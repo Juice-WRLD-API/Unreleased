@@ -698,6 +698,15 @@ export async function getMyProposals(channel?: string): Promise<SongEditProposal
   return request(url, { method: 'GET' }, true, url)
 }
 
+// Single proposal by id, any status (not just pending) - the list response
+// already carries the same full object, so this mainly serves the "view
+// data" panel on an already-decided proposal (approved/rejected/reversed),
+// fetched fresh rather than trusting whatever the list happened to cache.
+export async function getProposal(id: number): Promise<SongEditProposal> {
+  const url = `${ACCOUNT_BASE}/editor/proposals/${id}/`
+  return request(url, { method: 'GET' }, true, url)
+}
+
 export async function createProposal(payload: {
   song: number | null
   change_type: ProposalChangeType

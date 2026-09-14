@@ -3,7 +3,7 @@ import {
   ChevronLeft, Users, Clock, CheckCircle, XCircle, ShieldCheck, BarChart2,
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
   ChevronDown, ChevronUp, Shield, MessageSquare, Calendar,
-  Hash, Minus, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
+  Hash, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
   History, Play,
 } from 'lucide-react'
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
@@ -12,7 +12,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
 import { invalidateLyricsCache } from './Player'
-import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, buildHaystack, matchesHaystack, CopyButton } from './adminShared'
+import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, buildHaystack, matchesHaystack, ProposalDiff } from './adminShared'
 import ReportsTab from './ReportsTab'
 import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
@@ -22,145 +22,6 @@ import { useOtpGate } from '../hooks/useOtpGate'
 import RoleBadges from './RoleBadges'
 
 type Tab = AdminTab
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
-function renderValue(v: unknown): string {
-  if (v == null || v === '') return '(empty)'
-  if (typeof v === 'string') return v
-  if (Array.isArray(v)) return v.length ? v.join('\n') : '(empty)'
-  if (typeof v === 'boolean') return v ? 'true' : 'false'
-  return JSON.stringify(v, null, 2)
-}
-
-const LONG_KEYS = new Set(['lyrics', 'synced_lyrics', 'description', 'notes', 'additional_information'])
-const LONG_THRESHOLD = 200
-
-// ── Diff ──────────────────────────────────────────────────────────────────────
-
-function FieldDiff({ fieldKey, before, after }: { fieldKey: string; before: unknown; after: unknown }): JSX.Element {
-  const beforeStr = renderValue(before)
-  const afterStr  = renderValue(after)
-  const unchanged = beforeStr === afterStr
-  const isLong    = LONG_KEYS.has(fieldKey) || beforeStr.length > LONG_THRESHOLD || afterStr.length > LONG_THRESHOLD
-  // synced_lyrics is LRC - default expanded so content is visible immediately
-  const [exp, setExp] = useState(!isLong || fieldKey === 'synced_lyrics')
-  const MAX = fieldKey === 'synced_lyrics' ? 60 : 8
-
-  const sliceLong = (s: string) => {
-    const lines = s.split('\n')
-    if (exp || lines.length <= MAX) return { lines, clipped: false }
-    return { lines: lines.slice(0, MAX), clipped: true, total: lines.length }
-  }
-
-  const b = sliceLong(beforeStr)
-  const a = sliceLong(afterStr)
-  const hasBefore = before !== undefined && !unchanged
-  const sideBySide = hasBefore && !unchanged
-
-  return (
-    <div className="rounded-lg overflow-hidden border border-[var(--border)] text-[11px]">
-      {/* Field header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-surface-raised border-b border-[var(--border)]">
-        <span className="font-mono text-[10px] text-text-muted tracking-tight">{fieldKey.replace(/_/g, ' ')}</span>
-        <div className="flex items-center gap-2">
-          {unchanged && (
-            <>
-              <span className="text-[9px] italic text-text-muted">unchanged</span>
-              <CopyButton text={afterStr} label={fieldKey} />
-            </>
-          )}
-          {isLong && (
-            <button onClick={() => setExp(e => !e)} className="text-[10px] text-accent/70 hover:text-accent">
-              {exp ? 'collapse' : 'expand'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Side-by-side before / after */}
-      {sideBySide && (
-        <div className="grid grid-cols-2 divide-x divide-[var(--border)]">
-          {/* Before */}
-          <div className="bg-red-500/8 min-w-0">
-            <div className="flex items-center gap-1.5 px-3 py-1 border-b border-red-500/15">
-              <Minus size={9} className="text-red-500 shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wide text-red-500 flex-1">Before</span>
-              <CopyButton text={beforeStr} label={`${fieldKey} (before)`} />
-            </div>
-            <div className="px-3 py-2">
-              {b.lines.map((line, i) => (
-                <pre key={i} className="font-mono text-red-500 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-              ))}
-              {'clipped' in b && b.clipped && (
-                <p className="text-[9px] text-red-400 italic mt-1">+{(b as { total?: number }).total! - MAX} more lines</p>
-              )}
-            </div>
-          </div>
-
-          {/* After */}
-          <div className="bg-emerald-500/8 min-w-0">
-            <div className="flex items-center gap-1.5 px-3 py-1 border-b border-emerald-500/15">
-              <Plus size={9} className="text-emerald-600 shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-600 flex-1">After</span>
-              <CopyButton text={afterStr} label={`${fieldKey} (after)`} />
-            </div>
-            <div className="px-3 py-2">
-              {a.lines.map((line, i) => (
-                <pre key={i} className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-              ))}
-              {'clipped' in a && a.clipped && (
-                <p className="text-[9px] text-emerald-500 italic mt-1">+{(a as { total?: number }).total! - MAX} more lines</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* New value only (no snapshot) */}
-      {!unchanged && !hasBefore && (
-        <div className="bg-emerald-500/8">
-          <div className="flex items-center gap-1.5 px-3 py-1 border-b border-emerald-500/15">
-            <Plus size={9} className="text-emerald-600 shrink-0" />
-            <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-600 flex-1">Value</span>
-            <CopyButton text={afterStr} label={fieldKey} />
-          </div>
-          <div className="px-3 py-2">
-            {a.lines.map((line, i) => (
-              <pre key={i} className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Unchanged */}
-      {unchanged && (
-        <div className="px-3 py-2">
-          <pre className="font-mono text-text-muted whitespace-pre-wrap break-words leading-relaxed">
-            {exp ? afterStr : afterStr.slice(0, 120) + (afterStr.length > 120 ? '…' : '')}
-          </pre>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Memoized: a proposal touching lyrics renders two full lyric bodies side by
-// side, and this sits in the same component as the search box - so without it
-// every keystroke re-rendered the entire diff of whatever was selected.
-const ProposalDiff = memo(function ProposalDiff({ proposal }: { proposal: SongEditProposal }): JSX.Element {
-  const entries = Object.entries(proposal.proposed_data || {})
-  if (!entries.length) return <p className="text-text-muted text-xs italic p-4">No field data.</p>
-  const snap = proposal.original_snapshot || {}
-  return (
-    <div className="space-y-2 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-3">
-        Changes · {entries.length} field{entries.length !== 1 ? 's' : ''}
-      </p>
-      {entries.map(([k, v]) => <FieldDiff key={k} fieldKey={k} before={snap[k]} after={v} />)}
-    </div>
-  )
-})
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 

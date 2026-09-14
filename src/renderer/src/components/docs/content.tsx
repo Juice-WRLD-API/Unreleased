@@ -109,6 +109,7 @@ function OverviewTab() {
           <Endpoint method="POST" path="/accounts/application/" description="Apply to become an editor or contributor" />
           <Endpoint method="GET" path="/accounts/editor/proposals/" description="List your own edit proposals" />
           <Endpoint method="POST" path="/accounts/editor/proposals/" description="Submit an edit proposal (editor+)" />
+          <Endpoint method="GET" path="/accounts/editor/proposals/{id}/" description="Fetch a single proposal by id, any status" />
           <Endpoint method="PATCH" path="/accounts/editor/proposals/{id}/" description="Edit a pending proposal" />
           <Endpoint method="DELETE" path="/accounts/editor/proposals/{id}/" description="Withdraw a proposal" />
           <Endpoint method="GET" path="/accounts/editor/leaderboard/" description="Editor approved-count leaderboard with badges" />
@@ -1078,6 +1079,7 @@ function EditorWorkflowTab() {
           rows={[
             ['GET', '/accounts/editor/proposals/', "List the logged-in editor's own proposals"],
             ['POST', '/accounts/editor/proposals/', 'Submit a new proposal'],
+            ['GET', '/accounts/editor/proposals/{id}/', 'Fetch a single proposal by id, any status - not just pending'],
             ['PATCH', '/accounts/editor/proposals/{id}/', 'Edit a still-pending proposal'],
             ['DELETE', '/accounts/editor/proposals/{id}/', 'Withdraw a proposal'],
           ]}
