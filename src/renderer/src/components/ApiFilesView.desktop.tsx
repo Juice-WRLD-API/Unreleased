@@ -5,7 +5,7 @@ import {
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Globe, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText, FolderInput, CornerLeftUp,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import type { StagedFileChange } from '../store/useStore'
@@ -199,6 +199,9 @@ export default function ApiFilesView(): JSX.Element {
   const playlistFlyoutRef = useRef<HTMLDivElement>(null)
   const [playlistFlyoutPos, setPlaylistFlyoutPos] = useState({ top: 0, left: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
+  // Right-click on empty listing space, rather than a specific entry.
+  const [bgCtxMenu, setBgCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  const [newFolderPrompt, setNewFolderPrompt] = useState<string | null>(null)
   // Whether a right-clicked audio file actually has a matching song in the
   // Tracker - resolved lazily per path on menu-open (not for every row up
   // front) so "Find in Tracker" can be hidden for files with no match instead
@@ -400,6 +403,16 @@ export default function ApiFilesView(): JSX.Element {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [ctxMenu])
+
+  useEffect(() => {
+    if (!bgCtxMenu) return
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setBgCtxMenu(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [bgCtxMenu])
 
   const goBack = (): void => {
     if (history.length > 0) {
@@ -768,6 +781,16 @@ export default function ApiFilesView(): JSX.Element {
     setBundlePrompt(null)
   }
 
+  const confirmNewFolder = (): void => {
+    if (newFolderPrompt === null) return
+    const name = newFolderPrompt.trim().replace(/[/\\]/g, '')
+    if (!name) return
+    const folderPath = currentPath ? `${currentPath}/${name}` : name
+    stageFileChanges([{ changeType: 'create_folder', path: folderPath, channel: activeChannel }])
+    if (stagedFileChanges.length === 0) setShowUploadManager(true)
+    setNewFolderPrompt(null)
+  }
+
   /** Row classes/badge for an entry with a queued move, so staged work is
    *  visible in the listing and not only in the Uploads panel. */
   const stagedBadge = (path: string): JSX.Element | null => {
@@ -945,7 +968,16 @@ export default function ApiFilesView(): JSX.Element {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 pb-4">
+        <div
+          className="flex-1 overflow-y-auto px-5 pb-4"
+          onContextMenu={e => {
+            // Entry rows stop propagation on their own context menu, so this
+            // only fires for a right-click on actual empty space.
+            if (isSearching) return
+            e.preventDefault()
+            setBgCtxMenu({ x: e.clientX, y: e.clientY })
+          }}
+        >
           {(isSearching ? searchLoading : loading) ? (
             <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
               <Loader2 size={18} className="animate-spin" /><span className="text-sm">{isSearching ? 'Searching…' : 'Loading…'}</span>
@@ -1017,7 +1049,7 @@ export default function ApiFilesView(): JSX.Element {
                       else if (mt === 'text') openApiText(entry)
                     }}
                     onDoubleClick={() => { if (!selectMode && mt === 'audio') handlePlay(entry) }}
-                    onContextMenu={e => { e.preventDefault(); openContextMenu(entry, e.clientX, e.clientY) }}
+                    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openContextMenu(entry, e.clientX, e.clientY) }}
                     {...mouseLongPress.bind(() => enterSelectMode(entry))}
                     onTouchStart={() => handleLongPressStart(entry)}
                     onTouchEnd={handleLongPressEnd}
@@ -1148,7 +1180,7 @@ export default function ApiFilesView(): JSX.Element {
                       else if (mt === 'audio') handlePlay(entry)
                       else if (mt === 'text') openApiText(entry)
                     }}
-                    onContextMenu={e => { e.preventDefault(); openContextMenu(entry, e.clientX, e.clientY) }}
+                    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openContextMenu(entry, e.clientX, e.clientY) }}
                     {...mouseLongPress.bind(() => enterSelectMode(entry))}
                     onTouchStart={() => handleLongPressStart(entry)}
                     onTouchEnd={handleLongPressEnd}
@@ -1535,6 +1567,63 @@ export default function ApiFilesView(): JSX.Element {
             )}
           </ClampedMenu>
         </>
+      )}
+
+      {bgCtxMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setBgCtxMenu(null)} />
+          <ClampedMenu x={bgCtxMenu.x} y={bgCtxMenu.y} className="min-w-[180px]">
+            <button onClick={() => { navigate(currentPath, false); setBgCtxMenu(null) }}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+              <RefreshCw size={14} className="text-text-muted" /> Refresh
+            </button>
+            {canPropose && (
+              <>
+                <div className="border-t border-[var(--border)] my-1" />
+                <button onClick={() => {
+                  setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                  setBgCtxMenu(null)
+                  setActiveView('contributor')
+                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <Upload size={14} className="text-text-muted" /> Upload
+                </button>
+                <button onClick={() => { setNewFolderPrompt(''); setBgCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FolderPlus size={14} className="text-text-muted" /> New folder
+                </button>
+              </>
+            )}
+          </ClampedMenu>
+        </>
+      )}
+
+      {newFolderPrompt !== null && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setNewFolderPrompt(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
+            <p className="text-text-muted text-xs mb-3">
+              Queues a new folder in {currentPath || 'the root folder'}.
+            </p>
+            <input
+              autoFocus
+              value={newFolderPrompt}
+              onChange={e => setNewFolderPrompt(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') confirmNewFolder()
+                if (e.key === 'Escape') setNewFolderPrompt(null)
+              }}
+              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/50"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setNewFolderPrompt(null)} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary transition-colors">Cancel</button>
+              <button
+                onClick={confirmNewFolder}
+                disabled={!newFolderPrompt.trim()}
+                className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >Queue folder</button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )
