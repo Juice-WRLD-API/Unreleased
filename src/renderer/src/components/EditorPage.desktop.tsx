@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, memo, type ReactNode } from '
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ChevronLeft,
   ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2,
-  FolderOpen,
+  FolderOpen, CalendarDays,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import { useStore, useStorePick } from '../store/useStore'
@@ -148,6 +148,41 @@ function SuggestDropdown({ matches, onPick }: { matches: string[]; onPick: (v: s
   )
 }
 
+/* ── Date picker button ───────────────────────────────────────────────────── */
+/* A calendar icon that opens the browser's native date picker and appends the
+ *  picked date to the field - fields hold free text (a date can be a range, a
+ *  "TBD", or several dates on separate lines) so this augments rather than
+ *  replaces typing. The date input itself stays invisible; only the button is
+ *  seen, matching the folder-icon browse button elsewhere in these fields. */
+function DatePickerButton({ onPick, className }: { onPick: (date: string) => void; className: string }): JSX.Element {
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={e => {
+          e.preventDefault()
+          const el = ref.current
+          if (!el) return
+          try { el.showPicker() } catch { el.focus() }
+        }}
+        title="Pick a date"
+        className={className}
+      >
+        <CalendarDays size={14} />
+      </button>
+      <input
+        ref={ref}
+        type="date"
+        onChange={e => { const v = e.target.value; if (v) onPick(v); e.target.value = '' }}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+    </>
+  )
+}
+
 /* ── Field ─────────────────────────────────────────────────────────────────── */
 export function FieldRow({ label, value, original, onChange, placeholder, mono = false, span, onBrowse, suggest }: {
   label: string; value: string; original: string
@@ -209,23 +244,33 @@ function SelectRow({ label, value, original, onChange, options, placeholder }: {
 }
 
 /* ── Textarea field ────────────────────────────────────────────────────────── */
-export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, suggest }: {
+export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, suggest, dateInput = false }: {
   label: string; value: string; original: string
   onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean; span?: 2 | 3
   /** Autocompletes from other songs' values for this field (e.g. "leak_type"). */
   suggest?: SuggestField
+  /** Shows a calendar button that appends a picked date onto the field. */
+  dateInput?: boolean
 }): JSX.Element {
   const changed = value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
     <label className={`relative flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
       <FieldLabel label={label} changed={changed} />
-      <textarea
-        rows={rows} value={value} onChange={e => onChange(e.target.value)}
-        onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
-        placeholder={placeholder || '—'}
-        className={`${fieldInputClass(changed, mono)} resize-none leading-relaxed py-2.5`}
-      />
+      <div className="relative">
+        <textarea
+          rows={rows} value={value} onChange={e => onChange(e.target.value)}
+          onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
+          placeholder={placeholder || '—'}
+          className={`${fieldInputClass(changed, mono)} resize-none leading-relaxed py-2.5 ${dateInput ? 'pr-9' : ''}`}
+        />
+        {dateInput && (
+          <DatePickerButton
+            onPick={picked => onChange(value.trim() ? `${value}\n${picked}` : picked)}
+            className="absolute right-1.5 top-1.5 p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+          />
+        )}
+      </div>
       {suggest && open && <SuggestDropdown matches={matches} onPick={v => { onChange(v); setOpen(false) }} />}
     </label>
   )
@@ -246,13 +291,15 @@ const basicShellClass = (changed: boolean): string =>
 const basicLabelClass =
   'block text-[10px] font-semibold tracking-wide text-text-muted select-none leading-tight'
 
-export function BasicRow({ label, value, original, onChange, rows = 1, placeholder, mono = false, onBrowse, suggest }: {
+export function BasicRow({ label, value, original, onChange, rows = 1, placeholder, mono = false, onBrowse, suggest, dateInput = false }: {
   label: string; value: string; original?: string
   onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean
   /** Shows a folder button inside the field that opens a file picker. */
   onBrowse?: () => void
   /** Autocompletes from other songs' values for this field (e.g. "album"). */
   suggest?: SuggestField
+  /** Shows a calendar button that appends a picked date onto the field. */
+  dateInput?: boolean
 }): JSX.Element {
   const changed = original != null && value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
@@ -261,9 +308,17 @@ export function BasicRow({ label, value, original, onChange, rows = 1, placehold
       onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
       <span className={basicLabelClass}>{label}</span>
       {rows > 1
-        ? <textarea
-            rows={rows} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-            className={`${basicControlClass} resize-y ${mono ? 'font-mono text-xs' : ''}`} />
+        ? <div className="relative">
+            <textarea
+              rows={rows} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+              className={`${basicControlClass} resize-y ${mono ? 'font-mono text-xs' : ''} ${dateInput ? 'pr-7' : ''}`} />
+            {dateInput && (
+              <DatePickerButton
+                onPick={picked => onChange(value.trim() ? `${value}\n${picked}` : picked)}
+                className="absolute right-0 top-0 p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+              />
+            )}
+          </div>
         : <div className="flex items-center gap-1">
             <input
               value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
@@ -1190,7 +1245,7 @@ export default function EditorPage({ initialSongId = null }: {
                   <BasicRow label="Engineers" value={eng} original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
                 </div>
                 <BasicRow label="Recording locations" value={loc} original={String(base.recording_locations || '')} onChange={setLoc} rows={2} suggest="recording_locations" />
-                <BasicRow label="Record dates" value={recDate} original={String(base.record_dates || '')} onChange={setRecDate} rows={2} />
+                <BasicRow label="Record dates" value={recDate} original={String(base.record_dates || '')} onChange={setRecDate} rows={2} dateInput />
                 {cat === 'recording_session' && (
                   <div className="grid grid-cols-2 gap-1.5">
                     <BasicRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} rows={2} />
@@ -1209,13 +1264,15 @@ export default function EditorPage({ initialSongId = null }: {
                   <BasicRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')} onChange={setInstrumentals} rows={2} />
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Preview date" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} mono />
-                  <BasicRow label="Release date" value={relDate} original={String(base.release_date || '')} onChange={setRelDate} mono />
+                  <BasicRow label="Preview date" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} mono dateInput />
+                  <BasicRow label="Release date" value={relDate} original={String(base.release_date || '')} onChange={setRelDate} rows={2} mono dateInput />
                 </div>
+                <BasicRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} mono dateInput />
                 <div className="grid grid-cols-2 gap-1.5">
                   <BasicRow label="Instrumental names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} rows={2} />
-                  <BasicRow label="Notes" value={notes} original={String(base.notes || '')} onChange={setNotes} rows={2} />
+                  <BasicRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} suggest="leak_type" />
                 </div>
+                <BasicRow label="Notes" value={notes} original={String(base.notes || '')} onChange={setNotes} rows={2} />
                 {/* One lyrics box, toggled between plain and synced - showing both
                     at once was most of the form's remaining height. */}
                 {(() => {
@@ -1267,10 +1324,6 @@ export default function EditorPage({ initialSongId = null }: {
                     </div>
                   )
                 })()}
-                <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} mono />
-                  <BasicRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} suggest="leak_type" />
-                </div>
                 <div className="grid grid-cols-2 gap-1.5">
                   <BasicRow label="Image URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} mono onBrowse={() => setPickingImage(true)} />
                   <BasicRow label="File path" value={filePath} original={String(base.path || '')} onChange={setFilePath} mono onBrowse={() => setPickingFile(true)} />
@@ -1571,9 +1624,10 @@ export default function EditorPage({ initialSongId = null }: {
 
                 <Card title="Dates">
                   <FieldGrid cols={3}>
-                    <FieldRow label="Recorded"  value={recDate} original={String(base.record_dates || '')}  onChange={setRecDate} placeholder="YYYY-MM-DD" mono />
-                    <FieldRow label="Released"  value={relDate} original={String(base.release_date || '')}  onChange={setRelDate} placeholder="YYYY-MM-DD" mono />
-                    <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono />
+                    <TextareaRow label="Recorded"  value={recDate} original={String(base.record_dates || '')}  onChange={setRecDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
+                    <TextareaRow label="Released"  value={relDate} original={String(base.release_date || '')}  onChange={setRelDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
+                    <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
+                    <TextareaRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
                   </FieldGrid>
                 </Card>
 
@@ -1590,7 +1644,6 @@ export default function EditorPage({ initialSongId = null }: {
                     <FieldGrid>
                       <FieldRow label="Location"   value={loc}              original={String(base.recording_locations || '')}   onChange={setLoc} placeholder="Studio / city" suggest="recording_locations" />
                       <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ, snippet…" suggest="leak_type" />
-                      <TextareaRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} placeholder="YYYY-MM-DD" mono />
                       <FieldRow label="File names" value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
                       <FieldRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')}       onChange={setInstrumentals} placeholder="Instrumental versions available" />
                       <FieldRow label="Inst. names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} />

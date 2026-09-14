@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo, type ReactNode } from 'react'
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ArrowLeft,
-  ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2, FolderOpen,
+  ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2, FolderOpen, CalendarDays,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import { useStore, useStorePick } from '../store/useStore'
@@ -135,6 +135,41 @@ function SuggestDropdown({ matches, onPick }: { matches: string[]; onPick: (v: s
   )
 }
 
+/* ── Date picker button ───────────────────────────────────────────────────── */
+/* A calendar icon that opens the native date picker and appends the picked
+ *  date to the field - fields hold free text (a date can be a range, a
+ *  "TBD", or several dates on separate lines) so this augments rather than
+ *  replaces typing. The date input itself stays invisible; only the button is
+ *  seen, matching the folder-icon browse button elsewhere in these fields. */
+function DatePickerButton({ onPick, className }: { onPick: (date: string) => void; className: string }): JSX.Element {
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={e => {
+          e.preventDefault()
+          const el = ref.current
+          if (!el) return
+          try { el.showPicker() } catch { el.focus() }
+        }}
+        title="Pick a date"
+        className={className}
+      >
+        <CalendarDays size={14} />
+      </button>
+      <input
+        ref={ref}
+        type="date"
+        onChange={e => { const v = e.target.value; if (v) onPick(v); e.target.value = '' }}
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+    </>
+  )
+}
+
 /* ── Field - bordered box with the label inline at the top, touch-sized ───── */
 export function FieldRow({ label, value, original = '', onChange, placeholder, mono = false, span, onBrowse, suggest }: {
   label: string; value: string; original?: string
@@ -177,11 +212,13 @@ export function FieldRow({ label, value, original = '', onChange, placeholder, m
 }
 
 /* ── Textarea field ────────────────────────────────────────────────────────── */
-export function TextareaRow({ label, value, original = '', onChange, rows = 3, placeholder, mono = false, span, suggest }: {
+export function TextareaRow({ label, value, original = '', onChange, rows = 3, placeholder, mono = false, span, suggest, dateInput = false }: {
   label: string; value: string; original?: string
   onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean; span?: 2 | 3
   /** Autocompletes from other songs' values for this field (e.g. "recording_locations"). */
   suggest?: SuggestField
+  /** Shows a calendar button that appends a picked date onto the field. */
+  dateInput?: boolean
 }): JSX.Element {
   const changed = value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
@@ -190,13 +227,21 @@ export function TextareaRow({ label, value, original = '', onChange, rows = 3, p
       changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--border)] bg-surface-raised/50'
     }`}>
       <span className="block text-[10px] font-semibold tracking-wide text-text-muted select-none leading-tight">{label}</span>
-      <textarea
-        rows={rows} value={value} onChange={e => onChange(e.target.value)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        placeholder={placeholder}
-        className={`w-full bg-transparent border-0 p-0 mt-0.5 text-[13.5px] leading-snug text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-40 ${mono ? 'font-mono text-xs' : ''}`}
-      />
+      <div className="relative">
+        <textarea
+          rows={rows} value={value} onChange={e => onChange(e.target.value)}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          placeholder={placeholder}
+          className={`w-full bg-transparent border-0 p-0 mt-0.5 text-[13.5px] leading-snug text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-40 ${mono ? 'font-mono text-xs' : ''} ${dateInput ? 'pr-7' : ''}`}
+        />
+        {dateInput && (
+          <DatePickerButton
+            onPick={picked => onChange(value.trim() ? `${value}\n${picked}` : picked)}
+            className="absolute right-0 top-0 p-1 rounded text-text-muted active:text-text-primary active:bg-surface-overlay transition-colors"
+          />
+        )}
+      </div>
       {suggest && open && <SuggestDropdown matches={matches} onPick={v => { onChange(v); setOpen(false) }} />}
     </label>
   )
@@ -1195,15 +1240,14 @@ export default function EditorPage({ initialSongId = null }: {
 
             <Card title="Recording" overflowVisible>
               <TextareaRow label="Locations"    value={loc}     original={String(base.recording_locations || '')} onChange={setLoc}     rows={2} placeholder="Studio / city" suggest="recording_locations" />
-              <TextareaRow label="Record dates" value={recDate} original={String(base.record_dates || '')}        onChange={setRecDate} rows={2} placeholder="YYYY-MM-DD" mono />
+              <TextareaRow label="Record dates" value={recDate} original={String(base.record_dates || '')}        onChange={setRecDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
             </Card>
 
             <Card title="Dates" overflowVisible>
               <FieldGrid>
-                <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono />
-                <FieldRow label="Released"   value={relDate}     original={String(base.release_date || '')} onChange={setRelDate}     placeholder="YYYY-MM-DD" mono />
-                <TextareaRow label="Leaked"  value={dateLeaked}  original={String(base.date_leaked || '')}  onChange={setDateLeaked}  rows={2} placeholder="YYYY-MM-DD" mono />
-                <TextareaRow label="Leak type" value={leak}      original={String(base.leak_type || '')}    onChange={setLeak}        rows={2} placeholder="HQ, LQ…" suggest="leak_type" />
+                <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
+                <TextareaRow label="Released" value={relDate}    original={String(base.release_date || '')} onChange={setRelDate}     rows={2} placeholder="YYYY-MM-DD" mono dateInput />
+                <TextareaRow label="Leaked"  value={dateLeaked}  original={String(base.date_leaked || '')}  onChange={setDateLeaked}  rows={2} placeholder="YYYY-MM-DD" mono dateInput />
               </FieldGrid>
             </Card>
 
@@ -1276,6 +1320,7 @@ export default function EditorPage({ initialSongId = null }: {
                 </div>
                 <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')}  onChange={setBitrate}    rows={2} placeholder="320 kbps" mono />
                 <FieldGrid>
+                  <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ…" suggest="leak_type" />
                   <FieldRow label="File names"        value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
                   <FieldRow label="Instrumentals"     value={instrumentals}    original={String(base.instrumentals || '')}         onChange={setInstrumentals} placeholder="Versions available" />
                   <FieldRow label="Inst. names"       value={instrumentalNames} original={String(base.instrumental_names || '')}   onChange={setInstrumentalNames} />
