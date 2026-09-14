@@ -6,8 +6,8 @@ import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 
 // Owns the "my proposals" list + filter/search/edit/resubmit/withdraw logic
 // shared by EditorProfileView.desktop.tsx and .mobile.tsx. `refreshKey` is
-// owned by the caller (it also drives sibling hooks — leaderboard, comp
-// proposals, reports — off the same refresh button), so it's a parameter
+// owned by the caller (it also drives sibling hooks - leaderboard, comp
+// proposals, reports - off the same refresh button), so it's a parameter
 // here rather than state.
 export function useMyProposals(activeChannel: string, refreshKey: number) {
   const [proposals, setProposals] = useState<SongEditProposal[]>([])

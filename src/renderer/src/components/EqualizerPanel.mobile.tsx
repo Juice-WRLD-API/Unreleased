@@ -72,7 +72,7 @@ function InlineSelect({ value, onChange, options, disabled }: {
   )
 }
 
-/* ── Vertical EQ band fader — a touch drag-tracker, not a rotated <input
+/* ── Vertical EQ band fader - a touch drag-tracker, not a rotated <input
    type=range> (rotated range inputs hit-test touch input against their
    pre-rotation box, so the finger and the thumb visibly disagree). Tap the
    frequency label under a band to reset just that one. ─────────────────── */
@@ -130,7 +130,7 @@ function BandFader({ value, onChange, disabled }: {
 }
 
 /* ── A labeled row wrapper for the horizontal sliders below (balance, reverb,
-   speed) — value on the right, a reset button that only shows when dirty. ── */
+   speed) - value on the right, a reset button that only shows when dirty. ── */
 function SliderRow({ label, value, formatted, onReset, dirty, children }: {
   label: string; value?: string; formatted?: string; onReset?: () => void; dirty?: boolean; children: ReactNode
 }): JSX.Element {
@@ -177,7 +177,7 @@ export default function EqualizerPanel(): JSX.Element {
   const balancePct = Math.round(eqBalance * 100)
   const balanceLabel = balancePct === 0 ? 'C' : balancePct < 0 ? `L ${-balancePct}` : `R ${balancePct}`
 
-  // Sleep timer — duration picked before starting (mirrors Settings), plus a
+  // Sleep timer - duration picked before starting (mirrors Settings), plus a
   // periodic re-render while running so the countdown stays fresh.
   const [sleepMinutes, setSleepMinutes] = useState(30)
   const [, sleepTick] = useState(0)
@@ -187,10 +187,10 @@ export default function EqualizerPanel(): JSX.Element {
     return () => clearInterval(id)
   }, [sleepTimerEnd])
 
-  // Output devices — same enumeration the player bar's picker uses.
+  // Output devices - same enumeration the player bar's picker uses.
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
   useEffect(() => {
-    // Absent in some iOS Safari contexts — see Player.tsx's equivalent effect.
+    // Absent in some iOS Safari contexts - see Player.tsx's equivalent effect.
     if (!navigator.mediaDevices) return
     const enumerate = async (): Promise<void> => {
       try {
@@ -228,7 +228,7 @@ export default function EqualizerPanel(): JSX.Element {
 
       {/* iOS: the EQ/balance/mono/reverb chain is disabled so audio keeps
           playing in the background (routing through Web Audio forfeits that on
-          iOS — see platform IS_IOS). Speed, sleep timer, and community
+          iOS - see platform IS_IOS). Speed, sleep timer, and community
           edits below don't use the chain and still work. */}
       {!EFFECTS_SUPPORTED && (
         <p className="mx-5 mb-2 text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">
@@ -250,7 +250,7 @@ export default function EqualizerPanel(): JSX.Element {
         />
       </div>
 
-      {/* Community edits — community-made audio FILES (sped-up, remixes, …),
+      {/* Community edits - community-made audio FILES (sped-up, remixes, …),
           not effect presets: tapping one plays that file through the normal
           queue. The API endpoints for them don't exist yet, so the store list
           stays empty and only the empty state renders for now. */}
@@ -258,7 +258,7 @@ export default function EqualizerPanel(): JSX.Element {
         <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted pb-1.5">Community edits</p>
         {communityEdits.length === 0 ? (
           <p className="text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">
-            Nothing here yet — community-made edits will appear once they go live.
+            Nothing here yet - community-made edits will appear once they go live.
           </p>
         ) : (
           <div className="space-y-1 max-h-32 overflow-y-auto">
@@ -278,7 +278,7 @@ export default function EqualizerPanel(): JSX.Element {
       </div>
 
       {/* Graph-dependent effects (EQ bands, balance, mono, skip-silence,
-          reverb) — all routed through the Web Audio chain, so all unavailable
+          reverb) - all routed through the Web Audio chain, so all unavailable
           on iOS where the chain is off for background playback. */}
       <div className={!EFFECTS_SUPPORTED ? 'opacity-40 pointer-events-none' : ''}>
 
@@ -289,7 +289,7 @@ export default function EqualizerPanel(): JSX.Element {
             const gain = eqGains[i] ?? 0
             return (
               <div key={freq} className="flex flex-col items-center gap-1.5">
-                {/* Always shown (including "0") — a band's setting should be
+                {/* Always shown (including "0") - a band's setting should be
                     readable without a drag in progress. */}
                 <span className={`text-[9px] tabular-nums h-3 ${gain !== 0 ? 'text-accent font-semibold' : 'text-text-muted'}`}>
                   {gain > 0 ? `+${gain}` : gain}
@@ -297,7 +297,7 @@ export default function EqualizerPanel(): JSX.Element {
                 <BandFader value={gain} onChange={(v) => setEqBand(i, v)} disabled={!eqEnabled} />
                 <button
                   onClick={() => setEqBand(i, 0)}
-                  title={`${bandLabel(freq)} Hz — tap to reset`}
+                  title={`${bandLabel(freq)} Hz - tap to reset`}
                   className="text-[9px] text-text-muted px-1 py-0.5 active:text-accent transition-colors"
                 >
                   {bandLabel(freq)}
@@ -329,7 +329,7 @@ export default function EqualizerPanel(): JSX.Element {
         <Toggle on={eqMono} onClick={() => setEqMono(!eqMono)} />
       </div>
 
-      {/* Volume boost — makeup gain above the element's own 0..100% range,
+      {/* Volume boost - makeup gain above the element's own 0..100% range,
           for tracks that are just quiet. Runs through the same limiter as
           everything else in the chain so it clamps loud peaks instead of
           clipping them. */}
@@ -383,7 +383,7 @@ export default function EqualizerPanel(): JSX.Element {
 
       </div>{/* end graph-dependent effects block */}
 
-      {/* Speed — one control for slowed AND sped-up; with pitch shift on,
+      {/* Speed - one control for slowed AND sped-up; with pitch shift on,
           below 1x is the slowed feel, above 1x goes nightcore. Hidden during
           FM: a live stream has no meaningful playback rate. */}
       {!radioFmActive && (
@@ -406,7 +406,7 @@ export default function EqualizerPanel(): JSX.Element {
             <div className="flex items-center justify-between px-5 py-1.5">
               <div>
                 <p className="text-xs text-text-secondary">Pitch shift</p>
-                <p className="text-[10px] text-text-muted">Pitch follows speed — slowed below 1x, nightcore above</p>
+                <p className="text-[10px] text-text-muted">Pitch follows speed - slowed below 1x, nightcore above</p>
               </div>
               <Toggle on={pitchShift} onClick={() => setPitchShift(!pitchShift)} />
             </div>
@@ -414,9 +414,9 @@ export default function EqualizerPanel(): JSX.Element {
         </>
       )}
 
-      {/* A-B loop — repeats a marked portion of the current track. Pure
+      {/* A-B loop - repeats a marked portion of the current track. Pure
           audio.currentTime manipulation (no Web Audio graph involved), so it
-          works even where EFFECTS_SUPPORTED is false (iOS) — lives outside
+          works even where EFFECTS_SUPPORTED is false (iOS) - lives outside
           that gated block. Hidden during FM: a live stream has no positions
           to mark. One button cycles Set A → Set B → Looping → clear, mirroring
           the classic single-button A-B repeat control. */}
@@ -430,7 +430,7 @@ export default function EqualizerPanel(): JSX.Element {
                 {abLoopStart == null
                   ? 'Repeat a portion of this song'
                   : abLoopEnd == null
-                    ? `Point A at ${formatDuration(abLoopStart)} — pick point B`
+                    ? `Point A at ${formatDuration(abLoopStart)} - pick point B`
                     : `Looping ${formatDuration(abLoopStart)}–${formatDuration(abLoopEnd)}`}
               </p>
             </div>
@@ -459,7 +459,7 @@ export default function EqualizerPanel(): JSX.Element {
         </>
       )}
 
-      {/* Prefer OG version — a playback preference rather than an effect, so
+      {/* Prefer OG version - a playback preference rather than an effect, so
           it sits with the sleep timer / output group at the bottom. */}
       <div className="border-t border-[var(--border)] mx-5" />
       <div className="flex items-center justify-between gap-3 px-5 py-2.5">

@@ -11,7 +11,7 @@ import {
 // Feedback) and a per-song issue report (ReportModal, opened from a song's
 // context menu / info panel). It writes through the store's report actions,
 // which queue locally immediately, then wait for the first delivery attempt
-// to settle — so the screen can say honestly whether it actually reached the
+// to settle - so the screen can say honestly whether it actually reached the
 // server this round, rather than claiming success before it's known.
 
 export type ReportMode =
@@ -20,14 +20,14 @@ export type ReportMode =
 
 // 'sending' covers the queue + first delivery attempt; 'delivered' means the
 // request actually reached the server this round; 'queued' means it's saved
-// locally but delivery failed or was skipped (offline, API disabled, etc.) —
+// locally but delivery failed or was skipped (offline, API disabled, etc.) -
 // it'll keep retrying in the background, but the user should see that it
 // hasn't gone out yet rather than assume it has.
 type SubmitStatus = 'idle' | 'sending' | 'delivered' | 'queued'
 
 export default function ReportForm({ mode, onDone }: {
   mode: ReportMode
-  /** Called once delivery is confirmed — the modal uses it to close. Not
+  /** Called once delivery is confirmed - the modal uses it to close. Not
    *  called when the report only made it to the local outbox, so the user
    *  sees that state instead of the dialog vanishing on an unconfirmed send.
    *  When absent (inline in Settings) the form shows a "send another" reset. */
@@ -58,7 +58,7 @@ export default function ReportForm({ mode, onDone }: {
       ? await submitFeedback(category, message, contact)
       : await reportSong(mode.songId, mode.songName, issues, message, contact)
     setStatus(delivered ? 'delivered' : 'queued')
-    // Only auto-close on a confirmed delivery — if it's still just queued,
+    // Only auto-close on a confirmed delivery - if it's still just queued,
     // leave the dialog open so the "hasn't sent yet" message is actually seen.
     if (onDone && delivered) setTimeout(onDone, 1200)
   }
@@ -79,12 +79,12 @@ export default function ReportForm({ mode, onDone }: {
           ? <CheckCircle2 size={34} className="text-accent mb-3" />
           : <CloudOff size={34} className="text-amber-500 mb-3" />}
         <p className="text-text-primary text-sm font-semibold">
-          {delivered ? 'Sent — your report reached the team.' : "Saved, but it hasn't sent yet."}
+          {delivered ? 'Sent - your report reached the team.' : "Saved, but it hasn't sent yet."}
         </p>
         <p className="text-text-muted text-xs mt-1 max-w-xs leading-relaxed">
           {delivered
-            ? "It's in — you don't need to do anything else."
-            : "Couldn't reach the server right now. It's saved on this device and will keep retrying automatically — no need to resend."}
+            ? "It's in - you don't need to do anything else."
+            : "Couldn't reach the server right now. It's saved on this device and will keep retrying automatically - no need to resend."}
         </p>
         {!onDone && (
           <button
@@ -159,7 +159,7 @@ export default function ReportForm({ mode, onDone }: {
           maxLength={2000}
           placeholder={mode.kind === 'feedback'
             ? "What's on your mind? Bugs, ideas, anything…"
-            : 'Add details — the correct info, or what the lyrics should say (optional)'}
+            : 'Add details - the correct info, or what the lyrics should say (optional)'}
           className="w-full resize-none bg-surface border border-[var(--border)] rounded-lg px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent/50 leading-relaxed"
         />
         <div className="flex items-center justify-between mt-1">
@@ -168,12 +168,12 @@ export default function ReportForm({ mode, onDone }: {
       </div>
 
       {/* The endpoints accept an optional contact string. Logged-in users can
-          leave it blank — their Discord username rides along automatically. */}
+          leave it blank - their Discord username rides along automatically. */}
       <input
         value={contact}
         onChange={(e) => setContact(e.target.value)}
         maxLength={200}
-        placeholder="How can we reach you? (optional — Discord, email…)"
+        placeholder="How can we reach you? (optional - Discord, email…)"
         className="w-full bg-surface border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent/50"
       />
 

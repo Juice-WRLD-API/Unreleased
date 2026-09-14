@@ -62,7 +62,7 @@ function diff(before: Record<string, unknown>, after: Record<string, unknown>): 
   return patch
 }
 
-/* ── Card — grouped section container ─────────────────────────────────────── */
+/* ── Card - grouped section container ─────────────────────────────────────── */
 export function Card({ title, icon, action, children, className = '', overflowVisible = false }: {
   title?: string; icon?: ReactNode; action?: ReactNode
   children: ReactNode; className?: string
@@ -84,7 +84,7 @@ export function Card({ title, icon, action, children, className = '', overflowVi
   )
 }
 
-/* ── Grid — responsive field grid for use inside a Card ───────────────────── */
+/* ── Grid - responsive field grid for use inside a Card ───────────────────── */
 export function FieldGrid({ children, cols = 2 }: { children: ReactNode; cols?: 1 | 2 | 3 }): JSX.Element {
   const colClass = cols === 3 ? 'sm:grid-cols-3' : cols === 1 ? '' : 'sm:grid-cols-2'
   return <div className={`grid grid-cols-1 ${colClass} gap-x-5 gap-y-4`}>{children}</div>
@@ -106,7 +106,7 @@ const fieldInputClass = (changed: boolean, mono: boolean): string =>
   }`
 
 /* ── Field-value autocomplete ─────────────────────────────────────────────── */
-/* Shared by FieldRow and BasicRow — a value-matching dropdown fed from
+/* Shared by FieldRow and BasicRow - a value-matching dropdown fed from
  *  fieldSuggestions.ts (album/credits/location/leak type already used
  *  elsewhere in the catalog), same idea as the Versions card's title
  *  autocomplete but backed by song data instead of the /versions/ table. */
@@ -465,12 +465,12 @@ export default function EditorPage({ initialSongId = null }: {
     pendingEditProposal, setPendingEditProposal,
     setShowUserAuth, logoutAccount, activeChannel, channels,
   } = useStorePick('account', 'currentTrack', 'pendingEditorSongId', 'setPendingEditorSongId', 'setActiveView', 'previousView', 'pendingEditProposal', 'setPendingEditProposal', 'setShowUserAuth', 'logoutAccount', 'activeChannel', 'channels')
-  // Where "back"/"nothing to edit" should return to — wherever the user was
+  // Where "back"/"nothing to edit" should return to - wherever the user was
   // before landing here, falling back to the editor dashboard when that's
   // unknown (e.g. a deep link straight into the editor).
   const backView = previousView && previousView !== 'editor' ? previousView : 'editor-profile'
   // Mirrored into a ref so the redirect effect below can read the latest value
-  // without listing it as a dependency — setActiveView rewrites previousView,
+  // without listing it as a dependency - setActiveView rewrites previousView,
   // which would otherwise re-run that effect and make it call itself forever.
   const backViewRef = useRef(backView)
   backViewRef.current = backView
@@ -484,7 +484,7 @@ export default function EditorPage({ initialSongId = null }: {
   const [loading, setLoading] = useState(false)
   // Set when a manual load (Edit click / proposal open) fails, so the
   // "nothing to edit" effect below doesn't silently bounce the user to My
-  // Proposals — it used to swallow the fetch error entirely, making it look
+  // Proposals - it used to swallow the fetch error entirely, making it look
   // like clicking Edit just redirected there for no reason.
   const [loadError, setLoadError] = useState<string | null>(null)
   const lastLoadIdRef = useRef<number | null>(null)
@@ -492,7 +492,7 @@ export default function EditorPage({ initialSongId = null }: {
   // Set synchronously the instant a manual load (Edit click / proposal open)
   // is kicked off, before the async fetch resolves into `song`. Without this,
   // there's a render in between where pendingEditorSongId has already been
-  // cleared to null but `song` hasn't been set yet — during that window the
+  // cleared to null but `song` hasn't been set yet - during that window the
   // "prefill from currently-playing track" effect below would incorrectly
   // fire and race the manual load, sometimes clobbering it with whatever's
   // currently playing.
@@ -503,7 +503,7 @@ export default function EditorPage({ initialSongId = null }: {
   // Consumed once by the mount effect below; nulled so a later re-render can't
   // reopen it after the user has closed the song.
   const bootSongIdRef = useRef<number | null>(initialSongId)
-  // True once a song/draft has actually been opened in this visit — lets the
+  // True once a song/draft has actually been opened in this visit - lets the
   // "nothing to edit" redirect below tell "backed out of an edit" apart from
   // "landed here fresh with nothing pending" (the latter still goes to the
   // editor dashboard; the former should return to wherever the user came from).
@@ -547,7 +547,7 @@ export default function EditorPage({ initialSongId = null }: {
   // The patch (JSON-stringified) last successfully submitted, so the button
   // can stay disabled after submitState's 3s "submitted" flash resets back to
   // idle. Without this, an untouched proposal could be resubmitted verbatim
-  // by clicking again once that flash wore off — nothing else marks the
+  // by clicking again once that flash wore off - nothing else marks the
   // still-pending proposal as "already sent" for this exact set of edits.
   // Cleared wherever the field state itself is reset (populate/cancel), since
   // a stale value there would just as wrongly block a legitimately new patch.
@@ -564,22 +564,22 @@ export default function EditorPage({ initialSongId = null }: {
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
   const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
-  // True while editing a 'create' proposal (new song) — has no backing song object yet
+  // True while editing a 'create' proposal (new song) - has no backing song object yet
   const [isNewSongDraft, setIsNewSongDraft] = useState(false)
 
-  // This song's own version label plus the group's shared version title —
+  // This song's own version label plus the group's shared version title -
   // linking songs together happens from the Tracker's multi-select "Link
   // versions" action (see ApiTrackerView.tsx), not here. These write
   // straight to juicewrldapi.com's /versions/ table (see lib/versionsApi.ts),
   // not through its proposal/review system, hence the separate save button
   // below rather than piggybacking on "Submit proposal". Version is
   // per-song ("v1", "TV Mix"); version title is written to every song in
-  // the group at once so they always match — read-only everywhere else
+  // the group at once so they always match - read-only everywhere else
   // (SongInfoModal no longer allows editing either field).
   const [versionNum,   setVersionNum]   = useState('')
   const [versionTitle, setVersionTitle] = useState('')
   const [ownGroupId,   setOwnGroupId]   = useState<number | null>(null)
-  // The title as loaded, so a save can tell "renamed" from "left alone" — only
+  // The title as loaded, so a save can tell "renamed" from "left alone" - only
   // a real change retitles (and possibly splits) the song.
   const [loadedTitle,  setLoadedTitle]  = useState('')
   // Other songs sharing this song's group.
@@ -593,12 +593,12 @@ export default function EditorPage({ initialSongId = null }: {
   const baseline = (s: JWApiSong | null): Record<string, unknown> => {
     if (!s) return {}
     return {
-      // `name` is the API's own canonical title — NOT track_titles[0]. They
+      // `name` is the API's own canonical title - NOT track_titles[0]. They
       // usually agree, but track_titles is an unordered alias list and for
       // ~6% of released songs its first entry is an alias, not the title
       // people know the song by (see heardle.ts's slim() for the same
       // mismatch). Populating the Title field from track_titles[0] meant the
-      // editor sometimes showed — and would silently rewrite `name` to — an
+      // editor sometimes showed - and would silently rewrite `name` to - an
       // alt title if the user touched the field without noticing.
       name:                   s.name,
       credited_artists:       s.credited_artists || '',
@@ -679,7 +679,7 @@ export default function EditorPage({ initialSongId = null }: {
     } finally {
       setLoading(false)
       // Once a load completes (success or failure), `song` (if set) already
-      // blocks the currently-playing prefill effect on its own — the ref's
+      // blocks the currently-playing prefill effect on its own - the ref's
       // job was only to cover the race window while this was in flight.
       manualLoadRef.current = false
     }
@@ -704,7 +704,7 @@ export default function EditorPage({ initialSongId = null }: {
       setLoadedTitle(meta?.versionTitle ?? '')
       setOwnGroupId(meta?.groupId ?? null)
     })
-    // How many other songs share this song's group — decides whether a retitle
+    // How many other songs share this song's group - decides whether a retitle
     // renames in place or splits this song out, and is shown as a hint below.
     getVersionGroup(song.id).then(g => setLinkedCount(g.length))
   }, [song])
@@ -724,7 +724,7 @@ export default function EditorPage({ initialSongId = null }: {
     try {
       const groupId = await setSongVersion(song.id, versionNum.trim() || null, ownGroupId)
       const nextTitle = versionTitle.trim()
-      // Only touch titles when the field actually changed — saving a version
+      // Only touch titles when the field actually changed - saving a version
       // number alone must not split the song out of its group. A changed title
       // retitles this song only: setOwnVersionTitle moves it to a group of its
       // own when it shares one, leaving the other members' title alone.
@@ -746,7 +746,7 @@ export default function EditorPage({ initialSongId = null }: {
   }
 
   // Picking an existing title from the autocomplete means "this song belongs
-  // with that group" — so it joins the group behind that title (merging like
+  // with that group" - so it joins the group behind that title (merging like
   // linkSongVersion does) rather than just copying the text, otherwise two
   // songs could show the same title while sitting in different groups.
   const handlePickTitleSuggestion = async (suggestion: VersionTitleSuggestion): Promise<void> => {
@@ -791,7 +791,7 @@ export default function EditorPage({ initialSongId = null }: {
 
   useEffect(() => {
     // Don't hijack a new-song draft (or an about-to-be-applied edit proposal)
-    // with whatever happens to be playing — this raced with the
+    // with whatever happens to be playing - this raced with the
     // pendingEditProposal effect below and clobbered the draft once the
     // currently-playing track's fetch resolved a moment later. manualLoadRef
     // closes a second race: pendingEditorSongId/pendingEditProposal clear to
@@ -805,14 +805,14 @@ export default function EditorPage({ initialSongId = null }: {
   }, [canEdit, song, currentTrack, pendingEditorSongId, isNewSongDraft, pendingEditProposal, loadSong])
 
   // Landing here with nothing to edit (no song playing, no pending proposal/
-  // draft) used to show a static "No song selected" placeholder — send editors
+  // draft) used to show a static "No song selected" placeholder - send editors
   // to My Proposals instead, which is actually useful to land on. Runs after
   // the prefill effect above so `loading` is already true if a currently-
   // playing track's song is still being fetched.
   useEffect(() => {
     // manualLoadRef guards a cross-store race: the Edit-click load effect above
     // clears pendingEditorSongId (Zustand) and flips `loading` on (React state)
-    // in the same tick, but those commit in separate passes — leaving a render
+    // in the same tick, but those commit in separate passes - leaving a render
     // where pendingEditorSongId is already null yet `loading` is still false.
     // Without this guard that window looked like "nothing to edit" and bounced
     // the user to My Proposals the instant they clicked Edit. The ref is set
@@ -865,11 +865,11 @@ export default function EditorPage({ initialSongId = null }: {
     }
 
     if (songId == null) {
-      // 'create' proposal — new song, no backing song record exists yet
+      // 'create' proposal - new song, no backing song record exists yet
       setSong(null)
       setIsNewSongDraft(true)
       // Doesn't go through populate() (there's no song to populate from), so
-      // clear this by hand — otherwise a leftover value from whatever was
+      // clear this by hand - otherwise a leftover value from whatever was
       // open before could, in a rare coincidence, match this draft's patch
       // and wrongly show it as already submitted.
       lastSubmittedPatchRef.current = null
@@ -913,7 +913,7 @@ export default function EditorPage({ initialSongId = null }: {
   const patch        = diff(baseline(song), current)
   const changedCount = Object.keys(patch).length
   // True once changedCount > 0 has already been sent and nothing has been
-  // edited since — see lastSubmittedPatchRef above.
+  // edited since - see lastSubmittedPatchRef above.
   const alreadySubmitted = changedCount > 0 && JSON.stringify(patch) === lastSubmittedPatchRef.current
 
   const cancelEditProposal = (): void => {
@@ -940,7 +940,7 @@ export default function EditorPage({ initialSongId = null }: {
         })
       }
       // Lyrics may have changed (and auto-approve admins make it live instantly)
-      // — drop the cached copy so the next play reflects the edit.
+      // - drop the cached copy so the next play reflects the edit.
       if (song && ('lyrics' in patch || 'synced_lyrics' in patch)) invalidateLyricsCache(song.id)
       lastSubmittedPatchRef.current = JSON.stringify(patch)
       setSubmitState('submitted')
@@ -1070,7 +1070,7 @@ export default function EditorPage({ initialSongId = null }: {
         </button>
         <span className="font-bold text-[15px] text-text-primary">Song editor</span>
         <span className="flex-1" />
-        {/* Layout switch — full cards vs. the flat basic form */}
+        {/* Layout switch - full cards vs. the flat basic form */}
         <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-overlay border border-[var(--border)]">
           {([['full', 'Full'], ['basic', 'Basic']] as const).map(([mode, label]) => {
             const active = (mode === 'basic') === basicView
@@ -1197,7 +1197,7 @@ export default function EditorPage({ initialSongId = null }: {
                   <BasicRow label="Instrumental names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} rows={2} />
                   <BasicRow label="Notes" value={notes} original={String(base.notes || '')} onChange={setNotes} rows={2} />
                 </div>
-                {/* One lyrics box, toggled between plain and synced — showing both
+                {/* One lyrics box, toggled between plain and synced - showing both
                     at once was most of the form's remaining height. */}
                 {(() => {
                   const showSynced = lyricsTab === 'synced'
@@ -1426,7 +1426,7 @@ export default function EditorPage({ initialSongId = null }: {
                     {submitState === 'error'      && 'Try again'}
                   </button>
 
-                  {/* Propose deletion — only for an existing song, not a new-song draft or an in-progress edit proposal */}
+                  {/* Propose deletion - only for an existing song, not a new-song draft or an in-progress edit proposal */}
                   {song && !isNewSongDraft && editingPropId == null && (
                     <button
                       onClick={submitDeletion}
@@ -1672,7 +1672,7 @@ export default function EditorPage({ initialSongId = null }: {
   )
 }
 
-/* ── AppField — hoisted to module scope so React never remounts inputs ──────── */
+/* ── AppField - hoisted to module scope so React never remounts inputs ──────── */
 function AppField({ label, value, onChange, rows, placeholder, hint }: {
   label: string; value: string; onChange: (v: string) => void
   rows?: number; placeholder?: string; hint?: string

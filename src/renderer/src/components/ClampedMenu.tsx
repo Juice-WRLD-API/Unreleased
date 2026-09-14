@@ -1,14 +1,14 @@
 import { forwardRef, useLayoutEffect, useRef, useState } from 'react'
 
 // Fixed-position popup menu that keeps itself fully on-screen by measuring its
-// real rendered box after every render — the estimate-free counterpart to
+// real rendered box after every render - the estimate-free counterpart to
 // hardcoded `window.innerHeight - N` clamps, which undershoot whenever a
 // submenu grows the menu past the guess and its bottom gets clipped, worst on
 // short mobile viewports. Height is capped to the viewport so an over-tall
 // menu scrolls instead of clipping.
 //
 // Re-clamps on ResizeObserver (not just on mount) so content that grows after
-// the initial paint — a submenu opening, an inline rename field — still ends
+// the initial paint - a submenu opening, an inline rename field - still ends
 // up on-screen instead of clipped at the original, smaller measurement.
 //
 // Only handles positioning. Escape-to-close and click-outside are each
@@ -18,7 +18,7 @@ import { forwardRef, useLayoutEffect, useRef, useState } from 'react'
 export interface ClampedMenuProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'style'> {
   x: number
   y: number
-  // Fires with the settled clamped position after every (re)clamp — for a
+  // Fires with the settled clamped position after every (re)clamp - for a
   // dependent flyout/submenu that needs to place itself off this menu's
   // *final* on-screen box, not the raw (possibly off-screen) x/y it opened
   // at. Plain prop-drilling `left`/`top` back out would lag a commit behind

@@ -39,7 +39,7 @@ export default function LikedSongsView(): JSX.Element {
   }
 
   // Local-file likes live in the store (libraryTracks/likedTrackIds), so
-  // unliking one just needs toggleLike — the `visible` list above recomputes
+  // unliking one just needs toggleLike - the `visible` list above recomputes
   // from the store automatically. API favorites were snapshotted into
   // apiTracks at load time, though, so those need an explicit local removal
   // too or they'd linger until the next full reload.
@@ -59,7 +59,7 @@ export default function LikedSongsView(): JSX.Element {
   }, [libraryTracks, likedTrackIds])
 
   // Liked files from the API file browser (ApiFilesView) also skip the
-  // favorites API — same as local files, their id just encodes the path
+  // favorites API - same as local files, their id just encodes the path
   // instead of pointing at a scanned library entry, so rebuild the track
   // straight from the id rather than needing the folder they came from.
   const likedApiFileTracks = useMemo(() => likedTrackIds
@@ -135,7 +135,7 @@ export default function LikedSongsView(): JSX.Element {
                   </div>
                   <span className="text-text-muted text-xs tabular-nums shrink-0 hidden sm:block">{formatDuration(track.duration, '')}</span>
                   {/* Was opacity-0 group-hover:opacity-100 with no touch
-                      equivalent — invisible and undiscoverable on mobile. */}
+                      equivalent - invisible and undiscoverable on mobile. */}
                   <button
                     onClick={e => { e.stopPropagation(); setCtxMenu(prev => prev?.track.id === track.id ? null : { track, songId, x: e.clientX, y: e.clientY }) }}
                     className="text-text-muted hover:text-text-primary opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all shrink-0 w-11 h-11 md:w-auto md:h-auto flex items-center justify-center md:p-1.5"

@@ -37,7 +37,7 @@ import SongInfoModal from './SongInfoModal'
 // Phone-first file browser over the API's /files/* endpoints. The data layer
 // (browse + stale-while-revalidate cache, recursive search, ZIP jobs, Tracker
 // matching, playlists/likes, contributor proposals) is unchanged from the
-// desktop build — everything the user actually touches is not:
+// desktop build - everything the user actually touches is not:
 //
 //   · no hover: every action has a permanent, thumb-sized control
 //   · context menus, sorting and folder-jumping are bottom sheets, not
@@ -154,7 +154,7 @@ function Thumb({ entry, size, rounded = 'rounded-xl' }: {
       <img
         // Audio takes the API's rendered cover; images are served whole by
         // /files/download/, so a folder of art would be hundreds of KB per row
-        // at full size — thumbnails take the degraded copy, the lightbox still
+        // at full size - thumbnails take the degraded copy, the lightbox still
         // opens the original.
         src={mt === 'audio' ? buildCoverArtUrl(entry.path, true, activeChannel) : smallCoverUrl(buildStreamUrl(entry.path, activeChannel))}
         alt=""
@@ -205,7 +205,7 @@ export default function ApiFilesView(): JSX.Element {
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
-  // Set lookup for the per-row liked check — .includes on the array made the
+  // Set lookup for the per-row liked check - .includes on the array made the
   // listing O(rows × likes).
   const likedSet = useMemo(() => new Set(likedTrackIds), [likedTrackIds])
 
@@ -229,13 +229,13 @@ export default function ApiFilesView(): JSX.Element {
   const [playlistBusyId, setPlaylistBusyId] = useState<number | null>(null)
   const [playlistDoneId, setPlaylistDoneId] = useState<number | null>(null)
 
-  // Whether a file has a matching song in the Tracker — resolved lazily per
+  // Whether a file has a matching song in the Tracker - resolved lazily per
   // path when its sheet opens (not for every row up front) so the Tracker-only
   // actions can be hidden for files with no match instead of doing nothing.
   // undefined = not looked up yet, null = looked up, no match.
   const [trackerMatches, setTrackerMatches] = useState<Map<string, number | null>>(new Map())
 
-  // Search — recursive across the whole file tree via /files/browse/'s
+  // Search - recursive across the whole file tree via /files/browse/'s
   // `search` param, not scoped to the current folder. Results replace the
   // browsed folder's entries while active rather than living in a separate
   // list, so sorting/select-mode/sheets all keep working on it unchanged.
@@ -321,7 +321,7 @@ export default function ApiFilesView(): JSX.Element {
       setEntries(items)
     } catch (err) {
       if (requestId !== navigateRequestId.current) return
-      // Keep the cached listing visible on a network failure — only surface the
+      // Keep the cached listing visible on a network failure - only surface the
       // error when we had nothing to show in the first place.
       if (!cached) setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
@@ -355,7 +355,7 @@ export default function ApiFilesView(): JSX.Element {
   }, [debouncedSearch, isSearching, activeChannel])
 
   // Remember the browsed folder in the store so switching to another tab and
-  // back restores it — the component unmounts on tab switch, so local state
+  // back restores it - the component unmounts on tab switch, so local state
   // alone doesn't survive that round trip.
   useEffect(() => {
     setApiFilesLastPath(currentPath)
@@ -480,13 +480,13 @@ export default function ApiFilesView(): JSX.Element {
     )
   }
 
-  // The API-relative path ("Compilation/Folder/song.mp3") — what every
+  // The API-relative path ("Compilation/Folder/song.mp3") - what every
   // /files/* endpoint takes as its `path` param, unlike Copy link's full URL.
   const copyPath = (entry: JWApiFileEntry): void => copyToClipboard(entry.path, 'Path')
 
   // Server playlists are keyed by numeric Tracker song id, so this only works
   // for audio files that resolved to a Tracker match (same lookup that gates
-  // "Find in Tracker") — the action stays hidden otherwise.
+  // "Find in Tracker") - the action stays hidden otherwise.
   const addToPlaylist = async (playlistId: number, songId: number): Promise<void> => {
     setPlaylistBusyId(playlistId)
     try {
@@ -613,7 +613,7 @@ export default function ApiFilesView(): JSX.Element {
 
   // ── ZIP jobs ───────────────────────────────────────────────────────────────
   // The backend zips a folder path recursively with its subfolder structure
-  // intact, so a single directory path is enough — no need to walk and flatten
+  // intact, so a single directory path is enough - no need to walk and flatten
   // the tree client-side.
   const startZip = async (paths: string[], filename: string): Promise<void> => {
     if (paths.length === 0) return
@@ -663,7 +663,7 @@ export default function ApiFilesView(): JSX.Element {
     [isSearching, searchResults, entries, sortBy, sortDir]
   )
 
-  // Type filter — folders stay visible regardless of filter so navigation
+  // Type filter - folders stay visible regardless of filter so navigation
   // still works; only files are matched against the selected media type.
   const filteredEntries = useMemo(
     () => typeFilter === 'all'
@@ -717,7 +717,7 @@ export default function ApiFilesView(): JSX.Element {
       >
         {/* Selection state is drawn ON the thumbnail, not inserted before it: a
             leading checkbox shoves every row sideways the moment select mode
-            turns on, which happens mid-long-press — the layout moves out from
+            turns on, which happens mid-long-press - the layout moves out from
             under the finger before the press has even ended. */}
         <div className="relative shrink-0">
           <Thumb entry={entry} size={48} />
@@ -833,8 +833,8 @@ export default function ApiFilesView(): JSX.Element {
   return (
     <>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {/* The header paints no background of its own: the app shell's — the
-            optional accent gradient included — runs continuously from behind
+        {/* The header paints no background of its own: the app shell's - the
+            optional accent gradient included - runs continuously from behind
             the status bar down through the listing, and an opaque header in
             between showed up as a flat slab dividing two tinted regions.
             It also deliberately does NOT collapse in select mode. Swapping it
@@ -845,7 +845,7 @@ export default function ApiFilesView(): JSX.Element {
         <div className="shrink-0">
             {/* No top padding: <main> has already absorbed the status-bar
                 inset, and the 44px control row carries its own breathing room
-                — anything extra here just reads as a dead strip under the
+                - anything extra here just reads as a dead strip under the
                 notch. */}
             <div className="flex items-center gap-1 px-2">
               <button
@@ -898,7 +898,7 @@ export default function ApiFilesView(): JSX.Element {
               >{viewMode === 'list' ? <LayoutGrid size={19} /> : <LayoutList size={19} />}</button>
             </div>
 
-            {/* Search — recursive across the whole tree, not the current folder. */}
+            {/* Search - recursive across the whole tree, not the current folder. */}
             <div className="px-4 pt-2 pb-2">
               <div className="relative flex items-center">
                 <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
@@ -1013,7 +1013,7 @@ export default function ApiFilesView(): JSX.Element {
           )}
         </div>
 
-        {/* Selection action bar — in flow, so it sits directly above the player
+        {/* Selection action bar - in flow, so it sits directly above the player
             and nav instead of floating over the last row. */}
         {selectMode && (
           <div className="shrink-0 border-t border-[var(--border)] bg-surface">
@@ -1037,7 +1037,7 @@ export default function ApiFilesView(): JSX.Element {
                 onClick={() => {
                   // Deletion only: a replace swaps one file's body for another,
                   // which has no meaning across a selection. Directories are
-                  // dropped — proposals target files.
+                  // dropped - proposals target files.
                   const paths = filteredEntries
                     .filter((e) => e.type !== 'directory' && selectedPaths.has(e.path))
                     .map((e) => e.path)
@@ -1066,7 +1066,7 @@ export default function ApiFilesView(): JSX.Element {
         )}
       </div>
 
-      {/* Toasts — lifted clear of the player and nav bar, whose height the
+      {/* Toasts - lifted clear of the player and nav bar, whose height the
           BottomNav publishes as a CSS var. */}
       {toast && (
         <div
@@ -1269,7 +1269,7 @@ export default function ApiFilesView(): JSX.Element {
               <SheetItem icon={Link} label="Copy link" onClick={() => { copyLink(sheetEntry); closeSheet() }} />
               <SheetItem icon={Clipboard} label="Copy path" onClick={() => { copyPath(sheetEntry); closeSheet() }} />
 
-              {/* Contributor actions — proposals target a file, so directories
+              {/* Contributor actions - proposals target a file, so directories
                   are excluded. Both land on the contributor page prefilled. */}
               {canPropose && sheetEntry.type !== 'directory' && (
                 <>

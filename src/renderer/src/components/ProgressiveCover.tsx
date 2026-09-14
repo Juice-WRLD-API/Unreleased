@@ -15,10 +15,10 @@ interface Props {
 // the big PNG takes.
 //
 // For URLs with no degraded variant (site assets, local files, data URLs) this
-// is just an <img> — one load, no placeholder step.
+// is just an <img> - one load, no placeholder step.
 //
 // Module-level (not component state) so it survives the component unmounting
-// and remounting — e.g. leaving and reentering the WRLD tab, which tears down
+// and remounting - e.g. leaving and reentering the WRLD tab, which tears down
 // this component entirely. Without it, a cover that already loaded full-res
 // once would replay the low-res placeholder every time WRLD remounts, even
 // though the browser already has the full image cached.
@@ -28,7 +28,7 @@ export function ProgressiveCover({ src, alt = '', className = '', onError }: Pro
   const placeholder = hasSmallCoverVariant(src) ? smallCoverUrl(src) : undefined
   // Stored as the src it belongs to rather than a bare boolean: a boolean is
   // only reset inside the effect, which runs *after* the first render with the
-  // new src — so that render still saw `true` from the previous track and
+  // new src - so that render still saw `true` from the previous track and
   // pointed the <img> straight at the new full-size original, skipping the
   // placeholder step entirely. Since an <img> keeps painting its old frame
   // until the new src decodes, a track change sat on the previous song's cover
@@ -41,7 +41,7 @@ export function ProgressiveCover({ src, alt = '', className = '', onError }: Pro
   useEffect(() => {
     if (!src || !placeholder || fullyLoadedSrcs.has(src)) return
     // Preloading in an off-DOM Image (rather than swapping the <img> src and
-    // waiting) keeps the placeholder painted until the full copy is decoded —
+    // waiting) keeps the placeholder painted until the full copy is decoded -
     // swapping src directly blanks the element while the new one loads.
     const img = new Image()
     let cancelled = false

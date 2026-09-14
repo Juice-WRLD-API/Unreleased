@@ -26,7 +26,7 @@ export function Section({ title, children, defaultOpen = true }: { title: string
   }, [tab, title, register])
 
   const hit = !query || title.toLowerCase().includes(query) || text.includes(query)
-  // While searching, expand matches so the hit is visible without a click —
+  // While searching, expand matches so the hit is visible without a click -
   // but don't clobber the user's own toggle state for when the search clears.
   const expanded = query ? true : open
 
@@ -60,7 +60,7 @@ export function Endpoint({ method, path, description }: { method: 'GET' | 'POST'
 }
 
 // Inline "METHOD /path/" header used ad hoc inside a Section body (ZIP
-// operations, Who Am I, Feedback, etc.) — same visual language as Endpoint
+// operations, Who Am I, Feedback, etc.) - same visual language as Endpoint
 // above but without its description line.
 export function MethodPath({ method, path, className = '' }: { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; className?: string }) {
   return (

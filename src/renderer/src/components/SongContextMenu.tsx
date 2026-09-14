@@ -17,7 +17,7 @@ import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
-// + `songId` (the common denominator across those five places — some only
+// + `songId` (the common denominator across those five places - some only
 // have a Track, not a full JWApiSong) so it works without every caller
 // re-fetching a full song object first. Common actions (Song info's caller
 // hook aside, playlists, download, add-to-library, edit navigation, change
@@ -44,22 +44,22 @@ interface Props {
   onPlayNext?: () => void
   onAddToQueue?: () => void
   onShowInFiles?: () => void
-  /** Tracker / Library — enters multi-select mode with this song selected. */
+  /** Tracker / Library - enters multi-select mode with this song selected. */
   onSelect?: () => void
 
   /** WRLD's simple like toggle. */
   liked?: boolean
   onToggleLike?: () => void
 
-  /** Destructive, always-last action — "Unlike" (Liked Songs) or "Remove
+  /** Destructive, always-last action - "Unlike" (Liked Songs) or "Remove
    *  from playlist" (Playlists). */
   removeAction?: { label: string; onClick: () => void }
 
-  /** Full song object, if the caller already has one — unlocks the
+  /** Full song object, if the caller already has one - unlocks the
    *  recording-session ZIP download (needs fields Track doesn't carry). */
   song?: JWApiSong
 
-  /** Hides "Change version" even when songId is valid — for playback
+  /** Hides "Change version" even when songId is valid - for playback
    *  contexts where switching doesn't make sense (e.g. WRLD's FM radio,
    *  which is server-driven and can't be manually redirected). */
   disableChangeVersion?: boolean
@@ -72,7 +72,7 @@ interface Props {
 
 function MenuItem({ icon, label, onClick, destructive, trailing, innerRef }: {
   icon: React.ReactNode; label: string; onClick: () => void; destructive?: boolean
-  /** Right-aligned adornment — the submenu chevron. */
+  /** Right-aligned adornment - the submenu chevron. */
   trailing?: React.ReactNode
   innerRef?: React.Ref<HTMLButtonElement>
 }): JSX.Element {
@@ -96,7 +96,7 @@ function Divider(): JSX.Element {
 }
 
 // A mobile sub-sheet's header: back chevron + title, in place of Sheet's
-// plain `title` string — sub-sheets (playlist picker, version switcher, ZIP
+// plain `title` string - sub-sheets (playlist picker, version switcher, ZIP
 // picker) need an explicit way back to the main sheet since swiping down or
 // tapping the scrim closes the whole menu, not just the sub-sheet.
 function SubSheetHeader({ title, onBack }: { title: string; onBack: () => void }): JSX.Element {
@@ -158,7 +158,7 @@ export default function SongContextMenu({
   const submenuRef = useRef<HTMLDivElement>(null)
   const [subPos, setSubPos] = useState({ top: 0, left: 0 })
   // "Change version" is a flyout too, but ChangeVersionMenuItem owns its own
-  // placement (it has to re-place itself when its list finishes loading) — the
+  // placement (it has to re-place itself when its list finishes loading) - the
   // open state stays here so all three submenus remain mutually exclusive.
   const [versionsOpen, setVersionsOpen] = useState(false)
   const versionItemRef = useRef<HTMLButtonElement>(null)
@@ -194,7 +194,7 @@ export default function SongContextMenu({
             .then(song => ({
               song,
               version: m.version,
-              label: m.version ? (m.versionTitle ? `${m.version} — ${m.versionTitle}` : m.version) : m.versionTitle,
+              label: m.version ? (m.versionTitle ? `${m.version} - ${m.versionTitle}` : m.version) : m.versionTitle,
             }))
             .catch(() => null)
         ))
@@ -270,7 +270,7 @@ export default function SongContextMenu({
     if (isLocalOnly) {
       createLocalPlaylist(name)
       // createLocalPlaylist sets activeLocalPlaylistId synchronously (zustand
-      // set() applies immediately), so it's readable right after the call —
+      // set() applies immediately), so it's readable right after the call -
       // that's the newly-created playlist's id, needed to add this track to it.
       const newId = useStore.getState().activeLocalPlaylistId
       if (newId) addToLocalPlaylist(newId, track.id)
@@ -308,15 +308,15 @@ export default function SongContextMenu({
   }
 
   // A couple of callers use a -1 sentinel for "no real song" instead of null
-  // (e.g. shared-playlist placeholder rows) — treat both as invalid.
+  // (e.g. shared-playlist placeholder rows) - treat both as invalid.
   const hasValidSong = songId != null && songId > 0
   const isUnplayable = track.genre === 'unsurfaced' || (track.genre === 'recording_session' && !track.path)
-  // A local library file with no matching API song — it already lives on
+  // A local library file with no matching API song - it already lives on
   // disk (so "Download" is meaningless) and can't join a server playlist,
   // but it can join one of the device-local playlists instead.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
   const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly)
-  // Sessions/unsurfaced are treated as unplayable — don't offer Play / Play
+  // Sessions/unsurfaced are treated as unplayable - don't offer Play / Play
   // next / Add to queue for them (they'd never actually play). Local files
   // (no category in genre) stay playable as long as they have a path.
   const canQueue = !!track.path && !isUnplayable
@@ -326,7 +326,7 @@ export default function SongContextMenu({
   // because the menu's height varies a lot (which optional items a caller
   // enables, long titles), so near a screen edge the guess undershoots and the
   // menu spills off-screen. Measuring the actual box fixes every case. The
-  // submenus don't factor in — they're flyouts positioned separately.
+  // submenus don't factor in - they're flyouts positioned separately.
   const menuWidth = 208
   const menuHeight = panel !== 'main' ? 320 : 240
   const [pos, setPos] = useState(() => ({
@@ -360,7 +360,7 @@ export default function SongContextMenu({
         <Sheet onClose={() => setPanel('main')} header={<SubSheetHeader title="Download session" onBack={() => setPanel('main')} />}>
           {zipCandidates && zipCandidates.length > 0 ? (
             <>
-              <p className="px-5 pb-1 text-xs text-text-muted">Multiple matches found — pick one:</p>
+              <p className="px-5 pb-1 text-xs text-text-muted">Multiple matches found - pick one:</p>
               {zipCandidates.map(c => (
                 <SheetItem key={c.path} icon={PackageOpen} label={c.name} onClick={() => { downloadZipEntry(c); onClose() }} />
               ))}
@@ -458,12 +458,12 @@ export default function SongContextMenu({
                   className="flex-1 min-w-0 text-left py-3.5 text-[15px] text-text-primary truncate"
                 >
                   {v.name}
-                  {label && <span className="text-text-muted text-xs"> — {label}</span>}
+                  {label && <span className="text-text-muted text-xs"> - {label}</span>}
                 </button>
                 {version && (
                   <button
                     onClick={() => toggleMobileDefaultVersion(version)}
-                    title={isDefault ? 'Default version — tap to unset' : `Always play "${version}" for this song`}
+                    title={isDefault ? 'Default version - tap to unset' : `Always play "${version}" for this song`}
                     className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-full ${isDefault ? 'text-accent' : 'text-text-muted'}`}
                   >
                     <Star size={16} fill={isDefault ? 'currentColor' : 'none'} />
@@ -538,7 +538,7 @@ export default function SongContextMenu({
       // Height-capped to the viewport: a fully-loaded menu (queue actions +
       // playlist/version/file rows + Download/Remove) is taller than a short
       // phone screen, and the position clamp alone would leave the bottom
-      // items clipped and unreachable — scroll instead.
+      // items clipped and unreachable - scroll instead.
       style={{ position: 'fixed', zIndex: 9999, top: pos.top, left: pos.left, maxHeight: window.innerHeight - 16 }}
       className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-x-hidden overflow-y-auto py-1"
     >
@@ -652,7 +652,7 @@ export default function SongContextMenu({
           </button>
           {zipCandidates && zipCandidates.length > 0 ? (
             <div className="max-h-44 overflow-y-auto">
-              <p className="px-3 pb-1 text-[10px] text-text-muted">Multiple matches found — pick one:</p>
+              <p className="px-3 pb-1 text-[10px] text-text-muted">Multiple matches found - pick one:</p>
               {zipCandidates.map(c => (
                 <button
                   key={c.path}

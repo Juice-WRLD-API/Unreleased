@@ -10,15 +10,15 @@ import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 
-// The desktop landing screen — same sections, same data (useHomeData) and the
+// The desktop landing screen - same sections, same data (useHomeData) and the
 // same Settings → Home screen toggles as the mobile shell, laid out as a bento
 // that fills the window instead of a stack that scrolls out of it.
 //
 // The whole point of the desktop layout is that a desktop screen can hold the
 // entire dashboard at once: the view is height-bound (h-full inside App's
 // fixed-height <main>). Cover grids clamp to whole rows and size to their own
-// content (however many rows the actual items need, capped per section — see
-// fitCount's callers) rather than stretching to fill whatever space is left —
+// content (however many rows the actual items need, capped per section - see
+// fitCount's callers) rather than stretching to fill whatever space is left -
 // a card whose border runs on well past its last cover reads as broken the
 // same way a half-visible row would. News, the one section where the extra
 // headlines are worth keeping
@@ -28,15 +28,15 @@ import type { Track, ViewType } from '../types'
 // removes exactly one thing. Three move relative to mobile: News, 999 FM and
 // Liked share one narrow right-hand rail (compact cards, News taking whatever
 // height they leave it) rather than each claiming a full-height column of
-// their own, so Recently played and Playlists — the two sections actually
-// worth spending width on — get the rest of the page. "Your listening" is the
+// their own, so Recently played and Playlists - the two sections actually
+// worth spending width on - get the rest of the page. "Your listening" is the
 // hero's row of numbers, where it costs no vertical space of its own.
 
 const GAP = 12          // matches gap-3 on the cover grids
 const MIN_TILE = 104    // narrowest a cover may get before dropping a column
 const MAX_NEWS = 20
 
-// Whole rows only — see the header note. `width` decides how many columns
+// Whole rows only - see the header note. `width` decides how many columns
 // fit; the row count then follows the content itself (capped at `maxRows`)
 // rather than however much vertical space happens to be on offer, so the
 // card's height always matches what's actually inside it.
@@ -96,7 +96,7 @@ function RecentTile({ tracks, onPlay, span }: {
 }
 
 // A playlist with no cover of its own falls back to a 2×2 mosaic of its first
-// four tracks' art — same fallback PlaylistsView uses — before the plain icon.
+// four tracks' art - same fallback PlaylistsView uses - before the plain icon.
 function PlaylistCoverThumb({ cover, mosaic, alt }: { cover: string | null; mosaic: string[] | null; alt: string }): JSX.Element {
   if (cover) return <ProgressiveCover src={cover} alt={alt} className="w-full h-full object-cover" />
   if (mosaic && mosaic.length >= 4) {
@@ -115,14 +115,14 @@ function PlaylistsTile({ playlists, onAll, span }: {
   span: string
 }): JSX.Element {
   const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
-  // One row only — Playlists is capped at 10 items upstream (useHomeData), so
+  // One row only - Playlists is capped at 10 items upstream (useHomeData), so
   // a lone leftover on a second row was common and looked unfinished; the
   // rest is a click away via "All".
   const { cols, count } = fitCount(width, playlists.length, 1)
   return (
     <Tile title="Playlists" icon={<ListMusic size={15} />} action={{ label: 'All', onClick: onAll }} span={span}>
       {playlists.length === 0 ? (
-        <EmptyNote>No playlists yet — build one from any song&apos;s menu.</EmptyNote>
+        <EmptyNote>No playlists yet - build one from any song&apos;s menu.</EmptyNote>
       ) : (
         <CoverGrid cols={cols} bodyRef={bodyRef}>
           {playlists.slice(0, count).map((p) => (
@@ -250,9 +250,9 @@ function Stat({ value, label }: { value: string; label: string }): JSX.Element {
 }
 
 // Desktop counterpart to mobile Home's "More" button. Mobile's opens a sheet
-// of nav tabs that don't fit the bottom bar's cap — the sidebar has no such
+// of nav tabs that don't fit the bottom bar's cap - the sidebar has no such
 // cap, so there's nothing to overflow into it. This lists the destinations
-// that ship off by default instead (Wrapped, News, Liked Songs, API Docs —
+// that ship off by default instead (Wrapped, News, Liked Songs, API Docs -
 // see `defaultHidden` in navItems.tsx): still one click away without having
 // to turn them on in Settings first, just like mobile's sheet lets you reach
 // an overflowed tab without adding it to the bar.
@@ -382,7 +382,7 @@ export default function HomeViewDesktop(): JSX.Element {
         </div>
 
         {/* ── Main: recently played + playlists stacked, full width ──
-            ── Side rail: news, 999 FM, liked, games — compact, narrow ── */}
+            ── Side rail: news, 999 FM, liked, games - compact, narrow ── */}
         {(mainShown || sideShown) && (
           <div className="flex-1 min-h-0 flex gap-4">
             {mainShown && (
@@ -416,7 +416,7 @@ export default function HomeViewDesktop(): JSX.Element {
                     }
                     subtitle={
                       radioFmIsLive && radioFmNowPlaying
-                        ? `${radioFmNowPlaying.title} — ${radioFmNowPlaying.artist}`
+                        ? `${radioFmNowPlaying.title} - ${radioFmNowPlaying.artist}`
                         : 'Juice WRLD radio, live 24/7'
                     }
                     onClick={openRadioFm}

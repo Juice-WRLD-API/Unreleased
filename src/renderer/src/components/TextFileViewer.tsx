@@ -3,7 +3,7 @@ import { X, Download, Loader2, AlertCircle, Check, Clipboard, WrapText } from 'l
 
 // In-app viewer for plain-text files in the Files tab. Two sources feed it:
 // API files (fetched over HTTP from the stream URL) and local files (read in
-// the main process, which is the only side that can touch the disk) — the
+// the main process, which is the only side that can touch the disk) - the
 // caller owns that difference and hands us a `load` function, so this stays a
 // pure presentation component.
 
@@ -43,7 +43,7 @@ export default function TextFileViewer({ source, onClose }: Props): JSX.Element 
       })
     return () => { cancelled = true }
   // The caller rebuilds `source` each render, so key off the file name rather
-  // than the object identity — otherwise this refetches on every parent render.
+  // than the object identity - otherwise this refetches on every parent render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source.name])
 

@@ -19,7 +19,7 @@ export interface StaffRoles {
 // EditorProfileView.mobile.tsx, and AdminPage.desktop.tsx/.mobile.tsx.
 //
 // canReviewReports intentionally reads the raw account flags (not scoped to
-// activeChannel) — it mirrors EditorProfileView's original
+// activeChannel) - it mirrors EditorProfileView's original
 // `!!(account?.is_editor || account?.is_administrator)`, which was never
 // channel-scoped to begin with. Don't "fix" that here; it's a preserved
 // behavior, not an oversight.

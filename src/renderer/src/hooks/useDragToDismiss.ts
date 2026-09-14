@@ -1,6 +1,6 @@
 import { CSSProperties, RefObject, TouchEvent as ReactTouchEvent, useRef, useState } from 'react'
 
-// Shared "drag down to close" gesture — the curtain-reveal WRLD's full-screen
+// Shared "drag down to close" gesture - the curtain-reveal WRLD's full-screen
 // player uses, and every bottom-sheet-style panel (SongInfoModal, mobile/
 // Sheet.tsx) since. Wire `handlers` onto whatever region should arm the
 // gesture (often just a header/grabber, not the whole scrollable panel, so it
@@ -18,12 +18,12 @@ interface Options {
   transition?: string
   /** Opt into writing the live drag offset straight to this element's DOM
    *  node on every touchmove instead of through `setState` + the returned
-   *  `style` — skips a React re-render of whatever owns the element on every
-   *  touch frame. Pointless for a small panel (Sheet, Modal, SongInfoModal —
+   *  `style` - skips a React re-render of whatever owns the element on every
+   *  touch frame. Pointless for a small panel (Sheet, Modal, SongInfoModal -
    *  re-rendering those is cheap either way) but was visibly janky on WRLD's
    *  ~2000-line full-screen player, which re-rendered its entire subtree
    *  (blurred cover backdrop, lyrics, queue, everything) on every finger
-   *  move. `dragY`/`style` still update (rarely — only at drag start/end),
+   *  move. `dragY`/`style` still update (rarely - only at drag start/end),
    *  so consumers that don't pass this keep working exactly as before. */
   elRef?: RefObject<HTMLElement | null>
   /** Custom DOM write for the `elRef` path, e.g. WRLD also derives a

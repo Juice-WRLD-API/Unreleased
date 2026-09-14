@@ -1,4 +1,4 @@
-// Tier List — rank songs into S/A/B/C/D (or whatever tiers the user builds)
+// Tier List - rank songs into S/A/B/C/D (or whatever tiers the user builds)
 // by dragging a song into a row (touch drag via Pointer Events, since HTML5
 // drag-and-drop doesn't fire on touch), or by tapping a song then tapping the
 // row it belongs in. Unlike Heardle/Wordle there's no daily puzzle or score:
@@ -27,7 +27,7 @@ const DEFAULT_CATEGORIES: PoolId[] = ['released', 'unreleased']
 const POOL_DROP_ZONE = '__pool__'
 
 // Pointer must move this many px before a press counts as a drag rather than
-// a tap — keeps tap-to-select working for a finger that doesn't quite hold still.
+// a tap - keeps tap-to-select working for a finger that doesn't quite hold still.
 const DRAG_THRESHOLD = 8
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
@@ -180,7 +180,7 @@ export default function TierlistView(): JSX.Element {
     'setActiveView', 'setHeroBleedTop', 'previousView')
 
   // Lets GameBackdrop's wash paint full-bleed under the status bar instead of
-  // stopping at the shell's usual inset — matches WRLD's ownsTopInset trick.
+  // stopping at the shell's usual inset - matches WRLD's ownsTopInset trick.
   // The corner buttons and the switcher's top clearance compensate below.
   // Always true: mobile's nav bar is bottom-only now (see BottomNav), so the
   // shell always reserves this inset itself.
@@ -234,7 +234,7 @@ export default function TierlistView(): JSX.Element {
   }, [pool, assignments, search])
 
   // Selecting the tier a song currently belongs to (or the pool, for
-  // unassigning) is meant as a no-op, not a nudge to re-render — keeping the
+  // unassigning) is meant as a no-op, not a nudge to re-render - keeping the
   // state identity-equal skips the save effect that would otherwise fire.
   // useCallback with no deps: the pointer-drag handlers below chain off this
   // identity, and need it stable across renders (see their comment).
@@ -255,8 +255,8 @@ export default function TierlistView(): JSX.Element {
   }
 
   // Chip selection is routed through here (rather than straight to
-  // setSelectedSongId) so a drag's trailing click — fired by the browser
-  // right after pointerup — doesn't also toggle selection.
+  // setSelectedSongId) so a drag's trailing click - fired by the browser
+  // right after pointerup - doesn't also toggle selection.
   const handleChipClick = (songId: number): void => {
     if (suppressClickRef.current) { suppressClickRef.current = false; return }
     setSelectedSongId((cur) => (cur === songId ? null : songId))
@@ -284,7 +284,7 @@ export default function TierlistView(): JSX.Element {
   // These stay stable across renders (via the useCallback chain down to
   // assignSong/zoneUnderPoint, which have no deps) so that the add/remove
   // pairs in handleSongPointerDown and the unmount cleanup below always
-  // refer to the same function identity — addEventListener/removeEventListener
+  // refer to the same function identity - addEventListener/removeEventListener
   // only match on identity, so a handler that changed shape between the
   // pointerdown and the eventual pointerup would leak a listener.
   const handleSongPointerUp = useCallback((e: PointerEvent): void => {
@@ -369,7 +369,7 @@ export default function TierlistView(): JSX.Element {
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       <GameBackdrop />
 
-      {/* Corner controls — the hero owns the middle, so navigation and the
+      {/* Corner controls - the hero owns the middle, so navigation and the
           panels sit out of its way. z-20: the scroll container fills the whole
           view and comes later in the DOM, so at equal z it took every click in
           these corners and left the buttons visible but dead. */}
@@ -378,7 +378,7 @@ export default function TierlistView(): JSX.Element {
         style={{ top: ownsTopInset ? 'calc(var(--top-inset) + 0.5rem)' : '0.5rem' }}
       >
         <button
-          // See HeardleView.mobile.tsx's back button — same reasoning: Home,
+          // See HeardleView.mobile.tsx's back button - same reasoning: Home,
           // not WRLD, is where mobile actually enters this game from now.
           onClick={() => setActiveView(previousView ?? 'home')}
           aria-label="Back"
@@ -422,7 +422,7 @@ export default function TierlistView(): JSX.Element {
             <h1 className="text-text-primary text-3xl font-black tracking-tight">Tier List</h1>
             <p className="text-text-muted text-xs mt-2">
               {selectedSongId !== null
-                ? 'Tap a row to place it — tap the song again to cancel.'
+                ? 'Tap a row to place it - tap the song again to cancel.'
                 : 'Drag a song into a row, or tap it and then tap a row.'}
             </p>
           </div>

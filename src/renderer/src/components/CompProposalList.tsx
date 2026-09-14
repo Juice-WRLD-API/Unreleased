@@ -4,8 +4,8 @@ import { compChangeTypeLabel } from '../lib/userApi'
 import { StatusChip, relativeTime } from './adminShared'
 
 // A contributor's own comp proposals, with the status filter above them.
-// Three pages show this exact list — the submit page, the contributor profile,
-// and the editor profile's Comp tab — so it lives here rather than being
+// Three pages show this exact list - the submit page, the contributor profile,
+// and the editor profile's Comp tab - so it lives here rather than being
 // hand-rolled (and drifting) in each of them.
 
 export type CompFilterTab = 'all' | 'pending' | 'approved' | 'rejected'
@@ -16,7 +16,7 @@ export function filterCompProposals(proposals: CompFileProposal[], filter: CompF
   return filter === 'all' ? proposals : proposals.filter((p) => p.status === filter)
 }
 
-/** Searchable text for a comp proposal — both paths, the contributor's own
+/** Searchable text for a comp proposal - both paths, the contributor's own
  *  note, and the change type as it reads on screen ("rename folder", not
  *  "rename_folder"), so a query matches whatever the proposal actually
  *  touches. Mirrors proposalSearchText in lib/proposalSearch.ts for song
@@ -30,11 +30,11 @@ export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
   filter: CompFilterTab
   setFilter: (f: CompFilterTab) => void
   /** Optional per-tab counts (e.g. from filterCompProposals(all, tab).length)
-   *  — shown next to each tab's label like the song-proposal filter tabs do.
+   *  - shown next to each tab's label like the song-proposal filter tabs do.
    *  Omit to render the bar without counts (unchanged for other callers). */
   counts?: Partial<Record<CompFilterTab, number>>
   /** 'sm' (default, unchanged) matches this bar's original compact sizing.
-   *  'md' matches the song-proposal filter tabs' text-sm/font-medium sizing —
+   *  'md' matches the song-proposal filter tabs' text-sm/font-medium sizing -
    *  use it wherever this bar sits directly next to those tabs (e.g. the
    *  merged Proposals/Comp tile in EditorProfileView), so the two don't read
    *  as two different scales of control. */
@@ -64,7 +64,7 @@ export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
 export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, empty = 'No comp proposals yet.' }: {
   proposals: CompFileProposal[]
   loading?: boolean
-  /** Clicking a row — omit to render the rows as plain, unclickable cards. */
+  /** Clicking a row - omit to render the rows as plain, unclickable cards. */
   onSelect?: (proposal: CompFileProposal) => void
   /** Omit to hide the withdraw control (profile views are read-only). */
   onWithdraw?: (id: number) => void

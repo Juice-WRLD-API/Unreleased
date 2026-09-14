@@ -2,8 +2,8 @@ import { useStore } from '../store/useStore'
 import { createCompProposalUpload } from './userApi'
 import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from './compChunkedUpload'
 
-// Comp file proposals carry the actual file body — routinely a few hundred
-// megabytes — and used to be awaited inside the Contributor page's submit
+// Comp file proposals carry the actual file body - routinely a few hundred
+// megabytes - and used to be awaited inside the Contributor page's submit
 // handler, which meant leaving that page (or closing the window) killed the
 // upload halfway. The queue lives here at module scope instead: submitting
 // hands the jobs over and returns immediately, and progress shows up as a task
@@ -56,7 +56,7 @@ export function queueCompUploads(jobs: CompUploadJob[]): void {
 export function cancelCompUpload(id: string): void {
   const abort = aborts.get(id)
   if (abort) { abort(); return }
-  // Not started yet — drop it from the queue and mark the row itself, since
+  // Not started yet - drop it from the queue and mark the row itself, since
   // there's no in-flight request whose rejection would do it.
   const i = queue.findIndex((j) => j.id === id)
   if (i >= 0) queue.splice(i, 1)

@@ -6,11 +6,11 @@ import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
 
 // The mobile landing screen. All of its data comes from useHomeData, which the
-// desktop shell shares — this file is layout only: a stack of horizontally
+// desktop shell shares - this file is layout only: a stack of horizontally
 // scrolling rails sized for a phone.
 
 // A playlist with no cover of its own falls back to a 2×2 mosaic of its first
-// four tracks' art — same fallback PlaylistsView uses — before the plain icon.
+// four tracks' art - same fallback PlaylistsView uses - before the plain icon.
 function PlaylistCoverThumb({ cover, mosaic, alt }: { cover: string | null; mosaic: string[] | null; alt: string }): JSX.Element {
   if (cover) return <ProgressiveCover src={cover} alt={alt} className="w-full h-full object-cover" />
   if (mosaic && mosaic.length >= 4) {
@@ -68,7 +68,7 @@ export default function HomeViewMobile(): JSX.Element {
     openProfile, showSection, recent, newsItems, games, playlistRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
-  // Whatever doesn't fit the bottom nav directly — its old in-bar "More" tab
+  // Whatever doesn't fit the bottom nav directly - its old in-bar "More" tab
   // moved here, since fitting it AND a Home tab both in the bar pushed the
   // cap down by one more real destination. Mobile-only, so it stays here
   // rather than in the shared hook.
@@ -155,7 +155,7 @@ export default function HomeViewMobile(): JSX.Element {
           action={{ label: 'All', onClick: () => setActiveView('playlists') }}
         >
           {playlistRow.length === 0 ? (
-            <EmptyNote>No playlists yet — build one from any song&apos;s menu.</EmptyNote>
+            <EmptyNote>No playlists yet - build one from any song&apos;s menu.</EmptyNote>
           ) : (
             <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
               {playlistRow.map((p) => (
@@ -216,7 +216,7 @@ export default function HomeViewMobile(): JSX.Element {
             </span>
             <span className="block text-text-muted text-xs truncate">
               {radioFmIsLive && radioFmNowPlaying
-                ? `${radioFmNowPlaying.title} — ${radioFmNowPlaying.artist}`
+                ? `${radioFmNowPlaying.title} - ${radioFmNowPlaying.artist}`
                 : 'Juice WRLD radio, live 24/7'}
             </span>
           </span>

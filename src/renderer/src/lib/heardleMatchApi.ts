@@ -55,7 +55,7 @@ export interface HeardleMatchCallbacks {
   onOpponent: (progress: OpponentProgress) => void
   onEnd: (payload: MatchEndPayload) => void
   onError: (message: string) => void
-  /** The socket dropped. Fired on every unexpected close, not on teardown —
+  /** The socket dropped. Fired on every unexpected close, not on teardown -
    *  the UI has to say so, because a match can't be played without it. */
   onDisconnected?: () => void
   /** Back up after a drop, with the match re-bound. */
@@ -65,7 +65,7 @@ export interface HeardleMatchCallbacks {
 let socket: WebSocket | null = null
 let pendingQueueJoin = false
 let pendingMatchAck: string | null = null
-// Survives a drop so a reconnect can re-bind to the match in progress —
+// Survives a drop so a reconnect can re-bind to the match in progress -
 // unlike pendingMatchAck, which is consumed the moment it's delivered.
 let lastMatchId: string | null = null
 
@@ -100,7 +100,7 @@ export function connectMatchSocket(callbacks: HeardleMatchCallbacks, userId?: nu
     try { socket.close() } catch {}
     socket = null
   }
-  // A fresh connect is a fresh session — nothing queued against the previous
+  // A fresh connect is a fresh session - nothing queued against the previous
   // socket should be replayed onto this one.
   pendingQueueJoin = false
   pendingMatchAck = null
@@ -162,7 +162,7 @@ export function connectMatchSocket(callbacks: HeardleMatchCallbacks, userId?: nu
           status: data.status as GameStatus,
         }
         if (userId && progress.user_id === userId) {
-          // The round is how your own guess list advances — there's no other
+          // The round is how your own guess list advances - there's no other
           // message carrying it, so a self update without one leaves the board
           // frozen. The server is expected to always attach it here.
           if (data.round) callbacks.onRound(data.round as PuzzleResponse)
@@ -172,7 +172,7 @@ export function connectMatchSocket(callbacks: HeardleMatchCallbacks, userId?: nu
         return
       }
       if (type === 'match_end') {
-        // The match is over — a later reconnect must not re-ack it.
+        // The match is over - a later reconnect must not re-ack it.
         lastMatchId = null
         callbacks.onEnd(data as unknown as MatchEndPayload)
         return

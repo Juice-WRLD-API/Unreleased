@@ -4,7 +4,7 @@
 // without this every page in Google looks identical, and the site-wide title
 // and description in index.html are the only thing a crawler ever records.
 // applySeo() rewrites title / description / canonical / robots / og+twitter
-// after each navigation — Googlebot renders JS and reads the post-render head,
+// after each navigation - Googlebot renders JS and reads the post-render head,
 // so per-route titles do land.
 //
 // Deliberately not indexable: per-user views (liked, stats, library,
@@ -18,7 +18,7 @@ const ORIGIN = 'https://player.juicewrldapi.com'
 const SITE = 'unreleased'
 
 const DEFAULT_DESCRIPTION =
-  "Stream Juice WRLD's full catalog — every released and unreleased song — free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics."
+  "Stream Juice WRLD's full catalog - every released and unreleased song - free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics."
 
 type SeoEntry = {
   /** Canonical path for the view. Omitted for views with no stable URL. */
@@ -34,36 +34,36 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     // Canonical on the root, not /tracker: the two render the same view and
     // the root is what people link to. /tracker consolidates into it.
     path: '/',
-    title: 'unreleased — Juice WRLD music player',
+    title: 'unreleased - Juice WRLD music player',
     description: DEFAULT_DESCRIPTION,
   },
   'api-files': {
     path: '/files',
     title: 'Files',
     description:
-      'Browse the Juice WRLD API filesystem folder by folder — stream any track in place or download the original file.',
+      'Browse the Juice WRLD API filesystem folder by folder - stream any track in place or download the original file.',
   },
   wrld: {
     path: '/wrld',
-    title: '999 FM — live Juice WRLD radio',
+    title: '999 FM - live Juice WRLD radio',
     description:
       'A 24/7 Juice WRLD radio station. See what everyone is listening to in real time, vote to skip, suggest the next song, and preview the upcoming queue.',
   },
   heardle: {
     path: '/heardle',
-    title: 'Heardle — the daily Juice WRLD song game',
+    title: 'Heardle - the daily Juice WRLD song game',
     description:
       'Guess the Juice WRLD song from its opening second. A new track every day, drawn from the released and unreleased catalog.',
   },
   wordle: {
     path: '/wordle',
-    title: 'Wordle — the daily Juice WRLD song title game',
+    title: 'Wordle - the daily Juice WRLD song title game',
     description:
       'Guess the Juice WRLD song title letter by letter. A new title every day, and every guess is a real track from the released and unreleased catalog.',
   },
   tierlist: {
     path: '/tierlist',
-    title: 'Tier List — rank Juice WRLD songs',
+    title: 'Tier List - rank Juice WRLD songs',
     description:
       'Build a tier list of Juice WRLD songs, released and unreleased. Drag tracks into S through D tiers and save your ranking.',
   },
@@ -83,7 +83,7 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     path: '/download',
     title: 'Download the desktop app',
     description:
-      'Get unreleased for Windows, macOS and Linux — local file playback, offline downloads, Discord Rich Presence, global hotkeys, and pop-out windows.',
+      'Get unreleased for Windows, macOS and Linux - local file playback, offline downloads, Discord Rich Presence, global hotkeys, and pop-out windows.',
   },
 
   // Personal or unstable surfaces: crawlable in principle, worthless in an
@@ -126,20 +126,20 @@ function setLink(rel: string, href: string): void {
 }
 
 /**
- * Rewrite the document head for `view`. Safe to call on every navigation —
+ * Rewrite the document head for `view`. Safe to call on every navigation -
  * it only ever mutates tags it owns.
  */
 export function applySeo(view: ViewType): void {
   if (typeof document === 'undefined') return
 
   // `/` renders Home for desktop and installed apps (see getViewFromPath in
-  // App.tsx), but it stays the catalog's canonical, indexable URL — a
+  // App.tsx), but it stays the catalog's canonical, indexable URL - a
   // dashboard's noindex must never land on the site root.
   const atRoot = typeof window !== 'undefined' && window.location.pathname === '/'
   const entry = (atRoot ? ROUTES['api-tracker'] : ROUTES[view]) ?? ROUTES['not-found']
   const title = entry.title.includes(SITE) ? entry.title : `${entry.title} · ${SITE}`
   // Views without a canonical path (share links) keep their own URL, minus any
-  // query string — ?q= searches and OAuth params must never become canonicals.
+  // query string - ?q= searches and OAuth params must never become canonicals.
   const canonical = ORIGIN + (entry.path ?? window.location.pathname)
 
   document.title = title

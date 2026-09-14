@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 
 // Mouse press-and-hold as a second way into multi-select, alongside Ctrl/Cmd
-// +click (see the `onClick` handlers next to every `bind(...)` call site —
+// +click (see the `onClick` handlers next to every `bind(...)` call site -
 // they check `consumeFired()` first so the click that follows a completed
 // hold doesn't also run the row's normal single-click action).
 //
@@ -9,7 +9,7 @@ import { useCallback, useRef } from 'react'
 // hook itself, so it's safe to call once per row inside a `.map()` even in a
 // component that itself isn't per-row (see PlaylistsView/ApiFilesView, where
 // rows are plain divs rendered from a loop) as well as inside real per-row
-// components (see ApiTrackerView's row components) — only one press can be
+// components (see ApiTrackerView's row components) - only one press can be
 // in flight at a time, so a single shared timer/origin ref is enough either
 // way.
 

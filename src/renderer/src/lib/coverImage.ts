@@ -1,6 +1,6 @@
 // Copying and saving cover art. Every cover the app displays is readable from
 // the renderer: the API sends Access-Control-Allow-Origin (same as it does
-// for audio — see the CORS notes in audioEffects.ts), so a plain fetch() gets
+// for audio - see the CORS notes in audioEffects.ts), so a plain fetch() gets
 // the bytes for API covers and data:/blob: covers alike. Copy goes through
 // the async Clipboard API; save through an <a download> blob link.
 
@@ -21,8 +21,8 @@ async function fetchImageBlob(url: string): Promise<Blob> {
   return blob
 }
 
-// Chromium's async Clipboard API only takes PNG reliably — it rejects
-// anything else outright — while covers arrive as JPEG or WebP. Re-encode
+// Chromium's async Clipboard API only takes PNG reliably - it rejects
+// anything else outright - while covers arrive as JPEG or WebP. Re-encode
 // through a canvas. (Saving keeps the original bytes instead, so a saved
 // file isn't bloated by a pointless JPEG→PNG round trip.)
 async function toPngBlob(blob: Blob): Promise<Blob> {
@@ -61,7 +61,7 @@ export async function saveCoverImage(url: string, title: string): Promise<'saved
   const blob = await fetchImageBlob(url)
   const name = coverFileName(title, blob.type)
   // The cover's own URL is cross-origin, where `download` is ignored and the
-  // browser navigates to the image instead — so hand the anchor a same-origin
+  // browser navigates to the image instead - so hand the anchor a same-origin
   // blob: URL, which does honour the attribute (and the filename).
   const href = URL.createObjectURL(blob)
   const a = document.createElement('a')

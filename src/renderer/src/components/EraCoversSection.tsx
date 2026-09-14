@@ -6,7 +6,7 @@ import { resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { loadEraFullNames, eraFullName, listEras } from '../lib/eras'
 import FilePickerModal from './FilePickerModal'
 
-// Lets a user replace the API's shared placeholder cover for an entire era —
+// Lets a user replace the API's shared placeholder cover for an entire era -
 // every unreleased song in that era picks it up (see lib/eraCovers and
 // applyPrefToTrack's precedence). Released songs and songs with their own
 // personal cover are untouched, so this only ever fills a gap.

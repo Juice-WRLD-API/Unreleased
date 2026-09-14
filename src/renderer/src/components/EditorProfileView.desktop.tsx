@@ -21,18 +21,18 @@ import { useMyCompProposals } from '../hooks/useMyCompProposals'
 import { useReportsQueue } from '../hooks/useReportsQueue'
 import { RANK_STYLES, type ProposalFilterTab } from '../lib/proposalSearch'
 
-// Bento tile grid — replaces the v1 header+tabs+single-panel layout (see
-// "Visual Redesign v2 — Bento Dashboard Pivot" in the rewrite plan). Reuses
+// Bento tile grid - replaces the v1 header+tabs+single-panel layout (see
+// "Visual Redesign v2 - Bento Dashboard Pivot" in the rewrite plan). Reuses
 // the app's own Tile primitive (originally HomeView.desktop.tsx's bento
 // rework) so this page is visually unmistakable from the old tab-bar shape
 // while staying consistent with where the rest of the app is heading.
 // Everything below is height-bound (h-full inside App's fixed-height
-// <main>), not page-scrolling — individual tiles scroll internally.
+// <main>), not page-scrolling - individual tiles scroll internally.
 
 function AdminStatBox({ label, value, highlight, onClick }: {
   label: string
   value: number | string | null | undefined
-  /** Render the value in accent color — pass for a "pending" count that's
+  /** Render the value in accent color - pass for a "pending" count that's
    *  nonzero, or any other value worth calling out. Plain totals (Users,
    *  Channels) leave this unset. */
   highlight?: boolean
@@ -113,15 +113,15 @@ export default function EditorProfileView(): JSX.Element {
     loadChannels: s.loadChannels,
   })))
   const go = setActiveView
-  // Every list on this page — my proposals, my comp proposals, the Admin
-  // tile's review queues — is already scoped to activeChannel (see the
+  // Every list on this page - my proposals, my comp proposals, the Admin
+  // tile's review queues - is already scoped to activeChannel (see the
   // effects below and AdminPage). ApiFilesView is the only other place that
   // lets a user change it; without a switcher here too, reviewing a second
   // channel meant leaving the profile to flip it in Files first.
   useEffect(() => { if (channels.length === 0) loadChannels().catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Read live in the admin-preview effect below without being a dependency
-  // of it — channels.length changes once loadChannels() resolves just after
+  // of it - channels.length changes once loadChannels() resolves just after
   // mount, and that used to re-run the whole admin fetch (a second /users
   // request etc.) purely to update a count nothing else in that fetch needs.
   const channelsRef = useRef(channels)
@@ -130,7 +130,7 @@ export default function EditorProfileView(): JSX.Element {
   const [refreshKey, setRefreshKey] = useState(0)
   const [showAddSong, setShowAddSong] = useState(false)
   // A click on the Admin tile's own stat boxes used to expand an embedded
-  // AdminPage in place on this page — that read as a cramped "tile" for a
+  // AdminPage in place on this page - that read as a cramped "tile" for a
   // wide layout like the Users master/detail view, so this now leaves the
   // page entirely for the real standalone console at its own deep link
   // (e.g. /users), same as typing the URL would.
@@ -138,7 +138,7 @@ export default function EditorProfileView(): JSX.Element {
     setActiveAdminTab(tab)
     setActiveView('admin')
   }
-  // Which content the merged Proposals/Comp tile shows — only contributors
+  // Which content the merged Proposals/Comp tile shows - only contributors
   // ever see the toggle (non-contributors have no comp proposals to switch
   // to), so this stays 'songs' for everyone else.
   const [proposalsView, setProposalsView] = useState<'songs' | 'comp'>('songs')
@@ -146,9 +146,9 @@ export default function EditorProfileView(): JSX.Element {
 
   // Not `|| is_administrator`: this tile lists proposals *you* submitted, and
   // an admin who never contributed has none. Their review queue is the Admin
-  // tile's "Comp files" — the one place proposals are reviewed. Managers
+  // tile's "Comp files" - the one place proposals are reviewed. Managers
   // review the same two queues admins do, so they get the same embedded
-  // panel here. Scoped to the active channel — a manager grant on one
+  // panel here. Scoped to the active channel - a manager grant on one
   // channel shouldn't leave this tile visible (and then erroring) on a
   // channel they don't actually manage.
   const { isContributor, isAdmin, isManager, canReviewReports, canReviewStaff } = useStaffRoles(account, activeChannel, channels)
@@ -161,8 +161,8 @@ export default function EditorProfileView(): JSX.Element {
 
   const { leaderboard, loading: loadingLeaderboard, myEntry } = useLeaderboard(refreshKey, activeChannel, account?.discord_username)
 
-  // Grid mode has no "active tab" gating a tile's own fetch — every visible
-  // tile is live at once — so this is gated on the role condition alone
+  // Grid mode has no "active tab" gating a tile's own fetch - every visible
+  // tile is live at once - so this is gated on the role condition alone
   // (still exactly the role-gating logic from before, just not additionally
   // gated on tab selection).
   const {
@@ -183,7 +183,7 @@ export default function EditorProfileView(): JSX.Element {
     reports, status: reportStatus, setStatus: setReportStatus, loading: loadingReports,
   } = useReportsQueue(canReviewReports, refreshKey)
 
-  // Preview stats for the Admin/Manager tile — one per section of the queues
+  // Preview stats for the Admin/Manager tile - one per section of the queues
   // it opens into. Deliberately its own fetch rather than reusing
   // useAdminQueue: that hook only ever loads whichever tab is active inside
   // AdminPage, so pulling eight counts out of it here would mean cycling
@@ -212,7 +212,7 @@ export default function EditorProfileView(): JSX.Element {
     let cancelled = false
     // Deferred by one microtask so React StrictMode's dev-only synchronous
     // double-invoke (mount → cleanup → remount) skips firing the actual
-    // network requests on the first, soon-to-be-cleaned-up pass — cleanup
+    // network requests on the first, soon-to-be-cleaned-up pass - cleanup
     // sets `cancelled` before this queued callback runs, so only the second
     // (real) invocation's requests go out. Same "guard the redundant re-run"
     // idea as Player.tsx's StrictMode comment, applied to a fetch instead of
@@ -225,7 +225,7 @@ export default function EditorProfileView(): JSX.Element {
         isAdmin ? adminListApplications('pending') : Promise.resolve(null),
         isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
         isAdmin ? adminListUsers() : Promise.resolve(null),
-        // Full (unfiltered) proposal list — only used for the approved-count
+        // Full (unfiltered) proposal list - only used for the approved-count
         // / approval-rate figures the old standalone Stats tab showed, which
         // now live directly on this tile instead of behind a "Stats" button.
         isAdmin ? adminListProposals(undefined, activeChannel) : Promise.resolve(null),
@@ -254,12 +254,12 @@ export default function EditorProfileView(): JSX.Element {
       }).catch(() => { if (!cancelled) setAdminPreview(null) })
     })
     return () => { cancelled = true }
-    // channels.length deliberately excluded — see channelsRef comment above.
+    // channels.length deliberately excluded - see channelsRef comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReviewStaff, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
 
   const handleEdit = (p: SongEditProposal): void => {
-    // p.song is null for 'create' proposals (new song, no backing record yet) —
+    // p.song is null for 'create' proposals (new song, no backing record yet) -
     // EditorPage handles that case, so don't block it here.
     setPendingEditProposal({ id: p.id, songId: p.song, proposedData: p.proposed_data, editorNotes: p.editor_notes || '' })
     setPendingEditorSongId(p.song)
@@ -324,10 +324,10 @@ export default function EditorProfileView(): JSX.Element {
 
           {/* Top row: identity+stats and Quick actions side by side, sharing
               a flex row (default items-stretch) so they render at the same
-              height — as two independent columns they used to size to their
+              height - as two independent columns they used to size to their
               own content and rarely lined up. */}
           <div className="flex flex-col md:flex-row gap-3 md:gap-4 shrink-0">
-            {/* Identity + Stats — one tile: the two were separate cards
+            {/* Identity + Stats - one tile: the two were separate cards
                 showing barely more than a name and three lines of text each,
                 which read as empty space more than information. */}
             <div className="md:w-[42%]">
@@ -406,7 +406,7 @@ export default function EditorProfileView(): JSX.Element {
             >
               {/* Contributors get a toggle here instead of Tile's fixed
                   title, since this tile now covers both song-edit proposals
-                  and comp-file proposals — two separate queues that used to
+                  and comp-file proposals - two separate queues that used to
                   be two separate tiles. */}
               {isContributor && (
                 <div className="flex items-center gap-1 mb-3 shrink-0">
@@ -602,7 +602,7 @@ export default function EditorProfileView(): JSX.Element {
               )}
 
               {canReviewStaff && (
-                // Spans the full width of this 2-col grid (was one cell) —
+                // Spans the full width of this 2-col grid (was one cell) -
                 // the clickable stat rows need more room than a single
                 // generic "open the panel" tile did.
                 <Tile title={isAdmin ? 'Admin' : 'Manager'} icon={<ShieldCheck size={13} />} span="col-span-2">
@@ -610,7 +610,7 @@ export default function EditorProfileView(): JSX.Element {
                     {/* Managers only ever reach Song edits + Comp files, so
                         they get those two counts, same as before. Admins
                         get one box per queue their nav actually opens into,
-                        plus Channels (free — already in the store) and a
+                        plus Channels (free - already in the store) and a
                         Total pending rollup in place of a meaningless
                         "Stats" count. */}
                     <div className={`grid gap-2 ${isAdmin ? 'grid-cols-4' : 'grid-cols-2'}`}>
@@ -634,7 +634,7 @@ export default function EditorProfileView(): JSX.Element {
                     </div>
 
                     {/* Every section already opens from the stat box above
-                        it — no leftover "Stats" button, so the old Stats
+                        it - no leftover "Stats" button, so the old Stats
                         tab's own metrics (previously hidden behind that
                         button) get laid out right here instead, in the
                         space that freed up. */}

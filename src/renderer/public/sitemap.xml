@@ -2,7 +2,7 @@
 <!--
   Public routes only. Per-user views (/liked, /stats, /library, /playlists),
   authoring surfaces (/editor, /admin, /contributor), share links (/shared/*)
-  and the OAuth callback are deliberately absent — see robots.txt. /news is out
+  and the OAuth callback are deliberately absent - see robots.txt. /news is out
   too until NEWS_ENABLED flips; it renders empty today.
   / and /tracker render the same view; lib/seo.ts canonicalises both onto /,
   so only / is listed here.

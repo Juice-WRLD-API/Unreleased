@@ -30,7 +30,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   // Every field lives in one reducer (lib/proposalForm.ts) instead of ~26
   // separate useState calls. Auxiliary UI-only state (showMore, copiedFrom
   // banner, syncedTable toggle, file picker, eras, submit state) stays as
-  // plain useState here — it never becomes part of the proposal payload.
+  // plain useState here - it never becomes part of the proposal payload.
   const { formState: f, updateField, copyFrom: copyFromForm } = useProposalForm()
   const [showMore, setShowMore] = useState(false)
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null)
@@ -49,10 +49,10 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   }, [])
 
   // Everything the source song knows, minus the three fields that describe its
-  // specific audio file — a new version has its own file, length and bitrate,
+  // specific audio file - a new version has its own file, length and bitrate,
   // and silently inheriting those would submit wrong data for the common case.
   // (copyFromForm's field set/order/fallbacks live in proposalForm.ts's
-  // reducer — see its 'copyFrom' case.)
+  // reducer - see its 'copyFrom' case.)
   const copyFrom = (s: JWApiSong): void => {
     copyFromForm(s)
     setCopiedFrom(s.name || null)
@@ -61,7 +61,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
 
   // buildProposedData reproduces the exact pre-rewrite "only include
   // non-empty fields" payload mapping byte-for-byte (verified field-by-field
-  // against proposalForm.ts's implementation) — do not hand-roll this here.
+  // against proposalForm.ts's implementation) - do not hand-roll this here.
   const handleSubmit = async (): Promise<void> => {
     if (!f.name.trim() || submitState === 'submitting') return
     setSubmitState('submitting'); setSubmitError(null)
@@ -101,7 +101,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           </button>
         </div>
 
-        {/* Scrollable fields — same flat layout as the editor's Basic view, so
+        {/* Scrollable fields - same flat layout as the editor's Basic view, so
             creating a song and editing one look and behave alike. */}
         <div className="flex-1 overflow-y-auto min-h-0 px-4 py-3 flex flex-col gap-1.5">
           <CopyFromSong onCopy={copyFrom} copiedFrom={copiedFrom} onClear={() => setCopiedFrom(null)} variant="mobile" />

@@ -5,7 +5,7 @@ import { IS_IOS, IS_MOBILE, isStandalonePWA } from '../lib/platform'
 
 // One-time nudge that tells mobile users the app can be installed to their home
 // screen, and how. Two paths:
-//   • Android/Chromium fires `beforeinstallprompt` — we capture it and offer a
+//   • Android/Chromium fires `beforeinstallprompt` - we capture it and offer a
 //     real one-tap Install button that triggers the native prompt.
 //   • iOS Safari never fires that event (no programmatic install), so there we
 //     show the manual Share → "Add to Home Screen" steps instead.
@@ -127,7 +127,7 @@ export default function InstallPrompt(): JSX.Element | null {
 
         <div className="px-5 py-4 space-y-4">
           <p className="text-text-secondary text-sm leading-relaxed">
-            Add Unreleased to your home screen for a fullscreen, app-like experience and quick access — no app store needed.
+            Add Unreleased to your home screen for a fullscreen, app-like experience and quick access - no app store needed.
           </p>
 
           {IS_IOS ? (
@@ -163,7 +163,7 @@ export default function InstallPrompt(): JSX.Element | null {
             </>
           ) : (
             <>
-              {/* Android / Chromium — real install prompt. */}
+              {/* Android / Chromium - real install prompt. */}
               <button
                 onClick={install}
                 className="w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors flex items-center justify-center gap-2"
@@ -177,7 +177,7 @@ export default function InstallPrompt(): JSX.Element | null {
                 Not now
               </button>
               {/* Android's Doze mode / OEM battery savers can kill background
-                  web audio no matter what the app does — the one thing that
+                  web audio no matter what the app does - the one thing that
                   actually prevents it is a device-side setting only the user
                   can change. Surfaced here since this dialog is Android-only. */}
               <p className="flex items-start gap-2 text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">

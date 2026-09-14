@@ -3,7 +3,7 @@ import { ChevronUp, ChevronDown, Layers, Play } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { Track } from '../types'
 
-/** Tracks which compact-view groups are expanded — shared so the Tracker and
+/** Tracks which compact-view groups are expanded - shared so the Tracker and
  *  Playlists don't each carry their own copy of this Set-toggle boilerplate. */
 export function useExpandedGroups(): { expanded: Set<number>; toggle: (groupId: number) => void; clear: () => void } {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
@@ -19,7 +19,7 @@ export function useExpandedGroups(): { expanded: Set<number>; toggle: (groupId: 
   return { expanded, toggle, clear }
 }
 
-/** Collapsed row representing a version group — cover art of one member,
+/** Collapsed row representing a version group - cover art of one member,
  *  the shared title, and a member count. Expanding it is the caller's job
  *  (each view renders its own member rows below, since Tracker/Playlists
  *  have different row layouts). */
@@ -32,7 +32,7 @@ export const CompactGroupRow = memo(function CompactGroupRow({
   count: number
   expanded: boolean
   onToggle: () => void
-  /** Right-click (or long-press) the whole group — e.g. to act on all its
+  /** Right-click (or long-press) the whole group - e.g. to act on all its
    *  versions at once. Left-click still expands/collapses. */
   onContextMenu?: (e: React.MouseEvent) => void
   /** Optional play button for the group (plays its members starting from the
@@ -44,13 +44,13 @@ export const CompactGroupRow = memo(function CompactGroupRow({
    *  in the list/grid header. Omitted by callers that don't need it. */
   index?: number
   /** Optional category badge for the group as a whole (the Tracker's compact
-   *  view only — Playlists doesn't pass these, so the badge is omitted
+   *  view only - Playlists doesn't pass these, so the badge is omitted
    *  there). */
   categoryLabel?: string
   categoryClassName?: string
 }): JSX.Element {
   // Playlists' list-view rows use a fixed 40px (2.5rem) cover on every
-  // breakpoint — the Tracker's own rows use a 36px cover that shrinks further
+  // breakpoint - the Tracker's own rows use a 36px cover that shrinks further
   // on desktop (36 → effectively smaller via the md:w-9/h-9 wrapper), which is
   // what this component matched by default. Without this, a Playlists compact
   // row's cover (and therefore the whole row) rendered visibly smaller than
@@ -65,14 +65,14 @@ export const CompactGroupRow = memo(function CompactGroupRow({
       onContextMenu={onContextMenu}
       className="group w-full flex items-center gap-3 px-3 py-2.5 md:py-2 active:bg-surface-overlay md:hover:bg-surface-overlay rounded-lg transition-colors text-left cursor-pointer"
     >
-      {/* # stays put — it used to swap for the play button on hover, but
+      {/* # stays put - it used to swap for the play button on hover, but
           since this row is flex (not the fixed-column grid the list view
           uses), that swap made the number vanish and the cover jump left.
           The play button now overlays the cover art instead, matching how
           the grid view's tiles already do it.
 
           The leading blank spacer + the # column's width (w-7, not w-4) only
-          render when `index` is passed (Playlists) — they exist purely to
+          render when `index` is passed (Playlists) - they exist purely to
           match Playlists' list-view row, which has a drag-handle column
           (1rem) before its 1.75rem # column. Tracker never passes `index`,
           so its rows (which have no such drag column) render exactly as
@@ -86,7 +86,7 @@ export const CompactGroupRow = memo(function CompactGroupRow({
       <div className={`relative shrink-0 ${coverBoxClass} rounded overflow-hidden bg-surface-overlay`}>
         <AlbumArtThumbnail track={coverTrack} size={coverSize} shimmer={false} eager />
         {onPlay && (
-          // Always visible on mobile — this is a touch surface, and hover
+          // Always visible on mobile - this is a touch surface, and hover
           // never fires there. Desktop keeps the hover-reveal.
           <div className="absolute inset-0 bg-black/30 md:bg-black/0 md:group-hover:bg-black/30 transition-colors flex items-center justify-center">
             <button
@@ -112,7 +112,7 @@ export const CompactGroupRow = memo(function CompactGroupRow({
     </div>
   )
 }, (prev, next) =>
-  // Compare by value, not reference — callers pass a freshly-built coverTrack
+  // Compare by value, not reference - callers pass a freshly-built coverTrack
   // and inline onToggle/onContextMenu closures every render, so without this
   // every group header re-rendered whenever anything in the parent changed
   // (e.g. toggling a selection), freezing large compact lists. The closures
@@ -127,6 +127,6 @@ export const CompactGroupRow = memo(function CompactGroupRow({
   prev.categoryClassName === next.categoryClassName
 )
 
-/** Empty-state icon for compact view — re-exported so callers don't need
+/** Empty-state icon for compact view - re-exported so callers don't need
  *  their own lucide-react import just for this one icon. */
 export { Layers as CompactEmptyIcon }

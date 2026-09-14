@@ -1,7 +1,7 @@
 // Recently played, for the Home screen.
 //
 // The store already records every play in `listeningPlays`, but those events
-// hold song ids only — turning them back into something displayable means
+// hold song ids only - turning them back into something displayable means
 // resolving against the stats catalog, which costs ~25 requests on a cold
 // cache (see lib/statsCatalog.ts). Far too heavy for a landing screen, so this
 // keeps its own small ring of whole Tracks instead: written where a play is
@@ -10,7 +10,7 @@
 //
 // Storing the whole Track rather than a slim snapshot is what lets a Home row
 // be tapped straight into playTrack() without a lookup. It starts empty on
-// upgrade — there's nothing to backfill from, so Home shows an empty state
+// upgrade - there's nothing to backfill from, so Home shows an empty state
 // until the next song plays.
 
 import { ls } from './persist'

@@ -25,12 +25,12 @@ export interface AccountUser {
   // Optional: the API only started returning this with the manager role, so
   // older responses and anything replayed from cache simply omit it.
   is_manager?: boolean
-  // Grants News write access (create/edit-own/delete-own posts) — separate
+  // Grants News write access (create/edit-own/delete-own posts) - separate
   // from is_editor. Admins can write News regardless of this flag.
   is_news?: boolean
   is_administrator: boolean
   otp_enabled: boolean
-  // JSON blobs stored on the profile and PATCHable through this same route —
+  // JSON blobs stored on the profile and PATCHable through this same route -
   // per-song preferences and playlist folders (see lib/preferencesApi and
   // lib/foldersApi). Optional so cached/older responses stay assignable.
   user_preferences?: SongPreference[]
@@ -72,11 +72,11 @@ export function channelMembership(
 }
 
 // The global is_editor/is_contributor/is_manager booleans are an unscoped
-// grant that predates per-channel memberships — but the backend only ever
+// grant that predates per-channel memberships - but the backend only ever
 // honours it on the *primary* channel (legacy accounts never got a membership
 // row, so their global flag has to keep covering the one channel that existed
 // before channels did). On any other channel, the global flag alone isn't
-// enough — the account needs an explicit membership row for that channel, or
+// enough - the account needs an explicit membership row for that channel, or
 // admin. `isPrimary` defaults true so call sites that can't yet determine it
 // (e.g. before the channel list has loaded) keep the old, safe behavior.
 export function isChannelEditor(account: AccountUser | null, slug: string | null | undefined, isPrimary = true): boolean {
@@ -169,7 +169,7 @@ export function clearToken(): void {
   } catch {}
 }
 
-// `cacheKey` opts a GET call into the offline fallback cache — pass it only
+// `cacheKey` opts a GET call into the offline fallback cache - pass it only
 // for idempotent reads whose staleness is acceptable (playlists, favorites,
 // profile). Mutations don't pass one, so they always hit the network and
 // fail loudly if offline rather than silently no-op against stale data.
@@ -186,7 +186,7 @@ async function request<T>(url: string, options: RequestInit = {}, auth = true, c
   })
 }
 
-// Applies per-song overrides for the same reason songToTrack does — a track
+// Applies per-song overrides for the same reason songToTrack does - a track
 // reached through a playlist or the favorites list has to show the user's
 // custom name and cover just like one reached through the Tracker.
 export function liteSongToTrack(song: ApiSongLite): Track {
@@ -287,7 +287,7 @@ type PlaylistCoverEntry = { cover_image_url?: string | null; cover_image?: strin
 
 // In-memory cache so re-opening a playlist (or re-rendering the playlists
 // grid after switching tabs) shows its cover instantly instead of re-hitting
-// the API every time — covers rarely change, so a session-lifetime cache is
+// the API every time - covers rarely change, so a session-lifetime cache is
 // safe as long as uploads/removals below keep it in sync.
 const playlistCoverCache = new Map<number, PlaylistCoverEntry>()
 
@@ -301,7 +301,7 @@ export function peekPlaylistCover(id: number): PlaylistCoverEntry | undefined {
 export async function getPlaylistCover(id: number): Promise<PlaylistCoverEntry> {
   const cached = playlistCoverCache.get(id)
   if (cached) return cached
-  // getPlaylist's cached detail carries the same cover fields this needs —
+  // getPlaylist's cached detail carries the same cover fields this needs -
   // reuse it instead of firing a second near-duplicate /playlists/{id}/
   // request for the same playlist (prefetchPlaylistDetails calls both back
   // to back for every playlist on startup, which used to double the network
@@ -314,7 +314,7 @@ export async function getPlaylistCover(id: number): Promise<PlaylistCoverEntry> 
   const trackImages = (d.items ?? []).slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
   // cover_image_url/cover_image can be a site-relative pointer (the same
   // "/assets/x.jpg" shape a song's image_url uses, e.g. for era-linked
-  // covers) rather than an absolute URL — resolve it here so every caller
+  // covers) rather than an absolute URL - resolve it here so every caller
   // gets a directly loadable src instead of each having to know the shape.
   const entry: PlaylistCoverEntry = {
     cover_image_url: buildImageUrl(d.cover_image_url) ?? null,
@@ -375,11 +375,11 @@ export function peekPlaylistDetail(id: number): PlaylistDetail | undefined {
   return playlistDetailCache.get(id)
 }
 
-// Cache key for a playlist's persisted detail response — kept in sync with
+// Cache key for a playlist's persisted detail response - kept in sync with
 // mutations below so offline reads never show a stale-past-the-last-edit copy.
 const playlistDetailUrl = (id: number): string => `${LIBRARY_BASE}/playlists/${id}/?omit_cover_image=true`
 
-// Single request — tracks + cover in one response
+// Single request - tracks + cover in one response
 export async function getPlaylist(id: number): Promise<PlaylistDetail> {
   const url = playlistDetailUrl(id)
   const result = await request<PlaylistDetail>(url, {}, true, url)
@@ -427,7 +427,7 @@ export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverE
 }
 
 export async function uploadPlaylistCover(id: number, file: File): Promise<PlaylistDetail> {
-  // Compress to max 400px / 200 KB before encoding — prevents large covers in future
+  // Compress to max 400px / 200 KB before encoding - prevents large covers in future
   const base64 = await compressImageFile(file).catch(() =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader()
@@ -654,7 +654,7 @@ export function applicationType(app: Pick<EditorApplication, 'application_type'>
 /** The caller's application *of one kind*.
  *
  *  `type` is sent as a query param for a backend that can narrow, and the
- *  result is filtered client-side regardless — the endpoint historically
+ *  result is filtered client-side regardless - the endpoint historically
  *  returned "the" single application, and a page that blocks on the wrong kind
  *  strands the user (an editor rejection is not a reason to refuse a
  *  contributor application, and vice versa). Filtering here means the worst
@@ -690,7 +690,7 @@ function myProposalsUrl(channel?: string): string {
   return url.toString()
 }
 
-// Cached (offline-fallback) like the other "list my stuff" reads — this is
+// Cached (offline-fallback) like the other "list my stuff" reads - this is
 // the tab a signed-in editor lands on, and it shouldn't go blank just because
 // the request raced a flaky connection.
 export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
@@ -730,7 +730,7 @@ export async function withdrawProposal(id: number): Promise<void> {
   cacheDelete(myProposalsUrl())
 }
 
-// Withdraws a proposal and immediately re-creates it with the same data —
+// Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
   await withdrawProposal(p.id)
@@ -757,7 +757,7 @@ export async function getLeaderboard(): Promise<Array<{
 
 
 // Cached per status filter (each filter value is its own URL, so its own
-// cache entry) — offline fallback only. Not actively invalidated by
+// cache entry) - offline fallback only. Not actively invalidated by
 // adminReviewProposal/adminReverseProposal: those change which filtered list
 // an item belongs to, and a review queue is re-fetched right after acting on
 // it anyway (see AdminPage), so the tiny staleness window only ever shows up
@@ -834,13 +834,13 @@ export async function confirmOtpSetup(otpToken: string): Promise<{ otp_enabled: 
   })
 }
 
-// Same path as request(), minus the JSON Content-Type — the browser has to set
+// Same path as request(), minus the JSON Content-Type - the browser has to set
 // its own multipart boundary. Everything else (error parsing, offline cache
 // fallback) comes from apiClient like every other call in this module.
 // Comp-file contributions (proposals, the admin review queue, file history)
 // hang off routes that are newer than the rest of this module. Everything the
 // feature touches is gated on this one flag the way lib/newsApi gates `/news/`
-// — flip it to false and the contributor role disappears from the UI instead
+// - flip it to false and the contributor role disappears from the UI instead
 // of leading users to forms that fail on submit.
 export const CONTRIBUTOR_ENABLED = true
 
@@ -866,7 +866,7 @@ export function showStaffProfile(account: AccountUser | null): boolean {
 
 export function staffProfileView(account: AccountUser | null): ViewType {
   if (!account) return 'api-tracker'
-  // Everyone with review duties lands on the editor profile — it's the personal
+  // Everyone with review duties lands on the editor profile - it's the personal
   // page (your own song edits, your own comp files) and it embeds the review
   // queue as a tab. Pointing managers straight at the review panel instead cost
   // them any way to reach their own proposals, since this is the single profile
@@ -920,7 +920,7 @@ export async function createCompProposal(form: FormData): Promise<CompFilePropos
 }
 
 /** Same call as createCompProposal, but over XHR so the upload body's progress
- *  is observable — fetch() reports nothing until the whole request has been
+ *  is observable - fetch() reports nothing until the whole request has been
  *  sent, which is useless for the multi-hundred-megabyte zips this endpoint
  *  takes. Returns an abort handle so a queued upload can be cancelled. */
 export function createCompProposalUpload(form: FormData, opts: {
@@ -941,7 +941,7 @@ export function createCompProposalUpload(form: FormData, opts: {
         catch { reject(new Error('Upload succeeded but the response was unreadable')) }
         return
       }
-      // DRF answers with {"detail": …} or {"field": ["…"]} — surface whichever
+      // DRF answers with {"detail": …} or {"field": ["…"]} - surface whichever
       // is there rather than a bare status code.
       let msg = `Upload failed (HTTP ${xhr.status})`
       try {

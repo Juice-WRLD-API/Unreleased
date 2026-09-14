@@ -81,7 +81,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
   { tab: 'appearance', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'appearance', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
-  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits — left, right, top, bottom' },
+  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
   { tab: 'appearance', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
   { tab: 'appearance', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
   { tab: 'appearance', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
@@ -114,11 +114,11 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'FAQ', sub: 'What is this? Who are you? Why did you build this? Technical stuff?' },
 ]
 
-// ── Flat row primitive — no card/box, just an icon + label on the left and
+// ── Flat row primitive - no card/box, just an icon + label on the left and
 // a control on the right, separated by a hairline. Used inside each tab's
 // content pane (macOS System Settings' detail-pane idiom, not the boxed
 // inset-grouped list). The icon sits in a colored badge (iOS Settings-style)
-// — a fixed color + white icon reads correctly in both themes, unlike the
+// - a fixed color + white icon reads correctly in both themes, unlike the
 // plain `text-muted` icon this replaced, which nearly disappeared in light
 // mode. ──
 
@@ -127,7 +127,7 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
   iconColor: string
   label: string
   sub?: string
-  // Rendered immediately after the label, on the left — for controls that
+  // Rendered immediately after the label, on the left - for controls that
   // are conceptually part of the label (e.g. an on/off toggle right next
   // to "Crossfade"), as opposed to `children`, which sits at the row's
   // right edge (e.g. the crossfade duration slider).
@@ -152,7 +152,7 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
 }
 
 // One line of the "Lyric colors" setting: presets + a custom picker, with
-// "Auto" (value === null) meaning "leave it to the surface's own colors" —
+// "Auto" (value === null) meaning "leave it to the surface's own colors" -
 // the theme's text vars in the mini/now-playing lyrics, the cover-art-derived
 // ones in the WRLD tab. The <input type="color"> always needs a concrete hex,
 // so `fallback` is what it shows while the setting is on Auto.
@@ -211,11 +211,11 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Elem
       className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'}`}
     >
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
-          block centering trick) instead of a manual top offset — a fixed
+          block centering trick) instead of a manual top offset - a fixed
           `top-0.5` still relied on the button having zero padding/border to
           land exactly right, and browsers don't zero those out on <button>
           by default. auto-margin centering can't drift regardless of the
-          button's own box model. No shadow on the knob either — its default
+          button's own box model. No shadow on the knob either - its default
           downward offset (0 1px 3px) reads as visual weight sitting low,
           making it look off-center even when it's geometrically centered. */}
       <span className={`absolute inset-y-0 my-auto w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
@@ -229,7 +229,7 @@ export default function Settings(): JSX.Element {
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
-  // otherwise re-expand it — see the matching comment on setShowSettings.
+  // otherwise re-expand it - see the matching comment on setShowSettings.
   const openLegal = (doc: LegalDoc): void => { useSandboxStore.getState().expand(); setLegalDoc(doc) }
   const sandboxEnabled = useSandboxStore((s) => s.sandboxEnabled)
   const setSandboxEnabled = useSandboxStore((s) => s.setSandboxEnabled)
@@ -277,7 +277,7 @@ export default function Settings(): JSX.Element {
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [customAccent, setCustomAccent] = useState(accentColor)
-  // Drag-to-reorder state for the "Menu order" list — indices into the visible
+  // Drag-to-reorder state for the "Menu order" list - indices into the visible
   // nav list (see shownNav below). null = nothing being dragged / hovered.
   const [navDragIdx, setNavDragIdx] = useState<number | null>(null)
   const [navOverIdx, setNavOverIdx] = useState<number | null>(null)
@@ -286,7 +286,7 @@ export default function Settings(): JSX.Element {
   const [ctrlOverIdx, setCtrlOverIdx] = useState<number | null>(null)
   const [sleepMinutes, setSleepMinutes] = useState(30)
   const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Custom skins — which one the editor modal is open on (null = closed), the
+  // Custom skins - which one the editor modal is open on (null = closed), the
   // hidden file input for Import, and a transient "that file wasn't a skin"
   // message shown under the section.
   const [editingSkinId, setEditingSkinId] = useState<string | null>(null)
@@ -313,10 +313,10 @@ export default function Settings(): JSX.Element {
     setEditingSkinId(skin.id)
   }
   // ── Menu items (Appearance) ──────────────────────────────────────────────
-  // Every nav item in saved order — visible ones and the toggled-off extras
-  // alike — so the list is where you both reorder and show/hide.
-  // Pinned items (alwaysVisible) are listed too — they reorder like any other
-  // row — but they render without an eye, since isNavItemVisible short-circuits
+  // Every nav item in saved order - visible ones and the toggled-off extras
+  // alike - so the list is where you both reorder and show/hide.
+  // Pinned items (alwaysVisible) are listed too - they reorder like any other
+  // row - but they render without an eye, since isNavItemVisible short-circuits
   // on them and a toggle there would silently do nothing.
   const navRows = orderedNavItems(navOrder)
   const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
@@ -352,7 +352,7 @@ export default function Settings(): JSX.Element {
     setNavOrder(next)
   }
 
-  // ── Menu controls — the foot-of-menu buttons (Profile, Uploads, Diagnostics,
+  // ── Menu controls - the foot-of-menu buttons (Profile, Uploads, Diagnostics,
   // Download, Settings). Same reorder/hide model, filtered to the controls
   // that actually apply to this session (account state, platform, dev mode).
   const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads: uploads.length > 0 }
@@ -382,14 +382,14 @@ export default function Settings(): JSX.Element {
 
   const closeSettings = (): void => setShowSettings(false)
   // setActiveView alone leaves Settings now that it's a real page in the same
-  // slot as every other view — no separate close step, and no extra history
+  // slot as every other view - no separate close step, and no extra history
   // entry from one.
   const openMainView = (view: ViewType): void => setActiveView(view)
 
   // ── Last.fm connect flow (desktop token auth): fetch a token, send the user
   // to last.fm to approve it, then poll getSession until approval lands (it
   // returns null while the token is still unapproved). window.open reaches the
-  // system browser in every context — the Electron windows' window-open
+  // system browser in every context - the Electron windows' window-open
   // handlers route it through shell.openExternal.
   const [lastfmBusy, setLastfmBusy] = useState(false)
   const [lastfmWaiting, setLastfmWaiting] = useState(false)
@@ -412,10 +412,10 @@ export default function Settings(): JSX.Element {
       setLastfmWaiting(true)
       const startedAt = Date.now()
       lastfmPollRef.current = setInterval(() => {
-        // Tokens live ~60 minutes but nobody waits that long — give up well before.
+        // Tokens live ~60 minutes but nobody waits that long - give up well before.
         if (Date.now() - startedAt > 5 * 60_000) {
           stopLastfmPoll()
-          setLastfmError('Authorization timed out — try again.')
+          setLastfmError('Authorization timed out - try again.')
           return
         }
         lastfmTryGetSession(token).then((session) => {
@@ -456,7 +456,7 @@ export default function Settings(): JSX.Element {
         return
       }
       const combo = eventToCombo(e)
-      if (!combo) return // modifier held on its own — keep waiting for a real key
+      if (!combo) return // modifier held on its own - keep waiting for a real key
       setHotkeyBinding(recording.id, combo)
       setRecording(null)
     }
@@ -473,7 +473,7 @@ export default function Settings(): JSX.Element {
     { id: 'about', label: 'About', icon: Info },
   ]
 
-  // ── Settings search — a flat filter over SETTINGS_SEARCH_INDEX rather than
+  // ── Settings search - a flat filter over SETTINGS_SEARCH_INDEX rather than
   // per-tab content, since matches can live on a tab you're not currently
   // viewing. Gated the same way the rows themselves are (dev mode) so a
   // result never points at a tab that doesn't exist in this build.
@@ -532,7 +532,7 @@ export default function Settings(): JSX.Element {
           </div>
         </div>
 
-        {/* Search — a flat filter over every setting row (see
+        {/* Search - a flat filter over every setting row (see
             SETTINGS_SEARCH_INDEX), not just the current tab, since the row
             you're after might live somewhere you're not currently looking. */}
         <div className="shrink-0 px-4 sm:px-3 pt-3 pb-2 border-b border-[var(--border)]">
@@ -557,7 +557,7 @@ export default function Settings(): JSX.Element {
           </div>
         </div>
 
-        {/* Mobile tab bar — the sidebar collapses below sm, so categories
+        {/* Mobile tab bar - the sidebar collapses below sm, so categories
             move into a horizontal scroller instead. */}
         <div className="sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
           {tabs.map((t) => (
@@ -574,7 +574,7 @@ export default function Settings(): JSX.Element {
           ))}
         </div>
 
-        {/* Body — sidebar category list + flat content pane, mirroring
+        {/* Body - sidebar category list + flat content pane, mirroring
             macOS System Settings / Apple Music's own preferences window. */}
         <div className="flex flex-1 min-h-0">
           <div className="w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
@@ -635,7 +635,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0 flex-1">
                       <span className="text-text-primary text-sm">Skin</span>
-                      <p className="text-text-muted text-[11px]">Skins with a signature color also set the accent — or build your own below</p>
+                      <p className="text-text-muted text-[11px]">Skins with a signature color also set the accent - or build your own below</p>
                     </div>
                     <button
                       onClick={() => skinImportRef.current?.click()}
@@ -674,7 +674,7 @@ export default function Settings(): JSX.Element {
                             title={skin.dynamic ? 'Palette follows the current song’s cover art' : skin.name}
                           >
                             {/* Mini app mock: sidebar strip, two "text" lines, and a
-                                player bar with the skin's accent — a live swatch of
+                                player bar with the skin's accent - a live swatch of
                                 the actual palette values, not approximations. */}
                             <div
                               className="h-14 rounded-lg overflow-hidden flex border transition-transform group-hover:scale-[1.03] group-active:scale-[0.98]"
@@ -692,7 +692,7 @@ export default function Settings(): JSX.Element {
                                   <div
                                     className="w-2.5 h-2.5 rounded-full shrink-0"
                                     style={{
-                                      // Dynamic skin has no fixed accent — a color wheel
+                                      // Dynamic skin has no fixed accent - a color wheel
                                       // signals "follows the song's cover art".
                                       background: skin.dynamic
                                         ? 'conic-gradient(#f43f5e, #f59e0b, #10b981, #38bdf8, #a78bfa, #f43f5e)'
@@ -793,12 +793,12 @@ export default function Settings(): JSX.Element {
                   icon={Images}
                   iconColor="#8b5cf6"
                   label="Playlist header art"
-                  sub="Full-bleed blurred cover art behind a playlist's header — off falls back to a plain header. Tracked separately for light and dark skins."
+                  sub="Full-bleed blurred cover art behind a playlist's header - off falls back to a plain header. Tracked separately for light and dark skins."
                 >
                   {/* Tracked per skin darkness (playlistHeroEnabledDark/Light)
                       rather than one flag, so a choice made on a dark skin
                       doesn't silently carry over to a light one and vice
-                      versa — this toggle always shows/writes the value for
+                      versa - this toggle always shows/writes the value for
                       whichever skin is active right now. */}
                   {(() => {
                     const heroOn = getSkin(theme).dark ? playlistHeroEnabledDark : playlistHeroEnabledLight
@@ -812,7 +812,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">App font</span>
-                      <p className="text-text-muted text-[11px]">Typeface for the whole app — each option previews in its own font</p>
+                      <p className="text-text-muted text-[11px]">Typeface for the whole app - each option previews in its own font</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
@@ -919,7 +919,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">Lyrics text size</span>
-                      <p className="text-text-muted text-[11px]">Synced and plain lyrics everywhere — WRLD tab, now playing, mini player</p>
+                      <p className="text-text-muted text-[11px]">Synced and plain lyrics everywhere - WRLD tab, now playing, mini player</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap pl-[34px]">
@@ -1015,7 +1015,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">Lyric colors</span>
-                      <p className="text-text-muted text-[11px]">Color the line being sung and the ones that aren't — WRLD tab, now playing, mini player</p>
+                      <p className="text-text-muted text-[11px]">Color the line being sung and the ones that aren't - WRLD tab, now playing, mini player</p>
                     </div>
                   </div>
                   <div className="flex flex-col gap-2.5 pl-[34px]">
@@ -1042,7 +1042,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">Navigation position</span>
-                      <p className="text-text-muted text-[11px]">Where the nav menu sits on desktop — phones keep the bottom tabs</p>
+                      <p className="text-text-muted text-[11px]">Where the nav menu sits on desktop - phones keep the bottom tabs</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap pl-[34px]">
@@ -1170,7 +1170,7 @@ export default function Settings(): JSX.Element {
                       </div>
                       <div className="min-w-0 flex-1">
                         <span className="text-text-primary text-sm">Menu controls</span>
-                        <p className="text-text-muted text-[11px]">The buttons at the foot of the menu — reorder or hide them</p>
+                        <p className="text-text-muted text-[11px]">The buttons at the foot of the menu - reorder or hide them</p>
                       </div>
                       {!ctrlIsDefault && (
                         <button
@@ -1339,7 +1339,7 @@ export default function Settings(): JSX.Element {
                   iconColor="#d51007"
                   label="Last.fm scrobbling"
                   sub={
-                    !lastfmConfigured() ? 'Unavailable — this build has no Last.fm API key'
+                    !lastfmConfigured() ? 'Unavailable - this build has no Last.fm API key'
                     : lastfmError ? lastfmError
                     : lastfmUser ? `Connected as ${lastfmUser}`
                     : lastfmWaiting ? 'Approve access on last.fm, then come back here'

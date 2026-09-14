@@ -5,7 +5,7 @@ import { apiFetch, JWApiSong } from '../lib/juicewrldApi'
 // Most new AddSongModal entries are another version of a song that already
 // exists, so the fast path is "start from that one and change what
 // differs" rather than retyping every credit and date. Extracted verbatim
-// from EditorProfileView.desktop.tsx's inline CopyFromSong — the mobile copy
+// from EditorProfileView.desktop.tsx's inline CopyFromSong - the mobile copy
 // was identical except for touch-vs-hover states and slightly taller result
 // rows, both handled here via `variant` instead of forking the file.
 export interface CopyFromSongProps {

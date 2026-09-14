@@ -1,7 +1,7 @@
 // Song metadata resolution for the Wrapped page (components/StatsView).
 //
-// A song-preference row is just {song id, playcount} — no title, no length, no
-// era — so the page has to resolve every played id to a song before it can
+// A song-preference row is just {song id, playcount} - no title, no length, no
+// era - so the page has to resolve every played id to a song before it can
 // rank anything. Doing that one id at a time meant hundreds of requests on
 // open, and worse, they didn't stick: apiCache holds ~300 entries for the
 // entire app, so a few hundred played songs evict each other (and everything
@@ -10,7 +10,7 @@
 // So this mirrors lib/heardle's pool cache instead: page the catalogue in bulk,
 // slim each row down to the fields the page actually uses, and keep that in
 // localStorage for a day. ~25 requests once, then none. Deliberately NOT routed
-// through apiFetch for the same reason heardle isn't — a page of full song
+// through apiFetch for the same reason heardle isn't - a page of full song
 // objects is ~0.5MB, and caching those raw would blow the offline cache out.
 
 import { apiRequest } from './apiClient'
@@ -19,7 +19,7 @@ import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import type { Track } from '../types'
 
 /** A song trimmed to what the stats page reads. Full rows are ~3.3KB each
- *  (lyrics, session tracking, notes) — ~16MB of localStorage for the whole
+ *  (lyrics, session tracking, notes) - ~16MB of localStorage for the whole
  *  catalogue. Slimmed it's ~290 bytes a row, ~1.4MB for all ~2.5k songs. */
 export interface StatsSong {
   id: number
@@ -31,7 +31,7 @@ export interface StatsSong {
   category: JWApiSong['category']
   image_url: string | null
   album?: string | null
-  /** Era trimmed to what's displayed/grouped on — the API's own row also
+  /** Era trimmed to what's displayed/grouped on - the API's own row also
    *  carries a description and time frame the page never shows. */
   era: { id: number; name: string } | null
 }
@@ -53,13 +53,13 @@ export function slimSong(song: JWApiSong): StatsSong {
 
 /** Builds the playable Track for a slim row. Goes through songToTrack rather
  *  than assembling a Track here so the per-song name/cover overrides (and the
- *  stream URL) resolve exactly the way they do everywhere else — the fields it
+ *  stream URL) resolve exactly the way they do everywhere else - the fields it
  *  reads are all present above; the rest are metadata this page never shows. */
 export function statsSongToTrack(s: StatsSong): Track {
   return songToTrack({
     ...s,
     // songToTrack's display title comes from `name` alone (see its own
-    // comment) — this only exists to satisfy JWApiSong's shape.
+    // comment) - this only exists to satisfy JWApiSong's shape.
     track_titles: [],
     era: s.era,
     album: s.album ?? null,
@@ -80,7 +80,7 @@ const PAGE_SIZE = 100
 const MAX_PAGES = 40
 
 // Below this many unknown ids, fetching them individually is cheaper than
-// paging the whole catalogue — a user who's played a handful of songs
+// paging the whole catalogue - a user who's played a handful of songs
 // shouldn't pull 2.5k rows to learn about six of them.
 const PER_ID_THRESHOLD = 40
 
@@ -107,7 +107,7 @@ function writeCache(songs: StatsSong[]): void {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), songs } as CachedCatalog))
   } catch {
-    // Quota — the page still works from the in-memory copy this session.
+    // Quota - the page still works from the in-memory copy this session.
   }
 }
 
@@ -119,7 +119,7 @@ async function fetchCatalog(onPage?: (page: number, total: number) => void): Pro
       `${JWAPI_BASE}/songs/?page=${page}&page_size=${PAGE_SIZE}`,
     )
     // `count` is the total row count, so the page total is only known after
-    // the first response — before that the caller shows an indeterminate bar.
+    // the first response - before that the caller shows an indeterminate bar.
     if (page === 1) totalPages = Math.max(1, Math.ceil((data.count ?? 0) / PAGE_SIZE))
     for (const song of data.results ?? []) songs.push(slimSong(song))
     onPage?.(page, totalPages)
@@ -128,7 +128,7 @@ async function fetchCatalog(onPage?: (page: number, total: number) => void): Pro
   return songs
 }
 
-/** The whole catalogue keyed by song id — memoised for the session, cached on
+/** The whole catalogue keyed by song id - memoised for the session, cached on
  *  disk for a day. A stale cache is still returned on a network failure. */
 export async function loadCatalog(onPage?: (page: number, total: number) => void): Promise<Map<number, StatsSong>> {
   if (memoryCatalog) return memoryCatalog

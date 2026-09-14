@@ -14,7 +14,7 @@ function redactLocalPaths(text: string): string {
 }
 
 // Query string / hash can carry short-lived but sensitive values (an OAuth
-// callback's `code`/`state`, a share token) — only the origin and path are
+// callback's `code`/`state`, a share token) - only the origin and path are
 // worth reporting for context anyway.
 function sanitizedUrl(): string {
   const { origin, pathname } = window.location
@@ -24,20 +24,20 @@ function sanitizedUrl(): string {
 interface Props {
   children: ReactNode
   fallback?: ReactNode
-  // 'inline' (default) — the error card fills its slot in the layout, for
+  // 'inline' (default) - the error card fills its slot in the layout, for
   // boundaries around a content pane.
-  // 'overlay' — for boundaries around modals and pop-out panels, which render
+  // 'overlay' - for boundaries around modals and pop-out panels, which render
   // as loose siblings at the root rather than inside a sized container. The
   // card is centered over a backdrop instead of stretching the root flex
   // column, and gets a Close button so a crashed modal can still be dismissed
-  // (`onDismiss` should flip whatever store flag mounts it — without that the
+  // (`onDismiss` should flip whatever store flag mounts it - without that the
   // card would sit over the app with no way out).
   variant?: 'inline' | 'overlay'
   onDismiss?: () => void
 }
 // 'sending' covers the queue + first delivery attempt; 'delivered' means it
 // actually reached the server this round; 'queued' means it only made it to
-// the local outbox (offline, API disabled, etc.) — same three-way status
+// the local outbox (offline, API disabled, etc.) - same three-way status
 // ReportForm shows, so a crash report doesn't silently claim success when it
 // hasn't actually gone out yet.
 type ReportStatus = 'idle' | 'sending' | 'delivered' | 'queued'
@@ -46,7 +46,7 @@ interface State { error: Error | null; copied: boolean; reportStatus: ReportStat
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null, copied: false, reportStatus: 'idle' }
   private componentStack: string | null = null
-  // Guards against double-sending — the reportStatus 'sending' value alone
+  // Guards against double-sending - the reportStatus 'sending' value alone
   // can't do this, since it's also pre-set synchronously below (to avoid a
   // flash of the manual button) before the actual send starts.
   private reported = false
@@ -76,7 +76,7 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   /** `auto` distinguishes componentDidCatch firing this on its own (the
-   *  autoReportErrors setting) from a person clicking "Report this error" —
+   *  autoReportErrors setting) from a person clicking "Report this error" -
    *  only the former is genuinely unattended, so only that gets the API's
    *  `automated` field. */
   private reportError = async (auto = false): Promise<void> => {
@@ -125,15 +125,15 @@ export default class ErrorBoundary extends Component<Props, State> {
             </div>
             {this.state.reportStatus === 'delivered' ? (
               <p className="flex items-center gap-1.5 text-xs text-accent mt-1">
-                <Check size={13} /> Reported — thanks
+                <Check size={13} /> Reported - thanks
               </p>
             ) : this.state.reportStatus === 'queued' ? (
               <p className="flex items-center gap-1.5 text-xs text-amber-500 mt-1">
-                <CloudOff size={13} /> Saved — will send once back online
+                <CloudOff size={13} /> Saved - will send once back online
               </p>
             ) : (
               <button
-                // Not `onClick={this.reportError}` directly — that would
+                // Not `onClick={this.reportError}` directly - that would
                 // hand the click's SyntheticEvent to `auto` (truthy), wrongly
                 // marking a manual report as automated.
                 onClick={() => this.reportError()}

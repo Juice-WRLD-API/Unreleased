@@ -4,7 +4,7 @@ import type { OtpSetupPayload } from '../lib/userApi'
 
 // State machine behind AdminPage's OtpSetupPanel (desktop + mobile render
 // slightly different JSX around this, so the JSX itself stays in each
-// platform file — only the data/loading/error/confirm logic moves here).
+// platform file - only the data/loading/error/confirm logic moves here).
 export function useOtpGate(onEnabled: () => Promise<void>) {
   const [setup, setSetup] = useState<OtpSetupPayload | null>(null)
   const [loading, setLoading] = useState(true)

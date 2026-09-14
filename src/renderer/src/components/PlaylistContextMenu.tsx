@@ -11,7 +11,7 @@ import { JWAPI_BASE } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
 import { Track } from '../types'
 
-// Self-contained context menu for an API playlist — usable from anywhere
+// Self-contained context menu for an API playlist - usable from anywhere
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing
 // PlaylistsView mounted, since it talks to userApi/the store directly. Mirrors
 // the action set in PlaylistsView's open-playlist "⋯" menu.
@@ -191,7 +191,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   // Keep the menu on-screen near the cursor. The 220x340 figures are just the
-  // first-paint estimate — the layout effect below re-clamps against the
+  // first-paint estimate - the layout effect below re-clamps against the
   // actual rendered size, since content here grows a lot (renaming, the
   // "Add all to playlist" submenu) after the initial guess.
   const MENU_W = 220

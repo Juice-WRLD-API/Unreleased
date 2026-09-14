@@ -1,4 +1,4 @@
-// News feed data layer. `/news/` is live on the backend — `NEWS_ENABLED` is
+// News feed data layer. `/news/` is live on the backend - `NEWS_ENABLED` is
 // kept as a kill switch (reads fall back to an empty state and mutations
 // throw a clear "not available" error) rather than removed outright.
 import { JWAPI_BASE } from './juicewrldApi'
@@ -17,7 +17,7 @@ function assertEnabled(): void {
   if (!NEWS_ENABLED) throw new Error('News is not available yet')
 }
 
-// Authed request for editor/admin mutations — mirrors userApi's private
+// Authed request for editor/admin mutations - mirrors userApi's private
 // `request` helper (Token scheme) so news writes carry the same credentials as
 // the rest of the app.
 function authed<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -28,11 +28,11 @@ function authed<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 // ─── Channels ─────────────────────────────────────────────────────────────────
-// The feed is split into channels — each is its own stream the user tabs
+// The feed is split into channels - each is its own stream the user tabs
 // between. `id` is the stable slug sent to the API as `?channel=`. Admins can
 // create/rename/delete them; NEWS_CHANNELS below is only the offline fallback
 // used before the channels endpoint responds. The client-side "All" pseudo-tab
-// (ALL_CHANNEL) is never part of this list — it just omits the filter.
+// (ALL_CHANNEL) is never part of this list - it just omits the filter.
 
 export interface NewsChannel {
   id: string
@@ -44,7 +44,7 @@ export interface NewsChannel {
 export const ALL_CHANNEL = 'all'
 export const DEFAULT_NEWS_CHANNEL = ALL_CHANNEL
 
-// Fallback channel set — matches what the backend should seed. Real channels
+// Fallback channel set - matches what the backend should seed. Real channels
 // only; the view prepends the "All" tab itself.
 export const NEWS_CHANNELS: NewsChannel[] = [
   { id: 'announcements', label: 'Announcements' },
@@ -141,7 +141,7 @@ export async function uploadAttachment(file: File): Promise<NewsAttachment> {
   const token = getToken()
   const form = new FormData()
   form.append('file', file)
-  // Note: no Content-Type header — the browser sets the multipart boundary.
+  // Note: no Content-Type header - the browser sets the multipart boundary.
   return apiRequest<NewsAttachment>(`${NEWS_BASE}/uploads/`, {
     method: 'POST',
     headers: token ? { Authorization: `Token ${token}` } : undefined,
@@ -156,7 +156,7 @@ export interface NewsItem {
   title: string
   // Short plain-text teaser shown in the list.
   summary: string
-  // Full article body (markdown/plain text) — shown when an item is opened.
+  // Full article body (markdown/plain text) - shown when an item is opened.
   body: string
   // Optional lead image.
   image_url: string | null
@@ -167,7 +167,7 @@ export interface NewsItem {
   // Marks a hero/pinned story at the top of the feed.
   featured: boolean
   author: string | null
-  // Account id of the poster — used to gate edit/delete: editors may only
+  // Account id of the poster - used to gate edit/delete: editors may only
   // modify their own posts, admins may modify any (see NewsView).
   author_id: number | null
   attachments: NewsAttachment[]
@@ -183,7 +183,7 @@ export interface NewsItemInput {
   featured?: boolean
   // Cover image: a base64 data URL for a newly-picked image, an existing hosted
   // URL to keep, or null to remove. (Small + pre-compressed, so it rides inline
-  // — unlike attachments, which upload separately.)
+  // - unlike attachments, which upload separately.)
   image_url?: string | null
   // The full desired attachment set as hosted references (upload files first via
   // uploadAttachment, then pass what they return here).
@@ -232,7 +232,7 @@ export async function fetchNews(params: FetchNewsParams = {}): Promise<NewsListR
 // Synchronous read of the last cached fetchNews response for the same
 // params, or undefined. Lets NewsView render instantly on mount/channel
 // switch instead of flashing a spinner while the network round-trip that
-// fetchNews will do anyway is still in flight — stale-while-revalidate, same
+// fetchNews will do anyway is still in flight - stale-while-revalidate, same
 // pattern as apiPeek in juicewrldApi.ts.
 export function peekNews(params: FetchNewsParams = {}): NewsListResponse | undefined {
   if (!NEWS_ENABLED) return undefined
@@ -245,19 +245,19 @@ export async function fetchNewsItem(id: number): Promise<NewsItem> {
   return apiRequest<NewsItem>(`${NEWS_BASE}/${id}/`, { cacheKey: `news:item:${id}` })
 }
 
-// Editor+ — create a post. `author` is filled server-side from the token.
+// Editor+ - create a post. `author` is filled server-side from the token.
 export async function createNewsItem(input: NewsItemInput): Promise<NewsItem> {
   assertEnabled()
   return authed<NewsItem>(`${NEWS_BASE}/`, { method: 'POST', body: JSON.stringify(input) })
 }
 
-// Editor+ — edit an existing post.
+// Editor+ - edit an existing post.
 export async function updateNewsItem(id: number, input: Partial<NewsItemInput>): Promise<NewsItem> {
   assertEnabled()
   return authed<NewsItem>(`${NEWS_BASE}/${id}/`, { method: 'PATCH', body: JSON.stringify(input) })
 }
 
-// Editor+ — delete a post.
+// Editor+ - delete a post.
 export async function deleteNewsItem(id: number): Promise<void> {
   assertEnabled()
   return authed<void>(`${NEWS_BASE}/${id}/`, { method: 'DELETE' })

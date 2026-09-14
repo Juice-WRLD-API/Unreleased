@@ -20,7 +20,7 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
   const [videoError, setVideoError] = useState(false)
   // Mobile browsers (iOS Safari especially) refuse to play a <video src=...>
   // pointed straight at the API's download endpoint unless the server
-  // answers HTTP Range requests — without that it fails with a generic
+  // answers HTTP Range requests - without that it fails with a generic
   // "format not supported" error even for an ordinary mp4. Blob-loading it
   // (one full fetch, then an object URL) sidesteps that requirement
   // entirely, at the cost of buffering the whole file before playback
@@ -47,7 +47,7 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
     return () => { cancelled = true }
   }, [videoError, item, blobUrl, blobFailed])
 
-  // Object URLs are only ever handed to this one <video> element — revoke on
+  // Object URLs are only ever handed to this one <video> element - revoke on
   // swap/unmount rather than leaking one per video opened.
   useEffect(() => {
     if (!blobUrl) return
@@ -73,7 +73,7 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
     return () => window.removeEventListener('keydown', handler)
   }, [onClose, goPrev, goNext])
 
-  // This overlay is `fixed inset-0` with its own black backdrop (deliberate —
+  // This overlay is `fixed inset-0` with its own black backdrop (deliberate -
   // photos/video look better against black than the app's theme surface), but
   // Safari's toolbar tinting samples whatever's actually painted at the top of
   // the viewport, not the app's theme-color intent. Left alone, that reads the
@@ -95,9 +95,9 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
       className="fixed inset-0 z-[100] flex flex-col bg-black/95"
       onClick={onClose}
     >
-      {/* Top bar — filename only. The counter/download/close controls used to
+      {/* Top bar - filename only. The counter/download/close controls used to
           live here too, right next to the Electron window's own minimize/
-          maximize/close buttons — confusing and easy to misclick. They now
+          maximize/close buttons - confusing and easy to misclick. They now
           float directly above the media itself instead. */}
       <div
         className="flex items-center px-4 py-3 shrink-0 bg-black/60 backdrop-blur-sm"
@@ -152,7 +152,7 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
               draggable={false}
             />
           ) : videoError && blobUrl ? (
-            // Blob-loaded retry succeeded — plays from the fully-buffered
+            // Blob-loaded retry succeeded - plays from the fully-buffered
             // local object URL instead of the streamed endpoint.
             <video
               key={blobUrl}
@@ -219,7 +219,7 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
               }`}
             >
               {it.type === 'image' ? (
-                // 48px filmstrip cell — the degraded copy, while the main
+                // 48px filmstrip cell - the degraded copy, while the main
                 // view above keeps the original.
                 <img src={smallCoverUrl(it.url)} alt="" className="w-full h-full object-cover" />
               ) : (

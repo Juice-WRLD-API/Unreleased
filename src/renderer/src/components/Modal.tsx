@@ -6,7 +6,7 @@ import { ls } from '../lib/persist'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
 
 // Locked panels sit in their own z-index band, comfortably above anything
-// zCounter could reach in a real session — so "locked" always beats
+// zCounter could reach in a real session - so "locked" always beats
 // "unlocked" regardless of which was interacted with more recently.
 const LOCK_TIER = 1_000_000
 
@@ -18,25 +18,25 @@ function clamp(n: number, min: number, max: number): number {
 // that every in-app modal now docks into instead of showing as a full-screen
 // overlay. `dockedIds` is just presence tracking (so the notch knows whether
 // there's anything to show); `expanded` is the dropdown's own show/hide state,
-// independent of whether a modal is actually open — collapsing it hides the
+// independent of whether a modal is actually open - collapsing it hides the
 // docked modal without closing it, and expanding it again reveals the same
 // mounted instance, state intact.
 interface SandboxState {
   dockedIds: Set<string>
   expanded: boolean
-  // Stacking order among docked panels — several can be open (and overlap)
+  // Stacking order among docked panels - several can be open (and overlap)
   // at once. zCounter only ever increments; panelZ[id] is the counter value
   // at the moment that panel last opened, moved, or resized, so "most
   // recently touched" always sorts on top without needing to renumber
   // everyone else.
   zCounter: number
   panelZ: Record<string, number>
-  // Locked panels can't be covered by anything else docked in the sandbox —
+  // Locked panels can't be covered by anything else docked in the sandbox -
   // see LOCK_TIER below.
   lockedIds: Set<string>
   // Master on/off for the whole docking behavior (Settings > Window). Off
   // makes every non-floating, non-standalone ModalOverlay fall back to a
-  // plain centered backdrop instead of docking into the notch — see the
+  // plain centered backdrop instead of docking into the notch - see the
   // `dockingOff` checks in ModalOverlay below. Read from localStorage at
   // module init (not inside a component) since it has to be correct on the
   // very first render, before any effect has a chance to run.
@@ -86,7 +86,7 @@ export const useSandboxStore = create<SandboxState>((set) => ({
   },
 }))
 
-// The notch's dropdown body — a plain DOM node (not React-portalled from the
+// The notch's dropdown body - a plain DOM node (not React-portalled from the
 // notch itself) so ModalOverlay can portal into it without needing the notch
 // component higher in the tree to hand down a ref through props. SandboxNotch
 // claims this node on mount and positions it under the pill; it's always
@@ -96,7 +96,7 @@ export const sandboxSlotRef: { current: HTMLDivElement | null } = { current: nul
 interface Rect { left: number; top: number; width: number; height: number }
 
 // Live registry of every currently-dragged-or-resized-at-least-once panel's
-// rect, keyed by id — a plain mutable Map (not store state) since it's
+// rect, keyed by id - a plain mutable Map (not store state) since it's
 // written on every mousemove frame while dragging and would otherwise cause
 // every docked panel to re-render on every frame of every other panel's drag.
 // Read only inside the drag math below, never rendered from directly.
@@ -105,7 +105,7 @@ const panelRects = new Map<string, Rect>()
 const SNAP_THRESHOLD = 8
 
 // Snaps `pos` (the coordinate of the panel's leading edge) to align its
-// leading edge, trailing edge, or center with any target within threshold —
+// leading edge, trailing edge, or center with any target within threshold -
 // the same three-way alignment guides design tools like Figma use. Returns
 // the untouched `pos` when nothing is close enough.
 function snapAxis(pos: number, size: number, targets: number[]): number {
@@ -142,10 +142,10 @@ function snapTargets(excludeId: string): { x: number[]; y: number[] } {
   return { x, y }
 }
 
-// Lock toggle — an ordinary (non-absolute) icon button meant to sit inline
+// Lock toggle - an ordinary (non-absolute) icon button meant to sit inline
 // in the modal's own header, next to its other icon buttons. Locking a panel
 // pins it in LOCK_TIER, above every unlocked panel's z-index no matter what
-// gets moved/resized afterward — the only way something else docked in the
+// gets moved/resized afterward - the only way something else docked in the
 // sandbox can cover it again is if that something else is ALSO locked (and
 // more recently touched).
 export function LockToggle({
@@ -153,14 +153,14 @@ export function LockToggle({
 }: {
   locked: boolean
   onClick: (e: ReactMouseEvent) => void
-  /** Override the default (plain-surface-header) coloring — e.g. for a dark hero image. */
+  /** Override the default (plain-surface-header) coloring - e.g. for a dark hero image. */
   className?: string
 }): JSX.Element {
   const Icon = locked ? Lock : Unlock
   return (
     <button
       onClick={onClick}
-      title={locked ? 'Unlock — other panels can cover this again' : 'Lock on top — nothing else can cover this'}
+      title={locked ? 'Unlock - other panels can cover this again' : 'Lock on top - nothing else can cover this'}
       className={className ?? `w-6 h-6 flex items-center justify-center rounded-full transition-colors ${
         locked ? 'text-accent' : 'text-text-muted hover:text-text-primary'
       }`}
@@ -189,21 +189,21 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: ReactMouseEvent) => vo
 // that used to be copy-pasted (or, worse, re-wired) per modal: the portal,
 // the `floating` variant that pop-out windows use (FloatApp mounts the same
 // modal component with floating=true, which fills the pop-out's own OS window
-// instead), and — for the normal in-app case — drag-to-move/drag-to-resize.
+// instead), and - for the normal in-app case - drag-to-move/drag-to-resize.
 //
-// Non-floating no longer shows a full-screen backdrop — it docks into the
+// Non-floating no longer shows a full-screen backdrop - it docks into the
 // sandbox notch's dropdown instead. Opening a modal docks it and expands the
 // notch; unmounting it (the real "close", e.g. the X button) undocks it.
-// Collapsing the notch just hides the dropdown — the modal stays mounted, so
+// Collapsing the notch just hides the dropdown - the modal stays mounted, so
 // its state (scroll position, form input, drag/resize size, in-flight
 // progress) survives being reopened.
 //
 // `panelClassName` is the modal's own visual/default-size classes (border,
 // radius, shadow, bg, and its *default* width/height before the user ever
-// drags/resizes it — e.g. 'border rounded-2xl shadow-2xl w-full max-w-lg
+// drags/resizes it - e.g. 'border rounded-2xl shadow-2xl w-full max-w-lg
 // h-[640px]'). Once dragged or resized, ModalOverlay switches the panel to
 // `position: fixed` with an explicit pixel box and those default-size classes
-// stop applying (inline style wins) — the panel keeps growing/shrinking from
+// stop applying (inline style wins) - the panel keeps growing/shrinking from
 // wherever the user left it instead of snapping back to its own max-width.
 //
 // `children` is a render prop so the caller can mark its own header/hero as
@@ -224,14 +224,14 @@ export function ModalOverlay({
 }: {
   onClose: () => void
   floating?: boolean
-  /** Skips the sandbox entirely — a plain centered, backdropped overlay like
+  /** Skips the sandbox entirely - a plain centered, backdropped overlay like
    * every modal used to be, not draggable/resizable/lockable and not
    * collapsible from the notch. For modals that must always stay visible and
-   * on top regardless of sandbox state — e.g. UserAuthModal, since login
+   * on top regardless of sandbox state - e.g. UserAuthModal, since login
    * shouldn't disappear into a dropdown the user can collapse or that other
    * docked panels can stack over. */
   standalone?: boolean
-  /** Full Tailwind class, e.g. 'z-50' or 'z-[160]' — kept as one literal so Tailwind's scanner can find it. */
+  /** Full Tailwind class, e.g. 'z-50' or 'z-[160]' - kept as one literal so Tailwind's scanner can find it. */
   zIndexClassName: string
   /** Panel's own border/radius/shadow/bg + default (pre-drag/resize) size classes. */
   panelClassName: string
@@ -239,7 +239,7 @@ export function ModalOverlay({
   minHeight?: number
   /** Live offset (px) from a caller's own swipe-to-dismiss gesture (e.g.
    *  useDragToDismiss), for the plain-backdrop (non-docked) case only. The
-   *  panel translates with it while the backdrop fades out in proportion —
+   *  panel translates with it while the backdrop fades out in proportion -
    *  so dragging down actually uncovers the app behind instead of leaving a
    *  dimmed rectangle trailing the panel down the screen. */
   dragY?: number
@@ -250,7 +250,7 @@ export function ModalOverlay({
     toggleLock: () => void
     /** False when this panel isn't actually docked in the sandbox (floating
      *  pop-out, standalone modal, or the user turned docking off in
-     *  Settings) — locking only means something when something else could
+     *  Settings) - locking only means something when something else could
      *  cover this panel, so callers should hide their LockToggle button
      *  entirely rather than show one that's always unlocked and does nothing. */
     canLock: boolean
@@ -267,12 +267,12 @@ export function ModalOverlay({
   const z = locked ? LOCK_TIER + baseZ : baseZ
   const toggleLock = (): void => toggleLockStore(id)
   // Either this specific modal opts out (standalone) or the user turned the
-  // whole feature off in Settings — either way it falls back to the plain
+  // whole feature off in Settings - either way it falls back to the plain
   // backdrop below instead of docking into the notch.
   const dockingOff = standalone || !sandboxEnabled
 
   // Only the dockingOff branch below paints its own fixed inset-0 bg-black/60
-  // backdrop — the docked (sandbox) path has no full-screen scrim of its own,
+  // backdrop - the docked (sandbox) path has no full-screen scrim of its own,
   // and a floating pop-out is a real OS window with its own chrome, nothing
   // shared to tint. Same Safari-samples-the-scrim-pixel issue as
   // MediaLightbox/mobile Sheet: dim the meta tag to match while this backdrop
@@ -297,17 +297,17 @@ export function ModalOverlay({
   // target lives), but should still *open* centered in the viewport rather
   // than tucked up there. Runs once per mount, synchronously before the
   // browser paints (useLayoutEffect, not useEffect) so the panel's default
-  // CSS-driven position under the pill is never actually visible — it
+  // CSS-driven position under the pill is never actually visible - it
   // measures its own natural size there, then immediately switches to the
   // same position:fixed mechanism drag/resize already use, centered.
   //
   // dock(id) lives in this same effect (not a separate useEffect) so the
-  // store update — which flips the slot from invisible to visible — commits
+  // store update - which flips the slot from invisible to visible - commits
   // synchronously in the same pre-paint flush as the centering. Splitting
   // them used to leave a window where the panel could paint once before
   // dock() (a plain useEffect, not guaranteed to run before paint) landed;
   // the panel used to paper over that by forcing itself permanently
-  // `visible`, which also defeated the notch's collapse-to-hide behavior —
+  // `visible`, which also defeated the notch's collapse-to-hide behavior -
   // a collapsed sandbox still showed its docked panels, just uninteractive
   // (pointer-events-none, inherited from the slot, isn't overridden by a
   // child the way `visible` overrides `invisible`). Doing dock() here
@@ -325,9 +325,9 @@ export function ModalOverlay({
     }
     return () => undock(id)
     // Deliberately once-per-mount only (plus whenever dockingOff itself
-    // flips, e.g. the user toggling the sandbox off in Settings — that
+    // flips, e.g. the user toggling the sandbox off in Settings - that
     // re-runs the cleanup, undocking this panel, without re-centering it)
-    // — re-centering on every render would fight the user dragging it away
+    // - re-centering on every render would fight the user dragging it away
     // from the middle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floating, dockingOff])
@@ -393,7 +393,7 @@ export function ModalOverlay({
   }
 
   if (floating) {
-    // Locking doesn't apply to a real pop-out window — it's already its own
+    // Locking doesn't apply to a real pop-out window - it's already its own
     // OS window, nothing docked in the sandbox can cover it.
     return createPortal(
       <div className={`fixed inset-0 ${zIndexClassName} flex`}>
@@ -406,7 +406,7 @@ export function ModalOverlay({
   if (dockingOff) {
     // Same shape the pre-sandbox ModalOverlay always rendered: its own
     // full-screen backdrop, portalled straight to body rather than into the
-    // (collapsible, coverable) sandbox slot — so it can't be hidden by
+    // (collapsible, coverable) sandbox slot - so it can't be hidden by
     // collapsing the notch or buried under another docked panel. No
     // drag/resize/lock either, since nothing else can ever cover it to
     // begin with. Reached either because this modal opted out (standalone)
@@ -444,11 +444,11 @@ export function ModalOverlay({
   return createPortal(
     // z here (inline, overriding zIndexClassName's static value) is what
     // makes "the last-moved/resized panel comes to the front" work when
-    // multiple docked modals overlap — each panel's own tier class would
+    // multiple docked modals overlap - each panel's own tier class would
     // otherwise always win regardless of interaction order. `relative` is
-    // required too — z-index does nothing on a statically positioned element.
+    // required too - z-index does nothing on a statically positioned element.
     <div className={`relative ${zIndexClassName}`} style={{ zIndex: z }} data-modal-id={id}>
-      {/* panelClassName stays applied even after a drag/resize — its size
+      {/* panelClassName stays applied even after a drag/resize - its size
           classes (w-full max-w-*, h-[...]) just lose to panelStyle's explicit
           width/height/maxWidth/maxHeight via inline-style specificity, while
           its border/radius/shadow/bg/overflow-hidden keep applying either way. */}

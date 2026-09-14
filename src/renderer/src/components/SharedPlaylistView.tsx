@@ -49,7 +49,7 @@ function parseTracks(data: unknown): Track[] {
   }
 
   const obj = data as AnyObject
-  // Named candidate fields — try recursively to handle any nesting
+  // Named candidate fields - try recursively to handle any nesting
   const ARRAY_KEYS = ['songs', 'items', 'tracks', 'results', 'playlist_songs', 'song_list', 'files', 'entries']
   for (const key of ARRAY_KEYS) {
     const list = obj[key]
@@ -72,7 +72,7 @@ function parseTracks(data: unknown): Track[] {
     if (dataParsed.length) return dataParsed
   }
 
-  // playlist field — API wraps songs in { playlist: { songs: [...] } }
+  // playlist field - API wraps songs in { playlist: { songs: [...] } }
   if (obj.playlist && typeof obj.playlist === 'object') {
     const playlistParsed = parseTracks(obj.playlist)
     if (playlistParsed.length) return playlistParsed

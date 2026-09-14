@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 // Touch drag-to-reorder for a plain (non-virtualized) list of fixed-height
-// rows — the Playlists detail's reorder mode, the WRLD queue sheet, and
+// rows - the Playlists detail's reorder mode, the WRLD queue sheet, and
 // Settings' nav-tabs list all had up/down arrow buttons instead, because
 // HTML5 drag events (dragstart/dragover/drop) never fire on touch at all.
 // This is the real gesture: press a row's grip handle and drag it into place.
@@ -17,14 +17,14 @@ import { useEffect, useRef, useState } from 'react'
 export interface DragReorderHandle {
   /** Index currently being dragged, or null when nothing is. */
   dragIndex: number | null
-  /** Inline style for row `index` — apply to the same element carrying
+  /** Inline style for row `index` - apply to the same element carrying
    *  `data-drag-row` (or a wrapper around it with the row's real height). */
   rowStyle: (index: number) => React.CSSProperties
   /** Spread onto the grip handle that starts a drag for row `index`. Give the
    *  handle `touch-none` so the browser doesn't also try to scroll from it. */
   handleProps: (index: number) => { onTouchStart: (e: React.TouchEvent<HTMLElement>) => void }
   /** Same start logic as handleProps' onTouchStart, callable without a live
-   *  touch event — for gestures (e.g. press-and-hold-to-reorder on the row
+   *  touch event - for gestures (e.g. press-and-hold-to-reorder on the row
    *  itself) that decide to start dragging asynchronously, after a timer,
    *  rather than directly from a dedicated handle's touchstart. */
   startFrom: (index: number, clientY: number, rowEl: HTMLElement | null) => void
@@ -45,11 +45,11 @@ export function useDragReorder(
   const onReorderRef = useRef(onReorder)
   onReorderRef.current = onReorder
 
-  // Real (non-passive) document listeners, not JSX touchmove/touchend props —
+  // Real (non-passive) document listeners, not JSX touchmove/touchend props -
   // React attaches its own touch handlers passively by default, so
   // preventDefault() inside a JSX onTouchMove is silently ignored and the
   // page scrolls out from under the drag. Re-subscribed only when a drag
-  // starts/stops, not on every move — dragY changes live via a ref instead so
+  // starts/stops, not on every move - dragY changes live via a ref instead so
   // this effect doesn't re-run per pixel of movement.
   useEffect(() => {
     if (dragIndex === null) return
@@ -101,7 +101,7 @@ export function useDragReorder(
   const rowStyle = (index: number): React.CSSProperties => {
     if (dragIndex === null) return {}
     if (index === dragIndex) {
-      // No transition on the dragged row itself — it must track the finger
+      // No transition on the dragged row itself - it must track the finger
       // exactly, not ease toward it.
       return { transform: `translateY(${dragY}px)`, transition: 'none', position: 'relative', zIndex: 20 }
     }

@@ -1,4 +1,4 @@
-// Shared furniture for the Games tab — the pieces Heardle and Wordle both draw
+// Shared furniture for the Games tab - the pieces Heardle and Wordle both draw
 // so the two read as one tab rather than two apps that happen to sit together.
 //
 // The tab holds one view per game (see App's routing) instead of a wrapper that
@@ -18,7 +18,7 @@ const GAMES: { id: GameId; label: string }[] = [
   { id: 'tierlist', label: 'Tier List' },
 ]
 
-/** The games in the tab, as a pill row. Sits above each game's hero — the
+/** The games in the tab, as a pill row. Sits above each game's hero - the
  *  corner controls own the very top of the pane, so this is the first thing in
  *  the scroll flow rather than another floating layer to dodge them. */
 export function GameSwitcher({ current }: { current: GameId }): JSX.Element {

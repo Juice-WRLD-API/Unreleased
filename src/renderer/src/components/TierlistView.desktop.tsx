@@ -1,4 +1,4 @@
-// Tier List — rank songs into S/A/B/C/D (or whatever tiers the user builds)
+// Tier List - rank songs into S/A/B/C/D (or whatever tiers the user builds)
 // by dragging them into rows, or by tap-to-select then tap-a-row on touch.
 // Unlike Heardle/Wordle there's no daily puzzle or score: it's a personal
 // ranking, persisted locally (see lib/tierlist) with no server round-trip.
@@ -207,7 +207,7 @@ export default function TierlistView(): JSX.Element {
   }, [pool, assignments, search])
 
   // Selecting the tier a song currently belongs to (or the pool, for
-  // unassigning) is meant as a no-op, not a nudge to re-render — keeping the
+  // unassigning) is meant as a no-op, not a nudge to re-render - keeping the
   // state identity-equal skips the save effect that would otherwise fire.
   const assignSong = (songId: number, tierId: string | null): void => {
     setState((prev) => {
@@ -318,7 +318,7 @@ export default function TierlistView(): JSX.Element {
             <h1 className="text-text-primary text-4xl sm:text-5xl font-black tracking-tight">Tier List</h1>
             <p className="text-text-muted text-sm mt-2">
               {selectedSongId !== null
-                ? 'Tap a row to place it — tap the song again to cancel.'
+                ? 'Tap a row to place it - tap the song again to cancel.'
                 : 'Drag a song into a row, or tap it and then tap a row.'}
             </p>
           </div>

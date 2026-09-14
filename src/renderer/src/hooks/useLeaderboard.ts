@@ -13,7 +13,7 @@ export type LeaderboardEntry = {
 }
 
 // `activeChannel` isn't sent to the leaderboard endpoint (it's global, not
-// per-channel) — it's accepted here purely so switching channels re-triggers
+// per-channel) - it's accepted here purely so switching channels re-triggers
 // a refetch, matching EditorProfileView's original combined
 // Promise.all([getMyProposals(activeChannel), getLeaderboard()]) effect,
 // which refetched both on every channel switch even though only one of them

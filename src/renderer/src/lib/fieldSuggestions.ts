@@ -1,13 +1,13 @@
 // Autocomplete for free-text song fields that are actually shared across many
-// songs — album, credits, recording location, leak type. Same idea as
+// songs - album, credits, recording location, leak type. Same idea as
 // versionsApi's title suggestions, but sourced from the song catalog itself
 // rather than a dedicated table: there's no server-side "distinct values for
 // field X" endpoint, so this fetches the whole catalog once (same `?all=true`
-// bulk mode compactGroups.ts uses — the catalog is small enough, ~2500 songs,
+// bulk mode compactGroups.ts uses - the catalog is small enough, ~2500 songs,
 // that this is simpler and cheaper than a search-as-you-type request per
 // keystroke) and indexes it client-side.
 //
-// Matching is whole-field, not per-name — "Dominic Miller & Nick Mira" is one
+// Matching is whole-field, not per-name - "Dominic Miller & Nick Mira" is one
 // suggestion, not two. Splitting multi-credit fields into individual names
 // would need a real delimiter convention this data doesn't consistently have
 // (" & ", ", ", "/" all show up), and whole-field matching is what the
@@ -34,7 +34,7 @@ async function getCatalog(): Promise<JWApiSong[]> {
   }
 }
 
-// Built once per catalog fetch and reused across every field/query — indexing
+// Built once per catalog fetch and reused across every field/query - indexing
 // all six fields costs one pass over ~2500 songs, and repeating that per
 // keystroke was the difference between instant and noticeably laggy.
 let indexCache: { forCatalog: Promise<JWApiSong[]>; byField: Map<SuggestField, Map<string, number>> } | null = null

@@ -5,7 +5,7 @@ import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 
-// Triggered from the Uploads row in the side menu (see Sidebar.tsx) — this
+// Triggered from the Uploads row in the side menu (see Sidebar.tsx) - this
 // is a lightweight anchored popup (no backdrop, no drag/resize/lock), not the
 // sandbox/draggable modal system the other panels use. Closes on outside
 // click, same as the old self-contained floating version.
@@ -13,7 +13,7 @@ export default function UploadManager(): JSX.Element {
   const { uploads, setShowUploadManager, clearCompletedUploads, stagedFileChanges } = useStorePick('uploads', 'setShowUploadManager', 'clearCompletedUploads', 'stagedFileChanges')
   const panelRef = useRef<HTMLDivElement>(null)
   // Lives out here rather than in StagedChanges: a fully successful propose
-  // empties the queue, which unmounts that section — and with it the only
+  // empties the queue, which unmounts that section - and with it the only
   // confirmation the user would ever see.
   const [proposeResult, setProposeResult] = useState<string | null>(null)
 
@@ -80,7 +80,7 @@ export default function UploadManager(): JSX.Element {
 
 // Changes dragged together in the Files tab, waiting on one Propose. They sit
 // above the transfer list because they're the only rows here the user still
-// has to act on — everything below is already in flight or finished.
+// has to act on - everything below is already in flight or finished.
 function StagedChanges({ changes, onResult }: {
   changes: StagedFileChange[]
   onResult: (message: string | null) => void
@@ -152,7 +152,7 @@ function StagedChanges({ changes, onResult }: {
           {proposing
             ? <><Loader2 size={12} className="animate-spin" /> Proposing…</>
             : readyNow === 0
-              // Everything left is waiting on a folder — the useful action now
+              // Everything left is waiting on a folder - the useful action now
               // is re-checking whether that folder has been approved.
               ? <><Send size={12} /> Check for approval</>
               : <><Send size={12} /> Propose {readyNow} change{readyNow === 1 ? '' : 's'}</>}

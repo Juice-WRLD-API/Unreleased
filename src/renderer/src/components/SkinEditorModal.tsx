@@ -7,7 +7,7 @@ import {
   type Skin, type SkinVars,
 } from '../lib/skins'
 
-// Downloads `text` as a file named `name` (renderer-side blob download — the
+// Downloads `text` as a file named `name` (renderer-side blob download - the
 // user's own generated skin, no server round-trip).
 function downloadText(text: string, name: string): void {
   const blob = new Blob([text], { type: 'application/json' })
@@ -34,7 +34,7 @@ function toColorInputValue(value: string): string {
 
 /**
  * The custom-skin editor. Edits happen against the live store skin (looked up
- * by id) and every change saves through `saveCustomSkin` — because the caller
+ * by id) and every change saves through `saveCustomSkin` - because the caller
  * makes this skin the active theme before opening, that gives a true live
  * preview of the whole app behind the modal.
  */
@@ -45,7 +45,7 @@ export default function SkinEditorModal({
 }: {
   skinId: string
   onClose: () => void
-  // Retarget the editor at another skin (used by Duplicate) — owned by the
+  // Retarget the editor at another skin (used by Duplicate) - owned by the
   // caller so the open/edit state stays local to its window.
   onEditSkin: (id: string) => void
 }): JSX.Element | null {
@@ -60,7 +60,7 @@ export default function SkinEditorModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // The skin vanished from under us (deleted in another window) — bail out.
+  // The skin vanished from under us (deleted in another window) - bail out.
   if (!skin) return null
 
   const patch = (updates: Partial<Skin>): void => saveCustomSkin({ ...skin, ...updates })
@@ -82,7 +82,7 @@ export default function SkinEditorModal({
     const copy = createCustomSkin(skin, `${skin.name} copy`)
     saveCustomSkin(copy)
     setTheme(copy.id)
-    // Keep editing — retarget the editor at the fresh copy (now the active skin).
+    // Keep editing - retarget the editor at the fresh copy (now the active skin).
     onEditSkin(copy.id)
   }
 
@@ -191,7 +191,7 @@ export default function SkinEditorModal({
             </div>
           ))}
 
-          {/* Advanced — optional overrides that inherit when left blank. */}
+          {/* Advanced - optional overrides that inherit when left blank. */}
           <div className="mt-3 pt-3 border-t border-[var(--border)]">
             <p className="text-text-secondary text-[11px] font-semibold uppercase tracking-wide mb-1">Advanced</p>
             {SKIN_OPTIONAL_VAR_META.map(({ key, label, hint }) => {

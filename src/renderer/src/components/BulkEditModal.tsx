@@ -14,7 +14,7 @@ import type { SongVersionMeta } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { cleanDate } from './EditorPage.desktop'
 
-// Bulk editor — one dialog, two sources:
+// Bulk editor - one dialog, two sources:
 //
 //   • API songs, from the Tracker's multi-select "Edit". The API has no bulk
 //     endpoint, so this files one ordinary update proposal per song, exactly
@@ -24,8 +24,8 @@ import { cleanDate } from './EditorPage.desktop'
 //     write ID3 frames straight to disk through the writeTrackMetadata
 //     channel, then mirror the change into the in-memory library index.
 //
-// Both share the whole interaction model — tick a field, pick how the value
-// combines with what's there, preview, submit — so the machinery below is
+// Both share the whole interaction model - tick a field, pick how the value
+// combines with what's there, preview, submit - so the machinery below is
 // generic over the item type and each source only supplies a BulkSpec.
 //
 // Only fields that make sense across many items appear. Per-item identity
@@ -41,9 +41,9 @@ type FieldKind = 'text' | 'textarea' | 'list' | 'select'
 type Mode =
   | 'set'      // overwrite
   | 'fill'     // write only where the item currently has nothing
-  | 'add'      // list fields — append entries that aren't already there
-  | 'remove'   // list fields — drop the named entries
-  | 'append'   // free text — add on a new line after what's there
+  | 'add'      // list fields - append entries that aren't already there
+  | 'remove'   // list fields - drop the named entries
+  | 'append'   // free text - add on a new line after what's there
   | 'clear'    // empty the field
 
 interface BulkField<T> {
@@ -55,7 +55,7 @@ interface BulkField<T> {
   group: string
   placeholder?: string
   mono?: boolean
-  /** This item's current value, as an editor-shaped string — the comparison
+  /** This item's current value, as an editor-shaped string - the comparison
    *  basis for skipping items that already match. */
   read: (item: T) => string
   /** True when `read` can't actually see the stored value (ID3 frames the
@@ -66,7 +66,7 @@ interface BulkField<T> {
   options?: { value: string; label: string }[]
   /** Narrows the modes this field offers beyond its kind's default. */
   modes?: Mode[]
-  /** Caveat shown once the field is ticked — for consequences that only
+  /** Caveat shown once the field is ticked - for consequences that only
    *  matter when you're actually about to use it. */
   note?: string
   /** This field's current values are still loading; it reads as empty until
@@ -134,7 +134,7 @@ const MODE_HINTS: Record<Mode, string> = {
 
 function modesFor<T>(f: BulkField<T>): Mode[] {
   if (f.modes) return f.modes
-  // A field we can't read back can't be diffed, appended to, or filtered —
+  // A field we can't read back can't be diffed, appended to, or filtered -
   // only overwritten or emptied.
   if (f.writeOnly) return ['set', 'clear']
   return DEFAULT_MODES[f.kind]
@@ -143,7 +143,7 @@ function modesFor<T>(f: BulkField<T>): Mode[] {
 /* ── Value combination ─────────────────────────────────────────────────────── */
 
 // Credits are free text holding comma-separated names ("Nick Mira, Taz
-// Taylor") — the same convention the Tracker's producers tab splits on.
+// Taylor") - the same convention the Tracker's producers tab splits on.
 const splitList = (v: string): string[] => v.split(',').map(s => s.trim()).filter(Boolean)
 const joinList = (parts: string[]): string => parts.join(', ')
 const sameName = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
@@ -176,12 +176,12 @@ function combine(mode: Mode, input: string, current: string): string | undefined
 }
 
 /** True once this field has enough to act on. 'clear' needs no input; every
- *  other mode does — so an emptied box never silently wipes a field. */
+ *  other mode does - so an emptied box never silently wipes a field. */
 function isActionable(mode: Mode, input: string): boolean {
   return mode === 'clear' || input.trim() !== ''
 }
 
-/** Runs `task` over `items` a few at a time — one request (or one tag write)
+/** Runs `task` over `items` a few at a time - one request (or one tag write)
  *  per item would otherwise fire the whole selection at once. */
 async function pooled<T>(items: T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
   let next = 0
@@ -207,10 +207,10 @@ interface Target<T> {
 const API_GROUPS = ['Details', 'Versions', 'Credits', 'Dates']
 
 const VERSION_TITLE_NOTE =
-  "Retitles just this song. If it's currently linked with others, it's split into its own version group with the new title rather than renaming the shared one — same as the single-song editor. To rename a whole group in place, use that song's Versions card instead."
+  "Retitles just this song. If it's currently linked with others, it's split into its own version group with the new title rather than renaming the shared one - same as the single-song editor. To rename a whole group in place, use that song's Versions card instead."
 
 /** Links every song in `songs` into one version group and sets its title,
- *  regardless of whatever groups they were each in before — the explicit,
+ *  regardless of whatever groups they were each in before - the explicit,
  *  opt-in counterpart to the per-song split setOwnVersionTitle does by
  *  default. Same pairwise-merge as the Tracker's "Link versions" button
  *  (linking each song to the first one merges all of their groups), plus the
@@ -242,11 +242,11 @@ function apiFields(
     { key: 'notes', label: 'Notes', kind: 'textarea', group: 'Details', read: s => s.notes || '' },
 
     // Unlike every other field here this does NOT go through the proposal
-    // system — it writes straight to the /versions/ table, same as the
+    // system - it writes straight to the /versions/ table, same as the
     // single-song editor's Versions card, and for the same reason that card
     // uses setOwnVersionTitle rather than setGroupVersionTitle: retitling one
     // song shouldn't silently relabel songs the user didn't touch. The
-    // per-song "version" label (v1 / TV Mix) is deliberately absent — stamping
+    // per-song "version" label (v1 / TV Mix) is deliberately absent - stamping
     // one label across a selection would just claim every song is the same
     // version.
     { key: 'versionTitle', label: 'Version title', kind: 'text', group: 'Versions',
@@ -255,7 +255,7 @@ function apiFields(
       read: s => versionMeta?.get(s.id)?.versionTitle ?? '',
       // The per-song default above means typing the same title on several
       // *unlinked* songs gives each its own identical-looking-but-separate
-      // group rather than one shared one — this is the one-click fix for
+      // group rather than one shared one - this is the one-click fix for
       // when that's not what was wanted: merge the whole selection into a
       // single group and write the title once.
       customAction: {
@@ -264,7 +264,7 @@ function apiFields(
         run: async (songs, value) => {
           await linkAndTitle(songs, value)
           // Awaited: the "done" status this unblocks must not show until the
-          // field's read() reflects the merge — otherwise a subsequent Submit
+          // field's read() reflects the merge - otherwise a subsequent Submit
           // could still see the pre-merge snapshot and undo it (see
           // fetchVersionMeta's comment).
           await refreshVersionMeta()
@@ -309,7 +309,7 @@ export default function BulkEditModal(): JSX.Element | null {
   }, [isApi, eras.length])
 
   // Also used to refresh after linkAndTitle changes the server's grouping out
-  // from under the initial fetch — without this the field would keep reading
+  // from under the initial fetch - without this the field would keep reading
   // its stale pre-link snapshot, and setOwnVersionTitle (which doesn't check
   // whether a song's title already matches before deciding to split) would
   // undo the very merge that action just made the next time Submit runs.
@@ -349,7 +349,7 @@ export default function BulkEditModal(): JSX.Element | null {
         // than proposed for review (same as the single-song editor), so they
         // never belong in proposed_data. setOwnVersionTitle re-reads the
         // song's row itself before deciding what to do, so it's correct even
-        // if the prefetch above failed or is stale — the groupId passed here
+        // if the prefetch above failed or is stale - the groupId passed here
         // is only a hint it uses when the song has no row at all yet.
         const { versionTitle, ...rest } = patch
         if (versionTitle !== undefined) {
@@ -394,16 +394,16 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
   const [error, setError] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
-  /** Set after a partial failure — the items still to be written, so "Retry"
+  /** Set after a partial failure - the items still to be written, so "Retry"
    *  doesn't redo the ones that already went through. */
   const [retryTargets, setRetryTargets] = useState<Target<T>[] | null>(null)
   const [succeeded, setSucceeded] = useState(0)
-  // Per-field status for customAction buttons — 'done' shouldn't linger once
+  // Per-field status for customAction buttons - 'done' shouldn't linger once
   // the value it applied to has been edited again.
   const [customActionStatus, setCustomActionStatus] = useState<Record<string, 'running' | 'done' | 'error'>>({})
   const [customActionError, setCustomActionError] = useState<Record<string, string>>({})
 
-  // Touching the form after a run invalidates that run's outcome — the patches
+  // Touching the form after a run invalidates that run's outcome - the patches
   // it was built from no longer describe what's on screen.
   useEffect(() => {
     setStatus(s => (s === 'submitting' ? s : 'idle'))
@@ -421,7 +421,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
   }, [items, spec])
 
   /** Per field: the value shared by every writable item, or null when they
-   *  differ — drives both the "N values" hint and the prefill. */
+   *  differ - drives both the "N values" hint and the prefill. */
   const commonValues = useMemo(() => {
     const out: Record<string, string | null> = {}
     for (const f of fields) {
@@ -436,7 +436,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     () => fields.filter(f =>
       enabled[f.key]
       && isActionable(modes[f.key] ?? 'set', values[f.key] ?? '')
-      // A field whose customAction just ran is already applied — Submit
+      // A field whose customAction just ran is already applied - Submit
       // shouldn't also patch it per-item against data the action changed.
       && customActionStatus[f.key] !== 'done'
     ),
@@ -461,7 +461,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
           const current = f.read(item)
           const next = combine(mode, values[f.key] ?? '', current)
           if (next === undefined) continue
-          // A write-only field can't be diffed — it's always written.
+          // A write-only field can't be diffed - it's always written.
           if (!f.writeOnly && next === current) continue
           patch[f.key] = next
           changes.push({
@@ -547,7 +547,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     setCustomActionStatus(prev => ({ ...prev, [f.key]: 'running' }))
     try {
       await f.customAction.run(writable, values[f.key] ?? '')
-      // Left ticked (not unticked) so the "Done" state stays visible — the
+      // Left ticked (not unticked) so the "Done" state stays visible - the
       // 'done' guard in activeFields above is what keeps Submit from also
       // patching it per-item.
       setCustomActionStatus(prev => ({ ...prev, [f.key]: 'done' }))
@@ -574,7 +574,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     const mode = modes[f.key] ?? 'set'
     const availableModes = modesFor(f)
     const needsInput = mode !== 'clear' && !value.trim()
-    // How many items this one field would actually move — the per-field
+    // How many items this one field would actually move - the per-field
     // equivalent of the footer's total, so a mode that reaches nothing
     // (e.g. "Fill blanks" when none are blank) is obvious before submitting.
     const reach = on && !needsInput
@@ -685,7 +685,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
             <p className={`text-[11px] ${needsInput ? 'text-amber-500' : reach === 0 ? 'text-text-muted opacity-60' : 'text-text-muted opacity-75'}`}>
               {needsInput
                 ? availableModes.includes('clear')
-                  ? 'Enter a value — or switch to "Clear" to empty this field.'
+                  ? 'Enter a value - or switch to "Clear" to empty this field.'
                   : 'Enter a value.'
                 : reach === 0
                   ? 'Nothing would change.'
@@ -773,7 +773,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
                 <div className="flex items-start gap-2 rounded-xl bg-amber-500/10 border border-amber-500/25 px-3.5 py-2.5 text-[11px] text-amber-500">
                   <AlertCircle size={12} className="shrink-0 mt-0.5" />
                   <span>
-                    {unwritable.length} of {items.length} will be skipped —{' '}
+                    {unwritable.length} of {items.length} will be skipped - {' '}
                     {[...new Set(unwritable.map(i => spec.skip?.(i)).filter(Boolean))].join('; ')}.
                   </span>
                 </div>
@@ -788,7 +788,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
                       {group}
                       {writeOnlyGroup && (
                         <span className="ml-2 font-medium normal-case tracking-normal opacity-70">
-                          written, never read — these overwrite whatever is in the file
+                          written, never read - these overwrite whatever is in the file
                         </span>
                       )}
                     </h3>
@@ -799,7 +799,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
             </div>
 
             <div className="shrink-0 border-t border-[var(--border)]">
-              {/* Preview — everything that would actually change, with the
+              {/* Preview - everything that would actually change, with the
                   before/after per field, so a 40-item batch isn't run on faith. */}
               {targets.length > 0 && (
                 <div className="border-b border-[var(--border)]">
@@ -845,7 +845,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
                 {error && (
                   <div className="flex items-center gap-2 text-red-400 text-xs">
                     <AlertCircle size={12} className="shrink-0" />
-                    {failed} failed — {error}
+                    {failed} failed - {error}
                   </div>
                 )}
 

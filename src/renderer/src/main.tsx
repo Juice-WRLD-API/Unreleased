@@ -7,11 +7,11 @@ import { installGlobalErrorLogging } from './lib/runLog'
 installGlobalErrorLogging()
 
 // iOS home-screen apps have shipped several WebKit versions that size the
-// viewport as if Safari's bottom toolbar could still appear — chrome that
+// viewport as if Safari's bottom toolbar could still appear - chrome that
 // cannot exist outside a browser tab. 100dvh and window.innerHeight both
 // come back short by exactly that phantom toolbar, leaving a dead strip of
 // bare background across the bottom of the screen. 100lvh (the *largest*
-// viewport — every retractable bar retracted) is the real fullscreen height
+// viewport - every retractable bar retracted) is the real fullscreen height
 // there. index.css keys --app-height off this class; a genuine browser tab
 // keeps dvh, where lvh would instead run content under the visible toolbar.
 document.documentElement.classList.toggle(

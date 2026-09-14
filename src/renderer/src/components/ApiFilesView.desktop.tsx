@@ -127,7 +127,7 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   }
   return (
     <img
-      // Image entries are served whole by /files/download/ — a browse folder of
+      // Image entries are served whole by /files/download/ - a browse folder of
       // cover art is hundreds of KB per row at full size, so thumbnails take the
       // degraded copy. The lightbox still opens the original.
       src={smallCoverUrl(buildStreamUrl(path, activeChannel))}
@@ -175,7 +175,7 @@ export default function ApiFilesView(): JSX.Element {
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
-  // Set lookup for the per-row liked check — .includes on the array made the
+  // Set lookup for the per-row liked check - .includes on the array made the
   // listing O(rows × likes).
   const likedSet = useMemo(() => new Set(likedTrackIds), [likedTrackIds])
 
@@ -200,12 +200,12 @@ export default function ApiFilesView(): JSX.Element {
   const [playlistFlyoutPos, setPlaylistFlyoutPos] = useState({ top: 0, left: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
   // Whether a right-clicked audio file actually has a matching song in the
-  // Tracker — resolved lazily per path on menu-open (not for every row up
+  // Tracker - resolved lazily per path on menu-open (not for every row up
   // front) so "Find in Tracker" can be hidden for files with no match instead
   // of opening the info modal on nothing. undefined = not looked up yet,
   // null = looked up, no match.
   const [trackerMatches, setTrackerMatches] = useState<Map<string, number | null>>(new Map())
-  // Position clamping is handled by the shared <ClampedMenu> at render time —
+  // Position clamping is handled by the shared <ClampedMenu> at render time -
   // this ref is kept only so the playlist flyout below can measure it.
   const ctxMenuRef = useRef<HTMLDivElement>(null)
   const [ctxMenuPos, setCtxMenuPos] = useState({ left: 0, top: 0 })
@@ -217,7 +217,7 @@ export default function ApiFilesView(): JSX.Element {
     setPlaylistDoneId(null)
   }, [ctxMenu])
 
-  // Flyout sits beside the menu, flipping left when it'd run off the edge —
+  // Flyout sits beside the menu, flipping left when it'd run off the edge -
   // same placement helper the song context menu's submenus use.
   useLayoutEffect(() => {
     if (!playlistsOpen) return
@@ -227,7 +227,7 @@ export default function ApiFilesView(): JSX.Element {
     setPlaylistFlyoutPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
   }, [playlistsOpen, ctxMenuPos, playlists.length])
 
-  // Search — recursive across the whole file tree via /files/browse/'s
+  // Search - recursive across the whole file tree via /files/browse/'s
   // `search` param (same endpoint findSessionZips uses), not scoped to the
   // current folder. Results replace the browsed folder's entries while
   // active rather than living in a separate list, so sorting/select-mode/
@@ -238,7 +238,7 @@ export default function ApiFilesView(): JSX.Element {
   const [searchLoading, setSearchLoading] = useState(false)
   const isSearching = debouncedSearch.trim().length > 0
 
-  // Multi-select state — see the useMultiSelect() call further down (needs
+  // Multi-select state - see the useMultiSelect() call further down (needs
   // filteredEntries, which isn't defined yet here) for
   // selectMode/selectedPaths/enterSelectMode/toggleSelect/exitSelectMode.
   const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
@@ -314,7 +314,7 @@ export default function ApiFilesView(): JSX.Element {
       setEntries(items)
     } catch (err) {
       if (requestId !== navigateRequestId.current) return
-      // Keep the cached listing visible on a network failure — only surface the
+      // Keep the cached listing visible on a network failure - only surface the
       // error when we had nothing to show in the first place.
       if (!cached) setError(err instanceof Error ? err.message : 'Failed to load')
     } finally {
@@ -346,7 +346,7 @@ export default function ApiFilesView(): JSX.Element {
   }, [debouncedSearch, isSearching, activeChannel])
 
   // Remember the browsed folder in the store so switching to another tab and
-  // back restores it — the component unmounts on tab switch, so local state
+  // back restores it - the component unmounts on tab switch, so local state
   // alone doesn't survive that round trip.
   useEffect(() => {
     setApiFilesLastPath(currentPath)
@@ -421,7 +421,7 @@ export default function ApiFilesView(): JSX.Element {
       // Global infoSongId (not local state) so the info panel survives
       // switching to another tab, which unmounts this view.
       if (match) useStore.getState().setInfoSongId(match.id)
-    } catch { /* no match — leave whatever's already open (if anything) alone */ }
+    } catch { /* no match - leave whatever's already open (if anything) alone */ }
   }
 
   // Resolves (and caches) whether an audio file has a matching Tracker entry,
@@ -442,7 +442,7 @@ export default function ApiFilesView(): JSX.Element {
     resolveTrackerMatch(entry)
   }
 
-  // `marker` only drives the confirmation toast — any non-empty string will do.
+  // `marker` only drives the confirmation toast - any non-empty string will do.
   const copyTextToClipboard = (text: string, what: 'link' | 'path', marker = text): void => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedPath(marker)
@@ -461,14 +461,14 @@ export default function ApiFilesView(): JSX.Element {
     copyToClipboard(entry, url, 'link')
   }
 
-  // The API-relative path ("Compilation/Folder/song.mp3") — what every
+  // The API-relative path ("Compilation/Folder/song.mp3") - what every
   // /files/* endpoint takes as its `path` param, unlike Copy link's full URL.
   const copyPath = (entry: JWApiFileEntry): void => copyToClipboard(entry, entry.path, 'path')
 
   // ── Add to playlist ────────────────────────────────────────────────────────
   // Server playlists are keyed by numeric Tracker song id, so this only works
   // for audio files that resolved to a Tracker match (same lookup that gates
-  // "Find in Tracker") — the item stays hidden otherwise.
+  // "Find in Tracker") - the item stays hidden otherwise.
   const addToPlaylist = async (playlistId: number, songId: number): Promise<void> => {
     setPlaylistBusyId(playlistId)
     try {
@@ -506,7 +506,7 @@ export default function ApiFilesView(): JSX.Element {
 
   const openLightbox = (entry: JWApiFileEntry): void => {
     // While searching, the clicked entry can live in a folder other than the
-    // one currently browsed — `entries` (the current folder's listing) won't
+    // one currently browsed - `entries` (the current folder's listing) won't
     // contain it, so the gallery has to be built from the search results
     // themselves instead.
     const mediaEntries = (isSearching ? searchResults : entries).filter((e) => {
@@ -523,7 +523,7 @@ export default function ApiFilesView(): JSX.Element {
     setLightboxIndex(idx >= 0 ? idx : 0)
   }
 
-  // Text viewer — API files come over HTTP from the same stream URL the
+  // Text viewer - API files come over HTTP from the same stream URL the
   // player uses, capped client-side to match the local reader's 2 MB limit.
   const openApiText = (entry: JWApiFileEntry): void => {
     setTextFile({
@@ -543,7 +543,7 @@ export default function ApiFilesView(): JSX.Element {
 
   // ── Selection helpers ──────────────────────────────────────────────────────
   // enterSelectMode/toggleSelect/exitSelectMode are defined further down,
-  // right after the useMultiSelect() call (needs filteredEntries) — this
+  // right after the useMultiSelect() call (needs filteredEntries) - this
   // closure only runs later, on an actual long-press, so referencing them
   // here before that point is fine.
 
@@ -557,7 +557,7 @@ export default function ApiFilesView(): JSX.Element {
 
   // Backend zips a folder path recursively with its subfolder structure
   // intact (see /files/zip-selection/'s `{ "paths": ["Compilation/Folder"] }`
-  // shape in the docs), so a single directory path is enough — no need to
+  // shape in the docs), so a single directory path is enough - no need to
   // walk and flatten the tree client-side.
   const startZip = async (paths: string[], filename: string): Promise<void> => {
     if (paths.length === 0) return
@@ -607,7 +607,7 @@ export default function ApiFilesView(): JSX.Element {
     [isSearching, searchResults, entries, sortBy, sortDir]
   )
 
-  // Type filter — folders stay visible regardless of filter so navigation
+  // Type filter - folders stay visible regardless of filter so navigation
   // still works; only files are matched against the selected media type.
   const filteredEntries = useMemo(
     () => typeFilter === 'all'
@@ -616,9 +616,9 @@ export default function ApiFilesView(): JSX.Element {
     [sortedEntries, typeFilter]
   )
 
-  // Multi-select — select mode, the selected-paths Map, Escape-to-exit, and
+  // Multi-select - select mode, the selected-paths Map, Escape-to-exit, and
   // Ctrl/Cmd+A "select all" are handled by the shared hook. Value === key
-  // (path) here since there's nothing extra to carry per entry — `.has()`/
+  // (path) here since there's nothing extra to carry per entry - `.has()`/
   // `.size` behave the same as the old Set<string>; only spreads need
   // `.keys()` now instead of spreading the Map itself.
   const {
@@ -635,7 +635,7 @@ export default function ApiFilesView(): JSX.Element {
     setCtxMenu(null)
   }
   const toggleSelect = (path: string): void => toggle(path, path)
-  // Mouse press-and-hold — the desktop equivalent of the touch long-press
+  // Mouse press-and-hold - the desktop equivalent of the touch long-press
   // above, as a second way into select mode alongside Ctrl/Cmd+click.
   const mouseLongPress = useLongPress()
 
@@ -643,7 +643,7 @@ export default function ApiFilesView(): JSX.Element {
   // Contributors can drag entries onto a folder to move them in, or onto a
   // file to bundle both into a new folder. Nothing is proposed on drop: the
   // intended changes are staged (store.stagedFileChanges) and reviewed in the
-  // Uploads panel, which is where Propose lives — see lib/compStagedChanges.
+  // Uploads panel, which is where Propose lives - see lib/compStagedChanges.
   type DragItem = { path: string; isDir: boolean }
   const [draggedItems, setDraggedItems] = useState<DragItem[]>([])
   // Path of the row currently under the cursor, or '..' for the parent row.
@@ -664,7 +664,7 @@ export default function ApiFilesView(): JSX.Element {
     [stagedFileChanges, activeChannel],
   )
 
-  /** `awaitingFolder` marks moves into a folder that's only queued so far —
+  /** `awaitingFolder` marks moves into a folder that's only queued so far -
    *  the API rejects those until it's approved, so they're held back rather
    *  than proposed alongside it (see lib/compStagedChanges). */
   const stageMovesInto = (folderPath: string, items: DragItem[], awaitingFolder?: string): void => {
@@ -679,7 +679,7 @@ export default function ApiFilesView(): JSX.Element {
       }))
     if (changes.length === 0) return
     stageFileChanges(changes)
-    // Only pop the panel open for the first drop of a batch — it shows where
+    // Only pop the panel open for the first drop of a batch - it shows where
     // queued changes live, and after that the header pill carries the count
     // without the panel covering the listing on every subsequent drag.
     if (stagedFileChanges.length === 0) setShowUploadManager(true)
@@ -777,7 +777,7 @@ export default function ApiFilesView(): JSX.Element {
       <span
         className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-accent bg-accent/15 px-1.5 py-0.5 rounded-md"
         title={staged.awaitingFolder
-          ? `Queued: move to ${staged.destination} — waiting for the new folder to be approved`
+          ? `Queued: move to ${staged.destination} - waiting for the new folder to be approved`
           : `Queued: move to ${staged.destination}`}
       >
         <FolderInput size={9} /> Queued
@@ -877,7 +877,7 @@ export default function ApiFilesView(): JSX.Element {
             </div>
           </div>
 
-          {/* Search — recursive across the whole file tree (same /files/browse/
+          {/* Search - recursive across the whole file tree (same /files/browse/
               `search` param the session-ZIP lookup uses), not scoped to the
               current folder. */}
           {(
@@ -1232,7 +1232,7 @@ export default function ApiFilesView(): JSX.Element {
                         {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
                       </div>
                       {stagedBadge(entry.path)}
-                      {/* Same visible context-menu trigger as the list rows —
+                      {/* Same visible context-menu trigger as the list rows -
                           right-click/long-press aren't discoverable on touch. */}
                       {!selectMode && (
                         <button
@@ -1271,7 +1271,7 @@ export default function ApiFilesView(): JSX.Element {
             </button>
             {/* Deletion only: a replace swaps one file's body for another,
                 which has no meaning across a selection. Directories are
-                dropped — proposals target files. */}
+                dropped - proposals target files. */}
             {canPropose && (
               <button
                 onClick={() => {
@@ -1321,7 +1321,7 @@ export default function ApiFilesView(): JSX.Element {
         </div>
       )}
 
-      {/* Folder-download progress toast — the selection bar above already
+      {/* Folder-download progress toast - the selection bar above already
           shows zip status while selectMode is active, so this only covers
           the single-folder "Download folder" context-menu action. */}
       {!selectMode && zipStatus !== 'idle' && (
@@ -1390,7 +1390,7 @@ export default function ApiFilesView(): JSX.Element {
             className="min-w-[180px]"
             onPositioned={setCtxMenuPos}
           >
-            {/* Playlist flyout — a child of the menu so the click-away overlay
+            {/* Playlist flyout - a child of the menu so the click-away overlay
                 still counts clicks in it as "inside", but positioned beside it. */}
             {playlistsOpen && (
               <div
@@ -1499,7 +1499,7 @@ export default function ApiFilesView(): JSX.Element {
               className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
               <Clipboard size={14} className="text-text-muted" /> Copy path
             </button>
-            {/* Contributor actions — proposals target a file, so directories
+            {/* Contributor actions - proposals target a file, so directories
                 are excluded. Both land on the contributor page prefilled. */}
             {canPropose && ctxMenu.entry.type !== 'directory' && (
               <>

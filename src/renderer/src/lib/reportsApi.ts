@@ -11,7 +11,7 @@
 // tell them apart on the review side.
 // Neither takes structured category/issue fields, so the form's category and
 // issue checkboxes are folded into the message text, with the app version on
-// the last line — that context is what makes a bug report actionable.
+// the last line - that context is what makes a bug report actionable.
 //
 // There is no idempotency key server-side, so the store only flushes the
 // outbox from the MAIN window (pop-outs share localStorage and would
@@ -47,7 +47,7 @@ export interface FeedbackRow {
 }
 
 export async function submitFeedback(r: PendingFeedback, contact?: string | null): Promise<void> {
-  const message = `[${FEEDBACK_CATEGORY_LABELS[r.category]}] ${r.message}\n\n— Unreleased v${r.appVersion}`
+  const message = `[${FEEDBACK_CATEGORY_LABELS[r.category]}] ${r.message}\n\n - Unreleased v${r.appVersion}`
   await post(FEEDBACK_URL, { message, ...(contact ? { contact } : {}), ...(r.automated ? { automated: true } : {}) })
 }
 
@@ -128,7 +128,7 @@ export async function submitSongReport(r: PendingSongReport, contact?: string | 
     issues ? `Issues: ${issues}` : null,
     `Song: ${r.songName}`,
     r.message || null,
-    `— Unreleased v${r.appVersion}`,
+    ` - Unreleased v${r.appVersion}`,
   ].filter(Boolean).join('\n\n')
   await post(SONG_REPORTS_URL, { song_id: r.songId, message, ...(contact ? { contact } : {}) })
 }

@@ -2,12 +2,12 @@
 //
 // Subscriptions live in localStorage (source of truth, works signed-out and
 // offline) and are mirrored to the user profile's `news_subscriptions` blob
-// once the backend supports it — same pattern as song prefs / playlist folders.
+// once the backend supports it - same pattern as song prefs / playlist folders.
 // Delivery uses the Web Notifications API, which the Electron renderer maps to
 // native OS notifications, so no IPC is needed. Detection is a poll that diffs
 // the latest feed against the highest post id we've already shown.
 //
-// All of it is inert until NEWS_ENABLED (see newsApi) — the poll returns nothing
+// All of it is inert until NEWS_ENABLED (see newsApi) - the poll returns nothing
 // and the profile push no-ops, so this ships dormant with the rest of the
 // prepared frontend.
 import { JWAPI_BASE } from './juicewrldApi'
@@ -36,7 +36,7 @@ function writeSubscriptions(ids: string[]): void {
   try {
     localStorage.setItem(SUBS_KEY, JSON.stringify([...new Set(ids)]))
   } catch {}
-  // Best-effort profile sync — never blocks the local write.
+  // Best-effort profile sync - never blocks the local write.
   void pushSubscriptions()
 }
 
@@ -71,7 +71,7 @@ export async function pushSubscriptions(): Promise<void> {
       body: JSON.stringify({ news_subscriptions: getSubscriptions() }),
     })
   } catch {
-    // A failed sync is non-fatal — localStorage already holds the truth.
+    // A failed sync is non-fatal - localStorage already holds the truth.
   }
 }
 
@@ -134,7 +134,7 @@ export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) =>
       n.close()
     }
   } catch {
-    // Some environments throw on construction (e.g. permission race) — ignore.
+    // Some environments throw on construction (e.g. permission race) - ignore.
   }
 }
 
@@ -158,7 +158,7 @@ function setLastSeenId(id: number): void {
 // Polls the latest feed and returns posts in subscribed channels that are newer
 // than anything we've shown before. Advances the high-water mark to the newest
 // id seen (any channel) so nothing re-fires. On the very first run it just
-// seeds the mark and returns nothing — we don't want to blast the whole backlog.
+// seeds the mark and returns nothing - we don't want to blast the whole backlog.
 export async function checkForNewPosts(): Promise<NewsItem[]> {
   if (!NEWS_ENABLED || !notificationsEnabled()) return []
   const subs = getSubscriptions()

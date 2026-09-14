@@ -1,9 +1,9 @@
 // Shared status/rank style tables and search/format helpers for
-// EditorProfileView.desktop.tsx and .mobile.tsx — previously two private,
+// EditorProfileView.desktop.tsx and .mobile.tsx - previously two private,
 // byte-identical copies living in each file.
 //
 // Deliberately NOT merged with adminShared.tsx's STATUS_STYLE table yet
-// (different shape, different consumers) — that consolidation is a later
+// (different shape, different consumers) - that consolidation is a later
 // polish-pass task per the approved rewrite plan.
 import type { ProposalStatus, SongEditProposal } from './userApi'
 

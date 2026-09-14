@@ -17,7 +17,7 @@ function localStorageBytes(): number {
   return bytes
 }
 
-// The filename actually being played — local tracks carry a filesystem
+// The filename actually being played - local tracks carry a filesystem
 // `path`, API/stream tracks only have a `streamUrl` (the "file" is whatever
 // the URL's last path segment resolves to).
 function filenameOf(track: Track | null): string {
@@ -200,7 +200,7 @@ export default function DiagnosticsModal(): JSX.Element {
       )}
     </ModalOverlay>
 
-    {/* Outside ModalOverlay's panel — that panel is overflow-hidden (for its
+    {/* Outside ModalOverlay's panel - that panel is overflow-hidden (for its
         rounded corners), which would clip this full-screen popup since a
         fixed-position element is still clipped by an ancestor's overflow
         despite being positioned relative to the viewport. */}

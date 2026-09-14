@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Unreleased Music Player — Web Release Script
+Unreleased Music Player - Web Release Script
 
-Just run it — no arguments needed.
+Just run it - no arguments needed.
 
 This branch (the mobile-web UI port, currently `dev`, destined to become the
-live `web` branch) is fully decoupled from `app`'s release pipeline — see
+live `web` branch) is fully decoupled from `app`'s release pipeline - see
 `app`'s scripts/python/release.py `step_sync_web`, which is now a no-op for
 exactly this reason. There is no build step and no GitHub-release/installer
 machinery here: the live site (player.juicewrldapi.com) is served straight
@@ -13,12 +13,12 @@ from a checkout of this branch, so "release" just means "get a clean commit
 onto origin and let that checkout pick it up".
 
 Steps:
-  1. Fast-forward onto origin/<branch> (whatever branch you're actually on —
+  1. Fast-forward onto origin/<branch> (whatever branch you're actually on -
      this script doesn't assume it's already been renamed to `web`).
   2. Pick a version (bump patch / minor / major, or keep / custom).
   3. Enter a commit message (only if the tree is dirty).
   4. Commit, then push to origin.
-  5. Optionally tag the commit and create a GitHub release (changelog only —
+  5. Optionally tag the commit and create a GitHub release (changelog only -
      no assets; nothing downloads this branch's build).
 """
 
@@ -37,7 +37,7 @@ REPO_OWNER = "leanwrldd"
 REPO_NAME  = "unreleased"
 API_BASE   = "https://api.github.com"
 
-# Best-effort mirror (same GH_TOKEN, same pattern as app's release.py) — origin
+# Best-effort mirror (same GH_TOKEN, same pattern as app's release.py) - origin
 # is the source of truth, the mirror is a nice-to-have that never blocks or
 # rolls back the real push.
 MIRROR_OWNER = "Juice-WRLD-API"
@@ -53,7 +53,7 @@ def banner():
     w = 66
     print()
     print(_c("╔" + "═"*(w-2) + "╗", CYN, BOLD))
-    row = "  🌐  UNRELEASED  —  Web Release  "
+    row = "  🌐  UNRELEASED  - Web Release  "
     print(_c("║", CYN, BOLD) + _c(row.ljust(w-2), WHT, BOLD) + _c("║", CYN, BOLD))
     print(_c("╚" + "═"*(w-2) + "╝", CYN, BOLD))
     print()
@@ -120,7 +120,7 @@ def push_mirror_branch(branch, token):
     has to match origin's branch exactly, and on a brand-new/empty mirror
     repo a plain push has nothing to fast-forward from.
 
-    The token never reaches the console or an exception message — it's
+    The token never reaches the console or an exception message - it's
     redacted from both the printed command and any captured stderr.
     """
     url = f"https://{token}@github.com/{MIRROR_OWNER}/{MIRROR_NAME}.git"
@@ -197,7 +197,7 @@ def step_sync_remote(branch, state):
             f"       git rebase origin/{branch}   (or merge)")
 
     if behind:
-        info(f"{behind} new commit(s) on origin/{branch} — fast-forwarding")
+        info(f"{behind} new commit(s) on origin/{branch} - fast-forwarding")
         run(f"git merge --ff-only origin/{branch}")
         ok(f"Fast-forwarded to {capture('git rev-parse --short HEAD')}")
     elif ahead:
@@ -246,13 +246,13 @@ def prompt_commit_message(version):
         for line in capture("git status --short").splitlines():
             detail(line)
         return ask("Commit message", default=f"v{version}")
-    ok("Nothing to commit — tree is clean")
+    ok("Nothing to commit - tree is clean")
     return None
 
 
 def prompt_release():
     """A GitHub release here is a changelog entry, not a downloadable
-    artifact — nothing consumes this branch's build. Skippable since most
+    artifact - nothing consumes this branch's build. Skippable since most
     web releases won't need one."""
     make = confirm("Create a GitHub release for this version? (changelog only, no assets)", default=False)
     if not make:
@@ -277,7 +277,7 @@ def step_commit(branch, version, msg, state):
         state["committed"] = True
         ok(f"Committed: {msg}")
     else:
-        ok("Nothing to commit — tree is clean")
+        ok("Nothing to commit - tree is clean")
 
 
 def step_push(branch, state):
@@ -288,7 +288,7 @@ def step_push(branch, state):
 
     token = get_token()
     if not token:
-        warn("GH_TOKEN not found (env var or .env.local) — skipping mirror push.")
+        warn("GH_TOKEN not found (env var or .env.local) - skipping mirror push.")
         return
     try:
         info(f"Mirroring {branch} → {MIRROR_OWNER}/{MIRROR_NAME}")
@@ -302,7 +302,7 @@ def step_release(branch, version, notes, state):
     section(5, TOTAL, "GitHub release  (changelog only)")
     token = get_token()
     if not token:
-        warn("GH_TOKEN not found (env var or .env.local) — skipping release.")
+        warn("GH_TOKEN not found (env var or .env.local) - skipping release.")
         detail(f"Tag it later with: git tag v{version} && git push origin v{version}")
         return
 
@@ -332,7 +332,7 @@ def step_release(branch, version, notes, state):
                 {"body": notes})
             state["release_id"] = release["id"]
             state["release_created_new"] = False
-            ok(f"Release already exists — updated  (id={release['id']})")
+            ok(f"Release already exists - updated  (id={release['id']})")
         else:
             raise
 
@@ -361,7 +361,7 @@ def rollback(state):
             pass
 
     if state.get("pushed"):
-        warn(f"Already pushed to origin/{state.get('branch')} — the live site reads from this "
+        warn(f"Already pushed to origin/{state.get('branch')} - the live site reads from this "
              f"branch. Not auto-reverting.")
         detail(f"To undo manually: git reset --hard {state.get('pre_commit_sha')} && "
                f"git push --force origin {state.get('branch')}")
@@ -372,7 +372,7 @@ def rollback(state):
             ok(f"Saved the discarded commit ({doomed}) on branch {_c(backup, WHT, BOLD)}")
             detail(f"Recover with: git cherry-pick {backup}")
         else:
-            warn(f"Could not create backup branch — recover {doomed} via `git reflog`")
+            warn(f"Could not create backup branch - recover {doomed} via `git reflog`")
         run(f"git reset --hard {state['pre_commit_sha']}", check=False)
         ok("Reverted local commit (and version bump)")
     elif state.get("version_changed") and state.get("original_version"):

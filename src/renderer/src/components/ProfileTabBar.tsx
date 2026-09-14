@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 // Generic tab bar shared by EditorProfileView.desktop.tsx/.mobile.tsx (and,
 // per the rewrite plan, a future Phase 4 migration of AdminPage's own nav
-// onto this same component — kept generic enough for that even though it's
+// onto this same component - kept generic enough for that even though it's
 // only wired into the profile view for now).
 export interface ProfileTabDef<T extends string = string> {
   id: T
@@ -18,7 +18,7 @@ export interface ProfileTabBarProps<T extends string> {
   /** 'underline' matches EditorProfileView.desktop's original tab strip
    *  (bottom border indicator). 'pill' matches EditorProfileView.mobile's
    *  original rounded-full chip row. Caller owns the surrounding
-   *  border/padding — this component only renders the tabs themselves. */
+   *  border/padding - this component only renders the tabs themselves. */
   variant?: 'underline' | 'pill'
 }
 

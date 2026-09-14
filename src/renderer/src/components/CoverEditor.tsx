@@ -10,7 +10,7 @@ import FilePickerModal from './FilePickerModal'
 
 export interface CoverVersionEntry { song: JWApiSong }
 
-// The cover-picking half of Personalize's "Custom cover" section — grid of
+// The cover-picking half of Personalize's "Custom cover" section - grid of
 // this song's own/sibling covers, an inline title search, a file browser, and
 // a paste-URL fallback. Extracted out of SongPrefsSection so WRLD's cover
 // long-press sheet can offer the exact same picker without the rest of
@@ -23,7 +23,7 @@ export default function CoverEditor({
   ownImageRaw: string | null
   versions?: CoverVersionEntry[]
   altTitles?: string[]
-  /** Called after a cover is applied — sheet-style callers use this to close. */
+  /** Called after a cover is applied - sheet-style callers use this to close. */
   onPicked?: () => void
 }): JSX.Element {
   const setSongCover = useStore(s => s.setSongCover)

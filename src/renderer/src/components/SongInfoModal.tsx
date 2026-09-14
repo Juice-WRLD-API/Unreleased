@@ -77,15 +77,15 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
   const openReport = useStore((s) => s.openReport)
 
   // Clicking a linked version swaps the displayed song in place, without the
-  // caller needing to manage that — falls back to the `song` prop otherwise.
+  // caller needing to manage that - falls back to the `song` prop otherwise.
   const [overrideSong, setOverrideSong] = useState<JWApiSong | null>(null)
   useEffect(() => { setOverrideSong(null) }, [song?.id])
   const displaySong = overrideSong ?? song
 
-  // "Other versions" — a separate database from juicewrldapi.com (see
+  // "Other versions" - a separate database from juicewrldapi.com (see
   // lib/versionsApi.ts), since that API has no concept of grouping e.g.
   // "Song (v1)" / "(v2)" / "(TV Mix)" together as the same underlying song.
-  // Linking/unlinking only happens from the editor (Edit song → Versions) —
+  // Linking/unlinking only happens from the editor (Edit song → Versions) -
   // this view is read-only.
   const [versions, setVersions] = useState<{ song: JWApiSong; meta: SongVersionMeta }[]>([])
   const [loadingVersions, setLoadingVersions] = useState(false)
@@ -121,10 +121,10 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
   }
 
   // Swipe-down-to-dismiss on mobile, same curtain gesture as WRLD's full-
-  // screen player. Only armed from the hero (cover/header) area — same
-  // region the desktop drag-handle uses — so it doesn't fight the scrollable
+  // screen player. Only armed from the hero (cover/header) area - same
+  // region the desktop drag-handle uses - so it doesn't fight the scrollable
   // info list below. dragY/dragging get handed to ModalOverlay so it can
-  // translate the backdrop *with* the panel — otherwise the panel would slide
+  // translate the backdrop *with* the panel - otherwise the panel would slide
   // away while an opaque backdrop stayed put, hiding the app behind it until
   // the modal actually closed.
   // Called before the `!displaySong` early return below (hooks must run
@@ -136,14 +136,14 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
 
   // The user's per-song override (custom name/cover). Subscribing to the whole
   // map keeps the hero in step when it's edited from the Personalize section
-  // below (or another window) — the map's reference only changes on a write,
+  // below (or another window) - the map's reference only changes on a write,
   // so this modal isn't re-rendering on unrelated store churn.
   const pref = songPrefs[displaySong.id]
   const apiCoverUrl = buildImageUrl(displaySong.image_url)
   const coverUrl = resolvePrefCoverUrl(pref?.cover_url) ?? apiCoverUrl
   const apiPrimaryTitle = displaySong.name
   const primaryTitle = pref?.name || apiPrimaryTitle
-  // Every OTHER known title, not just track_titles[1:] — track_titles is an
+  // Every OTHER known title, not just track_titles[1:] - track_titles is an
   // unordered alias list, so its first entry isn't reliably the primary name
   // (see EditorPage's baseline() for the same mismatch). Excluding by value
   // rather than by index keeps a real alias from vanishing off this list just
@@ -197,7 +197,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
 
   // ModalOverlay portals to <body> so the overlay is never trapped inside a
   // caller with a CSS transform/animation/overflow (e.g. NowPlaying's
-  // slide-in panel) — a transformed ancestor becomes the containing block for
+  // slide-in panel) - a transformed ancestor becomes the containing block for
   // position: fixed, which would otherwise render this "modal" clipped
   // inside that panel.
   return (
@@ -266,7 +266,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
                   <span className="text-white text-[10px] font-semibold">{coverMsg}</span>
                 </div>
               ) : (
-                // Copy/save actions — always visible (no hover on touch),
+                // Copy/save actions - always visible (no hover on touch),
                 // tucked in the bottom-right corner so they don't compete with
                 // the cover itself.
                 <div className="absolute bottom-1 right-1 flex items-center gap-1">
@@ -331,7 +331,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             altTitles={altTitles}
           />
 
-          {/* Alt names as chips right under the hero, like the reference —
+          {/* Alt names as chips right under the hero, like the reference -
               they're also what widens the cover picker's search (see
               SongPrefsSection's altTitles prop). */}
           {altTitles.length > 0 && (
@@ -416,7 +416,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
                     >
                       <span className="text-text-primary text-xs truncate block">
                         {v.name}
-                        {meta.version && <span className="text-text-muted"> ({meta.version}{meta.versionTitle ? ` — ${meta.versionTitle}` : ''})</span>}
+                        {meta.version && <span className="text-text-muted"> ({meta.version}{meta.versionTitle ? ` - ${meta.versionTitle}` : ''})</span>}
                         {!meta.version && meta.versionTitle && <span className="text-text-muted"> ({meta.versionTitle})</span>}
                       </span>
                     </button>

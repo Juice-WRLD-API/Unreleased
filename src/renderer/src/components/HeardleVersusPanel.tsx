@@ -181,7 +181,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
   }, [])
 
   const handleMatched = useCallback((id: string, round?: PuzzleResponse) => {
-    // Both transports can deliver this, so ignore the second one — but only
+    // Both transports can deliver this, so ignore the second one - but only
     // when it's the *same* match. Dropping it on phase alone stranded the
     // player in a match they'd been placed in from a stale queue entry: the
     // server considered them playing, the UI showed the idle screen, and the
@@ -286,7 +286,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
           era: payload.reveal.era ?? null,
           category: payload.reveal.category ?? '',
           // revealCoverUrl reads the runtime object, not MatchEndReveal's
-          // declared type — the websocket payload may carry `image_url`
+          // declared type - the websocket payload may carry `image_url`
           // (see the comment on revealCoverUrl) even though that field isn't
           // in this interface.
           imageUrl: revealCoverUrl(payload.reveal) ?? '',
@@ -328,8 +328,8 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
   }, [account?.id])
 
   // REST polling is a *fallback*, not a parallel channel. Running it while the
-  // socket is open would enqueue the same player twice — once over each
-  // transport — so it only fires when the socket can't do the job.
+  // socket is open would enqueue the same player twice - once over each
+  // transport - so it only fires when the socket can't do the job.
   useEffect(() => {
     if (phase !== 'queue') return
     let cancelled = false
@@ -374,7 +374,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
     if (status !== 'playing' || !matchId) return
     if (!sendMatchGuess(null, true, matchId)) {
       setConnected(false)
-      setError("Connection lost — that skip didn't send. Reconnecting…")
+      setError("Connection lost - that skip didn't send. Reconnecting…")
       return
     }
     stopPlayback()
@@ -384,7 +384,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
     if (finished || !matchId) return
     if (!sendMatchGuess(song.id, false, matchId)) {
       setConnected(false)
-      setError("Connection lost — that guess didn't send. Reconnecting…")
+      setError("Connection lost - that guess didn't send. Reconnecting…")
       return
     }
     stopPlayback()
@@ -580,7 +580,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
             {finished && phase === 'playing' && (
               <div className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-center">
                 <p className="text-sm font-semibold text-text-primary">
-                  {status === 'won' ? 'Correct — waiting for opponent…' : 'Out of guesses — waiting for opponent…'}
+                  {status === 'won' ? 'Correct - waiting for opponent…' : 'Out of guesses - waiting for opponent…'}
                 </p>
                 <p className="text-xs text-text-muted mt-1">Result is decided once both players finish</p>
               </div>

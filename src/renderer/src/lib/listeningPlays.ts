@@ -1,4 +1,4 @@
-// Timestamped play history — one row per credited play, kept alongside the
+// Timestamped play history - one row per credited play, kept alongside the
 // aggregate per-song counts in lib/songPrefs (which predate this and stay the
 // source of truth for all-time numbers).
 //
@@ -23,7 +23,7 @@ export function normalizeListeningPlayEvent(raw: unknown): ListeningPlayEvent | 
   return { song, played_at }
 }
 
-/** Sort key — parsed, not the raw string. Local rows are always
+/** Sort key - parsed, not the raw string. Local rows are always
  *  `toISOString()` (UTC, milliseconds), but rows coming back from the server
  *  may be rendered in another shape ("+00:00" instead of "Z", microseconds),
  *  and lexical order across mixed shapes is wrong. */
@@ -42,7 +42,7 @@ export function capListeningPlays(events: ListeningPlayEvent[], max = SERVER_LIS
 }
 
 /** Union of this device's rows and the profile's, newest first. Dedupes on
- *  (song, parsed timestamp) rather than the literal string — see timeOf: a
+ *  (song, parsed timestamp) rather than the literal string - see timeOf: a
  *  server that reformats timestamps would otherwise duplicate the entire
  *  history on every login until the cap swallowed it. */
 export function mergeListeningPlays(local: ListeningPlayEvent[], server: ListeningPlayEvent[]): ListeningPlayEvent[] {
@@ -83,13 +83,13 @@ export function sortListeningPlays(events: ListeningPlayEvent[]): ListeningPlayE
   return [...events].sort(newestFirst)
 }
 
-/** Epoch ms of the oldest logged play — the point before which a period view
+/** Epoch ms of the oldest logged play - the point before which a period view
  *  has nothing to say. null when the log is empty.
  *
  *  Two separate things move this forward: the log only exists from the build
  *  that shipped it, and the cap evicts the oldest rows once a heavy listener
  *  passes SERVER_LISTENING_PLAYS_LIMIT. Callers don't need to tell those
- *  apart — either way, a window that starts earlier than this is incomplete
+ *  apart - either way, a window that starts earlier than this is incomplete
  *  and has to be labelled as such. */
 export function listeningPlaysCoverageStart(events: ListeningPlayEvent[]): number | null {
   let oldest: number | null = null

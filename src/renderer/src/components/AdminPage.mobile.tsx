@@ -47,7 +47,7 @@ function FieldDiff({ fieldKey, before, after }: { fieldKey: string; before: unkn
   const afterStr  = renderValue(after)
   const unchanged = beforeStr === afterStr
   const isLong    = LONG_KEYS.has(fieldKey) || beforeStr.length > LONG_THRESHOLD || afterStr.length > LONG_THRESHOLD
-  // synced_lyrics is LRC — default expanded so content is visible immediately
+  // synced_lyrics is LRC - default expanded so content is visible immediately
   const [exp, setExp] = useState(!isLong || fieldKey === 'synced_lyrics')
   const MAX = fieldKey === 'synced_lyrics' ? 60 : 8
 
@@ -82,7 +82,7 @@ function FieldDiff({ fieldKey, before, after }: { fieldKey: string; before: unkn
         </div>
       </div>
 
-      {/* Before / after — stacked, not side-by-side (a phone-width column each
+      {/* Before / after - stacked, not side-by-side (a phone-width column each
           would leave both unreadable). */}
       {sideBySide && (
         <div className="grid grid-cols-1 divide-y divide-[var(--border)]">
@@ -167,11 +167,11 @@ function ProposalDiff({ proposal }: { proposal: SongEditProposal }): JSX.Element
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 // `embedded` renders the page as a panel inside another view (the editor
-// profile's Admin tab) — no back button, page title, or window-control
+// profile's Admin tab) - no back button, page title, or window-control
 // clearance, since the host view owns that chrome.
 export default function AdminPage({ embedded = false, initialTab, onExit }: {
   embedded?: boolean
-  /** Which section to show — used by EditorProfileView's managerOnly landing
+  /** Which section to show - used by EditorProfileView's managerOnly landing
    *  (the only remaining embedded caller). Standalone falls back to the
    *  URL-derived tab below instead. */
   initialTab?: AdminTab
@@ -181,19 +181,19 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
 }): JSX.Element {
   const { account, setActiveView, setActiveAdminTab, loadAccount, activeChannel, channels, activeAdminTab } = useStorePick('account', 'setActiveView', 'setActiveAdminTab', 'loadAccount', 'activeChannel', 'channels', 'activeAdminTab')
   // Falls back to the standalone console's own deep link (see
-  // ADMIN_TAB_PATHS) when nobody passed an explicit initialTab — only
+  // ADMIN_TAB_PATHS) when nobody passed an explicit initialTab - only
   // relevant when not embedded, since the embedded panel has no URL of its
   // own and always arrives with an explicit initialTab from its host
   // (e.g. EditorProfileView's Admin tile) instead.
   const effectiveInitialTab = initialTab ?? (embedded ? undefined : activeAdminTab ?? undefined)
   // The header's rightmost controls (refresh + tabs) sit at the same corner
   // as the custom frameless-window buttons (see WindowControls in App.tsx,
-  // fixed top-right). Without extra clearance they render underneath them —
-  // is_manager grants no admin power beyond reviewing comp-file proposals —
+  // fixed top-right). Without extra clearance they render underneath them -
+  // is_manager grants no admin power beyond reviewing comp-file proposals -
   // everything else on this page (song edits, applications, users, stats,
   // security) stays isAdmin-only. managerOnly narrows the page down to just
   // that one tab instead of the full admin console. Scoped to the active
-  // channel, not "any channel" — see useChannelRoles.
+  // channel, not "any channel" - see useChannelRoles.
   const { isAdmin, isManager, canReviewStaff } = useStaffRoles(account, activeChannel, channels)
   const managerOnly  = isManager && !isAdmin
   const otpEnabled = !!account?.otp_enabled
@@ -216,14 +216,14 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     activeChannel,
     initialTab: effectiveInitialTab ?? (managerOnly ? 'comp-proposals' : 'proposals'),
     // account can still be loading when this page first mounts (deep link,
-    // page refresh) — managerOnly flips from false to true once it lands,
+    // page refresh) - managerOnly flips from false to true once it lands,
     // and the tab set at mount time (still 'proposals') would otherwise
     // strand a manager on a tab their nav bar no longer offers a button for.
     forceTab: { when: managerOnly, tab: 'comp-proposals' },
     managerNavIds: ['comp-proposals'],
   })
 
-  // No more overview grid — every section already has its own deep link
+  // No more overview grid - every section already has its own deep link
   // (see ADMIN_TAB_PATHS) and its own entry point on the profile page's
   // Admin tile, so a second, in-page "pick a section" screen was a
   // redundant extra hop rather than a real navigation aid. AdminPage now
@@ -237,7 +237,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   }
 
   // Each tab's content, once mounted, stays mounted (just hidden) instead of
-  // being torn down and rebuilt every time you switch away and back — an
+  // being torn down and rebuilt every time you switch away and back - an
   // unmount/remount was re-triggering every <img> in the tab (avatars, song
   // art) on every single switch, which for a list of any size fired hundreds
   // of redundant image requests for data that hadn't changed.
@@ -300,7 +300,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
       )}
 
       {/* A tab's data loads once per visit (see the sig comment in
-          useAdminQueue) rather than refetching every time it's reselected —
+          useAdminQueue) rather than refetching every time it's reselected -
           this is the explicit way back to fresh data instead. */}
       {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'security' && (
         <div className="shrink-0 flex items-center justify-between px-3 pb-1.5">
@@ -320,7 +320,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
 
       {/* The tab body stays mounted through a reload (switching the reports/
           proposals status filter, hitting refresh, etc.) instead of being
-          replaced by a spinner — that was unmounting things like the status
+          replaced by a spinner - that was unmounting things like the status
           filter chips and each tab's local state (selection, draft notes,
           cached song lookups) on every refetch. A translucent overlay signals
           the load without tearing the UI down. */}
@@ -425,7 +425,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
   const submit = async () => {
     setSaving(true); setErr(null)
     try {
-      // Convert back — track_titles is array
+      // Convert back - track_titles is array
       const revised_data: Record<string, unknown> = {}
       Object.entries(fields).forEach(([k, v]) => {
         if (k === 'track_titles') {
@@ -632,7 +632,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   const { playTrack } = useStorePick('playTrack')
 
   // Every proposal ever filed, fetched once and only when the history panel is
-  // first opened — /admin/proposals/ has no per-song filter, so "what else has
+  // first opened - /admin/proposals/ has no per-song filter, so "what else has
   // been proposed for this song" means holding the whole archive and grouping
   // client-side. Nulled after a review so the next open reflects it.
   const [archive,        setArchive]        = useState<SongEditProposal[] | null>(null)
@@ -644,7 +644,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   const [loadingSongId, setLoadingSongId] = useState<number | null>(null)
   const [playError,     setPlayError]     = useState<string | null>(null)
 
-  // Searchable: the song title, who filed it, the change type, and both ids —
+  // Searchable: the song title, who filed it, the change type, and both ids -
   // the public song id is what reports and Discord threads cite, so pasting
   // one should land on its proposal. Built once per fetch: under the "All"
   // filter this list is the entire archive, and doing it inline in the filter
@@ -659,7 +659,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
 
   // The filter runs against a deferred copy of the query, so a keystroke
   // repaints the input immediately and React re-runs the list at a lower
-  // priority — typing stays smooth even when the match set is huge.
+  // priority - typing stays smooth even when the match set is huge.
   const deferredQuery = useDeferredValue(query)
 
   const sortedProposals = useMemo(() => sortProposals(
@@ -669,7 +669,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
     sortBy,
   ), [proposals, haystacks, sortBy, deferredQuery])
 
-  // The list isn't windowed, and "All" can be the entire archive — mounting
+  // The list isn't windowed, and "All" can be the entire archive - mounting
   // every row costs several DOM nodes each before the user has even typed.
   // Render a page at a time and let them ask for more; searching normally
   // narrows the set well below the cap anyway.
@@ -678,7 +678,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   const pageOf = sortedProposals.slice(0, shown)
   const remaining = sortedProposals.length - pageOf.length
 
-  // Approving/reversing a proposal changes a song's live data — drop its
+  // Approving/reversing a proposal changes a song's live data - drop its
   // cached lyrics so the next play reflects it.
   const dropCache = (id: number) => {
     const songId = proposals.find(p => p.id === id)?.song
@@ -717,7 +717,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
     setLoadingSongId(songId)
     try {
       const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
-      // An unsurfaced song is a real catalog entry with no file behind it —
+      // An unsurfaced song is a real catalog entry with no file behind it -
       // the proposal is still reviewable, there's just nothing to play.
       if (!song.path) { setPlayError('No file on this song to play'); return }
       const track = songToTrack(song)
@@ -744,7 +744,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
 
   const p = selected
 
-  // Newest first, and it deliberately includes the proposal being viewed — the
+  // Newest first, and it deliberately includes the proposal being viewed - the
   // point is to read this one in the context of the run, so dropping it leaves
   // a hole in the timeline. It's marked "viewing" instead.
   const history = useMemo(() => {
@@ -759,7 +759,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   useEffect(() => { setExpandedPast(null); setPlayError(null) }, [p?.id])
   // A refetch replaces the rows wholesale, so a half-written revision no
   // longer lines up with what's on screen. Typing in the search box must not
-  // trip this — that's why it keys off the raw list, not the filtered one.
+  // trip this - that's why it keys off the raw list, not the filtered one.
   useEffect(() => { setRevising(false) }, [proposals])
 
   useBackToClose(() => (revising ? setRevising(false) : historyOpen ? setHistoryOpen(false) : setSelected(null)), p != null)
@@ -852,7 +852,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
           )}
         </div>
 
-        {/* Song history — every proposal ever filed against this song, so a
+        {/* Song history - every proposal ever filed against this song, so a
             reviewer can see whether a field has been fought over before, or
             whether this editor is re-submitting something already rejected.
             Read-only: expanding a row shows its diff in place rather than
@@ -1120,7 +1120,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
   const [actionId, setActionId] = useState<number | null>(null)
   const [filter,   setFilter]   = useState<'all' | 'admins' | 'editors' | 'contributors' | 'managers' | 'applicants'>('all')
   const [search,   setSearch]   = useState('')
-  // Collapsed-by-default accordion instead of always-expanded cards — one
+  // Collapsed-by-default accordion instead of always-expanded cards - one
   // row open at a time, mirroring the desktop master/detail split adapted to
   // a single column.
   const [expandedId, setExpandedId] = useState<number | null>(null)
@@ -1136,7 +1136,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
     { id: 'admins' as const,     label: 'Admins',     count: users.filter(u => u.role === 'administrator').length },
     { id: 'editors' as const,    label: 'Editors',    count: users.filter(u => u.role === 'editor').length },
     // Contributors cuts across the role buckets rather than being one of them
-    // — contributor_enabled is a flag on top of a role, so a contributor is
+    // - contributor_enabled is a flag on top of a role, so a contributor is
     // still counted under whichever of Admins/Editors/Applicants they are.
     { id: 'contributors' as const, label: 'Contributors', count: users.filter(u => u.contributor_enabled).length },
     { id: 'managers' as const, label: 'Managers', count: users.filter(u => !!u.manager_enabled).length },
@@ -1144,7 +1144,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
   ]
 
   // One haystack per user, built once per users-array change rather than
-  // per keystroke (see buildHaystack's own doc comment) — also widens search
+  // per keystroke (see buildHaystack's own doc comment) - also widens search
   // to match role/contributor/manager keywords, not just the display name
   // like the old plain substring match did.
   const haystack = useMemo(() => new Map(users.map(u => [u.user_id,

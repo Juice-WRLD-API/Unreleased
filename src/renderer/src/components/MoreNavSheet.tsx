@@ -5,7 +5,7 @@ import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { preloadView } from '../lib/lazyViews'
 
-// The bottom sheet for nav items that don't fit the bar directly — opened
+// The bottom sheet for nav items that don't fit the bar directly - opened
 // from a button on Home rather than a tab of its own; see BottomNav's
 // removal of the in-bar "More" button for why.
 export default function MoreNavSheet(): JSX.Element | null {
@@ -18,7 +18,7 @@ export default function MoreNavSheet(): JSX.Element | null {
 
   const navigateTo = (view: (typeof moreTabs)[number]['view']): void => {
     // Re-tapping the already-active Playlists row dispatches a back event
-    // instead of going through setActiveView (it's a no-op there — same view).
+    // instead of going through setActiveView (it's a no-op there - same view).
     if (activeView === view && view === 'playlists') {
       window.dispatchEvent(new CustomEvent('playlists:back'))
     } else {

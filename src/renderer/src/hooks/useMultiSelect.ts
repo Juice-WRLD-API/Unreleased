@@ -5,24 +5,24 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // items, Escape to exit, auto-exit once the last item is deselected, and an
 // optional Ctrl/Cmd+A "select all" binding. Previously each view hand-rolled
 // its own copy of all of this (see the Tracker's Ctrl+A bugs this was
-// extracted from — a race between the auto-exit effect and an async
+// extracted from - a race between the auto-exit effect and an async
 // select-all fetch that silently discarded the whole selection).
 //
 // Keyed on a generic Id with the stored value defaulting to Id itself, so
 // Set<string>-style call sites (file paths, playlist keys) work by passing
-// the id as both id and value — `.selected` is still a Map, so read it with
+// the id as both id and value - `.selected` is still a Map, so read it with
 // `[...selected.keys()]` where a Set spread was used before.
 export interface UseMultiSelectCtrlAOptions<Id, T> {
   // Only wire the Ctrl+A listener while this is true (e.g. the view's own
   // tab is the active one). Defaults to true.
   enabled?: boolean
-  // Everything currently selectable, synchronously — from whatever's already
+  // Everything currently selectable, synchronously - from whatever's already
   // loaded/rendered. Called on every select-all (also used to tell whether
   // the current selection already covers everything, so a second call can
   // toggle deselect).
   getAll: () => Map<Id, T>
   // For paginated/infinite-scroll views where `getAll` may not be everything
-  // yet — provide this to fetch the complete set instead. Only called when
+  // yet - provide this to fetch the complete set instead. Only called when
   // `needsFetch` returns true; while it's in flight, `selectAllLoading` is
   // true and calling select-all again cancels it (deselecting) instead of
   // re-running. Returning null means "cancelled or failed, don't apply" (the
@@ -53,7 +53,7 @@ export interface UseMultiSelectResult<Id, T> {
   clear: () => void
   exitSelectMode: () => void
   // Runs the same "select everything / fetch if needed / toggle-deselect if
-  // everything's already selected" logic the Ctrl+A binding uses — call this
+  // everything's already selected" logic the Ctrl+A binding uses - call this
   // from a "Select all" button so both paths stay identical. No-op if
   // `ctrlA` wasn't provided.
   selectAll: () => void
@@ -95,7 +95,7 @@ export function useMultiSelect<Id, T = Id>(
 
   // Deselecting the last item (click, context-menu unlink, etc.) drops out of
   // select mode on its own, so there's no separate "Cancel" needed once
-  // you're in it. Suppressed while a select-all fetch is loading — the first
+  // you're in it. Suppressed while a select-all fetch is loading - the first
   // select-all on an empty selection sets selectMode true before the fetch
   // has populated `selected`, and without this guard this effect would see
   // size===0 and flip select mode back off before the fetch ever finishes.
@@ -111,7 +111,7 @@ export function useMultiSelect<Id, T = Id>(
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectMode, exitSelectMode])
 
-  // Bumped to invalidate an in-flight fetchAll — calling select-all again
+  // Bumped to invalidate an in-flight fetchAll - calling select-all again
   // while loading cancels it so a stale response can't land afterward and
   // silently re-select everything after the user just asked to deselect.
   const fetchTokenRef = useRef(0)
@@ -119,7 +119,7 @@ export function useMultiSelect<Id, T = Id>(
 
   // Kept in a ref (rather than depended-on directly) so `selectAll` and the
   // Ctrl+A listener always read the current `selected`/`selectMode` without
-  // needing to be recreated — and thus re-subscribed to `window` — every
+  // needing to be recreated - and thus re-subscribed to `window` - every
   // time the selection changes.
   const stateRef = useRef({ selectMode, selected, selectAllLoading })
   stateRef.current = { selectMode, selected, selectAllLoading }

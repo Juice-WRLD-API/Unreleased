@@ -1,5 +1,5 @@
 // Shared display formatters. Every mm:ss / byte-size label in the app goes
-// through here — don't re-implement these locally in components.
+// through here - don't re-implement these locally in components.
 
 /**
  * Seconds → "m:ss". `empty` is returned for 0/NaN/Infinity/negative input,

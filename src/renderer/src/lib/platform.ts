@@ -4,7 +4,7 @@
 
 const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
 
-// iOS / iPadOS — every browser there is WebKit. iPadOS 13+ reports a desktop
+// iOS / iPadOS - every browser there is WebKit. iPadOS 13+ reports a desktop
 // ("MacIntel") UA, so the touch-point check is what distinguishes it from a
 // real Mac (Electron desktop = MacIntel, 0 touch points → NOT flagged).
 export const IS_IOS =
@@ -14,7 +14,7 @@ export const IS_IOS =
 
 export const IS_ANDROID = /Android/i.test(ua)
 
-// Coarse "is this a phone/tablet" check — used to gate mobile-only UI.
+// Coarse "is this a phone/tablet" check - used to gate mobile-only UI.
 export const IS_MOBILE = IS_IOS || IS_ANDROID
 
 /** Runs `fn` once the browser is idle, or after `timeoutMs` at the latest.
@@ -22,7 +22,7 @@ export const IS_MOBILE = IS_IOS || IS_ANDROID
  *
  *  For background warm-up work only. Anything scheduled here gives up its
  *  slice of the startup network/CPU budget to whatever the user is actually
- *  looking at — the point is that a prefetch must never race the visible
+ *  looking at - the point is that a prefetch must never race the visible
  *  view's own first request. requestIdleCallback isn't in Safari <16.4, hence
  *  the timeout fallback. */
 export function runWhenIdle(fn: () => void, timeoutMs = 2000): () => void {

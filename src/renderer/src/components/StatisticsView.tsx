@@ -13,7 +13,7 @@ import { relativeTime } from './adminShared'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import SongContextMenu, { type SongContextMenuState } from './SongContextMenu'
 
-// Catalog-wide numbers from GET /stats/ and GET /plays/stats/ — everyone sees
+// Catalog-wide numbers from GET /stats/ and GET /plays/stats/ - everyone sees
 // the same thing here, unlike StatsView ("Your Wrapped"), which is personal
 // listening history built from this user's own play log. Reached from Home's
 // hero stat row (see HomeView.desktop/.mobile) and by direct URL; not a
@@ -21,7 +21,7 @@ import SongContextMenu, { type SongContextMenuState } from './SongContextMenu'
 // chevron rather than a bottom-nav destination.
 //
 // /stats/ counts catalog rows (how many songs exist); /plays/stats/ counts
-// plays across every listener (how much they've been played) — two different
+// plays across every listener (how much they've been played) - two different
 // endpoints, shown as two different sections below.
 
 const CATEGORY_ORDER: (keyof JWApiStats['category_stats'])[] = [
@@ -29,15 +29,15 @@ const CATEGORY_ORDER: (keyof JWApiStats['category_stats'])[] = [
 ]
 
 // top_songs/recent_plays come back with only a name/title, era abbreviation
-// and category — no cover art, no stream path. Resolving up to ~100 ids
+// and category - no cover art, no stream path. Resolving up to ~100 ids
 // (50 top songs + 50 recent plays, often overlapping) one at a time would be
 // the exact "hundreds of requests" problem this API is otherwise good about
 // avoiding, so this goes through lib/statsCatalog's resolveStatsSongs
-// instead — the same bulk-catalog-page-once cache the personal Wrapped page
+// instead - the same bulk-catalog-page-once cache the personal Wrapped page
 // uses, so a visit there often leaves this warm already.
 //
 // Both lists render their full data (up to 50 rows, the API's own cap) inside
-// a fixed-height scroll area sized to ~15 rows — same visible count, same
+// a fixed-height scroll area sized to ~15 rows - same visible count, same
 // max-height, so the two sit at equal height side by side instead of one
 // stopping short or growing to chase the other's content.
 const LIST_MAX_HEIGHT = 'max-h-[720px]'
@@ -95,7 +95,7 @@ function CategoryBadge({ category }: { category: string }): JSX.Element {
 }
 
 // Both top_songs and recent_plays rows carry a song id but no playable track.
-// `songs` is the bulk-resolved map (see resolveStatsSongs above) — used when
+// `songs` is the bulk-resolved map (see resolveStatsSongs above) - used when
 // it already has the row's song (the common case once it's loaded), falling
 // back to a one-off fetch for anything it doesn't (map still loading, or an
 // id resolveStatsSongs couldn't find).
@@ -240,7 +240,7 @@ export default function StatisticsView(): JSX.Element {
   const playById = usePlaySongById(songMap)
 
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
-  // Same cover-lookup-first, fetch-on-miss split as usePlaySongById — a right
+  // Same cover-lookup-first, fetch-on-miss split as usePlaySongById - a right
   // click needs a full Track synchronously if it can, but falls back to
   // resolving just that one song rather than doing nothing while songMap is
   // still loading.
@@ -252,7 +252,7 @@ export default function StatisticsView(): JSX.Element {
   }
 
   // listEras()/eraLabel() read a module-level cache that fills in
-  // asynchronously — this just forces a re-render once loadEraFullNames
+  // asynchronously - this just forces a re-render once loadEraFullNames
   // resolves so the era list and full-name labels appear without a reload.
   const [, bumpEras] = useReducer((n: number) => n + 1, 0)
   useEffect(() => {
@@ -338,7 +338,7 @@ export default function StatisticsView(): JSX.Element {
                 )}
               </div>
 
-              {/* Category breakdown — catalog size and plays, one card per
+              {/* Category breakdown - catalog size and plays, one card per
                   category rather than two separately-ordered rows. */}
               {stats && (
                 <div>
@@ -360,7 +360,7 @@ export default function StatisticsView(): JSX.Element {
               )}
 
               {/* Below here, the page has room to spare in a narrow single
-                  column — two lg-width columns instead pair related sections
+                  column - two lg-width columns instead pair related sections
                   (song lists together, era charts together) so there's less
                   to scroll through on a wide window. */}
               <div className="grid lg:grid-cols-2 gap-6">

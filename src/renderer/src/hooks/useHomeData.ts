@@ -14,7 +14,7 @@ import { resumeEffectsContext } from '../lib/audioEffects'
 import type { Track, ViewType } from '../types'
 
 // A daily puzzle (streak + played-today) vs. Tier List, which is a standing
-// ranking with no daily reset — same card shell, different second line.
+// ranking with no daily reset - same card shell, different second line.
 export type GameCard =
   | { view: ViewType; label: string; kind: 'daily'; streak: number; done: boolean }
   | { view: ViewType; label: string; kind: 'freeform'; sub: string }
@@ -24,7 +24,7 @@ export interface HomePlaylistCard {
   name: string
   subtitle: string
   // A single cover image, or (mutually exclusive) up to 4 track covers to lay
-  // out as a mosaic — the same fallback a playlist with no cover of its own
+  // out as a mosaic - the same fallback a playlist with no cover of its own
   // gets everywhere else in the app. Exactly one of the two is set.
   cover: string | null
   mosaic: string[] | null
@@ -32,7 +32,7 @@ export interface HomePlaylistCard {
 }
 
 // Everything the Home dashboard shows, shared by the mobile and desktop
-// shells so the two can never drift on what a section means or contains —
+// shells so the two can never drift on what a section means or contains -
 // they differ only in layout.
 //
 // It's a dashboard over things the app already knows, not a new data source:
@@ -44,7 +44,7 @@ export interface HomePlaylistCard {
 // on songs joined against the stats catalog, and resolving that costs ~25
 // requests on a cold cache (lib/statsCatalog). The counts below come straight
 // off the raw play events instead. Listening *time* is the one number that
-// genuinely needs song durations, so it isn't shown here — /stats owns that.
+// genuinely needs song durations, so it isn't shown here - /stats owns that.
 export function useHomeData() {
   const {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
@@ -62,7 +62,7 @@ export function useHomeData() {
 
   // On a fresh app launch, playlists load as one step of loadAccount()'s long
   // sequential chain (getMe → favorites → prefs → folders → reports → THEN
-  // playlists) — Home routinely finishes mounting before that chain gets to
+  // playlists) - Home routinely finishes mounting before that chain gets to
   // its playlists step, and it's just one more await away from never getting
   // there at all if an earlier step throws. Rather than depend on that chain,
   // Home asks for its own copy directly; refreshPlaylists() already no-ops
@@ -74,7 +74,7 @@ export function useHomeData() {
 
   // localStorage-backed, so read once per mount rather than per render. Home is
   // remounted on every visit (it's a route), which is exactly when this should
-  // refresh — a song played while you were on another tab shows up on return.
+  // refresh - a song played while you were on another tab shows up on return.
   const recent = useMemo(() => loadRecentTracks(), [])
 
   // Same stale-while-revalidate pattern as NewsView: paint the last cached
@@ -121,7 +121,7 @@ export function useHomeData() {
     ...ownPlaylists.filter((p) => p.track_count > 0).map((p) => {
       // `playlists` is fetched with omit_cover_image=true (PlaylistsView's own
       // grid pays that same cost), so a summary object almost never carries
-      // its own cover_image/cover_image_url — peekPlaylistCover's cache is the
+      // its own cover_image/cover_image_url - peekPlaylistCover's cache is the
       // real source, warmed in the background by prefetchPlaylistDetails at
       // startup and by PlaylistsView whenever it's been opened. A miss (cache
       // still cold) just falls back to the icon, same as before.
@@ -170,7 +170,7 @@ export function useHomeData() {
     window.dispatchEvent(new CustomEvent('news:open', { detail: item.id }))
   }
 
-  // Navigating to WRLD used to land on the page without actually tuning in —
+  // Navigating to WRLD used to land on the page without actually tuning in -
   // the 999 FM toggle there is a separate click. Mirrors that toggle's own
   // "turn on" branch (WrldView's top-left button) so the shortcut here does
   // both in one action, same as clicking through and then hitting the toggle.

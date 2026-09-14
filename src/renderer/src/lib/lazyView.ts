@@ -4,11 +4,11 @@ import { lazy, ComponentType, LazyExoticComponent } from 'react'
 // On the web that filename stops existing the moment the site redeploys, so a
 // tab left open across a deploy throws "Failed to fetch dynamically imported
 // module" the first time the user navigates to a lazy view. The chunk isn't
-// coming back — only a reload gets the new index.html with the new hashes.
+// coming back - only a reload gets the new index.html with the new hashes.
 //
 // So: retry once (covers a genuinely flaky network), then reload the page once.
 // The sessionStorage stamp keeps a chunk that fails for any *other* reason
-// (offline, blocked by an extension) from putting the app in a reload loop —
+// (offline, blocked by an extension) from putting the app in a reload loop -
 // after one attempt the error falls through to the ErrorBoundary as before.
 const RELOAD_KEY = 'chunk-reload-at'
 const RELOAD_COOLDOWN_MS = 15_000
@@ -29,7 +29,7 @@ export function lazyView<T extends ComponentType<any>>(
       if (!isChunkLoadError(err)) throw err
       try {
         return await factory()
-      } catch {/* still gone — fall through to the reload */}
+      } catch {/* still gone - fall through to the reload */}
 
       let last = 0
       try { last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0) } catch {/* private mode */}

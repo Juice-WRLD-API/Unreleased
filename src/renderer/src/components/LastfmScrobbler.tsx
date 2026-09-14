@@ -14,23 +14,23 @@ const MIN_TRACK_S = 30
 const SCROBBLE_AT_S = 240
 
 // A backward currentTime jump this large that lands near the start is the
-// same track restarting (repeat-one / user pressing back-to-start) — the old
+// same track restarting (repeat-one / user pressing back-to-start) - the old
 // listen is finalized and a fresh one begins.
 const RESTART_JUMP_S = 10
 const RESTART_LANDING_S = 5
 
 // One in-progress listen. `listened` counts wall-clock seconds actually spent
 // playing (paused time excluded), which is what the half-or-4-minutes rule is
-// defined over — track position can't be used directly because seeking would
+// defined over - track position can't be used directly because seeking would
 // inflate or erase it.
 interface Candidate {
   key: string
   info: LastfmTrackInfo
-  startedAt: number // unix seconds — becomes the scrobble timestamp
+  startedAt: number // unix seconds - becomes the scrobble timestamp
   listened: number
 }
 
-// Headless — mounted once in App. Watches playback (both regular tracks and
+// Headless - mounted once in App. Watches playback (both regular tracks and
 // the live radio) and turns qualifying listens into queued scrobbles;
 // lib/lastfm owns the network side.
 export default function LastfmScrobbler(): JSX.Element | null {
@@ -50,7 +50,7 @@ export default function LastfmScrobbler(): JSX.Element | null {
   const active = lastfmConfigured() && !!lastfmUser && lastfmEnabled
 
   const candidateRef = useRef<Candidate | null>(null)
-  // Last sampled playback position — only used for the restart detection.
+  // Last sampled playback position - only used for the restart detection.
   const lastTimeRef = useRef(0)
 
   // A revoked session discovered mid-flight (error 9) must also flip the UI
@@ -75,7 +75,7 @@ export default function LastfmScrobbler(): JSX.Element | null {
   }
 
   // What's audible right now, normalized across the two sources. Radio has no
-  // pause state — while the tuner is active and reporting a track, it plays.
+  // pause state - while the tuner is active and reporting a track, it plays.
   let item: { key: string; info: LastfmTrackInfo } | null = null
   let playing = false
   if (radioFmActive) {
@@ -93,7 +93,7 @@ export default function LastfmScrobbler(): JSX.Element | null {
     }
   } else if (currentTrack?.title && currentTrack.artist) {
     // Raw file-browser tracks (unreleased sessions/leaks with no proper song
-    // entry — see apiFilePathToTrack) stuff the containing folder name into
+    // entry - see apiFilePathToTrack) stuff the containing folder name into
     // `album` as a display fallback (e.g. "10. Outsiders (Session)"). That's
     // fine for the app's own UI but not a real album title, so it's dropped
     // here rather than scrobbled as one.
@@ -116,7 +116,7 @@ export default function LastfmScrobbler(): JSX.Element | null {
   // only way to keep it accurate).
   useEffect(() => {
     if (!active) {
-      // Disabled or disconnected mid-listen — drop, never scrobble.
+      // Disabled or disconnected mid-listen - drop, never scrobble.
       candidateRef.current = null
       return
     }
@@ -163,7 +163,7 @@ export default function LastfmScrobbler(): JSX.Element | null {
     return () => { clearInterval(id); window.removeEventListener('online', onOnline) }
   }, [active])
 
-  // App closing mid-listen: enqueue synchronously (localStorage) — the send
+  // App closing mid-listen: enqueue synchronously (localStorage) - the send
   // happens next launch.
   useEffect(() => {
     const onUnload = (): void => finalize()

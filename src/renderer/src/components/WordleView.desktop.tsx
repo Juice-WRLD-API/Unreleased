@@ -24,7 +24,7 @@ import type { WordleEntry, WordleGuess, WordleMode, WordleSettings, LetterState 
 import { GameSwitcher, GameBackdrop, Field, Segmented, numberInput } from './gameShell'
 
 const MODES: { id: WordleMode; label: string; hint: string }[] = [
-  { id: 'daily', label: 'Daily', hint: 'One title a day — the same one for everyone' },
+  { id: 'daily', label: 'Daily', hint: 'One title a day - the same one for everyone' },
   { id: 'unlimited', label: 'Unlimited', hint: 'Random titles, play as many as you like' },
 ]
 
@@ -51,7 +51,7 @@ function tileTone(state: LetterState | 'empty'): string {
   }
 }
 
-/** One guess as a row of letters — or an empty row waiting for one. Rows are a
+/** One guess as a row of letters - or an empty row waiting for one. Rows are a
  *  grid rather than a flex run so every row of a round lines up column for
  *  column, whatever the title's length. */
 function Row({ length, letters, states, active }: {
@@ -67,7 +67,7 @@ function Row({ length, letters, states, active }: {
       style={{ gridTemplateColumns: `repeat(${length}, minmax(0, 1fr))` }}
     >
       {Array.from({ length }, (_, i) => {
-        // One tone class per tile — an `active` border stacked on top of the
+        // One tone class per tile - an `active` border stacked on top of the
         // tone's own border-* would leave which colour wins up to the order
         // Tailwind happened to emit them in.
         const state = states?.[i]
@@ -90,7 +90,7 @@ function Row({ length, letters, states, active }: {
 }
 
 /** The keyboard: how a guess is typed, and the tracker for what's already been
- *  ruled out. Both jobs on one control — the board only ever shows the letters
+ *  ruled out. Both jobs on one control - the board only ever shows the letters
  *  that have been played, and tracking twenty-six of them in your head across a
  *  title three times longer than a Wordle word is the whole difficulty.
  *
@@ -157,7 +157,7 @@ function Keyboard({ hints, onLetter, onEnter, onBackspace, disabled }: {
 
 // ─── Settings panel ───────────────────────────────────────────────────────────
 
-/** Game rules for Unlimited. Daily ignores all of them (see settingsForMode) —
+/** Game rules for Unlimited. Daily ignores all of them (see settingsForMode) -
  *  same rule as Heardle's panel, and said out loud for the same reason. */
 function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
   settings: WordleSettings
@@ -201,12 +201,12 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
         </div>
         <p className="text-xs text-text-muted mb-3">
           These apply to <span className="text-text-secondary font-semibold">Unlimited</span> only. The Daily
-          title always runs the standard rules — everyone plays the same round, and a six-guess round and a
+          title always runs the standard rules - everyone plays the same round, and a six-guess round and a
           ten-guess round aren&apos;t the same result.
         </p>
         {mode !== 'unlimited' && (
           <p className="text-xs text-accent bg-accent/10 border border-accent/25 rounded-lg px-3 py-2 mb-4">
-            You&apos;re playing Daily right now — nothing here changes that round. Switch to Unlimited to
+            You&apos;re playing Daily right now - nothing here changes that round. Switch to Unlimited to
             play by these.
           </p>
         )}
@@ -293,7 +293,7 @@ function lastUsedBucket(stats: Stats): number {
 }
 
 /** Reads straight from storage on open rather than mirroring the round's
- *  state — only Daily is ever recorded, so there's a single set to show. */
+ *  state - only Daily is ever recorded, so there's a single set to show. */
 function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
   const stats = useMemo(() => loadStats(), [])
   const max = Math.max(1, ...stats.distribution)
@@ -311,7 +311,7 @@ function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
             <X size={16} />
           </button>
         </div>
-        <p className="text-xs text-text-muted mb-4">Daily rounds only — Unlimited isn&apos;t counted.</p>
+        <p className="text-xs text-text-muted mb-4">Daily rounds only - Unlimited isn&apos;t counted.</p>
         <div className="grid grid-cols-4 gap-2 mb-5 text-center">
           {[
             { label: 'Played', value: stats.played },
@@ -360,7 +360,7 @@ export default function WordleView(): JSX.Element {
   const [guesses, setGuesses] = useState<WordleGuess[]>([])
   const [status, setStatus] = useState<GameStatus>('playing')
   // Which mode the round in state was dealt for. On the render a mode switch
-  // happens, the round below is still the old mode's — without this the save
+  // happens, the round below is still the old mode's - without this the save
   // effect would file it under the new mode's key before the setup effect's
   // state lands, overwriting a daily round with a practice one.
   const [roundMode, setRoundMode] = useState<WordleMode>(mode)
@@ -385,7 +385,7 @@ export default function WordleView(): JSX.Element {
 
   const day = useMemo(() => todayKey(), [])
   const isDaily = mode === 'daily'
-  // Which settings actually apply here — Daily ignores all of them. Everything
+  // Which settings actually apply here - Daily ignores all of them. Everything
   // below reads `rules`, never `settings`, so the mode rules live in one place.
   const rules = useMemo(() => settingsForMode(settings, mode), [settings, mode])
   const tries = clampTries(rules.tries)
@@ -396,7 +396,7 @@ export default function WordleView(): JSX.Element {
   useEffect(() => { loadEraFullNames().catch(() => undefined) }, [])
 
   // ── Pool ───────────────────────────────────────────────────────────────────
-  // `categories` is an array in state, so key the effect on its contents — a
+  // `categories` is an array in state, so key the effect on its contents - a
   // fresh array every render would otherwise refetch (and re-roll) endlessly.
   const categoryKey = categories.join(',')
   useEffect(() => {
@@ -414,7 +414,7 @@ export default function WordleView(): JSX.Element {
     () => filterByEra(pool, eraKey ? eraKey.split(',') : []),
     [pool, eraKey])
   const availableEras = useMemo(() => poolEras(pool), [pool])
-  // Titles that can be answers or guesses — letters only, and the right length
+  // Titles that can be answers or guesses - letters only, and the right length
   // to fit a row (see lib/wordle).
   const entries = useMemo(() => playableEntries(playablePool), [playablePool])
 
@@ -436,7 +436,7 @@ export default function WordleView(): JSX.Element {
     } else {
       // Practice picks up where it was left, unless the saved title has since
       // fallen out of the pool (the era filter or the catalogue moved under
-      // it) — then there's nothing to resume against and it deals a new one.
+      // it) - then there's nothing to resume against and it deals a new one.
       const saved = loadPracticeRound()
       const resumed = saved ? entries.find((e) => e.song.id === saved.answerId) : undefined
       setAnswer(resumed ?? pickRandomEntry(entries))
@@ -461,7 +461,7 @@ export default function WordleView(): JSX.Element {
     if (status === 'playing' && guesses.length >= tries) setStatus('lost')
   }, [roundMode, mode, status, guesses.length, tries])
 
-  // Persist the round after every guess — both modes, under their own keys.
+  // Persist the round after every guess - both modes, under their own keys.
   useEffect(() => {
     if (!answer || roundMode !== mode) return
     const state = { day, answerId: answer.song.id, guesses, status }
@@ -471,7 +471,7 @@ export default function WordleView(): JSX.Element {
 
   useEffect(() => { saveMode(mode) }, [mode])
 
-  // Fold a finished daily round into the stats (once — see recordResult's
+  // Fold a finished daily round into the stats (once - see recordResult's
   // lastDay guard). The roundMode gate matters here more than anywhere: a
   // finished practice round left on screen would otherwise be recorded as
   // today's daily result the moment the Daily tab is clicked.
@@ -522,7 +522,7 @@ export default function WordleView(): JSX.Element {
       era: song.era,
     }]
     setGuesses(next)
-    // Any title with the answer's exact letters wins — the catalogue holds
+    // Any title with the answer's exact letters wins - the catalogue holds
     // plenty of rows that are the same thing filed twice, and picking the
     // "wrong" one of those out of the dropdown isn't a wrong guess.
     if (key === answerKey) setStatus('won')
@@ -535,7 +535,7 @@ export default function WordleView(): JSX.Element {
 
   // ── Typing ─────────────────────────────────────────────────────────────────
   // A row can be typed out letter by letter as well as picked from the search
-  // box. It still has to name a real song — the catalogue is this game's
+  // box. It still has to name a real song - the catalogue is this game's
   // dictionary, and a row of any old letters would be a free look at the
   // colours for a guess nobody could have meant.
   const typeLetter = (letter: string): void => {
@@ -565,7 +565,7 @@ export default function WordleView(): JSX.Element {
       return
     }
     if (draft.length < length) {
-      reject(`${length} letters — you've typed ${draft.length}`)
+      reject(`${length} letters - you've typed ${draft.length}`)
       return
     }
     const entry = findEntryByKey(entries, draft)
@@ -578,7 +578,7 @@ export default function WordleView(): JSX.Element {
 
   // Physical keys, on window and in the capture phase so the player's own
   // shortcuts never see them: bare letters are bound by default (S shuffle,
-  // R loop, L like, M mute — see lib/hotkeys), and without stopping them here
+  // R loop, L like, M mute - see lib/hotkeys), and without stopping them here
   // every guess typed out would also shuffle the queue and mute the audio.
   //
   // The listener is registered once and dispatches through a ref, so it always
@@ -586,10 +586,10 @@ export default function WordleView(): JSX.Element {
   const globalKey = (e: KeyboardEvent): void => {
     if (finished || !answer || showSettings || showStats) return
     if (e.metaKey || e.ctrlKey || e.altKey) return
-    // App-level overlays sit over this view without unmounting it — read them
+    // App-level overlays sit over this view without unmounting it - read them
     // at event time so a keypress meant for one of them isn't swallowed by a
     // board nobody can see. Settings used to be one of these too, but it's a
-    // real page now (see App.tsx) — navigating to it unmounts this component
+    // real page now (see App.tsx) - navigating to it unmounts this component
     // entirely, so there's nothing left here to guard against.
     const app = useStore.getState()
     if (app.showUserAuth || app.showDiagnostics) return
@@ -666,7 +666,7 @@ export default function WordleView(): JSX.Element {
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       <GameBackdrop />
 
-      {/* Corner controls — the hero owns the middle, so navigation and the
+      {/* Corner controls - the hero owns the middle, so navigation and the
           panels sit out of its way. z-20 clears the scroll container; no-drag
           keeps Electron's title strip from swallowing the clicks (see
           HeardleView, which has the same corners for the same reasons). */}
@@ -742,7 +742,7 @@ export default function WordleView(): JSX.Element {
             {mode === 'unlimited' && rules.eras.length > 0 && ` · ${rules.eras.join(', ')}`}
           </p>
 
-          {/* Reroll — practice rounds aren't scored, so being stuck with a
+          {/* Reroll - practice rounds aren't scored, so being stuck with a
               title you have no chance on is just a dead end. */}
           <div className="flex justify-center mb-6">
             {mode === 'unlimited' ? (
@@ -769,7 +769,7 @@ export default function WordleView(): JSX.Element {
           ) : poolError ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
               <AlertCircle size={22} className="text-red-400" />
-              <p className="text-sm text-text-secondary">Couldn&apos;t load the catalogue — {poolError}</p>
+              <p className="text-sm text-text-secondary">Couldn&apos;t load the catalogue - {poolError}</p>
             </div>
           ) : !answer ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
@@ -873,7 +873,7 @@ export default function WordleView(): JSX.Element {
               </div>
 
               {/* The board carries the letters; this is the part you actually
-                  read back — which titles have already been spent. */}
+                  read back - which titles have already been spent. */}
               {guesses.length > 0 && (
                 <div className="space-y-1.5 mt-4">
                   {guesses.map((guess, i) => {
@@ -908,7 +908,7 @@ export default function WordleView(): JSX.Element {
               {finished && (
                 <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4">
                   <div className="flex gap-4">
-                    {/* Art stays hidden until the round is over — era covers are
+                    {/* Art stays hidden until the round is over - era covers are
                         shared, so showing one early would narrow the field. */}
                     <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] overflow-hidden flex items-center justify-center">
                       {answer.song.imageUrl
@@ -932,7 +932,7 @@ export default function WordleView(): JSX.Element {
                           like the game graded something else. */}
                       {/[([{]/.test(answer.song.name) && (
                         <p className="text-xs text-text-muted mt-1.5">
-                          Tiles spell <span className="font-mono">{answer.key}</span> — anything in brackets
+                          Tiles spell <span className="font-mono">{answer.key}</span> - anything in brackets
                           is left off the board.
                         </p>
                       )}

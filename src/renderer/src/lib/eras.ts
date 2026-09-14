@@ -2,7 +2,7 @@
 //
 // The API's era objects carry the abbreviation in `name`; the human-readable
 // full name only exists inside `description`, usually suffixed with an "era"
-// qualifier and a time frame — "WRLD On Drugs era (August 2018-December 2018)".
+// qualifier and a time frame - "WRLD On Drugs era (August 2018-December 2018)".
 // This module fetches /eras/ once (paginated, 34 across 2 pages), derives the
 // clean full names, and exposes a synchronous lookup for display code
 // (currently Discord RPC).
@@ -15,7 +15,7 @@ type ErasResponse = JWApiEra[] | { count: number; next: string | null; results: 
 const MAX_PAGES = 10
 
 const names: Record<string, string> = {}
-// Every era seen so far, in API order — dedup'd by name since ingest() runs
+// Every era seen so far, in API order - dedup'd by name since ingest() runs
 // both from the synchronous offline-cache seed and the async fetch below and
 // would otherwise double up entries.
 const eraOrder: string[] = []
@@ -23,7 +23,7 @@ const eraByName: Record<string, JWApiEra> = {}
 let loadPromise: Promise<void> | null = null
 
 // Overrides for eras whose real full name isn't derivable from the API's own
-// description at all — e.g. "HIH 999"'s description is just "HIH 999 era
+// description at all - e.g. "HIH 999"'s description is just "HIH 999 era
 // (March 2017-May 2017)", which strips down to "HIH 999" again with no
 // expansion anywhere in the API's data. Checked before the generic
 // description-based derivation below.
@@ -37,18 +37,18 @@ function fullName(era: JWApiEra): string | undefined {
   const desc = era.description?.trim()
   if (!desc) return undefined
   const stripped = desc
-    // A trailing "(...)" containing a year is a time frame — drop it. This
+    // A trailing "(...)" containing a year is a time frame - drop it. This
     // keeps meaningful parentheticals like "The Pre Party (Extended)".
     .replace(/\s*\([^)]*\d{4}[^)]*\)$/, '')
     .replace(/\s+era$/i, '')
     // Purely administrative buckets ("Mainstream releases grouping",
     // "SoundCloud releases grouping") aren't a stylistic era with a real
-    // full name — same treatment as no description at all.
+    // full name - same treatment as no description at all.
     .replace(/\s+releases grouping$/i, '')
     .replace(/\s+(project|collection)$/i, '')
     .trim()
   // Stripping produced the abbreviation right back (e.g. "KILL'S WRLD era"
-  // → "KILL'S WRLD") — nothing was actually expanded, so there's no real
+  // → "KILL'S WRLD") - nothing was actually expanded, so there's no real
   // full name to show.
   if (!stripped || stripped === era.name) return undefined
   return stripped
@@ -79,7 +79,7 @@ for (let page = 1; page <= MAX_PAGES; page++) {
   if (!ingest(apiPeek<ErasResponse>('/eras/', pageParams(page)))) break
 }
 
-/** Fetches all era pages once and fills the lookup. Safe to call repeatedly —
+/** Fetches all era pages once and fills the lookup. Safe to call repeatedly -
  *  the fetch is shared; a failed one is forgotten so a later call retries. */
 export function loadEraFullNames(): Promise<void> {
   if (!loadPromise) {
@@ -93,7 +93,7 @@ export function loadEraFullNames(): Promise<void> {
   return loadPromise
 }
 
-/** Full era name for an abbreviation, if known. Synchronous — returns
+/** Full era name for an abbreviation, if known. Synchronous - returns
  *  undefined until loadEraFullNames (or the offline cache) has run. */
 export function eraFullName(abbrev: string | null | undefined): string | undefined {
   return abbrev ? names[abbrev] : undefined
@@ -108,7 +108,7 @@ export function eraLabel(abbrev: string, full: boolean): string {
 }
 
 /** Every era seen so far, in API order. Populated by the same offline-cache
- *  seed and loadEraFullNames fetch as the name lookup above — call
+ *  seed and loadEraFullNames fetch as the name lookup above - call
  *  loadEraFullNames first (or accept whatever the offline cache seeded) if
  *  the caller needs the full set. */
 export function listEras(): JWApiEra[] {

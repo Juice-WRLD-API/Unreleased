@@ -81,7 +81,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
         <div className="px-5 py-4 space-y-3">
           {/* Existing channels */}
           {channels.length === 0 ? (
-            <p className="text-sm text-text-muted py-4 text-center">No channels yet — add one below.</p>
+            <p className="text-sm text-text-muted py-4 text-center">No channels yet - add one below.</p>
           ) : (
             <ul className="space-y-1.5">
               {channels.map((c) => (

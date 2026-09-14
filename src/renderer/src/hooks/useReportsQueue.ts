@@ -6,7 +6,7 @@ import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 // Wraps reportsApi.listSongReports for EditorProfileView.desktop.tsx/
 // .mobile.tsx's own Reports tab (editor/admin accounts reviewing reports
 // alongside their own proposals). NOT used by AdminPage's standalone Reports
-// tab — that data comes from useAdminQueue, which fetches it as part of its
+// tab - that data comes from useAdminQueue, which fetches it as part of its
 // own per-tab load() cycle.
 export function useReportsQueue(enabled: boolean, refreshKey: number) {
   const [status, setStatus] = useState<SongReportStatus | ''>('pending')

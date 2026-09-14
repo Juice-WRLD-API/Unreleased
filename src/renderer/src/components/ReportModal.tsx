@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore'
 import ReportForm from './ReportForm'
 
 // Global report dialog, mounted once at the app root and driven by the store's
-// `reportModal` target — opened from a song's context menu / info panel (song
+// `reportModal` target - opened from a song's context menu / info panel (song
 // mode) or anywhere a general feedback prompt is wired (feedback mode).
 export default function ReportModal(): JSX.Element | null {
   const target = useStore((s) => s.reportModal)

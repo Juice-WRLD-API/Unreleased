@@ -3,10 +3,10 @@
 // both files in full). Auxiliary UI-only state (showMore, copiedFrom banner
 // text, syncedTable toggle, file-picker visibility, eras list, submit
 // state/error) intentionally stays as plain useState in AddSongModal itself
-// — this module only owns the fields that become the proposal payload.
+// - this module only owns the fields that become the proposal payload.
 //
 // buildProposedData reproduces the exact existing "only include non-empty
-// fields" logic, field-name mapping, and fallbacks — this is the single most
+// fields" logic, field-name mapping, and fallbacks - this is the single most
 // contract-sensitive extraction in the rewrite: the payload sent to
 // createProposal must be byte-for-byte identical before and after.
 import { useCallback, useReducer } from 'react'
@@ -63,10 +63,10 @@ function reducer(state: ProposalFormState, action: Action): ProposalFormState {
       return { ...state, [action.key]: action.value }
     case 'copyFrom': {
       // Everything the source song knows, minus the three fields that
-      // describe its specific audio file — a new version has its own file,
+      // describe its specific audio file - a new version has its own file,
       // length and bitrate, and silently inheriting those would submit
       // wrong data for the common case. (Matches AddSongModal's original
-      // copyFrom exactly — same fields, same order, same fallbacks.)
+      // copyFrom exactly - same fields, same order, same fallbacks.)
       const s = action.song
       return {
         ...state,
@@ -125,7 +125,7 @@ export function useProposalForm(): {
 }
 
 /** Reproduces AddSongModal's "only include non-empty fields" proposed_data
- *  mapping byte-for-byte — do not reorder, rename, or add fallbacks here
+ *  mapping byte-for-byte - do not reorder, rename, or add fallbacks here
  *  without a before/after payload diff against createProposal. */
 export function buildProposedData(f: ProposalFormState): Record<string, unknown> {
   const proposed: Record<string, unknown> = {}
@@ -150,7 +150,7 @@ export function buildProposedData(f: ProposalFormState): Record<string, unknown>
   if (f.instrumentalNames) proposed.instrumental_names = f.instrumentalNames
   if (f.cat === 'recording_session' && f.sessionTitles)   proposed.session_titles   = f.sessionTitles
   if (f.cat === 'recording_session' && f.sessionTracking) proposed.session_tracking = f.sessionTracking
-  // "Additional info" maps to additional_information — distinct from
+  // "Additional info" maps to additional_information - distinct from
   // `notes`, which previously had this textarea's value submitted under the
   // wrong key.
   if (f.addInfo) proposed.additional_information = f.addInfo

@@ -12,7 +12,7 @@ import { Empty } from './adminShared'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { Sheet, SheetItem } from './mobile/Sheet'
 
-// Admin-only tab for managing Comp Channels — mirrors the master/detail
+// Admin-only tab for managing Comp Channels - mirrors the master/detail
 // pattern the rest of AdminPage's mobile tabs use (a list that swaps for a
 // full-screen detail on tap, back button undoes it) rather than the desktop
 // build's permanent two-column split, which doesn't fit a phone width.
@@ -57,7 +57,7 @@ function CreatePanel({ onCreated, onClose }: { onCreated: () => void; onClose: (
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Channel name — e.g. Sessions Comp"
+        placeholder="Channel name - e.g. Sessions Comp"
         className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       <input

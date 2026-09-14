@@ -1,7 +1,7 @@
 import { createContext, useContext, useCallback, Children, isValidElement, cloneElement } from 'react'
 
 // ─── Cross-tab search ─────────────────────────────────────────────────────────
-// Every tab stays mounted (this page is static markup — no fetching, no data
+// Every tab stays mounted (this page is static markup - no fetching, no data
 // deps), so each Section can hand its own rendered text to the page on mount
 // and search can cover the whole document instead of only the open tab.
 // Non-matching sections hide, matching ones force open, and tabs with no hits
@@ -48,7 +48,7 @@ export function highlightText(text: string, query: string): React.ReactNode {
 // Walks arbitrary JSX and highlights every raw string it contains, cloning
 // elements on the way down. Elements that hold their text in props rather than
 // children (Table, Endpoint) have no children to walk, so they're returned
-// untouched and highlight themselves from context instead — which is also what
+// untouched and highlight themselves from context instead - which is also what
 // keeps this from double-marking their content.
 export function highlightChildren(children: React.ReactNode, query: string): React.ReactNode {
   if (!query) return children

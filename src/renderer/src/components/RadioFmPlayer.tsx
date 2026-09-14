@@ -23,7 +23,7 @@ export default function RadioFmPlayer(): JSX.Element {
   const voteWasActiveRef = useRef(false)
 
   // A brand new ballot clears any previous dismissal, exactly once. Doing it
-  // here — the single place metadata lands — keeps the WRLD panel, the floating
+  // here - the single place metadata lands - keeps the WRLD panel, the floating
   // popup, and pop-out windows from each keeping their own copy.
   const applyVote = useCallback((vote: RadioVote | null): void => {
     const isActive = !!vote?.active
@@ -66,7 +66,7 @@ export default function RadioFmPlayer(): JSX.Element {
         setRadioFmUpNext(data.up_next)
         setRadioFmQueuePreview(data.queue_preview ?? [])
       })
-      // A failed REST probe means "unknown", not "offline" — leaving isLive null
+      // A failed REST probe means "unknown", not "offline" - leaving isLive null
       // keeps the FM toggle usable while the socket is streaming fine.
       .catch((error) => console.warn('[radio] live probe failed', error))
 
@@ -82,7 +82,7 @@ export default function RadioFmPlayer(): JSX.Element {
     if (audioRef.current) audioRef.current.volume = volume
   }, [volume])
 
-  // Mobile background watchdog — the socket/audio pipeline can silently
+  // Mobile background watchdog - the socket/audio pipeline can silently
   // stall while the tab is hidden (throttled timers, OS-paused audio).
   // Periodically nudge it, and recheck immediately when the tab regains focus.
   useEffect(() => {
@@ -134,7 +134,7 @@ export default function RadioFmPlayer(): JSX.Element {
       getSongById(songId)
         .then(apply)
         .catch(() => {
-          // song_id fetch failed — fall back to title search
+          // song_id fetch failed - fall back to title search
           apiFetch<{ results: JWApiSong[] }>('/songs/', { search: title, page_size: 3 })
             .then(d => { if (d.results[0]) apply(d.results[0]); else if (!cancelled) setRadioFmMatchedSong(null) })
             .catch(() => { if (!cancelled) setRadioFmMatchedSong(null) })
@@ -154,7 +154,7 @@ export default function RadioFmPlayer(): JSX.Element {
       preload="none"
       // MSE playback uses a same-origin blob: URL (crossOrigin is a no-op
       // there); the HTTP fallback streams from the API, which sends CORS
-      // headers — both keep the Web Audio chain un-tainted.
+      // headers - both keep the Web Audio chain un-tainted.
       crossOrigin="anonymous"
       style={{ display: 'none' }}
       onError={() => {

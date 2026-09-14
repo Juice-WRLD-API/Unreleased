@@ -1,12 +1,12 @@
 // Service worker for the installable web build (PWA). NOT used by the Electron
-// app — registration is guarded to http(s) only (see main.tsx), so this never
+// app - registration is guarded to http(s) only (see main.tsx), so this never
 // runs under file://.
 //
 // Caching strategy is deliberately conservative because shipping stale renderer
 // code has bitten this project before: app HTML is ALWAYS network-first, so an
 // online user never boots an old build. The cache only serves as an offline
-// fallback. Content-hashed build assets (/assets/*) are immutable — new deploys
-// get new filenames — so those alone are cache-first for speed.
+// fallback. Content-hashed build assets (/assets/*) are immutable - new deploys
+// get new filenames - so those alone are cache-first for speed.
 
 const VERSION = 'v2'
 const SHELL_CACHE = `shell-${VERSION}`
@@ -40,14 +40,14 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url)
   // Only same-origin. The juicewrldapi.com API and remote cover images go
-  // straight to the network — the app has its own localStorage cache for API
+  // straight to the network - the app has its own localStorage cache for API
   // responses, and we never want to serve stale songs/metadata.
   if (url.origin !== self.location.origin) return
 
   // Never touch the OAuth flow. The Discord login redirects back to
   // /auth/discord/callback?code=…&state=… and the app reads those params on
   // boot (see App.tsx). A service worker sitting in the middle of an auth
-  // redirect is a classic footgun — let the browser handle it end-to-end so
+  // redirect is a classic footgun - let the browser handle it end-to-end so
   // installed (standalone PWA) sign-in behaves exactly like a normal tab.
   if (url.pathname.startsWith('/auth/')) return
 
@@ -67,7 +67,7 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Content-hashed build assets are immutable — safe to serve cache-first.
+  // Content-hashed build assets are immutable - safe to serve cache-first.
   if (url.pathname.startsWith('/assets/')) {
     event.respondWith((async () => {
       const hit = await caches.match(req)

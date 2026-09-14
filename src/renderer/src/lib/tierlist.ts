@@ -1,4 +1,4 @@
-// Data + persistence for the Tier List game — drag songs into ranked rows and
+// Data + persistence for the Tier List game - drag songs into ranked rows and
 // save the result locally. Unlike Heardle/Wordle this has no daily puzzle or
 // scoring: it's a personal ranking, so state is just "what tiers exist" and
 // "which tier each song landed in", both kept in localStorage.
@@ -68,12 +68,12 @@ export function newTierId(): string {
   return `tier-${Date.now()}-${nextTierSeq++}`
 }
 
-/** Songs still unranked — everything in `pool` whose id has no assignment. */
+/** Songs still unranked - everything in `pool` whose id has no assignment. */
 export function unsortedSongs(pool: HeardleSong[], assignments: Record<number, string>): HeardleSong[] {
   return pool.filter((s) => !(s.id in assignments))
 }
 
-/** Songs assigned to `tierId`, in the order they appear in `pool` — stable
+/** Songs assigned to `tierId`, in the order they appear in `pool` - stable
  *  regardless of drop order since nothing here tracks per-tier position. */
 export function songsInTier(pool: HeardleSong[], assignments: Record<number, string>, tierId: string): HeardleSong[] {
   return pool.filter((s) => assignments[s.id] === tierId)

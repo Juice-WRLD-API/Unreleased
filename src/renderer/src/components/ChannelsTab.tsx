@@ -46,7 +46,7 @@ function CreatePanel({ onCreated }: { onCreated: () => void }): JSX.Element {
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Channel name — e.g. Sessions Comp"
+        placeholder="Channel name - e.g. Sessions Comp"
         className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       <input

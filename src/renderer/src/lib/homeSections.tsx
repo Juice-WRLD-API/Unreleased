@@ -1,10 +1,10 @@
 import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-// The Home dashboard's sections — each independently shown/hidden from
+// The Home dashboard's sections - each independently shown/hidden from
 // Settings → Appearance → Home screen. `id` is the stable key persisted in
 // homeSectionVisibility; don't rename these. No reorder support (unlike
-// NAV_ITEMS) — the sections' order reflects product intent, not preference.
+// NAV_ITEMS) - the sections' order reflects product intent, not preference.
 export interface HomeSectionDef {
   id: string
   label: string
@@ -21,7 +21,7 @@ export const HOME_SECTIONS: HomeSectionDef[] = [
   { id: 'liked', label: 'Liked songs shortcut', icon: <Heart size={18} /> },
 ]
 
-// Everything ships on — a user opts out rather than in.
+// Everything ships on - a user opts out rather than in.
 export const DEFAULT_HOME_SECTION_VISIBILITY: Record<string, boolean> = Object.fromEntries(
   HOME_SECTIONS.map((s) => [s.id, true]),
 )

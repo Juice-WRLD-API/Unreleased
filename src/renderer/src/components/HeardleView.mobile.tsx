@@ -33,7 +33,7 @@ import HeardleVersusPanel from './HeardleVersusPanel'
 type Mode = DailyMode | 'unlimited' | 'versus'
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
-  { id: 'daily', label: 'Daily', hint: 'One song a day — the same one for everyone' },
+  { id: 'daily', label: 'Daily', hint: 'One song a day - the same one for everyone' },
   { id: 'personal', label: 'Personal', hint: 'One song a day, picked just for you' },
   { id: 'versus', label: '1v1', hint: 'Real-time match against another player' },
   { id: 'unlimited', label: 'Unlimited', hint: 'Random songs, play as many as you like' },
@@ -70,7 +70,7 @@ function formatClock(s: number): string {
 const WAVE_BARS = 56
 
 /** Bar heights for the scope. Deterministic from the song id so a round always
- *  looks the same (and a reload doesn't reshuffle it mid-guess) — this is a
+ *  looks the same (and a reload doesn't reshuffle it mid-guess) - this is a
  *  decorative readout, not analysis of the actual audio, which would mean
  *  decoding the file we're deliberately only streaming 16 seconds of. */
 function barHeights(seed: number, count: number): number[] {
@@ -84,7 +84,7 @@ function barHeights(seed: number, count: number): number[] {
 }
 
 /** The clip as a scope: solid up to the playhead, dim out to what's unlocked,
- *  barely there beyond it — so the bars carry the same information the old
+ *  barely there beyond it - so the bars carry the same information the old
  *  progress bar did, plus a sense of how much song is still locked. */
 function Waveform({ seed, unlocked, elapsed, ladder, playing, startAt }: {
   seed: number; unlocked: number; elapsed: number; ladder: number[]; playing: boolean; startAt: number
@@ -93,8 +93,8 @@ function Waveform({ seed, unlocked, elapsed, ladder, playing, startAt }: {
   const heights = useMemo(() => barHeights(seed, WAVE_BARS), [seed])
   return (
     <div className="relative h-24 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)]/40 px-3 pb-3 pt-6 overflow-hidden">
-      {/* Where in the song this clip was cut from. Harmless to show — it says
-          nothing about which song it is — and without it a timestamp start
+      {/* Where in the song this clip was cut from. Harmless to show - it says
+          nothing about which song it is - and without it a timestamp start
           just looks like the audio is broken. */}
       <span className="absolute top-2 left-3 text-[9px] font-mono uppercase tracking-[0.2em] text-text-muted">
         {startAt > 0 ? `@ ${formatClock(startAt + elapsed)}` : 'From the top'}
@@ -124,7 +124,7 @@ function Waveform({ seed, unlocked, elapsed, ladder, playing, startAt }: {
   )
 }
 
-/** The guess slots, left to right — the round's progress at a glance. The one
+/** The guess slots, left to right - the round's progress at a glance. The one
  *  you're on glows; finished ones carry their result's colour. */
 function SlotRow({ ladder, guesses, status, showEraHint }: {
   ladder: number[]; guesses: Guess[]; status: GameStatus; showEraHint: boolean
@@ -154,7 +154,7 @@ function SlotRow({ ladder, guesses, status, showEraHint }: {
   )
 }
 
-/** One of the six slots — empty, a skip, a wrong guess, or the winning one.
+/** One of the six slots - empty, a skip, a wrong guess, or the winning one.
  *  Only the final guess of a won round is `correct`. */
 function GuessRow({ guess, index, correct, showEraHint }: {
   guess: Guess | undefined; index: number; correct: boolean; showEraHint: boolean
@@ -238,12 +238,12 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
       <div className="px-5 pb-2">
         <p className="text-xs text-text-muted mb-3">
           These apply to <span className="text-text-secondary font-semibold">Unlimited</span> only. Daily and
-          Personal always run the standard rules — their results are headed for a leaderboard, and a
+          Personal always run the standard rules - their results are headed for a leaderboard, and a
           six-try round and a ten-try round aren't the same achievement.
         </p>
         {mode !== 'unlimited' && (
           <p className="text-xs text-accent bg-accent/10 border border-accent/25 rounded-lg px-3 py-2 mb-4">
-            You're playing {mode === 'personal' ? 'Personal' : 'Daily'} right now — nothing here changes
+            You're playing {mode === 'personal' ? 'Personal' : 'Daily'} right now - nothing here changes
             that round. Switch to Unlimited to play by these.
           </p>
         )}
@@ -371,7 +371,7 @@ function lastUsedBucket(stats: Stats): number {
   return 0
 }
 
-/** Streaks are per-mode, so the panel is too — it reads straight from storage
+/** Streaks are per-mode, so the panel is too - it reads straight from storage
  *  on open rather than mirroring the round's state. */
 function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose: () => void }) {
   const [tab, setTab] = useState<DailyMode>(initialMode)
@@ -408,7 +408,7 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
           ))}
         </div>
         {/* The distribution is stored at the maximum width, but showing ten
-            empty rows to someone playing six-try rounds is noise — trim to the
+            empty rows to someone playing six-try rounds is noise - trim to the
             deepest bucket that's actually been used. */}
         <div className="space-y-1.5">
           {stats.distribution.slice(0, Math.max(DEFAULT_SETTINGS.tries, lastUsedBucket(stats))).map((n, i) => (
@@ -434,7 +434,7 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
 
 /** Standings for the two once-a-day modes. Both run fixed rules (see
  *  settingsForMode), which is what makes a ranking mean anything. Backed by
- *  the real `/heardle/leaderboard/` endpoint — see lib/heardleApi. */
+ *  the real `/heardle/leaderboard/` endpoint - see lib/heardleApi. */
 function LeaderboardPanel({ initialMode, signedIn, onClose }: {
   initialMode: DailyMode
   signedIn: boolean
@@ -448,7 +448,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
   const [error, setError] = useState<string | null>(null)
   const pending = useMemo(() => outboxSize(), [])
 
-  // The 1v1 table is a public ranking — readable signed out, unlike the daily
+  // The 1v1 table is a public ranking - readable signed out, unlike the daily
   // boards which are scoped to the caller. One definition, used by both the
   // fetch and the render: when these drifted apart the versus board fetched
   // fine and then rendered the sign-in prompt over it.
@@ -460,7 +460,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
     setLoading(true)
     setError(null)
     const fetchMode = board === 'versus' ? 'versus' : mode
-    // No day param — the server answers for its own today, which is the same
+    // No day param - the server answers for its own today, which is the same
     // calendar the rounds are graded against (see startTodayPuzzle).
     fetchLeaderboard(board, fetchMode)
       .then((res) => {
@@ -574,7 +574,7 @@ export default function HeardleView(): JSX.Element {
     'setActiveView', 'playTrack', 'setIsPlaying', 'isPlaying', 'volume', 'setVolume', 'account', 'setHeroBleedTop', 'previousView')
 
   // Lets GameBackdrop's wash paint full-bleed under the status bar instead of
-  // stopping at the shell's usual inset — matches WRLD's ownsTopInset trick.
+  // stopping at the shell's usual inset - matches WRLD's ownsTopInset trick.
   // The corner buttons and the switcher's top clearance compensate below.
   // Always true: mobile's nav bar is bottom-only now (see BottomNav), so the
   // shell always reserves this inset itself.
@@ -585,7 +585,7 @@ export default function HeardleView(): JSX.Element {
   }, [setHeroBleedTop])
 
   const [mode, setModeState] = useState<Mode>(() => loadGameMode())
-  // 1v1 is deliberately not persisted (see loadGameMode) — everything else
+  // 1v1 is deliberately not persisted (see loadGameMode) - everything else
   // remembers the last tab so reopening the game doesn't always land on Daily.
   const setMode = (m: Mode): void => {
     setModeState(m)
@@ -625,7 +625,7 @@ export default function HeardleView(): JSX.Element {
   const useServerRound = isDaily && !!account
   const dailyMode: DailyMode = mode === 'personal' ? 'personal' : 'daily'
   const localDay = useMemo(() => todayKey(), [])
-  // The server's calendar, once a server round has actually responded — see
+  // The server's calendar, once a server round has actually responded - see
   // startTodayPuzzle. A locally-computed date can disagree with the server's
   // for hours around midnight depending on timezone, and everything below
   // (streak bookkeeping, the submitted result, the share text, the puzzle
@@ -634,7 +634,7 @@ export default function HeardleView(): JSX.Element {
   const [serverDay, setServerDay] = useState<string | null>(null)
   const day = useServerRound && serverDay ? serverDay : localDay
 
-  // Which settings actually apply here — Daily ignores all of them, Personal
+  // Which settings actually apply here - Daily ignores all of them, Personal
   // takes the difficulty half. Everything below reads `rules`, never
   // `settings`, so the mode rules live in exactly one place.
   const rules = useMemo(
@@ -642,7 +642,7 @@ export default function HeardleView(): JSX.Element {
     [settings, mode],
   )
   // On the signed-in daily path the server owns the round and grades against
-  // its own ladder, so that ladder — not the local settings — has to drive the
+  // its own ladder, so that ladder - not the local settings - has to drive the
   // slot count, the unlocked window and the playback cutoff. Deriving them
   // locally would show a different number of tries than the server allows and
   // cut the clip at a different second than it intends.
@@ -650,12 +650,12 @@ export default function HeardleView(): JSX.Element {
   const ladder = useServerRound && serverLadder && serverLadder.length > 0
     ? serverLadder
     : localLadder
-  // Daily/Personal pin `rules.categories` to ['released'] — right for the
+  // Daily/Personal pin `rules.categories` to ['released'] - right for the
   // *difficulty* rules (settingsForMode), wrong for the *guess pool*: a
   // server-graded round is drawn from the server's own catalog, not the
   // client's, and there's no reason to believe that stays inside 'released'.
   // If it doesn't, an answer outside this pool is one the player can never
-  // type in — searchPool below only ever sees what's fetched here, so a
+  // type in - searchPool below only ever sees what's fetched here, so a
   // missing category isn't a harder guess, it's an unwinnable one. Search
   // every category on a server round; only the local fallback (signed out,
   // or Unlimited) needs the restriction, since there the same pool is what
@@ -678,7 +678,7 @@ export default function HeardleView(): JSX.Element {
   useEffect(() => { loadEraFullNames().catch(() => undefined) }, [])
 
   // ── Pool ───────────────────────────────────────────────────────────────────
-  // `categories` is an array in state, so key the effect on its contents — a
+  // `categories` is an array in state, so key the effect on its contents - a
   // fresh array every render would otherwise refetch (and re-roll) endlessly.
   const categoryKey = categories.join(',')
   useEffect(() => {
@@ -691,7 +691,7 @@ export default function HeardleView(): JSX.Element {
     return () => { cancelled = true }
   }, [categoryKey])
 
-  // The era filter narrows what's already loaded — no refetch, and the guess
+  // The era filter narrows what's already loaded - no refetch, and the guess
   // dropdown narrows with it, which is the point: a Goodbye & Good Riddance
   // round shouldn't autocomplete songs that can't be the answer.
   const eraKey = rules.eras.join(',')
@@ -700,7 +700,7 @@ export default function HeardleView(): JSX.Element {
     [pool, eraKey])
   const availableEras = useMemo(() => poolEras(pool), [pool])
 
-  // Version links load behind the pool — a round is playable without them,
+  // Version links load behind the pool - a round is playable without them,
   // they only widen what counts as correct. Empty on failure.
   useEffect(() => {
     if (pool.length === 0) return
@@ -723,7 +723,7 @@ export default function HeardleView(): JSX.Element {
   const applyServerPuzzle = useCallback((res: PuzzleResponse) => {
     setServerDay(res.day)
     setRoundToken(res.round_token)
-    // Fall back to the local ladder only when the server didn't send one —
+    // Fall back to the local ladder only when the server didn't send one -
     // a short/absent ladder must not silently shrink the round.
     setServerLadder(Array.isArray(res.ladder) && res.ladder.length > 0 ? res.ladder : null)
     setServerClipUrl(absoluteClipUrl(res.clip_url))
@@ -739,7 +739,7 @@ export default function HeardleView(): JSX.Element {
   useEffect(() => {
     if (!useServerRound) return
     let cancelled = false
-    // Not startPuzzle(dailyMode, localDay) — the browser's local date isn't
+    // Not startPuzzle(dailyMode, localDay) - the browser's local date isn't
     // safe to send (see startTodayPuzzle's doc comment).
     startTodayPuzzle(dailyMode)
       .then((res) => { if (!cancelled) applyServerPuzzle(res) })
@@ -763,7 +763,7 @@ export default function HeardleView(): JSX.Element {
       setStartAt(clipStart(song, fullWindow, rules.startPoint, `${seed}-${dailyMode}-${localDay}`))
     } else {
       // Resume whatever practice round was left open, rather than dealing a
-      // fresh song out from under an in-progress one — only when it still
+      // fresh song out from under an in-progress one - only when it still
       // matches the current pool/filters; otherwise fall through to a fresh
       // deal exactly like before.
       const saved = loadPracticeRound()
@@ -806,14 +806,14 @@ export default function HeardleView(): JSX.Element {
     saveRound(dailyMode, { day, answerId: answer.id, guesses, status })
   }, [isDaily, useServerRound, dailyMode, answer, day, guesses, status])
 
-  // Same, for the practice round — unscored, but still worth not throwing
+  // Same, for the practice round - unscored, but still worth not throwing
   // away when the tab closes mid-guess.
   useEffect(() => {
     if (mode !== 'unlimited' || !answer) return
     savePracticeRound({ answerId: answer.id, guesses, status, startAt })
   }, [mode, answer, guesses, status, startAt])
 
-  // Fold a finished round into that mode's stats (once — see recordResult's
+  // Fold a finished round into that mode's stats (once - see recordResult's
   // lastDay guard) and hand it to the leaderboard. submitResult queues rather
   // than throwing while the endpoint is missing or the user is signed out, so
   // rounds played today still count once it's live.
@@ -821,7 +821,7 @@ export default function HeardleView(): JSX.Element {
     if (!isDaily || status === 'playing') return
     if (!useServerRound && !answer) return
     // Both paths, always. The Stats panel reads localStorage and nothing else,
-    // so a server-graded round has to be folded in here too — gating this on
+    // so a server-graded round has to be folded in here too - gating this on
     // the local path would freeze the streak, distribution and played count
     // for exactly the signed-in players the leaderboard is for. recordResult
     // is idempotent per day, so the server path re-running it is harmless.
@@ -851,19 +851,19 @@ export default function HeardleView(): JSX.Element {
   // A dedicated element rather than the app's player: this has to start at a
   // fixed point, cut off mid-song, and never touch the queue or what the user
   // was listening to. It's deliberately outside the Web Audio effects chain
-  // too — the EQ shouldn't colour the clue.
+  // too - the EQ shouldn't colour the clue.
   //
   // Positions are tracked relative to `startAt`, since a "random" clip start
   // means the element's currentTime is offset from what the player sees.
   // ── Silence detection ──────────────────────────────────────────────────────
-  // A timestamp start can easily land in a gap — an intro pad, the beat of air
-  // between verses — and a one-second clip of nothing is unguessable. So the
+  // A timestamp start can easily land in a gap - an intro pad, the beat of air
+  // between verses - and a one-second clip of nothing is unguessable. So the
   // budget is spent in *audible* seconds: quiet is hopped over and doesn't
   // count against the unlock.
   //
   // This needs a private Web Audio graph on the game's element. Deliberately
-  // not the shared effects chain (lib/audioEffects) — the EQ must never colour
-  // the clue — but it carries the same CORS requirement: without
+  // not the shared effects chain (lib/audioEffects) - the EQ must never colour
+  // the clue - but it carries the same CORS requirement: without
   // crossOrigin="anonymous" on the element, createMediaElementSource emits
   // pure silence. The API sends Access-Control-Allow-Origin, same as it does
   // for the main player.
@@ -871,7 +871,7 @@ export default function HeardleView(): JSX.Element {
   // If any of it throws, analysis is simply off and the clip plays straight
   // through. A missing skip is a worse round; a broken graph is no audio.
   const analyserRef = useRef<AnalyserNode | null>(null)
-  // Typed as the ArrayBuffer-backed variant getFloatTimeDomainData expects —
+  // Typed as the ArrayBuffer-backed variant getFloatTimeDomainData expects -
   // a bare Float32Array widens to ArrayBufferLike and won't assign.
   const analyserBufRef = useRef<Float32Array<ArrayBuffer> | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -913,7 +913,7 @@ export default function HeardleView(): JSX.Element {
     return peak
   }, [])
 
-  // Audible seconds heard so far this play — this, not wall-clock position, is
+  // Audible seconds heard so far this play - this, not wall-clock position, is
   // what the unlock is measured in.
   const audibleRef = useRef(0)
   const lastTickRef = useRef(0)
@@ -921,7 +921,7 @@ export default function HeardleView(): JSX.Element {
 
   // Every start claims a token. Anything that ends playback bumps it, so the
   // async continuations below (waiting on metadata, on a seek, on play()) can
-  // tell they've been superseded — a start that was still loading when the
+  // tell they've been superseded - a start that was still loading when the
   // view went away would otherwise land on a detached element and play the
   // song through, unsupervised. Refs survive unmount; audioRef.current doesn't.
   const playTokenRef = useRef(0)
@@ -939,7 +939,7 @@ export default function HeardleView(): JSX.Element {
     setElapsed(0)
   }, [])
 
-  // Silence has to be quiet for a moment before it counts — inter-word gaps
+  // Silence has to be quiet for a moment before it counts - inter-word gaps
   // and drum rests are part of a song, not dead air. Hops are short so the
   // onset of the next sound is never far past the landing point.
   const SILENCE_FLOOR = 0.005
@@ -953,7 +953,7 @@ export default function HeardleView(): JSX.Element {
     const dt = lastTickRef.current ? Math.min((now - lastTickRef.current) / 1000, 0.25) : 0
     lastTickRef.current = now
 
-    // A stalled or seeking element outputs silence that isn't in the song —
+    // A stalled or seeking element outputs silence that isn't in the song -
     // don't bank it as audible and don't hop over it either.
     const settled = !audio.seeking && audio.readyState >= 2
     // Under a muted element, real silence and real audio look identical. The
@@ -968,7 +968,7 @@ export default function HeardleView(): JSX.Element {
         const duration = isFinite(audio.duration) ? audio.duration : 0
         const cap = duration > 0 ? duration - 0.25 : audio.currentTime + SILENCE_HOP_S
         const next = Math.min(audio.currentTime + SILENCE_HOP_S, cap)
-        // Out of song to skip into — end the clip rather than idle at the tail.
+        // Out of song to skip into - end the clip rather than idle at the tail.
         if (next <= audio.currentTime) { stopPlayback(); return }
         audio.currentTime = next
       }
@@ -984,7 +984,7 @@ export default function HeardleView(): JSX.Element {
 
   /** Backstop cutoff. requestAnimationFrame drives the audible-time accounting
    *  above, but it stops firing while the page is hidden, so it cannot be the
-   *  only thing ending a clip — this rides the element's own timeupdate, which
+   *  only thing ending a clip - this rides the element's own timeupdate, which
    *  keeps firing as long as audio is being decoded.
    *
    *  It measures wall-clock position, not audible time, so it has to allow for
@@ -1001,7 +1001,7 @@ export default function HeardleView(): JSX.Element {
   const startPlayback = useCallback((): void => {
     const audio = audioRef.current
     if (!audio) return
-    // Two things playing at once makes the clue unlistenable — yield the room.
+    // Two things playing at once makes the clue unlistenable - yield the room.
     if (isPlaying) setIsPlaying(false)
     setAudioError(false)
     setPreparing(true)
@@ -1019,14 +1019,14 @@ export default function HeardleView(): JSX.Element {
     silentSinceRef.current = null
 
     // Seeking before the element knows the song's duration is silently
-    // dropped, which put the clip back at 0:00 for every timestamp start —
+    // dropped, which put the clip back at 0:00 for every timestamp start -
     // wait for metadata (and the seek itself) before playing. Nothing to wait
     // for when the clip starts at the beginning.
     const begin = (): void => {
       if (!live()) { audio.pause(); return }
       audio.play()
         .then(() => {
-          // play() resolves asynchronously too — the round can have ended, or
+          // play() resolves asynchronously too - the round can have ended, or
           // the view gone, in the meantime.
           if (!live()) { audio.pause(); return }
           setPreparing(false); setPlaying(true)
@@ -1048,7 +1048,7 @@ export default function HeardleView(): JSX.Element {
   }, [isPlaying, setIsPlaying, volume, tick, ensureAnalyser])
 
   // Leaving the page stops the clip. Without this you could start a snippet,
-  // switch away, and let the song run on underneath — the whole track for
+  // switch away, and let the song run on underneath - the whole track for
   // free, on the first guess. Covers a backgrounded tab and a minimised
   // desktop window; navigating to another view unmounts this component, which
   // stops it through the cleanup below.
@@ -1069,7 +1069,7 @@ export default function HeardleView(): JSX.Element {
 
   // Teardown. The element is captured on mount rather than read from the ref
   // in the cleanup: React detaches refs before passive cleanups run, so
-  // audioRef.current can already be null here — and a paused-by-nobody element
+  // audioRef.current can already be null here - and a paused-by-nobody element
   // keeps playing after the view is gone.
   useEffect(() => {
     const audio = audioRef.current
@@ -1190,7 +1190,7 @@ export default function HeardleView(): JSX.Element {
       <GameBackdrop />
       {/* crossOrigin is load-bearing: the silence analyser routes this element
           through a MediaElementSource, which emits pure silence for media
-          fetched without CORS clearance. Must be set before src (it is — this
+          fetched without CORS clearance. Must be set before src (it is - this
           attribute is on the element, src is assigned in an effect). */}
       <audio
         ref={audioRef}
@@ -1200,7 +1200,7 @@ export default function HeardleView(): JSX.Element {
         onError={() => setAudioError(true)}
       />
 
-      {/* Corner controls — the hero owns the middle, so navigation and the
+      {/* Corner controls - the hero owns the middle, so navigation and the
           panels sit out of its way.
           z-20 (over the scroll container's z-10): the scroll container fills
           the whole view and comes later in the DOM, so at equal z it took every
@@ -1211,9 +1211,9 @@ export default function HeardleView(): JSX.Element {
       >
         <button
           // Desktop treats WRLD as the games' hub and always returns there;
-          // on mobile there's no WRLD tab in this flow any more — Home is
+          // on mobile there's no WRLD tab in this flow any more - Home is
           // where every game is actually entered from (see HomeView's Games
-          // section) — so back goes to wherever that really was instead of a
+          // section) - so back goes to wherever that really was instead of a
           // hardcoded destination that no longer makes sense here.
           onClick={() => setActiveView(previousView ?? 'home')}
           aria-label="Back"
@@ -1271,7 +1271,7 @@ export default function HeardleView(): JSX.Element {
             </p>
           </div>
 
-          {/* Mode tabs — a scrollable pill row rather than underline tabs, same
+          {/* Mode tabs - a scrollable pill row rather than underline tabs, same
               idiom as the other rewritten tabs' chip switchers. */}
           <div className="flex items-center justify-center gap-2 mb-2 overflow-x-auto scrollbar-none">
             {MODES.map((m) => (
@@ -1300,7 +1300,7 @@ export default function HeardleView(): JSX.Element {
             {mode === 'unlimited' && rules.eras.length > 0 && ` · ${rules.eras.join(', ')}`}
           </p>
 
-          {/* Reroll — practice rounds aren't scored, so being stuck with a
+          {/* Reroll - practice rounds aren't scored, so being stuck with a
               song you have no chance on is just a dead end. Only here: the
               daily modes get one song a day, and a reroll would be the whole
               point of them undone. */}
@@ -1331,7 +1331,7 @@ export default function HeardleView(): JSX.Element {
           ) : poolError ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
               <AlertCircle size={22} className="text-red-400" />
-              <p className="text-sm text-text-secondary">Couldn't load the catalogue — {poolError}</p>
+              <p className="text-sm text-text-secondary">Couldn't load the catalogue - {poolError}</p>
             </div>
           ) : !answer && !(useServerRound && serverClipUrl) ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
@@ -1376,7 +1376,7 @@ export default function HeardleView(): JSX.Element {
                         ? <><Pause size={16} className="fill-current" /> Stop</>
                         : <><Play size={16} className="fill-current" /> Play ({secLabel(unlocked)})</>}
                   </button>
-                  {/* Thin readout under the button — the scope shows the same
+                  {/* Thin readout under the button - the scope shows the same
                       thing, this just gives it an exact edge to read against. */}
                   <div className="mt-2 h-1 w-full rounded-full bg-[var(--surface-overlay)] overflow-hidden">
                     <div
@@ -1390,7 +1390,7 @@ export default function HeardleView(): JSX.Element {
                   </div>
                 </div>
 
-                {/* Volume is the app's own — the game plays through it, so a
+                {/* Volume is the app's own - the game plays through it, so a
                     slider that only moved a private copy would be a lie. */}
                 <div className="flex items-center gap-3">
                   <Volume2 size={14} className="text-text-muted shrink-0" />
@@ -1494,7 +1494,7 @@ export default function HeardleView(): JSX.Element {
               {finished && answer && (
                 <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4">
                   <div className="flex gap-4">
-                    {/* Art stays hidden until the round is over — era covers are
+                    {/* Art stays hidden until the round is over - era covers are
                         shared, so showing one early would narrow the field. */}
                     <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] overflow-hidden flex items-center justify-center">
                       {revealCoverUrl(answer)
@@ -1513,11 +1513,11 @@ export default function HeardleView(): JSX.Element {
                           versions.get(answer.id)?.version]
                           .filter(Boolean).join(' · ')}
                       </p>
-                      {/* Won on a different row — say why it counted, or it looks
+                      {/* Won on a different row - say why it counted, or it looks
                           like the game accepted a song you didn't guess. */}
                       {status === 'won' && guesses[guesses.length - 1]?.viaVersion && (
                         <p className="text-xs text-text-muted mt-1.5">
-                          Counted “{guesses[guesses.length - 1].label}” — same song, different version.
+                          Counted “{guesses[guesses.length - 1].label}” - same song, different version.
                         </p>
                       )}
                     </div>

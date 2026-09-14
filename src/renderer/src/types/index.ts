@@ -13,11 +13,11 @@ export interface Track {
   // API-sourced tracks
   streamUrl?: string  // if set, Player streams this URL instead of the local `path` (via toFileUrl)
   imageUrl?: string   // if set, AlbumArtThumbnail uses this instead of getAlbumArt IPC
-  era?: string        // API era abbreviation (e.g. "WOD") — shown on Discord RPC instead of album
+  era?: string        // API era abbreviation (e.g. "WOD") - shown on Discord RPC instead of album
   // The song's own title and cover as the API returns them. `title`/`imageUrl`
   // above may be a user's per-song override (see lib/songPrefs), and a Track
-  // outlives the conversion that built it — it sits in the queue until the
-  // user moves on — so the originals are kept here to let an override be
+  // outlives the conversion that built it - it sits in the queue until the
+  // user moves on - so the originals are kept here to let an override be
   // applied, changed, or removed in place without refetching the song. Only
   // set for API-sourced tracks; treat an absent value as "same as title".
   apiTitle?: string
@@ -66,7 +66,7 @@ export interface LibraryTrack {
   lastModified: number
   hasAlbumArt: boolean
   addedAt: number
-  // Cover art is NOT stored here — it lives in the store's `libraryArt` map
+  // Cover art is NOT stored here - it lives in the store's `libraryArt` map
   // (keyed by track id) so a streaming cover never mutates this list. This
   // optional field is only a transient seed some callers still read; treat the
   // map as the source of truth.
@@ -81,7 +81,7 @@ export interface LocalPlaylist {
   coverImage?: string | null  // base64 data URL or null
 }
 
-// A playlist for signed-out users — stored in localStorage, not tied to an
+// A playlist for signed-out users - stored in localStorage, not tied to an
 // account or to local-file scanning (unlike LocalPlaylist). Tracks are
 // embedded directly rather than referenced by id, since a guest playlist can
 // hold synced-catalog tracks a LibraryTrack lookup couldn't resolve.
@@ -93,12 +93,12 @@ export interface GuestPlaylist {
 }
 
 // A live pointer to someone else's synced playlist, saved from a share link
-// without cloning its songs — opening it always re-fetches the owner's
+// without cloning its songs - opening it always re-fetches the owner's
 // current playlist (see PlaylistsView's shared-view load path), so edits the
 // owner makes later show up here too. Local-only: the account profile has no
 // field for this yet, so unlike an owned playlist it doesn't sync across
 // devices. name/trackCount/coverUrl are a display cache, refreshed
-// opportunistically whenever this playlist is opened — never authoritative,
+// opportunistically whenever this playlist is opened - never authoritative,
 // just enough for the grid card to render before that fetch resolves.
 export interface FollowedPlaylist {
   id: number
@@ -109,10 +109,10 @@ export interface FollowedPlaylist {
 }
 
 // ─── Offline playlist sync (Electron only) ─────────────────────────────────
-// A downloaded API song, kept fully playable without network — the audio
+// A downloaded API song, kept fully playable without network - the audio
 // file plus a snapshot of the song's own metadata at download time.
 export interface OfflineTrackMeta {
-  path: string                // API song.path — changing this means the audio itself changed
+  path: string                // API song.path - changing this means the audio itself changed
   title: string
   artist: string
   album: string

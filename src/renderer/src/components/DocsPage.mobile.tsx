@@ -33,7 +33,7 @@ export default function DocsPage(): JSX.Element {
       }
     }
     return counts
-    // indexVersion is the signal that registry.current changed — it has no
+    // indexVersion is the signal that registry.current changed - it has no
     // other use here, hence the explicit reference.
   }, [query, indexVersion])
 
@@ -43,7 +43,7 @@ export default function DocsPage(): JSX.Element {
   )
 
   // Wherever this was opened from (Settings, most likely) is where "back"
-  // should return to — matching the app's other pushed pages (EditorPage,
+  // should return to - matching the app's other pushed pages (EditorPage,
   // LocalEditorPage) rather than a hardcoded destination.
   const backView = previousView && previousView !== 'docs' ? previousView : 'wrld'
 
@@ -51,7 +51,7 @@ export default function DocsPage(): JSX.Element {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
-      {/* App bar — same shape as the other pushed pages' */}
+      {/* App bar - same shape as the other pushed pages' */}
       <div className="shrink-0 flex items-center gap-1 px-2 pt-2">
         <button
           onClick={() => setActiveView(backView)}
@@ -102,7 +102,7 @@ export default function DocsPage(): JSX.Element {
           )}
         </div>
 
-        {/* Tabs — a horizontally scrollable chip row rather than an
+        {/* Tabs - a horizontally scrollable chip row rather than an
             underline tab bar (underlines read as desktop chrome and give no
             touch feedback of their own). */}
         <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 scrollbar-none">
@@ -114,7 +114,7 @@ export default function DocsPage(): JSX.Element {
               <button
                 key={tab.id}
                 // Tapping a tab while searching jumps to that category's
-                // results instead of clearing the query — every matching tab
+                // results instead of clearing the query - every matching tab
                 // stays rendered (stacked, filtered by `visible` below), so
                 // this just scrolls the target section into view.
                 onClick={() => {

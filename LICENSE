@@ -24,7 +24,7 @@ SOFTWARE.
 
 NOTE: The MIT license above applies to the source code of this project
 ("unreleased"). Binary distributions (desktop installers) bundle third-party
-components under their own licenses — including FFmpeg, which is licensed under
+components under their own licenses - including FFmpeg, which is licensed under
 the GNU General Public License v3.0. See THIRD-PARTY-NOTICES.md for details and
 obligations. This project is a fan-made client and is not affiliated with,
 endorsed by, or connected to Juice WRLD, his estate, or any associated party;

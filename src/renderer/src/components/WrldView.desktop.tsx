@@ -84,7 +84,7 @@ export default function WrldView(): JSX.Element {
   })))
 
   // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
-  // "is this a dark look" — Ocean, Mocha, etc. need the dark treatment too.
+  // "is this a dark look" - Ocean, Mocha, etc. need the dark treatment too.
   const isDarkSkin = getSkin(theme).dark
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -97,7 +97,7 @@ export default function WrldView(): JSX.Element {
   useEffect(() => { if (volume > 0) prevVolumeRef.current = volume }, [volume])
   const toggleMute = (): void => setVolume(volume === 0 ? (prevVolumeRef.current || 0.8) : 0)
 
-  // Audio output device picker — mirrors the Player bar's (the bottom bar is
+  // Audio output device picker - mirrors the Player bar's (the bottom bar is
   // hidden on this page, so WRLD needs its own copy of this control instead
   // of inheriting it for free).
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
@@ -106,7 +106,7 @@ export default function WrldView(): JSX.Element {
   const [pickerPos, setPickerPos] = useState({ bottom: 0, right: 0 })
 
   useEffect(() => {
-    // Absent in some iOS Safari contexts — see Player.tsx's equivalent effect.
+    // Absent in some iOS Safari contexts - see Player.tsx's equivalent effect.
     if (!navigator.mediaDevices) return
     const enumerate = async (): Promise<void> => {
       try {
@@ -128,7 +128,7 @@ export default function WrldView(): JSX.Element {
 
   const [fmTab, setFmTab] = useState<'radio' | 'lyrics'>('radio')
   // Fullscreen renders the page through a portal (covers the sidebar/other
-  // chrome) AND requests real OS/browser-level fullscreen — the portal alone
+  // chrome) AND requests real OS/browser-level fullscreen - the portal alone
   // only fills the app window, not the actual screen.
   const [fullscreen, setFullscreen] = useState(false)
   const fullscreenRef = useRef(false)
@@ -147,7 +147,7 @@ export default function WrldView(): JSX.Element {
   }
 
   // Keep React state in sync when fullscreen is entered/exited by something
-  // other than our own button — OS window-manager gestures, or the browser's
+  // other than our own button - OS window-manager gestures, or the browser's
   // native Escape-exits-fullscreen behavior.
   useEffect(() => {
     const onChange = (): void => setFullscreen(!!document.fullscreenElement)
@@ -156,7 +156,7 @@ export default function WrldView(): JSX.Element {
   }, [])
 
   // If this page unmounts (navigating away) while still fullscreen, leave
-  // real OS/browser fullscreen too — otherwise the window would be stuck
+  // real OS/browser fullscreen too - otherwise the window would be stuck
   // fullscreen with no obvious way back once the WRLD-specific toggle is gone.
   useEffect(() => () => {
     if (!fullscreenRef.current) return
@@ -164,7 +164,7 @@ export default function WrldView(): JSX.Element {
   }, [])
 
   // Mirror fullscreen into the global store so App.tsx can hide the
-  // frameless-window title bar controls (minimize/maximize/close) — they'd
+  // frameless-window title bar controls (minimize/maximize/close) - they'd
   // otherwise float over this immersive view regardless of how fullscreen
   // was entered/exited (button, F11, Escape, or unmount).
   const setWrldFullscreen = useStore(s => s.setWrldFullscreen)
@@ -192,7 +192,7 @@ export default function WrldView(): JSX.Element {
   const [selectedVersionIdx, setSelectedVersionIdx] = useState(0)
   const [playingAlbumSongId, setPlayingAlbumSongId] = useState<number | null>(null)
   // Lives here (not inside AlbumDetail) because AlbumDetail is invoked as a
-  // plain function — see the note above ArtBox — and plain calls can't own hooks.
+  // plain function - see the note above ArtBox - and plain calls can't own hooks.
   const [versionMenuOpen, setVersionMenuOpen] = useState(false)
 
   useEffect(() => {
@@ -221,7 +221,7 @@ export default function WrldView(): JSX.Element {
     if (!suggestQuery.trim()) { setSuggestResults([]); setSuggestLoading(false); return }
     setSuggestLoading(true)
     suggestTimer.current = setTimeout(async () => {
-      // Search the DJ's published library, not /songs/ — only these ids can be
+      // Search the DJ's published library, not /songs/ - only these ids can be
       // resolved back to a playable file by propose_queue.
       try {
         setSuggestResults(await searchRadioLibrary(suggestQuery, 5))
@@ -232,7 +232,7 @@ export default function WrldView(): JSX.Element {
   }, [suggestQuery])
 
   const handlePropose = (track: RadioLibraryTrack) => {
-    // Only confirm if the proposal actually went out over the socket — a
+    // Only confirm if the proposal actually went out over the socket - a
     // closed/absent connection used to still flash "Proposed" while nothing
     // was ever sent.
     const sent = getActiveRadioClient()?.proposeQueue(track.id) ?? false
@@ -246,7 +246,7 @@ export default function WrldView(): JSX.Element {
       proposeTimer.current = setTimeout(() => setProposed(null), 4000)
     } else {
       setProposed(null)
-      setProposeError('Tune in to 999 FM first — proposals only count from listeners')
+      setProposeError('Tune in to 999 FM first - proposals only count from listeners')
       proposeTimer.current = setTimeout(() => setProposeError(null), 4000)
     }
   }
@@ -258,7 +258,7 @@ export default function WrldView(): JSX.Element {
   useEffect(() => { setArtError(false) }, [artSrc])
 
   // Sibling versions of the currently playing song (v1/v2/TV Mix/etc, linked
-  // via juicewrldapi's /versions/ table — see versionsApi.ts), shown as
+  // via juicewrldapi's /versions/ table - see versionsApi.ts), shown as
   // a single notch menu next to the cover art.
   const [songVersions, setSongVersions] = useState<{ songId: number; label: string | null }[]>([])
   const [songVersionMenuOpen, setSongVersionMenuOpen] = useState(false)
@@ -279,7 +279,7 @@ export default function WrldView(): JSX.Element {
     let cancelled = false
     getVersionGroup(numericId).then(async metas => {
       if (cancelled) return
-      // A version linked in the /versions/ table isn't necessarily playable —
+      // A version linked in the /versions/ table isn't necessarily playable -
       // recording-session songs (and some unsurfaced ones) have no `path`,
       // same gate used for bulk queue/playlist adds elsewhere in the app.
       const withPaths = await Promise.all(metas.map(async m => {
@@ -327,7 +327,7 @@ export default function WrldView(): JSX.Element {
   }
 
   useEffect(() => {
-    // On the theme background there's no art to read a contrast from — the tab
+    // On the theme background there's no art to read a contrast from - the tab
     // is sitting on --surface, so the skin's own polarity is the answer.
     if (wrldThemeBackground) { setTextIsDark(!isDarkSkin); return }
     if (!artSrc || artError) {
@@ -362,7 +362,7 @@ export default function WrldView(): JSX.Element {
   const isSynced  = rawLyrics ? isLrcFormat(rawLyrics) : false
   const isEditor  = account?.is_editor || account?.is_administrator
   // FM's Radio/Lyrics tabs stand on their own regardless of lyrics
-  // availability, so the manual override only applies to normal playback —
+  // availability, so the manual override only applies to normal playback -
   // same scope as the auto-collapse behavior it's overriding.
   const lyricsVisible = useLyricsVisible(!!rawLyrics, lyricsOverride, !radioFmActive && !!currentTrackFull?.lyricsPending)
   const showLyricsColumn = radioFmActive || showQueue || lyricsVisible
@@ -370,14 +370,14 @@ export default function WrldView(): JSX.Element {
   // On the theme background these come from the skin's own text vars, so the
   // tab matches the rest of the app (and follows a skin change live) instead
   // of the fixed black/white pair the art treatment picks between. The two
-  // faintest steps stay alpha-based — there's no theme var that dim, and
+  // faintest steps stay alpha-based - there's no theme var that dim, and
   // fading the primary color keeps them right on any skin.
   const txtPri   = wrldThemeBackground ? 'var(--text-primary)'   : textIsDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,1)'
   const txtSec   = wrldThemeBackground ? 'var(--text-secondary)' : textIsDark ? 'rgba(0,0,0,0.5)'  : 'rgba(255,255,255,0.5)'
   const txtTer   = wrldThemeBackground ? 'var(--text-muted)'     : textIsDark ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.3)'
   const txtFaint = textIsDark ? 'rgba(0,0,0,0.22)'  : 'rgba(255,255,255,0.2)'
   // Unplayed part of the progress/volume troughs. It used to be a hardcoded
-  // white wash, which is invisible on a light surface — now it follows the
+  // white wash, which is invisible on a light surface - now it follows the
   // same polarity as the text.
   const trackBg  = textIsDark ? 'rgba(0,0,0,0.15)'  : 'rgba(255,255,255,0.18)'
 
@@ -406,7 +406,7 @@ export default function WrldView(): JSX.Element {
     { value: 'playlists', label: 'Playlists' },
   ]
   // A "new vote" is detected by active rising edge (false/absent -> true),
-  // NOT by track/kind equality — those can stay identical across repeated
+  // NOT by track/kind equality - those can stay identical across repeated
   // metadata broadcasts for the SAME ongoing vote, but using them as the
   // reset trigger also means a stale/unrelated broadcast can spuriously
   // reset your vote selection (un-highlighting Yes/No) and a brand new vote
@@ -424,7 +424,7 @@ export default function WrldView(): JSX.Element {
 
   // Time the warning out like the propose error below it. The rising-edge reset
   // above only fires when a brand new ballot arrives, which can be a long way
-  // off — long enough for "tune in to 999 FM" to still be sitting there after
+  // off - long enough for "tune in to 999 FM" to still be sitting there after
   // the listener has done exactly that.
   useEffect(() => {
     if (!voteError) return
@@ -432,7 +432,7 @@ export default function WrldView(): JSX.Element {
     return () => clearTimeout(t)
   }, [voteError])
 
-  // Highlight a choice only once the socket accepted it — the server discards
+  // Highlight a choice only once the socket accepted it - the server discards
   // votes from a connection it hasn't seen listening:true on, which otherwise
   // looks identical to a counted vote.
   const castFmVote = useCallback((value: 'yes' | 'no'): void => {
@@ -443,7 +443,7 @@ export default function WrldView(): JSX.Element {
 
   // Locally tick the countdown once per second, independent of how often
   // server metadata broadcasts arrive. The interval is created once per vote
-  // and only re-synced (not torn down/recreated) on each server update —
+  // and only re-synced (not torn down/recreated) on each server update -
   // recreating it on every broadcast meant it could be cleared before ever
   // reaching its own 1000ms tick if broadcasts arrived more often than that,
   // making the displayed countdown look static.
@@ -473,14 +473,14 @@ export default function WrldView(): JSX.Element {
   const displayArtist = radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist
   const displayAlbum  = radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.album  : currentTrack?.album
 
-  // Nothing to control — gray out and disable the transport so it doesn't
+  // Nothing to control - gray out and disable the transport so it doesn't
   // look interactive when there's no track loaded (and FM isn't filling in).
   const noTrack = !radioFmActive && !currentTrack
 
   // ArtBox / FmRadioPanel / AlbumsGrid / AlbumDetail are rendered via plain
   // function calls, NOT <JSX/> element syntax: they're (re)defined on every
   // WrldView render, so as JSX components React would see a brand-new type
-  // each time and unmount/remount their whole subtree — album art re-decoded
+  // each time and unmount/remount their whole subtree - album art re-decoded
   // and flickered, and any internal DOM/menu state was lost on every parent
   // re-render. As plain calls they're just part of this component's own tree.
   // (Corollary: they must not contain hooks of their own.)
@@ -540,7 +540,7 @@ export default function WrldView(): JSX.Element {
             {radioFmVote.votes_needed != null && <span> · need {radioFmVote.votes_needed}</span>}
           </p>
           {voteError && (
-            <p className="text-red-400/80 text-xs">Vote didn't send — tune in to 999 FM and try again.</p>
+            <p className="text-red-400/80 text-xs">Vote didn't send - tune in to 999 FM and try again.</p>
           )}
           <div className="flex gap-2">
             <button
@@ -651,7 +651,7 @@ export default function WrldView(): JSX.Element {
     </div>
   )
 
-  // LyricsPanel is now a module-level component (see below WrldView) — call via JSX.
+  // LyricsPanel is now a module-level component (see below WrldView) - call via JSX.
 
   // ── Albums notch content ──────────────────────────────────────────────────────
 
@@ -805,7 +805,7 @@ export default function WrldView(): JSX.Element {
     <div className="relative flex flex-col md:flex-row flex-1 h-full w-full overflow-hidden">
 
       {/* 999 FM toggle + fullscreen toggle, grouped together so they move as
-          one unit — 999FM sits top-right on mobile, top-left on desktop
+          one unit - 999FM sits top-right on mobile, top-left on desktop
           (md:), and fullscreen now rides along right next to it instead of
           living in its own corner. */}
       <div className="absolute z-30 flex items-center gap-2 top-3 right-3 md:top-4 md:left-4 md:right-auto">
@@ -844,11 +844,11 @@ export default function WrldView(): JSX.Element {
       </div>
 
       <>
-          {/* Background — the cover's blurred art, or (Settings ▸ Appearance)
+          {/* Background - the cover's blurred art, or (Settings ▸ Appearance)
               the app's own surface color, which also skips the darkening wash
               on top of it since there's no art there to pull text off of. Gets
               the same accent radials as `html.gradients .app-shell` (index.css)
-              rather than that class itself — this page suppresses the app
+              rather than that class itself - this page suppresses the app
               shell underneath it, so the class's own selector never applies
               here, and unlike the shell this surface is full-bleed with no
               sidebar/player strips to leave uncovered, so both radials are
@@ -863,7 +863,7 @@ export default function WrldView(): JSX.Element {
                 } : undefined}
               />
             ) : artSrc && !artError ? (
-              // Blurred to 60px, so resolution is meaningless here — always the
+              // Blurred to 60px, so resolution is meaningless here - always the
               // degraded copy, which also gets the backdrop up on the first frame.
               <img src={smallCoverUrl(artSrc)} alt=""
                 className="absolute inset-0 w-full h-full object-cover"
@@ -928,7 +928,7 @@ export default function WrldView(): JSX.Element {
               : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />
             )}
 
-            {/* Mobile playback bar — the bottom Player bar is hidden on this
+            {/* Mobile playback bar - the bottom Player bar is hidden on this
                 page, and the mobile layout never had its own controls, so
                 this is the only way to control playback here. FM has no
                 local play/pause/seek, so that mode is volume-only. */}
@@ -1054,12 +1054,12 @@ export default function WrldView(): JSX.Element {
           {/* Desktop layout */}
           <div className="hidden md:flex relative z-10 flex-1 h-full overflow-hidden">
 
-            {/* Left column — Apple Music style. A true 50/50 split with the
+            {/* Left column - Apple Music style. A true 50/50 split with the
                 lyrics column, not a narrow fixed-width sidebar next to a huge
                 mostly-empty lyrics pane. */}
             {/* overflow-x-hidden is required here, not just tidy: per the CSS
                 overflow spec, when one axis is 'auto' the other's computed
-                value is promoted from 'visible' to 'auto' too — so without
+                value is promoted from 'visible' to 'auto' too - so without
                 this, the version menu popping out past this column's edge
                 was making the browser grow a horizontal scrollbar, which
                 shifted the whole column up by its height. */}
@@ -1072,7 +1072,7 @@ export default function WrldView(): JSX.Element {
                 {!radioFmActive && songVersions.length > 0 && (
                   <div className="absolute right-full top-1/2 -translate-y-1/2 z-20">
                     {/* Flush against the art's left edge rather than centered
-                        on it — only the half that pokes out past the cover is
+                        on it - only the half that pokes out past the cover is
                         drawn (rounded-l-full, flat edge against the art),
                         instead of a full pill floating half on top of it. */}
                     <button
@@ -1112,7 +1112,7 @@ export default function WrldView(): JSX.Element {
                 </div>
               </div>
 
-              {/* Progress bar — FM gets a read-only version (no scrubbing on live radio) */}
+              {/* Progress bar - FM gets a read-only version (no scrubbing on live radio) */}
               <div className="w-full" style={{ maxWidth: 320 }}>
                 {radioFmActive
                   ? <FmProgressBar txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />
@@ -1121,7 +1121,7 @@ export default function WrldView(): JSX.Element {
 
               {/* Playback controls */}
               <div className="w-full flex flex-col gap-4" style={{ maxWidth: 320 }}>
-                {/* Main controls row — hidden during 999FM; it's a live stream,
+                {/* Main controls row - hidden during 999FM; it's a live stream,
                     nothing here to locally play/pause/seek. Voting to skip
                     lives in the FM panel itself instead of a repurposed button. */}
                 {!radioFmActive && (
@@ -1249,7 +1249,7 @@ export default function WrldView(): JSX.Element {
 
             </div>
 
-            {/* Version menu — portaled (see songVersionMenuPos above): kept
+            {/* Version menu - portaled (see songVersionMenuPos above): kept
                 mounted so it still fades/scales in, but out of the left
                 column's scroll box. */}
             {!radioFmActive && songVersions.length > 0 && createPortal(
@@ -1282,7 +1282,7 @@ export default function WrldView(): JSX.Element {
               document.body
             )}
 
-            {/* Output device popover — portaled so it isn't clipped by the
+            {/* Output device popover - portaled so it isn't clipped by the
                 (overflow-hidden) column it's anchored to. */}
             {showOutputPicker && createPortal(
               <>
@@ -1319,10 +1319,10 @@ export default function WrldView(): JSX.Element {
               document.body
             )}
 
-            {/* Divider — FM only */}
+            {/* Divider - FM only */}
             {radioFmActive && <div className="w-px bg-white/10 shrink-0 my-10" />}
 
-            {/* Right column — swaps to the queue when toggled (replacing
+            {/* Right column - swaps to the queue when toggled (replacing
                 lyrics entirely, rather than floating a queue popup over the
                 left column) so it gets the full column's height instead of
                 a cramped 300px-capped overlay. */}
@@ -1360,9 +1360,9 @@ export default function WrldView(): JSX.Element {
       {/* ── Notch menu ── */}
       <div className="group absolute right-0 top-0 bottom-0 z-20 flex items-center">
 
-        {/* Expanded panel — slides in on hover */}
+        {/* Expanded panel - slides in on hover */}
         {/* Clip width is in rem (17rem = 272px at scale 1) so it grows together
-            with the rem-based `w-64` panel inside — a fixed px clamp here chopped
+            with the rem-based `w-64` panel inside - a fixed px clamp here chopped
             off the right column of album covers at UI scales above normal. */}
         <div className="overflow-hidden max-w-0 group-hover:max-w-[17rem] transition-[max-width] duration-200 ease-out">
           <div
@@ -1448,11 +1448,11 @@ export default function WrldView(): JSX.Element {
           </div>
         </div>
 
-        {/* Notch handle — pill tab */}
+        {/* Notch handle - pill tab */}
         <div className="w-[5px] group-hover:w-[3px] h-16 group-hover:h-24 rounded-l-full bg-white/20 group-hover:bg-white/50 transition-all duration-200 ease-out shrink-0" />
       </div>
 
-      {/* Mobile queue — full-screen sheet (there's no side-by-side room for
+      {/* Mobile queue - full-screen sheet (there's no side-by-side room for
           an inline drawer like the desktop layout gets). Hidden during 999FM,
           a live stream with nothing to queue/reorder. */}
       {showQueue && !radioFmActive && (
@@ -1467,8 +1467,8 @@ export default function WrldView(): JSX.Element {
     // Portaled to <body> so it covers the sidebar/nav instead of being
     // squeezed into the normal content column. z-30 is deliberately LOW: the
     // portal only has to out-stack the app chrome (nothing there goes above
-    // z-20), and every overlay in the app — the EQ popover, Settings,
-    // pickers, context menus, modals — sits at z-40 or higher. Parking this
+    // z-20), and every overlay in the app - the EQ popover, Settings,
+    // pickers, context menus, modals - sits at z-40 or higher. Parking this
     // at z-[150] like it used to meant all of those opened *behind* the
     // fullscreen view and looked broken. The view's own internal z-indexes
     // are unaffected: the positioned portal root is their stacking context.
@@ -1480,7 +1480,7 @@ export default function WrldView(): JSX.Element {
   return inner
 }
 
-// ── ProgressBar — module-level so currentTime ticks don't re-render WrldView ──
+// ── ProgressBar - module-level so currentTime ticks don't re-render WrldView ──
 
 import { memo as _memo2, useRef as _useRef2, useCallback as _cb2 } from 'react'
 // (re-exports already imported above; using same imports)
@@ -1555,7 +1555,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
       <button
         ref={btnRef}
         // Stop the mousedown from reaching SongContextMenu's document-level
-        // outside-click listener — otherwise clicking this button while the
+        // outside-click listener - otherwise clicking this button while the
         // menu is open closes it (mousedown) and then reopens it (click),
         // so it never appears to toggle shut.
         onMouseDown={(e) => e.stopPropagation()}
@@ -1567,7 +1567,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
         <MoreHorizontal size={18} />
       </button>
 
-      {/* FM radio is server-driven — Play/Play next/Add to queue/version
+      {/* FM radio is server-driven - Play/Play next/Add to queue/version
           switching don't make sense mid-broadcast, so those are left off,
           but Song info and Add to playlist still apply to the now-playing
           track. Synthesize a minimal Track since FM only gives us title/
@@ -1622,7 +1622,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
   )
 })
 
-// Apple Music-style "Up Next" queue panel for the WRLD tab — a dark glass
+// Apple Music-style "Up Next" queue panel for the WRLD tab - a dark glass
 // panel matching the rest of the page instead of the app-wide QueuePanel's
 // light theme (which App.tsx suppresses while this page is active, mirroring
 // how it already suppresses the standalone NowPlaying panel here).
@@ -1650,7 +1650,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
     reshuffleQueue: s.reshuffleQueue,
     // Every label in here is hardcoded white, which only works over something
     // dark. The art background always is (it's dimmed to 0.22/0.45 brightness),
-    // but the theme background is whatever the skin's surface is — so on a
+    // but the theme background is whatever the skin's surface is - so on a
     // light skin the glass has to darken instead of brighten, leaving a dark
     // card on a light page, the same way the notch drawer already looks.
     onLightBackdrop: s.wrldThemeBackground && !getSkin(s.theme).dark,
@@ -1686,7 +1686,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
       style={variant === 'inline' ? { maxHeight: 300 } : undefined}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Glassy frosted panel — blurs and lifts whatever's actually behind it
+      {/* Glassy frosted panel - blurs and lifts whatever's actually behind it
           (brightness/saturate on the backdrop-filter itself, not a flat black
           tint) so it reads as a distinct elevated card. A plain blur() alone
           over this page's already-dark art background just looked like more
@@ -1699,7 +1699,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
         }}
       />
       <div className={`absolute inset-0 ${onLightBackdrop ? 'bg-black/30' : 'bg-white/[0.06]'}`} />
-      {/* Soft top sheen — reads as light catching the top edge of the glass. */}
+      {/* Soft top sheen - reads as light catching the top edge of the glass. */}
       <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-white/[0.07] to-transparent pointer-events-none" />
 
       <div className="relative z-10 flex items-center justify-between px-4 pt-4 pb-3 shrink-0 border-b border-white/10">
@@ -1746,7 +1746,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
           .wrld-queue-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
           .wrld-queue-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.35); }
         `}</style>
-        {/* ── History ── (collapsible, above now playing — same behavior as
+        {/* ── History ── (collapsible, above now playing - same behavior as
             the app-wide QueuePanel's history section, restyled for this
             panel's glass theme). During radio the queue holds *only* played
             history, so without this the panel looked empty in radio mode. */}
@@ -1902,7 +1902,7 @@ function WrldQueueRow({ track, isActive, isPlaying, showDrag, onPlay, onRemove }
   )
 }
 
-// Read-only playback bar for 999FM — it's a live stream, so no scrubbing,
+// Read-only playback bar for 999FM - it's a live stream, so no scrubbing,
 // but elapsed/duration are still known (from the radio WS) and ticked
 // locally between updates the same way the bottom Player bar does.
 const FmProgressBar = memo(function FmProgressBar({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }) {
@@ -1912,7 +1912,7 @@ const FmProgressBar = memo(function FmProgressBar({ txtPri, txtTer, trackBg }: {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const elapsed = radioFmNowPlaying?.elapsed_ms
 
-  // Keyed on elapsed_ms, not the whole now-playing object — that object changes
+  // Keyed on elapsed_ms, not the whole now-playing object - that object changes
   // on every metadata broadcast, so the interval was rebuilt before it could
   // ever reach its own 500ms tick.
   useEffect(() => {
@@ -1951,7 +1951,7 @@ const FmProgressBar = memo(function FmProgressBar({ txtPri, txtTer, trackBg }: {
 const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }) {
   const { progress, currentTime } = useStore(useShallow(s => ({ progress: s.progress, currentTime: s.currentTime })))
   const barRef = useRef<HTMLDivElement>(null)
-  // Buffer the scrub position visually while dragging — only call seekAudio
+  // Buffer the scrub position visually while dragging - only call seekAudio
   // on release, since seeking on every mousemove makes playback glitch/stutter.
   const [dragPct, setDragPct] = useState<number | null>(null)
 
@@ -2027,7 +2027,7 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
   )
 })
 
-// ── LyricsPanel — module-level component so it has its own Zustand selector ──
+// ── LyricsPanel - module-level component so it has its own Zustand selector ──
 
 import type { SyncedLyricLine, Track } from '../types'
 
@@ -2059,11 +2059,11 @@ const LyricsPanel = memo(function LyricsPanel({
 
   // Driven by requestAnimationFrame against the LIVE audio.currentTime rather
   // than the Zustand-stored value (which only updates on the native
-  // 'timeupdate' event, ~4x/sec) — that throttling is what made the active
+  // 'timeupdate' event, ~4x/sec) - that throttling is what made the active
   // line snap every ~250ms instead of transitioning smoothly.
   // Lazily computed from the live audio position (not just -1) so that a
-  // remount — e.g. entering/exiting fullscreen re-parents this panel through
-  // a portal, which fully unmounts and remounts it — doesn't momentarily
+  // remount - e.g. entering/exiting fullscreen re-parents this panel through
+  // a portal, which fully unmounts and remounts it - doesn't momentarily
   // render with no active line (translateY snaps to 0 / the first line)
   // before the next rAf tick corrects it. That produced a visible "jump to
   // the top, then glide back down" flash on every fullscreen toggle.
@@ -2101,7 +2101,7 @@ const LyricsPanel = memo(function LyricsPanel({
   const [translateY, setTranslateY] = useState(0)
   const [vpHalf, setVpHalf] = useState(0)
 
-  // Manual-scroll override — the lyric column isn't a native scroll container
+  // Manual-scroll override - the lyric column isn't a native scroll container
   // (its position is driven by a `transform`, not `scrollTop`), so a plain
   // wheel/touch drag would otherwise do nothing. When the user scrolls
   // manually we take over `translateY` here and stop auto-centering the
@@ -2155,12 +2155,12 @@ const LyricsPanel = memo(function LyricsPanel({
     const active = activeRef.current
     if (!active) return
     // offsetTop is relative to linesRef (position: relative), unaffected by the
-    // transform — so this stays correct mid-animation. lyricsScale is a dep
+    // transform - so this stays correct mid-animation. lyricsScale is a dep
     // because changing the text size reflows every line's offsetTop.
     setTranslateY(active.offsetTop + active.offsetHeight / 2 - vpHalf)
   }, [currentLineIdx, vpHalf, lyricsScale])
 
-  // Right-click → "Download synced lyrics" — only offered for LRC-format
+  // Right-click → "Download synced lyrics" - only offered for LRC-format
   // lyrics (the .lrc file needs the timestamps; plain unsynced text has
   // nothing worth exporting in that format).
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -2215,7 +2215,7 @@ const LyricsPanel = memo(function LyricsPanel({
 
   if (isSynced && syncedLines.length > 0) {
     // Edge fade is done with a mask on the lines themselves, not an opaque
-    // overlay — painting flat rgba(0,0,0,0.55) bands on top added darkness
+    // overlay - painting flat rgba(0,0,0,0.55) bands on top added darkness
     // confined to this panel's box, creating a visible "aura" rectangle that
     // didn't match the rest of the tab's background. A mask instead fades the
     // text to transparent, letting the page's own blurred-art background
@@ -2250,7 +2250,7 @@ const LyricsPanel = memo(function LyricsPanel({
             const isActive = i === currentLineIdx
             const dist     = Math.abs(i - currentLineIdx)
             // The active line grows via `transform: scale()`, not a literal
-            // font-size change. font-size is a layout property — animating it
+            // font-size change. font-size is a layout property - animating it
             // keeps reflowing this line's box (and shifting every line below
             // it) for the whole 0.4s, which raced the translateY centering
             // calculation above: that math runs once off the pre-growth
@@ -2268,7 +2268,7 @@ const LyricsPanel = memo(function LyricsPanel({
                 className={`cursor-pointer select-none ${lyricsAlign === 'center' ? 'origin-center mx-auto text-center' : 'origin-left'}`}
                 style={{
                   // The active line grows via `scale()`, anchored at its left
-                  // edge (`origin-left`) so it doesn't jump around — but scale
+                  // edge (`origin-left`) so it doesn't jump around - but scale
                   // is purely visual and doesn't reflow layout, so a line
                   // already near the container's full width would have its
                   // right edge pushed past the viewport once scaled up, and
@@ -2279,7 +2279,7 @@ const LyricsPanel = memo(function LyricsPanel({
                   maxWidth:   padded ? '80%' : '82%',
                   fontFamily: 'var(--font-lyrics)',
                   fontSize:   baseFontSize,
-                  // Bold weight is the active line's CSS class only — not
+                  // Bold weight is the active line's CSS class only - not
                   // animated. Most fonts (including this app's system-font
                   // stack) aren't variable fonts, so `font-weight` can't
                   // actually interpolate between steps like 400→800; the
@@ -2290,8 +2290,8 @@ const LyricsPanel = memo(function LyricsPanel({
                   lineHeight: 1.25,
                   color:      isActive ? activeColor : inactiveColor,
                   opacity:    isActive ? 1 : dist === 1 ? 0.55 : dist === 2 ? 0.35 : 0.2,
-                  // Every line except the one playing — played and upcoming
-                  // alike — so the active line is the only sharp thing on
+                  // Every line except the one playing - played and upcoming
+                  // alike - so the active line is the only sharp thing on
                   // screen.
                   filter:     (!isActive && lyricsBlur) ? `blur(${(0.6 * lyricsBlurAmount).toFixed(2)}px)` : 'none',
                   transform:  `scale(${scale})`,

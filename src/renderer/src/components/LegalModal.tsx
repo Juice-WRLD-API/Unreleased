@@ -61,7 +61,7 @@ function TermsContent(): JSX.Element {
 
       <H>3. The App does not host content</H>
       <P>
-        The App is a client — a viewer and player. It does not store, host, upload, or distribute any music, audio,
+        The App is a client - a viewer and player. It does not store, host, upload, or distribute any music, audio,
         artwork, or metadata itself. All such content is retrieved on demand from the third-party{' '}
         <Ext href="https://juicewrldapi.com">Juice WRLD API</Ext> and other third-party sources, which are operated
         independently of the App and are solely responsible for the content they make available. We do not own, control,
@@ -100,7 +100,7 @@ function TermsContent(): JSX.Element {
         are most effective when directed at the source hosting the material. That said, if you are a rights holder (or
         their agent) and believe content made accessible through the App infringes your rights, contact us through the
         channels below with a description of the work, where it appears, and your contact details, and we will act on
-        your notice in good faith — including removing links or references within the App and forwarding the notice to
+        your notice in good faith - including removing links or references within the App and forwarding the notice to
         the relevant data source. We will also address repeat infringement where we are able to.
       </P>
 
@@ -117,7 +117,7 @@ function TermsContent(): JSX.Element {
         To the fullest extent permitted by law, the maintainers and contributors of the App are not liable for any
         indirect, incidental, special, consequential, or punitive damages, or for any loss of data, profits, or
         goodwill, arising from your use of (or inability to use) the App or any content accessed through it. The App is
-        free, and to the extent any liability cannot be excluded, it is limited to the amount you paid to use the App —
+        free, and to the extent any liability cannot be excluded, it is limited to the amount you paid to use the App -
         which is zero. Your sole and exclusive remedy for dissatisfaction is to stop using the App.
       </P>
 
@@ -132,8 +132,8 @@ function TermsContent(): JSX.Element {
       <P>
         You may stop using the App at any time by uninstalling it or closing the page. We may modify, suspend, or
         discontinue the App (in whole or in part) at any time without notice or liability. Sections that by their nature
-        should survive termination — including content disclaimers, warranty disclaimers, limitation of liability, and
-        indemnification — will continue to apply.
+        should survive termination - including content disclaimers, warranty disclaimers, limitation of liability, and
+        indemnification - will continue to apply.
       </P>
 
       <H>11. Governing law &amp; severability</H>
@@ -182,13 +182,13 @@ function PrivacyContent(): JSX.Element {
           'Settings and preferences (theme, playback options, menu layout, equalizer, etc.).',
           'Your local music library folders and tracks (desktop app only).',
           'Playback state, recently played, and cached artwork/metadata for speed.',
-          'Your login token, if you sign in — kept locally to authenticate requests.',
+          'Your login token, if you sign in - kept locally to authenticate requests.',
         ]}
       />
 
       <H>3. Cookies &amp; local storage</H>
       <P>
-        The App uses your browser&apos;s local storage (and, on the desktop app, local files) to function — for example
+        The App uses your browser&apos;s local storage (and, on the desktop app, local files) to function - for example
         to remember your settings, keep you signed in, and cache content for speed. These are strictly necessary for the
         App to work and are not used to track you across other websites or to build an advertising profile.
       </P>
@@ -196,7 +196,7 @@ function PrivacyContent(): JSX.Element {
         We do not use third-party advertising or analytics cookies. Any cookies set by third-party services you reach
         through the App (for example the Juice WRLD API, Discord sign-in, or Last.fm) are governed by those services&apos;
         own policies. You can clear this storage at any time from Settings, or by clearing your browser data or
-        uninstalling the desktop app — doing so resets your preferences and signs you out.
+        uninstalling the desktop app - doing so resets your preferences and signs you out.
       </P>
 
       <H>4. Data sent to the Juice WRLD API</H>
@@ -223,15 +223,15 @@ function PrivacyContent(): JSX.Element {
       <List
         items={[
           <>
-            <strong className="text-text-primary font-medium">Last.fm scrobbling</strong> — if you connect Last.fm, the
+            <strong className="text-text-primary font-medium">Last.fm scrobbling</strong> - if you connect Last.fm, the
             tracks you play are sent to Last.fm to scrobble under your account. Disconnect any time in Settings.
           </>,
           <>
-            <strong className="text-text-primary font-medium">Discord status</strong> — the desktop app can show what
+            <strong className="text-text-primary font-medium">Discord status</strong> - the desktop app can show what
             you&apos;re listening to as your Discord activity. This runs locally with Discord and can be turned off.
           </>,
           <>
-            <strong className="text-text-primary font-medium">Feedback &amp; reports</strong> — anything you submit
+            <strong className="text-text-primary font-medium">Feedback &amp; reports</strong> - anything you submit
             (message, and optional contact you provide) is sent so we can act on it.
           </>,
         ]}
@@ -242,7 +242,7 @@ function PrivacyContent(): JSX.Element {
         items={[
           'We do not sell your data.',
           'We do not show third-party advertising or embed ad trackers.',
-          'We do not ask for payment information — the App is free.',
+          'We do not ask for payment information - the App is free.',
         ]}
       />
 

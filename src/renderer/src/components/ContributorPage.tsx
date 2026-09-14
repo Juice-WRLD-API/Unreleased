@@ -37,7 +37,7 @@ const CHANGE_OPTIONS: { value: CompProposalChangeType; label: string; icon: type
   { value: 'delete_folder', label: 'Delete folder', icon: FolderX },
 ]
 
-// Folder-scoped types: the target is a whole folder, not a single file — no
+// Folder-scoped types: the target is a whole folder, not a single file - no
 // filename field, no file body. Mirrors create_folder's existing shape.
 const FOLDER_SCOPED_TYPES = new Set<CompProposalChangeType>([
   'create_folder', 'rename_folder', 'move_folder', 'delete_folder',
@@ -79,7 +79,7 @@ function ApplyPanel({ onSubmitted, rejection, channel }: { onSubmitted: () => vo
   return (
     <div className="flex-1 min-w-0 overflow-y-auto">
       <div className="max-w-lg mx-auto px-6 py-12">
-      {/* A rejected application is shown, not enforced — the reviewer's notes
+      {/* A rejected application is shown, not enforced - the reviewer's notes
           usually say what to fix, so the form stays open underneath. */}
       {rejection && (
         <div className="mb-4 rounded-2xl border border-red-500/25 bg-red-500/5 p-4">
@@ -120,7 +120,7 @@ export default function ContributorPage(): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<CompFilterTab>('all')
   // The API takes one `file_path`, but typing a whole path by hand is what
-  // made this page painful — a folder comes from the browser, a filename from
+  // made this page painful - a folder comes from the browser, a filename from
   // the file you picked or from typing. They're joined on submit.
   const [folderPath, setFolderPath] = useState('')
   const [fileName, setFileName] = useState('')
@@ -133,7 +133,7 @@ export default function ContributorPage(): JSX.Element {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null)
   // Delete works off existing paths rather than local files, so it keeps its
-  // own list — gathered from the picker's multi-select.
+  // own list - gathered from the picker's multi-select.
   const [deletePaths, setDeletePaths] = useState<string[]>([])
   const [submitState, setSubmitState] = useState<SubmitState>('idle')
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -148,7 +148,7 @@ export default function ContributorPage(): JSX.Element {
 
   const isContributor = userApi.isChannelContributor(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
 
-  // Where "back" goes. Prefer the profile the user actually arrived from —
+  // Where "back" goes. Prefer the profile the user actually arrived from -
   // an editor-contributor reaches this page from the editor profile, and
   // sending them to the contributor profile strands them without the
   // Proposals/Reports tabs. Fall back to whichever profile their role owns
@@ -197,11 +197,11 @@ export default function ContributorPage(): JSX.Element {
       setDeletePaths((prev) => [...prev, ...paths.filter((x) => !prev.includes(x))])
     } else if (type === 'upload') {
       // The Files context menu hands over the folder being browsed, not a
-      // file — there's nothing to pick apart into folder + name yet.
+      // file - there's nothing to pick apart into folder + name yet.
       setFolderPath(paths[0] ?? '')
     } else {
       if (paths.length === 0) { setPendingCompProposal(null); return }
-      // Replace is single by definition — a selection can only seed the first.
+      // Replace is single by definition - a selection can only seed the first.
       setFolderPath(parentOf(paths[0]))
       setFileName(basename(paths[0]))
     }
@@ -292,7 +292,7 @@ export default function ContributorPage(): JSX.Element {
     // Anything carrying a file body goes to the background queue: a comp zip is
     // routinely hundreds of megabytes, and awaiting it here meant the user had
     // to sit on this page (and keep the window open) until it finished. The
-    // queue reports progress into the Downloads panel instead — see
+    // queue reports progress into the Downloads panel instead - see
     // lib/compUploads. Delete and move proposals carry no body, so they stay
     // inline below where their result can be reported immediately.
     if (carriesFile) {
@@ -333,7 +333,7 @@ export default function ContributorPage(): JSX.Element {
     setBatchProgress(null)
 
     // A partial batch is the interesting case: the ones that landed are real
-    // proposals, so don't roll the form back as if nothing happened — keep
+    // proposals, so don't roll the form back as if nothing happened - keep
     // the failures named and let them retry just those.
     if (failed.length === jobs.length) {
       setSubmitState('error')
@@ -453,7 +453,7 @@ export default function ContributorPage(): JSX.Element {
                   : 'Target (relative to comp/)'}
               </label>
               <div className="flex gap-2">
-                <input value={folderPath} onChange={e => setFolderPath(e.target.value)} placeholder="Folder — e.g. Compilation/Unreleased"
+                <input value={folderPath} onChange={e => setFolderPath(e.target.value)} placeholder="Folder - e.g. Compilation/Unreleased"
                   className="flex-1 min-w-0 rounded-xl border border-[var(--border)] bg-surface-overlay px-4 py-2.5 text-sm font-mono text-text-primary focus:outline-none focus:border-accent" />
                 <button
                   type="button"
@@ -465,7 +465,7 @@ export default function ContributorPage(): JSX.Element {
                 </button>
               </div>
               {!isBatch && !isFolderOp && (
-                <input value={fileName} onChange={e => setFileName(e.target.value)} placeholder="Filename — e.g. My Song.mp3"
+                <input value={fileName} onChange={e => setFileName(e.target.value)} placeholder="Filename - e.g. My Song.mp3"
                   className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-4 py-2.5 text-sm font-mono text-text-primary focus:outline-none focus:border-accent" />
               )}
               {/* The joined value is what actually gets submitted, so show it
@@ -516,10 +516,10 @@ export default function ContributorPage(): JSX.Element {
             {needsDestination && (
               <div className="space-y-2">
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-text-muted block">
-                  {changeType === 'rename_folder' ? 'New location — same parent folder (relative to comp/)' : 'Destination (relative to comp/)'}
+                  {changeType === 'rename_folder' ? 'New location - same parent folder (relative to comp/)' : 'Destination (relative to comp/)'}
                 </label>
                 <div className="flex gap-2">
-                  <input value={destFolder} onChange={e => setDestFolder(e.target.value)} placeholder="Folder — e.g. Compilation/Released"
+                  <input value={destFolder} onChange={e => setDestFolder(e.target.value)} placeholder="Folder - e.g. Compilation/Released"
                     className="flex-1 min-w-0 rounded-xl border border-[var(--border)] bg-surface-overlay px-4 py-2.5 text-sm font-mono text-text-primary focus:outline-none focus:border-accent" />
                   <button
                     type="button"
@@ -531,13 +531,13 @@ export default function ContributorPage(): JSX.Element {
                   </button>
                 </div>
                 <input value={destFileName} onChange={e => setDestFileName(e.target.value)}
-                  placeholder={changeType === 'rename_folder' || changeType === 'move_folder' ? 'New folder name' : 'Filename — leave as-is to keep the name'}
+                  placeholder={changeType === 'rename_folder' || changeType === 'move_folder' ? 'New folder name' : 'Filename - leave as-is to keep the name'}
                   className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-4 py-2.5 text-sm font-mono text-text-primary focus:outline-none focus:border-accent" />
                 <p className="text-[11px] font-mono text-text-muted truncate" title={destinationPath || undefined}>
                   {destinationPath ? `comp/${destinationPath}` : 'comp/…'}
                 </p>
                 {changeType === 'rename_folder' && (
-                  <p className="text-[11px] text-text-muted leading-relaxed">Rename keeps the folder in the same parent — only the folder name changes.</p>
+                  <p className="text-[11px] text-text-muted leading-relaxed">Rename keeps the folder in the same parent - only the folder name changes.</p>
                 )}
                 {changeType === 'move_folder' && (
                   <p className="text-[11px] text-text-muted leading-relaxed">Move requires a different parent folder.</p>
@@ -556,7 +556,7 @@ export default function ContributorPage(): JSX.Element {
               <div>
                 <label className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
                   {isUpload ? 'Files' : 'File'}
-                  {isUpload && <span className="normal-case tracking-normal font-normal opacity-70"> — pick several to propose them all into the folder above</span>}
+                  {isUpload && <span className="normal-case tracking-normal font-normal opacity-70"> - pick several to propose them all into the folder above</span>}
                 </label>
                 <div className="mt-1.5">
                   <input ref={fileInputRef} type="file" multiple={isUpload}
@@ -567,7 +567,7 @@ export default function ContributorPage(): JSX.Element {
                       const files = Array.from(e.target.files ?? []).slice(0, isUpload ? Infinity : 1)
                       setSelectedFiles(files)
                       // Don't make them retype the name of the file they just
-                      // picked off disk — but never clobber one they typed.
+                      // picked off disk - but never clobber one they typed.
                       // Only meaningful for a single file; a batch keeps each
                       // file's own name.
                       if (files.length === 1 && !fileName.trim()) setFileName(files[0].name)
@@ -608,7 +608,7 @@ export default function ContributorPage(): JSX.Element {
 
             {/* Mirror of the Downloads panel's upload rows. The panel itself is
                 desktop-only (and easy to miss), so the page it was started from
-                shows the same progress — leaving the page no longer stops it. */}
+                shows the same progress - leaving the page no longer stops it. */}
             {activeUploads.length > 0 && (
               <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/60 divide-y divide-[var(--border)]/40">
                 {activeUploads.map((u) => (
@@ -628,7 +628,7 @@ export default function ContributorPage(): JSX.Element {
                   </div>
                 ))}
                 <p className="px-3.5 py-2 text-[11px] text-text-muted">
-                  Uploading in the background — you can leave this page.
+                  Uploading in the background - you can leave this page.
                 </p>
               </div>
             )}
@@ -696,7 +696,7 @@ export default function ContributorPage(): JSX.Element {
               if (!fileName.trim() && selectedFiles.length === 1) setFileName(selectedFiles[0].name)
             } else {
               setDestFolder(path)
-              // A move keeps its filename unless the user renames it — that's
+              // A move keeps its filename unless the user renames it - that's
               // the whole difference between a move and a rename.
               if (!destFileName.trim()) setDestFileName(fileName.trim())
             }

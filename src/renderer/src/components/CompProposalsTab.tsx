@@ -11,7 +11,7 @@ import { useStore } from '../store/useStore'
 import { getMediaType } from '../lib/fileTypes'
 import { formatBytes, formatDuration } from '../lib/format'
 
-/** Loads a comp-admin route's bytes into an object URL — the staging file
+/** Loads a comp-admin route's bytes into an object URL - the staging file
  *  isn't public like a live comp/ path, so it needs the same authed fetch
  *  downloadStaging already uses, just kept in memory instead of saved to
  *  disk. Torn down (URL revoked) on unmount or when the source URL changes,
@@ -42,10 +42,10 @@ function useAuthedBlobUrl(url: string | null): { src: string | null; loading: bo
   return state
 }
 
-/** One preview slot — a live comp/ path (plain <img>/<audio>/<video> against
+/** One preview slot - a live comp/ path (plain <img>/<audio>/<video> against
  *  the public download URL, same as FilePickerModal's thumbnails) or an
  *  authed blob (the staged file, not yet part of comp/). Anything that isn't
- *  audio, video, or an image (a tracklist .txt, a folder) renders nothing —
+ *  audio, video, or an image (a tracklist .txt, a folder) renders nothing -
  *  the JSON snapshot below already covers non-media proposals. */
 function MediaPreview({ label, name, src, loading, error, bytes }: {
   label: string
@@ -126,7 +126,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
   // Separate from `error` (review/reverse action failures, shown in the detail
-  // pane) — this covers the list fetch itself and has to stay visible even
+  // pane) - this covers the list fetch itself and has to stay visible even
   // with nothing selected, since a channel-access failure clears the list.
   const [loadError, setLoadError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -135,7 +135,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   // the change type as it's labelled on screen ("New file", not "create"), and
   // the raw id so a proposal referenced by number elsewhere can be pulled up.
   // Flattened once per fetch and matched against a deferred query, so typing
-  // never waits on the list — same treatment as the song-edit queue.
+  // never waits on the list - same treatment as the song-edit queue.
   const haystacks = useMemo(() => {
     const m = new Map<number, string>()
     for (const p of proposals) {
@@ -162,7 +162,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
       .then(rows => {
         setProposals(rows)
         // Reviewing a proposal reloads the list and moves the selection, so
-        // the notes box has to reset with it — otherwise the text typed for
+        // the notes box has to reset with it - otherwise the text typed for
         // the proposal just approved rides along into the next Approve.
         setSelected(rows[0] ?? null)
         setReviewNotes('')
@@ -170,7 +170,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
       .catch((e) => {
         setLoadError(e instanceof Error ? e.message : 'Could not load comp proposals')
         // Don't leave the previous channel's list on screen underneath the
-        // error — its approve/reject actions would still be live against the
+        // error - its approve/reject actions would still be live against the
         // wrong channel context.
         setProposals([])
         setSelected(null)
@@ -196,7 +196,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
 
   // The review/reverse endpoints hand back the updated row, so the list can
   // reflect it immediately instead of waiting on the reload() round-trip
-  // below — that fetch still runs (for the row's neighbors and to reconcile
+  // below - that fetch still runs (for the row's neighbors and to reconcile
   // final ordering), it just no longer gates how long the acted-on row keeps
   // showing as pending. Dropped from view outright when it no longer matches
   // the current status filter, same as the server-side list would show.
@@ -246,7 +246,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         a.href = href
         a.download = p.staging_filename || 'staged-file'
         // Anchor has to be in the document for the click to count in some
-        // browsers, and the object URL has to outlive the click — revoking it
+        // browsers, and the object URL has to outlive the click - revoking it
         // on the same tick cancels the download before it starts.
         document.body.appendChild(a)
         a.click()
@@ -257,7 +257,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   }
 
   // The proposed file only exists in staging while the proposal is pending
-  // (approval moves it into comp/, rejection discards it) — matches the same
+  // (approval moves it into comp/, rejection discards it) - matches the same
   // condition the existing "Staged file" download button already gates on.
   const stagingUrl = selected && selected.staging_filename && selected.status === 'pending'
     ? userApi.adminCompProposalStagingUrl(selected.id, activeChannel)
@@ -395,7 +395,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
               )}
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-4 text-sm">
-              {/* "Current" is the file already in comp/ — meaningful context for
+              {/* "Current" is the file already in comp/ - meaningful context for
                   a replace, move, or delete (what's about to change or vanish),
                   and for a plain upload it's simply not there yet, so the public
                   fetch 404s and the slot quietly shows "unavailable". */}

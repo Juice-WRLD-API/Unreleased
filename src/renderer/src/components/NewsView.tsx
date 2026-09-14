@@ -46,7 +46,7 @@ function stripMarkdown(md: string): string {
     .trim()
 }
 
-// Falls back to a snippet of the body when no summary was written — the
+// Falls back to a snippet of the body when no summary was written - the
 // composer no longer requires one.
 function displaySummary(item: NewsItem): string {
   const trimmed = item.summary?.trim()
@@ -71,7 +71,7 @@ function CategoryTag({ label }: { label: string }) {
 
 // Edit/delete cluster, shown on hover for editors on desktop; always visible on
 // mobile since touch has no hover state. Rendered as a sibling of the card's
-// clickable button (never nested — a button can't contain buttons).
+// clickable button (never nested - a button can't contain buttons).
 function ManageActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   const isMobile = useIsMobile()
   return (
@@ -337,7 +337,7 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
 
 export default function NewsView(): JSX.Element {
   const { setActiveView, account } = useStorePick('setActiveView', 'account')
-  // News write access is its own role (is_news), separate from is_editor —
+  // News write access is its own role (is_news), separate from is_editor -
   // admins can post regardless. Only admins manage channels.
   const canPost = !!(account?.is_news || account?.is_administrator)
   const canManageChannels = !!account?.is_administrator
@@ -357,7 +357,7 @@ export default function NewsView(): JSX.Element {
   const [selected, setSelected] = useState<NewsItem | null>(null)
 
   // Whether the user follows the active channel (drives the bell toggle). "All"
-  // isn't subscribable — you follow specific channels.
+  // isn't subscribable - you follow specific channels.
   const [subscribed, setSubscribedState] = useState(false)
 
   // Modals
@@ -370,7 +370,7 @@ export default function NewsView(): JSX.Element {
       const list = await fetchChannels()
       setChannels(list)
     } catch {
-      // Keep whatever we have (the static fallback) — a channels fetch failure
+      // Keep whatever we have (the static fallback) - a channels fetch failure
       // shouldn't blank out the tab bar.
     }
   }, [])
@@ -400,7 +400,7 @@ export default function NewsView(): JSX.Element {
   useEffect(() => { loadChannels() }, [loadChannels])
 
   // Reload whenever the channel changes (and on mount). Close any open article
-  // so we don't strand the reader on a story from the previous channel — but
+  // so we don't strand the reader on a story from the previous channel - but
   // not on the very first run, which needs to leave a URL-deep-linked post
   // (see the effect below) alone.
   const didMount = useRef(false)
@@ -527,7 +527,7 @@ export default function NewsView(): JSX.Element {
             {channel !== ALL_CHANNEL && (
               <button
                 onClick={toggleSubscribe}
-                title={subscribed ? `Following — notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
+                title={subscribed ? `Following - notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
                 aria-label={subscribed ? 'Unfollow channel' : 'Follow channel for notifications'}
                 aria-pressed={subscribed}
                 className={`p-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${subscribed ? 'text-accent hover:bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`}
@@ -547,7 +547,7 @@ export default function NewsView(): JSX.Element {
             )}
             <button
               onClick={() => setSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
-              title={sort === 'newest' ? 'Newest first — switch to oldest' : 'Oldest first — switch to newest'}
+              title={sort === 'newest' ? 'Newest first - switch to oldest' : 'Oldest first - switch to newest'}
               aria-label={sort === 'newest' ? 'Sort: newest first, switch to oldest' : 'Sort: oldest first, switch to newest'}
               className="flex items-center gap-1 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >

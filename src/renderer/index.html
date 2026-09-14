@@ -6,7 +6,7 @@
          over file://. On the web that relative base is resolved against the
          current path, which breaks every nested route: from
          /auth/discord/callback the browser asks for
-         /auth/discord/assets/index-*.js, gets a 404, and renders nothing —
+         /auth/discord/assets/index-*.js, gets a 404, and renders nothing -
          a blank page right after Discord login (same for /shared/<id>).
          Over http(s) repoint the base at the origin root before the parser
          reaches the injected module script; file:// keeps the relative base. -->
@@ -14,14 +14,14 @@
     <script>if(/^https?:/.test(location.protocol))document.querySelector('base').href='/'</script>
     <!-- maximum-scale=1 stops iOS Safari's auto-zoom when focusing inputs
          under 10px (all our text-xs fields); deliberate pinch-zoom still
-         works — iOS ignores the cap for user gestures. -->
+         works - iOS ignores the cap for user gestures. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/png" href="/favicon.png" />
 
     <!-- Nothing in this app needs remote script/style execution, eval, or a
          plugin/object embed, so this closes off the main injection→escalation
          path for a compromised dependency or an XSS in rendered content
-         (react-markdown here is already sanitized — see lib/Markdown.tsx —
+         (react-markdown here is already sanitized - see lib/Markdown.tsx -
          this is the second layer). The two inline <script> blocks below are
          pinned by hash rather than 'unsafe-inline'; if either one's source
          changes, its hash here has to be recomputed or it silently stops
@@ -45,56 +45,56 @@
       form-action 'self';
     " />
 
-    <!-- SEO — web build only in effect, though the tags ship in the packaged
+    <!-- SEO - web build only in effect, though the tags ship in the packaged
          HTML too (same bundle, same index.html; they are inert there, exactly
-         like the PWA tags below). These are what every non-JS scraper reads —
-         Discord/Twitter/iMessage unfurls included — so they describe the site
+         like the PWA tags below). These are what every non-JS scraper reads -
+         Discord/Twitter/iMessage unfurls included - so they describe the site
          as a whole. Once React boots, lib/seo.ts rewrites
          title/description/canonical/robots per route; see applySeo(), which
          no-ops in Electron. -->
-    <meta name="description" content="Stream Juice WRLD's full catalog — every released and unreleased song — free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics." />
+    <meta name="description" content="Stream Juice WRLD's full catalog - every released and unreleased song - free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics." />
     <link rel="canonical" href="https://player.juicewrldapi.com/" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 
     <meta property="og:site_name" content="unreleased" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://player.juicewrldapi.com/" />
-    <meta property="og:title" content="unreleased — Juice WRLD music player" />
-    <meta property="og:description" content="Stream Juice WRLD's full catalog — every released and unreleased song — free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics." />
+    <meta property="og:title" content="unreleased - Juice WRLD music player" />
+    <meta property="og:description" content="Stream Juice WRLD's full catalog - every released and unreleased song - free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics." />
     <meta property="og:image" content="https://player.juicewrldapi.com/icon-512.png" />
     <meta property="og:image:width" content="512" />
     <meta property="og:image:height" content="512" />
-    <meta property="og:image:alt" content="unreleased — Juice WRLD music player" />
+    <meta property="og:image:alt" content="unreleased - Juice WRLD music player" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="unreleased — Juice WRLD music player" />
-    <meta name="twitter:description" content="Stream Juice WRLD's full catalog — every released and unreleased song — free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics." />
+    <meta name="twitter:title" content="unreleased - Juice WRLD music player" />
+    <meta name="twitter:description" content="Stream Juice WRLD's full catalog - every released and unreleased song - free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics." />
     <meta name="twitter:image" content="https://player.juicewrldapi.com/icon-512.png" />
 
     <!-- PWA / installability. These are inert in the Electron build (it loads
          over file://, never installs, and the service worker is not registered
-         there — see main.tsx). -->
+         there - see main.tsx). -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#121212" />
-    <!-- iOS ignores the web manifest for "Add to Home Screen" — it reads these
+    <!-- iOS ignores the web manifest for "Add to Home Screen" - it reads these
          Apple-specific tags instead to launch fullscreen with our own icon. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <!-- black-translucent lets the page paint under the status bar, which is
          what keeps the skin/gradient running to the very top edge.
          Known and not ours to fix: iOS softens the top of the screen in
-         installed apps regardless of page content — every installed PWA shows
+         installed apps regardless of page content - every installed PWA shows
          it, so don't go hunting for a CSS blur in here. Only the viewer's
          Settings → Accessibility → Reduce Transparency changes it. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Unreleased" />
     <link rel="apple-touch-icon" href="/icon-512.png" />
 
-    <title>unreleased — Juice WRLD music player</title>
+    <title>unreleased - Juice WRLD music player</title>
 
     <!-- Structured data. WebSite carries the SearchAction so a Google sitelinks
          search box can deep-link into the tracker's ?q= param (the tracker
          already reflects each settled search there). WebApplication describes
-         the player itself — free, browser-based, no install. -->
+         the player itself - free, browser-based, no install. -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -104,7 +104,7 @@
           "@id": "https://player.juicewrldapi.com/#website",
           "url": "https://player.juicewrldapi.com/",
           "name": "unreleased",
-          "description": "A music player for Juice WRLD — stream the full catalog of released and unreleased songs.",
+          "description": "A music player for Juice WRLD - stream the full catalog of released and unreleased songs.",
           "inLanguage": "en",
           "potentialAction": {
             "@type": "SearchAction",
@@ -159,22 +159,22 @@
     <!-- Crawlers that don't execute JS (and the ones that do, before the bundle
          resolves) otherwise see an empty <div id="root">. This gives them real
          text and crawlable links to the public routes. Never reaches a real
-         visitor — or the desktop app, where scripting is always on. -->
+         visitor - or the desktop app, where scripting is always on. -->
     <noscript>
-      <h1>unreleased — a Juice WRLD music player</h1>
+      <h1>unreleased - a Juice WRLD music player</h1>
       <p>
-        Stream Juice WRLD's full catalog — every released and unreleased song — free in your
+        Stream Juice WRLD's full catalog - every released and unreleased song - free in your
         browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio,
         and read synced lyrics. Powered by the
         <a href="https://juicewrldapi.com">Juice WRLD API</a>.
       </p>
       <p>This player needs JavaScript enabled.</p>
       <ul>
-        <li><a href="/tracker">Tracker — search the catalog</a></li>
-        <li><a href="/files">Files — browse the API filesystem</a></li>
-        <li><a href="/wrld">WRLD — 999 FM live radio</a></li>
-        <li><a href="/heardle">Heardle — the daily song guessing game</a></li>
-        <li><a href="/wordle">Wordle — the daily song title game</a></li>
+        <li><a href="/tracker">Tracker - search the catalog</a></li>
+        <li><a href="/files">Files - browse the API filesystem</a></li>
+        <li><a href="/wrld">WRLD - 999 FM live radio</a></li>
+        <li><a href="/heardle">Heardle - the daily song guessing game</a></li>
+        <li><a href="/wordle">Wordle - the daily song title game</a></li>
         <li><a href="/docs">Docs</a></li>
         <li><a href="/download">Download the desktop app</a></li>
       </ul>

@@ -25,7 +25,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
 
   useEffect(() => { setSelected(reports[0] ?? null) }, [reports])
 
-  // Song names for rows that only carry an id — one bulk catalog fetch (the
+  // Song names for rows that only carry an id - one bulk catalog fetch (the
   // same ?all=true mode compact view uses) instead of a request per report.
   const [songsById, setSongsById] = useState<Map<number, JWApiSong>>(new Map())
   useEffect(() => {

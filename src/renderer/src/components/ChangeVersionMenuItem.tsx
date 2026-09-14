@@ -16,25 +16,25 @@ interface Props {
   itemRef: React.RefObject<HTMLButtonElement>
   /** The menu element this flyout positions itself beside. */
   menuRef: React.RefObject<HTMLElement>
-  /** The menu's own position — reposition the flyout when the menu moves. */
+  /** The menu's own position - reposition the flyout when the menu moves. */
   menuPos: { top: number; left: number }
 }
 
 interface VersionOption { song: JWApiSong; label: string | null; version: string | null }
 
 /** "Change version" row + submenu for the song context menu (which every view
- *  in the app funnels through — Tracker, Liked Songs, Playlists, Player, WRLD).
+ *  in the app funnels through - Tracker, Liked Songs, Playlists, Player, WRLD).
  *  Renders as a flyout beside the menu, like "Add to playlist" and "File
  *  actions". The parent owns the open state so only one submenu shows at a
  *  time; everything else (the sibling fetch, its own placement) stays here.
  *  Siblings are fetched lazily on first open rather than eagerly whenever
- *  the parent menu opens — doing that for every song regardless of whether
+ *  the parent menu opens - doing that for every song regardless of whether
  *  the user ever clicks this item is exactly the kind of needless-fetch
  *  pattern that made compact view laggy before.
  *
  *  Clicking a sibling's name plays it now (a one-off). The star pins it as the
  *  group's *default* version (lib/songPrefs) so every future play of any
- *  version of this song resolves to it — the persistent counterpart to the
+ *  version of this song resolves to it - the persistent counterpart to the
  *  one-off switch, set right where the user is already comparing versions. */
 export default function ChangeVersionMenuItem({
   songId, onChangeVersion, open, onToggle, itemRef, menuRef, menuPos,
@@ -50,7 +50,7 @@ export default function ChangeVersionMenuItem({
     }))
   )
 
-  // Own row wins if set, else the first sibling that has one — mirrors
+  // Own row wins if set, else the first sibling that has one - mirrors
   // queueSlice's groupDefaultVersion so the star here matches what playback
   // actually resolves to, even when the default was set from a *different*
   // version's own menu rather than this song's.
@@ -64,7 +64,7 @@ export default function ChangeVersionMenuItem({
     return null
   }, [songPrefs, songId, versions])
 
-  // Siblings load on first open, not when the parent menu mounts — see the
+  // Siblings load on first open, not when the parent menu mounts - see the
   // needless-fetch note above.
   useEffect(() => {
     if (!open || versions != null || loading) return
@@ -79,13 +79,13 @@ export default function ChangeVersionMenuItem({
               song,
               version: m.version,
               label: m.version
-                ? (m.versionTitle ? `${m.version} — ${m.versionTitle}` : m.version)
+                ? (m.versionTitle ? `${m.version} - ${m.versionTitle}` : m.version)
                 : m.versionTitle,
             }))
             .catch(() => null)
         ))
         // Songs with no `path` (recording sessions, some unsurfaced entries)
-        // have nothing to actually play — hidden here since both switching to
+        // have nothing to actually play - hidden here since both switching to
         // one and starring it as the group default would break playback.
         if (!cancelled) setVersions(fetched.filter((v): v is VersionOption => !!v && !!v.song.path))
       } finally {
@@ -145,7 +145,7 @@ export default function ChangeVersionMenuItem({
                     className="flex-1 min-w-0 text-left pl-3.5 py-2 text-sm text-text-secondary hover:text-text-primary truncate"
                   >
                     {song.name}
-                    {label && <span className="text-text-muted text-xs"> — {label}</span>}
+                    {label && <span className="text-text-muted text-xs"> - {label}</span>}
                   </button>
                   {version && (
                     <button
@@ -164,7 +164,7 @@ export default function ChangeVersionMenuItem({
                           }
                         }
                       }}
-                      title={isDefault ? 'Default version — click to unset' : `Always play "${version}" for this song`}
+                      title={isDefault ? 'Default version - click to unset' : `Always play "${version}" for this song`}
                       className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors ${isDefault ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
                     >
                       <Star size={13} fill={isDefault ? 'currentColor' : 'none'} />

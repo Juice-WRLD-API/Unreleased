@@ -7,7 +7,7 @@
 // skipGuess to be graded there. That is what makes a posted score evidence
 // rather than a claim, and it is why the client must take the server's
 // `ladder`, `status` and `guesses` as authoritative instead of recomputing
-// them — the whole pool is still in the browser and localStorage is still
+// them - the whole pool is still in the browser and localStorage is still
 // plain text, so anything derived locally is only a display convenience.
 //
 // submitResult below is the *legacy* path and still self-reports. It stays
@@ -35,7 +35,7 @@ export interface LeaderboardEntry {
   discord_avatar?: string | null
   /** today: guesses used; null when the day was lost. */
   guesses?: number | null
-  /** today: whether the day was won. A flag, never a tally — the versus
+  /** today: whether the day was won. A flag, never a tally - the versus
    *  boards count with `wins`, so that the two can't be confused into
    *  rendering a boolean where a number belongs. */
   won?: boolean
@@ -109,7 +109,7 @@ export async function startPuzzle(mode: DailyMode, day?: string): Promise<Puzzle
   })
 }
 
-/** UTC calendar day — the only "today" both sides can agree on without
+/** UTC calendar day - the only "today" both sides can agree on without
  *  knowing each other's timezone. */
 function utcDay(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 86_400_000)
@@ -121,14 +121,14 @@ function utcDay(offsetDays = 0): string {
  *
  *  The browser's local date is not a safe thing to send: the API validates the
  *  day as "not in the future" against its own clock, so any player east of the
- *  server's timezone gets rejected for hours every night — which is exactly
+ *  server's timezone gets rejected for hours every night - which is exactly
  *  the "Must be YYYY-MM-DD and not in the future" failure. The server owns the
  *  answer, so it owns the calendar too; the day it returns is authoritative
  *  and callers should key their state off `res.day`, not off todayKey().
  *
  *  Candidates are tried in order and the first success wins: no day at all
  *  (correct if the server defaults to its own today), then the UTC day, then
- *  the UTC day before — which between them cover a server on any offset,
+ *  the UTC day before - which between them cover a server on any offset,
  *  whether or not it requires the field. Only a failure costs an extra call.
  */
 export async function startTodayPuzzle(mode: DailyMode): Promise<PuzzleResponse> {
@@ -219,7 +219,7 @@ export async function flushResults(): Promise<void> {
   }
 }
 
-/** Standings. `day` is optional and best left off — the server then answers for
+/** Standings. `day` is optional and best left off - the server then answers for
  *  its own today, which is the same calendar the rounds are graded against.
  *  Passing a locally-computed date risks asking for a day the server hasn't
  *  reached (see startTodayPuzzle). */

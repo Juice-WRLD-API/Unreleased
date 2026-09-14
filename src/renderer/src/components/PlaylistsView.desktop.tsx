@@ -51,7 +51,7 @@ function PlaylistMosaic({ tracks, className = '' }: { tracks: Track[]; className
   if (artUrls.length < 4) return <ProgressiveCover src={artUrls[0]} className={`object-cover ${className}`} />
   return (
     <div className={`grid grid-cols-2 ${className}`} style={{ overflow: 'hidden', transform: 'translateZ(0)' }}>
-      {/* Each quadrant is half the box, so the degraded covers are enough — and
+      {/* Each quadrant is half the box, so the degraded covers are enough - and
           four full-size ones per playlist is exactly the load worth avoiding. */}
       {artUrls.map((url, i) => (
         <img key={i} src={smallCoverUrl(url)} alt="" className="w-full h-full object-cover" style={{ aspectRatio: '1' }} />
@@ -60,10 +60,10 @@ function PlaylistMosaic({ tracks, className = '' }: { tracks: Track[]; className
   )
 }
 
-// ── HeroBackdrop — Apple Music-style full-bleed blurred cover art behind the
+// ── HeroBackdrop - Apple Music-style full-bleed blurred cover art behind the
 // playlist header, instead of a faint corner blob. Fades into the page's own
 // background at the bottom so the track list below sits on ordinary bg.
-// Independent of the "App gradients" setting — this is the hero's own art,
+// Independent of the "App gradients" setting - this is the hero's own art,
 // not a decorative accent wash.
 //
 // The darkening overlay was hardcoded to black, which reads as a dark banner
@@ -98,7 +98,7 @@ function HeroBackdrop({ src, isDarkSkin }: { src?: string | null; isDarkSkin: bo
   )
 }
 
-// ── HeroPlayButton / HeroShuffleButton — Apple Music-style circular icon
+// ── HeroPlayButton / HeroShuffleButton - Apple Music-style circular icon
 // controls, replacing the pill-shaped "Play"/"Shuffle" text buttons.
 function HeroPlayButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
@@ -123,7 +123,7 @@ function HeroShuffleButton({ onClick }: { onClick: () => void }): JSX.Element {
   )
 }
 
-// (The per-tile hover play button lives in PlaylistCard now — every grid,
+// (The per-tile hover play button lives in PlaylistCard now - every grid,
 // including the logged-out one, renders tiles through it.)
 
 function totalDurationLabel(tracks: Track[]): string {
@@ -229,7 +229,7 @@ function LocalPlaylistMosaic({ trackIds, className = '' }: {
   trackIds: string[]; className?: string
 }): JSX.Element {
   // Covers live in the store's libraryArt map (keyed by track id), populated as
-  // tracks are viewed in the Library tab — read them straight from there.
+  // tracks are viewed in the Library tab - read them straight from there.
   const libraryArt = useStore(s => s.libraryArt)
   const covers = trackIds
     .map(id => libraryArt[id])
@@ -257,7 +257,7 @@ function LocalPlaylistMosaic({ trackIds, className = '' }: {
 // ── PlaylistExpandPanel ───────────────────────────────────────────────────────
 // The inline "quick view" that opens below a clicked card's row, spanning the
 // full grid width (col-span-full breaks the CSS grid's auto-flow onto its own
-// row right there, pushing later cards down onto the row after it — no need
+// row right there, pushing later cards down onto the row after it - no need
 // to know how many columns are actually rendered).
 function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, onPlayTrack, onOpenFull, onTrackContextMenu }: {
   name: string
@@ -268,7 +268,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
   onClose: () => void
   onPlayTrack: (track: Track) => void
   /** Jumps to the old full-page playlist view (drag-reorder, sort, share,
-   *  offline download, etc.) — this quick-view panel is deliberately a
+   *  offline download, etc.) - this quick-view panel is deliberately a
    *  lighter subset, not a replacement for it. */
   onOpenFull: () => void
   onTrackContextMenu: (track: Track, e: React.MouseEvent) => void
@@ -357,20 +357,20 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
 // ── Row-aware grid expansion ──────────────────────────────────────────────────
 // A CSS grid item with `grid-column: 1 / -1` (the "spans the full row" trick
 // used to break a quick-view panel onto its own row) forces auto-placement to
-// restart at column 1 for everything that comes after it — so inserting one
+// restart at column 1 for everything that comes after it - so inserting one
 // right after the clicked card mid-row shoves every card to its right down
 // onto the row below, instead of leaving that row intact. Fix: figure out how
 // many columns the grid is actually rendering right now (auto-fill decides
 // this per pixel width, so it has to be measured, not assumed), then insert
-// the panel after the LAST card of the clicked card's row instead — nothing
+// the panel after the LAST card of the clicked card's row instead - nothing
 // in that row moves, and the panel still lands directly beneath it.
 
 type GridEntry = { key: string; tile: JSX.Element; panel: JSX.Element | null }
 
 // Takes the element itself (state, not a mutable ref object) so the
-// measuring effect re-runs when a conditionally-rendered grid — like a
+// measuring effect re-runs when a conditionally-rendered grid - like a
 // folder's member grid, which doesn't exist in the DOM until the folder is
-// opened — actually mounts. A plain useRef's identity never changes, so an
+// opened - actually mounts. A plain useRef's identity never changes, so an
 // effect keyed on it only ever runs once at the owning component's initial
 // mount, back when such a grid's ref.current was still null; it would then
 // silently stay stuck at the default column count forever.
@@ -420,21 +420,21 @@ export default function PlaylistsView(): JSX.Element {
     followedPlaylists, followPlaylist, unfollowPlaylist, updateFollowedPlaylistMeta,
     playlistFolders, createFolder, renameFolder, deleteFolder, movePlaylistsToFolder, appTextScale,
     // Subscribed purely so the track memo below re-derives when a custom
-    // name/cover changes — liteSongToTrack bakes the override in at conversion
+    // name/cover changes - liteSongToTrack bakes the override in at conversion
     // time, so without this the rows keep the old name until a refetch.
     songPrefs, openBulkEditor, fullEraNames, theme, playlistHeroEnabledDark, playlistHeroEnabledLight } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'playNext', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistsOpenFolderId', 'setPlaylistsOpenFolderId', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'songPrefs', 'openBulkEditor', 'fullEraNames', 'theme', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight')
   useEffect(() => { loadEraFullNames().catch(() => {}) }, [])
-  // Cast back to the component's own SortField union — the store keeps the
+  // Cast back to the component's own SortField union - the store keeps the
   // field as a plain string so it doesn't have to import this component's type.
   const sort = sortRaw as SortState
   const setSort = setSortRaw as (s: SortState) => void
   const canEdit = useCanEdit()
   // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
-  // "is this a dark look" — Ocean, Mocha, etc. need the dark treatment too.
+  // "is this a dark look" - Ocean, Mocha, etc. need the dark treatment too.
   // The playlist hero's white-on-dark text only makes sense while its own
   // backdrop is actually dark; see heroLight below at each hero render.
   const isDarkSkin = getSkin(theme).dark
-  // The setting is tracked per skin darkness, not as one flag — see
+  // The setting is tracked per skin darkness, not as one flag - see
   // playlistHeroEnabledDark/Light in useStore.ts.
   const playlistHeroEnabled = isDarkSkin ? playlistHeroEnabledDark : playlistHeroEnabledLight
 
@@ -442,17 +442,17 @@ export default function PlaylistsView(): JSX.Element {
   const [detail, setDetail] = useState<PlaylistDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
-  // Inline "quick view" expansion — clicking a card in the grid expands a
+  // Inline "quick view" expansion - clicking a card in the grid expands a
   // panel below its row (Apple Music-style) instead of navigating away.
   // Keyed the same way as the multi-select set ("api:<id>" / "local:<id>")
   // so it's unambiguous across the two playlist kinds.
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [expandedTracks, setExpandedTracks] = useState<Track[]>([])
   const [expandedLoading, setExpandedLoading] = useState(false)
-  // Toggles a card's quick-view panel, closing any open folder first — see
+  // Toggles a card's quick-view panel, closing any open folder first - see
   // the note on openFolder for why the two can't both be open at once.
   // closeFolder defaults to true (a top-level card's expand should close any
-  // open folder so the two panels don't collide in the same grid row — see
+  // open folder so the two panels don't collide in the same grid row - see
   // openFolder's note). A folder's own member cards pass false: they render
   // inside that folder's already-open panel, so closing it out from under
   // them would unmount the very panel their own expand view needs to appear
@@ -462,8 +462,8 @@ export default function PlaylistsView(): JSX.Element {
     setExpandedKey(k => k === key ? null : key)
   }, [setPlaylistsOpenFolderId])
   // One column-count measurement per distinct grid container that can host a
-  // quick-view panel — see useGridColumnCount above. State (not useRef) so
-  // the measuring effect re-fires when the element actually mounts — needed
+  // quick-view panel - see useGridColumnCount above. State (not useRef) so
+  // the measuring effect re-fires when the element actually mounts - needed
   // for folderGridEl, whose grid doesn't exist until a folder is opened.
   // authGridEl covers the logged-out library grid, mainGridEl the logged-in
   // one, deviceGridEl "On This Device", and folderGridEl the (single, since
@@ -486,7 +486,7 @@ export default function PlaylistsView(): JSX.Element {
   // Context menus
   const [trackMenu, setTrackMenu] = useState<SongContextMenuState | null>(null)
   const [cardMenu, setCardMenu] = useState<CardMenuState | null>(null)
-  // Shared by every quick-view panel's track rows — same trackMenu state the
+  // Shared by every quick-view panel's track rows - same trackMenu state the
   // full playlist page's own SongContextMenu uses, just opened from a
   // different place (the two never show at once, since a quick-view panel
   // only ever renders in the grid views, not the full-page detail view).
@@ -494,7 +494,7 @@ export default function PlaylistsView(): JSX.Element {
     setTrackMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })
   }, [])
 
-  // Multi-select of playlists in the library grid — ctrl/cmd-click a card to
+  // Multi-select of playlists in the library grid - ctrl/cmd-click a card to
   // toggle it, mirroring the file browser's selection model (ApiFilesView).
   // Keyed as "api:<id>" / "local:<id>" since both id spaces are numeric and
   // could otherwise collide. See the useMultiSelect() call further down for
@@ -507,7 +507,7 @@ export default function PlaylistsView(): JSX.Element {
   const [newFolderName, setNewFolderName] = useState('')
   const [folderMenu, setFolderMenu] = useState<{ folder: PlaylistFolder; x: number; y: number; renaming?: boolean; renameVal?: string } | null>(null)
 
-  // Drag-to-move-into-a-folder — dragged keys are the same "api:<id>"/"local:<id>"
+  // Drag-to-move-into-a-folder - dragged keys are the same "api:<id>"/"local:<id>"
   // composite the multi-select already uses. Transient gesture state, so it's
   // fine as local state (unlike the store-backed selection that survives tab
   // switches). Usually just the one card under the cursor, but dragging a
@@ -517,10 +517,10 @@ export default function PlaylistsView(): JSX.Element {
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null)
   // Dropping one ungrouped playlist card directly onto another (as opposed to
   // onto a folder tile, handled by dropTargetFolderId above) bundles the two
-  // into a brand-new folder — the "drag a playlist onto a playlist" gesture.
+  // into a brand-new folder - the "drag a playlist onto a playlist" gesture.
   const [dropTargetPlaylistKey, setDropTargetPlaylistKey] = useState<string | null>(null)
 
-  // Multi-select of tracks within an open playlist — mirrors the Tracker's
+  // Multi-select of tracks within an open playlist - mirrors the Tracker's
   // bulk-select (ApiTrackerView). Keyed by track.id (Track has a string id;
   // the numeric songId is derived when needed for playlist/remove ops). See
   // the useMultiSelect() call further down (needs displayTracks, which isn't
@@ -542,18 +542,18 @@ export default function PlaylistsView(): JSX.Element {
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
 
-  // Sort + search — sort itself comes from the store (see playlistsSort)
+  // Sort + search - sort itself comes from the store (see playlistsSort)
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // Compact view — same grouping as the Tracker's (see lib/compactGroups.ts):
+  // Compact view - same grouping as the Tracker's (see lib/compactGroups.ts):
   // collapses tracks sharing a version_title into one row. Uses the
   // playlist-scoped groupItemsByVersion since `tracks` here is already the
-  // playlist's full, unpaginated list — no need to ask juicewrldapi's
+  // playlist's full, unpaginated list - no need to ask juicewrldapi's
   // /versions/ table for every group app-wide like the Tracker has to.
   const [compactView, setCompactView] = useState(false)
-  // Grid view — mutually exclusive with compact, so only one of the two
+  // Grid view - mutually exclusive with compact, so only one of the two
   // non-default track layouts is ever active at once.
   const [gridView, setGridView] = useState(false)
   const [compactGroups, setCompactGroups] = useState<CompactGroup<Track>[]>([])
@@ -616,7 +616,7 @@ export default function PlaylistsView(): JSX.Element {
     Promise.all(workers).catch(() => undefined)
   }, [playlists])
 
-  // ── Derived data — ALL hooks at top level, no conditionals ────────────────
+  // ── Derived data - ALL hooks at top level, no conditionals ────────────────
 
   const summary = useMemo(() => playlists.find(p => p.id === selectedId), [playlists, selectedId])
   const tracks: Track[] = useMemo(
@@ -637,7 +637,7 @@ export default function PlaylistsView(): JSX.Element {
     }
     if (sort.field !== 'default') {
       // Original playlist position, for the "#" column's own sort (and the
-      // tie-break below) — built from the unfiltered `tracks` order rather
+      // tie-break below) - built from the unfiltered `tracks` order rather
       // than `result`, since search may have already dropped entries.
       const origIndex = sort.field === 'index' ? new Map(tracks.map((t, i) => [t, i])) : null
       result = [...result].sort((a, b) => {
@@ -662,13 +662,13 @@ export default function PlaylistsView(): JSX.Element {
   // ── Detail track-list virtualization ───────────────────────────────────────
   // Large playlists rendered every row (each with decoded album art) at once.
   // Element-state refs (not RefObjects) because the detail view mounts long
-  // after this component does — see useVirtualWindowEl.
+  // after this component does - see useVirtualWindowEl.
   const [listScrollEl, setListScrollEl] = useState<HTMLDivElement | null>(null)
   const [listContentEl, setListContentEl] = useState<HTMLDivElement | null>(null)
   // 56 = px-4 py-2 row wrapping 40px album art at normal scale. Multiplied by
   // the app text-size setting so the virtualized rows (whose height and
   // absolute offsets must be concrete px) grow with the rem-based covers/text
-  // inside them — otherwise larger scales clipped rows and shrank the covers.
+  // inside them - otherwise larger scales clipped rows and shrank the covers.
   const TRACK_ROW_H = Math.round(56 * appTextScale)
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
     useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, TRACK_ROW_H)
@@ -678,7 +678,7 @@ export default function PlaylistsView(): JSX.Element {
   const filteredCompactGroups = useMemo(() => {
     const filtered = filterCompactGroups(compactGroups, search, t => `${t.title} ${t.artist}`)
     // Compact view only exposes the # column (see the header row), so
-    // index sort is the only sort that applies here — reverse for desc.
+    // index sort is the only sort that applies here - reverse for desc.
     return sort.field === 'index' && sort.dir === 'desc' ? [...filtered].reverse() : filtered
   }, [compactGroups, search, sort])
 
@@ -711,7 +711,7 @@ export default function PlaylistsView(): JSX.Element {
       if (cancelled) return
       // groupItemsByVersion builds groups from a Map keyed by version-group id,
       // so they come back in whatever order the /versions/ lookup happened to
-      // return — not the playlist's actual track order. Re-sort both the
+      // return - not the playlist's actual track order. Re-sort both the
       // groups and each group's members by their position in `tracks` so
       // compact view lines up with what normal/grid view shows, instead of
       // silently reshuffling the playlist.
@@ -736,7 +736,7 @@ export default function PlaylistsView(): JSX.Element {
   }, [])
 
   // Collapse the inline quick-view whenever a full playlist page opens (e.g.
-  // via the card's "⋯ → Open" menu) — otherwise it'd sit there stale under
+  // via the card's "⋯ → Open" menu) - otherwise it'd sit there stale under
   // the grid the user just navigated away from.
   useEffect(() => {
     if (selectedId != null || localSelectedId != null) setExpandedKey(null)
@@ -749,7 +749,7 @@ export default function PlaylistsView(): JSX.Element {
     if (!expandedKey) { setExpandedTracks([]); return }
     if (expandedKey === 'liked') {
       // Same three sources LikedSongsView combines: API favorites (fetched
-      // fresh — likedTrackIds only carries local/file ids, not synced ones),
+      // fresh - likedTrackIds only carries local/file ids, not synced ones),
       // scanned local-library likes, and liked API-browser files.
       const localLiked = new Set(likedTrackIds)
       const localTracks = libraryTracks.filter(t => localLiked.has(t.id)).map(libTrackToTrack)
@@ -803,7 +803,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // Open a playlist requested from the sidebar's expandable playlist list.
   // A store field (not the URL-param effect above) is needed here because it
-  // has to work even when this component is already mounted — the URL effect
+  // has to work even when this component is already mounted - the URL effect
   // only runs once, on mount.
   useEffect(() => {
     if (pendingPlaylistId == null) return
@@ -834,7 +834,7 @@ export default function PlaylistsView(): JSX.Element {
       setCoverData(null)
       setCoverLoading(true)
     }
-    // A cached detail (tracks + metadata) renders instantly too — then we
+    // A cached detail (tracks + metadata) renders instantly too - then we
     // still refetch in the background to pick up changes made elsewhere,
     // swapping in the fresh result without ever showing a loading spinner.
     const cachedDetail = userApi.peekPlaylistDetail(id)
@@ -873,7 +873,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // Keep a followed playlist's cached display fields (the grid card's name/
   // cover/track count) reasonably fresh. The detail view above already
-  // re-fetches live on every open — this just makes sure the summary shown
+  // re-fetches live on every open - this just makes sure the summary shown
   // before that fetch resolves next time isn't stuck on whatever it looked
   // like the moment it was followed.
   useEffect(() => {
@@ -887,7 +887,7 @@ export default function PlaylistsView(): JSX.Element {
   }, [isSharedView, selectedId, detail, coverData, followedPlaylists, updateFollowedPlaylistMeta])
 
   // Reset sort/search/editing when switching playlists. The sort
-  // reset is skipped on the component's own first mount — this effect's
+  // reset is skipped on the component's own first mount - this effect's
   // dependency array fires then too, and since sort lives in the store (so
   // it survives switching tabs and back, see playlistsSort), resetting it
   // unconditionally here would wipe that persistence on every tab switch.
@@ -928,7 +928,7 @@ export default function PlaylistsView(): JSX.Element {
     } catch {}
   }
 
-  // Optimistic remove — no loading flash
+  // Optimistic remove - no loading flash
   const removeTrack = useCallback(async (songId: number) => {
     if (selectedId == null) return
     setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => i.song.id !== songId) } : null)
@@ -973,7 +973,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // "Edit" needs full song objects (producers, dates, lyrics, …), but a
   // playlist's own items only carry the lite shape the list endpoint returns
-  // (title/artist/path — enough for a row, not enough for the editor). Fetch
+  // (title/artist/path - enough for a row, not enough for the editor). Fetch
   // each selected song in full before opening the dialog, same endpoint
   // EditorPage.loadSong uses. A handful at a time so a large selection
   // doesn't fire fifty requests at once.
@@ -1002,7 +1002,7 @@ export default function PlaylistsView(): JSX.Element {
   }, [selectedTrackList, openBulkEditor])
 
   // Remove every selected track in one pass, then refresh once (rather than
-  // per-track like removeTrack) — otherwise a large selection fires a refresh
+  // per-track like removeTrack) - otherwise a large selection fires a refresh
   // storm. Optimistically drops them from the open detail first.
   const bulkRemove = useCallback(async () => {
     if (selectedId == null) return
@@ -1024,7 +1024,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // ── Multi-select of playlists (library grid) ──────────────────────────────
   // "Select all" here varies per tab (local-only vs. local+api combined), so
-  // it isn't a single generic "everything visible" — those buttons keep their
+  // it isn't a single generic "everything visible" - those buttons keep their
   // own setSelectedPlaylistKeys calls below rather than going through the
   // hook's ctrlA/selectAll (which assumes one canonical "all").
   const {
@@ -1243,7 +1243,7 @@ export default function PlaylistsView(): JSX.Element {
         song_ids: allowedIds,
       })
 
-      // Request 2 (optional): cover — use existing base64 directly, or fetch from URL
+      // Request 2 (optional): cover - use existing base64 directly, or fetch from URL
       const b64 = coverData?.cover_image
       const url = coverData?.cover_image_url
       if (b64) {
@@ -1269,7 +1269,7 @@ export default function PlaylistsView(): JSX.Element {
   // ── Playlist card menu (shared by logged-in and logged-out views) ──────────
 
   // A default name for a folder made straight from a "Move to folder → New
-  // folder" action, where there's no name field — unique so two quick creates
+  // folder" action, where there's no name field - unique so two quick creates
   // don't collide. The user can rename via the folder's ⋯ menu.
   const uniqueFolderName = (): string => {
     const taken = new Set(playlistFolders.map(f => f.name.toLowerCase()))
@@ -1317,7 +1317,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // The right-click/⋯ card menu, rendered into a body portal. Defined before
   // the early returns because the logged-out local-playlists view sets the
-  // same cardMenu state — previously nothing rendered it there, so the menu
+  // same cardMenu state - previously nothing rendered it there, so the menu
   // silently never appeared.
   const renderCardMenu = (): React.ReactNode => cardMenu && createPortal(
     <ClampedMenu x={cardMenu.x} y={cardMenu.y} className="min-w-[210px]">
@@ -1537,7 +1537,7 @@ export default function PlaylistsView(): JSX.Element {
   // Defined before the early returns so the logged-out local-playlists view
   // renders the same tiles, folder sections, and menus as the main library.
 
-  // Cover node for a card — the exact per-kind cover logic the grids used
+  // Cover node for a card - the exact per-kind cover logic the grids used
   // inline, pulled out so folder members render an identical tile.
   const apiCoverNode = (p: PlaylistSummary): React.ReactNode => (
     covers[p.id] === undefined ? <div className="w-full h-full bg-surface-raised animate-pulse" />
@@ -1558,10 +1558,10 @@ export default function PlaylistsView(): JSX.Element {
         })()
   )
 
-  // Shared drag-source wiring for playlist cards — dropped onto a folder tile
+  // Shared drag-source wiring for playlist cards - dropped onto a folder tile
   // to move them in (see the folder tiles' onDrop in renderFoldersSection).
   // Works from inside select mode now (rather than being disabled there) so
-  // a multi-selection can be dragged as a unit — dragging a card that's part
+  // a multi-selection can be dragged as a unit - dragging a card that's part
   // of the current selection carries every selected card along with it;
   // dragging an unselected one (select mode or not) moves just that card.
   const dragSourceProps = (plKey: string): {
@@ -1580,7 +1580,7 @@ export default function PlaylistsView(): JSX.Element {
   })
 
   // Dropping a dragged playlist card onto another (ungrouped) playlist card
-  // bundles both into a new folder — if the target is already in one, the
+  // bundles both into a new folder - if the target is already in one, the
   // dragged playlist(s) just join it instead of nesting folders.
   const dropOntoPlaylistProps = (plKey: string): {
     onDragOver: (e: React.DragEvent) => void
@@ -1607,7 +1607,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // Dropping a dragged folder member onto empty grid background (rather than
   // onto a specific card or folder tile, both of which stopPropagation so
-  // this never double-fires) pulls it back out to ungrouped — the drag-out
+  // this never double-fires) pulls it back out to ungrouped - the drag-out
   // counterpart of dragging a playlist onto a folder tile to file it away.
   // Harmless no-op if the dragged playlist(s) weren't in a folder already.
   const gridBackgroundDropProps = {
@@ -1756,10 +1756,10 @@ export default function PlaylistsView(): JSX.Element {
 
   // Folders group both kinds of playlist by their composite key. Resolve each
   // folder's members against the currently-loaded playlists (a member whose
-  // playlist was deleted since simply drops out — see the prune-on-read note in
+  // playlist was deleted since simply drops out - see the prune-on-read note in
   // lib/playlistFolders) and render them in the folder's own key order. Logged
   // out, `playlists` is empty, so api: members drop out naturally and a folder
-  // shows just its device-local playlists — membership itself is unaffected.
+  // shows just its device-local playlists - membership itself is unaffected.
   const apiById = new Map(playlists.map(p => [p.id, p]))
   const localById = new Map(localPlaylists.map(lp => [lp.id, lp]))
   const folderMemberEntries = (f: PlaylistFolder): GridEntry[] => {
@@ -1777,26 +1777,26 @@ export default function PlaylistsView(): JSX.Element {
   const ungroupedApi = playlists.filter(p => !foldered.has(`api:${p.id}`))
   const ungroupedLocal = localPlaylists.filter(lp => !foldered.has(`local:${lp.id}`))
 
-  /** A folder's cover — a 2x2 mosaic of up to its first 4 members' own cover
+  /** A folder's cover - a 2x2 mosaic of up to its first 4 members' own cover
    *  art, so a folder reads as "a playlist made of playlists" instead of a
    *  plain icon. Falls back to a Folder icon tile when it has no resolvable
    *  members yet.
    *
    *  Each quadrant is a single flat image rather than delegating to
-   *  apiCoverNode/LocalPlaylistMosaic — those fall back to a *nested* 2x2 of
+   *  apiCoverNode/LocalPlaylistMosaic - those fall back to a *nested* 2x2 of
    *  a member's own top tracks when it has no cover image of its own, and a
    *  grid-in-grid like that means two independently GPU-composited layers
    *  (each promoted via its own translateZ(0)) stacked inside the card that
    *  PlaylistCard applies a hover transform (`group-hover:-translate-y-1`)
    *  to. The nested layer's bounds get reconciled against the newly
    *  promoted ancestor layer the instant hover starts, which is what showed
-   *  up as the quadrants visibly separating for a frame before settling —
+   *  up as the quadrants visibly separating for a frame before settling -
    *  the exact flicker fixed on plain playlist covers by keeping their
    *  mosaic to one level. Flattening folder quadrants to a single image
    *  removes the nested layer entirely instead of trying to keep two levels
    *  of compositing in sync. */
   // Returns the member's flat cover image (or null if it resolves but has
-  // none), and undefined when the key doesn't resolve to a member at all —
+  // none), and undefined when the key doesn't resolve to a member at all -
   // callers skip undefined so an unresolvable entry doesn't eat one of the
   // folder's 4 slots.
   const folderSlotImage = (key: string): string | null | undefined => {
@@ -1841,10 +1841,10 @@ export default function PlaylistsView(): JSX.Element {
   }
 
   // Opening a folder now expands it in place (accordion-style) instead of
-  // navigating to a separate page — clicking the open folder again collapses
+  // navigating to a separate page - clicking the open folder again collapses
   // it. `playlistsOpenFolderId` still lives in the store so it survives the
   // tab-unmount-on-switch behavior noted at its declaration.
-  // Closes any open playlist quick-view first — a folder tile and a playlist
+  // Closes any open playlist quick-view first - a folder tile and a playlist
   // card can land in the same grid row, and a row can only have one full-width
   // break point without disturbing its neighbors (see layoutGridEntries), so
   // a folder panel and a playlist panel open at once would otherwise collide
@@ -1855,14 +1855,14 @@ export default function PlaylistsView(): JSX.Element {
     setPlaylistsOpenFolderId(playlistsOpenFolderId === id ? null : id)
   }
 
-  /** Folder tiles — one PlaylistCard-styled tile per folder, meant to be
+  /** Folder tiles - one PlaylistCard-styled tile per folder, meant to be
    *  spread directly into the same grid as the playlists (not a separate
    *  "Folders" section), so a folder sits right next to the playlists it
    *  groups and behaves like any other tile (click opens it, drag a playlist
    *  onto it to file it away). Clicking the open folder's tile expands a
    *  panel of its member cards directly beneath it, spanning the full grid
    *  row, rather than navigating away. `onlyWithMembers` hides folders whose
-   *  members can't be resolved in the current view — the logged-out library
+   *  members can't be resolved in the current view - the logged-out library
    *  passes true so folders holding only synced playlists (invisible without
    *  an account) don't render as misleadingly "empty". Returns a GridEntry per
    *  folder (tile + optional member-panel) for the caller to lay out
@@ -1923,7 +1923,7 @@ export default function PlaylistsView(): JSX.Element {
     })
   }
 
-  /** Folder context menu (right-click a folder header / its ⋯ button) —
+  /** Folder context menu (right-click a folder header / its ⋯ button) -
    *  a body portal, so it renders from either library view. */
   const renderFolderMenu = (): React.ReactNode => folderMenu && createPortal(
     <ClampedMenu x={folderMenu.x} y={folderMenu.y} className="w-56">
@@ -1948,7 +1948,7 @@ export default function PlaylistsView(): JSX.Element {
         <>
           <MenuItem icon={Pencil} label="Rename folder" onClick={() => setFolderMenu(prev => prev ? { ...prev, renaming: true, renameVal: prev.folder.name } : null)} />
           <div className="border-t border-[var(--border)] my-1" />
-          {/* Deleting a folder only ungroups its playlists — they return to
+          {/* Deleting a folder only ungroups its playlists - they return to
               the sections above, nothing is removed. */}
           <MenuItem icon={Trash2} label="Delete folder" destructive onClick={() => { deleteFolder(folderMenu.folder.id); setFolderMenu(null) }} />
         </>
@@ -1983,7 +1983,7 @@ export default function PlaylistsView(): JSX.Element {
       const localQTracks: Track[] = localTracks.map(libTrackToTrack)
       const heroSrc = localPl.coverImage ?? localTracks.map(t => libraryArt[t.id]).find(a => !!a) ?? null
       // Only actually dark (and so worth white text) with a backdrop AND a
-      // dark skin — Settings > Appearance can turn the backdrop off
+      // dark skin - Settings > Appearance can turn the backdrop off
       // entirely, and a light skin's backdrop lightens instead (see
       // HeroBackdrop), both of which want the normal dark-on-light text.
       const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
@@ -2058,8 +2058,8 @@ export default function PlaylistsView(): JSX.Element {
             <>
               {/* Folders sit right in the same grid as the playlists they
                   group, rather than a separate section. They work logged out
-                  too — membership is device-local (the API only ever stores
-                  synced-playlist ids) — folders holding only synced
+                  too - membership is device-local (the API only ever stores
+                  synced-playlist ids) - folders holding only synced
                   playlists are hidden here since their members can't render
                   without an account. */}
               <div ref={setAuthGridEl} className="grid gap-4 mb-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
@@ -2211,17 +2211,17 @@ export default function PlaylistsView(): JSX.Element {
     const durLabel = totalDurationLabel(tracks)
     // Extra leading checkbox column while selecting. rem, not px, so the fixed
     // columns (notably the album-art column) scale with the app text-size
-    // setting alongside the rem-sized covers and text — identical at scale 1.
+    // setting alongside the rem-sized covers and text - identical at scale 1.
     const gridCols = selectMode
       ? '1.25rem 1rem 1.75rem 2.5rem 1fr 6rem 5rem 3.5rem 2.25rem'
       : '1rem 1.75rem 2.5rem 1fr 6rem 5rem 3.5rem 2.25rem'
 
-    // Shuffles by SONG, not by track — a song with several versions (a demo,
+    // Shuffles by SONG, not by track - a song with several versions (a demo,
     // a TV mix, etc.) would otherwise flood the shuffle with itself, since
     // plain fisherYates(tracks) treats every version as an independent equal
     // chance. Grouping first means e.g. a 2-version song and a 1-version song
     // both get a 1-in-N shot of playing first; only *which version* of the
-    // 2-version song is then a coin flip. Only applied in compact view — that's
+    // 2-version song is then a coin flip. Only applied in compact view - that's
     // the mode where version-grouping is the user's stated mental model of the
     // playlist; in normal/grid view each row is still its own independent track.
     const playShuffle = async () => {
@@ -2238,7 +2238,7 @@ export default function PlaylistsView(): JSX.Element {
     }
 
     const heroSrc = playlistCoverUrl(coverData ?? {}) ?? tracks[0]?.imageUrl ?? null
-    // See heroLight elsewhere in this file — was fixed to a light palette
+    // See heroLight elsewhere in this file - was fixed to a light palette
     // regardless of app theme (the backdrop used to always be a dark
     // blurred image, so theme-aware text would've flipped to unreadable
     // dark-on-dark). Now the backdrop itself lightens on a light skin (see
@@ -2247,7 +2247,7 @@ export default function PlaylistsView(): JSX.Element {
     const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
     return (
       <div ref={setListScrollEl} className="relative flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden" onClick={() => { setTrackMenu(null); setShowAddAllMenu(false); setShowHeroMenu(false) }}>
-        {/* ── Hero (shown immediately using summary data) — the backdrop now
+        {/* ── Hero (shown immediately using summary data) - the backdrop now
             extends behind the back button too, instead of leaving a plain
             theme-background strip above the gradient. ── */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
@@ -2272,7 +2272,7 @@ export default function PlaylistsView(): JSX.Element {
           />
 
           <div className="relative z-10 flex gap-6 items-end pt-6">
-            {/* Cover image — clickable to upload (owner only) */}
+            {/* Cover image - clickable to upload (owner only) */}
             <div className={`shrink-0 self-start group/cover relative rounded-xl shadow-2xl overflow-hidden ${isSharedView ? "cursor-default" : "cursor-pointer"}`} style={{ width: 180, height: 180 }} onClick={() => !isSharedView && coverInputRef.current?.click()}>
               {loadingDetail && tracks.length === 0 ? (
                 <div className="w-full h-full bg-surface-overlay animate-pulse" />
@@ -2381,7 +2381,7 @@ export default function PlaylistsView(): JSX.Element {
                 {tracks.length > 1 && <HeroShuffleButton onClick={playShuffle} />}
 
                 {/* Shared (not-owned) playlists get two ways to keep this
-                    around: Follow (a live pointer — always shows the owner's
+                    around: Follow (a live pointer - always shows the owner's
                     current tracks, local to this device) or Save a copy (a
                     one-time snapshot into an owned playlist, requires an
                     account). Follow needs no account since it's purely local. */}
@@ -2396,7 +2396,7 @@ export default function PlaylistsView(): JSX.Element {
                         coverUrl: coverData?.cover_image_url ?? coverData?.cover_image ?? null,
                       })
                     }}
-                    title={isFollowingCurrent ? 'Unfollow — stop showing this in your Playlists' : 'Follow — always shows the owner\'s current tracks, kept on this device only'}
+                    title={isFollowingCurrent ? 'Unfollow - stop showing this in your Playlists' : 'Follow - always shows the owner\'s current tracks, kept on this device only'}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
                       isFollowingCurrent ? 'text-accent bg-accent/10' : 'text-text-primary bg-surface-raised hover:bg-surface-overlay'
                     }`}
@@ -2534,7 +2534,7 @@ export default function PlaylistsView(): JSX.Element {
                 opaque background is what stops that.
                 The controls sit on the LEFT on purpose. Right-aligned they'd
                 land under those window buttons, which forces the 188px gutter
-                the other toolbars carry — and that gutter is pure dead space
+                the other toolbars carry - and that gutter is pure dead space
                 next to the controls. Nothing here may share the column row
                 either: anything in that grid steals width from the columns and
                 knocks the duration header out of line with the rows.
@@ -2590,7 +2590,7 @@ export default function PlaylistsView(): JSX.Element {
                     <button
                       onClick={() => { setCompactView(true); setGridView(false); clearExpandedGroups() }}
                       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                      title="Compact view — collapse tracks into their version groups"
+                      title="Compact view - collapse tracks into their version groups"
                     >
                       <Layers size={15} />
                     </button>
@@ -2603,7 +2603,7 @@ export default function PlaylistsView(): JSX.Element {
                 )}
               </div>
 
-              {/* Always rendered (just hidden) rather than conditionally mounted —
+              {/* Always rendered (just hidden) rather than conditionally mounted -
                   otherwise toggling to grid/compact view drops this row's height
                   and the track list jumps up. Grid view's cards don't line up
                   with this table layout at all, so it's hidden wholesale there;
@@ -2757,7 +2757,7 @@ export default function PlaylistsView(): JSX.Element {
               <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
             )}
 
-            {/* Windowed rows — absolutely positioned at displayIdx * TRACK_ROW_H
+            {/* Windowed rows - absolutely positioned at displayIdx * TRACK_ROW_H
                 inside a container sized to the full list, so only the visible
                 slice is mounted (see useVirtualWindowEl). */}
             <div ref={setListContentEl} style={{ height: rowsTotalHeight, position: 'relative' }}>
@@ -2945,7 +2945,7 @@ export default function PlaylistsView(): JSX.Element {
     const localQTracks: Track[] = localTracks.map(libTrackToTrack)
     const localDurLabel = totalDurationLabel(localQTracks)
     const heroSrc = localPl.coverImage ?? localTracks.map(t => libraryArt[t.id]).find(a => !!a) ?? null
-    // See heroLight in the guest-local-playlist branch above — only actually
+    // See heroLight in the guest-local-playlist branch above - only actually
     // dark with a backdrop AND a dark skin AND the setting on.
     const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
 
@@ -3108,7 +3108,7 @@ export default function PlaylistsView(): JSX.Element {
           </div>
         )}
 
-        {/* ── Playlists section — folders sit right in the same grid as the
+        {/* ── Playlists section - folders sit right in the same grid as the
             playlists they group, rather than a separate section above it. ── */}
         <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3">Playlists</h2>
         <div ref={setMainGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
@@ -3144,11 +3144,11 @@ export default function PlaylistsView(): JSX.Element {
           ], mainGridCols)}
 
           {playlists.length === 0 && (
-            <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet — click "New Playlist" to create one.</p>
+            <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet - click "New Playlist" to create one.</p>
           )}
         </div>
 
-        {/* ── Following section — other people's playlists followed from a
+        {/* ── Following section - other people's playlists followed from a
             share link. Live pointers, not copies (see FollowedPlaylist);
             right-click or the "⋯" button unfollows since there's nothing
             else to do with one from here. ── */}
@@ -3161,7 +3161,7 @@ export default function PlaylistsView(): JSX.Element {
           </>
         )}
 
-        {/* ── On This Device section — separated from synced playlists,
+        {/* ── On This Device section - separated from synced playlists,
             mirroring Apple Music's split between iCloud and local library. ── */}
         {ungroupedLocal.length > 0 && (
           <>
@@ -3253,7 +3253,7 @@ export default function PlaylistsView(): JSX.Element {
         </div>
       )}
 
-      {/* Bulk context menu — shown when right-clicking a card during playlist multi-select */}
+      {/* Bulk context menu - shown when right-clicking a card during playlist multi-select */}
       {plBulkMenu && (
         <ClampedMenu x={plBulkMenu.x} y={plBulkMenu.y} className="min-w-[210px]">
           <div className="px-3.5 py-2 text-xs text-text-muted">
@@ -3327,7 +3327,7 @@ export default function PlaylistsView(): JSX.Element {
         </ClampedMenu>
       )}
 
-      {/* Unified playlist card context menu — portaled to <body> and
+      {/* Unified playlist card context menu - portaled to <body> and
           self-clamped (see ClampedMenu) so growing content like the "Add all
           to playlist" submenu can't push it off-screen or get
           clipped/mis-measured by an ancestor. */}

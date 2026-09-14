@@ -28,7 +28,7 @@ export default function NowPlaying(): JSX.Element {
 
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab (this component itself unmounts when the Wrld tab is
-  // active — see App.tsx). The id is already right there in currentTrack.id
+  // active - see App.tsx). The id is already right there in currentTrack.id
   // (format 'jw-<id>'), so no fetch is needed just to open it.
   const handleInfo = (): void => {
     const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
@@ -45,7 +45,7 @@ export default function NowPlaying(): JSX.Element {
     <div
       // bg-surface on mobile, not bg-surface-raised: this is `position: fixed;
       // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
-      // element's background directly — bg-surface-raised made the status bar
+      // element's background directly - bg-surface-raised made the status bar
       // read visibly darker than the rest of the app while this panel is open.
       className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden animate-slide-in-right`}
       style={isMobile

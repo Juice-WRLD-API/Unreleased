@@ -41,7 +41,7 @@ export function useResizablePanel(
       window.addEventListener('mousemove', onMove)
       window.addEventListener('mouseup', onUp)
     },
-    [min, max]   // no `width` dep — reads from ref instead
+    [min, max]   // no `width` dep - reads from ref instead
   )
 
   return [width, { onMouseDown, style: { cursor: 'ew-resize' } }]

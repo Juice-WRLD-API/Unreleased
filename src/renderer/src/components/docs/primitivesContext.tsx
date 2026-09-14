@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 
 // Code/Section/Endpoint/MethodPath render differently on desktop (hover,
-// borders) vs mobile (active states, touch-sized targets) — every Tab in
+// borders) vs mobile (active states, touch-sized targets) - every Tab in
 // content.tsx pulls its copy from context instead of importing one directly,
 // so the same tab content renders correctly on either platform.
 export interface DocsPrimitives {

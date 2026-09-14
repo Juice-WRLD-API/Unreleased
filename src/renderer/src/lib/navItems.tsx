@@ -4,9 +4,9 @@ import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
 
 // The primary nav destinations available to the desktop side menu (Sidebar).
-// `view` doubles as the stable id persisted in the saved order/visibility —
+// `view` doubles as the stable id persisted in the saved order/visibility -
 // don't rename these. `electronOnly` items are hidden on the web build.
-// `defaultHidden` items ship off — they're the extras the user can add to the
+// `defaultHidden` items ship off - they're the extras the user can add to the
 // menu from Settings. The mobile BottomNav uses its own curated set and is
 // unaffected.
 export interface NavItemDef {
@@ -15,41 +15,41 @@ export interface NavItemDef {
   icon: ReactNode
   electronOnly?: boolean
   /** Always lands in the mobile "More" sheet rather than a direct bar slot,
-   *  regardless of how much room the bar has — for destinations Home already
+   *  regardless of how much room the bar has - for destinations Home already
    *  gives a shortcut to (or, for News, doesn't need one), so a bar slot
    *  would just crowd out more frequently used tabs. No effect on desktop. */
   mobileOverflow?: boolean
   defaultHidden?: boolean
-  /** Can't be toggled off from Settings — always occupies a bar slot. */
+  /** Can't be toggled off from Settings - always occupies a bar slot. */
   alwaysVisible?: boolean
 }
 
 export const NAV_ITEMS: NavItemDef[] = [
-  // Desktop-only — mobile reaches WRLD through the mini player, not this
+  // Desktop-only - mobile reaches WRLD through the mini player, not this
   // list (see MOBILE_HIDDEN_VIEWS in useMobileNavTabs), same as it always
   // has.
   { view: 'wrld', label: 'WRLD', icon: <img src={logo} alt="WRLD" className="w-[24px] h-[24px] object-contain" /> },
-  // The landing page on both shells, so it's pinned rather than optional —
+  // The landing page on both shells, so it's pinned rather than optional -
   // hiding it would leave the app with no way back to where it opened.
   { view: 'home', label: 'Home', icon: <House size={18} />, alwaysVisible: true },
   { view: 'api-tracker', label: 'Tracker', icon: <SearchCode size={18} /> },
   { view: 'api-files', label: 'Files', icon: <HardDrive size={18} /> },
-  // `view` stays 'heardle' — it's the persisted id (and the /heardle route);
+  // `view` stays 'heardle' - it's the persisted id (and the /heardle route);
   // only the label is Games, so the tab can hold more than one game later.
   // Excluded from the mobile bar/More entirely (see useMobileNavTabs'
-  // MOBILE_HIDDEN_VIEWS) — Home's Games section already covers it directly.
+  // MOBILE_HIDDEN_VIEWS) - Home's Games section already covers it directly.
   { view: 'heardle', label: 'Games', icon: <Gamepad2 size={18} /> },
   // Same as Games: hidden from mobile entirely, since Home's own Playlists
   // section is the real mobile entry point now.
   { view: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
-  // Off by default, addable from Settings → Menu items — same as Liked/Docs
+  // Off by default, addable from Settings → Menu items - same as Liked/Docs
   // below. (No mobileOverflow: that flag forces a tab into the "More" sheet
   // even once the user has explicitly turned it on, which reads as "I
   // enabled this and it still isn't in the bar." Once shown, these behave
-  // like any other optional tab — a direct bar slot, subject to the cap.)
+  // like any other optional tab - a direct bar slot, subject to the cap.)
   { view: 'stats', label: 'Wrapped', icon: <BarChart3 size={18} />, defaultHidden: true },
   { view: 'news', label: 'News', icon: <Newspaper size={18} />, defaultHidden: true },
-  // Extras — off by default, addable from Settings → Appearance → Menu items.
+  // Extras - off by default, addable from Settings → Appearance → Menu items.
   { view: 'liked', label: 'Liked Songs', icon: <Heart size={18} />, defaultHidden: true },
   { view: 'docs', label: 'API Docs', icon: <BookOpen size={18} />, defaultHidden: true },
 ]
@@ -58,14 +58,14 @@ export const DEFAULT_NAV_ORDER: ViewType[] = NAV_ITEMS.map((i) => i.view)
 
 // Views that live inside another tab rather than owning one. The Games tab is
 // entered as 'heardle' but holds a view per game, so the menu has to highlight
-// it for all of them — a nav item that goes dark the moment you switch game
+// it for all of them - a nav item that goes dark the moment you switch game
 // reads as having navigated out of the tab.
 const TAB_OF: Partial<Record<ViewType, ViewType>> = {
   wordle: 'heardle',
   tierlist: 'heardle',
 }
 
-/** The nav tab `view` belongs to — itself, unless it's a sub-view. */
+/** The nav tab `view` belongs to - itself, unless it's a sub-view. */
 export function navTabFor(view: ViewType): ViewType {
   return TAB_OF[view] ?? view
 }
@@ -106,7 +106,7 @@ export const DEFAULT_NAV_VISIBILITY: Record<string, boolean> = Object.fromEntrie
 // Reorder NAV_ITEMS by a saved list of view ids. Ids in `order` that no longer
 // exist are skipped; items missing from `order` (e.g. a destination added in a
 // newer version than the saved order) keep their canonical position, appended
-// after the saved ones — so a stale persisted order never hides a new tab.
+// after the saved ones - so a stale persisted order never hides a new tab.
 export function orderedNavItems(order: ViewType[]): NavItemDef[] {
   const byView = new Map(NAV_ITEMS.map((i) => [i.view, i]))
   const seen = new Set<ViewType>()
@@ -119,21 +119,21 @@ export function orderedNavItems(order: ViewType[]): NavItemDef[] {
   return out
 }
 
-// Hard cap on the mobile bottom nav's direct buttons, Settings included — a
+// Hard cap on the mobile bottom nav's direct buttons, Settings included - a
 // phone-width row scrolling to reach an 8th or 9th enabled item (the original
 // behavior) is worse than just not offering that many at once. Above the cap,
 // the tail overflows into the "More" sheet, opened from a button on Home
-// rather than the bar itself — so unlike the old in-bar "More" tab, a direct
+// rather than the bar itself - so unlike the old in-bar "More" tab, a direct
 // slot never has to be reserved for the trigger; the cap here is exactly the
 // bar's real capacity minus the pinned Settings slot.
 export const MAX_MOBILE_TABS = 6
 
 /** Split an already-filtered, already-ordered list of mobile nav items into
  *  the ones the bottom bar shows directly and the tail that overflows into
- *  the "More" sheet. Pure — callers supply the visible, ordered list (see
+ *  the "More" sheet. Pure - callers supply the visible, ordered list (see
  *  BottomNav, HomeView, MoreNavSheet) so this has no store dependency.
  *  `mobileOverflow` items are pulled out regardless of how much room is
- *  left — they don't compete for the cap at all — so freeing up bar space
+ *  left - they don't compete for the cap at all - so freeing up bar space
  *  elsewhere (as removing Playlists/Games did) can't pull them back in. */
 export function splitMobileNavTabs(items: NavItemDef[]): { tabs: NavItemDef[]; moreTabs: NavItemDef[] } {
   const tabs: NavItemDef[] = []
@@ -154,7 +154,7 @@ export function isNavItemVisible(item: NavItemDef, visibility: Record<string, bo
 }
 
 // ─── Bottom-section controls ─────────────────────────────────────────────────
-// The account/utility buttons at the foot of the side menu — reorderable and
+// The account/utility buttons at the foot of the side menu - reorderable and
 // hideable just like the nav tabs, but they're actions rather than views, so
 // the Sidebar owns their behavior and renders each by id. `login` and the
 // collapse toggle are deliberately NOT here: they stay pinned so the user can
@@ -199,8 +199,8 @@ export interface NavControlCtx { account: boolean; isElectron: boolean; develope
 // Whether a control applies to the current session at all (regardless of the
 // user's show/hide choice): profile needs an account, download is web only,
 // diagnostics needs developer mode, uploads needs something to show (an
-// active transfer or this session's history) — otherwise it's a button that
-// opens an empty panel — settings is always available.
+// active transfer or this session's history) - otherwise it's a button that
+// opens an empty panel - settings is always available.
 export function isNavControlAvailable(id: NavControlId, ctx: NavControlCtx): boolean {
   switch (id) {
     case 'profile': return ctx.account

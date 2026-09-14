@@ -41,7 +41,7 @@ function AddressRow({ label, value }: { label: string; value: string }): JSX.Ele
 }
 
 // A one-time, dismissible notice inviting crypto donations to support the
-// site. Purely informational — dismissing it is remembered so it never
+// site. Purely informational - dismissing it is remembered so it never
 // shows again on this device.
 export default function DonationNotice(): JSX.Element | null {
   const [dismissed, setDismissed] = useState<boolean>(() => {
@@ -56,14 +56,14 @@ export default function DonationNotice(): JSX.Element | null {
     try {
       localStorage.setItem(STORAGE_KEY, '1')
     } catch {
-      // best effort — dismiss for this session regardless
+      // best effort - dismiss for this session regardless
     }
     setDismissed(true)
   }
 
   // Both notices anchor to the same bottom-center spot, so showing this one
   // while the cookie notice is still up would stack them. Wait for the
-  // cookie notice to be acknowledged (or for it to have never appeared) —
+  // cookie notice to be acknowledged (or for it to have never appeared) -
   // its dismiss button broadcasts this event so we don't need a reload to
   // pick it up.
   const [cookieNoticeClear, setCookieNoticeClear] = useState(isCookieNoticeAcked)

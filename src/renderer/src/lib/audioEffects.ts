@@ -4,14 +4,14 @@
 //   MediaElementSource → chainInput ─→ 10-band EQ → mono → balance → limiter → destination
 //                                   └→ analyser (silence detection tap)
 //
-// Element-level volume/playbackRate/crossfade logic is untouched — the
+// Element-level volume/playbackRate/crossfade logic is untouched - the
 // MediaElementSource picks up the element's volume-scaled output, so all the
 // existing fade ramps keep working exactly as before.
 //
 // CORS note: createMediaElementSource outputs pure silence for media fetched
-// without CORS clearance. Every playable origin is covered — the API sends
+// without CORS clearance. Every playable origin is covered - the API sends
 // `access-control-allow-origin: *`, the local-media:// protocol handler adds
-// the same header, and FM's MSE path plays a same-origin blob: URL — but the
+// the same header, and FM's MSE path plays a same-origin blob: URL - but the
 // <audio> elements must carry crossOrigin="anonymous" for any of that to
 // apply.
 
@@ -19,7 +19,7 @@ import { IS_IOS, IS_MOBILE } from './platform'
 
 export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 export const EQ_GAIN_LIMIT = 12
-// Volume boost range — 1 = 100% (unity, no boost), 2 = 200%.
+// Volume boost range - 1 = 100% (unity, no boost), 2 = 200%.
 export const EQ_BOOST_MAX = 2
 
 export interface EqPreset {
@@ -47,7 +47,7 @@ export const EQ_PRESETS: EqPreset[] = [
   { id: 'small-speakers', name: 'Small Speakers', gains: [5.5, 4.5, 4, 2.5, 1.5, 0, -1.5, -3, -4, -4.5] },
 ]
 
-// A community-made edit of a song — an actual audio FILE (sped-up, remix,
+// A community-made edit of a song - an actual audio FILE (sped-up, remix,
 // mashup, …) served by the API, not an effects preset. The endpoints don't
 // exist yet; this models what the panel will list and play once they do,
 // using the same /files/download/ path convention as regular songs.
@@ -83,12 +83,12 @@ export interface AudioEffectSettings {
 
 // ── iOS background-audio guard ──────────────────────────────────────────────
 // On iOS/iPadOS (every browser there is WebKit), a bare <audio> element keeps
-// playing when the tab is backgrounded / the screen locks — that's what drives
+// playing when the tab is backgrounded / the screen locks - that's what drives
 // lock-screen playback. But the moment its output is routed through a Web Audio
 // AudioContext (createMediaElementSource → … → ctx.destination), iOS ties the
 // sound to the context's lifetime and *suspends the context* on background,
 // then tears it down after a couple of minutes of inactivity. Result: music
-// dies ~minutes after the user leaves the app, with no event we can catch — and
+// dies ~minutes after the user leaves the app, with no event we can catch - and
 // no gesture available in the background to resume() it. This is architectural,
 // not a bug we can patch with watchdogs (we tried; see Player's interval +
 // visibilitychange handlers), so the only reliable fix is to *not* route
@@ -96,7 +96,7 @@ export interface AudioEffectSettings {
 // reverb/skip-silence there. Uninterrupted background playback >> effects.
 
 // Whether the Web Audio effects chain can run at all. False on iOS (see above),
-// where attaching would sacrifice background playback — the UI reads this to
+// where attaching would sacrifice background playback - the UI reads this to
 // explain why EQ/balance/reverb are unavailable instead of silently doing
 // nothing.
 export const EFFECTS_SUPPORTED = !IS_IOS
@@ -104,7 +104,7 @@ export const EFFECTS_SUPPORTED = !IS_IOS
 // Android is a milder version of the same story: routing through the graph
 // works, but the context gets suspended by doze/screen-off and the page loses
 // the "playing audio" exemption that keeps a backgrounded tab from being
-// frozen — at which point nothing is left running to resume it. A bare element
+// frozen - at which point nothing is left running to resume it. A bare element
 // survives all of that. So on mobile the graph is built lazily: elements stay
 // unrouted until the user actually switches an effect on, which is the only
 // point where the trade is worth making. Desktop attaches eagerly as before.
@@ -124,23 +124,23 @@ let boostGain: GainNode | null = null
 let builtDecay = 0
 let decayRebuildTimer: number | null = null
 
-// Elements already wired in — createMediaElementSource throws if called twice
+// Elements already wired in - createMediaElementSource throws if called twice
 // on the same element, and there is no way to un-create a source node.
 const attachedEls = new WeakSet<HTMLAudioElement>()
 // Elements that asked to be routed while the graph didn't exist yet (mobile,
 // before any effect is switched on). Held so enabling an effect later can wire
-// up everything that already registered — the player slots and the FM element
+// up everything that already registered - the player slots and the FM element
 // all attach once at mount and never come back to ask again. Bounded by that:
 // three elements that live as long as the app does.
 const pendingEls = new Set<HTMLAudioElement>()
 
 // Settings/sink can arrive from the store before the first element attaches
-// (i.e. before the graph exists) — hold them and apply on creation.
+// (i.e. before the graph exists) - hold them and apply on creation.
 let lastSettings: AudioEffectSettings = { eqEnabled: false, gains: FLAT_GAINS, balance: 0, mono: false, reverbMix: 0, reverbDecay: 3, boost: 1 }
 let lastSinkId = ''
 
 // Synthetic impulse response: stereo noise burst with an exponential-ish
-// decay curve — the standard trick for a convolution reverb without shipping
+// decay curve - the standard trick for a convolution reverb without shipping
 // an IR file. ConvolverNode.normalize (default on) keeps loudness comparable
 // across tail lengths.
 function buildImpulseResponse(context: AudioContext, seconds: number): AudioBuffer {
@@ -158,7 +158,7 @@ function buildImpulseResponse(context: AudioContext, seconds: number): AudioBuff
 
 function ensureGraph(): AudioContext | null {
   if (ctx) return ctx
-  // iOS: never build the graph — routing through Web Audio would kill
+  // iOS: never build the graph - routing through Web Audio would kill
   // background playback (see IS_IOS above). Elements play bare instead.
   if (IS_IOS) return null
   // Android: not until an effect is actually in use (see effectsWanted).
@@ -166,13 +166,13 @@ function ensureGraph(): AudioContext | null {
   try {
     ctx = new AudioContext()
   } catch (e) {
-    console.error('AudioContext creation failed — audio effects disabled:', e)
+    console.error('AudioContext creation failed - audio effects disabled:', e)
     return null
   }
 
   // Auto-resume if the context ever suspends. We never suspend it ourselves
   // (pausing pauses the <audio> element, not the graph), so a 'suspended' state
-  // always means the OS did it — Android in particular suspends the context
+  // always means the OS did it - Android in particular suspends the context
   // when the screen turns off / the device dozes, which silences playback
   // (audio is routed *through* this graph) while the element still reports as
   // playing, so the Player's element watchdog can't see it. Nudging it back
@@ -208,7 +208,7 @@ function ensureGraph(): AudioContext | null {
 
   panner = ctx.createStereoPanner()
 
-  // Safety limiter — several presets push +5 dB and stacked boosts would
+  // Safety limiter - several presets push +5 dB and stacked boosts would
   // otherwise hard-clip. Zero knee + high threshold keeps it transparent
   // until a peak actually exceeds it.
   const limiter = ctx.createDynamicsCompressor()
@@ -226,7 +226,7 @@ function ensureGraph(): AudioContext | null {
   wetGain.gain.value = 0
   convolver = ctx.createConvolver()
 
-  // Boost: makeup gain applied after the dry/wet mix, before the limiter —
+  // Boost: makeup gain applied after the dry/wet mix, before the limiter -
   // so boosted peaks still get caught by the same safety compressor instead
   // of clipping straight through.
   boostGain = ctx.createGain()
@@ -250,7 +250,7 @@ function ensureGraph(): AudioContext | null {
 }
 
 // Routes an element through the shared chain. Safe to call repeatedly.
-// Elements keep playing (unprocessed) if the Web Audio setup fails — and on
+// Elements keep playing (unprocessed) if the Web Audio setup fails - and on
 // mobile they deliberately stay unprocessed until setEffectsChainWanted().
 export function attachAudioElement(el: HTMLAudioElement | null): void {
   if (!el || attachedEls.has(el)) return
@@ -297,13 +297,13 @@ export function applyAudioEffects(settings: AudioEffectSettings): void {
     boostGain.gain.setTargetAtTime(Math.max(1, Math.min(EQ_BOOST_MAX, settings.boost || 1)), t, 0.05)
   }
 
-  // Reverb dry/wet — equal-power crossfade so mid positions don't dip in
+  // Reverb dry/wet - equal-power crossfade so mid positions don't dip in
   // loudness and full-wet is actually reachable.
   if (dryGain && wetGain && convolver) {
     const mix = Math.max(0, Math.min(1, settings.reverbMix))
     const decay = Math.max(0.5, Math.min(10, settings.reverbDecay))
     if (mix > 0 && (!convolver.buffer || builtDecay !== decay)) {
-      // Debounce IR rebuilds — a decay slider drag would otherwise allocate a
+      // Debounce IR rebuilds - a decay slider drag would otherwise allocate a
       // multi-second stereo buffer on every input event.
       if (decayRebuildTimer != null) clearTimeout(decayRebuildTimer)
       const immediate = !convolver.buffer  // first enable: build now, not in 200ms
@@ -342,14 +342,14 @@ export function getCurrentPeak(): number {
   return peak
 }
 
-// Autoplay policies can leave a fresh context suspended — call on every
+// Autoplay policies can leave a fresh context suspended - call on every
 // play so audio never sits routed into a dead graph.
 export function resumeEffectsContext(): void {
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
 }
 
 // The output-device picker sets sinkId per <audio> element, but attached
-// elements emit through the AudioContext now — mirror the choice here.
+// elements emit through the AudioContext now - mirror the choice here.
 export function setEffectsOutputDevice(deviceId: string): void {
   lastSinkId = deviceId
   const c = ctx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null

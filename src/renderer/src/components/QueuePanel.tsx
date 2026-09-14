@@ -20,7 +20,7 @@ export default function QueuePanel(): JSX.Element {
   const [panelWidth, dragHandle] = useResizablePanel(300, 240, 480)
   const isMobile = useIsMobile()
   const [historyOpen, setHistoryOpen] = useState(false)
-  // How many upcoming rows to render — grows when the user clicks "+N more".
+  // How many upcoming rows to render - grows when the user clicks "+N more".
   const [visibleCount, setVisibleCount] = useState(MAX_UPCOMING_SHOWN)
   const [search, setSearch] = useState('')
 
@@ -70,7 +70,7 @@ export default function QueuePanel(): JSX.Element {
     <div
       // bg-surface on mobile, not bg-surface-raised: this is `position: fixed;
       // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
-      // element's background directly — bg-surface-raised made the status bar
+      // element's background directly - bg-surface-raised made the status bar
       // read visibly darker than the rest of the app while this panel is open.
       className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden animate-slide-in-right`}
       style={isMobile
@@ -80,7 +80,7 @@ export default function QueuePanel(): JSX.Element {
         : { width: panelWidth, borderLeft: '1px solid var(--border)' }
       }
     >
-      {/* Resize handle — desktop only */}
+      {/* Resize handle - desktop only */}
       {!isMobile && (
         <div className="w-1 shrink-0 relative group/handle" {...dragHandle}>
           <div className="absolute inset-y-0 -left-1 -right-1 group-hover/handle:bg-accent/30 transition-colors rounded-full" />
@@ -93,7 +93,7 @@ export default function QueuePanel(): JSX.Element {
         <div
           className="flex items-center justify-between px-5 pb-3 shrink-0 border-b border-[var(--border)]"
           style={{
-            // Clears the status bar when running edge-to-edge on mobile —
+            // Clears the status bar when running edge-to-edge on mobile -
             // this panel is fixed, so the shell's inset doesn't reach it.
             paddingTop: isMobile ? 'max(20px, var(--top-inset))' : 20,
           }}
@@ -317,7 +317,7 @@ export default function QueuePanel(): JSX.Element {
 
 // ─── Swipe-to-remove wrapper (mobile) + drag-to-reorder wrapper (desktop) ────
 // Same row, two removal gestures: HTML5 drag events (desktop mouse) never
-// fire from touch, so a phone gets nothing from the reorder wiring above — a
+// fire from touch, so a phone gets nothing from the reorder wiring above - a
 // leftward swipe uncovers a red delete backdrop instead, mirroring the
 // swipe-to-delete pattern most mail/message apps already teach.
 function SwipeableUpcomingRow({
@@ -334,13 +334,13 @@ function SwipeableUpcomingRow({
   onRemove: () => void
 }): JSX.Element {
   // How far left fully reveals the backdrop, and how far past that triggers
-  // removal on release — rubber-banded past REVEAL so the row doesn't just
+  // removal on release - rubber-banded past REVEAL so the row doesn't just
   // vanish off-screen as you keep dragging.
   const REVEAL = 72
   const THRESHOLD = 56
   const startRef = useRef<{ x: number; y: number } | null>(null)
   // Undecided until the touch moves enough to tell a horizontal swipe from a
-  // vertical scroll — committing too early would swallow a scroll attempt
+  // vertical scroll - committing too early would swallow a scroll attempt
   // that happens to start with a slightly diagonal touch.
   const axisRef = useRef<'x' | 'y' | null>(null)
   const [dragX, setDragX] = useState(0)
@@ -364,7 +364,7 @@ function SwipeableUpcomingRow({
     }
     if (axisRef.current !== 'x') return
     // preventDefault here (not just on the horizontal axis check above) is
-    // what stops the synthetic click iOS/Android fire after touchend — without
+    // what stops the synthetic click iOS/Android fire after touchend - without
     // it, releasing mid-swipe on the row also triggered its tap-to-play.
     e.preventDefault()
     const raw = Math.min(dx, 0)
@@ -433,7 +433,7 @@ function QueueRow({
         isActive ? 'bg-surface-overlay' : 'hover:bg-surface-overlay'
       } ${onPlay && !isActive ? 'cursor-pointer' : ''}`}
       onDoubleClick={onPlay}
-      // Double-click has no touch equivalent worth relying on — same
+      // Double-click has no touch equivalent worth relying on - same
       // tap-to-play treatment as the Tracker/Playlists rows.
       onClick={() => { if (window.matchMedia('(max-width: 767px)').matches && onPlay && !isActive) onPlay() }}
     >
@@ -478,7 +478,7 @@ function QueueRow({
           </span>
         )}
         {onRemove && (
-          // Was opacity-0 group-hover:opacity-100 with no touch equivalent —
+          // Was opacity-0 group-hover:opacity-100 with no touch equivalent -
           // invisible and undiscoverable on mobile.
           <button
             onClick={(e) => { e.stopPropagation(); onRemove() }}

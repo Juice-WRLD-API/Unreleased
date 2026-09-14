@@ -76,7 +76,7 @@ export interface JWApiStats {
 // ─── Site-wide play stats (GET /plays/stats/) ──────────────────────────────────
 // Distinct from JWApiStats (GET /stats/) above: that one counts catalog rows,
 // this one counts plays across every listener. top_albums is documented but
-// comes back empty in practice — typed loosely since its shape is unverified.
+// comes back empty in practice - typed loosely since its shape is unverified.
 
 export interface JWApiPlaysCategoryCount {
   category: JWApiSong['category']
@@ -142,7 +142,7 @@ export interface JWApiFileEntry {
 // /files/browse/ may return { items: [...] } or a flat array
 export type JWApiBrowseResponse = JWApiFileEntry[] | { items: JWApiFileEntry[]; current_path?: string }
 
-/** Normalizes a /files/browse/ response to a flat entry array — shared by
+/** Normalizes a /files/browse/ response to a flat entry array - shared by
  *  every view that hits that endpoint (ApiFilesView, CoverPickerModal). */
 export function parseBrowseEntries(data: JWApiBrowseResponse): JWApiFileEntry[] {
   if (Array.isArray(data)) return data
@@ -151,7 +151,7 @@ export function parseBrowseEntries(data: JWApiBrowseResponse): JWApiFileEntry[] 
 }
 
 /** Strips trailing qualifiers ("(feat. X)", "[Prod. Y]") from a song title so
- *  a /files/browse/ search hits the file tree's naming — folders/images are
+ *  a /files/browse/ search hits the file tree's naming - folders/images are
  *  rarely filed under the full bracketed title. Same idea as
  *  findSessionZips' strip() below, shared with CoverPickerModal and
  *  SongPrefsSection's inline cover search. */
@@ -164,7 +164,7 @@ function escapeRegExp(s: string): string {
 }
 
 /** Filters /files/browse/ search results down to entries whose path contains
- *  the query as a whole word — the API's `search` param is a plain substring
+ *  the query as a whole word - the API's `search` param is a plain substring
  *  match, so a short title like "Rental" also turns up unrelated files like
  *  "Parental Advisory.png" (which literally contains "rental"). Shared by
  *  CoverPickerModal and SongPrefsSection's inline cover search. */
@@ -211,7 +211,7 @@ export const loadAllSongs = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[
 // fetch and RadioFmPlayer's now-playing match both resolve the full song
 // object for whatever's currently playing, and often for the same song at
 // once (e.g. the FM-matched track happens to be the one already queued).
-// apiFetch's own dedup only collapses requests that overlap in time — once
+// apiFetch's own dedup only collapses requests that overlap in time - once
 // the first settles, a second caller a moment later still hits the network.
 // Routing both through this cache instead lets that second caller reuse the
 // still-fresh result.
@@ -229,7 +229,7 @@ export function getSongById(id: number): Promise<JWApiSong> {
 }
 
 
-// Synchronous read of the offline cache for a path+params — returns the last
+// Synchronous read of the offline cache for a path+params - returns the last
 // successful apiFetch response for that exact key, or undefined. Lets views do
 // stale-while-revalidate: render the cached copy instantly on mount, then let
 // their normal apiFetch refresh it in the background.
@@ -263,7 +263,7 @@ export async function fetchChannels(): Promise<JWApiChannel[]> {
   }
 }
 
-// The API serves cover art at full size — /files/cover-art/ hands back the art
+// The API serves cover art at full size - /files/cover-art/ hands back the art
 // embedded in an audio file (often a ~1MB 600x600 PNG) and /files/download/
 // hands back a standalone image file whole (a few hundred KB). Either is absurd
 // for a 36px list row, and it adds up fast when a virtualized list paints dozens
@@ -273,7 +273,7 @@ export async function fetchChannels(): Promise<JWApiChannel[]> {
 const SMALL_COVER_PARAM = 'small=1'
 
 // Endpoints that honour `small`. /files/download/ only degrades when the path is
-// an image — for audio the API ignores the param — so it's matched by extension
+// an image - for audio the API ignores the param - so it's matched by extension
 // rather than blanket-applied, keeping stream URLs untouched.
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|avif|heic|tiff?)(&|$)/i
 
@@ -294,14 +294,14 @@ export function buildCoverArtUrl(path: string, small = false, channel?: string):
  *  Most cover URLs in the app arrive as opaque strings (a Track's imageUrl, a
  *  preference's resolved cover, a song's `image_url`) with no path to rebuild
  *  from, so degrading happens at the point of render rather than at the source.
- *  Anything the API can't degrade — a site asset, a data/blob URL, a local
- *  file's extracted art, an audio stream URL — passes through untouched. */
+ *  Anything the API can't degrade - a site asset, a data/blob URL, a local
+ *  file's extracted art, an audio stream URL - passes through untouched. */
 export function smallCoverUrl(url: string | null | undefined): string | undefined {
   if (!url) return undefined
   return degradable(url) ? `${url}&${SMALL_COVER_PARAM}` : url
 }
 
-/** True when `url` has a cheaper degraded variant worth loading first — the
+/** True when `url` has a cheaper degraded variant worth loading first - the
  *  signal ProgressiveCover uses to decide whether a two-step load buys anything. */
 export function hasSmallCoverVariant(url: string | null | undefined): boolean {
   return !!url && degradable(url)
@@ -310,7 +310,7 @@ export function hasSmallCoverVariant(url: string | null | undefined): boolean {
 // ─── API file → track (for liking raw file-browser entries) ───────────────────
 //
 // Files browsed in ApiFilesView don't correspond to a numeric song id, so they
-// can't go through the favorites API — they're liked purely locally, the same
+// can't go through the favorites API - they're liked purely locally, the same
 // way locally-scanned library tracks are. The path is encoded directly into the
 // track id so a liked entry can be reconstructed (e.g. in LikedSongsView)
 // without re-fetching the folder it came from.
@@ -349,7 +349,7 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
 
 // ─── Recording session ZIP lookup ──────────────────────────────────────────────
 //
-// "recording_session" songs have no `path` — the actual Pro Tools/Logic
+// "recording_session" songs have no `path` - the actual Pro Tools/Logic
 // project is a pre-built .zip sitting elsewhere in the file tree (under
 // "Studio Sessions/..."), not a single streamable audio file. There's no
 // field on the song object that points at it directly, so this falls back to
@@ -365,7 +365,7 @@ export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]
 
   // Same search term can turn up session zips for unrelated songs that
   // happen to share a prefix (e.g. "Money Hunt" vs "Money Hunt (with Dripface
-  // Hottie)") — only auto-pick when exactly one candidate's name (stripped of
+  // Hottie)") - only auto-pick when exactly one candidate's name (stripped of
   // extension and any trailing parenthetical/bracket qualifier) matches the
   // song title exactly; otherwise let the caller show all candidates.
   const strip = (name: string): string => name.replace(/\.[^.]+$/, '').replace(/\s*[[(].*$/, '').trim().toLowerCase()
@@ -377,13 +377,13 @@ export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]
 export function buildImageUrl(imageUrl: string | null | undefined): string | undefined {
   if (!imageUrl) return undefined
   if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-  // Relative path — ensure single leading slash
+  // Relative path - ensure single leading slash
   const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl
   return `https://juicewrldapi.com${rel}`
 }
 
-/** Resolves a preference's `cover_url` — a user's chosen cover, pointing into
- *  the API's own storage — to a loadable URL.
+/** Resolves a preference's `cover_url` - a user's chosen cover, pointing into
+ *  the API's own storage - to a loadable URL.
  *
  *  Three forms are accepted, because a cover can plausibly be picked from
  *  either place the app already shows images from: an absolute/data URL passes
@@ -391,7 +391,7 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
  *  song's own `image_url` uses ("/assets/youtube.webp"); anything else is
  *  treated as a path into the file storage ApiFilesView browses and goes
  *  through the cover-art endpoint. Worth re-checking against the real column
- *  once /library/preferences/ ships — this is the one place that has to know. */
+ *  once /library/preferences/ ships - this is the one place that has to know. */
 export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string | undefined {
   if (!coverUrl) return undefined
   if (/^(https?:|data:|blob:)/.test(coverUrl)) return coverUrl
@@ -400,7 +400,7 @@ export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string
 }
 
 // Discord's classic (local IPC) Rich Presence only reliably applies a
-// `large_url` up to roughly this many characters — longer ones get silently
+// `large_url` up to roughly this many characters - longer ones get silently
 // ignored, leaving the static fallback logo. There's no way to shorten the
 // query path itself, since /files/cover-art/ needs the song's exact path to
 // resolve the file, so this gates whether we send the per-track cover at all
@@ -408,7 +408,7 @@ export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string
 const DISCORD_RPC_URL_LIMIT = 256
 
 /** Cover art URL for Discord RPC: prefers the curated `image_url`, and falls
- *  back to the file's own cover art by path — but only when that URL fits
+ *  back to the file's own cover art by path - but only when that URL fits
  *  under Discord's length limit. Returns undefined (static logo) otherwise.
  *
  *  `path` must be a path into the API's file storage. Callers holding a
@@ -430,7 +430,7 @@ export function discordCoverUrl(
 // ─── Local file → API song cover match ────────────────────────────────────────
 //
 // Discord resolves an activity's image server-side, through its own media
-// proxy, so it can only ever display a publicly-reachable URL — a local file's
+// proxy, so it can only ever display a publicly-reachable URL - a local file's
 // embedded art (a base64 data URI on this machine) can't be handed to it at
 // all. Since this library is Juice WRLD material, the way to give local files
 // real cover art is to recognise which song the file *is* and borrow that
@@ -449,15 +449,15 @@ export function normalizeSongTitle(title: string): string {
 
 /** As above, but also drops bracketed qualifiers ("(feat. X)", "[Prod. Y]",
  *  "(v1)"). Local tags and the API disagree constantly about these, so a loose
- *  comparison catches far more real matches — at the cost of collapsing a
+ *  comparison catches far more real matches - at the cost of collapsing a
  *  song's versions together, which is why it's only the fallback. */
 function normalizeSongTitleLoose(title: string): string {
   return normalizeSongTitle(stripFileTitleCruft(title).replace(/[[(][^)\]]*[)\]]/g, ' '))
 }
 
-/** Drops the two things a local title picks up from being a file — a trailing
+/** Drops the two things a local title picks up from being a file - a trailing
  *  extension (when the title fell back to the filename) and a leading track
- *  number ("01. ", "03 - ") — without touching the title itself. Applied
+ *  number ("01. ", "03 - ") - without touching the title itself. Applied
  *  before the API search too, so those artifacts don't end up in the query. */
 function stripFileTitleCruft(title: string): string {
   return title
@@ -465,7 +465,7 @@ function stripFileTitleCruft(title: string): string {
     .replace(/^\s*\d{1,3}\s*[-._)]\s+/, '')
 }
 
-// Matches are memoized by normalized title, misses included — a local track
+// Matches are memoized by normalized title, misses included - a local track
 // that isn't in the API would otherwise re-search every time it plays, and the
 // answer doesn't change within a session.
 const localCoverMatches = new Map<string, LocalSongCover | null>()
@@ -480,8 +480,8 @@ export interface LocalSongCover {
  *  when there's no confident match.
  *
  *  Deliberately strict: a wrong cover on someone's status is worse than the
- *  fallback logo, so a candidate only counts when its name — or one of its
- *  `track_titles` aliases — normalizes to exactly the same string as the local
+ *  fallback logo, so a candidate only counts when its name - or one of its
+ *  `track_titles` aliases - normalizes to exactly the same string as the local
  *  title. The API's `search` is a loose substring match, so its top hit alone
  *  is not evidence of anything. An exact match is preferred over a loose one
  *  so a plain "Lucid Dreams" doesn't take the cover of the first alternate
@@ -515,7 +515,7 @@ export async function matchLocalSongCover(title: string | null | undefined): Pro
       if (url) result = { imageUrl: url, era: song.era?.name ?? null }
     }
   } catch {
-    // Offline or API down — no cover this time. Not cached, so a later play
+    // Offline or API down - no cover this time. Not cached, so a later play
     // of the same track can still resolve it.
     return null
   }
@@ -528,11 +528,11 @@ export async function matchLocalSongCover(title: string | null | undefined): Pro
  *  API song it names, or null when the API has nothing that matches. Uses the
  *  same strict exact→loose comparison as matchLocalSongCover: the API's
  *  `search` is a loose substring match, so its top hit is not proof of
- *  anything — a candidate only counts when its name or one of its
+ *  anything - a candidate only counts when its name or one of its
  *  `track_titles` aliases normalizes to the same string. Returning null (rather
  *  than a wrong guess) is what lets the importer report "not in the API".
  *
- *  'unsurfaced' and 'recording_session' songs are never returned — same
+ *  'unsurfaced' and 'recording_session' songs are never returned - same
  *  exclusion as handleImportPlaylist/handleAddAllTo elsewhere in the app, since
  *  those categories aren't meant to be dropped into a normal playlist. A title
  *  that only matches one of those reports as "not found" rather than adding it. */
@@ -583,7 +583,7 @@ export function parseDuration(length: string | null | undefined): number {
 // ─── Convert API song to Track ────────────────────────────────────────────────
 
 // A Track is what the app plays and displays, so this is where a user's
-// per-song overrides get applied — every surface (queue, player, mini player,
+// per-song overrides get applied - every surface (queue, player, mini player,
 // Discord RPC, lists built from Tracks) then picks them up for free. The
 // canonical values stay on the Track as apiTitle/apiImageUrl.
 //
@@ -605,7 +605,7 @@ export function songToTrack(song: JWApiSong): Track {
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
   // A user-set cover always wins; a rotated suggestion fills in next; an era
-  // cover override fills in after that — and only for songs that aren't
+  // cover override fills in after that - and only for songs that aren't
   // released, since released songs have their own real art JWA already shows.
   const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
     ?? peekRotatedCover(song.id)

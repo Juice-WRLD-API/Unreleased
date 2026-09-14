@@ -11,7 +11,7 @@ import { dimThemeColorMeta, syncThemeColorMeta } from '../../lib/themeEffects'
 // bottom edge instead, inside thumb range, with a scrim that doubles as the
 // dismiss target.
 //
-// Mount it only while open (`{open && <Sheet …/>}`) — it owns its own exit
+// Mount it only while open (`{open && <Sheet …/>}`) - it owns its own exit
 // animation and calls `onClose` after it finishes, so the caller never has to
 // track a closing state.
 
@@ -51,7 +51,7 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
   // the same path as a tap on the scrim.
   useEffect(() => registerBackHandler(() => { requestClose(); return true }), [requestClose])
 
-  // The scrim below is `fixed inset-0`, same as MediaLightbox's backdrop —
+  // The scrim below is `fixed inset-0`, same as MediaLightbox's backdrop -
   // Safari's toolbar tinting samples it directly rather than reading the
   // app's theme-color intent, so left alone every sheet (context menus
   // included) reads as a hard black status bar instead of the scrim's actual
@@ -62,7 +62,7 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
     return () => syncThemeColorMeta()
   }, [])
 
-  // Swipe the grabber/header down to dismiss — the gesture people already
+  // Swipe the grabber/header down to dismiss - the gesture people already
   // expect from a sheet. Upward drag is rubber-banded rather than blocked so
   // the sheet still feels attached to the finger.
   const { style: dragStyle, handlers: dragHandlers } = useDragToDismiss(requestClose, {
@@ -110,7 +110,7 @@ interface SheetItemProps {
   trailing?: ReactNode
   onClick?: () => void
   disabled?: boolean
-  /** Accent-tinted — the currently-applied option in a picker. */
+  /** Accent-tinted - the currently-applied option in a picker. */
   active?: boolean
   danger?: boolean
 }

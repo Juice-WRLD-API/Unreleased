@@ -1,11 +1,11 @@
-// Admin/Manager/Editor/Contributor badge cluster — previously inlined and
+// Admin/Manager/Editor/Contributor badge cluster - previously inlined and
 // duplicated (with two different Manager colors) in EditorProfileView's
 // desktop and mobile files. Consolidated on one consistent color scheme:
 // Admin = accent, Manager = amber (matches adminShared.tsx's STATUS_STYLE
 // "pending" amber, keeping the semantic distinct from Editor's neutral chip
 // and Contributor's sky chip), Editor = neutral surface, Contributor = sky.
 //
-// Callers pass raw role booleans (not pre-subtracted) — this component owns
+// Callers pass raw role booleans (not pre-subtracted) - this component owns
 // the "don't show Editor/Manager/Contributor once Admin is already shown"
 // precedence, matching both platforms' original conditionals.
 export interface RoleBadgesProps {

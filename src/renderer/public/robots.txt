@@ -1,7 +1,7 @@
 # player.juicewrldapi.com
 # Everything under these paths is either per-user (liked songs, stats, local
 # library, settings), an authoring surface (editor/admin/contributor), or a
-# one-off share link — none of it belongs in an index. lib/seo.ts also sends
+# one-off share link - none of it belongs in an index. lib/seo.ts also sends
 # noindex on those routes; this just saves the crawl budget.
 
 User-agent: *

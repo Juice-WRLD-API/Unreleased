@@ -1,4 +1,4 @@
-// Skin registry — the single source of truth for every selectable look.
+// Skin registry - the single source of truth for every selectable look.
 // Each skin owns the full CSS-variable palette that index.css establishes for
 // the classic light/dark themes; App.tsx writes `vars` onto <html> whenever
 // the active skin changes (inline vars win over the :root/.dark fallbacks,
@@ -37,7 +37,7 @@ export interface SkinVars {
   // Optional overrides for the frameless-window title-bar cluster (minimize /
   // maximize / close and the downloads trigger). Absent on the built-in skins,
   // which inherit --text-muted (idle) / --text-primary (hover) via CSS var
-  // fallback — see WindowControls. A custom skin can set these to make the
+  // fallback - see WindowControls. A custom skin can set these to make the
   // window controls legible on a title bar where muted text is too faint.
   '--titlebar-icon'?: string
   '--titlebar-icon-hover'?: string
@@ -46,7 +46,7 @@ export interface SkinVars {
 export interface Skin {
   id: SkinId
   name: string
-  // Whether the `.dark` class goes on <html> — drives Tailwind `dark:`
+  // Whether the `.dark` class goes on <html> - drives Tailwind `dark:`
   // variants and the CSS `color-scheme` (native controls, scrollbars).
   dark: boolean
   // Signature accent applied via setAccentColor when the skin is picked.
@@ -54,17 +54,17 @@ export interface Skin {
   // keeps whatever accent the user already chose.
   accent?: string
   // Dynamic skins derive their palette at runtime (from the current song's
-  // cover art — see useThemeEffects); `vars` is only the fallback shown while
+  // cover art - see useThemeEffects); `vars` is only the fallback shown while
   // nothing is playing or extraction fails.
   dynamic?: boolean
   // User-created (built in the in-app skin editor / imported). Custom skins
   // live in the store's `customSkins`, not this hardcoded registry, and are
-  // editable, deletable, and exportable — see lib/skins helpers below.
+  // editable, deletable, and exportable - see lib/skins helpers below.
   custom?: boolean
   vars: SkinVars
 }
 
-// The palette variables in edit order, with UI labels/hints — the single
+// The palette variables in edit order, with UI labels/hints - the single
 // source the skin editor iterates over and importer validates against, so a
 // new variable only has to be added here (and to SkinVars) once.
 export const SKIN_VAR_META: { key: keyof SkinVars; label: string; hint: string }[] = [
@@ -81,7 +81,7 @@ export const SKIN_VAR_META: { key: keyof SkinVars; label: string; hint: string }
   { key: '--scrollbar', label: 'Scrollbar', hint: 'Scrollbar thumb' },
 ]
 
-// Optional palette variables — editable in the skin editor but not required in
+// Optional palette variables - editable in the skin editor but not required in
 // a skin file (they fall back via CSS var() when unset). Kept apart from the
 // core meta above so import validation only *requires* the core keys.
 export const SKIN_OPTIONAL_VAR_META: { key: keyof SkinVars; label: string; hint: string }[] = [
@@ -268,7 +268,7 @@ export const SKINS: Skin[] = [
 
 // ── Custom-skin cache ─────────────────────────────────────────────────────────
 // User-created skins live in the Zustand store (persisted to localStorage), but
-// getSkin() is a pure lookup called from places that can't reach the store —
+// getSkin() is a pure lookup called from places that can't reach the store -
 // the store's own `theme` initializer, and songToTrack-style module code. So the
 // store mirrors its `customSkins` array into this module cache on every write
 // (setCustomSkinsCache), exactly like lib/songPrefs. Seed it before the store's
@@ -279,7 +279,7 @@ export function setCustomSkinsCache(skins: Skin[]): void {
   _customSkins = skins
 }
 
-/** Built-in skins followed by the user's custom skins — the full pick list. */
+/** Built-in skins followed by the user's custom skins - the full pick list. */
 export function allSkins(): Skin[] {
   return [...SKINS, ..._customSkins]
 }
@@ -295,14 +295,14 @@ export function getSkin(id: string | null | undefined): Skin {
 const SKIN_FILE_FORMAT = 'unreleased-skin'
 const SKIN_FILE_VERSION = 1
 
-// Generated id for a user skin — the `custom-` prefix keeps it clear of every
+// Generated id for a user skin - the `custom-` prefix keeps it clear of every
 // built-in id, and the random suffix avoids collisions across quick creates.
 export function newSkinId(): string {
   return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-// Accepts the CSS color forms the palettes actually use — hex, rgb/rgba,
-// hsl/hsla, and bare keywords — while rejecting anything long or structural, so
+// Accepts the CSS color forms the palettes actually use - hex, rgb/rgba,
+// hsl/hsla, and bare keywords - while rejecting anything long or structural, so
 // an imported file can't smuggle arbitrary text into a style property.
 function isColor(value: unknown): value is string {
   return (
@@ -321,7 +321,7 @@ export function createCustomSkin(base: Skin = SKINS[1], name?: string): Skin {
     dark: base.dark,
     custom: true,
     accent: base.accent,
-    // Never carry `dynamic` onto a custom skin — its vars are the real palette.
+    // Never carry `dynamic` onto a custom skin - its vars are the real palette.
     vars: { ...base.vars },
   }
 }
@@ -348,7 +348,7 @@ export function skinFileName(skin: Skin): string {
 /**
  * Parses (and validates) an exported skin file back into a fresh Skin with a
  * new id. Accepts either the wrapped `{ format, version, skin }` envelope or a
- * bare skin object. Returns null on anything malformed — every palette variable
+ * bare skin object. Returns null on anything malformed - every palette variable
  * must be present and a plausible color, so a bad file can't half-apply.
  */
 export function parseSkinFile(text: string): Skin | null {

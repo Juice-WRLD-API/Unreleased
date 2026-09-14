@@ -32,7 +32,7 @@ import { loadEraFullNames, eraLabel } from '../lib/eras'
 import { useBackToClose } from '../hooks/useBackToClose'
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
-// Phone-first rewrite of the catalog browser. Every fetch path is unchanged —
+// Phone-first rewrite of the catalog browser. Every fetch path is unchanged -
 // infinite scroll, the fetch-everything-then-sort mode, compact version groups,
 // lyric search, the client-side parsing behind the calendar/producer tabs, the
 // bulk ZIP/playlist/link operations, and the virtual windowing that keeps a
@@ -40,7 +40,7 @@ import { useBackToClose } from '../hooks/useBackToClose'
 // desktop chrome any more:
 //
 //   · the 176px category/era sidebar is a Filters sheet
-//   · sortable column headers are a Sort sheet — which means mobile can sort at
+//   · sortable column headers are a Sort sheet - which means mobile can sort at
 //     all now; the headers were md:-only, so on a phone the feature didn't exist
 //   · the four view modes moved into a sheet instead of a four-icon strip
 //   · long-press starts a selection, and the bulk bar's eight buttons collapse
@@ -72,7 +72,7 @@ const CATEGORY_DOTS: Record<string, string> = {
 
 // ─── Era color palette (Calendar tab) ─────────────────────────────────────────
 // Eras are dynamic (fetched from the API, not a fixed enum), so colors are
-// assigned by index rather than hardcoded per name — same era always gets the
+// assigned by index rather than hardcoded per name - same era always gets the
 // same color as long as `eras` keeps returning them in the same order.
 // Written as literal class names (not template-built) so Tailwind's static
 // scanner picks them all up.
@@ -94,7 +94,7 @@ const ERA_COLOR_PALETTE: EraColor[] = [
 const DEFAULT_ERA_COLOR: EraColor = { text: 'text-text-muted', bg: 'bg-surface-overlay', border: 'border-[var(--border)]', dot: 'bg-text-muted' }
 
 // A compact-view group bundles several versions of one song, each of which
-// can sit in a different category — the group as a whole is labeled by
+// can sit in a different category - the group as a whole is labeled by
 // whichever category ranks highest here (a released version anywhere in the
 // group makes the whole group "Released", even if other versions are
 // unreleased/session/unsurfaced; same logic cascades down the list).
@@ -114,7 +114,7 @@ const LS_TRACKER_CALENDAR_MONTH = 'api-tracker:calendarMonth'
 // implausible match (e.g. a stray "1/2/03" fragment that isn't really a
 // date). Juice WRLD's earliest known recordings are from the mid-2010s, so
 // anything before this is almost certainly a parsing false-positive rather
-// than a real recording date — treat it as invalid.
+// than a real recording date - treat it as invalid.
 const MIN_PLAUSIBLE_RECORD_YEAR = 2010
 
 // The `q` URL param takes priority over the saved localStorage query so that
@@ -148,7 +148,7 @@ const SNIPPET_CONTEXT_CHARS = 70
 // split into before/match/after so the caller can highlight just the match.
 // The API's lyrics search may be more lenient than a plain substring match
 // (e.g. punctuation/case normalization), so this falls back to locating just
-// the first query word if the full phrase isn't found verbatim — better to
+// the first query word if the full phrase isn't found verbatim - better to
 // show an approximate snippet than none at all.
 function getLyricSnippet(lyrics: string | null, query: string): { before: string; match: string; after: string } | null {
   const q = query.trim()
@@ -174,7 +174,7 @@ function getLyricSnippet(lyrics: string | null, query: string): { before: string
 
 // ─── Recording-date parsing (Calendar tab) ────────────────────────────────────
 // `record_dates` is free-text (e.g. "5/5/18", "May 5, 2018", sometimes several
-// dates for one song, sometimes just a year/season with no day at all) —
+// dates for one song, sometimes just a year/season with no day at all) -
 // there's no structured date field to key a calendar off of. These helpers
 // pull out every exact (year, month, day) triple found in the text and
 // silently drop anything too vague to place on a specific day, rather than
@@ -244,7 +244,7 @@ function buildMonthGrid(year: number, month: number): (Date | null)[][] {
   return weeks
 }
 
-/** artist · era · category — the one subtitle line every song row carries. */
+/** artist · era · category - the one subtitle line every song row carries. */
 function songSubtitle(song: JWApiSong, fullEraNames: boolean): string {
   return [
     song.credited_artists || 'Juice WRLD',
@@ -257,7 +257,7 @@ function songSubtitle(song: JWApiSong, fullEraNames: boolean): string {
 
 // Selection state is drawn ON the artwork rather than inserted before it. A
 // leading checkbox pushes every row's contents sideways the instant select mode
-// turns on — and since that happens mid-long-press, the layout moves out from
+// turns on - and since that happens mid-long-press, the layout moves out from
 // under the finger before the press even ends.
 function ArtSelectOverlay({ selected }: { selected: boolean }): JSX.Element {
   return (
@@ -353,7 +353,7 @@ const SongRow = memo(function SongRow({
 })
 // Memoized so toggling one selection only re-renders that row, not every
 // rendered row. This depends on the callbacks passed in being stable
-// (useCallback) — otherwise the default shallow prop compare never matches and
+// (useCallback) - otherwise the default shallow prop compare never matches and
 // the memo is a no-op.
 
 // ─── Song row (detailed mode) ─────────────────────────────────────────────────
@@ -429,7 +429,7 @@ const DetailedSongRow = memo(function DetailedSongRow({
 // ─── Song card (grid mode) ────────────────────────────────────────────────────
 // Two-up cover-led cards. The desktop card carried seven collapsible metadata
 // sections inline; at half a phone's width those were unreadable, so the full
-// field set lives in Detailed view and Song info instead — nothing is lost from
+// field set lives in Detailed view and Song info instead - nothing is lost from
 // the app, just from this one widget.
 const SongCard = memo(function SongCard({
   song, coverH, onPlay, onMenu, selectMode, selected, onToggleSelect, playingId, isPlaying,
@@ -594,7 +594,7 @@ const LyricResultRow = memo(function LyricResultRow({
 
 // ─── Virtualized lists ────────────────────────────────────────────────────────
 // Rows are absolutely positioned at a fixed pixel stride so the window can place
-// them without measuring the DOM — but their contents are rem-sized, so
+// them without measuring the DOM - but their contents are rem-sized, so
 // Settings → App text size grows the text inside a box that would otherwise stay
 // put, and the spilled text ends up clipped and unreachable. Scaling the stride
 // by the same factor keeps box and contents in step.
@@ -830,7 +830,7 @@ export default function ApiTrackerView(): JSX.Element {
   const canEdit = useCanEdit()
   const playingId = currentTrack?.id ?? null
 
-  // Full era names aren't in the offline cache seed for every session — fetch
+  // Full era names aren't in the offline cache seed for every session - fetch
   // once so eraLabel() has something to show once the user opts in.
   useEffect(() => { loadEraFullNames().catch(() => {}) }, [])
 
@@ -848,11 +848,11 @@ export default function ApiTrackerView(): JSX.Element {
   const [bulkZipSkipped, setBulkZipSkipped] = useState(0)
   const [bulkLinkStatus, setBulkLinkStatus] = useState<'idle' | 'linking' | 'done' | 'error'>('idle')
   // Shown after a link completes if the resulting group still has no
-  // version_title — untitled groups are functionally useless in compact view.
+  // version_title - untitled groups are functionally useless in compact view.
   const [titlePromptGroupId, setTitlePromptGroupId] = useState<number | null>(null)
   const [savingTitlePrompt, setSavingTitlePrompt] = useState(false)
 
-  // useCallback so the row memos aren't defeated — a fresh identity here would
+  // useCallback so the row memos aren't defeated - a fresh identity here would
   // re-render every row on each selection toggle (functional setState keeps it
   // dependency-free and stable).
   const toggleSelect = useCallback((song: JWApiSong): void => {
@@ -877,7 +877,7 @@ export default function ApiTrackerView(): JSX.Element {
     if (selectMode && selected.size === 0) setSelectMode(false)
   }, [selectMode, selected])
 
-  // Compact view — shows only songs grouped into a titled version group,
+  // Compact view - shows only songs grouped into a titled version group,
   // collapsed to one row per group. Fetched independently of the paginated
   // `songs` list (see fetchAllCompactGroups).
   const [compactView, setCompactViewState] = useState(() => localStorage.getItem(LS_TRACKER_COMPACT) === 'true')
@@ -899,7 +899,7 @@ export default function ApiTrackerView(): JSX.Element {
 
   // Compact view renders far less content than the underlying song list, so the
   // sentinel stays permanently visible and would otherwise auto-page through the
-  // entire library in the background — pause that while active.
+  // entire library in the background - pause that while active.
   const compactViewRef = useRef(false)
   useEffect(() => { compactViewRef.current = compactView }, [compactView])
 
@@ -956,7 +956,7 @@ export default function ApiTrackerView(): JSX.Element {
 
   const sentinelRef = useRef<HTMLDivElement>(null)
   const listScrollRef = useRef<HTMLDivElement>(null)
-  // Refs for scroll logic — avoids stale closures in the observer callback.
+  // Refs for scroll logic - avoids stale closures in the observer callback.
   const hasMoreRef = useRef(false)
   const loadingRef = useRef(true)
   const sentinelVisibleRef = useRef(false)
@@ -969,7 +969,7 @@ export default function ApiTrackerView(): JSX.Element {
 
   const [orderField, setOrderField] = useState<OrderField | null>(null)
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc')
-  // Whether any column is driving sort mode — the fetched song set depends only
+  // Whether any column is driving sort mode - the fetched song set depends only
   // on this and the search/category/era filters, not on *which* field it'll be
   // sorted by (that's applied client-side).
   const sortModeActive = orderField !== null
@@ -1022,8 +1022,8 @@ export default function ApiTrackerView(): JSX.Element {
   }, [categoryFilter, eraFilter])
 
   // `field:"value"` search syntax (e.g. `artists:"Juice WRLD"`) has no
-  // server-side equivalent — the API's `searchall` is a single plain-text
-  // param — so a query using it forces fetch-all mode (below) and gets
+  // server-side equivalent - the API's `searchall` is a single plain-text
+  // param - so a query using it forces fetch-all mode (below) and gets
   // filtered here instead of trusting the server to have applied it.
   const parsedSearch = useMemo(() => parseSearchQuery(debouncedSearch), [debouncedSearch])
   const advancedSearchActive = parsedSearch.filters.length > 0
@@ -1086,7 +1086,7 @@ export default function ApiTrackerView(): JSX.Element {
 
   // ── Calendar / credits (separate tabs) ────────────────────────────────────
   // Fetches the whole catalog once (lazily, on first visit) since there's no
-  // server-side way to filter or group by record_dates — it's parsed out of
+  // server-side way to filter or group by record_dates - it's parsed out of
   // free text client-side.
   const [calendarSongs, setCalendarSongs] = useState<JWApiSong[]>([])
   const [calendarLoading, setCalendarLoading] = useState(false)
@@ -1115,7 +1115,7 @@ export default function ApiTrackerView(): JSX.Element {
   }, [calendarSongs])
 
   // `recording_locations` is also free text (e.g. "Record One Studios, Los
-  // Angeles") — grouped by the exact trimmed string, since there's no reliable
+  // Angeles") - grouped by the exact trimmed string, since there's no reliable
   // delimiter between studio name and city.
   const calendarByStudio = useMemo(() => {
     const map = new Map<string, JWApiSong[]>()
@@ -1129,7 +1129,7 @@ export default function ApiTrackerView(): JSX.Element {
   }, [calendarSongs])
 
   // `producers`/`engineers` are free text, often several names separated by
-  // commas — split so each person gets an entry instead of grouping by the
+  // commas - split so each person gets an entry instead of grouping by the
   // combined string. Kept as two groupings so a name in both credits still
   // appears under each.
   const groupByNameField = (list: JWApiSong[], field: (s: JWApiSong) => string | null | undefined): [string, JWApiSong[]][] => {
@@ -1213,7 +1213,7 @@ export default function ApiTrackerView(): JSX.Element {
     if (window.location.protocol === 'file:') return
     const onPopState = (): void => {
       const q = new URLSearchParams(window.location.search).get('q') || ''
-      isFirstUrlSync.current = true // this sync came from the URL — don't push it again
+      isFirstUrlSync.current = true // this sync came from the URL - don't push it again
       setSearch(q)
       setDebouncedSearch(q)
       resetSongs()
@@ -1233,10 +1233,10 @@ export default function ApiTrackerView(): JSX.Element {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       setDebouncedSearch(search)
-      // Skip resetSongs on mount — only reset when the user actually types.
+      // Skip resetSongs on mount - only reset when the user actually types.
       if (isFirstDebounce.current) { isFirstDebounce.current = false; return }
       // Settled back to the query already showing: no dep changes, so nothing
-      // would refetch — a reset here would just blank the list.
+      // would refetch - a reset here would just blank the list.
       if (search === debouncedSearch) return
       resetSongs()
     }, 400)
@@ -1263,12 +1263,12 @@ export default function ApiTrackerView(): JSX.Element {
     runLog('tracker-sort', `start search=${JSON.stringify(debouncedSearch)} category=${categoryParam || '-'} era=${eraParam || '-'} multi=${multiFilterActive} advanced=${advancedSearchActive}`)
     const matchesAll = (s: JWApiSong): boolean => matchesFilters(s) && matchesSearch(s)
     // `all=true` returns the whole (filtered) catalogue as a plain array in
-    // one request — server-side page_size is capped below what we'd need to
+    // one request - server-side page_size is capped below what we'd need to
     // paginate reliably, so this avoids under-counting totalPages against it.
     ;(async () => {
       try {
         const all = await apiFetch<JWApiSong[]>('/songs/', {
-          // field:value tokens are stripped out — parsedSearch.freeText is what's
+          // field:value tokens are stripped out - parsedSearch.freeText is what's
           // left, which the server still searches; matchesSearch narrows further
           // by the field filters below.
           searchall: parsedSearch.freeText || undefined,
@@ -1379,7 +1379,7 @@ export default function ApiTrackerView(): JSX.Element {
       s.era?.name, s.notes, s.additional_information, s.session_titles, s.original_key,
     ].filter(Boolean).join(' '))
     // Field-qualified tokens (artists:"...", etc.) aren't handled by
-    // filterCompactGroups' plain free-text match — apply them here as an
+    // filterCompactGroups' plain free-text match - apply them here as an
     // extra member-level pass. A group survives if at least one version does.
     if (parsedSearch.filters.length > 0) {
       filtered = filtered
@@ -1392,7 +1392,7 @@ export default function ApiTrackerView(): JSX.Element {
       filtered = filtered.filter(g => g.members.some(m => matchesFilters(m.item)))
     }
     if (!orderField) return filtered
-    // Copy before sorting — filterCompactGroups may return the input array.
+    // Copy before sorting - filterCompactGroups may return the input array.
     const sorted = [...filtered]
     const dir = orderDir === 'asc' ? 1 : -1
     // Only Title and Length map onto a group; everything else falls back to
@@ -1438,7 +1438,7 @@ export default function ApiTrackerView(): JSX.Element {
     setContextMenu({ song, x: e.clientX, y: e.clientY })
   }, [selectMode])
 
-  // Long-pressing a compact group acts on all its versions at once — selects
+  // Long-pressing a compact group acts on all its versions at once - selects
   // every member and opens the bulk sheet.
   const handleGroupLongPress = useCallback((group: CompactGroup<JWApiSong>): void => {
     setSelected(new Map(group.members.map(m => [m.item.id, m.item])))
@@ -1448,7 +1448,7 @@ export default function ApiTrackerView(): JSX.Element {
   const selectedSongs = useMemo(() => [...selected.values()], [selected])
   // Sessions/unsurfaced songs can't go in playlists or the queue. If even one
   // selected song is ineligible, both actions are disabled entirely rather than
-  // silently dropping it — a partial add on a selection made as one unit is
+  // silently dropping it - a partial add on a selection made as one unit is
   // surprising.
   const bulkEligibleSongs = useMemo(
     () => selectedSongs.filter(s => !['recording_session', 'unsurfaced'].includes(s.category)),
@@ -1459,7 +1459,7 @@ export default function ApiTrackerView(): JSX.Element {
     && bulkEligibleSongs.length === selectedSongs.length
     && bulkEligibleSongs.every(s => s.path)
 
-  // Which playlists already contain *every* eligible selected song — shown as a
+  // Which playlists already contain *every* eligible selected song - shown as a
   // checkmark so re-adding isn't a silent no-op.
   const [bulkContained, setBulkContained] = useState<Set<number>>(new Set())
   const playlistsPageOpen = sheet === 'bulk' && bulkSheetPage === 'playlists'
@@ -1530,7 +1530,7 @@ export default function ApiTrackerView(): JSX.Element {
     setTimeout(() => setBulkZipStatus('idle'), skipped > 0 ? 5000 : 3000)
   }
 
-  // Links every selected song together as versions of one another — pairing each
+  // Links every selected song together as versions of one another - pairing each
   // against the first merges all of their groups. If none had a version_title,
   // the merged group ends up untitled, so prompt for one rather than leaving a
   // group that compact view can't surface.
@@ -1636,7 +1636,7 @@ export default function ApiTrackerView(): JSX.Element {
       {/* The header deliberately does NOT collapse in select mode. Swapping it
           for a one-line selection bar removed the tabs, search and filter chips
           all at once, and the list jumped ~100px up the screen the instant a
-          long press registered — under the finger that was still pressing. The
+          long press registered - under the finger that was still pressing. The
           selection controls live in the bottom bar instead, which only shortens
           the scroller (top-anchored content doesn't move). */}
       {detail ? (
@@ -1738,7 +1738,7 @@ export default function ApiTrackerView(): JSX.Element {
             </div>
           )}
 
-          {/* Active filter chips — individually removable, so a multi-select can
+          {/* Active filter chips - individually removable, so a multi-select can
               be trimmed one at a time instead of all-or-nothing. */}
           {trackerTab === 'songs' && filterCount > 0 && (
             <div className="flex items-center gap-2 px-4 pt-2.5 overflow-x-auto no-scrollbar">

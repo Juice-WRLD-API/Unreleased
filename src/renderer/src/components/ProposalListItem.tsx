@@ -2,7 +2,7 @@ import { Loader2, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import type { SongEditProposal } from '../lib/userApi'
 import { STATUS_STYLES, formatDate, changeTypeLabel } from '../lib/proposalSearch'
 
-// "My proposals" row — extracted from the filteredProposals.map(...) block
+// "My proposals" row - extracted from the filteredProposals.map(...) block
 // duplicated in EditorProfileView.desktop.tsx/.mobile.tsx. The two were
 // layout-identical; the only real differences were hover-reveal actions vs
 // always-visible touch actions, and hover: vs active: button states, both

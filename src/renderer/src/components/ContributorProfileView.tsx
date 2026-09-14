@@ -8,17 +8,17 @@ import { useMyCompProposals } from '../hooks/useMyCompProposals'
 import CompProposalList, { CompFilterBar, filterCompProposals } from './CompProposalList'
 
 // A contributor-only account's home. Reviewing other people's proposals is
-// deliberately NOT here — that queue lives in exactly one place, the Admin
+// deliberately NOT here - that queue lives in exactly one place, the Admin
 // page's "Comp files" tab, reachable from the editor profile.
 
-// Bento tile grid — mirrors the tile treatment EditorProfileView.desktop/
-// .mobile.tsx use (see "Visual Redesign v2 — Bento Dashboard Pivot" in the
+// Bento tile grid - mirrors the tile treatment EditorProfileView.desktop/
+// .mobile.tsx use (see "Visual Redesign v2 - Bento Dashboard Pivot" in the
 // rewrite plan), but this page stays a single file (no .desktop/.mobile
-// split, per the plan's explicit decision — it's the smallest surface and
+// split, per the plan's explicit decision - it's the smallest surface and
 // doesn't need two layouts). The grid below is a simple responsive
 // `grid-cols-2` stack that escalates to 4 columns at `sm`, closer to
 // EditorProfileView.mobile.tsx's approach than the desktop file's
-// height-filling bento — there just isn't enough content here to justify a
+// height-filling bento - there just isn't enough content here to justify a
 // dedicated per-platform layout.
 export default function ContributorProfileView(): JSX.Element {
   const { account, setActiveView, activeChannel, channels } = useStorePick('account', 'setActiveView', 'activeChannel', 'channels')
@@ -111,7 +111,7 @@ export default function ContributorProfileView(): JSX.Element {
             </div>
           </Tile>
 
-          {/* Comp Files — large */}
+          {/* Comp Files - large */}
           <Tile title="Comp Files" icon={<FolderOpen size={13} />} span="col-span-2 sm:col-span-4">
             <div className="flex items-center gap-2 mb-2 shrink-0">
               <CompFilterBar filter={filter} setFilter={setFilter} />

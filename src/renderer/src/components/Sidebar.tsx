@@ -60,7 +60,7 @@ export default function Sidebar(): JSX.Element {
   const [navOverIdx, setNavOverIdx] = useState<number | null>(null)
   // Move a visible row to sit adjacent to a target row. Reordering happens on
   // the FULL saved order (including any hidden items) so their relative spots
-  // are preserved — same approach as Settings' moveNavItem.
+  // are preserved - same approach as Settings' moveNavItem.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
     const full = orderedNavItems(navOrder).map((i) => i.view)
@@ -74,7 +74,7 @@ export default function Sidebar(): JSX.Element {
     setNavOrder(next)
   }
 
-  // Right-click on a nav tab pops a single "Hide" action — a faster path to
+  // Right-click on a nav tab pops a single "Hide" action - a faster path to
   // the same navVisibility toggle Settings → Appearance → Menu items exposes.
   const [navMenu, setNavMenu] = useState<{ view: ViewType; label: string; x: number; y: number } | null>(null)
   const openNavMenu = (view: ViewType, label: string) => (e: React.MouseEvent): void => {
@@ -118,13 +118,13 @@ export default function Sidebar(): JSX.Element {
   // items. orderedNavItems sanitizes the saved order; isNavItemVisible drops
   // web-only tabs on web and anything the user has toggled off.
   const items = orderedNavItems(navOrder).filter((i) => isNavItemVisible(i, navVisibility, false))
-  // Which tab reads as current — not always activeView, since some views are
+  // Which tab reads as current - not always activeView, since some views are
   // sub-views of a tab (the games inside Games). See navTabFor.
   const activeTab = navTabFor(activeView)
 
   // Start the view's chunk on hover/focus rather than on click. Pointing at a
   // menu item precedes clicking it by ~100ms, which is usually the whole
-  // download — so by the time Suspense would need a fallback, there's nothing
+  // download - so by the time Suspense would need a fallback, there's nothing
   // left to wait for. Focus covers keyboard navigation. Idempotent and
   // bandwidth-aware; see preloadView.
   const warmOnIntent = (view: ViewType): { onPointerEnter: () => void; onFocus: () => void } => ({
@@ -136,13 +136,13 @@ export default function Sidebar(): JSX.Element {
     if (activeView === view && view === 'playlists') {
       window.dispatchEvent(new CustomEvent('playlists:back'))
     } else {
-      // Not always `view` itself — a tab holding several views reopens on the
+      // Not always `view` itself - a tab holding several views reopens on the
       // one last used. See tabEntryView.
       setActiveView(tabEntryView(view))
     }
   }
 
-  // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) —
+  // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) -
   // ordered and filtered to what's both available and toggled on in Settings.
   // Log in and the collapse toggle are rendered separately (never hideable).
   const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads: uploads.length > 0 }
@@ -327,7 +327,7 @@ export default function Sidebar(): JSX.Element {
     <aside
       className={`app-sidebar hidden md:flex flex-col h-full bg-sidebar shrink-0 ${sidebarPosition === 'right' ? 'border-l' : 'border-r'} border-[var(--border)] transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
     >
-      {/* Logo — collapses to zero height when the sidebar is collapsed */}
+      {/* Logo - collapses to zero height when the sidebar is collapsed */}
       <div
         className="flex flex-col items-center gap-1 shrink-0 px-5 overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out"
         style={{ maxHeight: collapsed ? '0px' : '200px', opacity: collapsed ? 0 : 1 }}
@@ -410,7 +410,7 @@ export default function Sidebar(): JSX.Element {
         ))}
       </nav>
 
-      {/* Bottom section — Log in stays pinned (never hideable); the rest are
+      {/* Bottom section - Log in stays pinned (never hideable); the rest are
           user-ordered/hideable controls (Settings → Appearance → Menu controls). */}
       <div className="pb-4 space-y-1 px-2">
         {!account && (
@@ -431,7 +431,7 @@ export default function Sidebar(): JSX.Element {
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className="flex items-center w-full py-2 rounded text-sm font-medium text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3"
         >
-          {/* Chevron points where the edge will move — mirrored when the
+          {/* Chevron points where the edge will move - mirrored when the
               sidebar sits on the right. */}
           <span className="w-6 h-6 flex items-center justify-center shrink-0">
             {collapsed !== (sidebarPosition === 'right') ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}

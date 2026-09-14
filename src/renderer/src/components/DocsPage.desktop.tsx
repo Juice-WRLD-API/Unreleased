@@ -33,7 +33,7 @@ export default function DocsPage(): JSX.Element {
       }
     }
     return counts
-    // indexVersion is the signal that registry.current changed — it has no
+    // indexVersion is the signal that registry.current changed - it has no
     // other use here, hence the explicit reference.
   }, [query, indexVersion])
 
@@ -101,7 +101,7 @@ export default function DocsPage(): JSX.Element {
               <button
                 key={tab.id}
                 // Clicking a tab while searching jumps to that category's
-                // results instead of clearing the query — every matching tab
+                // results instead of clearing the query - every matching tab
                 // stays rendered (stacked, filtered by `visible` below), so
                 // this just scrolls the target section into view.
                 onClick={() => {

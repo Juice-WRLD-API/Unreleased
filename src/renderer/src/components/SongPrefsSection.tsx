@@ -6,7 +6,7 @@ import { JWApiSong, resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldA
 import { getOwnVersionMeta, SongVersionMeta } from '../lib/versionsApi'
 import CoverEditor from './CoverEditor'
 
-// The "Personalize" editor shown inside SongInfoModal — the one place a user
+// The "Personalize" editor shown inside SongInfoModal - the one place a user
 // sets the per-song overrides in lib/songPrefs (custom name, custom cover,
 // preferred version) and sees their playcount. Everything here writes through
 // the store's song-preference actions, which are local-first, so it works
@@ -27,21 +27,21 @@ export default function SongPrefsSection({
   songId, apiTitle, apiImageUrl, ownImageRaw, ownHasFile, versions, altTitles = [],
 }: {
   songId: number
-  /** The song's own primary title — the placeholder/reset target for the name. */
+  /** The song's own primary title - the placeholder/reset target for the name. */
   apiTitle: string
-  /** The song's own cover, resolved — the reset target and default swatch. */
+  /** The song's own cover, resolved - the reset target and default swatch. */
   apiImageUrl?: string
   /** The song's own raw image_url (as the API returned it), stored verbatim
    *  when the user picks "this song's cover" so the value matches the backend's
    *  own pointer shape rather than an app-resolved absolute URL. */
   ownImageRaw: string | null
-  /** Whether this song has an actual playable file (`song.path`) — recording
+  /** Whether this song has an actual playable file (`song.path`) - recording
    *  sessions and some unsurfaced entries don't. Excluded from the default
    *  version picker below since defaulting to one would leave nothing to play. */
   ownHasFile: boolean
   /** Linked version siblings, already fetched by the modal. */
   versions: VersionEntry[]
-  /** This song's other known titles — widens the cover picker's search so
+  /** This song's other known titles - widens the cover picker's search so
    *  covers filed under an alt name still surface. */
   altTitles?: string[]
 }): JSX.Element {
@@ -68,7 +68,7 @@ export default function SongPrefsSection({
   }
 
   // ── Own version label ─────────────────────────────────────────────────────
-  // The modal hands us the siblings but not the song's own row, so fetch it —
+  // The modal hands us the siblings but not the song's own row, so fetch it -
   // needed both to offer "this song" as a default-version choice and to show
   // which label is currently preferred.
   const [ownMeta, setOwnMeta] = useState<SongVersionMeta | null>(null)
@@ -81,7 +81,7 @@ export default function SongPrefsSection({
   // ── Default-version choices ───────────────────────────────────────────────
   // One entry per distinct version label across the whole group (this song +
   // siblings). Storing the label (not a song id) is what lets a default set
-  // here govern the group no matter which member is played — see queueSlice's
+  // here govern the group no matter which member is played - see queueSlice's
   // groupDefaultVersion.
   const versionChoices = useMemo(() => {
     const out: { label: string; title: string }[] = []
@@ -97,8 +97,8 @@ export default function SongPrefsSection({
     return out
   }, [ownMeta, versions, apiTitle, ownHasFile])
 
-  // The group's effective default — own row wins if set, else the first
-  // sibling that has one — mirrors queueSlice's groupDefaultVersion so this
+  // The group's effective default - own row wins if set, else the first
+  // sibling that has one - mirrors queueSlice's groupDefaultVersion so this
   // picker highlights the same choice playback will actually resolve to, even
   // when the default was set while viewing a *different* version of this song.
   const groupDefaultVersion = useMemo(() => {
@@ -112,7 +112,7 @@ export default function SongPrefsSection({
 
   // Setting a label always writes to this song's own row (it wins per the
   // resolution above). Clearing has to reach wherever the label actually
-  // lives — own row or an inherited sibling's — or "unstarring" an inherited
+  // lives - own row or an inherited sibling's - or "unstarring" an inherited
   // default would silently do nothing and the star would stay lit.
   const clearDefaultVersionLabel = (label: string): void => {
     if (pref?.default_version?.toLowerCase() === label.toLowerCase()) setSongDefaultVersion(songId, null)
@@ -178,7 +178,7 @@ export default function SongPrefsSection({
           </button>
         )}
       </div>
-      {/* The song's other known titles, one click away — renaming to an alt
+      {/* The song's other known titles, one click away - renaming to an alt
           name is the common case, and retyping one by hand is needless. */}
       {altTitles.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -206,7 +206,7 @@ export default function SongPrefsSection({
         <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-surface-overlay flex items-center justify-center">
           {effectiveCover ? (
             // Keyed by URL: onError hides the element imperatively, and React
-            // would otherwise reuse that hidden node when the cover changes —
+            // would otherwise reuse that hidden node when the cover changes -
             // leaving a working cover invisible after one bad URL.
             <img key={effectiveCover} src={smallCoverUrl(effectiveCover)} alt="" className="w-full h-full object-cover"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
@@ -246,7 +246,7 @@ export default function SongPrefsSection({
 
       {/* ── Default version ── */}
       {/* A default only means anything when there's more than one label to
-          choose between — a single-version song has nothing to default to. */}
+          choose between - a single-version song has nothing to default to. */}
       {versionChoices.length > 1 && (
         <>
           <GroupLabel>Default version</GroupLabel>

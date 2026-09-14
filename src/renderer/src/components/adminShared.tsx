@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Search, X as XIcon, Copy, Check } from 'lucide-react'
 
 // A field's raw value, not the JSX rendering of it (which may drop blank
-// lines, truncate, or otherwise reformat for display) — copying is for
+// lines, truncate, or otherwise reformat for display) - copying is for
 // pasting the real value somewhere else, so callers should always pass the
 // untruncated string regardless of what's currently visible on screen.
 export function CopyButton({ text, label }: { text: string; label: string }): JSX.Element {
@@ -77,7 +77,7 @@ export function Empty({ label }: { label: string }): JSX.Element {
  *
  *  Kept separate from the matching so callers can build it once per row when
  *  the data changes, instead of re-lowercasing every field of every row on
- *  every keystroke — on the unfiltered "All" proposals list that was thousands
+ *  every keystroke - on the unfiltered "All" proposals list that was thousands
  *  of string allocations per character typed. */
 export function buildHaystack(...fields: (string | number | null | undefined)[]): string {
   let out = ''
@@ -96,7 +96,7 @@ export function matchesHaystack(query: string, hay: string | undefined): boolean
   const q = query.trim().toLowerCase()
   if (!q) return true
   if (!hay) return false
-  // Single-term is the overwhelmingly common case — skip the split/allocation.
+  // Single-term is the overwhelmingly common case - skip the split/allocation.
   if (!/\s/.test(q)) return hay.includes(q)
   return q.split(/\s+/).every(term => hay.includes(term))
 }
@@ -109,7 +109,7 @@ export function matchesQuery(query: string, ...fields: (string | number | null |
 }
 
 /** Search box for the review queues' left column. Filtering is client-side
- *  over the rows already loaded — neither the song-edit nor the comp-file list
+ *  over the rows already loaded - neither the song-edit nor the comp-file list
  *  endpoint takes a query param, and the status filter beside it is what
  *  decides which rows get fetched in the first place. So this searches the
  *  current status bucket, not the whole archive. */
@@ -127,7 +127,7 @@ export function QueueSearch({ value, onChange, placeholder, matches, total }: {
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
-        // Escape clears rather than blurs — the list is the thing being
+        // Escape clears rather than blurs - the list is the thing being
         // filtered, so getting back to "everything" shouldn't cost a mouse trip.
         onKeyDown={e => { if (e.key === 'Escape' && value) { e.stopPropagation(); onChange('') } }}
         placeholder={placeholder}

@@ -1,10 +1,10 @@
 // Field-qualified search syntax for the Tracker's search box, e.g.
-// `artists:"Juice WRLD" love` — matches songs whose credited_artists field
+// `artists:"Juice WRLD" love` - matches songs whose credited_artists field
 // contains "Juice WRLD" AND whose free text (title/artist/producer/etc.)
 // contains "love". Field tokens are stripped out of the query before it's
 // sent to the API's `searchall` param (which has no concept of per-field
 // search); the remaining free text still goes through the normal
-// server-side search, while field filters are applied client-side — see
+// server-side search, while field filters are applied client-side - see
 // ApiTrackerView's fetchAllMode, which this pushes field-filtered queries
 // into (same as sort/multi-category search already does).
 import { JWApiSong } from './juicewrldApi'
@@ -62,9 +62,9 @@ export const SEARCH_FIELD_HELP: { field: string; example: string }[] = FIELD_DEF
 // "5:30" or similar doesn't get silently eaten).
 const TOKEN_RE = /([a-zA-Z_]+):(?:"([^"]*)"|'([^']*)'|(\S+))/g
 
-// `&`/`&&` between field tokens is purely cosmetic — filters are already
+// `&`/`&&` between field tokens is purely cosmetic - filters are already
 // ANDed together with no operator needed (`artists:"X" producers:"Y"` and
-// `artists:"X" & producers:"Y"` behave identically) — so once field tokens
+// `artists:"X" & producers:"Y"` behave identically) - so once field tokens
 // are stripped out, any standalone `&`/`&&` left over is dropped too rather
 // than leaking into the free-text search sent to the server. Only matches
 // when it's its own token (surrounded by whitespace/string edges) so a

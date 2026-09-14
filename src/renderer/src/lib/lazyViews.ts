@@ -12,7 +12,7 @@ import { ViewType } from '../types'
 // front of first paint.
 //
 // lazyView (not React's lazy) so a chunk that vanished in a redeploy triggers
-// a reload instead of an error card — see lib/lazyView.
+// a reload instead of an error card - see lib/lazyView.
 export const EditorPage = lazyView(() => import('../components/EditorPage'))
 export const AdminPage = lazyView(() => import('../components/AdminPage'))
 export const SharedPlaylistView = lazyView(() => import('../components/SharedPlaylistView'))
@@ -36,14 +36,14 @@ export const PlaylistsView = lazyView(() => import('../components/PlaylistsView'
 export const ApiFilesView = lazyView(() => import('../components/ApiFilesView'))
 // Also a static import inside PlaylistsView.desktop/.mobile, so Rollup hoists
 // it into a chunk shared with Playlists rather than duplicating it. Splitting
-// the route is still worth it — it's off the startup path either way.
+// the route is still worth it - it's off the startup path either way.
 export const LikedSongsView = lazyView(() => import('../components/LikedSongsView'))
 export const DiagnosticsModal = lazyView(() => import('../components/DiagnosticsModal'))
 
 // The same import() factories again, keyed by view, for warming a chunk ahead
 // of the navigation that needs it. Deliberately a second reference to the same
 // specifier rather than something clever: Vite resolves both to one chunk, and
-// calling the factory is exactly what React would do on render — so a warmed
+// calling the factory is exactly what React would do on render - so a warmed
 // chunk makes the later render resolve from the module cache synchronously.
 const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   editor: () => import('../components/EditorPage'),
@@ -75,7 +75,7 @@ const started = new Set<ViewType>()
 // Chromium-only; absent elsewhere, which reads as "no constraint known".
 interface NetworkInfo { saveData?: boolean; effectiveType?: string }
 
-/** True when the browser is telling us not to spend bandwidth speculatively —
+/** True when the browser is telling us not to spend bandwidth speculatively -
  *  Data Saver on, or a connection slow enough that a prefetch would compete
  *  with the request the user is actually waiting for. */
 function shouldSkipPrefetch(): boolean {
@@ -86,7 +86,7 @@ function shouldSkipPrefetch(): boolean {
 
 /** Start loading `view`'s chunk without rendering it. Safe to call on every
  *  hover/pointerdown: it runs at most once per view, and a failure is
- *  swallowed — the real navigation still goes through lazyView's retry +
+ *  swallowed - the real navigation still goes through lazyView's retry +
  *  reload recovery, so a failed warm-up must never surface anything. */
 export function preloadView(view: ViewType): void {
   // Not always `view` itself: a tab holding several views (Games) opens on

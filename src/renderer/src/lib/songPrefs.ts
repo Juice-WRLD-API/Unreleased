@@ -14,7 +14,7 @@
 // The store owns every write and mirrors its map in here via setSongPrefsCache
 // so non-React callers always resolve against the current overrides.
 
-/** One user's overrides for one song — mirrors the API row shape. */
+/** One user's overrides for one song - mirrors the API row shape. */
 export interface SongPreference {
   /** Numeric API song id (the row's `song` field). */
   song: number
@@ -24,7 +24,7 @@ export interface SongPreference {
    *  API's storage. Resolved to a loadable URL by resolvePrefCoverUrl. */
   cover_url: string | null
   /** Preferred version *label* (e.g. "v1", "OG", "TV Mix") within this song's
-   *  version group — matched against the /versions/ table's `version` field
+   *  version group - matched against the /versions/ table's `version` field
    *  rather than holding a song id, so it survives songs being relinked or
    *  groups being merged. A default set on any member governs the whole group;
    *  see queueSlice's groupDefaultVersion. */
@@ -35,7 +35,7 @@ export interface SongPreference {
 
 export type SongPrefMap = Record<number, SongPreference>
 
-/** A change to a preference row — only the fields being set. */
+/** A change to a preference row - only the fields being set. */
 export type SongPrefPatch = Partial<Omit<SongPreference, 'song'>>
 
 let _prefs: SongPrefMap = {}
@@ -69,7 +69,7 @@ export function emptySongPref(songId: number): SongPreference {
   return { song: songId, name: null, cover_url: null, default_version: null, playcount: 0 }
 }
 
-/** True once a row carries no overrides and no play history — the store drops
+/** True once a row carries no overrides and no play history - the store drops
  *  these instead of keeping empty rows around forever. */
 export function isEmptySongPref(p: SongPreference): boolean {
   return p.name == null && p.cover_url == null && p.default_version == null && p.playcount === 0
@@ -88,9 +88,9 @@ export function normalizePrefText(value: string | null | undefined): string | nu
 export const SERVER_PREFS_LIMIT = 500
 
 /** Fits the prefs array under the server's row cap. Rows with real overrides
- *  (name/cover/default version) survive first — a playcount-only row is the
+ *  (name/cover/default version) survive first - a playcount-only row is the
  *  cheapest thing to lose since every song played past the threshold creates
- *  one — then higher playcounts win among the rest. */
+ *  one - then higher playcounts win among the rest. */
 export function capSongPrefs(prefs: SongPreference[], max = SERVER_PREFS_LIMIT): SongPreference[] {
   if (prefs.length <= max) return prefs
   const hasOverride = (p: SongPreference): boolean =>

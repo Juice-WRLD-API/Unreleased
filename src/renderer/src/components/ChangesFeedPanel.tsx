@@ -37,7 +37,7 @@ function fullDate(iso: string | null): string {
 }
 
 // Groups rows into day buckets (Today / Yesterday / weekday / date) without
-// re-sorting — the API already returns newest-first, so consecutive same-day
+// re-sorting - the API already returns newest-first, so consecutive same-day
 // items just land in the same bucket.
 function dayLabel(iso: string | null): string {
   if (!iso) return 'Unknown date'
@@ -93,7 +93,7 @@ const ACTION_ICONS: Record<string, typeof Plus> = {
   create_folder: FolderPlus,
 }
 
-// Icon-chip that anchors each row — the colored circle is the primary "what
+// Icon-chip that anchors each row - the colored circle is the primary "what
 // kind of change" cue, since a wall of same-shaped rows is hard to scan.
 function ActionIcon({ action }: { action: string }): JSX.Element {
   const cls = ACTION_STYLES[action] || 'bg-[var(--surface-overlay)] text-text-secondary border-[var(--border)]'
@@ -135,7 +135,7 @@ function CompRow({ item, onOpen }: { item: CompChange; onOpen: (i: CompChange) =
       <div className="shrink-0 text-right">
         <div className="text-xs text-text-secondary truncate max-w-[9rem]">{item.user}</div>
         <div title={fullDate(item.timestamp)} className="text-[11px] text-text-muted">{timeAgo(item.timestamp)}</div>
-        {/* Folders carry no meaningful byte count — the server sends 0 for them
+        {/* Folders carry no meaningful byte count - the server sends 0 for them
             and a "0 B" line next to a new folder just reads like a failure. */}
         {!item.is_folder && humanSize(item.size) && <div className="text-[11px] text-text-muted">{humanSize(item.size)}</div>}
       </div>

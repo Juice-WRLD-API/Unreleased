@@ -1,5 +1,5 @@
 /* Josefin Sans powers the sidebar wordmark and the "Display" font choice
-   (lib/fonts.ts) — the body weights are here for the latter, which needs more
+   (lib/fonts.ts) - the body weights are here for the latter, which needs more
    than the wordmark's hairline 100/200. Every other selectable font is a
    system stack, so this stays the only webfont and its failure to load just
    falls through to the next family in the stack.
@@ -46,17 +46,17 @@
 /* ─── Light theme ────────────────────────────────────────────────────────────────
    NOTE: these :root/.dark blocks are only the first-paint fallback (and the
    values Tailwind's color-scheme relies on before React mounts). The live
-   palette — including these two classic themes and every other skin — is
+   palette - including these two classic themes and every other skin - is
    defined in lib/skins.ts and written onto <html> as inline vars by App.tsx.
    Change palettes there, not here. */
 :root {
   /* Without this, native controls (mainly <select> dropdown popups) follow
-     the OS's own dark/light preference instead of this app's theme toggle —
+     the OS's own dark/light preference instead of this app's theme toggle -
      e.g. OS in dark mode + app in light mode renders the popup with a dark
      native background while the <option> text still inherits this theme's
      (black) color, making it unreadable. */
   color-scheme: light;
-  /* Font stacks — first-paint defaults; useThemeEffects overwrites these with
+  /* Font stacks - first-paint defaults; useThemeEffects overwrites these with
      the user's picks (lib/fonts.ts). --font-app also backs Tailwind's
      `font-sans`, which preflight applies to <html>. */
   --font-app: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -145,7 +145,7 @@ html.theme-animate {
    (the class names predate the UI labels; the storage keys are load-bearing
    for already-saved preferences, so only the labels were reworded.)
    Accent-tinted washes layered as background-image on
-   top of the existing flat background-color, so no skin's palette changes —
+   top of the existing flat background-color, so no skin's palette changes -
    and because they ride rgb(var(--accent-rgb) / α), they recolor with the
    accent, follow the Now Playing skin's per-song accent, and animate through
    the same registered-property cross-fade as everything else. */
@@ -167,7 +167,7 @@ html.gradients .app-sidebar {
 }
 
 /* Player bar: mirror of the sidebar, rising from the bottom edge. Grouped
-   with the controls below rather than the shell above — it reads as a
+   with the controls below rather than the shell above - it reads as a
    control strip, not as app chrome, so it follows that toggle. */
 html.surface-gradients .app-player {
   background-image: linear-gradient(0deg, rgb(var(--accent-rgb) / 0.10), transparent 80%);
@@ -175,21 +175,21 @@ html.surface-gradients .app-player {
 
 /* Accent-filled controls get a subtle two-tone sheen (hover-accent → accent).
    background-image over Tailwind's background-color, so `bg-accent` keeps
-   working everywhere — tiny dots/indicators just look flat, buttons look lit. */
+   working everywhere - tiny dots/indicators just look flat, buttons look lit. */
 html.gradients .bg-accent {
   background-image: linear-gradient(135deg, rgb(var(--accent-hover-rgb) / 1), rgb(var(--accent-rgb) / 1) 70%);
 }
 
 /* Flat surface-overlay boxes (view-toggle groups, search bars, badges, menu
    panels, etc.) get a faint wash too, so they don't read as flatly
-   inconsistent next to the gradients above — top-down like the sidebar's,
+   inconsistent next to the gradients above - top-down like the sidebar's,
    not diagonal like bg-accent's, since these are mostly small/wide pills
    where a diagonal reads as an odd, randomly-placed highlight rather than
    "lit from the same direction as everything else". Much fainter than the
    others since surface-overlay covers far more of the UI at once.
 
    Its own `surface-gradients` class (Settings → Appearance → Surface
-   gradients), independent of `gradients` above — bg-surface-overlay is used
+   gradients), independent of `gradients` above - bg-surface-overlay is used
    everywhere, so someone who wants the big shell/sidebar/player washes
    doesn't necessarily want every small pill tinted too. Off by default
    behavior is just the flat --surface-overlay color, same as before either
@@ -208,18 +208,18 @@ html.standalone { --app-height: 100lvh; }
 
 /* Top inset for anything that parks itself below the status bar, with a bit
    of breathing room past it: iOS softens the top band of the screen in every
-   installed web app (not something this page causes or can turn off — see the
+   installed web app (not something this page causes or can turn off - see the
    status-bar meta in index.html), and nothing moves content out of that band
    entirely, so this just keeps titles and icon buttons off the worst of it.
 
    Measured on a 59px-inset iPhone: the blur is total for the first ~60px,
-   fades through ~75px, and is gone by ~90px — i.e. it runs about 30px past
+   fades through ~75px, and is gone by ~90px - i.e. it runs about 30px past
    the inset itself. 1.6 lands just clear of that (~94px). Only those last
    ~30px are a real cost; the 59px below the status bar was never usable
    anyway. Dial the factor down to reclaim space at the price of a softer
    first line.
 
-   The multiplier is what gates it — deliberately, rather than a standalone
+   The multiplier is what gates it - deliberately, rather than a standalone
    check. The inset is only non-zero where content actually renders under a
    status bar, so scaling it adds room exactly there and stays 0×n = 0 on
    desktop and in browser tabs. */
@@ -239,7 +239,7 @@ html, body, #root {
 
 /* Same wash as .app-shell (above), mirrored onto html/body/#root themselves.
    iOS standalone mode extends content under the status bar/notch via
-   safe-area insets, and .app-shell doesn't always cover that sliver — without
+   safe-area insets, and .app-shell doesn't always cover that sliver - without
    this, Gradient Surfaces users see a flat patch there instead of the glow
    the rest of the shell has. Keeping both copies in sync is fine: they're
    cheap and only one is ever visible at a time. */
@@ -254,10 +254,10 @@ html.gradients #root {
 /* Same gap, same fix, for WRLD: its dark blurred-cover backdrop is the only
    thing under that sliver while it's open, so leaking through to the raw
    `var(--surface)` below reads as a wrong-colored (and theme-following)
-   patch sitting on top of an otherwise dark, immersive screen — much more
+   patch sitting on top of an otherwise dark, immersive screen - much more
    jarring than the Gradient Surfaces case above, since WRLD's backdrop is
    always dark regardless of the active theme. `wrld-active` is toggled on
-   <html> for exactly as long as WrldView is mounted (mobile only — desktop
+   <html> for exactly as long as WrldView is mounted (mobile only - desktop
    never fills the safe-area top inset this way). Can't replicate the actual
    blurred-cover art here (this paints behind everything, before React has
    anything to sample from), so a plain dark tone is the fix: close enough
@@ -289,7 +289,7 @@ input[type='range'] {
   background: transparent;
   cursor: pointer;
   /* Taller than the thumb so the vertical grab/drag area is more forgiving
-     than the visible 4px track — dragging slightly off-track shouldn't feel
+     than the visible 4px track - dragging slightly off-track shouldn't feel
      like losing the slider. */
   height: 20px;
   display: block;
@@ -312,7 +312,7 @@ input[type='range']::-webkit-slider-thumb {
   opacity: 0;
   transition: opacity 0.15s;
 }
-/* Keep the thumb visible for the whole drag — :hover alone drops out the
+/* Keep the thumb visible for the whole drag - :hover alone drops out the
    moment the cursor strays vertically off the thin track, which reads as
    the slider "slipping away" even though the drag (native pointer capture)
    is still tracking correctly. :active persists for the whole mouse-down. */
@@ -321,7 +321,7 @@ input[type='range']:active::-webkit-slider-thumb {
   opacity: 1;
 }
 /* Touch devices have no :hover at all, so a hover-gated thumb never becomes
-   visible except mid-drag (:active) — on a bare slider with no accent fill
+   visible except mid-drag (:active) - on a bare slider with no accent fill
    (anything not wrapped in .progress-track/.eq-band, e.g. the crossfade
    duration slider) that left nothing on screen at all until the user's
    finger was already on it. Mobile browsers correctly report (hover: none)
@@ -341,7 +341,7 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 
 /* Equalizer band sliders. Unlike seek/volume, a band's setting has to be
-   readable at a glance without hovering each one — so the thumb stays
+   readable at a glance without hovering each one - so the thumb stays
    visible, and the track fills from the 0 dB center out to the current
    gain (--lo/--hi are the low/high ends of that span, set by the panel). */
 .eq-band input[type='range']::-webkit-slider-thumb { opacity: 1; }
@@ -417,7 +417,7 @@ input[type='range']:active::-webkit-slider-thumb {
   animation: slide-in-right 0.28s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
-/* Track row stagger — cap delay at first 30 rows */
+/* Track row stagger - cap delay at first 30 rows */
 .track-row { animation: fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .track-row:nth-child(1)  { animation-delay:   0ms; }
 .track-row:nth-child(2)  { animation-delay:  20ms; }
@@ -454,7 +454,7 @@ input[type='range']:active::-webkit-slider-thumb {
   animation: wrld-queue-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Per-row reveal, staggered — layered on top of the panel entrance so the
+/* Per-row reveal, staggered - layered on top of the panel entrance so the
    list cascades in. `backwards` (not `both`) so the fill state is dropped
    once the animation ends, leaving the drag-reorder transforms free to apply. */
 @keyframes wrld-row-in {
@@ -474,7 +474,7 @@ input[type='range']:active::-webkit-slider-thumb {
 .wrld-q-row:nth-child(10)  { animation-delay: 166ms; }
 .wrld-q-row:nth-child(n+11) { animation-delay: 172ms; }
 
-/* App-menu dropdown / submenu entrance — a quick, subtle scale-fade. The panel
+/* App-menu dropdown / submenu entrance - a quick, subtle scale-fade. The panel
    sets transform-origin inline (top vs bottom) so it grows out of the trigger
    whether it opens downward or flips above it (bottom nav bar). */
 @keyframes menu-pop {
@@ -509,7 +509,7 @@ input[type='range']:active::-webkit-slider-thumb {
    Starts invisible and only fades in after a beat: a chunk that's already
    warm (lib/lazyViews prefetches on nav hover/tap) resolves well inside the
    delay, so the common case shows nothing at all instead of a flash of
-   skeleton. Pure CSS — no timer to keep in sync with React's own scheduling. */
+   skeleton. Pure CSS - no timer to keep in sync with React's own scheduling. */
 @keyframes view-skeleton-in {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -520,7 +520,7 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* Keep the delay — it's what suppresses the flash, not decoration — but
+  /* Keep the delay - it's what suppresses the flash, not decoration - but
      drop the fade itself. Not folded into the block above, which zeroes
      animation-delay for animations where the delay IS decoration. */
   .view-skeleton { animation-duration: 0.01ms; }

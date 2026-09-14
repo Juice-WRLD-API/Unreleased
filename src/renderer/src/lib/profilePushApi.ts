@@ -2,7 +2,7 @@
 // plays, and playlist folders each live as their own JSON field on
 // /accounts/account/me/ (see preferencesApi.ts and foldersApi.ts for the
 // per-field shapes), but they used to be pushed by three independently
-// debounced timers — a burst of edits across more than one field (e.g. a
+// debounced timers - a burst of edits across more than one field (e.g. a
 // song skip, which bumps both playcount and listening plays) fired one PATCH
 // per field instead of one PATCH total. This is the single combined pusher
 // the store's one shared debounce timer calls into instead.

@@ -7,7 +7,7 @@ const CLIENT_ID_KEY = 'radioClientId'
 
 // A durable id for this browser profile. Without it the server can only identify
 // a listener by socket, so every reload looks like a new voter and every extra
-// tab like another one — which quietly inflates the vote threshold.
+// tab like another one - which quietly inflates the vote threshold.
 function radioClientId(): string {
   try {
     const existing = localStorage.getItem(CLIENT_ID_KEY)
@@ -178,7 +178,7 @@ export class RadioStreamClient {
   }
 
   // `track_id` is the only field the relay forwards, and it must be the id from
-  // GET /radio/library/ — the DJ resolves it against a path hash, so a numeric
+  // GET /radio/library/ - the DJ resolves it against a path hash, so a numeric
   // /songs/ id can never match.
   proposeQueue(trackId: string): boolean {
     if (!this.canVote()) return false
@@ -192,7 +192,7 @@ export class RadioStreamClient {
     return this.send({ type: 'vote', value })
   }
 
-  // Recovery nudge for mobile background tabs — browsers can silently close
+  // Recovery nudge for mobile background tabs - browsers can silently close
   // the websocket and/or pause the audio element while hidden, without firing
   // the events this class normally reacts to. Safe to call repeatedly: it's a
   // no-op when the connection/audio are already healthy.

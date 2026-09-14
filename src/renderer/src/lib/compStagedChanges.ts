@@ -4,7 +4,7 @@ import { COMP_UPLOADS_CHANGED } from './compUploads'
 import { apiFetch, parseBrowseEntries, JWApiBrowseResponse } from './juicewrldApi'
 
 // Submits the file changes the Files tab staged by drag-and-drop (see the
-// store's stagedFileChanges). These carry no file body — a move is two paths —
+// store's stagedFileChanges). These carry no file body - a move is two paths -
 // so unlike lib/compUploads there's no progress to report and no chunking:
 // the whole batch goes out inline when the user hits Propose.
 
@@ -36,7 +36,7 @@ function buildForm(change: StagedFileChange): FormData {
 
 /** Whether `folder` exists in the tree right now. A folder only becomes real
  *  once its create_folder proposal is approved, and the API refuses a move
- *  into a path that isn't there — so this is what decides when the moves that
+ *  into a path that isn't there - so this is what decides when the moves that
  *  were bundled behind a new folder can finally go out. */
 async function folderExists(folder: string, channel: string): Promise<boolean> {
   const parent = folder.split('/').filter(Boolean).slice(0, -1).join('/')
@@ -47,7 +47,7 @@ async function folderExists(folder: string, channel: string): Promise<boolean> {
     const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', params)
     return parseBrowseEntries(data).some(e => e.type === 'directory' && e.path === folder)
   } catch {
-    // Can't tell — treat as missing rather than firing a move that would only
+    // Can't tell - treat as missing rather than firing a move that would only
     // come back as "no active file exists at this path".
     return false
   }
@@ -56,7 +56,7 @@ async function folderExists(folder: string, channel: string): Promise<boolean> {
 /** Proposes every staged change, folder creations first. Each one that lands is
  *  dropped from the queue; failures stay queued carrying the error so they can
  *  be retried without re-dragging everything. Moves waiting on a folder that
- *  doesn't exist yet are held back untouched and reported as `held` — running
+ *  doesn't exist yet are held back untouched and reported as `held` - running
  *  this again after the folder's proposal is approved sends them. */
 export async function proposeStagedChanges(): Promise<{ proposed: number; failed: number; held: number }> {
   const { stagedFileChanges, updateStagedFileChange, unstageFileChange } = useStore.getState()

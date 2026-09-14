@@ -6,25 +6,25 @@ import { navTabFor, tabEntryView } from '../lib/navItems'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { preloadView } from '../lib/lazyViews'
 
-// The mobile nav bar — the counterpart to the desktop Sidebar, which it now
+// The mobile nav bar - the counterpart to the desktop Sidebar, which it now
 // shares its destination list with. It used to hardcode its own four tabs,
 // which meant Settings → Appearance → "Menu items" (order + show/hide) silently
 // did nothing on a phone; the same maps drive both surfaces here.
 //
-// Always bottom-anchored — unlike the desktop Sidebar (left/right/top/bottom,
+// Always bottom-anchored - unlike the desktop Sidebar (left/right/top/bottom,
 // via `sidebarPosition`), mobile no longer offers a way to move this bar; a
 // vertical rail never fit a phone anyway, and top placement wasn't worth the
 // two-way UI it required. Deliberately not reading `sidebarPosition` at all:
 // that field is desktop's, and a value of 'top' saved there (or synced from a
-// desktop session) must never flip this bar — see App.tsx's `isMobile` guard
+// desktop session) must never flip this bar - see App.tsx's `isMobile` guard
 // on the matching top-inset padding.
 //
-// Hard-capped (see MAX_MOBILE_TABS in lib/navItems), Settings always last —
+// Hard-capped (see MAX_MOBILE_TABS in lib/navItems), Settings always last -
 // a phone-width row scrolling to reach an 8th or 9th enabled item (the
 // original behavior) is worse than not offering that many at once. Anything
 // past the cap doesn't get a button here at all any more: it lives in the
 // "More" sheet (MoreNavSheet.tsx), opened from a button on Home rather than a
-// tab in this bar — see useMobileNavSplit for the shared tabs/moreTabs split.
+// tab in this bar - see useMobileNavSplit for the shared tabs/moreTabs split.
 
 export default function BottomNav(): JSX.Element {
   const { activeView, setActiveView, toggleSettings } =
@@ -34,7 +34,7 @@ export default function BottomNav(): JSX.Element {
 
   const navigateTo = (view: ViewType): void => {
     // Re-tapping the already-active Playlists tab dispatches a back event
-    // instead of going through setActiveView (it's a no-op there — same view).
+    // instead of going through setActiveView (it's a no-op there - same view).
     if (activeView === view && view === 'playlists') {
       window.dispatchEvent(new CustomEvent('playlists:back'))
     } else {
@@ -57,7 +57,7 @@ export default function BottomNav(): JSX.Element {
   ) : null
 
   // Published as a CSS var so other full-screen overlays (mobile Settings)
-  // can carve out exactly this much space instead of covering the nav bar —
+  // can carve out exactly this much space instead of covering the nav bar -
   // measured rather than hardcoded since it varies with the safe-area inset.
   // Zero on desktop, where this is display:none and the rule is a no-op.
   const navRef = useRef<HTMLElement>(null)
@@ -76,11 +76,11 @@ export default function BottomNav(): JSX.Element {
   return (
     <nav
       ref={navRef}
-      // Hidden on WRLD (mobile) — that tab wants full-screen immersion, and
+      // Hidden on WRLD (mobile) - that tab wants full-screen immersion, and
       // its own layout already reclaims the freed space (see
       // --bottom-nav-height, published below and read there).
       // bg-surface, not bg-sidebar: on the dark skin --sidebar is pure black,
-      // noticeably blacker than the app's own --surface — stacked with the
+      // noticeably blacker than the app's own --surface - stacked with the
       // safe-area-inset-bottom padding below the icons, that read as a stark,
       // "dead" slab distinct from the rest of the app instead of part of it.
       className={`md:hidden ${activeView === 'wrld' ? 'hidden' : 'flex'} items-stretch bg-surface shrink-0`}
@@ -89,7 +89,7 @@ export default function BottomNav(): JSX.Element {
       {tabs.map((tab) => {
         const active = navTabFor(activeView) === tab.view
         return (
-          // Touch has no hover, so warm the chunk on pointerdown — still lands
+          // Touch has no hover, so warm the chunk on pointerdown - still lands
           // ~80-150ms before the click that needs it.
           <button key={tab.view} onPointerDown={() => preloadView(tab.view)} onClick={() => navigateTo(tab.view)} className={tabCls(active)}>
             {marker(active)}
