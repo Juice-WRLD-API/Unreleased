@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSquare, Check, AlertCircle } from 'lucide-react'
 import * as userApi from '../lib/userApi'
 import type { SongEditProposal } from '../lib/userApi'
@@ -18,10 +18,16 @@ export interface ProposalListItemProps {
   resubmittingId: number | null
   deletingId: number | null
   variant?: 'desktop' | 'mobile'
+  /** Whether this row's data panel is open - lifted to the parent list so
+   *  expanding one row can collapse whatever else was open (see
+   *  EditorProfileView's expandedProposalId). */
+  expanded: boolean
+  onToggleExpand: () => void
 }
 
 export default function ProposalListItem({
   proposal: p, onEdit, onResubmit, onDelete, resubmittingId, deletingId, variant = 'desktop',
+  expanded, onToggleExpand,
 }: ProposalListItemProps): JSX.Element {
   const isMobile = variant === 'mobile'
   const s = STATUS_STYLES[p.status]
@@ -33,23 +39,25 @@ export default function ProposalListItem({
   // proposals skip this: their data is already on screen via the Edit
   // button, and it's still a live draft rather than a settled diff.
   const viewable = p.status !== 'pending'
-  const [expanded, setExpanded] = useState(false)
   const [detail, setDetail] = useState<SongEditProposal | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
+  // Fetches once, the first time this row is actually opened - not eagerly
+  // for every row up front, and not refetched on a later re-open.
+  useEffect(() => {
+    if (!expanded || detail || detailLoading) return
+    setDetailLoading(true)
+    setDetailError(null)
+    userApi.getProposal(p.id)
+      .then(setDetail)
+      .catch((e) => setDetailError(e instanceof Error ? e.message : 'Failed to load proposal'))
+      .finally(() => setDetailLoading(false))
+  }, [expanded, detail, detailLoading, p.id])
+
   const toggleExpanded = (): void => {
     if (!viewable) return
-    const next = !expanded
-    setExpanded(next)
-    if (next && !detail && !detailLoading) {
-      setDetailLoading(true)
-      setDetailError(null)
-      userApi.getProposal(p.id)
-        .then(setDetail)
-        .catch((e) => setDetailError(e instanceof Error ? e.message : 'Failed to load proposal'))
-        .finally(() => setDetailLoading(false))
-    }
+    onToggleExpand()
   }
 
   const actionBtnCls = isMobile

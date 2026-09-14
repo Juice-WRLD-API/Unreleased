@@ -142,6 +142,9 @@ export default function EditorProfileView(): JSX.Element {
   // ever see the toggle (non-contributors have no comp proposals to switch
   // to), so this stays 'songs' for everyone else.
   const [proposalsView, setProposalsView] = useState<'songs' | 'comp'>('songs')
+  // Which "My Proposals" row (if any) has its data expanded - accordion-style,
+  // so opening one closes whatever was already open instead of stacking diffs.
+  const [expandedProposalId, setExpandedProposalId] = useState<number | null>(null)
   const [compSearch, setCompSearch] = useState('')
 
   // Not `|| is_administrator`: this tile lists proposals *you* submitted, and
@@ -506,6 +509,8 @@ export default function EditorProfileView(): JSX.Element {
                             resubmittingId={resubmittingId}
                             deletingId={deletingId}
                             variant="desktop"
+                            expanded={expandedProposalId === p.id}
+                            onToggleExpand={() => setExpandedProposalId(id => id === p.id ? null : p.id)}
                           />
                         ))}
                       </div>

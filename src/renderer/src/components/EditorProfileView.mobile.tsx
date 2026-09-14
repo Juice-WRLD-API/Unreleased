@@ -148,6 +148,9 @@ export default function EditorProfileView(): JSX.Element {
   // Which content the merged Proposals/Comp tile shows - see the desktop
   // file's identical toggle for why these two used to be separate tiles.
   const [proposalsView, setProposalsView] = useState<'songs' | 'comp'>('songs')
+  // Which "My Proposals" row (if any) has its data expanded - accordion-style,
+  // so opening one closes whatever was already open instead of stacking diffs.
+  const [expandedProposalId, setExpandedProposalId] = useState<number | null>(null)
   const [compSearch, setCompSearch] = useState('')
 
   const {
@@ -463,6 +466,8 @@ export default function EditorProfileView(): JSX.Element {
                           resubmittingId={resubmittingId}
                           deletingId={deletingId}
                           variant="mobile"
+                          expanded={expandedProposalId === p.id}
+                          onToggleExpand={() => setExpandedProposalId(id => id === p.id ? null : p.id)}
                         />
                       ))}
                     </div>
