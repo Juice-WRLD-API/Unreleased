@@ -141,6 +141,14 @@ function SuggestDropdown({ matches, onPick }: { matches: string[]; onPick: (v: s
  *  "TBD", or several dates on separate lines) so this augments rather than
  *  replaces typing. The date input itself stays invisible; only the button is
  *  seen, matching the folder-icon browse button elsewhere in these fields. */
+// Constructed from the y/m/d parts (not `new Date(iso)`) so the picked day
+// never shifts - parsing an ISO date string alone is read back as UTC
+// midnight, which formats as the previous day in negative-UTC timezones.
+function formatPickedDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+}
+
 function DatePickerButton({ onPick, className }: { onPick: (date: string) => void; className: string }): JSX.Element {
   const ref = useRef<HTMLInputElement>(null)
   return (
@@ -161,7 +169,7 @@ function DatePickerButton({ onPick, className }: { onPick: (date: string) => voi
       <input
         ref={ref}
         type="date"
-        onChange={e => { const v = e.target.value; if (v) onPick(v); e.target.value = '' }}
+        onChange={e => { const v = e.target.value; if (v) onPick(formatPickedDate(v)); e.target.value = '' }}
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
@@ -1244,11 +1252,11 @@ export default function EditorPage({ initialSongId = null }: {
             </Card>
 
             <Card title="Dates" overflowVisible>
-              <FieldGrid>
+              <div className="grid grid-cols-3 gap-2">
                 <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
                 <TextareaRow label="Released" value={relDate}    original={String(base.release_date || '')} onChange={setRelDate}     rows={2} placeholder="YYYY-MM-DD" mono dateInput />
                 <TextareaRow label="Leaked"  value={dateLeaked}  original={String(base.date_leaked || '')}  onChange={setDateLeaked}  rows={2} placeholder="YYYY-MM-DD" mono dateInput />
-              </FieldGrid>
+              </div>
             </Card>
 
             {versionsEnabled && song && (
