@@ -509,10 +509,14 @@ export default function EditorPage({ initialSongId = null }: {
   const [filePath,          setFilePath]          = useState('')
   const [songLength,        setSongLength]        = useState('')
   const [bitrate,           setBitrate]           = useState('')
+  const [bpm,               setBpm]               = useState('')
+  const [musicalKey,        setMusicalKey]        = useState('')
   const [altNames,          setAltNames]          = useState('')
   const [fileNames,         setFileNames]         = useState('')
   const [instrumentals,     setInstrumentals]     = useState('')
   const [instrumentalNames, setInstrumentalNames] = useState('')
+  const [sessionTitles,   setSessionTitles]   = useState('')
+  const [sessionTracking, setSessionTracking] = useState('')
 
   const [lyricsTab,    setLyricsTab]    = useState<LyricsTab>('lyrics')
   const [lyricsLoading, setLyricsLoading] = useState(false)
@@ -532,6 +536,7 @@ export default function EditorPage({ initialSongId = null }: {
   const [showMore,     setShowMore]     = useState(false)
   // File picker for the audio path field (File URL / File path).
   const [pickingFile, setPickingFile] = useState(false)
+  const [pickingImage, setPickingImage] = useState(false)
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
   const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
@@ -591,10 +596,14 @@ export default function EditorPage({ initialSongId = null }: {
       path:                   s.path || '',
       length:                 s.length || '',
       bitrate:                s.bitrate || '',
+      bpm:                    s.bpm ?? '',
+      key:                    s.key || '',
       track_titles:           s.track_titles || [],
       file_names:             s.file_names || '',
       instrumentals:          s.instrumentals || '',
       instrumental_names:     s.instrumental_names || '',
+      session_titles:         s.session_titles || '',
+      session_tracking:       s.session_tracking || '',
     }
   }
 
@@ -620,10 +629,14 @@ export default function EditorPage({ initialSongId = null }: {
     setFilePath(s.path || '')
     setSongLength(s.length || '')
     setBitrate(s.bitrate || '')
+    setBpm(s.bpm != null ? String(s.bpm) : '')
+    setMusicalKey(s.key || '')
     setAltNames((s.track_titles || []).join('\n'))
     setFileNames(s.file_names || '')
     setInstrumentals(s.instrumentals || '')
     setInstrumentalNames(s.instrumental_names || '')
+    setSessionTitles(s.session_titles || '')
+    setSessionTracking(s.session_tracking || '')
     setEdNotes('')
     setSubmitState('idle')
     setSubmitError(null)
@@ -829,10 +842,14 @@ export default function EditorPage({ initialSongId = null }: {
       if ('path' in d)                   setFilePath(String(d.path ?? ''))
       if ('length' in d)                 setSongLength(String(d.length ?? ''))
       if ('bitrate' in d)                setBitrate(String(d.bitrate ?? ''))
+      if ('bpm' in d)                    setBpm(d.bpm != null ? String(d.bpm) : '')
+      if ('key' in d)                    setMusicalKey(String(d.key ?? ''))
       if ('track_titles' in d)           setAltNames(Array.isArray(d.track_titles) ? (d.track_titles as string[]).join('\n') : String(d.track_titles ?? ''))
       if ('file_names' in d)             setFileNames(String(d.file_names ?? ''))
       if ('instrumentals' in d)          setInstrumentals(String(d.instrumentals ?? ''))
       if ('instrumental_names' in d)     setInstrumentalNames(String(d.instrumental_names ?? ''))
+      if ('session_titles' in d)         setSessionTitles(String(d.session_titles ?? ''))
+      if ('session_tracking' in d)       setSessionTracking(String(d.session_tracking ?? ''))
       setEdNotes(editorNotes)
     }
 
@@ -874,10 +891,14 @@ export default function EditorPage({ initialSongId = null }: {
     path: filePath,
     length: songLength,
     bitrate,
+    bpm: bpm.trim() ? Number(bpm) : '',
+    key: musicalKey,
     track_titles: altNames ? altNames.split('\n').map(s => s.trim()).filter(Boolean) : [],
     file_names: fileNames,
     instrumentals,
     instrumental_names: instrumentalNames,
+    session_titles: cat === 'recording_session' ? sessionTitles : '',
+    session_tracking: cat === 'recording_session' ? sessionTracking : '',
   }
   const patch        = diff(baseline(song), current)
   const changedCount = Object.keys(patch).length
@@ -1179,10 +1200,10 @@ export default function EditorPage({ initialSongId = null }: {
 
             <Card title="Dates" overflowVisible>
               <FieldGrid>
-                <FieldRow label="Preview"    value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} placeholder="YYYY-MM-DD" mono />
+                <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono />
                 <FieldRow label="Released"   value={relDate}     original={String(base.release_date || '')} onChange={setRelDate}     placeholder="YYYY-MM-DD" mono />
-                <FieldRow label="Leaked"     value={dateLeaked}  original={String(base.date_leaked || '')}  onChange={setDateLeaked}  placeholder="YYYY-MM-DD" mono />
-                <FieldRow label="Leak type"  value={leak}        original={String(base.leak_type || '')}    onChange={setLeak}        placeholder="HQ, LQ…" suggest="leak_type" />
+                <TextareaRow label="Leaked"  value={dateLeaked}  original={String(base.date_leaked || '')}  onChange={setDateLeaked}  rows={2} placeholder="YYYY-MM-DD" mono />
+                <TextareaRow label="Leak type" value={leak}      original={String(base.leak_type || '')}    onChange={setLeak}        rows={2} placeholder="HQ, LQ…" suggest="leak_type" />
               </FieldGrid>
             </Card>
 
@@ -1248,13 +1269,23 @@ export default function EditorPage({ initialSongId = null }: {
 
             {showMore && (
               <Card title="More fields">
+                <div className="grid grid-cols-3 gap-2">
+                  <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
+                  <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
+                  <FieldRow label="Key"    value={musicalKey} original={String(base.key || '')}      onChange={setMusicalKey} placeholder="C# Minor" />
+                </div>
+                <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')}  onChange={setBitrate}    rows={2} placeholder="320 kbps" mono />
                 <FieldGrid>
-                  <FieldRow label="Length"  value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
-                  <FieldRow label="Bitrate" value={bitrate}    original={String(base.bitrate || '')}  onChange={setBitrate}    placeholder="320 kbps" mono />
                   <FieldRow label="File names"        value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
                   <FieldRow label="Instrumentals"     value={instrumentals}    original={String(base.instrumentals || '')}         onChange={setInstrumentals} placeholder="Versions available" />
                   <FieldRow label="Inst. names"       value={instrumentalNames} original={String(base.instrumental_names || '')}   onChange={setInstrumentalNames} />
-                  <FieldRow label="Cover URL"         value={imageUrl}         original={String(base.image_url || '')}             onChange={setImageUrl} mono />
+                  <FieldRow label="Cover URL"         value={imageUrl}         original={String(base.image_url || '')}             onChange={setImageUrl} mono onBrowse={() => setPickingImage(true)} />
+                  {cat === 'recording_session' && (
+                    <>
+                      <FieldRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
+                      <FieldRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
+                    </>
+                  )}
                 </FieldGrid>
                 <FieldRow label="File path" value={filePath} original={String(base.path || '')} onChange={setFilePath} mono onBrowse={() => setPickingFile(true)} />
                 <TextareaRow label="Additional info" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} />
@@ -1409,6 +1440,16 @@ export default function EditorPage({ initialSongId = null }: {
           altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
           onSelect={p => { setFilePath(p); setPickingFile(false) }}
           onClose={() => setPickingFile(false)}
+        />
+      )}
+
+      {pickingImage && (
+        <FilePickerModal
+          kind="image"
+          songTitle={name || song?.name}
+          altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
+          onSelect={p => { setImageUrl(p); setPickingImage(false) }}
+          onClose={() => setPickingImage(false)}
         />
       )}
     </div>

@@ -209,19 +209,24 @@ function SelectRow({ label, value, original, onChange, options, placeholder }: {
 }
 
 /* ── Textarea field ────────────────────────────────────────────────────────── */
-export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span }: {
+export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, suggest }: {
   label: string; value: string; original: string
   onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean; span?: 2 | 3
+  /** Autocompletes from other songs' values for this field (e.g. "leak_type"). */
+  suggest?: SuggestField
 }): JSX.Element {
   const changed = value !== original && !(value === '' && original === '')
+  const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
+    <label className={`relative flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
       <FieldLabel label={label} changed={changed} />
       <textarea
         rows={rows} value={value} onChange={e => onChange(e.target.value)}
+        onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
         placeholder={placeholder || '—'}
         className={`${fieldInputClass(changed, mono)} resize-none leading-relaxed py-2.5`}
       />
+      {suggest && open && <SuggestDropdown matches={matches} onPick={v => { onChange(v); setOpen(false) }} />}
     </label>
   )
 }
@@ -532,6 +537,8 @@ export default function EditorPage({ initialSongId = null }: {
   const [filePath,          setFilePath]          = useState('')
   const [songLength,        setSongLength]        = useState('')
   const [bitrate,           setBitrate]           = useState('')
+  const [bpm,               setBpm]               = useState('')
+  const [musicalKey,        setMusicalKey]        = useState('')
   const [altNames,          setAltNames]          = useState('')
   const [fileNames,         setFileNames]         = useState('')
   const [instrumentals,     setInstrumentals]     = useState('')
@@ -561,6 +568,8 @@ export default function EditorPage({ initialSongId = null }: {
   const [basicView,    setBasicView]    = useState(() => localStorage.getItem('editor:view') === 'basic')
   // File picker for the audio path field (File URL / File path).
   const [pickingFile, setPickingFile] = useState(false)
+  // File picker for the cover image field (Cover URL / Image URL).
+  const [pickingImage, setPickingImage] = useState(false)
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
   const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
@@ -621,6 +630,8 @@ export default function EditorPage({ initialSongId = null }: {
       path:                   s.path || '',
       length:                 s.length || '',
       bitrate:                s.bitrate || '',
+      bpm:                    s.bpm ?? '',
+      key:                    s.key || '',
       track_titles:           s.track_titles || [],
       file_names:             s.file_names || '',
       instrumentals:          s.instrumentals || '',
@@ -652,6 +663,8 @@ export default function EditorPage({ initialSongId = null }: {
     setFilePath(s.path || '')
     setSongLength(s.length || '')
     setBitrate(s.bitrate || '')
+    setBpm(s.bpm != null ? String(s.bpm) : '')
+    setMusicalKey(s.key || '')
     setAltNames((s.track_titles || []).join('\n'))
     setFileNames(s.file_names || '')
     setInstrumentals(s.instrumentals || '')
@@ -855,6 +868,8 @@ export default function EditorPage({ initialSongId = null }: {
       if ('path' in d)                   setFilePath(String(d.path ?? ''))
       if ('length' in d)                 setSongLength(String(d.length ?? ''))
       if ('bitrate' in d)                setBitrate(String(d.bitrate ?? ''))
+      if ('bpm' in d)                    setBpm(d.bpm != null ? String(d.bpm) : '')
+      if ('key' in d)                    setMusicalKey(String(d.key ?? ''))
       if ('track_titles' in d)           setAltNames(Array.isArray(d.track_titles) ? (d.track_titles as string[]).join('\n') : String(d.track_titles ?? ''))
       if ('file_names' in d)             setFileNames(String(d.file_names ?? ''))
       if ('instrumentals' in d)          setInstrumentals(String(d.instrumentals ?? ''))
@@ -903,6 +918,8 @@ export default function EditorPage({ initialSongId = null }: {
     path: filePath,
     length: songLength,
     bitrate,
+    bpm: bpm.trim() ? Number(bpm) : '',
+    key: musicalKey,
     track_titles: altNames ? altNames.split('\n').map(s => s.trim()).filter(Boolean) : [],
     file_names: fileNames,
     instrumentals,
@@ -1180,17 +1197,19 @@ export default function EditorPage({ initialSongId = null }: {
                     <BasicRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} rows={2} />
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-3 gap-1.5">
                   <BasicRow label="Length" value={songLength} original={String(base.length || '')} onChange={setSongLength} mono />
-                  <BasicRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} mono />
+                  <BasicRow label="BPM" value={bpm} original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} mono />
+                  <BasicRow label="Key" value={musicalKey} original={String(base.key || '')} onChange={setMusicalKey} placeholder="C# Minor" />
                 </div>
+                <BasicRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} rows={2} mono />
                 <BasicRow label="Additional information" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} />
                 <div className="grid grid-cols-2 gap-1.5">
                   <BasicRow label="File names" value={fileNames} original={String(base.file_names || '')} onChange={setFileNames} rows={2} />
                   <BasicRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')} onChange={setInstrumentals} rows={2} />
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Preview date" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} mono />
+                  <BasicRow label="Preview date" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} mono />
                   <BasicRow label="Release date" value={relDate} original={String(base.release_date || '')} onChange={setRelDate} mono />
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -1249,11 +1268,11 @@ export default function EditorPage({ initialSongId = null }: {
                   )
                 })()}
                 <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} mono />
-                  <BasicRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} suggest="leak_type" />
+                  <BasicRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} mono />
+                  <BasicRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} suggest="leak_type" />
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Image URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} mono />
+                  <BasicRow label="Image URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} mono onBrowse={() => setPickingImage(true)} />
                   <BasicRow label="File path" value={filePath} original={String(base.path || '')} onChange={setFilePath} mono onBrowse={() => setPickingFile(true)} />
                 </div>
                 <BasicRow label="Notes for the reviewer (optional)" value={edNotes} onChange={setEdNotes} />
@@ -1461,10 +1480,14 @@ export default function EditorPage({ initialSongId = null }: {
                     <FieldRow label="Title"    value={name}     original={String(base.name || '')}    onChange={setName} />
                     <FieldRow label="Artists"  value={artists}  original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
                     <FieldRow label="Album"    value={album}    original={String(base.album || '')}   onChange={setAlbum} suggest="album" />
-                    <FieldRow label="Cover URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} placeholder="https://…" mono />
+                    <FieldRow label="Cover URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} placeholder="https://…" mono onBrowse={() => setPickingImage(true)} />
                     <FieldRow label="File URL"  value={filePath} original={String(base.path || '')}      onChange={setFilePath} placeholder="Path/URL to the audio file" mono span={2} onBrowse={() => setPickingFile(true)} />
-                    <FieldRow label="Length"    value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
-                    <FieldRow label="Bitrate"   value={bitrate}  original={String(base.bitrate || '')}   onChange={setBitrate} placeholder="320 kbps" mono />
+                    <div className="sm:col-span-2 grid grid-cols-3 gap-x-5 gap-y-4">
+                      <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
+                      <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
+                      <FieldRow label="Key"    value={musicalKey} original={String(base.key || '')}      onChange={setMusicalKey} placeholder="C# Minor" />
+                    </div>
+                    <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} rows={2} placeholder="320 kbps" mono span={2} />
                     <TextareaRow
                       label="Alt names" value={altNames}
                       original={(Array.isArray(base.track_titles) ? (base.track_titles as string[]).join('\n') : '')}
@@ -1550,7 +1573,7 @@ export default function EditorPage({ initialSongId = null }: {
                   <FieldGrid cols={3}>
                     <FieldRow label="Recorded"  value={recDate} original={String(base.record_dates || '')}  onChange={setRecDate} placeholder="YYYY-MM-DD" mono />
                     <FieldRow label="Released"  value={relDate} original={String(base.release_date || '')}  onChange={setRelDate} placeholder="YYYY-MM-DD" mono />
-                    <FieldRow label="Preview"   value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} placeholder="YYYY-MM-DD" mono />
+                    <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono />
                   </FieldGrid>
                 </Card>
 
@@ -1566,8 +1589,8 @@ export default function EditorPage({ initialSongId = null }: {
                   <Card title="Additional details" overflowVisible>
                     <FieldGrid>
                       <FieldRow label="Location"   value={loc}              original={String(base.recording_locations || '')}   onChange={setLoc} placeholder="Studio / city" suggest="recording_locations" />
-                      <FieldRow label="Leak type"  value={leak}             original={String(base.leak_type || '')}             onChange={setLeak} placeholder="HQ, LQ, snippet…" suggest="leak_type" />
-                      <FieldRow label="Date leaked" value={dateLeaked}      original={String(base.date_leaked || '')}           onChange={setDateLeaked} placeholder="YYYY-MM-DD" mono />
+                      <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ, snippet…" suggest="leak_type" />
+                      <TextareaRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} placeholder="YYYY-MM-DD" mono />
                       <FieldRow label="File names" value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
                       <FieldRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')}       onChange={setInstrumentals} placeholder="Instrumental versions available" />
                       <FieldRow label="Inst. names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} />
@@ -1666,6 +1689,16 @@ export default function EditorPage({ initialSongId = null }: {
           altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
           onSelect={p => { setFilePath(p); setPickingFile(false) }}
           onClose={() => setPickingFile(false)}
+        />
+      )}
+
+      {pickingImage && (
+        <FilePickerModal
+          kind="image"
+          songTitle={name || song?.name}
+          altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
+          onSelect={p => { setImageUrl(p); setPickingImage(false) }}
+          onClose={() => setPickingImage(false)}
         />
       )}
     </div>
