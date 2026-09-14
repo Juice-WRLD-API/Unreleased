@@ -42,6 +42,84 @@ const CATEGORY_ORDER: (keyof JWApiStats['category_stats'])[] = [
 // stopping short or growing to chase the other's content.
 const LIST_MAX_HEIGHT = 'max-h-[720px]'
 
+// ─── Era timeline ───────────────────────────────────────────────────────────
+// time_frame is free text — "(Month Year-Month Year)" or "(Month Year-Present)"
+// — not two structured date fields, so this parses it defensively: any era
+// that fails to parse is just left off the timeline rather than crashing or
+// distorting the scale. `now` also clamps a bad far-future end date (the live
+// data has had at least one) so one bad row can't blow out the whole axis.
+const MONTHS: Record<string, number> = {
+  january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+  july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+}
+
+function parseMonthYear(s: string): Date | null {
+  const m = s.trim().match(/^([A-Za-z]+)\s+(\d{4})$/)
+  if (!m) return null
+  const month = MONTHS[m[1].toLowerCase()]
+  if (month === undefined) return null
+  return new Date(Number(m[2]), month, 1)
+}
+
+function parseTimeFrame(timeFrame: string | undefined, now: Date): { start: Date; end: Date } | null {
+  const m = timeFrame?.trim().match(/^\(([^-]+)-(.+)\)$/)
+  if (!m) return null
+  const start = parseMonthYear(m[1])
+  if (!start) return null
+  const endRaw = m[2].trim()
+  const end = endRaw.toLowerCase() === 'present' ? now : parseMonthYear(endRaw)
+  if (!end) return null
+  // Push to the end of that month so a single-month range still gets a
+  // sliver of width instead of collapsing to zero.
+  const endOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0)
+  const clampedEnd = endOfMonth > now ? now : endOfMonth
+  return clampedEnd > start ? { start, end: clampedEnd } : null
+}
+
+const monthYearLabel = (d: Date): string => d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+
+// Golden-angle hue steps give N well-spread, non-repeating colors without a
+// hand-picked palette — needed here since the era count is open-ended (34
+// today, whatever the API adds later).
+const eraColor = (i: number): string => `hsl(${Math.round((i * 137.508) % 360)}, 62%, 52%)`
+
+interface TimelineRow { key: string; label: string; count: number; start: Date; end: Date }
+
+function EraTimeline({ rows, start, end }: { rows: TimelineRow[]; start: Date; end: Date }): JSX.Element {
+  return (
+    <div>
+      <div className="flex h-8 rounded-lg overflow-hidden">
+        {rows.map((r, i) => {
+          const ms = r.end.getTime() - r.start.getTime()
+          const shareOfSpan = (ms / (end.getTime() - start.getTime())) * 100
+          return (
+            <div
+              key={r.key}
+              // flexGrow proportional to duration (not a % width) so tiny
+              // segments still get their minWidth floor without the row's
+              // total overflowing past 100% — flexbox reflows the rest to
+              // make room instead.
+              className="h-full flex items-center justify-center overflow-hidden shrink-0"
+              style={{ flexGrow: ms, flexBasis: 0, minWidth: '6px', backgroundColor: eraColor(i) }}
+              title={`${r.label} — ${monthYearLabel(r.start)} to ${monthYearLabel(r.end)} — ${r.count.toLocaleString()} songs`}
+            >
+              {shareOfSpan > 3 && (
+                <span className="text-[10px] font-semibold text-white truncate px-1" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                  {r.key}
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex justify-between text-[10px] text-text-muted mt-1.5">
+        <span>{monthYearLabel(start)}</span>
+        <span>Present</span>
+      </div>
+    </div>
+  )
+}
+
 function CategoryCard({ label, songCount, catalogTotal, playCount, playsTotal, colorClass }: {
   label: string
   songCount: number
@@ -252,9 +330,11 @@ export default function StatisticsView(): JSX.Element {
   }
 
   // listEras()/eraLabel() read a module-level cache that fills in
-  // asynchronously - this just forces a re-render once loadEraFullNames
-  // resolves so the era list and full-name labels appear without a reload.
-  const [, bumpEras] = useReducer((n: number) => n + 1, 0)
+  // asynchronously - this bumps a version number (not just a dummy re-render
+  // trigger) so the useMemos below that depend on it actually recompute once
+  // loadEraFullNames resolves, instead of being stuck with abbreviations from
+  // whatever was cached at first render.
+  const [eraNamesVersion, bumpEras] = useReducer((n: number) => n + 1, 0)
   useEffect(() => {
     loadEraFullNames().then(bumpEras).catch(() => undefined)
   }, [])
@@ -274,8 +354,32 @@ export default function StatisticsView(): JSX.Element {
       if (!seen.has(name)) rows.push({ key: name, label: name, count })
     }
     return rows.filter((r) => r.count > 0).sort((a, b) => b.count - a.count)
-  }, [stats])
+  }, [stats, eraNamesVersion])
   const maxEraCount = eraRows[0]?.count ?? 0
+
+  // One long line of every era with a parseable time_frame and at least one
+  // song, ordered chronologically by start date. `now` is captured once per
+  // mount rather than recomputed on every render — the axis doesn't need
+  // live-clock precision, just a stable "today" to clamp against.
+  const [now] = useState(() => new Date())
+  const timelineRows = useMemo((): TimelineRow[] => {
+    if (!stats) return []
+    return listEras()
+      .map((e): TimelineRow | null => {
+        const count = stats.era_stats[e.name] ?? 0
+        if (count === 0) return null
+        const range = parseTimeFrame(e.time_frame, now)
+        if (!range) return null
+        return { key: e.name, label: eraLabel(e.name, true), count, ...range }
+      })
+      .filter((r): r is TimelineRow => r !== null)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+  }, [stats, eraNamesVersion, now])
+  const timelineStart = timelineRows[0]?.start ?? null
+  const timelineEnd = useMemo(
+    () => timelineRows.reduce<Date | null>((max, r) => (!max || r.end > max ? r.end : max), null),
+    [timelineRows],
+  )
 
   const topEraRows = useMemo(
     () => [...(playStats?.top_eras ?? [])].sort((a, b) => b.play_count - a.play_count),
@@ -356,6 +460,16 @@ export default function StatisticsView(): JSX.Element {
                       />
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Timeline */}
+              {timelineRows.length > 0 && timelineStart && timelineEnd && (
+                <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-4 py-3.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-3">
+                    Timeline ({timelineRows.length} eras)
+                  </p>
+                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} />
                 </div>
               )}
 
