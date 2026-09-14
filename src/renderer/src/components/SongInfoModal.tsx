@@ -223,7 +223,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
       >
 
         <div
-          className="relative shrink-0 overflow-hidden cursor-grab active:cursor-grabbing"
+          className={`relative shrink-0 overflow-hidden ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
           {...dragHandlers}
         >
