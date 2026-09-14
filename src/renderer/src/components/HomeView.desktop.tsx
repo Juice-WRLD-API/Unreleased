@@ -288,7 +288,7 @@ export default function HomeViewDesktop(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, showSection, recent, newsItems, games, playlistRow,
-    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem,
+    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
   const { navOrder, navVisibility } = useStorePick('navOrder', 'navVisibility')
   const [showMore, setShowMore] = useState(false)
@@ -419,7 +419,7 @@ export default function HomeViewDesktop(): JSX.Element {
                         ? `${radioFmNowPlaying.title} — ${radioFmNowPlaying.artist}`
                         : 'Juice WRLD radio, live 24/7'
                     }
-                    onClick={() => setActiveView('wrld')}
+                    onClick={openRadioFm}
                   />
                 )}
                 {showLiked && (

@@ -1,36 +1,75 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
-import { ChevronLeft, BarChart3 } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
-import { apiFetch, apiPeek, CATEGORY_LABELS, CATEGORY_COLORS, type JWApiStats } from '../lib/juicewrldApi'
+import { ChevronLeft, BarChart3, Play, Radio, Music2 } from 'lucide-react'
+import { useStore, useStorePick } from '../store/useStore'
+import {
+  apiFetch, apiPeek, getSongById, songToTrack,
+  CATEGORY_LABELS, CATEGORY_COLORS,
+  type JWApiStats, type JWApiPlaysStats, type JWApiTopSong, type JWApiRecentPlay,
+} from '../lib/juicewrldApi'
+import { resolveStatsSongs, statsSongToTrack, type StatsSong } from '../lib/statsCatalog'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
+import { useCanEdit } from '../hooks/useChannelRoles'
+import { relativeTime } from './adminShared'
+import { AlbumArtThumbnail } from './AlbumArtThumbnail'
+import SongContextMenu, { type SongContextMenuState } from './SongContextMenu'
 
-// Catalog-wide numbers from GET /stats/ — everyone sees the same thing here,
-// unlike StatsView ("Your Wrapped"), which is personal listening history.
-// Reached from Home's hero stat row (see HomeView.desktop/.mobile) and by
-// direct URL; not a persistent nav tab, so it behaves like Docs/News: a
-// pushed page with a back chevron rather than a bottom-nav destination.
+// Catalog-wide numbers from GET /stats/ and GET /plays/stats/ — everyone sees
+// the same thing here, unlike StatsView ("Your Wrapped"), which is personal
+// listening history built from this user's own play log. Reached from Home's
+// hero stat row (see HomeView.desktop/.mobile) and by direct URL; not a
+// persistent nav tab, so it behaves like Docs/News: a pushed page with a back
+// chevron rather than a bottom-nav destination.
+//
+// /stats/ counts catalog rows (how many songs exist); /plays/stats/ counts
+// plays across every listener (how much they've been played) — two different
+// endpoints, shown as two different sections below.
 
 const CATEGORY_ORDER: (keyof JWApiStats['category_stats'])[] = [
   'released', 'unreleased', 'unsurfaced', 'recording_session',
 ]
 
-function CategoryCard({ label, count, total, colorClass }: {
+// top_songs/recent_plays come back with only a name/title, era abbreviation
+// and category — no cover art, no stream path. Resolving up to ~100 ids
+// (50 top songs + 50 recent plays, often overlapping) one at a time would be
+// the exact "hundreds of requests" problem this API is otherwise good about
+// avoiding, so this goes through lib/statsCatalog's resolveStatsSongs
+// instead — the same bulk-catalog-page-once cache the personal Wrapped page
+// uses, so a visit there often leaves this warm already.
+//
+// Both lists render their full data (up to 50 rows, the API's own cap) inside
+// a fixed-height scroll area sized to ~15 rows — same visible count, same
+// max-height, so the two sit at equal height side by side instead of one
+// stopping short or growing to chase the other's content.
+const LIST_MAX_HEIGHT = 'max-h-[720px]'
+
+function CategoryCard({ label, songCount, catalogTotal, playCount, playsTotal, colorClass }: {
   label: string
-  count: number
-  total: number
+  songCount: number
+  catalogTotal: number
+  playCount: number
+  playsTotal: number
   colorClass: string
 }): JSX.Element {
-  const pct = total > 0 ? Math.round((count / total) * 100) : 0
+  const songPct = catalogTotal > 0 ? Math.round((songCount / catalogTotal) * 100) : 0
+  const playPct = playsTotal > 0 ? Math.round((playCount / playsTotal) * 100) : 0
   return (
-    <div className={`rounded-xl border px-4 py-3.5 ${colorClass}`}>
+    <div className={`rounded-xl border px-4 py-3.5 text-center ${colorClass}`}>
       <p className="text-[10px] font-semibold uppercase tracking-widest opacity-80 mb-1.5">{label}</p>
-      <p className="text-2xl font-bold tabular-nums">{count.toLocaleString()}</p>
-      <p className="text-xs opacity-70 mt-0.5">{pct}% of catalog</p>
+      <div className="flex items-end justify-center gap-4">
+        <div>
+          <p className="text-2xl font-bold tabular-nums">{songCount.toLocaleString()}</p>
+          <p className="text-xs opacity-70 mt-0.5">{songPct}% of catalog</p>
+        </div>
+        <div className="pl-4 border-l border-current/15">
+          <p className="text-2xl font-bold tabular-nums">{playCount.toLocaleString()}</p>
+          <p className="text-xs opacity-70 mt-0.5">{playPct}% of plays</p>
+        </div>
+      </div>
     </div>
   )
 }
 
-function EraBar({ label, count, max }: { label: string; count: number; max: number }): JSX.Element {
+function Bar({ label, count, max }: { label: string; count: number; max: number }): JSX.Element {
   return (
     <div>
       <div className="flex items-baseline gap-2 mb-1">
@@ -47,14 +86,170 @@ function EraBar({ label, count, max }: { label: string; count: number; max: numb
   )
 }
 
+function CategoryBadge({ category }: { category: string }): JSX.Element {
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide border shrink-0 ${CATEGORY_COLORS[category] ?? 'text-text-muted bg-surface-raised border-[var(--border)]'}`}>
+      {CATEGORY_LABELS[category] ?? category}
+    </span>
+  )
+}
+
+// Both top_songs and recent_plays rows carry a song id but no playable track.
+// `songs` is the bulk-resolved map (see resolveStatsSongs above) — used when
+// it already has the row's song (the common case once it's loaded), falling
+// back to a one-off fetch for anything it doesn't (map still loading, or an
+// id resolveStatsSongs couldn't find).
+function usePlaySongById(songs: Map<number, StatsSong>): (id: number) => void {
+  const { playTrack } = useStorePick('playTrack')
+  return (id: number) => {
+    const cached = songs.get(id)
+    if (cached) { playTrack(statsSongToTrack(cached)); return }
+    getSongById(id).then((song) => playTrack(songToTrack(song))).catch(() => undefined)
+  }
+}
+
+function RowThumb({ cover, fallback }: { cover?: StatsSong; fallback: React.ReactNode }): JSX.Element {
+  return (
+    <span className="relative w-8 h-8 rounded-md overflow-hidden bg-surface-raised flex items-center justify-center shrink-0">
+      {cover ? (
+        <>
+          <AlbumArtThumbnail track={statsSongToTrack(cover)} size={32} className="rounded-md" />
+          <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Play size={14} className="text-white" fill="currentColor" />
+          </span>
+        </>
+      ) : fallback}
+    </span>
+  )
+}
+
+function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu }: {
+  song: JWApiTopSong
+  cover?: StatsSong
+  rank: number
+  max: number
+  onPlay: (id: number) => void
+  onContextMenu: (id: number, cover: StatsSong | undefined, e: React.MouseEvent) => void
+}): JSX.Element {
+  return (
+    <button
+      onClick={() => onPlay(song.id)}
+      onContextMenu={(e) => onContextMenu(song.id, cover, e)}
+      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised transition-colors text-left"
+    >
+      <span className="w-5 text-text-muted text-xs tabular-nums text-right shrink-0">{rank}</span>
+      <RowThumb
+        cover={cover}
+        fallback={
+          <>
+            <Music2 size={14} className="text-text-muted group-hover:opacity-0 transition-opacity" />
+            <Play size={14} className="text-text-primary absolute opacity-0 group-hover:opacity-100 transition-opacity" fill="currentColor" />
+          </>
+        }
+      />
+      <div className="min-w-0 flex-1">
+        <p className="text-text-primary text-sm font-medium truncate" title={song.name}>{song.name}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {song.era_name && <span className="text-text-muted text-[11px] truncate">{song.era_name}</span>}
+          <CategoryBadge category={song.category} />
+        </div>
+      </div>
+      <div className="w-24 shrink-0 hidden sm:block">
+        <div className="h-1.5 rounded-full bg-surface-raised overflow-hidden">
+          <div
+            className="h-full rounded-full bg-accent"
+            style={{ width: `${max > 0 ? Math.max(2, (song.play_count / max) * 100) : 0}%` }}
+          />
+        </div>
+      </div>
+      <span className="text-text-muted text-xs tabular-nums shrink-0 w-16 text-right">
+        {song.play_count.toLocaleString()}
+      </span>
+    </button>
+  )
+}
+
+function RecentPlayRow({ play, cover, onPlay, onContextMenu }: {
+  play: JWApiRecentPlay
+  cover?: StatsSong
+  onPlay: (id: number) => void
+  onContextMenu: (id: number, cover: StatsSong | undefined, e: React.MouseEvent) => void
+}): JSX.Element {
+  return (
+    <button
+      onClick={() => onPlay(play.song_id)}
+      onContextMenu={(e) => onContextMenu(play.song_id, cover, e)}
+      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised transition-colors text-left"
+    >
+      <RowThumb
+        cover={cover}
+        fallback={play.source === 'radio'
+          ? <Radio size={13} className="text-text-muted" />
+          : <Music2 size={13} className="text-text-muted" />}
+      />
+      <div className="min-w-0 flex-1">
+        <p className="text-text-primary text-sm font-medium truncate" title={play.title}>{play.title}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {play.era_name && <span className="text-text-muted text-[11px] truncate">{play.era_name}</span>}
+          <CategoryBadge category={play.category} />
+        </div>
+      </div>
+      <span
+        className="text-text-muted text-[11px] tabular-nums shrink-0"
+        title={new Date(play.played_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+      >
+        {relativeTime(play.played_at)}
+      </span>
+    </button>
+  )
+}
+
 export default function StatisticsView(): JSX.Element {
-  const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
+  const { setActiveView, previousView, playTrack, playNext } = useStorePick(
+    'setActiveView', 'previousView', 'playTrack', 'playNext',
+  )
   const backView = previousView && previousView !== 'statistics' ? previousView : 'home'
+  const canEdit = useCanEdit()
 
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   useEffect(() => {
     apiFetch<JWApiStats>('/stats/').then(setStats).catch(() => undefined)
   }, [])
+
+  const [playStats, setPlayStats] = useState<JWApiPlaysStats | null>(() => apiPeek<JWApiPlaysStats>('/plays/stats/') ?? null)
+  useEffect(() => {
+    apiFetch<JWApiPlaysStats>('/plays/stats/').then(setPlayStats).catch(() => undefined)
+  }, [])
+
+  // Cover art (and everything else needed to play) for the songs named in
+  // top_songs/recent_plays, resolved in bulk once both lists are known.
+  const [songMap, setSongMap] = useState<Map<number, StatsSong>>(() => new Map())
+  useEffect(() => {
+    if (!playStats) return
+    const ids = new Set<number>()
+    for (const s of playStats.top_songs) ids.add(s.id)
+    for (const p of playStats.recent_plays) ids.add(p.song_id)
+    if (ids.size === 0) return
+    let cancelled = false
+    resolveStatsSongs([...ids], () => undefined, () => cancelled)
+      .then((map) => { if (!cancelled) setSongMap(map) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [playStats])
+
+  const playById = usePlaySongById(songMap)
+
+  const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
+  // Same cover-lookup-first, fetch-on-miss split as usePlaySongById — a right
+  // click needs a full Track synchronously if it can, but falls back to
+  // resolving just that one song rather than doing nothing while songMap is
+  // still loading.
+  const openContextMenu = (id: number, cover: StatsSong | undefined, e: React.MouseEvent): void => {
+    e.preventDefault()
+    const { clientX: x, clientY: y } = e
+    if (cover) { setCtxMenu({ track: statsSongToTrack(cover), songId: id, x, y }); return }
+    getSongById(id).then((song) => setCtxMenu({ track: songToTrack(song), songId: id, x, y })).catch(() => undefined)
+  }
 
   // listEras()/eraLabel() read a module-level cache that fills in
   // asynchronously — this just forces a re-render once loadEraFullNames
@@ -80,8 +275,17 @@ export default function StatisticsView(): JSX.Element {
     }
     return rows.filter((r) => r.count > 0).sort((a, b) => b.count - a.count)
   }, [stats])
-
   const maxEraCount = eraRows[0]?.count ?? 0
+
+  const topEraRows = useMemo(
+    () => [...(playStats?.top_eras ?? [])].sort((a, b) => b.play_count - a.play_count),
+    [playStats],
+  )
+  const maxTopEraPlays = topEraRows[0]?.play_count ?? 0
+
+  const maxTopSongPlays = playStats?.top_songs[0]?.play_count ?? 0
+
+  const loading = !stats && !playStats
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
@@ -103,53 +307,122 @@ export default function StatisticsView(): JSX.Element {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
-          {!stats ? (
+        <div className="max-w-[1600px] mx-auto space-y-6">
+          {loading ? (
             <div className="space-y-4">
               <div className="h-24 bg-surface-raised animate-pulse rounded-xl" />
               <div className="h-32 bg-surface-raised animate-pulse rounded-xl" />
+              <div className="h-64 bg-surface-raised animate-pulse rounded-xl" />
             </div>
           ) : (
             <>
               {/* Hero */}
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0">
-                  <BarChart3 size={28} className="text-accent" />
+              <div className="flex items-center gap-6 flex-wrap">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0">
+                    <BarChart3 size={28} className="text-accent" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-text-primary text-3xl font-bold tabular-nums">{(stats?.total_songs ?? 0).toLocaleString()}</p>
+                    <p className="text-text-muted text-sm">songs in the catalog</p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-text-primary text-3xl font-bold tabular-nums">{stats.total_songs.toLocaleString()}</p>
-                  <p className="text-text-muted text-sm">songs in the catalog</p>
-                </div>
+                {playStats && (
+                  <>
+                    <div className="w-px h-12 bg-[var(--border)] shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-text-primary text-3xl font-bold tabular-nums">{playStats.total_plays.toLocaleString()}</p>
+                      <p className="text-text-muted text-sm">plays across every listener</p>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Category breakdown */}
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-2.5">By category</p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {CATEGORY_ORDER.map((key) => (
-                    <CategoryCard
-                      key={key}
-                      label={CATEGORY_LABELS[key]}
-                      count={stats.category_stats[key]}
-                      total={stats.total_songs}
-                      colorClass={CATEGORY_COLORS[key]}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Era breakdown */}
-              <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-4 py-3.5">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-3">
-                  By era ({eraRows.length})
-                </p>
-                {eraRows.length === 0 ? (
-                  <p className="text-text-muted text-xs">No era data yet.</p>
-                ) : (
-                  <div className="space-y-2.5">
-                    {eraRows.map((row) => (
-                      <EraBar key={row.key} label={row.label} count={row.count} max={maxEraCount} />
+              {/* Category breakdown — catalog size and plays, one card per
+                  category rather than two separately-ordered rows. */}
+              {stats && (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-2.5">By category</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {CATEGORY_ORDER.map((key) => (
+                      <CategoryCard
+                        key={key}
+                        label={CATEGORY_LABELS[key]}
+                        songCount={stats.category_stats[key]}
+                        catalogTotal={stats.total_songs}
+                        playCount={playStats?.category_breakdown.find((r) => r.category === key)?.count ?? 0}
+                        playsTotal={playStats?.total_plays ?? 0}
+                        colorClass={CATEGORY_COLORS[key]}
+                      />
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Below here, the page has room to spare in a narrow single
+                  column — two lg-width columns instead pair related sections
+                  (song lists together, era charts together) so there's less
+                  to scroll through on a wide window. */}
+              <div className="grid lg:grid-cols-2 gap-6">
+                {/* Top songs */}
+                {playStats && playStats.top_songs.length > 0 && (
+                  <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-2 py-3.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1 px-2">
+                      Most played songs
+                    </p>
+                    <div className={`space-y-0.5 ${LIST_MAX_HEIGHT} overflow-y-auto`}>
+                      {playStats.top_songs.map((song, i) => (
+                        <TopSongRow
+                          key={song.id} song={song} cover={songMap.get(song.id)} rank={i + 1} max={maxTopSongPlays}
+                          onPlay={playById} onContextMenu={openContextMenu}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent activity */}
+                {playStats && playStats.recent_plays.length > 0 && (
+                  <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-2 py-3.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1 px-2">
+                      Recent activity
+                    </p>
+                    <div className={`space-y-0.5 ${LIST_MAX_HEIGHT} overflow-y-auto`}>
+                      {playStats.recent_plays.map((play) => (
+                        <RecentPlayRow
+                          key={play.id} play={play} cover={songMap.get(play.song_id)}
+                          onPlay={playById} onContextMenu={openContextMenu}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Top eras by plays */}
+                {topEraRows.length > 0 && (
+                  <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-4 py-3.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-3">
+                      Most played eras
+                    </p>
+                    <div className="space-y-2.5">
+                      {topEraRows.map((row) => (
+                        <Bar key={row.id} label={row.name} count={row.play_count} max={maxTopEraPlays} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Catalog size by era */}
+                {eraRows.length > 0 && (
+                  <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-4 py-3.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-3">
+                      Catalog by era ({eraRows.length})
+                    </p>
+                    <div className="space-y-2.5">
+                      {eraRows.map((row) => (
+                        <Bar key={row.key} label={row.label} count={row.count} max={maxEraCount} />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -157,6 +430,17 @@ export default function StatisticsView(): JSX.Element {
           )}
         </div>
       </div>
+
+      {ctxMenu && (
+        <SongContextMenu
+          state={ctxMenu}
+          onClose={() => setCtxMenu(null)}
+          canEdit={canEdit}
+          onInfo={() => ctxMenu.songId != null && useStore.getState().setInfoSongId(ctxMenu.songId)}
+          onPlay={() => playTrack(ctxMenu.track)}
+          onPlayNext={() => playNext(ctxMenu.track)}
+        />
+      )}
     </div>
   )
 }

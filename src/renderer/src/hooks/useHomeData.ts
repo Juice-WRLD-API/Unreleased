@@ -9,6 +9,8 @@ import { loadStats as loadWordleStats, todayKey as wordleToday } from '../lib/wo
 import { loadTierlistState } from '../lib/tierlist'
 import { ALL_CHANNEL, fetchNews, peekNews, type NewsItem } from '../lib/newsApi'
 import { isHomeSectionVisible } from '../lib/homeSections'
+import { getActiveRadioClient } from '../lib/radioSocketService'
+import { resumeEffectsContext } from '../lib/audioEffects'
 import type { Track, ViewType } from '../types'
 
 // A daily puzzle (streak + played-today) vs. Tier List, which is a standing
@@ -47,11 +49,13 @@ export function useHomeData() {
   const {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
     listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile,
-    radioFmIsLive, radioFmNowPlaying, homeSectionVisibility, refreshPlaylists,
+    radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
+    homeSectionVisibility, refreshPlaylists, setIsPlaying,
   } = useStorePick(
     'account', 'playlists', 'guestPlaylists', 'followedPlaylists', 'likedTrackIds',
     'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile',
-    'radioFmIsLive', 'radioFmNowPlaying', 'homeSectionVisibility', 'refreshPlaylists',
+    'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
+    'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying',
   )
 
   const showSection = (id: string): boolean => isHomeSectionVisible(id, homeSectionVisibility)
@@ -166,12 +170,26 @@ export function useHomeData() {
     window.dispatchEvent(new CustomEvent('news:open', { detail: item.id }))
   }
 
+  // Navigating to WRLD used to land on the page without actually tuning in —
+  // the 999 FM toggle there is a separate click. Mirrors that toggle's own
+  // "turn on" branch (WrldView's top-left button) so the shortcut here does
+  // both in one action, same as clicking through and then hitting the toggle.
+  const openRadioFm = (): void => {
+    if (!radioFmActive) {
+      setIsPlaying(false)
+      resumeEffectsContext()
+      void getActiveRadioClient()?.startListening()?.catch(() => setRadioFmActive(false))
+      setRadioFmActive(true)
+    }
+    setActiveView('wrld')
+  }
+
   return {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying,
     setActiveView, openProfile,
     showSection,
     recent, newsItems, games, playlistRow,
     totalPlays, distinctSongs, weekPlays, siteStats,
-    openTrack, openNewsItem,
+    openTrack, openNewsItem, openRadioFm,
   }
 }

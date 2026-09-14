@@ -73,6 +73,55 @@ export interface JWApiStats {
   era_stats: Record<string, number>
 }
 
+// ─── Site-wide play stats (GET /plays/stats/) ──────────────────────────────────
+// Distinct from JWApiStats (GET /stats/) above: that one counts catalog rows,
+// this one counts plays across every listener. top_albums is documented but
+// comes back empty in practice — typed loosely since its shape is unverified.
+
+export interface JWApiPlaysCategoryCount {
+  category: JWApiSong['category']
+  count: number
+}
+
+export interface JWApiTopSong {
+  id: number
+  public_id: number
+  name: string
+  era_name: string | null
+  category: JWApiSong['category']
+  play_count: number
+}
+
+export interface JWApiTopEra {
+  id: number
+  name: string
+  play_count: number
+}
+
+export interface JWApiRecentPlay {
+  id: number
+  song_id: number
+  public_id: number
+  title: string
+  era_name: string | null
+  category: JWApiSong['category']
+  album_name: string | null
+  source: string
+  played_at: string
+}
+
+export interface JWApiPlaysStats {
+  total_plays: number
+  total_songs_with_plays: number
+  total_albums_with_plays: number
+  total_eras_with_plays: number
+  category_breakdown: JWApiPlaysCategoryCount[]
+  top_songs: JWApiTopSong[]
+  top_albums: unknown[]
+  top_eras: JWApiTopEra[]
+  recent_plays: JWApiRecentPlay[]
+}
+
 export interface JWApiRadioResponse {
   title: string
   path: string

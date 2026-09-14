@@ -66,7 +66,7 @@ export default function HomeViewMobile(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, showSection, recent, newsItems, games, playlistRow,
-    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem,
+    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
   // Whatever doesn't fit the bottom nav directly — its old in-bar "More" tab
   // moved here, since fitting it AND a Home tab both in the bar pushed the
@@ -203,7 +203,7 @@ export default function HomeViewMobile(): JSX.Element {
 
       {showSection('radio') && (
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={openRadioFm}
           className="mx-4 mb-6 w-[calc(100%-2rem)] flex items-center gap-3 rounded-xl bg-[var(--surface-overlay)] px-3.5 py-3 active:bg-surface-highest transition-colors"
         >
           <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${radioFmIsLive ? 'bg-red-600/15' : 'bg-accent/15'}`}>
