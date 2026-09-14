@@ -3,7 +3,7 @@ import {
   Search, Loader2, Music2, X, Check, ListPlus, ChevronDown, ChevronLeft,
   ChevronRight, MoreVertical, Plus, ListMusic, PackageOpen, Link2, Layers, LayoutGrid,
   LayoutList, Rows3, Mic2, CalendarDays, Users, AlertTriangle, Pencil, SlidersHorizontal,
-  Filter, CheckCircle2, Circle, ArrowLeft, ArrowUp, ArrowDown, MapPin,
+  Filter, CheckCircle2, Circle, ArrowLeft, ArrowUp, ArrowDown, MapPin, BarChart3,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -1707,6 +1707,12 @@ export default function ApiTrackerView(): JSX.Element {
                 </button>
               )
             })}
+            <button
+              onClick={() => setActiveView('statistics')}
+              className="shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[13px] font-medium transition-colors bg-surface-overlay text-text-secondary active:bg-surface-highest"
+            >
+              <BarChart3 size={14} />Statistics
+            </button>
           </div>
 
           {/* Search */}

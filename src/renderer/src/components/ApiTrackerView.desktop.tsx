@@ -4,7 +4,7 @@ import {
   LayoutList, Rows3, Info, ListPlus, ListFilter,
   ChevronUp, ChevronDown, MoreHorizontal, Plus, ListMusic, PackageOpen,
   CheckSquare2, Square, Link2, Layers, LayoutGrid, Mic2, CalendarDays, ChevronLeft, ChevronRight, Users,
-  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type,
+  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type, BarChart3,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -2896,6 +2896,12 @@ export default function ApiTrackerView(): JSX.Element {
             }`}
           >
             <Users size={11} /> Producers
+          </button>
+          <button
+            onClick={() => setActiveView('statistics')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+          >
+            <BarChart3 size={11} /> Statistics
           </button>
         </div>
 

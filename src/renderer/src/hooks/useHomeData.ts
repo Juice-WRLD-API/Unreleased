@@ -11,6 +11,7 @@ import { ALL_CHANNEL, fetchNews, peekNews, type NewsItem } from '../lib/newsApi'
 import { isHomeSectionVisible } from '../lib/homeSections'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { resumeEffectsContext } from '../lib/audioEffects'
+import type { PlaylistSummary } from '../lib/userApi'
 import type { Track, ViewType } from '../types'
 
 // A daily puzzle (streak + played-today) vs. Tier List, which is a standing
@@ -29,6 +30,11 @@ export interface HomePlaylistCard {
   cover: string | null
   mosaic: string[] | null
   open: () => void
+  /** Only set for the account's own API playlists - lets the caller offer the
+   *  full PlaylistContextMenu (rename/delete/export/…) on right-click, same
+   *  as the sidebar's playlist list. Followed/guest playlists don't have a
+   *  PlaylistSummary to hand it, so they just don't get a menu. */
+  playlist?: PlaylistSummary
 }
 
 // Everything the Home dashboard shows, shared by the mobile and desktop
@@ -136,6 +142,7 @@ export function useHomeData() {
         cover: useMosaic ? null : cover,
         mosaic: useMosaic ? mosaicUrls : null,
         open: () => { setPendingPlaylistId(p.id); setActiveView('playlists') },
+        playlist: p,
       }
     }),
     ...followedPlaylists.filter((p) => p.trackCount > 0).map((p) => ({

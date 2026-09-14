@@ -43,7 +43,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/heardle') return 'heardle'
   if (pathname === '/wordle') return 'wordle'
   if (pathname === '/tierlist') return 'tierlist'
-  if (pathname === '/stats') return 'stats'
+  if (pathname === '/wrapped') return 'stats'
   if (pathname === '/statistics') return 'statistics'
   if (pathname === '/download') return 'download'
   if (pathname === '/settings') return 'settings'

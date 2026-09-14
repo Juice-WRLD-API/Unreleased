@@ -5,7 +5,11 @@ import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
 import { useHomeData, type GameCard, type HomePlaylistCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
-import { useStorePick } from '../store/useStore'
+import { useStore, useStorePick } from '../store/useStore'
+import { useCanEdit } from '../hooks/useChannelRoles'
+import * as userApi from '../lib/userApi'
+import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
+import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
 import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
@@ -67,9 +71,10 @@ function CoverGrid({ children, cols, bodyRef }: {
   )
 }
 
-function RecentTile({ tracks, onPlay, span }: {
+function RecentTile({ tracks, onPlay, onContextMenu, span }: {
   tracks: Track[]
   onPlay: (track: Track) => void
+  onContextMenu: (track: Track, e: React.MouseEvent) => void
   span: string
 }): JSX.Element {
   const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
@@ -78,7 +83,12 @@ function RecentTile({ tracks, onPlay, span }: {
     <Tile title="Recently played" icon={<Disc3 size={15} />} span={span}>
       <CoverGrid cols={cols} bodyRef={bodyRef}>
         {tracks.slice(0, count).map((track) => (
-          <button key={track.id} onClick={() => onPlay(track)} className="group text-left min-w-0">
+          <button
+            key={track.id}
+            onClick={() => onPlay(track)}
+            onContextMenu={(e) => { e.preventDefault(); onContextMenu(track, e) }}
+            className="group text-left min-w-0"
+          >
             <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5">
               <AlbumArtThumbnail track={track} fill className="w-full h-full object-cover" />
               <span className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -109,9 +119,10 @@ function PlaylistCoverThumb({ cover, mosaic, alt }: { cover: string | null; mosa
   return <ListMusic size={26} className="text-text-muted" />
 }
 
-function PlaylistsTile({ playlists, onAll, span }: {
+function PlaylistsTile({ playlists, onAll, onContextMenu, span }: {
   playlists: HomePlaylistCard[]
   onAll: () => void
+  onContextMenu: (p: HomePlaylistCard, e: React.MouseEvent) => void
   span: string
 }): JSX.Element {
   const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
@@ -126,7 +137,12 @@ function PlaylistsTile({ playlists, onAll, span }: {
       ) : (
         <CoverGrid cols={cols} bodyRef={bodyRef}>
           {playlists.slice(0, count).map((p) => (
-            <button key={p.key} onClick={p.open} className="group text-left min-w-0">
+            <button
+              key={p.key}
+              onClick={p.open}
+              onContextMenu={(e) => { if (p.playlist) { e.preventDefault(); onContextMenu(p, e) } }}
+              className="group text-left min-w-0"
+            >
               <div className="aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5 flex items-center justify-center">
                 <PlaylistCoverThumb cover={p.cover} mosaic={p.mosaic} alt={p.name} />
               </div>
@@ -290,8 +306,11 @@ export default function HomeViewDesktop(): JSX.Element {
     openProfile, showSection, recent, newsItems, games, playlistRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
-  const { navOrder, navVisibility } = useStorePick('navOrder', 'navVisibility')
+  const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
+  const canEdit = useCanEdit()
   const [showMore, setShowMore] = useState(false)
+  const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
+  const [playlistMenu, setPlaylistMenu] = useState<PlaylistContextMenuState | null>(null)
   const hiddenNavItems = orderedNavItems(navOrder).filter(
     (i) => i.defaultHidden && !isNavItemVisible(i, navVisibility, false),
   )
@@ -387,9 +406,21 @@ export default function HomeViewDesktop(): JSX.Element {
           <div className="flex-1 min-h-0 flex gap-4">
             {mainShown && (
               <div className="flex-1 min-w-0 min-h-0 overflow-y-auto flex flex-col gap-4">
-                {showRecent && <RecentTile tracks={recent} onPlay={openTrack} span="shrink-0" />}
+                {showRecent && (
+                  <RecentTile
+                    tracks={recent}
+                    onPlay={openTrack}
+                    onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
+                    span="shrink-0"
+                  />
+                )}
                 {showPlaylists && (
-                  <PlaylistsTile playlists={playlistRow} onAll={() => setActiveView('playlists')} span="shrink-0" />
+                  <PlaylistsTile
+                    playlists={playlistRow}
+                    onAll={() => setActiveView('playlists')}
+                    onContextMenu={(p, e) => { if (p.playlist) setPlaylistMenu({ playlist: p.playlist, x: e.clientX, y: e.clientY }) }}
+                    span="shrink-0"
+                  />
                 )}
               </div>
             )}
@@ -449,6 +480,20 @@ export default function HomeViewDesktop(): JSX.Element {
           </div>
         )}
       </div>
+
+      {ctxMenu && (
+        <SongContextMenu
+          state={ctxMenu}
+          onClose={() => setCtxMenu(null)}
+          canEdit={canEdit}
+          onInfo={() => ctxMenu.songId != null && useStore.getState().setInfoSongId(ctxMenu.songId)}
+          onPlay={() => playTrack(ctxMenu.track)}
+          onPlayNext={() => playNext(ctxMenu.track)}
+        />
+      )}
+      {playlistMenu && (
+        <PlaylistContextMenu state={playlistMenu} onClose={() => setPlaylistMenu(null)} />
+      )}
     </div>
   )
 }

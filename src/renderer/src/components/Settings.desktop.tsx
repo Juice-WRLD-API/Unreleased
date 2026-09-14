@@ -659,7 +659,7 @@ export default function Settings(): JSX.Element {
                   {skinImportError && (
                     <p className="text-red-400 text-[11px] mb-2 pl-[34px]">{skinImportError}</p>
                   )}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
+                  <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2 pl-[34px]">
                     {[...SKINS, ...customSkins].map((skin) => {
                       const active = theme === skin.id
                       return (

@@ -85,7 +85,12 @@ const eraColor = (i: number): string => `hsl(${Math.round((i * 137.508) % 360)},
 
 interface TimelineRow { key: string; label: string; count: number; start: Date; end: Date }
 
-function EraTimeline({ rows, start, end }: { rows: TimelineRow[]; start: Date; end: Date }): JSX.Element {
+function EraTimeline({ rows, start, end, onSelect }: {
+  rows: TimelineRow[]
+  start: Date
+  end: Date
+  onSelect: (eraName: string) => void
+}): JSX.Element {
   return (
     <div>
       <div className="flex h-8 rounded-lg overflow-hidden">
@@ -93,22 +98,23 @@ function EraTimeline({ rows, start, end }: { rows: TimelineRow[]; start: Date; e
           const ms = r.end.getTime() - r.start.getTime()
           const shareOfSpan = (ms / (end.getTime() - start.getTime())) * 100
           return (
-            <div
+            <button
               key={r.key}
+              onClick={() => onSelect(r.key)}
               // flexGrow proportional to duration (not a % width) so tiny
               // segments still get their minWidth floor without the row's
               // total overflowing past 100% — flexbox reflows the rest to
               // make room instead.
-              className="h-full flex items-center justify-center overflow-hidden shrink-0"
+              className="h-full flex items-center justify-center overflow-hidden shrink-0 transition-[filter] hover:brightness-110"
               style={{ flexGrow: ms, flexBasis: 0, minWidth: '6px', backgroundColor: eraColor(i) }}
-              title={`${r.label} — ${monthYearLabel(r.start)} to ${monthYearLabel(r.end)} — ${r.count.toLocaleString()} songs`}
+              title={`${r.label} — ${monthYearLabel(r.start)} to ${monthYearLabel(r.end)} — ${r.count.toLocaleString()} songs — view in Tracker`}
             >
               {shareOfSpan > 3 && (
                 <span className="text-[10px] font-semibold text-white truncate px-1" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
                   {r.key}
                 </span>
               )}
-            </div>
+            </button>
           )
         })}
       </div>
@@ -283,11 +289,19 @@ function RecentPlayRow({ play, cover, onPlay, onContextMenu }: {
 }
 
 export default function StatisticsView(): JSX.Element {
-  const { setActiveView, previousView, playTrack, playNext } = useStorePick(
-    'setActiveView', 'previousView', 'playTrack', 'playNext',
+  const { setActiveView, previousView, playTrack, playNext, setApiTrackerEra } = useStorePick(
+    'setActiveView', 'previousView', 'playTrack', 'playNext', 'setApiTrackerEra',
   )
   const backView = previousView && previousView !== 'statistics' ? previousView : 'home'
   const canEdit = useCanEdit()
+
+  // Consumed by ApiTrackerView on mount (see its own effect reading
+  // apiTrackerEra/setApiTrackerEra) — the same deep-link slot other flows
+  // already had ready-made in the store, just previously unused.
+  const openEraInTracker = (eraName: string): void => {
+    setApiTrackerEra(eraName)
+    setActiveView('api-tracker')
+  }
 
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   useEffect(() => {
@@ -469,7 +483,7 @@ export default function StatisticsView(): JSX.Element {
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-3">
                     Timeline ({timelineRows.length} eras)
                   </p>
-                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} />
+                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} onSelect={openEraInTracker} />
                 </div>
               )}
 

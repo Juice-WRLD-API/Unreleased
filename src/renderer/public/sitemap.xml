@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Public routes only. Per-user views (/liked, /stats, /library, /playlists),
+  Public routes only. Per-user views (/liked, /wrapped, /library, /playlists),
   authoring surfaces (/editor, /admin, /contributor), share links (/shared/*)
   and the OAuth callback are deliberately absent - see robots.txt. /news is out
   too until NEWS_ENABLED flips; it renders empty today.
