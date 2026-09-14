@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStorePick } from '../store/useStore'
 import { loadRecentTracks } from '../lib/recentTracks'
 import { filterListeningPlaysByDays } from '../lib/listeningPlays'
-import { playlistCoverUrl } from '../lib/juicewrldApi'
+import { playlistCoverUrl, apiFetch, apiPeek, type JWApiStats } from '../lib/juicewrldApi'
 import { peekPlaylistCover } from '../lib/userApi'
 import { loadStats as loadHeardleStats, todayKey as heardleToday } from '../lib/heardle'
 import { loadStats as loadWordleStats, todayKey as wordleToday } from '../lib/wordle'
@@ -78,6 +78,15 @@ export function useHomeData() {
   const [newsItems, setNewsItems] = useState<NewsItem[]>(() => peekNews({ channel: ALL_CHANNEL })?.results ?? [])
   useEffect(() => {
     fetchNews({ channel: ALL_CHANNEL }).then((res) => setNewsItems(res.results)).catch(() => undefined)
+  }, [])
+
+  // Site-wide catalog totals (GET /stats/), shown next to the user's own
+  // listening numbers in the hero. Same stale-while-revalidate shape as News:
+  // ApiTrackerView already warms this exact cache key, so most visits paint
+  // it instantly from there.
+  const [siteStats, setSiteStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
+  useEffect(() => {
+    apiFetch<JWApiStats>('/stats/').then(setSiteStats).catch(() => undefined)
   }, [])
 
   const games = useMemo((): GameCard[] => {
@@ -162,7 +171,7 @@ export function useHomeData() {
     setActiveView, openProfile,
     showSection,
     recent, newsItems, games, playlistRow,
-    totalPlays, distinctSongs, weekPlays,
+    totalPlays, distinctSongs, weekPlays, siteStats,
     openTrack, openNewsItem,
   }
 }

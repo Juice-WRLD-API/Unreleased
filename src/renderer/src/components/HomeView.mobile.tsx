@@ -62,7 +62,7 @@ export default function HomeViewMobile(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, showSection, recent, newsItems, games, playlistRow,
-    totalPlays, distinctSongs, weekPlays, openTrack, openNewsItem,
+    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem,
   } = useHomeData()
   // Whatever doesn't fit the bottom nav directly — its old in-bar "More" tab
   // moved here, since fitting it AND a Home tab both in the bar pushed the
@@ -233,6 +233,11 @@ export default function HomeViewMobile(): JSX.Element {
               <StatCard value={totalPlays.toLocaleString()} label="Plays" />
               <StatCard value={distinctSongs.toLocaleString()} label="Songs" />
               <StatCard value={weekPlays.toLocaleString()} label="This week" />
+            </div>
+          )}
+          {siteStats && (
+            <div className="px-4 pt-3">
+              <StatCard value={siteStats.total_songs.toLocaleString()} label="In the catalog" />
             </div>
           )}
         </Section>

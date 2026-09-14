@@ -288,7 +288,7 @@ export default function HomeViewDesktop(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, showSection, recent, newsItems, games, playlistRow,
-    totalPlays, distinctSongs, weekPlays, openTrack, openNewsItem,
+    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem,
   } = useHomeData()
   const { navOrder, navVisibility } = useStorePick('navOrder', 'navVisibility')
   const [showMore, setShowMore] = useState(false)
@@ -357,6 +357,12 @@ export default function HomeViewDesktop(): JSX.Element {
                   <Stat value={totalPlays.toLocaleString()} label={totalPlays === 1 ? 'play' : 'plays'} />
                   <Stat value={distinctSongs.toLocaleString()} label={distinctSongs === 1 ? 'song' : 'songs'} />
                   <Stat value={weekPlays.toLocaleString()} label="this week" />
+                </>
+              )}
+              {siteStats && (
+                <>
+                  <div className="w-px h-6 bg-[var(--border)] shrink-0" />
+                  <Stat value={siteStats.total_songs.toLocaleString()} label="in the catalog" />
                 </>
               )}
               <button
