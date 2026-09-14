@@ -44,6 +44,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/wordle') return 'wordle'
   if (pathname === '/tierlist') return 'tierlist'
   if (pathname === '/stats') return 'stats'
+  if (pathname === '/statistics') return 'statistics'
   if (pathname === '/download') return 'download'
   if (pathname === '/settings') return 'settings'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
@@ -82,7 +83,7 @@ import MoreNavSheet from './components/MoreNavSheet'
 import {
   EditorPage, AdminPage, SharedPlaylistView, EditorProfileView, NotFoundView,
   DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
-  StatsView, DownloadAppView, AlbumsAdminView, ContributorPage,
+  StatsView, StatisticsView, DownloadAppView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
   LikedSongsView, DiagnosticsModal, preloadView,
 } from './lib/lazyViews'
@@ -272,6 +273,7 @@ export default function App(): JSX.Element {
               : bgView === 'wordle' ? <WordleView />
               : bgView === 'tierlist' ? <TierlistView />
               : bgView === 'stats' ? <StatsView />
+              : bgView === 'statistics' ? <StatisticsView />
               : bgView === 'download' ? <DownloadAppView />
               : bgView === 'albums-admin' ? <AlbumsAdminView />
               : bgView === 'not-found' ? <NotFoundView />

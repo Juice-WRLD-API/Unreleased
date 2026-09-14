@@ -73,6 +73,12 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     description:
       'How to use the unreleased player: search and filters, playlists, the equalizer, offline downloads, Last.fm scrobbling, and keyboard shortcuts.',
   },
+  statistics: {
+    path: '/statistics',
+    title: 'Catalog statistics',
+    description:
+      'How big the Juice WRLD catalog is: total songs, the split across released, unreleased, unsurfaced and recording sessions, and a per-era breakdown.',
+  },
   download: {
     path: '/download',
     title: 'Download the desktop app',

@@ -45,12 +45,16 @@ function Section({ title, icon, action, children }: {
   )
 }
 
-function StatCard({ value, label }: { value: string; label: string }): JSX.Element {
+function StatCard({ value, label, onClick }: { value: string; label: string; onClick?: () => void }): JSX.Element {
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className="flex-1 min-w-0 rounded-xl bg-[var(--surface-overlay)] px-3 py-2.5">
+    <Tag
+      onClick={onClick}
+      className="flex-1 min-w-0 rounded-xl bg-[var(--surface-overlay)] px-3 py-2.5 text-left active:bg-surface-highest transition-colors"
+    >
       <p className="text-text-primary text-lg font-bold tabular-nums truncate">{value}</p>
       <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted truncate">{label}</p>
-    </div>
+    </Tag>
   )
 }
 
@@ -237,7 +241,11 @@ export default function HomeViewMobile(): JSX.Element {
           )}
           {siteStats && (
             <div className="px-4 pt-3">
-              <StatCard value={siteStats.total_songs.toLocaleString()} label="In the catalog" />
+              <StatCard
+                value={siteStats.total_songs.toLocaleString()}
+                label="In the catalog"
+                onClick={() => setActiveView('statistics')}
+              />
             </div>
           )}
         </Section>

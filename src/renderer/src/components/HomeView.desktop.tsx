@@ -362,7 +362,13 @@ export default function HomeViewDesktop(): JSX.Element {
               {siteStats && (
                 <>
                   <div className="w-px h-6 bg-[var(--border)] shrink-0" />
-                  <Stat value={siteStats.total_songs.toLocaleString()} label="in the catalog" />
+                  <button
+                    onClick={() => setActiveView('statistics')}
+                    title="Catalog statistics"
+                    className="rounded-lg -mx-1 px-1 hover:bg-[var(--surface-overlay)] transition-colors"
+                  >
+                    <Stat value={siteStats.total_songs.toLocaleString()} label="in the catalog" />
+                  </button>
                 </>
               )}
               <button
