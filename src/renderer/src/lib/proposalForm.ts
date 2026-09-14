@@ -11,7 +11,7 @@
 // createProposal must be byte-for-byte identical before and after.
 import { useCallback, useReducer } from 'react'
 import type { JWApiSong } from './juicewrldApi'
-import { cleanDate } from '../components/EditorPage.desktop'
+import { cleanDate } from './format'
 
 export interface ProposalFormState {
   name: string

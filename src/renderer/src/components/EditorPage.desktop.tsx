@@ -18,6 +18,7 @@ import {
 import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
+import { cleanDate } from '../lib/format'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -41,14 +42,6 @@ const CAT_BADGE: Record<string, string> = {
   unreleased:        'bg-accent/20 text-accent',
   unsurfaced:        'bg-yellow-500/20 text-yellow-400',
   recording_session: 'bg-zinc-500/20 text-zinc-400',
-}
-
-// Exported for BulkEditModal, which has to derive the same baselines this page
-// does so a bulk change doesn't submit a no-op patch for a song that already
-// carries the value (dates come back from the API with a weekday prefix).
-export function cleanDate(raw: string | null | undefined): string {
-  if (!raw) return ''
-  return raw.replace(/^[A-Za-z][a-z]+\s+(?=[A-Z]|\d)/g, '').trim().replace(/\.$/, '').trim()
 }
 
 function diff(before: Record<string, unknown>, after: Record<string, unknown>): Record<string, unknown> {
@@ -86,7 +79,10 @@ export function Card({ title, icon, action, children, className = '', overflowVi
 
 /* ── Grid - responsive field grid for use inside a Card ───────────────────── */
 export function FieldGrid({ children, cols = 2 }: { children: ReactNode; cols?: 1 | 2 | 3 | 4 }): JSX.Element {
-  const colClass = cols === 4 ? 'sm:grid-cols-4' : cols === 3 ? 'sm:grid-cols-3' : cols === 1 ? '' : 'sm:grid-cols-2'
+  // The default (cols=2) grid picks up a third column once the window is wide
+  // enough to fit it (past the left rail) - the whole reason this component
+  // widened in the first place was to stop wasting that space.
+  const colClass = cols === 4 ? 'sm:grid-cols-4' : cols === 3 ? 'sm:grid-cols-3' : cols === 1 ? '' : 'sm:grid-cols-2 lg:grid-cols-3'
   return <div className={`grid grid-cols-1 ${colClass} gap-x-5 gap-y-4`}>{children}</div>
 }
 
@@ -192,9 +188,15 @@ function DatePickerButton({ onPick, className }: { onPick: (date: string) => voi
 }
 
 /* ── Field ─────────────────────────────────────────────────────────────────── */
-export function FieldRow({ label, value, original, onChange, placeholder, mono = false, span, onBrowse, suggest }: {
+export function FieldRow({ label, value, original, onChange, placeholder, mono = false, span, full = false, onBrowse, suggest }: {
   label: string; value: string; original: string
-  onChange: (v: string) => void; placeholder?: string; mono?: boolean; span?: 2 | 3
+  onChange: (v: string) => void; placeholder?: string; mono?: boolean
+  /** Spans this many of the grid's own columns (2 of 3 pairs it with one more
+   *  single-width field, rather than claiming the whole row). */
+  span?: 2 | 3
+  /** Always takes the whole row, however many columns the grid currently has -
+   *  for fields (long paths, free-form notes) that never want a neighbor. */
+  full?: boolean
   /** Shows a folder button inside the field that opens a file picker. */
   onBrowse?: () => void
   /** Autocompletes from other songs' values for this field (e.g. "album"). */
@@ -203,7 +205,7 @@ export function FieldRow({ label, value, original, onChange, placeholder, mono =
   const changed = value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
+    <label className={`flex flex-col min-w-0 ${full ? 'sm:col-span-2 lg:col-span-3' : span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
       <FieldLabel label={label} changed={changed} />
       <div className="relative">
         <input
@@ -252,9 +254,15 @@ function SelectRow({ label, value, original, onChange, options, placeholder }: {
 }
 
 /* ── Textarea field ────────────────────────────────────────────────────────── */
-export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, suggest, dateInput = false }: {
+export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, full = false, suggest, dateInput = false }: {
   label: string; value: string; original: string
-  onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean; span?: 2 | 3
+  onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean
+  /** Spans this many of the grid's own columns (2 of 3 pairs it with one more
+   *  single-width field, rather than claiming the whole row). */
+  span?: 2 | 3
+  /** Always takes the whole row, however many columns the grid currently has -
+   *  for fields (long paths, free-form notes) that never want a neighbor. */
+  full?: boolean
   /** Autocompletes from other songs' values for this field (e.g. "leak_type"). */
   suggest?: SuggestField
   /** Shows a calendar button that appends a picked date onto the field. */
@@ -263,7 +271,7 @@ export function TextareaRow({ label, value, original, onChange, rows = 3, placeh
   const changed = value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`relative flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
+    <label className={`relative flex flex-col min-w-0 ${full ? 'sm:col-span-2 lg:col-span-3' : span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
       <FieldLabel label={label} changed={changed} />
       <div className="relative">
         <textarea
@@ -1210,7 +1218,7 @@ export default function EditorPage({ initialSongId = null }: {
             </div>
           </div>
         ) : (
-          <div className={`mx-auto w-full ${basicView ? 'max-w-4xl px-5 py-4' : 'max-w-6xl px-6 py-6'}`}>
+          <div className={`mx-auto w-full ${basicView ? 'max-w-4xl px-5 py-4' : 'max-w-[1600px] px-6 py-6'}`}>
 
             {/* ── Editing proposal banner ── */}
             {editingPropId != null && (
@@ -1542,17 +1550,15 @@ export default function EditorPage({ initialSongId = null }: {
                     <FieldRow label="Artists"  value={artists}  original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
                     <FieldRow label="Album"    value={album}    original={String(base.album || '')}   onChange={setAlbum} suggest="album" />
                     <FieldRow label="Cover URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} placeholder="https://…" mono onBrowse={() => setPickingImage(true)} />
+                    <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
+                    <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
+                    <FieldRow label="Key"    value={musicalKey} original={String(base.key || '')}      onChange={setMusicalKey} placeholder="C# Minor" />
                     <FieldRow label="File URL"  value={filePath} original={String(base.path || '')}      onChange={setFilePath} placeholder="Path/URL to the audio file" mono span={2} onBrowse={() => setPickingFile(true)} />
-                    <div className="sm:col-span-2 grid grid-cols-3 gap-x-5 gap-y-4">
-                      <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
-                      <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
-                      <FieldRow label="Key"    value={musicalKey} original={String(base.key || '')}      onChange={setMusicalKey} placeholder="C# Minor" />
-                    </div>
-                    <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} rows={2} placeholder="320 kbps" mono span={2} />
+                    <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} rows={2} placeholder="320 kbps" mono full />
                     <TextareaRow
                       label="Alt names" value={altNames}
                       original={(Array.isArray(base.track_titles) ? (base.track_titles as string[]).join('\n') : '')}
-                      onChange={setAltNames} rows={2} placeholder="One name per line" span={2}
+                      onChange={setAltNames} rows={2} placeholder="One name per line" full
                     />
                   </FieldGrid>
                 </Card>
@@ -1651,7 +1657,7 @@ export default function EditorPage({ initialSongId = null }: {
                   <Card title="Additional details" overflowVisible>
                     <FieldGrid>
                       <FieldRow label="Location"   value={loc}              original={String(base.recording_locations || '')}   onChange={setLoc} placeholder="Studio / city" suggest="recording_locations" />
-                      <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ, snippet…" suggest="leak_type" />
+                      <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ, snippet…" suggest="leak_type" span={2} />
                       <FieldRow label="File names" value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
                       <FieldRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')}       onChange={setInstrumentals} placeholder="Instrumental versions available" />
                       <FieldRow label="Inst. names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} />
@@ -1661,8 +1667,8 @@ export default function EditorPage({ initialSongId = null }: {
                           <FieldRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
                         </>
                       )}
-                      <TextareaRow label="Add. info" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} span={2} />
-                      <TextareaRow label="Notes"     value={notes}   original={String(base.notes || '')}                  onChange={setNotes}   rows={2} span={2} />
+                      <TextareaRow label="Add. info" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} full />
+                      <TextareaRow label="Notes"     value={notes}   original={String(base.notes || '')}                  onChange={setNotes}   rows={2} full />
                     </FieldGrid>
                   </Card>
                 )}

@@ -12,7 +12,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { getVersionMetaForSongs, getOwnVersionMeta, setOwnVersionTitle, linkSongVersion, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
-import { cleanDate } from './EditorPage.desktop'
+import { cleanDate } from '../lib/format'
 
 // Bulk editor - one dialog, two sources:
 //

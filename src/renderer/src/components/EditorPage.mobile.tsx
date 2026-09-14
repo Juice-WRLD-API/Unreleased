@@ -17,6 +17,7 @@ import {
 import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
+import { cleanDate } from '../lib/format'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -40,14 +41,6 @@ const CAT_BADGE: Record<string, string> = {
   unreleased:        'bg-accent/20 text-accent',
   unsurfaced:        'bg-yellow-500/20 text-yellow-400',
   recording_session: 'bg-zinc-500/20 text-zinc-400',
-}
-
-// Exported for BulkEditModal, which has to derive the same baselines this page
-// does so a bulk change doesn't submit a no-op patch for a song that already
-// carries the value (dates come back from the API with a weekday prefix).
-export function cleanDate(raw: string | null | undefined): string {
-  if (!raw) return ''
-  return raw.replace(/^[A-Za-z][a-z]+\s+(?=[A-Z]|\d)/g, '').trim().replace(/\.$/, '').trim()
 }
 
 function diff(before: Record<string, unknown>, after: Record<string, unknown>): Record<string, unknown> {

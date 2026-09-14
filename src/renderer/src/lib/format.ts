@@ -27,3 +27,9 @@ export function formatBytes(b: number): string {
   if (b < 1073741824) return `${(b / 1048576).toFixed(1)} MB`
   return `${(b / 1073741824).toFixed(2)} GB`
 }
+
+/** Strips the weekday prefix the API puts on date strings, e.g. "Fri May 2." → "May 2". */
+export function cleanDate(raw: string | null | undefined): string {
+  if (!raw) return ''
+  return raw.replace(/^[A-Za-z][a-z]+\s+(?=[A-Z]|\d)/g, '').trim().replace(/\.$/, '').trim()
+}
