@@ -88,15 +88,21 @@ function StagedChanges({ changes, onResult }: {
   const { unstageFileChange, clearStagedFileChanges } = useStorePick('unstageFileChange', 'clearStagedFileChanges')
   const [proposing, setProposing] = useState(false)
 
+  // Only a change that isn't waiting on a queued folder can go out now. The
+  // count is a floor, not a promise: a folder proposed earlier may have been
+  // approved since, which only the propose run itself can find out.
+  const readyNow = changes.filter((c) => !c.awaitingFolder).length
+
   const propose = async (): Promise<void> => {
     if (proposing) return
     setProposing(true)
     onResult(null)
-    const { proposed, failed } = await proposeStagedChanges()
+    const { proposed, failed, held } = await proposeStagedChanges()
     setProposing(false)
-    onResult(failed > 0
-      ? `Proposed ${proposed}, ${failed} failed — the rest stayed queued`
-      : `Proposed ${proposed} change${proposed === 1 ? '' : 's'}`)
+    const parts = [`Proposed ${proposed}`]
+    if (failed > 0) parts.push(`${failed} failed`)
+    if (held > 0) parts.push(`${held} waiting on a folder that isn't approved yet`)
+    onResult(parts.join(' · '))
   }
 
   return (
@@ -124,6 +130,13 @@ function StagedChanges({ changes, onResult }: {
               <p className="text-[var(--text-muted)] text-[10px] truncate" title={change.destination ?? change.path}>
                 {change.destination ? `→ ${change.destination}` : change.path}
               </p>
+              {change.awaitingFolder && (
+                <p className="text-[var(--text-muted)] text-[10px] mt-0.5 truncate italic">
+                  {changes.some((c) => c.changeType === 'create_folder' && c.path === change.awaitingFolder)
+                    ? 'Goes out once the new folder is approved'
+                    : 'Waiting on the new folder’s approval'}
+                </p>
+              )}
               {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
             </div>
             <button onClick={() => unstageFileChange(change.id)} disabled={proposing} title="Remove from queue"
@@ -138,7 +151,11 @@ function StagedChanges({ changes, onResult }: {
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity">
           {proposing
             ? <><Loader2 size={12} className="animate-spin" /> Proposing…</>
-            : <><Send size={12} /> Propose {changes.length} change{changes.length === 1 ? '' : 's'}</>}
+            : readyNow === 0
+              // Everything left is waiting on a folder — the useful action now
+              // is re-checking whether that folder has been approved.
+              ? <><Send size={12} /> Check for approval</>
+              : <><Send size={12} /> Propose {readyNow} change{readyNow === 1 ? '' : 's'}</>}
         </button>
       </div>
     </div>

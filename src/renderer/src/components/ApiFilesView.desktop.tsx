@@ -664,7 +664,10 @@ export default function ApiFilesView(): JSX.Element {
     [stagedFileChanges, activeChannel],
   )
 
-  const stageMovesInto = (folderPath: string, items: DragItem[]): void => {
+  /** `awaitingFolder` marks moves into a folder that's only queued so far —
+   *  the API rejects those until it's approved, so they're held back rather
+   *  than proposed alongside it (see lib/compStagedChanges). */
+  const stageMovesInto = (folderPath: string, items: DragItem[], awaitingFolder?: string): void => {
     const changes = items
       .filter(d => parentFolder(d.path) !== folderPath)
       .map(d => ({
@@ -672,6 +675,7 @@ export default function ApiFilesView(): JSX.Element {
         path: d.path,
         destination: folderPath ? `${folderPath}/${basename(d.path)}` : basename(d.path),
         channel: activeChannel,
+        ...(awaitingFolder ? { awaitingFolder } : {}),
       }))
     if (changes.length === 0) return
     stageFileChanges(changes)
@@ -760,7 +764,7 @@ export default function ApiFilesView(): JSX.Element {
     const parent = parentFolder(bundlePrompt.target.path)
     const folderPath = parent ? `${parent}/${name}` : name
     stageFileChanges([{ changeType: 'create_folder', path: folderPath, channel: activeChannel }])
-    stageMovesInto(folderPath, [bundlePrompt.target, ...bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path)])
+    stageMovesInto(folderPath, [bundlePrompt.target, ...bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path)], folderPath)
     setBundlePrompt(null)
   }
 
@@ -772,7 +776,9 @@ export default function ApiFilesView(): JSX.Element {
     return (
       <span
         className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-accent bg-accent/15 px-1.5 py-0.5 rounded-md"
-        title={`Queued: move to ${staged.destination}`}
+        title={staged.awaitingFolder
+          ? `Queued: move to ${staged.destination} — waiting for the new folder to be approved`
+          : `Queued: move to ${staged.destination}`}
       >
         <FolderInput size={9} /> Queued
       </span>
