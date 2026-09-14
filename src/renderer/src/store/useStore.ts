@@ -68,6 +68,30 @@ export interface UploadItem {
   speedBps?: number
 }
 
+// ─── Staged comp file change (in-session) ────────────────────
+//
+// Drag-and-drop in the Files tab doesn't propose anything on drop — it parks
+// the intended change here, the Uploads panel lists what's queued, and one
+// "Propose" there submits the lot (see lib/compStagedChanges). Dragging is
+// cheap to do by accident, and a reorganize is usually several drags that
+// only make sense together, so proposing each one the instant it lands would
+// spam reviewers with half a move.
+export interface StagedFileChange {
+  id: string
+  /** The subset of comp proposal change types drag-and-drop can produce. */
+  changeType: 'move' | 'move_folder' | 'create_folder'
+  /** Source path — the file/folder being moved, or the folder to create. */
+  path: string
+  /** Full destination path; absent for create_folder. */
+  destination?: string
+  /** Channel slug the change belongs to, since the Files tab can switch
+   *  channels with changes still queued and each proposal carries its own. */
+  channel: string
+  /** Set when a propose attempt failed, so the row can show why and stay
+   *  queued for a retry. Cleared on the next attempt. */
+  error?: string
+}
+
 // Where the desktop nav menu sits — classic left sidebar, mirrored right, or a
 // horizontal bar above/below the content. Mobile always uses the bottom tab bar.
 export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
@@ -438,6 +462,9 @@ interface AppState {
   // Uploads (comp upload progress — see lib/compUploads)
   uploads: UploadItem[]
   showUploadManager: boolean
+  // Comp file changes staged by Files drag-and-drop, proposed as a batch from
+  // the Uploads panel (see lib/compStagedChanges).
+  stagedFileChanges: StagedFileChange[]
 }
 
 interface AppActions {
@@ -725,6 +752,13 @@ interface AppActions {
   removeUpload: (id: string) => void
   clearCompletedUploads: () => void
   setShowUploadManager: (show: boolean) => void
+
+  /** Queues drag-and-drop file changes; ids are assigned here. Returns nothing
+   *  — the Uploads panel is where they're reviewed and proposed. */
+  stageFileChanges: (changes: Omit<StagedFileChange, 'id'>[]) => void
+  updateStagedFileChange: (id: string, updates: Partial<StagedFileChange>) => void
+  unstageFileChange: (id: string) => void
+  clearStagedFileChanges: () => void
 }
 
 export type AppStore = QueueSlice & AppState & AppActions
@@ -1075,6 +1109,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'wordle': '/wordle',
       'tierlist': '/tierlist',
       'stats': '/stats',
+      'statistics': '/statistics',
       'download': '/download',
       'settings': '/settings',
     }
@@ -2337,6 +2372,24 @@ export const useStore = create<AppStore>((set, get, store) => ({
     uploads: s.uploads.filter((d) => d.state === 'downloading'),
   })),
   setShowUploadManager: (show) => set({ showUploadManager: show }),
+
+  stagedFileChanges: [],
+  // One queued change per path: dragging an already-queued file somewhere else
+  // is a correction, not a second move, and proposing both would ask reviewers
+  // to send the same file to two places.
+  stageFileChanges: (changes) => set((s) => ({
+    stagedFileChanges: [
+      ...s.stagedFileChanges.filter((c) => !changes.some((n) => n.path === c.path && n.channel === c.channel)),
+      ...changes.map((c, i) => ({ ...c, id: `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
+    ],
+  })),
+  updateStagedFileChange: (id, updates) => set((s) => ({
+    stagedFileChanges: s.stagedFileChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
+  })),
+  unstageFileChange: (id) => set((s) => ({
+    stagedFileChanges: s.stagedFileChanges.filter((c) => c.id !== id),
+  })),
+  clearStagedFileChanges: () => set({ stagedFileChanges: [] }),
 }))
 
 // Dev-only console handle for driving store state while debugging (e.g.

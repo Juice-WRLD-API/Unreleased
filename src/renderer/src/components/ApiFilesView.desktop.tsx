@@ -5,9 +5,10 @@ import {
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Globe, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText,
+  FileText, FolderInput, CornerLeftUp,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import type { StagedFileChange } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { placeFlyout } from '../lib/menuFlyout'
@@ -28,6 +29,7 @@ import {
 import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
+import { basename } from '../lib/compStagedChanges'
 import { ClampedMenu } from './ClampedMenu'
 import { Track } from '../types'
 import { ProgressiveCover } from './ProgressiveCover'
@@ -169,7 +171,7 @@ function urlToPath(pathname: string): string {
 }
 
 export default function ApiFilesView(): JSX.Element {
-  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, stagedFileChanges, stageFileChanges, setShowUploadManager } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'stagedFileChanges', 'stageFileChanges', 'setShowUploadManager')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
@@ -637,6 +639,146 @@ export default function ApiFilesView(): JSX.Element {
   // above, as a second way into select mode alongside Ctrl/Cmd+click.
   const mouseLongPress = useLongPress()
 
+  // ── Drag-and-drop reorganizing ─────────────────────────────────────────────
+  // Contributors can drag entries onto a folder to move them in, or onto a
+  // file to bundle both into a new folder. Nothing is proposed on drop: the
+  // intended changes are staged (store.stagedFileChanges) and reviewed in the
+  // Uploads panel, which is where Propose lives — see lib/compStagedChanges.
+  type DragItem = { path: string; isDir: boolean }
+  const [draggedItems, setDraggedItems] = useState<DragItem[]>([])
+  // Path of the row currently under the cursor, or '..' for the parent row.
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [bundlePrompt, setBundlePrompt] = useState<{ target: DragItem; items: DragItem[]; name: string } | null>(null)
+
+  // Moves already queued for this channel, keyed by the path being moved, so
+  // a row can show where it's headed instead of looking untouched.
+  const stagedMoves = useMemo(() => {
+    const m = new Map<string, StagedFileChange>()
+    for (const c of stagedFileChanges) {
+      if (c.channel === activeChannel && c.changeType !== 'create_folder') m.set(c.path, c)
+    }
+    return m
+  }, [stagedFileChanges, activeChannel])
+  const stagedCount = useMemo(
+    () => stagedFileChanges.filter(c => c.channel === activeChannel).length,
+    [stagedFileChanges, activeChannel],
+  )
+
+  const stageMovesInto = (folderPath: string, items: DragItem[]): void => {
+    const changes = items
+      .filter(d => parentFolder(d.path) !== folderPath)
+      .map(d => ({
+        changeType: (d.isDir ? 'move_folder' : 'move') as 'move_folder' | 'move',
+        path: d.path,
+        destination: folderPath ? `${folderPath}/${basename(d.path)}` : basename(d.path),
+        channel: activeChannel,
+      }))
+    if (changes.length === 0) return
+    stageFileChanges(changes)
+    // Only pop the panel open for the first drop of a batch — it shows where
+    // queued changes live, and after that the header pill carries the count
+    // without the panel covering the listing on every subsequent drag.
+    if (stagedFileChanges.length === 0) setShowUploadManager(true)
+    // A drag out of select mode consumed the whole selection, so drop out of
+    // it rather than keeping rows checked that are now queued to move away.
+    if (selectMode) exitSelectMode()
+  }
+
+  const dragSourceProps = (entry: JWApiFileEntry): {
+    draggable: boolean
+    onDragStart: (e: React.DragEvent) => void
+    onDragEnd: () => void
+  } => ({
+    draggable: canPropose,
+    onDragStart: e => {
+      // A hold long enough to start a drag would otherwise also trip
+      // hold-to-select, leaving the row selected once the drag ends.
+      mouseLongPress.cancel()
+      e.dataTransfer.effectAllowed = 'move'
+      const byPath = new Map(filteredEntries.map(x => [x.path, x]))
+      // Dragging one of the selected rows takes the whole selection with it;
+      // dragging an unselected row moves just that one.
+      const paths = selectedPaths.has(entry.path) ? [...selectedPaths.keys()] : [entry.path]
+      setDraggedItems(paths.map(p => ({ path: p, isDir: (byPath.get(p) ?? entry).type === 'directory' })))
+    },
+    onDragEnd: () => { setDraggedItems([]); setDropTarget(null) },
+  })
+
+  /** Whether the current drag can land on `entry`: not onto itself, not a
+   *  folder into its own subtree, and not into the folder it already sits in. */
+  const dropAllowed = (entry: JWApiFileEntry): boolean => {
+    if (draggedItems.length === 0) return false
+    if (draggedItems.some(d => d.path === entry.path)) return false
+    if (entry.type !== 'directory') return true
+    if (draggedItems.some(d => d.isDir && entry.path.startsWith(`${d.path}/`))) return false
+    return draggedItems.some(d => parentFolder(d.path) !== entry.path)
+  }
+
+  const dropTargetProps = (entry: JWApiFileEntry): {
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: () => void
+    onDrop: (e: React.DragEvent) => void
+  } => ({
+    onDragOver: e => {
+      if (!dropAllowed(entry)) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+      setDropTarget(entry.path)
+    },
+    onDragLeave: () => setDropTarget(prev => (prev === entry.path ? null : prev)),
+    onDrop: e => {
+      e.preventDefault(); e.stopPropagation()
+      if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
+      if (entry.type === 'directory') stageMovesInto(entry.path, draggedItems)
+      // Onto a file: both sides move into a folder that doesn't exist yet, so
+      // ask for its name before anything is staged.
+      else setBundlePrompt({ target: { path: entry.path, isDir: false }, items: draggedItems, name: 'New Folder' })
+      setDraggedItems([]); setDropTarget(null)
+    },
+  })
+
+  /** The ".." row doubles as a drop target for moving entries up a level. */
+  const parentDropProps = {
+    onDragOver: (e: React.DragEvent): void => {
+      if (draggedItems.length === 0) return
+      const parent = parentFolder(currentPath)
+      if (!draggedItems.some(d => parentFolder(d.path) !== parent)) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+      setDropTarget('..')
+    },
+    onDragLeave: (): void => setDropTarget(prev => (prev === '..' ? null : prev)),
+    onDrop: (e: React.DragEvent): void => {
+      e.preventDefault(); e.stopPropagation()
+      stageMovesInto(parentFolder(currentPath), draggedItems)
+      setDraggedItems([]); setDropTarget(null)
+    },
+  }
+
+  const confirmBundle = (): void => {
+    if (!bundlePrompt) return
+    const name = bundlePrompt.name.trim().replace(/[/\\]/g, '')
+    if (!name) return
+    const parent = parentFolder(bundlePrompt.target.path)
+    const folderPath = parent ? `${parent}/${name}` : name
+    stageFileChanges([{ changeType: 'create_folder', path: folderPath, channel: activeChannel }])
+    stageMovesInto(folderPath, [bundlePrompt.target, ...bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path)])
+    setBundlePrompt(null)
+  }
+
+  /** Row classes/badge for an entry with a queued move, so staged work is
+   *  visible in the listing and not only in the Uploads panel. */
+  const stagedBadge = (path: string): JSX.Element | null => {
+    const staged = stagedMoves.get(path)
+    if (!staged) return null
+    return (
+      <span
+        className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-accent bg-accent/15 px-1.5 py-0.5 rounded-md"
+        title={`Queued: move to ${staged.destination}`}
+      >
+        <FolderInput size={9} /> Queued
+      </span>
+    )
+  }
+
   const crumbs = breadcrumbs(currentPath)
   const channelDescription = channels.find((c) => c.slug === activeChannel)?.description?.trim() || ''
 
@@ -658,6 +800,18 @@ export default function ApiFilesView(): JSX.Element {
                 <p className="text-text-muted text-sm truncate max-w-xl">{channelDescription}</p>
               )}
             </div>
+            {/* Queued drag-and-drop changes live in the Uploads panel (that's
+                where Propose is), so this is a pointer to them rather than a
+                second place to act. */}
+            {stagedCount > 0 && (
+              <button
+                onClick={() => setShowUploadManager(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-medium hover:bg-accent/25 transition-colors shrink-0"
+                title="Review staged changes in the Uploads panel"
+              >
+                <FolderInput size={13} /> {stagedCount} staged change{stagedCount === 1 ? '' : 's'}
+              </button>
+            )}
             <div className="flex items-center gap-3 ml-auto">
               {channels.length > 0 && (
                 <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
@@ -809,9 +963,21 @@ export default function ApiFilesView(): JSX.Element {
             /* ── List view ────────────────────────────────────────────────────── */
             <div className="space-y-0.5">
               {currentPath && !isSearching && (
-                <button onClick={goBack} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-surface-overlay transition-colors text-left">
-                  <div className="w-9 h-9 flex items-center justify-center shrink-0"><FolderOpen size={18} className="text-text-muted" /></div>
-                  <span className="text-text-muted text-sm">..</span>
+                <button
+                  onClick={goBack}
+                  {...parentDropProps}
+                  className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg transition-colors text-left ${
+                    dropTarget === '..' ? 'bg-accent/15 ring-2 ring-accent/50' : 'hover:bg-surface-overlay'
+                  }`}
+                >
+                  <div className="w-9 h-9 flex items-center justify-center shrink-0">
+                    {dropTarget === '..'
+                      ? <CornerLeftUp size={18} className="text-accent" />
+                      : <FolderOpen size={18} className="text-text-muted" />}
+                  </div>
+                  <span className={`text-sm ${dropTarget === '..' ? 'text-accent' : 'text-text-muted'}`}>
+                    {dropTarget === '..' ? 'Move up a level' : '..'}
+                  </span>
                 </button>
               )}
               {filteredEntries.map((entry) => {
@@ -821,10 +987,17 @@ export default function ApiFilesView(): JSX.Element {
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
                 const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path))
+                const isDropTarget = dropTarget === entry.path
+                const isStaged = stagedMoves.has(entry.path)
                 return (
                   <div key={entry.path}
+                    {...dragSourceProps(entry)}
+                    {...dropTargetProps(entry)}
                     className={`group flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-default ${
-                      isSelected ? 'bg-accent/10 hover:bg-accent/15' : 'hover:bg-surface-overlay'
+                      isDropTarget ? 'bg-accent/15 ring-2 ring-accent/50'
+                        : isSelected ? 'bg-accent/10 hover:bg-accent/15'
+                        : isStaged ? 'bg-accent/[0.06] ring-1 ring-accent/30 hover:bg-accent/10'
+                        : 'hover:bg-surface-overlay'
                     }`}
                     onClick={(e) => {
                       if (mouseLongPress.consumeFired()) return
@@ -886,6 +1059,7 @@ export default function ApiFilesView(): JSX.Element {
                         <span className="block text-text-muted text-[10px] truncate">{parentFolder(entry.path)}</span>
                       )}
                     </span>
+                    {stagedBadge(entry.path)}
                     {isLiked && (
                       <button
                         className="shrink-0 p-1 text-accent"
@@ -920,9 +1094,21 @@ export default function ApiFilesView(): JSX.Element {
             /* ── Grid view ────────────────────────────────────────────────────── */
             <div className="grid gap-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
               {currentPath && !isSearching && (
-                <button onClick={goBack} className="flex flex-col items-center gap-2 p-3 rounded-xl bg-surface-overlay hover:bg-surface-raised transition-colors">
-                  <div className="w-full aspect-square flex items-center justify-center"><FolderOpen size={40} className="text-text-muted" /></div>
-                  <span className="text-text-muted text-xs">..</span>
+                <button
+                  onClick={goBack}
+                  {...parentDropProps}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-colors ${
+                    dropTarget === '..' ? 'bg-accent/15 ring-2 ring-accent/50' : 'bg-surface-overlay hover:bg-surface-raised'
+                  }`}
+                >
+                  <div className="w-full aspect-square flex items-center justify-center">
+                    {dropTarget === '..'
+                      ? <CornerLeftUp size={40} className="text-accent" />
+                      : <FolderOpen size={40} className="text-text-muted" />}
+                  </div>
+                  <span className={`text-xs ${dropTarget === '..' ? 'text-accent' : 'text-text-muted'}`}>
+                    {dropTarget === '..' ? 'Move up' : '..'}
+                  </span>
                 </button>
               )}
               {filteredEntries.map((entry) => {
@@ -932,10 +1118,17 @@ export default function ApiFilesView(): JSX.Element {
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
                 const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path))
+                const isDropTarget = dropTarget === entry.path
+                const isStaged = stagedMoves.has(entry.path)
                 return (
                   <div key={entry.path}
+                    {...dragSourceProps(entry)}
+                    {...dropTargetProps(entry)}
                     className={`group flex flex-col rounded-xl overflow-hidden transition-colors cursor-default ${
-                      isSelected ? 'bg-accent/10 ring-2 ring-accent/40' : 'bg-surface-overlay hover:bg-surface-raised'
+                      isDropTarget ? 'bg-accent/15 ring-2 ring-accent/60'
+                        : isSelected ? 'bg-accent/10 ring-2 ring-accent/40'
+                        : isStaged ? 'bg-accent/[0.06] ring-1 ring-accent/30'
+                        : 'bg-surface-overlay hover:bg-surface-raised'
                     }`}
                     onClick={(e) => {
                       if (mouseLongPress.consumeFired()) return
@@ -1032,6 +1225,7 @@ export default function ApiFilesView(): JSX.Element {
                         <p className="text-text-primary text-xs font-medium truncate">{entry.name}</p>
                         {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
                       </div>
+                      {stagedBadge(entry.path)}
                       {/* Same visible context-menu trigger as the list rows —
                           right-click/long-press aren't discoverable on touch. */}
                       {!selectMode && (
@@ -1133,6 +1327,39 @@ export default function ApiFilesView(): JSX.Element {
           ) : (
             <><X size={13} className="text-red-400" /> ZIP failed</>
           )}
+        </div>
+      )}
+
+      {/* Name prompt for the drop-a-file-onto-a-file gesture: both files move
+          into a folder that doesn't exist yet, and its name is the one thing
+          the drag itself can't say. */}
+      {bundlePrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setBundlePrompt(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
+            <p className="text-text-muted text-xs mb-3">
+              Queues a new folder holding {bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path).length + 1} items, in {parentFolder(bundlePrompt.target.path) || 'the root folder'}.
+            </p>
+            <input
+              autoFocus
+              value={bundlePrompt.name}
+              onChange={e => setBundlePrompt(prev => prev && { ...prev, name: e.target.value })}
+              onKeyDown={e => {
+                if (e.key === 'Enter') confirmBundle()
+                if (e.key === 'Escape') setBundlePrompt(null)
+              }}
+              onFocus={e => e.target.select()}
+              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/50"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setBundlePrompt(null)} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary transition-colors">Cancel</button>
+              <button
+                onClick={confirmBundle}
+                disabled={!bundlePrompt.name.trim()}
+                className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >Queue folder</button>
+            </div>
+          </div>
         </div>
       )}
 

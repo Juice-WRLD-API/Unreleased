@@ -1,16 +1,21 @@
-import { useEffect, useRef } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine } from 'lucide-react'
-import { useStorePick, UploadItem } from '../store/useStore'
+import { useEffect, useRef, useState } from 'react'
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine, FolderPlus, FolderInput, Send } from 'lucide-react'
+import { useStorePick, UploadItem, StagedFileChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
+import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 
 // Triggered from the Uploads row in the side menu (see Sidebar.tsx) — this
 // is a lightweight anchored popup (no backdrop, no drag/resize/lock), not the
 // sandbox/draggable modal system the other panels use. Closes on outside
 // click, same as the old self-contained floating version.
 export default function UploadManager(): JSX.Element {
-  const { uploads, setShowUploadManager, clearCompletedUploads } = useStorePick('uploads', 'setShowUploadManager', 'clearCompletedUploads')
+  const { uploads, setShowUploadManager, clearCompletedUploads, stagedFileChanges } = useStorePick('uploads', 'setShowUploadManager', 'clearCompletedUploads', 'stagedFileChanges')
   const panelRef = useRef<HTMLDivElement>(null)
+  // Lives out here rather than in StagedChanges: a fully successful propose
+  // empties the queue, which unmounts that section — and with it the only
+  // confirmation the user would ever see.
+  const [proposeResult, setProposeResult] = useState<string | null>(null)
 
   useEffect(() => {
     const handler = (e: MouseEvent): void => {
@@ -51,13 +56,90 @@ export default function UploadManager(): JSX.Element {
       </div>
       {/* List */}
       <div className="max-h-72 overflow-y-auto">
+        {stagedFileChanges.length > 0 && <StagedChanges changes={stagedFileChanges} onResult={setProposeResult} />}
+        {proposeResult && (
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
+            <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+            <span className="text-[var(--text-muted)] text-[11px] flex-1">{proposeResult}</span>
+            <button onClick={() => setProposeResult(null)} className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+              <X size={11} />
+            </button>
+          </div>
+        )}
         {uploads.length === 0 ? (
-          <p className="text-[var(--text-muted)] text-xs text-center py-6">No uploads</p>
+          stagedFileChanges.length === 0 && !proposeResult && <p className="text-[var(--text-muted)] text-xs text-center py-6">No uploads</p>
         ) : (
           <div className="divide-y divide-[var(--border)]/40">
             {uploads.map((item) => <UploadRow key={item.id} item={item} />)}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// Changes dragged together in the Files tab, waiting on one Propose. They sit
+// above the transfer list because they're the only rows here the user still
+// has to act on — everything below is already in flight or finished.
+function StagedChanges({ changes, onResult }: {
+  changes: StagedFileChange[]
+  onResult: (message: string | null) => void
+}): JSX.Element {
+  const { unstageFileChange, clearStagedFileChanges } = useStorePick('unstageFileChange', 'clearStagedFileChanges')
+  const [proposing, setProposing] = useState(false)
+
+  const propose = async (): Promise<void> => {
+    if (proposing) return
+    setProposing(true)
+    onResult(null)
+    const { proposed, failed } = await proposeStagedChanges()
+    setProposing(false)
+    onResult(failed > 0
+      ? `Proposed ${proposed}, ${failed} failed — the rest stayed queued`
+      : `Proposed ${proposed} change${proposed === 1 ? '' : 's'}`)
+  }
+
+  return (
+    <div className="border-b border-[var(--border)] bg-[var(--accent)]/[0.04]">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span className="text-[var(--text-primary)] text-[11px] font-semibold flex-1">
+          Staged changes
+          <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-[var(--accent)]/20 text-[var(--accent)] text-[10px] font-medium">{changes.length}</span>
+        </span>
+        <button onClick={clearStagedFileChanges} disabled={proposing}
+          className="text-[10px] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors px-1 rounded">
+          Discard
+        </button>
+      </div>
+      <div className="divide-y divide-[var(--border)]/40">
+        {changes.map((change) => (
+          <div key={change.id} className="flex items-start gap-2 px-3 py-2">
+            <div className="mt-0.5 shrink-0">
+              {change.changeType === 'create_folder'
+                ? <FolderPlus size={13} className="text-[var(--accent)]" />
+                : <FolderInput size={13} className="text-[var(--accent)]" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={change.path}>{stagedChangeLabel(change)}</p>
+              <p className="text-[var(--text-muted)] text-[10px] truncate" title={change.destination ?? change.path}>
+                {change.destination ? `→ ${change.destination}` : change.path}
+              </p>
+              {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
+            </div>
+            <button onClick={() => unstageFileChange(change.id)} disabled={proposing} title="Remove from queue"
+              className="shrink-0 p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors">
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="px-3 py-2 flex items-center gap-2">
+        <button onClick={propose} disabled={proposing}
+          className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity">
+          {proposing
+            ? <><Loader2 size={12} className="animate-spin" /> Proposing…</>
+            : <><Send size={12} /> Propose {changes.length} change{changes.length === 1 ? '' : 's'}</>}
+        </button>
       </div>
     </div>
   )
