@@ -161,7 +161,14 @@ export default function Player(): JSX.Element {
   // crossfade preloaded) can be dropped when the element loads the new
   // media - which is what made a slowed/pitched track silently revert to 1x
   // partway through a playlist until some setting was toggled.
-  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => applyRate(e.currentTarget)
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
+    const audio = e.currentTarget
+    applyRate(audio)
+    // Both slots share this handler - only the active slot finishing its
+    // load means the current track is ready (a preload landing on the
+    // inactive slot doesn't unblock preloading the track after it).
+    if (audio === getActive()) setCurrentTrackReady(true)
+  }
 
 
   // FM elapsed time - ticks locally between WS updates
@@ -215,6 +222,11 @@ export default function Player(): JSX.Element {
 
   // Seek drag buffering - only commit audio.currentTime on mouse release
   const [seekDrag, setSeekDrag] = useState<number | null>(null)
+
+  // Whether the active slot has actually loaded the current track (metadata
+  // received) - gates preloading the next queue track so it doesn't compete
+  // with the current track's own fetch for bandwidth.
+  const [currentTrackReady, setCurrentTrackReady] = useState(false)
 
   // Crossfade state (all refs - no re-renders needed)
   const cfActive     = useRef(false)
@@ -315,8 +327,12 @@ export default function Player(): JSX.Element {
   // pre-shuffled, so the next track is deterministic (queueIndex + 1) there
   // too. Radio's next track lives in radioNext, not the queue - nothing to
   // preload from here.
+  // Gated on currentTrackReady: starting this fetch before the current track
+  // has loaded would fight it for bandwidth, which is exactly backwards -
+  // the song actually playing should never be starved for one that's just
+  // getting a head start.
   useEffect(() => {
-    if (!crossfadeEnabled || radioMode || !isPlaying || queue.length === 0 || cfActive.current) return
+    if (!crossfadeEnabled || radioMode || !isPlaying || queue.length === 0 || cfActive.current || !currentTrackReady) return
     let nextIdx: number
     if (repeat === 'one') nextIdx = queueIndex
     else {
@@ -336,7 +352,7 @@ export default function Player(): JSX.Element {
     // Preloaded slots inherit the current rate too - the loadedmetadata
     // handler re-asserts it once this load settles.
     applyRate(na)
-  }, [queueIndex, queue.length, isPlaying, repeat, crossfadeEnabled, radioMode])
+  }, [queueIndex, queue.length, isPlaying, repeat, crossfadeEnabled, radioMode, currentTrackReady])
 
   // Route both slots through the shared Web Audio effects chain (EQ, balance,
   // mono, silence detection). Elements keep their own volume/rate handling.
@@ -438,12 +454,14 @@ export default function Player(): JSX.Element {
     if (!audio || !currentTrack) return
 
     if (skipNextLoad.current) {
-      // Crossfade just swapped - audio already playing on active slot
+      // Crossfade just swapped - audio already playing on active slot, and it
+      // was the preload target this same track just finished loading as.
       skipNextLoad.current = false
       audio.volume = volumeRef.current
       // This slot was loaded by the crossfade preload, which never ran the
       // rate setup below - apply it now or the faded-in track plays at 1x.
       applyRate(audio)
+      setCurrentTrackReady(true)
       return
     }
 
@@ -453,6 +471,15 @@ export default function Player(): JSX.Element {
     // deliberate double-invoke in dev) firing a second network request for
     // the same track.
     if (audio.src === fileUrl) return
+
+    setCurrentTrackReady(false)
+    // A different track just started loading - any in-flight preload of an
+    // upcoming queue track was fetched for the old "next", not this one.
+    // Abort it now instead of leaving it to compete with this track's own
+    // load for bandwidth; the preload effect below will kick off a fresh one
+    // once this track is ready and the real next track is known.
+    const na = getNext()
+    if (na && na.src) { na.removeAttribute('src'); na.load() }
 
     cancelCF()
     cancelPauseFade()
