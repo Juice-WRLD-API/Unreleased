@@ -248,6 +248,33 @@ export default function Player(): JSX.Element {
   const getNext = (): HTMLAudioElement | null =>
     activeSlot.current === 'A' ? slotB.current : slotA.current
 
+  // Tracks each slot's in-flight play() promise. With preload="none" the
+  // element only starts fetching once play() is called, so pausing right
+  // after selecting a track (before that fetch/decode settles) races the
+  // pending play() request - calling pause() while it's still outstanding
+  // can lose to it and leave the track audibly playing once the data
+  // arrives. Deferring the pause until play() has settled closes that gap.
+  const pendingPlays = useRef(new WeakMap<HTMLAudioElement, Promise<unknown>>()).current
+
+  const playSlot = (audio: HTMLAudioElement): void => {
+    const p = audio.play().catch(console.error)
+    pendingPlays.set(audio, p)
+    p.finally(() => { if (pendingPlays.get(audio) === p) pendingPlays.delete(audio) })
+  }
+
+  const pauseSlot = (audio: HTMLAudioElement): void => {
+    const pending = pendingPlays.get(audio)
+    if (pending) {
+      // Wait for this play() to settle before pausing - pausing while it's
+      // still outstanding can lose the race and leave the track audibly
+      // playing once the data arrives. Skip the pause if a newer play()
+      // has since superseded this one (a quick resume raced back in).
+      pending.finally(() => { if (!pendingPlays.has(audio) || pendingPlays.get(audio) === pending) audio.pause() })
+    } else {
+      audio.pause()
+    }
+  }
+
   const cancelPauseFade = (): void => {
     if (pauseFadeRaf.current != null) { cancelAnimationFrame(pauseFadeRaf.current); pauseFadeRaf.current = null }
     if (pauseFadeTimer.current != null) { clearTimeout(pauseFadeTimer.current); pauseFadeTimer.current = null }
@@ -432,7 +459,7 @@ export default function Player(): JSX.Element {
     audio.src = fileUrl
     audio.volume = volumeRef.current
     applyRate(audio)
-    if (isPlaying) audio.play().catch(console.error)
+    if (isPlaying) playSlot(audio)
   }, [currentTrack?.id])
 
   // Rotate suggested covers (when the setting is on and the song has no cover
@@ -471,7 +498,7 @@ export default function Player(): JSX.Element {
         // still-running fade-out left the volume when it got cancelled above.
         const from = audio.paused ? 0 : audio.volume
         audio.volume = from
-        audio.play().catch(console.error)
+        playSlot(audio)
         const startTime = performance.now()
         // Land the ramp at full volume - from the RAF ramp completing, or from
         // the timer backstop below. RAF is frozen while this window is hidden/
@@ -496,7 +523,7 @@ export default function Player(): JSX.Element {
         // Instant resume (fade off, or fired while hidden). Restore volume in
         // case a previous ramp was snapped/cancelled mid-fade at a low value.
         audio.volume = volumeRef.current
-        audio.play().catch(console.error)
+        playSlot(audio)
       }
     } else {
       // Pause must stop BOTH slots. Mid-crossfade the incoming slot is also
@@ -508,7 +535,8 @@ export default function Player(): JSX.Element {
       if (smoothFade && !audio.paused && !audio.ended) {
         // Fade only the active slot; the inactive one is silenced immediately
         // (it should never be audible outside a crossfade anyway).
-        getNext()?.pause()
+        const next = getNext()
+        if (next) pauseSlot(next)
         const startVol = audio.volume
         const startTime = performance.now()
         // Finalize the pause. Runs from whichever fires first - the RAF ramp
@@ -517,7 +545,7 @@ export default function Player(): JSX.Element {
         // idempotent by clearing the other pending handle.
         const finalize = (): void => {
           cancelPauseFade()
-          audio.pause()
+          pauseSlot(audio)
           // Restore element volume while silent so any code path that plays
           // this slot without going through the resume ramp isn't stuck at 0.
           audio.volume = volumeRef.current
@@ -535,8 +563,8 @@ export default function Player(): JSX.Element {
         // it normally loses the race to RAF and only wins when RAF is stalled.
         pauseFadeTimer.current = window.setTimeout(finalize, PAUSE_FADE_MS + 50)
       } else {
-        slotA.current?.pause()
-        slotB.current?.pause()
+        if (slotA.current) pauseSlot(slotA.current)
+        if (slotB.current) pauseSlot(slotB.current)
       }
     }
   }, [isPlaying])
