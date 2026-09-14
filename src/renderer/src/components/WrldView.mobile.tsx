@@ -11,7 +11,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
-import { buildImageUrl, apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { buildImageUrl, apiFetch, getSongsByIds, songToTrack } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { searchRadioLibrary } from '../lib/radioLibrary'
 import type { RadioLibraryTrack } from '../lib/radioLibrary'
@@ -182,12 +182,12 @@ export default function WrldView(): JSX.Element {
       // A version linked in the /versions/ table isn't necessarily playable -
       // recording-session songs (and some unsurfaced ones) have no `path`,
       // same gate used for bulk queue/playlist adds elsewhere in the app.
-      const withPaths = await Promise.all(metas.map(async m => {
-        try {
-          const song = await apiFetch<JWApiSong>(`/songs/${m.songId}/`)
-          return song.path ? m : null
-        } catch { return null }
-      }))
+      const songs = await getSongsByIds(metas.map(m => m.songId)).catch(() => [])
+      const byId = new Map(songs.map(s => [s.id, s]))
+      const withPaths = metas.map(m => {
+        const song = byId.get(m.songId)
+        return song?.path ? m : null
+      })
       if (cancelled) return
       setSongVersions(
         withPaths

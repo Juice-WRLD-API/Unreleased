@@ -4,12 +4,13 @@ import {
   X, Music2, Pencil, Flag,
   Clock, Hash, MicVocal, Music, Wrench, FileText, Piano, MapPin,
   Calendar, CalendarClock, CalendarDays, Droplets, Gauge, Layers,
-  GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon
+  GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon,
+  Activity, Music4
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
 import { useCanEdit } from '../hooks/useChannelRoles'
-import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import { versionsEnabled, getVersionGroup, SongVersionMeta } from '../lib/versionsApi'
 import { formatDuration } from '../lib/format'
 import { copyCoverImage, saveCoverImage } from '../lib/coverImage'
@@ -100,10 +101,17 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
     if (!versionsEnabled) return
     setLoadingVersions(true)
     getVersionGroup(id)
-      .then(metas => Promise.all(metas.map(meta =>
-        apiFetch<JWApiSong>(`/songs/${meta.songId}/`).then(song => ({ song, meta })).catch(() => null)
-      )))
-      .then(entries => setVersions(entries.filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)))
+      .then(async metas => {
+        const songs = await getSongsByIds(metas.map(m => m.songId))
+        const byId = new Map(songs.map(s => [s.id, s]))
+        return metas
+          .map((meta): { song: JWApiSong; meta: SongVersionMeta } | null => {
+            const song = byId.get(meta.songId)
+            return song ? { song, meta } : null
+          })
+          .filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)
+      })
+      .then(entries => setVersions(entries))
       .finally(() => setLoadingVersions(false))
   }
 
@@ -390,6 +398,8 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
           )}
 
           <TextSection icon={Gauge} label="Bitrate" value={displaySong.bitrate} />
+          <TextSection icon={Activity} label="BPM" value={displaySong.bpm != null ? String(displaySong.bpm) : null} />
+          <TextSection icon={Music4} label="Key" value={displaySong.key} />
 
           {hasSession && (
             <Section icon={Layers} label="Session">

@@ -175,6 +175,8 @@ function OverviewTab() {
   "record_dates": "Recording Dates",
   "length": "3:59",
   "bitrate": "Bitrate Info",
+  "bpm": 140,
+  "key": "C# Minor",
   "additional_information": "Extra Info",
   "file_names": "File Name(s)",
   "instrumentals": "Instrumental beat name",
@@ -274,6 +276,46 @@ function SongsTab() {
 
       <Section title="Single Song (GET /songs/{id}/)">
         <p className="text-sm text-text-secondary">Returns a full song object by internal ID (<Code>song.id</Code>, not <Code>public_id</Code>).</p>
+      </Section>
+
+      <Section title="Batch Fetch (GET /songs/?ids=...)">
+        <p className="text-sm text-text-secondary">
+          Resolves many songs by internal ID in one request instead of one <Code>{'/songs/{id}/'}</Code> call
+          per song - built for anything that used to fan out tens or hundreds of individual lookups
+          (a stats page resolving played-song IDs, a bulk edit over a large selection, a version-group lookup).
+        </p>
+        <Table
+          headers={['Param', 'Type', 'Description']}
+          rows={[
+            [<Code>ids</Code>, 'string', 'Comma-separated internal IDs, no spaces, e.g. "74834,84329,83274". Max 250 per request - send more as additional requests.'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-2">
+          Response: <span className="font-semibold text-text-primary">Content-Type: text/csv</span>, not the usual JSON envelope
+        </p>
+        <p className="text-xs text-text-muted">
+          One row per matched song, header row first. An ID that doesn&apos;t exist is silently omitted -
+          no error, no null placeholder - and <span className="font-semibold text-text-primary">row order is not
+          guaranteed to match the order IDs were passed in</span>, so pair rows back up by their own{' '}
+          <Code>id</Code> column rather than by position.
+        </p>
+        <Pre>{`id,public_id,name,original_key,track_titles,path,length,credited_artists,producers,engineers,recording_locations,record_dates,bitrate,bpm,key,additional_information,file_names,instrumentals,instrumental_names,preview_date,release_date,dates,session_titles,session_tracking,notes,snippets,era_id,era_name,era_description,era_time_frame,image_url,category,lyrics,synced_lyrics,leak_type,date_leaked,album
+74834,123,"Song Title",,"[""Alt Title""]",Compilation/folder/song.mp3,3:59,Juice WRLD,Producer Name,,,,320 kbps,140,C# Minor,,,,,,,,,,,108,GB&GR,Goodbye & Good Riddance era,(December 2017-May 2018),/assets/cover.webp,unreleased,,,,,`}</Pre>
+        <p className="text-xs text-text-muted">
+          Every column from the full song shape is present, flattened for a table row:
+        </p>
+        <Table
+          headers={['Column(s)', 'Notes']}
+          rows={[
+            [<Code>track_titles</Code>, <>and <Code>snippets</Code> are JSON-encoded arrays inside their cell (quoted per RFC4180, since the JSON itself contains commas) - <Code>JSON.parse</Code> the cell to get the array back.</>],
+            [<><Code>era_id</Code>, <Code>era_name</Code>, <Code>era_description</Code>, <Code>era_time_frame</Code></>, <>the nested <Code>era</Code> object, flattened. An empty <Code>era_id</Code> means the song has no era (<Code>era: null</Code>).</>],
+            ['Everything else', 'One column per scalar field on the song object, same names as the JSON shape above. An empty cell means null.'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Standard RFC4180 quoting throughout: a field containing a comma, a double quote, or a newline is
+          wrapped in <Code>"..."</Code>, with a literal quote inside doubled (<Code>""</Code>).
+        </p>
       </Section>
 
       <Section title="GET /categories/">

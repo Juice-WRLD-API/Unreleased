@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Layers, ChevronRight, Loader2, Star } from 'lucide-react'
 import { getVersionGroup } from '../lib/versionsApi'
-import { apiFetch, JWApiSong } from '../lib/juicewrldApi'
+import { getSongsByIds, JWApiSong } from '../lib/juicewrldApi'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { placeFlyout } from '../lib/menuFlyout'
@@ -73,21 +73,25 @@ export default function ChangeVersionMenuItem({
     ;(async () => {
       try {
         const metas = await getVersionGroup(songId)
-        const fetched = await Promise.all(metas.map(m =>
-          apiFetch<JWApiSong>(`/songs/${m.songId}/`)
-            .then(song => ({
+        const songs = await getSongsByIds(metas.map(m => m.songId))
+        const byId = new Map(songs.map(s => [s.id, s]))
+        // Songs with no `path` (recording sessions, some unsurfaced entries)
+        // have nothing to actually play - hidden here since both switching to
+        // one and starring it as the group default would break playback.
+        const fetched = metas
+          .map((m): VersionOption | null => {
+            const song = byId.get(m.songId)
+            if (!song?.path) return null
+            return {
               song,
               version: m.version,
               label: m.version
                 ? (m.versionTitle ? `${m.version} - ${m.versionTitle}` : m.version)
                 : m.versionTitle,
-            }))
-            .catch(() => null)
-        ))
-        // Songs with no `path` (recording sessions, some unsurfaced entries)
-        // have nothing to actually play - hidden here since both switching to
-        // one and starring it as the group default would break playback.
-        if (!cancelled) setVersions(fetched.filter((v): v is VersionOption => !!v && !!v.song.path))
+            }
+          })
+          .filter((v): v is VersionOption => !!v)
+        if (!cancelled) setVersions(fetched)
       } finally {
         if (!cancelled) setLoading(false)
       }

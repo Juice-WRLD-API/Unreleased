@@ -7,7 +7,7 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
-import { buildStreamUrl, findSessionZips, songToTrack, apiFetch, JWApiSong, JWApiFileEntry } from '../lib/juicewrldApi'
+import { buildStreamUrl, findSessionZips, songToTrack, getSongsByIds, JWApiSong, JWApiFileEntry } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import ChangeVersionMenuItem from './ChangeVersionMenuItem'
 import { placeFlyout } from '../lib/menuFlyout'
@@ -189,18 +189,20 @@ export default function SongContextMenu({
     ;(async () => {
       try {
         const metas = await getVersionGroup(songId)
-        const fetched = await Promise.all(metas.map(m =>
-          apiFetch<JWApiSong>(`/songs/${m.songId}/`)
-            .then(song => ({
+        const songs = await getSongsByIds(metas.map(m => m.songId))
+        const byId = new Map(songs.map(s => [s.id, s]))
+        const fetched = metas
+          .map(m => {
+            const song = byId.get(m.songId)
+            if (!song?.path) return null
+            return {
               song,
               version: m.version,
               label: m.version ? (m.versionTitle ? `${m.version} - ${m.versionTitle}` : m.version) : m.versionTitle,
-            }))
-            .catch(() => null)
-        ))
-        if (!cancelled) {
-          setMobileVersions(fetched.filter((v): v is { song: JWApiSong; label: string | null; version: string | null } => !!v && !!v.song.path))
-        }
+            }
+          })
+          .filter((v): v is { song: JWApiSong; label: string | null; version: string | null } => !!v)
+        if (!cancelled) setMobileVersions(fetched)
       } finally {
         if (!cancelled) setMobileVersionsLoading(false)
       }

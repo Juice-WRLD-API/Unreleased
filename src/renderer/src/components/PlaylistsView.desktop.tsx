@@ -14,7 +14,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { buildImageUrl, buildStreamUrl, JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
+import { buildImageUrl, buildStreamUrl, JWAPI_BASE, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { fisherYates } from '../store/queueSlice'
@@ -973,10 +973,9 @@ export default function PlaylistsView(): JSX.Element {
 
   // "Edit" needs full song objects (producers, dates, lyrics, …), but a
   // playlist's own items only carry the lite shape the list endpoint returns
-  // (title/artist/path - enough for a row, not enough for the editor). Fetch
-  // each selected song in full before opening the dialog, same endpoint
-  // EditorPage.loadSong uses. A handful at a time so a large selection
-  // doesn't fire fifty requests at once.
+  // (title/artist/path - enough for a row, not enough for the editor). One
+  // batched /songs/?ids=... request resolves the whole selection instead of
+  // firing one /songs/{id}/ call per song.
   const [bulkEditLoading, setBulkEditLoading] = useState(false)
   const bulkEdit = useCallback(async () => {
     const ids = selectedTrackList
@@ -985,16 +984,7 @@ export default function PlaylistsView(): JSX.Element {
     if (!ids.length) return
     setBulkEditLoading(true)
     try {
-      const songs: JWApiSong[] = []
-      const POOL = 6
-      let next = 0
-      await Promise.all(Array.from({ length: Math.min(POOL, ids.length) }, async () => {
-        for (;;) {
-          const i = next++
-          if (i >= ids.length) return
-          try { songs.push(await apiFetch<JWApiSong>(`/songs/${ids[i]}/`)) } catch {}
-        }
-      }))
+      const songs = await getSongsByIds(ids)
       if (songs.length) openBulkEditor(songs)
     } finally {
       setBulkEditLoading(false)

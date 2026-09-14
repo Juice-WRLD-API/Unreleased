@@ -2,19 +2,22 @@
 //
 // A song-preference row is just {song id, playcount} - no title, no length, no
 // era - so the page has to resolve every played id to a song before it can
-// rank anything. Doing that one id at a time meant hundreds of requests on
-// open, and worse, they didn't stick: apiCache holds ~300 entries for the
-// entire app, so a few hundred played songs evict each other (and everything
-// else) and the next visit refetches the lot.
+// rank anything. Doing that one id at a time used to mean hundreds of
+// requests on open, and worse, they didn't stick: apiCache holds ~300 entries
+// for the entire app, so a few hundred played songs evict each other (and
+// everything else) and the next visit refetches the lot. A moderate number of
+// unknown ids now goes through the batch endpoint instead (getSongsByIds,
+// juicewrldApi.ts) - one request instead of one per id.
 //
-// So this mirrors lib/heardle's pool cache instead: page the catalogue in bulk,
-// slim each row down to the fields the page actually uses, and keep that in
-// localStorage for a day. ~25 requests once, then none. Deliberately NOT routed
-// through apiFetch for the same reason heardle isn't - a page of full song
-// objects is ~0.5MB, and caching those raw would blow the offline cache out.
+// For a genuinely large unknown set this still mirrors lib/heardle's pool
+// cache: page the catalogue in bulk, slim each row down to the fields the
+// page actually uses, and keep that in localStorage for a day. ~25 requests
+// once, then none. Deliberately NOT routed through apiFetch for the same
+// reason heardle isn't - a page of full song objects is ~0.5MB, and caching
+// those raw would blow the offline cache out.
 
 import { apiRequest } from './apiClient'
-import { JWAPI_BASE, apiFetch, songToTrack } from './juicewrldApi'
+import { JWAPI_BASE, getSongsByIds, songToTrack } from './juicewrldApi'
 import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import type { Track } from '../types'
 
@@ -79,13 +82,12 @@ const PAGE_SIZE = 100
 // malformed `next` can't spin the loop forever.
 const MAX_PAGES = 40
 
-// Below this many unknown ids, fetching them individually is cheaper than
-// paging the whole catalogue - a user who's played a handful of songs
-// shouldn't pull 2.5k rows to learn about six of them.
-const PER_ID_THRESHOLD = 40
-
-// Concurrent /songs/{id}/ requests on the per-id path.
-const FETCH_CONCURRENCY = 6
+// Below this many unknown ids, a batched /songs/?ids=... lookup is cheaper
+// than paging the whole catalogue - a user who's played a handful of songs
+// shouldn't pull 2.5k rows to learn about six of them. Lines up with the
+// batch endpoint's own per-request cap (BATCH_MAX_IDS in juicewrldApi.ts) so
+// this path almost always resolves in a single request.
+const PER_ID_THRESHOLD = 250
 
 interface CachedCatalog { ts: number; songs: StatsSong[] }
 
@@ -155,32 +157,6 @@ export async function loadCatalog(onPage?: (page: number, total: number) => void
   return memoryCatalog
 }
 
-/** Runs `fn` over `items` with at most `limit` in flight. Failures resolve to
- *  null rather than rejecting the batch. */
-async function mapPool<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-  onSettled?: () => void,
-): Promise<(R | null)[]> {
-  const out: (R | null)[] = new Array(items.length).fill(null)
-  let next = 0
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const i = next++
-      if (i >= items.length) return
-      try {
-        out[i] = await fn(items[i])
-      } catch {
-        out[i] = null
-      }
-      onSettled?.()
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return out
-}
-
 /** What the view is currently waiting on, so it can label the progress line. */
 export type ResolvePhase = 'catalog' | 'songs'
 
@@ -238,18 +214,13 @@ export async function resolveStatsSongs(
     return out
   }
 
-  // Few enough to ask for directly. These do go through apiFetch: single songs
-  // are small, and its cache is the same one the tracker and song-info modal
-  // populate, so the entries get reused rather than sitting idle.
-  let done = 0
+  // Few enough (≤ PER_ID_THRESHOLD) to ask for directly - one batched
+  // /songs/?ids=... request (chunked only if that ever changes to exceed the
+  // endpoint's own per-request cap) instead of one /songs/{id}/ call per id.
   onProgress({ phase: 'songs', done: 0, total: missing.length })
-  const results = await mapPool(
-    missing,
-    FETCH_CONCURRENCY,
-    (id) => apiFetch<JWApiSong>(`/songs/${id}/`),
-    () => { if (!isCancelled()) onProgress({ phase: 'songs', done: ++done, total: missing.length }) },
-  )
+  const results = await getSongsByIds(missing)
   if (isCancelled()) return out
-  for (const song of results) if (song) out.set(song.id, slimSong(song))
+  for (const song of results) out.set(song.id, slimSong(song))
+  onProgress({ phase: 'songs', done: missing.length, total: missing.length })
   return out
 }
