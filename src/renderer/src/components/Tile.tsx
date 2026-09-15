@@ -41,7 +41,7 @@ export function Tile({ title, icon, action, span = '', children }: {
           overflow-y-auto here is now just a fallback for tiles with no
           scrollable region of their own - a no-op once an inner list is
           properly sized and scrolling itself. */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
         {children}
       </div>
     </section>
