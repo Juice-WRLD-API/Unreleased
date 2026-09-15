@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { toBlob, toPng } from 'html-to-image'
-import { X, Download, Share2, Copy, Loader2, Music2 } from 'lucide-react'
+import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus } from 'lucide-react'
 import { ModalOverlay } from './Modal'
 import { parseLrc, isLrcFormat, getCurrentLineIndex } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
@@ -24,7 +24,7 @@ interface Props {
 const MAX_LINES = 8
 
 type Format = 'story' | 'square' | 'post' | 'portrait' | 'landscape' | 'widescreen'
-type BgStyle = 'blur' | 'solid' | 'gradient'
+type BgStyle = 'blur' | 'solid' | 'gradient' | 'custom'
 type TextSize = 'S' | 'M' | 'L'
 type TextPos = 'top' | 'center' | 'bottom'
 type TextColor = 'white' | 'accent' | 'gold'
@@ -113,7 +113,7 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
   return (
     <div>
       <p className="text-text-muted text-[11px] mb-1.5">{label}</p>
-      <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--surface-highest)]">
+      <div className="flex flex-wrap gap-1 p-1 rounded-lg bg-[var(--surface-highest)]">
         {options.map(opt => {
           const active = value === opt.key
           return (
@@ -121,7 +121,7 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
               key={opt.key}
               onClick={() => onChange(opt.key)}
               aria-pressed={active}
-              className={`flex-1 min-w-0 h-7 rounded-md text-[11px] font-medium transition-colors ${
+              className={`px-2 h-7 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors ${
                 active ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-overlay'
               }`}
             >
@@ -137,9 +137,11 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
 export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, onClose }: Props): JSX.Element {
   const lines = useMemo(() => shareableLines(rawLyrics), [rawLyrics])
 
-  const [selStart, setSelStart] = useState(0)
-  const [selEnd, setSelEnd] = useState(Math.min(2, Math.max(0, lines.length - 1)))
-  const [anchor, setAnchor] = useState<number | null>(null)
+  // Sorted line indices - a plain toggle set rather than a [start, end] range,
+  // so a selection can skip lines in the middle (e.g. a verse's 1st, 2nd and
+  // 4th lines) instead of only ever picking one contiguous block.
+  const [selected, setSelected] = useState<number[]>(() => lines.slice(0, 3).map((_, i) => i))
+  const selectedSet = useMemo(() => new Set(selected), [selected])
 
   const [format, setFormat] = useState<Format>('story')
   const [bgStyle, setBgStyle] = useState<BgStyle>('blur')
@@ -155,6 +157,20 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     ? `'${customFont.trim().replace(/'/g, "\\'")}', ${getFont(undefined).stack}`
     : getFont(fontId).stack
 
+  // A user-picked photo, read locally via FileReader rather than uploaded
+  // anywhere - it's already a data: URL, so unlike the album cover it never
+  // risks a tainted export canvas.
+  const [customBgUrl, setCustomBgUrl] = useState<string | null>(null)
+  const bgFileInputRef = useRef<HTMLInputElement>(null)
+  const handleCustomBgPick = (e: ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => setCustomBgUrl(reader.result as string)
+    reader.readAsDataURL(file)
+  }
+
   const { w: cardW, h: cardH } = FORMATS.find(f => f.key === format) ?? FORMATS[0]
 
   // Default the selection to whatever line is currently playing (± context),
@@ -167,8 +183,9 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     const text = synced[idx]?.text
     const flatIdx = text ? lines.indexOf(text) : -1
     if (flatIdx < 0) return
-    setSelStart(Math.max(0, flatIdx - 1))
-    setSelEnd(Math.min(lines.length - 1, flatIdx + 1))
+    const start = Math.max(0, flatIdx - 1)
+    const end = Math.min(lines.length - 1, flatIdx + 1)
+    setSelected(Array.from({ length: end - start + 1 }, (_, k) => start + k))
     // Only want this once, on open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -197,31 +214,18 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   const [busy, setBusy] = useState<'download' | 'copy' | 'share' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // Plain toggle: click an unselected line to add it (up to MAX_LINES), click
+  // a selected one to drop it - so a selection can skip lines in between
+  // instead of always being one contiguous block.
   const handleLineClick = (i: number): void => {
-    if (anchor === null) {
-      setAnchor(i)
-      setSelStart(i)
-      setSelEnd(i)
-      return
-    }
-    if (anchor === i && selStart === i && selEnd === i) {
-      // Clicking the sole selected line again clears the selection.
-      setAnchor(null)
-      return
-    }
-    let start = Math.min(anchor, i)
-    let end = Math.max(anchor, i)
-    if (end - start + 1 > MAX_LINES) {
-      // Keep the anchor fixed and clamp the far edge, so the range grows only
-      // toward where the user is clicking.
-      if (i > anchor) end = start + MAX_LINES - 1
-      else start = end - MAX_LINES + 1
-    }
-    setSelStart(start)
-    setSelEnd(end)
+    setSelected(prev => {
+      if (prev.includes(i)) return prev.filter(x => x !== i)
+      if (prev.length >= MAX_LINES) return prev
+      return [...prev, i].sort((a, b) => a - b)
+    })
   }
 
-  const selectedLines = lines.slice(selStart, selEnd + 1)
+  const selectedLines = selected.map(i => lines[i])
   const { top: textPadTop, bottom: textPadBottom } = textPadding(cardH, showInfoBar)
   const textAreaH = cardH - textPadTop - textPadBottom
   const textAreaW = cardW - 52 // 26px horizontal padding each side, see the card's own padding below
@@ -309,30 +313,33 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
             <div className="flex-1 min-w-0 min-h-0 flex flex-col border-b md:border-b-0 md:border-r border-[var(--border)]">
               <p className="text-xs text-text-muted px-4 pt-3 pb-2 shrink-0">
-                Tap a line, then another, to pick up to {MAX_LINES} lines to share.
+                Tap up to {MAX_LINES} lines to share - skip any you don't want, they don't have to be next to each other.
               </p>
               <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-3">
                 {lines.map((line, i) => {
-                  const selected = i >= selStart && i <= selEnd && anchor !== null
-                  // A contiguous selection reads as one merged block (like a
-                  // message group) instead of a stack of separately-rounded
+                  const isSelected = selectedSet.has(i)
+                  // A run of consecutive selected lines reads as one merged
+                  // block (like a message group) instead of separately-rounded
                   // pills: only the outer top/bottom corners round, the seam
-                  // between adjacent selected lines stays flat.
-                  const isFirst = i === selStart
-                  const isLast = i === selEnd
-                  const rounding = !selected || (isFirst && isLast)
+                  // between adjacent selected lines stays flat. A selected line
+                  // next to a *skipped* one still gets its own full rounding.
+                  const prevSelected = selectedSet.has(i - 1)
+                  const nextSelected = selectedSet.has(i + 1)
+                  const rounding = !isSelected
                     ? 'rounded-lg'
-                    : isFirst
-                    ? 'rounded-t-lg rounded-b-none'
-                    : isLast
+                    : prevSelected && nextSelected
+                    ? 'rounded-none'
+                    : prevSelected
                     ? 'rounded-b-lg rounded-t-none'
-                    : 'rounded-none'
+                    : nextSelected
+                    ? 'rounded-t-lg rounded-b-none'
+                    : 'rounded-lg'
                   return (
                     <button
                       key={i}
                       onClick={() => handleLineClick(i)}
                       className={`w-full text-left px-2.5 py-1.5 text-sm transition-colors ${rounding} ${
-                        selected ? 'bg-accent/20 text-text-primary' : 'text-text-secondary hover:bg-surface-overlay'
+                        isSelected ? 'bg-accent/20 text-text-primary' : 'text-text-secondary hover:bg-surface-overlay'
                       }`}
                     >
                       {line}
@@ -372,8 +379,24 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   })}
                 </div>
               </div>
-              <SegmentedControl label="Background" value={bgStyle} onChange={setBgStyle}
-                options={[{ key: 'blur', label: 'Blur' }, { key: 'solid', label: 'Solid' }, { key: 'gradient', label: 'Gradient' }]} />
+              <div>
+                <SegmentedControl label="Background" value={bgStyle} onChange={setBgStyle}
+                  options={[
+                    { key: 'blur', label: 'Blur' }, { key: 'solid', label: 'Solid' },
+                    { key: 'gradient', label: 'Gradient' }, { key: 'custom', label: 'Custom' },
+                  ]} />
+                {bgStyle === 'custom' && (
+                  <>
+                    <input ref={bgFileInputRef} type="file" accept="image/*" onChange={handleCustomBgPick} className="hidden" />
+                    <button
+                      onClick={() => bgFileInputRef.current?.click()}
+                      className="mt-1.5 w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-secondary text-[11px] font-medium flex items-center justify-center gap-1.5 hover:bg-surface-overlay transition-colors"
+                    >
+                      <ImagePlus size={12} /> {customBgUrl ? 'Change picture' : 'Choose picture'}
+                    </button>
+                  </>
+                )}
+              </div>
               <div>
                 <p className="text-text-muted text-[11px] mb-1.5">Font</p>
                 <select
@@ -447,6 +470,13 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   )}
                   {bgStyle === 'gradient' && (
                     <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, rgb(var(--accent-rgb) / 0.85), #0b0b0d 72%)' }} />
+                  )}
+                  {bgStyle === 'custom' && customBgUrl && (
+                    <img
+                      src={customBgUrl}
+                      alt=""
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
                   )}
                   <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.55))' }} />
                   <div style={{
