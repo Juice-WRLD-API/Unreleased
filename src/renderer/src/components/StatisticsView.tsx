@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
-import { ChevronLeft, BarChart3, Play, Radio, Music2 } from 'lucide-react'
+import { ChevronLeft, BarChart3, Play, Radio, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import {
   apiFetch, apiPeek, getSongById, songToTrack,
@@ -420,6 +420,38 @@ export default function StatisticsView(): JSX.Element {
           </button>
           <h1 className="text-text-primary text-xl font-bold">Statistics</h1>
           <span className="text-xs text-text-muted font-mono">juicewrldapi.com</span>
+        </div>
+
+        <div className="flex items-center gap-0.5 mt-2.5 w-fit bg-surface-overlay rounded-md p-0.5">
+          <button
+            onClick={() => setActiveView('api-tracker')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+          >
+            <Music2 size={11} /> Songs
+          </button>
+          <button
+            onClick={() => setActiveView('api-tracker')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+          >
+            <Mic2 size={11} /> Lyrics
+          </button>
+          <button
+            onClick={() => setActiveView('api-tracker')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+          >
+            <CalendarDays size={11} /> Overview
+          </button>
+          <button
+            onClick={() => setActiveView('api-tracker')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+          >
+            <Users size={11} /> Producers
+          </button>
+          <button
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors bg-surface-raised text-text-primary"
+          >
+            <BarChart3 size={11} /> Statistics
+          </button>
         </div>
       </div>
 
