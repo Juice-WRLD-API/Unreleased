@@ -27,6 +27,7 @@ export const TierlistView = lazyView(() => import('../components/TierlistView'))
 export const StatsView = lazyView(() => import('../components/StatsView'))
 export const StatisticsView = lazyView(() => import('../components/StatisticsView'))
 export const DownloadAppView = lazyView(() => import('../components/DownloadAppView'))
+export const ThankYouView = lazyView(() => import('../components/ThankYouView'))
 export const AlbumsAdminView = lazyView(() => import('../components/AlbumsAdminView'))
 export const ContributorPage = lazyView(() => import('../components/ContributorPage'))
 export const ContributorProfileView = lazyView(() => import('../components/ContributorProfileView'))
@@ -60,6 +61,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   stats: () => import('../components/StatsView'),
   statistics: () => import('../components/StatisticsView'),
   download: () => import('../components/DownloadAppView'),
+  thanks: () => import('../components/ThankYouView'),
   'albums-admin': () => import('../components/AlbumsAdminView'),
   contributor: () => import('../components/ContributorPage'),
   'contributor-profile': () => import('../components/ContributorProfileView'),

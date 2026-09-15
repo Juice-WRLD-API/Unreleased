@@ -85,6 +85,11 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     description:
       'Get unreleased for Windows, macOS and Linux - local file playback, offline downloads, Discord Rich Presence, global hotkeys, and pop-out windows.',
   },
+  thanks: {
+    path: '/thank-you',
+    title: 'Thank you',
+    description: 'Thank you to everyone who has donated to help keep unreleased running.',
+  },
 
   // Personal or unstable surfaces: crawlable in principle, worthless in an
   // index, and in several cases they render empty for a signed-out crawler.

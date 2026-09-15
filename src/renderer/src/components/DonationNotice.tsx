@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Heart, Copy, Check, X as XIcon } from 'lucide-react'
 import { COOKIE_NOTICE_ACK_EVENT } from './CookieNotice'
+import { useStorePick } from '../store/useStore'
 
 const STORAGE_KEY = 'donation-notice-dismissed'
 const COOKIE_STORAGE_KEY = 'cookie-notice-ack'
@@ -44,6 +45,7 @@ function AddressRow({ label, value }: { label: string; value: string }): JSX.Ele
 // site. Purely informational - dismissing it is remembered so it never
 // shows again on this device.
 export default function DonationNotice(): JSX.Element | null {
+  const { setActiveView } = useStorePick('setActiveView')
   const [dismissed, setDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY) === '1'
@@ -90,6 +92,12 @@ export default function DonationNotice(): JSX.Element | null {
             <div className="flex flex-col gap-1.5">
               {ADDRESSES.map(a => <AddressRow key={a.label} label={a.label} value={a.value} />)}
             </div>
+            <button
+              onClick={() => { setActiveView('thanks'); dismiss() }}
+              className="mt-2 text-[11px] font-semibold text-accent hover:underline"
+            >
+              See who&rsquo;s helped us
+            </button>
           </div>
           <button
             onClick={dismiss}

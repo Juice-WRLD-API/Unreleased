@@ -46,6 +46,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/wrapped') return 'stats'
   if (pathname === '/statistics') return 'statistics'
   if (pathname === '/download') return 'download'
+  if (pathname === '/thank-you') return 'thanks'
   if (pathname === '/settings') return 'settings'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
   if (pathname === '/auth/discord/callback') return 'api-tracker'
@@ -83,7 +84,7 @@ import MoreNavSheet from './components/MoreNavSheet'
 import {
   EditorPage, AdminPage, SharedPlaylistView, EditorProfileView, NotFoundView,
   DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
-  StatsView, StatisticsView, DownloadAppView, AlbumsAdminView, ContributorPage,
+  StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
   LikedSongsView, DiagnosticsModal, preloadView,
 } from './lib/lazyViews'
@@ -275,6 +276,7 @@ export default function App(): JSX.Element {
               : bgView === 'stats' ? <StatsView />
               : bgView === 'statistics' ? <StatisticsView />
               : bgView === 'download' ? <DownloadAppView />
+              : bgView === 'thanks' ? <ThankYouView />
               : bgView === 'albums-admin' ? <AlbumsAdminView />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
