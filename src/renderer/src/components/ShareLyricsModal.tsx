@@ -6,6 +6,7 @@ import { parseLrc, isLrcFormat, getCurrentLineIndex } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
 import { getAudioCurrentTime } from './Player'
 import { useStore } from '../store/useStore'
+import { FONTS, getFont } from '../lib/fonts'
 import logo from '../assets/logo.png'
 
 interface Props {
@@ -146,6 +147,13 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   const [textPos, setTextPos] = useState<TextPos>('center')
   const [textColor, setTextColor] = useState<TextColor>('white')
   const [showInfoBar, setShowInfoBar] = useState(true)
+  // Defaults to whatever the user already has lyrics displayed in, so the
+  // card matches unless they explicitly change it here.
+  const [fontId, setFontId] = useState(() => useStore.getState().lyricsFont)
+  const [customFont, setCustomFont] = useState('')
+  const fontFamily = fontId === 'custom' && customFont.trim()
+    ? `'${customFont.trim().replace(/'/g, "\\'")}', ${getFont(undefined).stack}`
+    : getFont(fontId).stack
 
   const { w: cardW, h: cardH } = FORMATS.find(f => f.key === format) ?? FORMATS[0]
 
@@ -165,13 +173,25 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Fetched separately from the cover shown on screen: html-to-image needs a
+  // same-origin (data:) URL to embed the cover into the exported PNG without
+  // tainting the canvas, but that fetch can fail for reasons that have
+  // nothing to do with whether the cover itself is loadable (a CORS gap on
+  // some asset host, a slow/failed request) - and blocking the PREVIEW on it
+  // meant a song whose cover displays fine everywhere else in the app (a
+  // plain <img> needs no CORS) showed no cover here at all. The plain
+  // `imageUrl` is used for display below and only swapped for this once it
+  // resolves, so export quality degrades gracefully instead of the whole
+  // preview going blank.
   const [artDataUrl, setArtDataUrl] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    if (!imageUrl) { setArtDataUrl(null); return }
-    fetchImageDataUrl(imageUrl).then(url => { if (!cancelled) setArtDataUrl(url) }).catch(() => { if (!cancelled) setArtDataUrl(null) })
+    setArtDataUrl(null)
+    if (!imageUrl) return
+    fetchImageDataUrl(imageUrl).then(url => { if (!cancelled) setArtDataUrl(url) }).catch(() => {})
     return () => { cancelled = true }
   }, [imageUrl])
+  const previewArtSrc = artDataUrl ?? imageUrl ?? undefined
 
   const cardRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState<'download' | 'copy' | 'share' | null>(null)
@@ -354,6 +374,26 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
               </div>
               <SegmentedControl label="Background" value={bgStyle} onChange={setBgStyle}
                 options={[{ key: 'blur', label: 'Blur' }, { key: 'solid', label: 'Solid' }, { key: 'gradient', label: 'Gradient' }]} />
+              <div>
+                <p className="text-text-muted text-[11px] mb-1.5">Font</p>
+                <select
+                  value={fontId}
+                  onChange={(e) => setFontId(e.target.value)}
+                  className="w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-primary text-[11px] px-2 border-none outline-none"
+                >
+                  {FONTS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  <option value="custom">Custom…</option>
+                </select>
+                {fontId === 'custom' && (
+                  <input
+                    type="text"
+                    value={customFont}
+                    onChange={(e) => setCustomFont(e.target.value)}
+                    placeholder="Font family name"
+                    className="mt-1.5 w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-primary text-[11px] px-2 outline-none placeholder:text-text-muted"
+                  />
+                )}
+              </div>
               <SegmentedControl label="Text size" value={textSize} onChange={setTextSize}
                 options={[{ key: 'S', label: 'S' }, { key: 'M', label: 'M' }, { key: 'L', label: 'L' }]} />
               <SegmentedControl label="Position" value={textPos} onChange={setTextPos}
@@ -395,9 +435,9 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 style={{ width: cardW, height: cardH }}
               >
                 <div ref={cardRef} style={{ width: cardW, height: cardH, position: 'relative', background: '#111114' }}>
-                  {bgStyle === 'blur' && artDataUrl && (
+                  {bgStyle === 'blur' && previewArtSrc && (
                     <img
-                      src={artDataUrl}
+                      src={previewArtSrc}
                       alt=""
                       style={{
                         position: 'absolute', inset: -20, width: `calc(100% + 40px)`, height: `calc(100% + 40px)`,
@@ -415,14 +455,14 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                     padding: `${textPadTop}px 26px ${textPadBottom}px`, gap: TEXT_LINE_GAP,
                   }}>
                     {selectedLines.length === 0 ? (
-                      <p style={{ color: 'rgba(255,255,255,0.55)', fontFamily: 'var(--font-lyrics)', fontSize: 13, textAlign: 'center' }}>
+                      <p style={{ color: 'rgba(255,255,255,0.55)', fontFamily, fontSize: 13, textAlign: 'center' }}>
                         Select lines to preview
                       </p>
                     ) : selectedLines.map((line, i) => (
                       <p
                         key={i}
                         style={{
-                          color: TEXT_COLOR_VALUE[textColor], fontFamily: 'var(--font-lyrics)', fontWeight: 700,
+                          color: TEXT_COLOR_VALUE[textColor], fontFamily, fontWeight: 700,
                           fontSize, lineHeight: TEXT_LINE_HEIGHT, margin: 0,
                           textShadow: '0 2px 14px rgba(0,0,0,0.55)',
                         }}
@@ -437,8 +477,8 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                       display: 'flex', alignItems: 'center', gap: 10,
                       background: 'linear-gradient(0deg, rgba(0,0,0,0.6), transparent)',
                     }}>
-                      {artDataUrl ? (
-                        <img src={artDataUrl} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+                      {previewArtSrc ? (
+                        <img src={previewArtSrc} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
                       ) : (
                         <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <Music2 size={16} color="rgba(255,255,255,0.6)" />
