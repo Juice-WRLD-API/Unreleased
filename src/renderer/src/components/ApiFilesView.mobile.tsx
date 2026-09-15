@@ -98,11 +98,11 @@ function sortEntries(entries: JWApiFileEntry[], by: SortBy, dir: SortDir): JWApi
 
     let cmp = 0
     if (by === 'name') {
-      cmp = a.name.localeCompare(b.name)
+      cmp = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
     } else if (by === 'type') {
       const aExt = getFileExt(a.name)
       const bExt = getFileExt(b.name)
-      cmp = aExt.localeCompare(bExt) || a.name.localeCompare(b.name)
+      cmp = aExt.localeCompare(bExt) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
     } else if (by === 'size') {
       cmp = (a.size ?? 0) - (b.size ?? 0)
     }
