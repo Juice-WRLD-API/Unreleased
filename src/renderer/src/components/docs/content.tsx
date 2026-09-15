@@ -507,6 +507,7 @@ function FilesTab() {
           rows={[
             [<Code>path</Code>, 'Yes', 'Audio file path relative to compilation root'],
             [<Code>small</Code>, 'No', <>&quot;true&quot; returns a degraded ~128px JPEG instead of the full-size embedded art</>],
+            [<Code>size</Code>, 'No', 'Target size in px, e.g. size=400 returns a 400×400 JPEG. Overrides small when both are passed'],
             [<Code>channel</Code>, 'No', 'Comp channel slug. Defaults to the primary channel'],
           ]}
         />
@@ -515,7 +516,13 @@ function FilesTab() {
           downscaled to a few KB. Use it for anything drawn at thumbnail size, and as a fast first paint
           before the full-size one loads.
         </p>
-        <Pre>{`GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&small=true`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>size</Code> gives finer control than <Code>small</Code>: pass an exact target px (e.g.{' '}
+          <Code>size=400</Code>) and the embedded art is downscaled to that square instead of the fixed ~128px{' '}
+          <Code>small</Code> gives you.
+        </p>
+        <Pre>{`GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&small=true
+GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&size=400`}</Pre>
         <p className="text-xs text-text-muted mt-1">
           <Code>{'GET /files/art/'}</Code> is an alias for this same endpoint, same params, same response.
         </p>
