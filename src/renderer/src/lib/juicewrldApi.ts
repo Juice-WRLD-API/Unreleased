@@ -1,6 +1,6 @@
 import { Track } from '../types'
 import { apiRequest } from './apiClient'
-import { cacheGet, cacheSet } from './apiCache'
+import { cacheGet } from './apiCache'
 import { peekSongPref } from './songPrefs'
 import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
@@ -231,186 +231,24 @@ export function getSongById(id: number): Promise<JWApiSong> {
 }
 
 // ─── Batch fetch (GET /songs/?ids=...) ─────────────────────────────────────
-// Resolves many song ids in one or few requests instead of one per id - built
-// to replace the Promise.all(ids.map(id => apiFetch(`/songs/${id}/`))) pattern
-// that used to show up anywhere a view needed full objects for more than a
-// couple of ids (stats catalogue resolution, bulk-edit selections, version
-// lookups). Unlike every other endpoint in this file, the response body is
-// CSV, not JSON - see the "Batch Fetch" section of the API docs page for the
-// column layout this parses.
+// The docs page (and this comment, formerly) claimed `ids=` filters by
+// internal `id` and replies with CSV. Neither is true any more: live probes
+// against the API show `ids=` actually filters by `public_id`, replies with
+// the normal JSON envelope, and caps `results` at a default page size - and
+// most songs in this catalogue (anything unreleased) have no `public_id` at
+// all, so the "batch" path silently resolved nothing for them. See
+// project_jwa_api_docs_drift in memory: the docs page is hand-written and
+// drifts from the live API.
 //
-// Chunked because the server caps how many ids one request accepts (see
-// BATCH_MAX_IDS) - a huge selection still costs a handful of round trips
-// instead of one per song, just not literally one request for all of them.
-const BATCH_MAX_IDS = 250
-
-function csvCell(v: string | undefined): string {
-  return v ?? ''
-}
-
-function csvOrNull(v: string | undefined): string | null {
-  const s = csvCell(v)
-  return s === '' ? null : s
-}
-
-function csvNum(v: string | undefined): number | null {
-  const s = csvCell(v)
-  return s === '' ? null : Number(s)
-}
-
-// track_titles/snippets are JSON-encoded arrays inside their (quoted) cell -
-// simpler and less lossy than inventing another delimiter for values that can
-// themselves contain commas.
-function csvJsonArray(v: string | undefined): string[] {
-  const s = csvCell(v)
-  if (!s) return []
-  try {
-    const parsed = JSON.parse(s)
-    return Array.isArray(parsed) ? parsed.map(String) : []
-  } catch {
-    return []
-  }
-}
-
-/** Splits one RFC4180 record into its fields: comma-separated, with `"..."`
- *  quoting a field that itself contains a comma/quote/newline (`""` for a
- *  literal quote inside one). */
-function splitCsvRecord(record: string): string[] {
-  const out: string[] = []
-  let field = ''
-  let inQuotes = false
-  for (let i = 0; i < record.length; i++) {
-    const c = record[i]
-    if (inQuotes) {
-      if (c === '"') {
-        if (record[i + 1] === '"') { field += '"'; i++ } else inQuotes = false
-      } else field += c
-      continue
-    }
-    if (c === '"') inQuotes = true
-    else if (c === ',') { out.push(field); field = '' }
-    else field += c
-  }
-  out.push(field)
-  return out
-}
-
-/** Splits CSV text into records first (a record can span multiple physical
- *  lines when a quoted field carries a literal newline), then each record
- *  into fields. */
-function parseCsv(text: string): string[][] {
-  const records: string[] = []
-  let record = ''
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
-    record = record ? `${record}\n${line}` : line
-    // An odd number of quote chars means this line ended mid-quoted-field -
-    // the newline that split it was literal, not a record boundary.
-    if ((record.match(/"/g)?.length ?? 0) % 2 === 1) continue
-    if (record.length) records.push(record)
-    record = ''
-  }
-  return records.map(splitCsvRecord)
-}
-
-function songsFromCsv(text: string): JWApiSong[] {
-  const rows = parseCsv(text.trim())
-  if (rows.length < 1) return []
-  const header = rows[0]
-  const col = (name: string): number => header.indexOf(name)
-  const idx = {
-    id: col('id'), public_id: col('public_id'), name: col('name'), original_key: col('original_key'),
-    track_titles: col('track_titles'), path: col('path'), length: col('length'),
-    credited_artists: col('credited_artists'), producers: col('producers'), engineers: col('engineers'),
-    recording_locations: col('recording_locations'), record_dates: col('record_dates'), bitrate: col('bitrate'),
-    bpm: col('bpm'), key: col('key'), additional_information: col('additional_information'),
-    file_names: col('file_names'), instrumentals: col('instrumentals'), instrumental_names: col('instrumental_names'),
-    preview_date: col('preview_date'), release_date: col('release_date'), dates: col('dates'),
-    session_titles: col('session_titles'), session_tracking: col('session_tracking'), notes: col('notes'),
-    snippets: col('snippets'), era_id: col('era_id'), era_name: col('era_name'),
-    era_description: col('era_description'), era_time_frame: col('era_time_frame'),
-    image_url: col('image_url'), category: col('category'), lyrics: col('lyrics'),
-    synced_lyrics: col('synced_lyrics'), leak_type: col('leak_type'), date_leaked: col('date_leaked'),
-    album: col('album'),
-  }
-  return rows.slice(1).filter(r => r.length > 1 || r[0] !== '').map((r): JWApiSong => {
-    const eraId = csvCell(r[idx.era_id])
-    return {
-      id: Number(r[idx.id]),
-      public_id: csvNum(r[idx.public_id]),
-      name: csvCell(r[idx.name]),
-      original_key: csvOrNull(r[idx.original_key]),
-      track_titles: csvJsonArray(r[idx.track_titles]),
-      path: csvCell(r[idx.path]),
-      length: csvCell(r[idx.length]),
-      credited_artists: csvCell(r[idx.credited_artists]),
-      producers: csvCell(r[idx.producers]),
-      engineers: csvOrNull(r[idx.engineers]),
-      recording_locations: csvOrNull(r[idx.recording_locations]),
-      record_dates: csvOrNull(r[idx.record_dates]),
-      bitrate: csvOrNull(r[idx.bitrate]),
-      bpm: csvNum(r[idx.bpm]),
-      key: csvOrNull(r[idx.key]),
-      additional_information: csvOrNull(r[idx.additional_information]),
-      file_names: csvOrNull(r[idx.file_names]),
-      instrumentals: csvOrNull(r[idx.instrumentals]),
-      instrumental_names: csvOrNull(r[idx.instrumental_names]),
-      preview_date: csvOrNull(r[idx.preview_date]),
-      release_date: csvOrNull(r[idx.release_date]),
-      dates: csvOrNull(r[idx.dates]),
-      session_titles: csvOrNull(r[idx.session_titles]),
-      session_tracking: csvOrNull(r[idx.session_tracking]),
-      notes: csvOrNull(r[idx.notes]),
-      snippets: csvJsonArray(r[idx.snippets]),
-      era: eraId ? {
-        id: Number(eraId),
-        name: csvCell(r[idx.era_name]),
-        description: csvOrNull(r[idx.era_description]) ?? undefined,
-        time_frame: csvOrNull(r[idx.era_time_frame]) ?? undefined,
-      } : null,
-      image_url: csvOrNull(r[idx.image_url]),
-      category: csvCell(r[idx.category]) as JWApiSong['category'],
-      lyrics: csvOrNull(r[idx.lyrics]),
-      synced_lyrics: csvOrNull(r[idx.synced_lyrics]),
-      leak_type: csvOrNull(r[idx.leak_type]),
-      date_leaked: csvOrNull(r[idx.date_leaked]),
-      album: csvOrNull(r[idx.album]),
-    }
-  })
-}
-
-async function fetchSongsBatch(ids: number[]): Promise<JWApiSong[]> {
-  const url = apiUrl('/songs/', { ids: ids.join(',') })
-  let text: string
-  try {
-    const res = await fetch(url, { cache: 'no-cache' })
-    if (!res.ok) throw new Error(`JW API error ${res.status}`)
-    text = await res.text()
-  } catch (err) {
-    // Same offline fallback apiFetch gives every other read - a network-level
-    // failure (not an HTTP error, which throws above and stays thrown) falls
-    // back to the last successful response for this exact id set.
-    const cached = cacheGet<JWApiSong[]>(url)
-    if (cached !== undefined) return cached
-    throw err
-  }
-  const songs = songsFromCsv(text)
-  cacheSet(url, songs)
-  return songs
-}
-
-/** Resolves many song ids in one or few requests - see the module comment
- *  above. Ids that don't exist are simply absent from the result (no error,
- *  no null placeholder), and row order isn't guaranteed to match `ids`, so
- *  callers that need to pair results back up should key off `.id` rather than
- *  assume `result[i]` corresponds to `ids[i]`. */
+// Until the API grows a real batch-by-id endpoint, this just fans out to the
+// single-song endpoint (GET /songs/{id}/, confirmed still keyed by internal
+// id) in parallel and drops ids that don't exist - same contract callers
+// already relied on (no error, no null placeholder).
 export async function getSongsByIds(ids: number[]): Promise<JWApiSong[]> {
   const unique = Array.from(new Set(ids))
   if (unique.length === 0) return []
-  const chunks: number[][] = []
-  for (let i = 0; i < unique.length; i += BATCH_MAX_IDS) chunks.push(unique.slice(i, i + BATCH_MAX_IDS))
-  const results = await Promise.all(chunks.map(fetchSongsBatch))
-  return results.flat()
+  const results = await Promise.all(unique.map((id) => getSongById(id).catch(() => null)))
+  return results.filter((s): s is JWApiSong => s !== null)
 }
 
 // Synchronous read of the offline cache for a path+params - returns the last

@@ -2,14 +2,14 @@
 //
 // A song-preference row is just {song id, playcount} - no title, no length, no
 // era - so the page has to resolve every played id to a song before it can
-// rank anything. Doing that one id at a time used to mean hundreds of
-// requests on open, and worse, they didn't stick: apiCache holds ~300 entries
-// for the entire app, so a few hundred played songs evict each other (and
-// everything else) and the next visit refetches the lot. A moderate number of
-// unknown ids now goes through the batch endpoint instead (getSongsByIds,
-// juicewrldApi.ts) - one request instead of one per id.
+// rank anything. Doing that one id at a time for every played song used to
+// mean hundreds of requests on open, and worse, they didn't stick: apiCache
+// holds ~300 entries for the entire app, so a few hundred played songs evict
+// each other (and everything else) and the next visit refetches the lot. A
+// small number of unknown ids still goes straight through individual
+// requests (getSongsByIds, juicewrldApi.ts).
 //
-// For a genuinely large unknown set this still mirrors lib/heardle's pool
+// For a genuinely large unknown set this instead mirrors lib/heardle's pool
 // cache: page the catalogue in bulk, slim each row down to the fields the
 // page actually uses, and keep that in localStorage for a day. ~25 requests
 // once, then none. Deliberately NOT routed through apiFetch for the same
@@ -82,12 +82,13 @@ const PAGE_SIZE = 100
 // malformed `next` can't spin the loop forever.
 const MAX_PAGES = 40
 
-// Below this many unknown ids, a batched /songs/?ids=... lookup is cheaper
-// than paging the whole catalogue - a user who's played a handful of songs
-// shouldn't pull 2.5k rows to learn about six of them. Lines up with the
-// batch endpoint's own per-request cap (BATCH_MAX_IDS in juicewrldApi.ts) so
-// this path almost always resolves in a single request.
-const PER_ID_THRESHOLD = 250
+// Below this many unknown ids, fetching them individually (getSongsByIds -
+// there's no real batch-by-id endpoint any more, see its comment in
+// juicewrldApi.ts) is cheaper than paging the whole catalogue - a user who's
+// played a handful of songs shouldn't pull 2.5k rows to learn about six of
+// them. Above it, ~25 requests for the whole catalogue beats firing that many
+// individual song requests at once.
+const PER_ID_THRESHOLD = 40
 
 interface CachedCatalog { ts: number; songs: StatsSong[] }
 
