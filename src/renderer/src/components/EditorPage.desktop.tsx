@@ -299,8 +299,8 @@ export function TextareaRow({ label, value, original, onChange, rows = 3, placeh
 const basicControlClass =
   'w-full bg-transparent border-0 p-0 text-[13px] leading-snug text-text-primary focus:outline-none placeholder:text-text-muted placeholder:opacity-40'
 
-const basicShellClass = (changed: boolean): string =>
-  `block rounded-md border px-2.5 py-1.5 transition-colors focus-within:border-accent/50 ${
+const basicShellClass = (changed: boolean, roomy = false): string =>
+  `block rounded-md border ${roomy ? 'pl-2.5 pr-3 pt-1.5 pb-3' : 'px-2.5 py-1.5'} transition-colors focus-within:border-accent/50 ${
     changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--border)] bg-surface-overlay/60'
   }`
 
@@ -320,7 +320,7 @@ export function BasicRow({ label, value, original, onChange, rows = 1, placehold
   const changed = original != null && value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`${basicShellClass(changed)} relative ${open && matches.length > 0 ? 'z-20' : ''}`}
+    <label className={`${basicShellClass(changed, rows > 1)} relative ${open && matches.length > 0 ? 'z-20' : ''}`}
       onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
       <span className={basicLabelClass}>{label}</span>
       {rows > 1
