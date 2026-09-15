@@ -1535,6 +1535,7 @@ function AdminTab() {
           headers={['Method', 'Path', 'Description']}
           rows={[
             ['GET', '/accounts/admin/proposals/', 'List all proposals. Filter: ?status=pending|approved|rejected|reversed&channel='],
+            ['GET', '/accounts/admin/proposals/?counts=1', 'Grouped status counts only (total/pending/approved/rejected/reversed), no proposal rows'],
             ['POST', '/accounts/admin/proposals/{id}/review/', 'Approve, reject, or revise-and-approve a proposal'],
             ['POST', '/accounts/admin/proposals/{id}/reverse/', 'Reverse a previously approved proposal'],
           ]}
@@ -1550,6 +1551,12 @@ function AdminTab() {
         <p className="text-xs text-text-muted">
           Requires admin or manager token, and, on a channel-scoped deployment, the per-channel{' '}
           <Code>is_manager</Code>/<Code>is_editor</Code> membership flag for the proposal&apos;s own channel.
+        </p>
+        <p className="text-xs text-text-muted">
+          <Code>?counts=1</Code> short-circuits the normal list response and instead returns{' '}
+          <Code>{'{ total, pending, approved, rejected, reversed }'}</Code>, grouped via{' '}
+          <Code>.values('status').annotate(Count('id'))</Code> before any row is serialized. Still respects{' '}
+          <Code>&amp;channel=</Code>.
         </p>
       </Section>
 
@@ -1580,6 +1587,7 @@ function AdminTab() {
           headers={['Method', 'Path', 'Description']}
           rows={[
             ['GET', '/accounts/admin/comp-proposals/', 'List all comp-file proposals. Filter: ?status=pending|approved|rejected|reversed&channel='],
+            ['GET', '/accounts/admin/comp-proposals/?counts=1', 'Grouped status counts only (total/pending/approved/rejected/reversed), no proposal rows'],
             ['POST', '/accounts/admin/comp-proposals/{id}/review/', 'Approve or reject a proposal'],
             ['POST', '/accounts/admin/comp-proposals/{id}/reverse/', 'Reverse a previously approved proposal'],
             ['GET', '/accounts/admin/comp-proposals/{id}/staging/', 'Download the staged file to inspect before approving'],
@@ -1603,6 +1611,11 @@ function AdminTab() {
         <p className="text-xs text-text-muted">
           <Code>/staging/</Code> streams the actual staged file (not JSON). Treat it as a download/preview link,
           the same way <Code>/files/download/</Code> is used for library audio.
+        </p>
+        <p className="text-xs text-text-muted">
+          <Code>?counts=1</Code> works the same way as on <Code>/accounts/admin/proposals/</Code> above: a single
+          grouped aggregate (<Code>{'{ total, pending, approved, rejected, reversed }'}</Code>) instead of the
+          proposal list, still filterable by <Code>&amp;channel=</Code>.
         </p>
         <p className="text-xs text-text-muted font-semibold mt-3">
           <Code>delete_folder</Code> &mdash; stricter approval rules:
