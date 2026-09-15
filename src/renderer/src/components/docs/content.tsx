@@ -128,6 +128,14 @@ function OverviewTab() {
           <Endpoint method="DELETE" path="/accounts/admin/channels/{id}/" description="Deactivate a comp channel (admin)" />
           <Endpoint method="GET" path="/accounts/admin/channels/{id}/members/" description="List a comp channel's per-user role memberships (admin)" />
           <Endpoint method="POST" path="/accounts/admin/channels/{id}/members/" description="Set a user's editor/contributor/manager flags for a comp channel (admin)" />
+          <Endpoint method="GET" path="/accounts/admin/eras/" description="List all eras, ordered by name (admin)" />
+          <Endpoint method="POST" path="/accounts/admin/eras/" description="Create an era (admin)" />
+          <Endpoint method="PATCH" path="/accounts/admin/eras/{id}/" description="Update an era (admin)" />
+          <Endpoint method="DELETE" path="/accounts/admin/eras/{id}/" description="Delete an era (admin)" />
+          <Endpoint method="GET" path="/accounts/admin/albums/" description="List all albums, ordered by title, nested artist (admin)" />
+          <Endpoint method="POST" path="/accounts/admin/albums/" description="Create an album, optionally with a tracklist (admin)" />
+          <Endpoint method="PATCH" path="/accounts/admin/albums/{id}/" description="Update an album; sending songs[] replaces the tracklist (admin)" />
+          <Endpoint method="DELETE" path="/accounts/admin/albums/{id}/" description="Delete an album (admin)" />
           <Endpoint method="GET" path="/news/" description="Paginated news feed. Filter: ?channel=, sort: ?ordering=" />
           <Endpoint method="GET" path="/news/{id}/" description="Single news post" />
           <Endpoint method="POST" path="/news/" description="Create a news post (is_news or admin)" />
@@ -1512,6 +1520,81 @@ function AdminTab() {
           to.
         </p>
         <p className="text-xs text-text-muted">Requires admin token (<Code>is_administrator: true</Code>).</p>
+      </Section>
+
+
+      <Section title="Admin: Eras &amp; Albums" defaultOpen={false}>
+        <p className="text-sm text-text-secondary leading-relaxed">
+          CRUD for the <Code>Era</Code> and <Code>Album</Code> catalog objects surfaced read-only on the public{' '}
+          <Code>/eras/</Code> and <Code>/albums/</Code> endpoints (Songs tab). Requires admin token (
+          <Code>is_administrator: true</Code>) plus OTP enabled.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-2">Eras</p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/accounts/admin/eras/', 'All eras, ordered by name'],
+            ['POST', '/accounts/admin/eras/', 'Create an era'],
+            ['PATCH', '/accounts/admin/eras/{id}/', 'Update an era; only include fields you want to change'],
+            ['DELETE', '/accounts/admin/eras/{id}/', 'Delete an era'],
+          ]}
+        />
+        <Pre>{`POST /accounts/admin/eras/
+
+{
+  "name": "Late 2019",       // required
+  "description": "",         // optional
+  "time_frame": "",          // optional
+  "play_count": 0             // optional, defaults to 0
+}`}</Pre>
+        <p className="text-xs text-text-muted">Same body shape for <Code>PATCH</Code>, any subset of fields. Both return the era object; <Code>DELETE</Code> returns <Code>{'{ "detail": "Era deleted." }'}</Code>.</p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Albums</p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/accounts/admin/albums/', 'All albums, ordered by title, each with a nested artist object'],
+            ['POST', '/accounts/admin/albums/', 'Create an album'],
+            ['PATCH', '/accounts/admin/albums/{id}/', 'Update an album; only include fields you want to change'],
+            ['DELETE', '/accounts/admin/albums/{id}/', 'Delete an album'],
+          ]}
+        />
+        <Pre>{`POST /accounts/admin/albums/
+
+{
+  "title": "Death Race for Love",   // required
+  "artist_id": 1,                    // required, FK to an existing Artist
+  "release_date": "2019-03-08",      // required, YYYY-MM-DD
+  "type": "Album",                   // optional, e.g. "Album" | "EP" | "Single"
+  "description": "",                 // optional
+  "play_count": 0,                    // optional, defaults to 0
+  "songs": [                          // optional, ordered tracklist
+    { "order": 1, "path": "Released/DRFL/Empty.flac" },
+    { "order": 2, "path": "Released/DRFL/Maze.flac" }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Each <Code>songs</Code> entry is <Code>{'{ order, path }'}</Code>; the backend re-sorts the array by{' '}
+          <Code>order</Code> on save, so send it unsorted if convenient.
+        </p>
+        <p className="text-xs text-text-muted">
+          <Code>PATCH</Code> takes the same fields as <Code>POST</Code>. Sending <Code>songs</Code> replaces the
+          entire tracklist, same whole-array semantics as the blob fields on{' '}
+          <Code>/accounts/account/me/</Code> above &mdash; there is no per-track add/remove route.
+        </p>
+        <p className="text-xs text-text-muted">Both return the album object with nested <Code>artist</Code>; <Code>DELETE</Code> returns <Code>{'{ "detail": "Album deleted." }'}</Code>.</p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Errors</p>
+        <Pre>{`{ "detail": "Error message here." }`}</Pre>
+        <Table
+          headers={['Status', 'Meaning']}
+          rows={[
+            ['400', 'Validation error: missing required field, bad type, invalid songs format'],
+            ['401', 'Not authenticated'],
+            ['403', 'Not an administrator, or OTP not enabled'],
+            ['404', 'Era or album not found'],
+          ]}
+        />
       </Section>
 
 
