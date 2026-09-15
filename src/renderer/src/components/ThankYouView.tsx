@@ -16,8 +16,10 @@ const DEVELOPERS: string[] = [
 
 // Placeholder list for the fucking opps
 const OTHERS: string[] = [
-  'Pure',
+  'Xig (fuck this nigga)',
   'emzie',
+  'flow',
+  'Pure'
 ]
 
 export default function ThankYouView(): JSX.Element {
