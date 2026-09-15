@@ -4,6 +4,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { apiFetch, buildStreamUrl, buildCoverArtUrl } from '../lib/juicewrldApi'
 import { liteSongToTrack, ApiSongLite } from '../lib/userApi'
 import { Track } from '../types'
+import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObject = Record<string, any>
@@ -104,7 +105,6 @@ export default function SharedPlaylistView(): JSX.Element {
   const [tracks, setTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [imgErrors, setImgErrors] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!shareId) { setError(true); setLoading(false); return }
@@ -182,16 +182,7 @@ export default function SharedPlaylistView(): JSX.Element {
           >
             <span className="text-text-muted text-xs w-6 text-right tabular-nums shrink-0">{i + 1}</span>
             <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
-              {!imgErrors.has(t.id) && (t.imageUrl || t.hasAlbumArt) ? (
-                <img
-                  src={t.imageUrl ?? ''}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  onError={() => setImgErrors(prev => new Set([...prev, t.id]))}
-                />
-              ) : (
-                <Music2 size={14} className="text-text-muted opacity-40" />
-              )}
+              <AlbumArtThumbnail track={t} fill className="w-full h-full" />
               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                 <Play size={12} fill="white" className="text-white ml-0.5" />
               </div>
