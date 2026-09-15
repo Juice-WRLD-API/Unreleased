@@ -4,8 +4,9 @@ import {
   Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, Play, Pause,
   SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX,
   MoreHorizontal, Heart, ListMusic, Trash2, History, SlidersHorizontal,
-  Mic2, Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter,
+  Mic2, Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, Share2,
 } from 'lucide-react'
+import ShareLyricsModal from './ShareLyricsModal'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY } from '../lib/lyrics'
@@ -1576,6 +1577,7 @@ function LyricsScreen({
   })))
   useBackToClose(onClose)
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
+  const [showShareLyrics, setShowShareLyrics] = useState(false)
 
   return createPortal(
     // isolate: ArtBackdrop's noise-texture layer uses mix-blend-overlay,
@@ -1605,6 +1607,14 @@ function LyricsScreen({
           <p className="text-[13px] font-semibold truncate" style={{ color: txtPri }}>{title || 'Lyrics'}</p>
           {artist && <p className="text-[11px] truncate" style={{ color: txtTer }}>{artist}</p>}
         </div>
+        {rawLyrics && (
+          <button
+            onClick={() => setShowShareLyrics(true)}
+            aria-label="Share lyrics"
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
+            style={{ color: txtTer }}
+          ><Share2 size={18} /></button>
+        )}
         {/* Lyric display settings (size, alignment, blur, colors, sync
             offset) shown right here as a sheet instead of sending the user
             off to Settings - they're mid-song, tucking away to a different
@@ -1629,6 +1639,15 @@ function LyricsScreen({
       />
 
       {showLyricsSettings && <LyricsSettingsSheet onClose={() => setShowLyricsSettings(false)} />}
+      {showShareLyrics && (
+        <ShareLyricsModal
+          title={title || 'Lyrics'}
+          artist={artist || ''}
+          imageUrl={artSrc}
+          rawLyrics={rawLyrics}
+          onClose={() => setShowShareLyrics(false)}
+        />
+      )}
 
       {!radioFmActive && (
         <div

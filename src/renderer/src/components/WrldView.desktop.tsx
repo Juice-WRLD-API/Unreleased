@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useMemo, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2 } from 'lucide-react'
+import ShareLyricsModal from './ShareLyricsModal'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
@@ -90,6 +91,7 @@ export default function WrldView(): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const activeRef    = useRef<HTMLDivElement>(null)
   const [artError, setArtError] = useState(false)
+  const [showShareLyrics, setShowShareLyrics] = useState(false)
 
   // Remember the volume before muting so unmuting restores it, instead of
   // jumping to a hardcoded level (mirrors the Player bar's toggleMute).
@@ -908,6 +910,16 @@ export default function WrldView(): JSX.Element {
                     <ListMusic size={18} />
                   </button>
                 )}
+                {rawLyrics && (
+                  <button
+                    onClick={() => setShowShareLyrics(true)}
+                    title="Share lyrics"
+                    className="p-1.5 rounded-full transition-colors hover:bg-white/10"
+                    style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
+                  >
+                    <Share2 size={16} />
+                  </button>
+                )}
                 <FmLikeButton light={textIsDark} />
                 <SongMenu light={textIsDark} />
               </div>
@@ -1112,6 +1124,16 @@ export default function WrldView(): JSX.Element {
                       style={{ color: showQueue ? 'var(--accent)' : (textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)') }}
                     >
                       <ListMusic size={18} />
+                    </button>
+                  )}
+                  {rawLyrics && (
+                    <button
+                      onClick={() => setShowShareLyrics(true)}
+                      title="Share lyrics"
+                      className="p-1.5 rounded-full transition-colors hover:bg-white/10"
+                      style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
+                    >
+                      <Share2 size={16} />
                     </button>
                   )}
                   <FmLikeButton light={textIsDark} />
@@ -1466,6 +1488,16 @@ export default function WrldView(): JSX.Element {
         <div className="md:hidden">
           <WrldQueuePanel variant="sheet" onClose={() => setShowQueue(false)} />
         </div>
+      )}
+
+      {showShareLyrics && rawLyrics && (
+        <ShareLyricsModal
+          title={displayTitle || 'Lyrics'}
+          artist={displayArtist || ''}
+          imageUrl={artSrc}
+          rawLyrics={rawLyrics}
+          onClose={() => setShowShareLyrics(false)}
+        />
       )}
     </div>
   )

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useResizablePanel } from '../hooks/useResizablePanel'
-import { X, Music, ChevronUp, ChevronDown, Pencil, Info } from 'lucide-react'
+import { X, Music, ChevronUp, ChevronDown, Pencil, Info, Share2 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import LyricsDisplay from './LyricsDisplay'
+import ShareLyricsModal from './ShareLyricsModal'
 import { smallCoverUrl } from '../lib/juicewrldApi'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -17,6 +18,7 @@ export default function NowPlaying(): JSX.Element {
   } = useStorePick('currentTrack', 'currentTrackFull', 'setShowNowPlaying', 'lyricsOverride')
 
   const [artCollapsed, setArtCollapsed] = useState(false)
+  const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [panelWidth, dragHandle] = useResizablePanel(360, 280, 520)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
@@ -70,6 +72,15 @@ export default function NowPlaying(): JSX.Element {
                 title={artCollapsed ? 'Show artwork' : 'Hide artwork'}
               >
                 {artCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              </button>
+            )}
+            {hasLyrics && (
+              <button
+                onClick={() => setShowShareLyrics(true)}
+                className="text-text-muted hover:text-text-primary transition-colors"
+                title="Share lyrics"
+              >
+                <Share2 size={16} />
               </button>
             )}
             {jwMatch && (
@@ -155,6 +166,15 @@ export default function NowPlaying(): JSX.Element {
           </div>
         )}
       </div>
+      {showShareLyrics && currentTrack && currentTrackFull && (
+        <ShareLyricsModal
+          title={currentTrack.title}
+          artist={currentTrack.artist}
+          imageUrl={currentTrackFull.albumArt ?? currentTrack.imageUrl}
+          rawLyrics={currentTrackFull.syncedLyrics || currentTrackFull.lyrics}
+          onClose={() => setShowShareLyrics(false)}
+        />
+      )}
     </div>
   )
 }

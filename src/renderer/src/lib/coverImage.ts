@@ -56,6 +56,19 @@ export async function copyCoverImage(url: string): Promise<void> {
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
 }
 
+/** Fetches a remote cover and returns it as a data: URL, for embedding in
+ *  contexts (like a canvas-rendered share card) that need the bytes inlined
+ *  rather than a cross-origin <img> src. */
+export async function fetchImageDataUrl(url: string): Promise<string> {
+  const blob = await fetchImageBlob(url)
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read image'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 /** Writes the cover to disk as a browser download. */
 export async function saveCoverImage(url: string, title: string): Promise<'saved' | 'canceled'> {
   const blob = await fetchImageBlob(url)
