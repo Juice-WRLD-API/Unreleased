@@ -1017,19 +1017,22 @@ export default function EditorPage({ initialSongId = null }: {
     setSubmitError(null)
     try {
       if (editingPropId != null) {
+        // Already a live pending proposal on the server - editing it further
+        // updates that proposal directly rather than staging a second one.
         await userApi.updateProposal(editingPropId, { proposed_data: patch, editor_notes: edNotes })
         setEditingPropId(null)
         setIsNewSongDraft(false)
+        if (song && ('lyrics' in patch || 'synced_lyrics' in patch)) invalidateLyricsCache(song.id)
       } else if (song) {
-        await userApi.createProposal({
-          song: song.id, change_type: 'update',
-          title: name || song.name, proposed_data: patch, editor_notes: edNotes,
+        useStore.getState().stageSongChanges([{
+          songId: song.id, changeType: 'update',
+          title: name || song.name, proposedData: patch, editorNotes: edNotes,
           channel: activeChannel,
-        })
+        }])
       }
-      // Lyrics may have changed (and auto-approve admins make it live instantly)
-      // - drop the cached copy so the next play reflects the edit.
-      if (song && ('lyrics' in patch || 'synced_lyrics' in patch)) invalidateLyricsCache(song.id)
+      // Lyrics cache invalidation for an update happens once it's actually
+      // proposed (see compStagedSongChanges) - staging alone changes nothing
+      // server-side yet.
       lastSubmittedPatchRef.current = JSON.stringify(patch)
       setSubmitState('submitted')
       setTimeout(() => setSubmitState('idle'), 3000)
@@ -1046,11 +1049,11 @@ export default function EditorPage({ initialSongId = null }: {
     setDeleteState('submitting')
     setDeleteError(null)
     try {
-      await userApi.createProposal({
-        song: song.id, change_type: 'delete',
-        title: name || song.name, proposed_data: {}, editor_notes: edNotes,
+      useStore.getState().stageSongChanges([{
+        songId: song.id, changeType: 'delete',
+        title: name || song.name, proposedData: {}, editorNotes: edNotes,
         channel: activeChannel,
-      })
+      }])
       setDeleteState('submitted')
       setTimeout(() => setDeleteState('idle'), 3000)
     } catch (e) {
@@ -1370,10 +1373,10 @@ export default function EditorPage({ initialSongId = null }: {
                     {submitState === 'submitting' && <Loader2 size={12} className="animate-spin" />}
                     {submitState === 'submitted'  && <Check size={12} />}
                     {submitState === 'error'      && <AlertCircle size={12} />}
-                    {submitState === 'idle' && alreadySubmitted && 'Submitted'}
-                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Submit update proposal')}
-                    {submitState === 'submitting' && 'Submitting…'}
-                    {submitState === 'submitted'  && 'Submitted!'}
+                    {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Staged')}
+                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Stage update proposal')}
+                    {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Staging…')}
+                    {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Staged!')}
                     {submitState === 'error'      && 'Try again'}
                   </button>
                   <span className="text-[11px] text-text-muted opacity-65 tabular-nums">
@@ -1385,7 +1388,7 @@ export default function EditorPage({ initialSongId = null }: {
                       onClick={submitDeletion}
                       onBlur={() => { if (deleteState === 'confirm') setDeleteState('idle') }}
                       disabled={deleteState === 'submitting' || deleteState === 'submitted'}
-                      title="Propose that this song entry be deleted. Admins review before it's removed."
+                      title="Stage this song entry for deletion. Review it in the Uploads panel before it's proposed - admins review before it's removed."
                       className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition-colors flex items-center gap-1.5 ${
                         deleteState === 'submitted' ? 'text-emerald-400' :
                         deleteState === 'error'     ? 'text-red-400' :
@@ -1395,8 +1398,8 @@ export default function EditorPage({ initialSongId = null }: {
                       {deleteState === 'submitting' && <Loader2 size={12} className="animate-spin" />}
                       {deleteState === 'idle'       && 'Delete song'}
                       {deleteState === 'confirm'    && 'Click again to confirm'}
-                      {deleteState === 'submitting' && 'Submitting…'}
-                      {deleteState === 'submitted'  && 'Submitted!'}
+                      {deleteState === 'submitting' && 'Staging…'}
+                      {deleteState === 'submitted'  && 'Staged!'}
                       {deleteState === 'error'      && 'Try again'}
                     </button>
                   )}
@@ -1507,20 +1510,20 @@ export default function EditorPage({ initialSongId = null }: {
                     {submitState === 'submitting' && <Loader2 size={12} className="animate-spin" />}
                     {submitState === 'submitted'  && <Check size={12} />}
                     {submitState === 'error'      && <AlertCircle size={12} />}
-                    {submitState === 'idle' && alreadySubmitted && 'Submitted'}
-                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Submit proposal')}
-                    {submitState === 'submitting' && 'Submitting…'}
-                    {submitState === 'submitted'  && 'Submitted!'}
+                    {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Staged')}
+                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Stage proposal')}
+                    {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Staging…')}
+                    {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Staged!')}
                     {submitState === 'error'      && 'Try again'}
                   </button>
 
-                  {/* Propose deletion - only for an existing song, not a new-song draft or an in-progress edit proposal */}
+                  {/* Stage deletion - only for an existing song, not a new-song draft or an in-progress edit proposal */}
                   {song && !isNewSongDraft && editingPropId == null && (
                     <button
                       onClick={submitDeletion}
                       onBlur={() => { if (deleteState === 'confirm') setDeleteState('idle') }}
                       disabled={deleteState === 'submitting' || deleteState === 'submitted'}
-                      title="Propose that this song entry be deleted. Admins review before it's removed."
+                      title="Stage this song entry for deletion. Review it in the Uploads panel before it's proposed - admins review before it's removed."
                       className={`w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                         deleteState === 'submitted' ? 'bg-emerald-500/20 text-emerald-400' :
                         deleteState === 'error'     ? 'bg-red-500/20 text-red-400' :
@@ -1531,10 +1534,10 @@ export default function EditorPage({ initialSongId = null }: {
                       {deleteState === 'submitted'  && <Check size={12} />}
                       {(deleteState === 'idle' || deleteState === 'confirm') && <Trash2 size={12} />}
                       {deleteState === 'error'      && <AlertCircle size={12} />}
-                      {deleteState === 'idle'       && 'Propose deletion'}
+                      {deleteState === 'idle'       && 'Stage deletion'}
                       {deleteState === 'confirm'    && 'Click again to confirm'}
-                      {deleteState === 'submitting' && 'Submitting…'}
-                      {deleteState === 'submitted'  && 'Submitted!'}
+                      {deleteState === 'submitting' && 'Staging…'}
+                      {deleteState === 'submitted'  && 'Staged!'}
                       {deleteState === 'error'      && 'Try again'}
                     </button>
                   )}

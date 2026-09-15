@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
-import { createProposal } from '../lib/userApi'
+import { useStore } from '../store/useStore'
 import { apiFetch, JWApiEra, JWApiSong } from '../lib/juicewrldApi'
 import FilePickerModal from './FilePickerModal'
 import { BasicRow, BasicSelect, SyncedLyricsTable } from './EditorPage.desktop'
@@ -62,25 +62,19 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   // buildProposedData reproduces the exact pre-rewrite "only include
   // non-empty fields" payload mapping byte-for-byte (verified field-by-field
   // against proposalForm.ts's implementation) - do not hand-roll this here.
-  const handleSubmit = async (): Promise<void> => {
+  const handleSubmit = (): void => {
     if (!f.name.trim() || submitState === 'submitting') return
     setSubmitState('submitting'); setSubmitError(null)
-    try {
-      await createProposal({
-        song: null,
-        change_type: 'create',
-        title: f.name.trim(),
-        proposed_data: buildProposedData(f),
-        editor_notes: edNotes,
-        channel,
-      })
-      setSubmitState('submitted')
-      setTimeout(() => { onSubmitted(); onClose() }, 1200)
-    } catch (e) {
-      setSubmitState('error')
-      setSubmitError(e instanceof Error ? e.message : 'Submission failed')
-      setTimeout(() => setSubmitState('idle'), 4000)
-    }
+    useStore.getState().stageSongChanges([{
+      songId: null,
+      changeType: 'create',
+      title: f.name.trim(),
+      proposedData: buildProposedData(f),
+      editorNotes: edNotes,
+      channel,
+    }])
+    setSubmitState('submitted')
+    setTimeout(() => { onSubmitted(); onClose() }, 1200)
   }
 
   return (
@@ -208,9 +202,9 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
             {submitState === 'submitting' && <Loader2 size={14} className="animate-spin" />}
             {submitState === 'submitted'  && <Check size={14} />}
             {submitState === 'error'      && <AlertCircle size={14} />}
-            {submitState === 'idle'       && 'Submit proposal'}
-            {submitState === 'submitting' && 'Submitting…'}
-            {submitState === 'submitted'  && 'Submitted!'}
+            {submitState === 'idle'       && 'Stage proposal'}
+            {submitState === 'submitting' && 'Staging…'}
+            {submitState === 'submitted'  && 'Staged!'}
             {submitState === 'error'      && 'Try again'}
           </button>
         </div>

@@ -7,7 +7,6 @@ import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { apiFetch, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiEra } from '../lib/juicewrldApi'
-import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { getVersionMetaForSongs, getOwnVersionMeta, setOwnVersionTitle, linkSongVersion, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
@@ -17,9 +16,10 @@ import { cleanDate } from '../lib/format'
 // Bulk editor - one dialog, two sources:
 //
 //   • API songs, from the Tracker's multi-select "Edit". The API has no bulk
-//     endpoint, so this files one ordinary update proposal per song, exactly
-//     like EditorPage does for a single song; review, admin auto-approve and
-//     My Proposals all behave the same.
+//     endpoint, so this stages one ordinary update proposal per song, exactly
+//     like EditorPage does for a single song - nothing is actually proposed
+//     until the Uploads panel's Propose is used; from there review, admin
+//     auto-approve and My Proposals all behave the same.
 //   • Local library files, from the Library's multi-select "Edit tags". These
 //     write ID3 frames straight to disk through the writeTrackMetadata
 //     channel, then mirror the change into the in-memory library index.
@@ -286,9 +286,9 @@ function apiFields(
 /* ── Component ─────────────────────────────────────────────────────────────── */
 
 export default function BulkEditModal(): JSX.Element | null {
-  const { target, close } = useStore(
+  const { target, close, activeChannel } = useStore(
     useShallow(s => ({
-      target: s.bulkEdit, close: s.closeBulkEditor,
+      target: s.bulkEdit, close: s.closeBulkEditor, activeChannel: s.activeChannel,
     }))
   )
   const canEdit = useCanEdit()
@@ -339,18 +339,19 @@ export default function BulkEditModal(): JSX.Element | null {
       keyOf: s => String(s.id),
       titleOf: s => s.name,
       noun: ['song', 'songs'],
-      subtitle: 'Files one edit proposal per song.',
+      subtitle: 'Stages one edit proposal per song - review and propose them from the Uploads panel.',
       notePlaceholder: 'Editor notes (shared by every proposal)…',
       unavailable: canEdit ? undefined : 'Only editors can propose changes.',
-      actionLabel: n => `Submit ${n} proposal${n === 1 ? '' : 's'}`,
-      doneLabel: n => `${n} proposal${n === 1 ? '' : 's'} submitted`,
+      actionLabel: n => `Stage ${n} proposal${n === 1 ? '' : 's'}`,
+      doneLabel: n => `${n} proposal${n === 1 ? '' : 's'} staged`,
       commit: async (song, patch, note) => {
         // Version titles are written straight to the /versions/ table rather
         // than proposed for review (same as the single-song editor), so they
-        // never belong in proposed_data. setOwnVersionTitle re-reads the
-        // song's row itself before deciding what to do, so it's correct even
-        // if the prefetch above failed or is stale - the groupId passed here
-        // is only a hint it uses when the song has no row at all yet.
+        // never belong in proposed_data and are never staged - they go out
+        // immediately. setOwnVersionTitle re-reads the song's row itself
+        // before deciding what to do, so it's correct even if the prefetch
+        // above failed or is stale - the groupId passed here is only a hint
+        // it uses when the song has no row at all yet.
         const { versionTitle, ...rest } = patch
         if (versionTitle !== undefined) {
           await setOwnVersionTitle(song.id, versionTitle || null, versionMeta?.get(song.id)?.groupId ?? null)
@@ -362,16 +363,17 @@ export default function BulkEditModal(): JSX.Element | null {
         for (const [key, value] of Object.entries(rest)) {
           proposed[key] = key === 'era_id' ? (value ? Number(value) : null) : (value === '' ? null : value)
         }
-        await userApi.createProposal({
-          song: song.id,
-          change_type: 'update',
+        useStore.getState().stageSongChanges([{
+          songId: song.id,
+          changeType: 'update',
           title: song.name,
-          proposed_data: proposed,
-          editor_notes: note,
-        })
+          proposedData: proposed,
+          editorNotes: note,
+          channel: activeChannel,
+        }])
       },
     }
-  }, [target, canEdit, eras, versionMeta, fetchVersionMeta])
+  }, [target, canEdit, eras, versionMeta, fetchVersionMeta, activeChannel])
 
   if (!target) return null
   if (apiSpec) return <BulkEditor key="api" spec={apiSpec} onClose={close} />

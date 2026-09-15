@@ -98,6 +98,33 @@ export interface StagedFileChange {
   error?: string
 }
 
+// ─── Staged song edit proposal (in-session) ──────────────────
+//
+// Same idea as StagedFileChange, applied to the Tracker's song editor, bulk
+// editor and "propose new song" modal: editing a song's metadata, proposing
+// its deletion, or proposing a brand new song doesn't submit anything on its
+// own - it parks the proposal here, the Uploads panel lists what's queued,
+// and one "Propose" there sends the lot (see lib/compStagedSongChanges).
+// Editing an *already-submitted* pending proposal (editingPropId set in
+// EditorPage) is a different action - that proposal already exists
+// server-side, so it's still updated immediately.
+export interface StagedSongChange {
+  id: string
+  /** Null for a 'create' change - a new song has no id yet. */
+  songId: number | null
+  changeType: 'update' | 'delete' | 'create'
+  /** Song title, for the queue row - not sent as part of proposed_data. */
+  title: string
+  proposedData: Record<string, unknown>
+  editorNotes: string
+  /** Channel slug the proposal belongs to. Absent lets the server pick a
+   *  default (the AddSongModal can be opened without one). */
+  channel?: string
+  /** Set when a propose attempt failed, so the row can show why and stay
+   *  queued for a retry. Cleared on the next attempt. */
+  error?: string
+}
+
 // Where the desktop nav menu sits - classic left sidebar, mirrored right, or a
 // horizontal bar above/below the content. Mobile always uses the bottom tab bar.
 export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
@@ -471,6 +498,9 @@ interface AppState {
   // Comp file changes staged by Files drag-and-drop, proposed as a batch from
   // the Uploads panel (see lib/compStagedChanges).
   stagedFileChanges: StagedFileChange[]
+  // Song edit/delete proposals staged by the Tracker's editors, proposed as a
+  // batch from the Uploads panel (see lib/compStagedSongChanges).
+  stagedSongChanges: StagedSongChange[]
 }
 
 interface AppActions {
@@ -765,6 +795,15 @@ interface AppActions {
   updateStagedFileChange: (id: string, updates: Partial<StagedFileChange>) => void
   unstageFileChange: (id: string) => void
   clearStagedFileChanges: () => void
+
+  /** Queues a song edit/delete proposal; ids are assigned here. Replaces any
+   *  queued change of the same type already staged for that song/channel, so
+   *  editing a song again before proposing it just updates the queued patch
+   *  rather than piling up duplicates. */
+  stageSongChanges: (changes: Omit<StagedSongChange, 'id'>[]) => void
+  updateStagedSongChange: (id: string, updates: Partial<StagedSongChange>) => void
+  unstageSongChange: (id: string) => void
+  clearStagedSongChanges: () => void
 }
 
 export type AppStore = QueueSlice & AppState & AppActions
@@ -1117,6 +1156,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'stats': '/wrapped',
       'statistics': '/statistics',
       'download': '/download',
+      'thanks': '/thank-you',
       'settings': '/settings',
     }
     // Returning to Playlists with a playlist already open (it stays selected
@@ -2396,6 +2436,26 @@ export const useStore = create<AppStore>((set, get, store) => ({
     stagedFileChanges: s.stagedFileChanges.filter((c) => c.id !== id),
   })),
   clearStagedFileChanges: () => set({ stagedFileChanges: [] }),
+
+  stagedSongChanges: [],
+  // One queued change per song/channel/type: editing a song again before it's
+  // proposed replaces the queued patch rather than piling up duplicates. A
+  // 'create' has no song id to key off of - each new-song draft is its own
+  // proposal, so those never collapse into each other.
+  stageSongChanges: (changes) => set((s) => ({
+    stagedSongChanges: [
+      ...s.stagedSongChanges.filter((c) => !changes.some((n) =>
+        n.songId != null && n.songId === c.songId && n.channel === c.channel && n.changeType === c.changeType)),
+      ...changes.map((c, i) => ({ ...c, id: `staged-song-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
+    ],
+  })),
+  updateStagedSongChange: (id, updates) => set((s) => ({
+    stagedSongChanges: s.stagedSongChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
+  })),
+  unstageSongChange: (id) => set((s) => ({
+    stagedSongChanges: s.stagedSongChanges.filter((c) => c.id !== id),
+  })),
+  clearStagedSongChanges: () => set({ stagedSongChanges: [] }),
 }))
 
 // Dev-only console handle for driving store state while debugging (e.g.
