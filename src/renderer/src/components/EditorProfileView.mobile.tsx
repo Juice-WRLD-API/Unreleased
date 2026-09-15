@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   Loader2, Trophy, FileEdit, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
-  Users, Shield,
+  Users, Shield, Pencil, Check,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers } from '../lib/userApi'
+import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers, updateDisplayName } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
 import ReportsTab from './ReportsTab.mobile'
 import AdminPage from './AdminPage.mobile'
@@ -153,6 +153,33 @@ export default function EditorProfileView(): JSX.Element {
   const [expandedProposalId, setExpandedProposalId] = useState<number | null>(null)
   const [compSearch, setCompSearch] = useState('')
 
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  function startEditName(): void {
+    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  async function saveDisplayName(): Promise<void> {
+    const trimmed = nameInput.trim()
+    if (!trimmed || trimmed === account?.display_name) { setEditingName(false); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
   const {
     proposals, loading: loadingProposals, refreshing,
     filter, setFilter, search, setSearch, deletingId, resubmittingId,
@@ -288,9 +315,50 @@ export default function EditorProfileView(): JSX.Element {
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <h1 className="text-text-primary text-[17px] font-bold leading-tight truncate">
-                {account?.display_name || account?.discord_username || 'My Profile'}
-              </h1>
+              {editingName ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    autoFocus
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveDisplayName()
+                      if (e.key === 'Escape') setEditingName(false)
+                    }}
+                    maxLength={50}
+                    disabled={savingName}
+                    className="min-w-0 flex-1 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-[15px] font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <button
+                    onClick={saveDisplayName}
+                    disabled={savingName}
+                    className="w-7 h-7 shrink-0 flex items-center justify-center rounded text-accent active:bg-accent/15 transition-colors disabled:opacity-40"
+                    title="Save"
+                  >
+                    {savingName ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  </button>
+                  <button
+                    onClick={() => setEditingName(false)}
+                    disabled={savingName}
+                    className="w-7 h-7 shrink-0 flex items-center justify-center rounded text-text-muted active:bg-surface-overlay transition-colors disabled:opacity-40"
+                    title="Cancel"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <h1 className="text-text-primary text-[17px] font-bold leading-tight truncate flex items-center gap-1.5">
+                  {account?.display_name || account?.discord_username || 'My Profile'}
+                  <button
+                    onClick={startEditName}
+                    className="p-0.5 rounded text-text-muted active:bg-surface-overlay transition-colors shrink-0"
+                    title="Edit display name"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                </h1>
+              )}
+              {nameError && <p className="text-[10px] text-red-400">{nameError}</p>}
               <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted truncate">
                 {myEntry
                   ? `Rank #${myEntry.rank} · ${myEntry.approved_count} approved`

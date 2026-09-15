@@ -97,7 +97,7 @@ function OverviewTab() {
           <Endpoint method="GET" path="/cover/{name}" description="Static cover art image by filename" />
           <Endpoint method="GET" path="/media/{path}" description="Static media file (news covers, attachments, etc.)" />
           <Endpoint method="GET" path="/accounts/account/me/" description="Current user info (public-facing), incl. per-song preferences + playlist folders" />
-          <Endpoint method="PATCH" path="/accounts/account/me/" description="Update user_preferences (custom titles, covers, default version, playcounts) and/or playlist_folders" />
+          <Endpoint method="PATCH" path="/accounts/account/me/" description="Update display_name, user_preferences (custom titles, covers, default version, playcounts), and/or playlist_folders" />
           <Endpoint method="GET" path="/accounts/me/" description="Current user with role, for editor/admin dashboards" />
           <Endpoint method="POST" path="/feedback/" description="Submit API feedback (no auth)" />
           <Endpoint method="GET" path="/feedback/" description="List submitted feedback (requires auth)" />
@@ -918,8 +918,16 @@ Authorization: Token <token>`}</Pre>
           <div>
             <MethodPath method="PATCH" path={`/accounts/account/me/`} />
             <p className="text-xs text-text-muted mb-2">
-              Updates the logged-in user&apos;s own <Code>user_preferences</Code>, <Code>playlist_folders</Code>, and/or{' '}
-              <Code>listening_plays</Code> blobs. See the sections below for what goes in each.
+              Updates the logged-in user&apos;s own <Code>display_name</Code>, <Code>user_preferences</Code>,{' '}
+              <Code>playlist_folders</Code>, and/or <Code>listening_plays</Code>. See the sections below for what
+              goes in each of the blob fields.
+            </p>
+            <Pre>{`PATCH /accounts/account/me/
+
+{ "display_name": "New Name" }`}</Pre>
+            <p className="text-xs text-text-muted">
+              Self-service rename, independent of the Discord-derived <Code>discord_username</Code>. Send just{' '}
+              <Code>display_name</Code> on its own; it doesn&apos;t require the blob fields to be present.
             </p>
           </div>
           <div>

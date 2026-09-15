@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import {
   Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
-  Users, Shield,
+  Users, Shield, Pencil, Check,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers } from '../lib/userApi'
+import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers, updateDisplayName } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
 import ReportsTab from './ReportsTab'
 import type { AdminTab } from '../hooks/useAdminQueue'
@@ -113,6 +113,33 @@ export default function EditorProfileView(): JSX.Element {
     loadChannels: s.loadChannels,
   })))
   const go = setActiveView
+
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  function startEditName(): void {
+    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  async function saveDisplayName(): Promise<void> {
+    const trimmed = nameInput.trim()
+    if (!trimmed || trimmed === account?.display_name) { setEditingName(false); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
   // Every list on this page - my proposals, my comp proposals, the Admin
   // tile's review queues - is already scoped to activeChannel (see the
   // effects below and AdminPage). ApiFilesView is the only other place that
@@ -341,9 +368,50 @@ export default function EditorProfileView(): JSX.Element {
                         </div>
                       )}
                       <div className="min-w-0">
-                        <h1 className="text-text-primary text-base font-bold truncate">
-                          {account?.display_name || account?.discord_username || 'My Profile'}
-                        </h1>
+                        {editingName ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={nameInput}
+                              onChange={(e) => setNameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveDisplayName()
+                                if (e.key === 'Escape') setEditingName(false)
+                              }}
+                              maxLength={50}
+                              disabled={savingName}
+                              className="min-w-0 w-36 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                            />
+                            <button
+                              onClick={saveDisplayName}
+                              disabled={savingName}
+                              className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40"
+                              title="Save"
+                            >
+                              {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            </button>
+                            <button
+                              onClick={() => setEditingName(false)}
+                              disabled={savingName}
+                              className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+                              title="Cancel"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <h1 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
+                            {account?.display_name || account?.discord_username || 'My Profile'}
+                            <button
+                              onClick={startEditName}
+                              className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
+                              title="Edit display name"
+                            >
+                              <Pencil size={11} />
+                            </button>
+                          </h1>
+                        )}
+                        {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
                         <div className="mt-1">
                           <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={!!account?.is_editor} isContributor={isContributor} />
                         </div>

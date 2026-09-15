@@ -262,6 +262,16 @@ export async function getMe(): Promise<AccountUser> {
   return request(url, { method: 'GET' }, true, url)
 }
 
+export async function updateDisplayName(displayName: string): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ display_name: displayName }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
 export async function getFavorites(): Promise<FavoriteEntry[]> {
   const url = `${LIBRARY_BASE}/favorites/`
   return request(url, { method: 'GET' }, true, url)

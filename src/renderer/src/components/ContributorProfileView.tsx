@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { RefreshCw, ChevronLeft, Plus, FolderOpen, User, Trophy } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
+import { RefreshCw, ChevronLeft, Plus, FolderOpen, User, Trophy, Pencil, Check, X, Loader2 } from 'lucide-react'
+import { useStore, useStorePick } from '../store/useStore'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useMyCompProposals } from '../hooks/useMyCompProposals'
 import CompProposalList, { CompFilterBar, filterCompProposals } from './CompProposalList'
+import { updateDisplayName } from '../lib/userApi'
 
 // A contributor-only account's home. Reviewing other people's proposals is
 // deliberately NOT here - that queue lives in exactly one place, the Admin
@@ -24,6 +25,33 @@ export default function ContributorProfileView(): JSX.Element {
   const { account, setActiveView, activeChannel, channels } = useStorePick('account', 'setActiveView', 'activeChannel', 'channels')
   const go = setActiveView
   const [refreshKey, setRefreshKey] = useState(0)
+
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  function startEditName(): void {
+    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  async function saveDisplayName(): Promise<void> {
+    const trimmed = nameInput.trim()
+    if (!trimmed || trimmed === account?.display_name) { setEditingName(false); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
 
   const { isContributor, isAdmin, isManager, isEditor } = useStaffRoles(account, activeChannel, channels)
 
@@ -75,9 +103,50 @@ export default function ContributorProfileView(): JSX.Element {
                 </div>
               )}
               <div className="min-w-0">
-                <h2 className="text-text-primary text-base font-bold truncate">
-                  {account.display_name || account.discord_username}
-                </h2>
+                {editingName ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      autoFocus
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveDisplayName()
+                        if (e.key === 'Escape') setEditingName(false)
+                      }}
+                      maxLength={50}
+                      disabled={savingName}
+                      className="min-w-0 w-36 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                    <button
+                      onClick={saveDisplayName}
+                      disabled={savingName}
+                      className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40"
+                      title="Save"
+                    >
+                      {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                    </button>
+                    <button
+                      onClick={() => setEditingName(false)}
+                      disabled={savingName}
+                      className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+                      title="Cancel"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <h2 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
+                    {account.display_name || account.discord_username}
+                    <button
+                      onClick={startEditName}
+                      className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
+                      title="Edit display name"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  </h2>
+                )}
+                {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
                 <div className="mt-1">
                   <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={isEditor} isContributor={isContributor} />
                 </div>
