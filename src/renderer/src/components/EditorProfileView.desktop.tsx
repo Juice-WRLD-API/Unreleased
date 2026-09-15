@@ -5,7 +5,7 @@ import {
   Users, Shield,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { SongEditProposal, adminListProposals, adminListCompProposals, adminListApplications, adminListUsers } from '../lib/userApi'
+import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
 import ReportsTab from './ReportsTab'
 import type { AdminTab } from '../hooks/useAdminQueue'
@@ -223,33 +223,28 @@ export default function EditorProfileView(): JSX.Element {
     Promise.resolve().then(() => {
       if (cancelled) return
       Promise.all([
-        adminListProposals('pending', activeChannel),
-        adminListCompProposals('pending', activeChannel),
+        adminProposalCounts(activeChannel),
+        adminCompProposalCounts(activeChannel),
         isAdmin ? adminListApplications('pending') : Promise.resolve(null),
         isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
         isAdmin ? adminListUsers() : Promise.resolve(null),
-        // Full (unfiltered) proposal list - only used for the approved-count
-        // / approval-rate figures the old standalone Stats tab showed, which
-        // now live directly on this tile instead of behind a "Stats" button.
-        isAdmin ? adminListProposals(undefined, activeChannel) : Promise.resolve(null),
-      ]).then(([props, comp, apps, reps, users, allProps]) => {
+      ]).then(([propCounts, compCounts, apps, reps, users]) => {
         if (cancelled) return
         const pendingApplications = apps?.length ?? null
         const pendingReports = reps?.length ?? null
-        const approved = allProps?.filter(p => p.status === 'approved').length ?? null
-        const reviewed = allProps?.filter(p => p.status !== 'pending').length ?? 0
+        const reviewed = propCounts.total - propCounts.pending
         setAdminPreview({
-          pendingProposals: props.length,
-          pendingComp: comp.length,
+          pendingProposals: propCounts.pending,
+          pendingComp: compCounts.pending,
           pendingApplications,
           pendingReports,
           totalUsers: users?.length ?? null,
           totalChannels: channelsRef.current.length,
-          totalPending: props.length + comp.length + (pendingApplications ?? 0) + (pendingReports ?? 0),
+          totalPending: propCounts.pending + compCounts.pending + (pendingApplications ?? 0) + (pendingReports ?? 0),
           otpEnabled: isAdmin ? !!account?.otp_enabled : null,
-          totalProposals: allProps?.length ?? null,
-          approvedProposals: approved,
-          approvalPct: allProps && reviewed > 0 ? Math.round((approved ?? 0) / reviewed * 100) : allProps ? 0 : null,
+          totalProposals: isAdmin ? propCounts.total : null,
+          approvedProposals: isAdmin ? propCounts.approved : null,
+          approvalPct: isAdmin ? (reviewed > 0 ? Math.round(propCounts.approved / reviewed * 100) : 0) : null,
           editors: users ? users.filter(u => u.role === 'editor').length : null,
           managers: users ? users.filter(u => !!u.manager_enabled).length : null,
           applicants: users ? users.filter(u => u.role === 'applicant').length : null,
