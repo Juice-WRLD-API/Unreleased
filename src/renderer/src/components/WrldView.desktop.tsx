@@ -853,7 +853,14 @@ export default function WrldView(): JSX.Element {
               here, and unlike the shell this surface is full-bleed with no
               sidebar/player strips to leave uncovered, so both radials are
               centered on it instead of pinned to the shell's corners. */}
-          <div className="absolute inset-0 overflow-hidden">
+          {/* bg-black base: none of the layers below is opaque to its own
+              edges - blur(60px) fades the cover out well before scale(1.2)
+              pushes it off-screen, worst at the corners where two edges
+              compound, and the radio fallback starts at from-red-950/60. That
+              needs something solid behind it here, because unlike mobile this
+              page renders over a still-mounted bgView (App.tsx), so the page
+              you came from bled through those corners. */}
+          <div className="absolute inset-0 overflow-hidden bg-black">
             {wrldThemeBackground ? (
               <div
                 className="absolute inset-0 bg-surface"
