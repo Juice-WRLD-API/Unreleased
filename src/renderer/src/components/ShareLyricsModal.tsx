@@ -1,4 +1,5 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
 import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check } from 'lucide-react'
 import { ModalOverlay } from './Modal'
@@ -219,6 +220,14 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     return () => { cancelled = true }
   }, [imageUrl])
   const previewArtSrc = artDataUrl ?? imageUrl ?? undefined
+  // While actually rasterizing the card (Save/Copy/Share), the cover must
+  // never be the raw cross-origin `imageUrl` - a plain <img> can paint a
+  // non-CORS image fine on screen, but html-to-image reading that same pixel
+  // data back out for the PNG throws instead of just skipping it. Export
+  // falls back to no cover at all rather than the unsafe URL if the fetch
+  // hasn't resolved (or failed) by the time the user clicks a button.
+  const [exporting, setExporting] = useState(false)
+  const safeArtSrc = exporting ? (artDataUrl ?? undefined) : previewArtSrc
 
   const cardRef = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState<'download' | 'copy' | 'share' | null>(null)
@@ -251,12 +260,26 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
 
   const renderOpts = { pixelRatio: 4, cacheBust: true, backgroundColor: '#111114' }
 
+  // Forces the card into its export-safe state (see `safeArtSrc`) and back
+  // out again around the actual rasterization. `flushSync` matters here -
+  // without it the DOM wouldn't reflect `exporting` yet by the time
+  // toPng/toBlob reads it, since React would otherwise defer that render to
+  // the next microtask/paint.
+  const withExportMode = async <T,>(capture: () => Promise<T>): Promise<T> => {
+    flushSync(() => setExporting(true))
+    try {
+      return await capture()
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const handleDownload = async (): Promise<void> => {
     if (!cardRef.current) return
     setError(null)
     setBusy('download')
     try {
-      const dataUrl = await toPng(cardRef.current, renderOpts)
+      const dataUrl = await withExportMode(() => toPng(cardRef.current!, renderOpts))
       const a = document.createElement('a')
       a.href = dataUrl
       a.download = `${fileName}.png`
@@ -275,7 +298,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     setError(null)
     setBusy('copy')
     try {
-      const blob = await toBlob(cardRef.current, renderOpts)
+      const blob = await withExportMode(() => toBlob(cardRef.current!, renderOpts))
       if (!blob) throw new Error('empty blob')
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
     } catch {
@@ -290,7 +313,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     setError(null)
     setBusy('share')
     try {
-      const blob = await toBlob(cardRef.current, renderOpts)
+      const blob = await withExportMode(() => toBlob(cardRef.current!, renderOpts))
       if (!blob) throw new Error('empty blob')
       const file = new File([blob], `${fileName}.png`, { type: 'image/png' })
       if (navigator.canShare && !navigator.canShare({ files: [file] })) throw new Error('unsupported')
@@ -529,9 +552,9 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 style={{ width: cardW, height: cardH }}
               >
                 <div ref={cardRef} style={{ width: cardW, height: cardH, position: 'relative', background: '#111114' }}>
-                  {bgStyle === 'blur' && previewArtSrc && (
+                  {bgStyle === 'blur' && safeArtSrc && (
                     <img
-                      src={previewArtSrc}
+                      src={safeArtSrc}
                       alt=""
                       style={{
                         position: 'absolute', inset: -20, width: `calc(100% + 40px)`, height: `calc(100% + 40px)`,
@@ -578,8 +601,8 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                       display: 'flex', alignItems: 'center', gap: 10,
                       background: 'linear-gradient(0deg, rgba(0,0,0,0.6), transparent)',
                     }}>
-                      {previewArtSrc ? (
-                        <img src={previewArtSrc} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+                      {safeArtSrc ? (
+                        <img src={safeArtSrc} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
                       ) : (
                         <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <Music2 size={16} color="rgba(255,255,255,0.6)" />
