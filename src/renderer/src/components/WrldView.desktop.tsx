@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useMemo, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2 } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2 } from 'lucide-react'
 import ShareLyricsModal from './ShareLyricsModal'
+import { ModalOverlay, LockToggle } from './Modal'
+import CoverEditor from './CoverEditor'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
@@ -92,6 +94,25 @@ export default function WrldView(): JSX.Element {
   const activeRef    = useRef<HTMLDivElement>(null)
   const [artError, setArtError] = useState(false)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
+
+  // Right-click the cover for the same "Change cover" picker the mobile
+  // long-press opens (see WrldView.mobile.tsx) - reached directly instead of
+  // via Song info, so a plain local modal rather than the global infoSongId
+  // host, which would pull in the rest of Song info around it.
+  const coverSongId = radioFmActive
+    ? (radioFmNowPlaying?.song_id ?? radioFmMatchedSong?.songId ?? null)
+    : (currentTrack ? userApi.trackIdToSongId(currentTrack.id) : null)
+  const [coverPickerSong, setCoverPickerSong] = useState<JWApiSong | null>(null)
+  const [showCoverPicker, setShowCoverPicker] = useState(false)
+  const openCoverPicker = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    if (coverSongId == null) return
+    setCoverPickerSong(null)
+    setShowCoverPicker(true)
+    apiFetch<JWApiSong>(`/songs/${coverSongId}/`)
+      .then(song => setCoverPickerSong(song))
+      .catch(() => setShowCoverPicker(false))
+  }
 
   // Remember the volume before muting so unmuting restores it, instead of
   // jumping to a hardcoded level (mirrors the Player bar's toggleMute).
@@ -492,6 +513,10 @@ export default function WrldView(): JSX.Element {
         ? 'w-14 h-14 rounded-xl overflow-hidden shrink-0 shadow-lg'
         : 'rounded-3xl overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.8)] w-full'}
       style={mobile ? {} : { aspectRatio: '1' }}
+      // Right-click → "Change cover", same as mobile's long-press. Only on
+      // the big desktop art, not the small header thumbnail (mobile=true) -
+      // mirrors mobile only wiring this to its one large cover.
+      onContextMenu={!mobile && coverSongId != null ? openCoverPicker : undefined}
     >
       {artSrc && !artError ? (
         // The mobile box is 56px, so the degraded cover is all it ever needs;
@@ -1498,6 +1523,47 @@ export default function WrldView(): JSX.Element {
           rawLyrics={rawLyrics}
           onClose={() => setShowShareLyrics(false)}
         />
+      )}
+
+      {showCoverPicker && (
+        <ModalOverlay
+          onClose={() => setShowCoverPicker(false)}
+          zIndexClassName="z-[170]"
+          panelClassName="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-sm max-h-[85svh]"
+          minWidth={340} minHeight={360}
+        >
+          {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+            <div className="bg-surface w-full h-full overflow-y-auto">
+              <div
+                className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface cursor-grab active:cursor-grabbing"
+                onMouseDown={onHandleMouseDown}
+              >
+                <h2 className="text-text-primary text-sm font-semibold">Change cover</h2>
+                <div className="flex items-center gap-1">
+                  {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+                  <button onClick={() => setShowCoverPicker(false)} className="text-text-muted hover:text-text-primary transition-colors">
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+              <div className="px-5 py-4">
+                {coverPickerSong ? (
+                  <CoverEditor
+                    songId={coverPickerSong.id}
+                    apiTitle={coverPickerSong.name}
+                    ownImageRaw={coverPickerSong.image_url}
+                    altTitles={(coverPickerSong.track_titles ?? []).filter(t => t && t !== coverPickerSong.name)}
+                    onPicked={() => setShowCoverPicker(false)}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center gap-2 text-text-muted text-xs py-6">
+                    <Loader2 size={13} className="animate-spin" /> Loading…
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </ModalOverlay>
       )}
     </div>
   )
