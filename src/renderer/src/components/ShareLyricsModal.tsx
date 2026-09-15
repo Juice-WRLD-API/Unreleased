@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toBlob, toPng } from 'html-to-image'
-import { X, Download, Share2, Loader2, Music2 } from 'lucide-react'
+import { X, Download, Share2, Copy, Loader2, Music2 } from 'lucide-react'
 import { ModalOverlay } from './Modal'
 import { parseLrc, isLrcFormat, getCurrentLineIndex } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
@@ -33,8 +33,13 @@ const FORMATS: { key: Format; label: string; w: number; h: number }[] = [
   { key: 'portrait', label: 'Portrait · 2:3', w: 280, h: 420 },
   { key: 'post', label: 'Post · 4:5', w: 300, h: 375 },
   { key: 'square', label: 'Square · 1:1', w: 340, h: 340 },
-  { key: 'landscape', label: 'Landscape · 16:9', w: 400, h: 225 },
-  { key: 'widescreen', label: 'Widescreen · 21:9', w: 420, h: 180 },
+  // Capped at the same 340px max width as Square, not their "true" 400/420px
+  // width - a wider card than every other format pushed the preview column
+  // past the modal's edge on anything but a very wide window. The exported
+  // image shrinks by the same ratio (still 4x pixelRatio on top of this), a
+  // fair tradeoff for a preview that actually stays on screen.
+  { key: 'landscape', label: 'Landscape · 16:9', w: 340, h: 191 },
+  { key: 'widescreen', label: 'Widescreen · 21:9', w: 340, h: 146 },
 ]
 
 const TEXT_SIZE_MULT: Record<TextSize, number> = { S: 0.8, M: 1, L: 1.25 }
@@ -52,6 +57,48 @@ function baseFontSize(lineCount: number): number {
   if (lineCount <= 4) return 20
   if (lineCount <= 6) return 17
   return 14
+}
+
+const TEXT_LINE_HEIGHT = 1.35
+const TEXT_LINE_GAP = 6
+
+/** Padding above/below the lyric text block. The bottom bar (cover +
+ *  title/artist, ~64px regardless of card size) needs the same reserve on
+ *  every format, but a fixed 90px reserve ate more than a third of the short
+ *  landscape/widescreen cards - scale it down on those instead. With the bar
+ *  hidden entirely there's nothing to reserve for, so bottom matches top. */
+function textPadding(cardH: number, showInfoBar: boolean): { top: number; bottom: number } {
+  const top = Math.max(16, Math.min(30, cardH * 0.12))
+  return { top, bottom: showInfoBar ? Math.max(70, Math.min(90, cardH * 0.3)) : top }
+}
+
+// Rough average character width as a fraction of font size, for a bold sans
+// lyric font - not exact (no canvas measurement here), just enough to guess
+// how many characters fit per line before the browser itself wraps it.
+const AVG_CHAR_WIDTH_RATIO = 0.58
+
+function estimateVisualLines(text: string, fontSize: number, areaW: number): number {
+  const charsPerLine = Math.max(1, Math.floor(areaW / (fontSize * AVG_CHAR_WIDTH_RATIO)))
+  return Math.max(1, Math.ceil(text.length / charsPerLine))
+}
+
+function estimateBlockHeight(lines: string[], fontSize: number, areaW: number): number {
+  return lines.reduce((total, line, i) => {
+    const height = total + estimateVisualLines(line, fontSize, areaW) * fontSize * TEXT_LINE_HEIGHT
+    return i < lines.length - 1 ? height + TEXT_LINE_GAP : height
+  }, 0)
+}
+
+/** The largest font size, at or below `maxFont`, whose lines - including
+ *  ones that will visually wrap inside `areaW` - fit within `areaH`. A plain
+ *  per-line-count estimate undercounts wrapped lines (a long lyric line can
+ *  become 2-3 visual lines on a narrow/short card), which is what let text
+ *  run down into the bottom info bar instead of shrinking to make room. */
+function fitFontSizeToArea(lines: string[], maxFont: number, areaW: number, areaH: number): number {
+  if (lines.length === 0) return maxFont
+  let size = maxFont
+  while (size > 10 && estimateBlockHeight(lines, size, areaW) > areaH) size -= 0.5
+  return Math.max(10, size)
 }
 
 /** Small pill-style segmented control, matching the app's own lyrics-display
@@ -98,6 +145,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   const [textSize, setTextSize] = useState<TextSize>('M')
   const [textPos, setTextPos] = useState<TextPos>('center')
   const [textColor, setTextColor] = useState<TextColor>('white')
+  const [showInfoBar, setShowInfoBar] = useState(true)
 
   const { w: cardW, h: cardH } = FORMATS.find(f => f.key === format) ?? FORMATS[0]
 
@@ -126,7 +174,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   }, [imageUrl])
 
   const cardRef = useRef<HTMLDivElement>(null)
-  const [busy, setBusy] = useState<'download' | 'share' | null>(null)
+  const [busy, setBusy] = useState<'download' | 'copy' | 'share' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const handleLineClick = (i: number): void => {
@@ -154,9 +202,18 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   }
 
   const selectedLines = lines.slice(selStart, selEnd + 1)
-  const fontSize = baseFontSize(selectedLines.length) * TEXT_SIZE_MULT[textSize]
+  const { top: textPadTop, bottom: textPadBottom } = textPadding(cardH, showInfoBar)
+  const textAreaH = cardH - textPadTop - textPadBottom
+  const textAreaW = cardW - 52 // 26px horizontal padding each side, see the card's own padding below
+  const fontSize = fitFontSizeToArea(
+    selectedLines,
+    baseFontSize(selectedLines.length) * TEXT_SIZE_MULT[textSize],
+    textAreaW,
+    textAreaH,
+  )
   const fileName = `${title} - ${artist}`.replace(/[/\\?%*:|"<>]/g, '').trim() || 'lyrics'
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  const canCopyImage = typeof navigator !== 'undefined' && !!navigator.clipboard?.write && typeof window.ClipboardItem === 'function'
 
   const renderOpts = { pixelRatio: 4, cacheBust: true, backgroundColor: '#111114' }
 
@@ -174,6 +231,21 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
       a.remove()
     } catch {
       setError('Could not generate the image.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleCopy = async (): Promise<void> => {
+    if (!cardRef.current) return
+    setError(null)
+    setBusy('copy')
+    try {
+      const blob = await toBlob(cardRef.current, renderOpts)
+      if (!blob) throw new Error('empty blob')
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    } catch {
+      setError('Could not copy the image.')
     } finally {
       setBusy(null)
     }
@@ -222,11 +294,24 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
               <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-3">
                 {lines.map((line, i) => {
                   const selected = i >= selStart && i <= selEnd && anchor !== null
+                  // A contiguous selection reads as one merged block (like a
+                  // message group) instead of a stack of separately-rounded
+                  // pills: only the outer top/bottom corners round, the seam
+                  // between adjacent selected lines stays flat.
+                  const isFirst = i === selStart
+                  const isLast = i === selEnd
+                  const rounding = !selected || (isFirst && isLast)
+                    ? 'rounded-lg'
+                    : isFirst
+                    ? 'rounded-t-lg rounded-b-none'
+                    : isLast
+                    ? 'rounded-b-lg rounded-t-none'
+                    : 'rounded-none'
                   return (
                     <button
                       key={i}
                       onClick={() => handleLineClick(i)}
-                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-sm transition-colors ${
+                      className={`w-full text-left px-2.5 py-1.5 text-sm transition-colors ${rounding} ${
                         selected ? 'bg-accent/20 text-text-primary' : 'text-text-secondary hover:bg-surface-overlay'
                       }`}
                     >
@@ -290,9 +375,21 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   ))}
                 </div>
               </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-text-primary text-xs">Show song info</p>
+                <button
+                  onClick={() => setShowInfoBar(v => !v)}
+                  aria-pressed={showInfoBar}
+                  className={`flex items-center shrink-0 w-9 h-5 p-0.5 rounded-full transition-colors ${
+                    showInfoBar ? 'bg-accent justify-end' : 'bg-[var(--surface-highest)] justify-start'
+                  }`}
+                >
+                  <span className="w-4 h-4 rounded-full bg-white" />
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 min-w-0 shrink-0 min-h-0 flex flex-col items-center gap-4 p-5 overflow-y-auto">
+            <div className="min-w-0 min-h-0 flex flex-col items-center gap-4 p-5 overflow-auto">
               <div
                 className="shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-[var(--border)]"
                 style={{ width: cardW, height: cardH }}
@@ -314,7 +411,8 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.12), rgba(0,0,0,0.55))' }} />
                   <div style={{
                     position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
-                    justifyContent: JUSTIFY_FOR_POS[textPos], padding: '30px 26px 90px', gap: 6,
+                    justifyContent: JUSTIFY_FOR_POS[textPos],
+                    padding: `${textPadTop}px 26px ${textPadBottom}px`, gap: TEXT_LINE_GAP,
                   }}>
                     {selectedLines.length === 0 ? (
                       <p style={{ color: 'rgba(255,255,255,0.55)', fontFamily: 'var(--font-lyrics)', fontSize: 13, textAlign: 'center' }}>
@@ -325,7 +423,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                         key={i}
                         style={{
                           color: TEXT_COLOR_VALUE[textColor], fontFamily: 'var(--font-lyrics)', fontWeight: 700,
-                          fontSize, lineHeight: 1.35, margin: 0,
+                          fontSize, lineHeight: TEXT_LINE_HEIGHT, margin: 0,
                           textShadow: '0 2px 14px rgba(0,0,0,0.55)',
                         }}
                       >
@@ -333,24 +431,26 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                       </p>
                     ))}
                   </div>
-                  <div style={{
-                    position: 'absolute', left: 0, right: 0, bottom: 0, padding: '14px 18px',
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    background: 'linear-gradient(0deg, rgba(0,0,0,0.6), transparent)',
-                  }}>
-                    {artDataUrl ? (
-                      <img src={artDataUrl} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <Music2 size={16} color="rgba(255,255,255,0.6)" />
+                  {showInfoBar && (
+                    <div style={{
+                      position: 'absolute', left: 0, right: 0, bottom: 0, padding: '14px 18px',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      background: 'linear-gradient(0deg, rgba(0,0,0,0.6), transparent)',
+                    }}>
+                      {artDataUrl ? (
+                        <img src={artDataUrl} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 36, height: 36, borderRadius: 8, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Music2 size={16} color="rgba(255,255,255,0.6)" />
+                        </div>
+                      )}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <p style={{ color: '#fff', fontSize: 12, fontWeight: 700, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</p>
+                        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10.5, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{artist}</p>
                       </div>
-                    )}
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <p style={{ color: '#fff', fontSize: 12, fontWeight: 700, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</p>
-                      <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10.5, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{artist}</p>
+                      <img src={logo} alt="" style={{ height: 32, width: 'auto', opacity: 0.9, flexShrink: 0 }} />
                     </div>
-                    <img src={logo} alt="" style={{ height: 13, width: 'auto', opacity: 0.9, flexShrink: 0 }} />
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -362,6 +462,17 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 >
                   {busy === 'download' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Save image
                 </button>
+                {canCopyImage && (
+                  <button
+                    onClick={handleCopy}
+                    disabled={busy !== null || selectedLines.length === 0}
+                    title="Copy image"
+                    aria-label="Copy image"
+                    className="flex items-center justify-center px-3 py-2.5 rounded-xl bg-surface-overlay hover:bg-surface-highest disabled:opacity-50 text-text-primary transition-colors"
+                  >
+                    {busy === 'copy' ? <Loader2 size={15} className="animate-spin" /> : <Copy size={15} />}
+                  </button>
+                )}
                 {canNativeShare && (
                   <button
                     onClick={handleShare}
