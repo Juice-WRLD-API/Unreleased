@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { toBlob, toPng } from 'html-to-image'
-import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus } from 'lucide-react'
+import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check } from 'lucide-react'
 import { ModalOverlay } from './Modal'
 import { parseLrc, isLrcFormat, getCurrentLineIndex } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
@@ -27,7 +27,7 @@ type Format = 'story' | 'square' | 'post' | 'portrait' | 'landscape' | 'widescre
 type BgStyle = 'blur' | 'solid' | 'gradient' | 'custom'
 type TextSize = 'S' | 'M' | 'L'
 type TextPos = 'top' | 'center' | 'bottom'
-type TextColor = 'white' | 'accent' | 'gold'
+type TextColor = 'white' | 'accent' | 'gold' | 'custom'
 
 const FORMATS: { key: Format; label: string; w: number; h: number }[] = [
   { key: 'story', label: 'Story · 9:16', w: 270, h: 480 },
@@ -44,7 +44,14 @@ const FORMATS: { key: Format; label: string; w: number; h: number }[] = [
 ]
 
 const TEXT_SIZE_MULT: Record<TextSize, number> = { S: 0.8, M: 1, L: 1.25 }
-const TEXT_COLOR_VALUE: Record<TextColor, string> = { white: '#fff', accent: 'rgb(var(--accent-rgb))', gold: '#f5c451' }
+const TEXT_COLOR_PRESETS: { key: Exclude<TextColor, 'custom'>; value: string }[] = [
+  { key: 'white', value: '#fff' },
+  { key: 'accent', value: 'rgb(var(--accent-rgb))' },
+  { key: 'gold', value: '#f5c451' },
+]
+const TEXT_COLOR_VALUE: Record<TextColor, string> = {
+  white: '#fff', accent: 'rgb(var(--accent-rgb))', gold: '#f5c451', custom: '#fff',
+}
 const JUSTIFY_FOR_POS: Record<TextPos, string> = { top: 'flex-start', center: 'center', bottom: 'flex-end' }
 
 function shareableLines(rawLyrics: string | null): string[] {
@@ -113,7 +120,7 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
   return (
     <div>
       <p className="text-text-muted text-[11px] mb-1.5">{label}</p>
-      <div className="flex flex-wrap gap-1 p-1 rounded-lg bg-[var(--surface-highest)]">
+      <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--surface-highest)]">
         {options.map(opt => {
           const active = value === opt.key
           return (
@@ -121,7 +128,7 @@ function SegmentedControl<T extends string>({ label, value, options, onChange }:
               key={opt.key}
               onClick={() => onChange(opt.key)}
               aria-pressed={active}
-              className={`px-2 h-7 rounded-md text-[11px] font-medium whitespace-nowrap transition-colors ${
+              className={`flex-1 min-w-0 h-7 rounded-md text-[11px] font-medium transition-colors ${
                 active ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-overlay'
               }`}
             >
@@ -148,11 +155,14 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   const [textSize, setTextSize] = useState<TextSize>('M')
   const [textPos, setTextPos] = useState<TextPos>('center')
   const [textColor, setTextColor] = useState<TextColor>('white')
+  const [customTextColor, setCustomTextColor] = useState('#ffffff')
+  const resolvedTextColor = textColor === 'custom' ? customTextColor : TEXT_COLOR_VALUE[textColor]
   const [showInfoBar, setShowInfoBar] = useState(true)
   // Defaults to whatever the user already has lyrics displayed in, so the
   // card matches unless they explicitly change it here.
   const [fontId, setFontId] = useState(() => useStore.getState().lyricsFont)
   const [customFont, setCustomFont] = useState('')
+  const [fontMenuOpen, setFontMenuOpen] = useState(false)
   const fontFamily = fontId === 'custom' && customFont.trim()
     ? `'${customFont.trim().replace(/'/g, "\\'")}', ${getFont(undefined).stack}`
     : getFont(fontId).stack
@@ -380,11 +390,27 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 </div>
               </div>
               <div>
-                <SegmentedControl label="Background" value={bgStyle} onChange={setBgStyle}
-                  options={[
+                <p className="text-text-muted text-[11px] mb-1.5">Background</p>
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[var(--surface-highest)]">
+                  {([
                     { key: 'blur', label: 'Blur' }, { key: 'solid', label: 'Solid' },
                     { key: 'gradient', label: 'Gradient' }, { key: 'custom', label: 'Custom' },
-                  ]} />
+                  ] as const).map(opt => {
+                    const active = bgStyle === opt.key
+                    return (
+                      <button
+                        key={opt.key}
+                        onClick={() => setBgStyle(opt.key)}
+                        aria-pressed={active}
+                        className={`h-7 rounded-md text-[11px] font-medium transition-colors ${
+                          active ? 'bg-accent text-white' : 'text-text-secondary hover:bg-surface-overlay'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
                 {bgStyle === 'custom' && (
                   <>
                     <input ref={bgFileInputRef} type="file" accept="image/*" onChange={handleCustomBgPick} className="hidden" />
@@ -399,20 +425,49 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
               </div>
               <div>
                 <p className="text-text-muted text-[11px] mb-1.5">Font</p>
-                <select
-                  value={fontId}
-                  onChange={(e) => setFontId(e.target.value)}
-                  className="w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-primary text-[11px] px-2 border-none outline-none"
+                <button
+                  onClick={() => setFontMenuOpen(o => !o)}
+                  aria-expanded={fontMenuOpen}
+                  className="w-full h-7 rounded-md bg-[var(--surface-highest)] hover:bg-surface-overlay transition-colors text-text-primary text-[11px] px-2 flex items-center justify-between gap-1"
                 >
-                  {FONTS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                  <option value="custom">Custom…</option>
-                </select>
+                  <span className="truncate" style={{ fontFamily }}>
+                    {fontId === 'custom' ? (customFont.trim() || 'Custom…') : getFont(fontId).name}
+                  </span>
+                  <ChevronDown size={12} className={`shrink-0 text-text-muted transition-transform ${fontMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {fontMenuOpen && (
+                  <div className="mt-1 rounded-lg bg-[var(--surface-highest)] p-1 flex flex-col gap-0.5">
+                    {FONTS.map(f => (
+                      <button
+                        key={f.id}
+                        onClick={() => { setFontId(f.id); setFontMenuOpen(false) }}
+                        className={`flex items-center justify-between gap-2 px-2 h-8 rounded-md text-[13px] transition-colors ${
+                          fontId === f.id ? 'bg-accent/20 text-text-primary' : 'text-text-secondary hover:bg-surface-overlay'
+                        }`}
+                        style={{ fontFamily: f.stack }}
+                      >
+                        <span className="truncate">{f.name}</span>
+                        {fontId === f.id && <Check size={12} className="shrink-0" />}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setFontId('custom')}
+                      className={`flex items-center justify-between gap-2 px-2 h-8 rounded-md text-[11px] font-medium transition-colors ${
+                        fontId === 'custom' ? 'bg-accent/20 text-text-primary' : 'text-text-secondary hover:bg-surface-overlay'
+                      }`}
+                    >
+                      Custom…
+                      {fontId === 'custom' && <Check size={12} className="shrink-0" />}
+                    </button>
+                  </div>
+                )}
                 {fontId === 'custom' && (
                   <input
                     type="text"
                     value={customFont}
                     onChange={(e) => setCustomFont(e.target.value)}
                     placeholder="Font family name"
+                    style={{ fontFamily }}
                     className="mt-1.5 w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-primary text-[11px] px-2 outline-none placeholder:text-text-muted"
                   />
                 )}
@@ -424,7 +479,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
               <div>
                 <p className="text-text-muted text-[11px] mb-1.5">Color</p>
                 <div className="flex items-center gap-2 px-0.5">
-                  {(Object.keys(TEXT_COLOR_VALUE) as TextColor[]).map(c => (
+                  {TEXT_COLOR_PRESETS.map(({ key: c, value }) => (
                     <button
                       key={c}
                       onClick={() => setTextColor(c)}
@@ -433,9 +488,25 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                       className={`w-6 h-6 rounded-full border-2 transition-transform ${
                         textColor === c ? 'scale-110 border-text-primary' : 'border-transparent hover:scale-105'
                       }`}
-                      style={{ background: TEXT_COLOR_VALUE[c], boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
+                      style={{ background: value, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
                     />
                   ))}
+                  {/* Custom color - the swatch doubles as the picker's own
+                      trigger, so there's no separate "choose color" button. */}
+                  <label
+                    title="Custom color"
+                    className={`relative w-6 h-6 rounded-full border-2 transition-transform cursor-pointer overflow-hidden ${
+                      textColor === 'custom' ? 'scale-110 border-text-primary' : 'border-transparent hover:scale-105'
+                    }`}
+                    style={{ background: customTextColor, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
+                  >
+                    <input
+                      type="color"
+                      value={customTextColor}
+                      onChange={(e) => { setCustomTextColor(e.target.value); setTextColor('custom') }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                  </label>
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -492,7 +563,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                       <p
                         key={i}
                         style={{
-                          color: TEXT_COLOR_VALUE[textColor], fontFamily, fontWeight: 700,
+                          color: resolvedTextColor, fontFamily, fontWeight: 700,
                           fontSize, lineHeight: TEXT_LINE_HEIGHT, margin: 0,
                           textShadow: '0 2px 14px rgba(0,0,0,0.55)',
                         }}
