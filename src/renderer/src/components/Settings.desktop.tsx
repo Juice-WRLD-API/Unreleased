@@ -5,7 +5,7 @@ import {
   FolderOpen, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House,
+  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart,
 } from 'lucide-react'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
@@ -105,6 +105,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'Log out' },
   { tab: 'about', label: 'API Docs' },
+  { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -1613,6 +1614,14 @@ export default function Settings(): JSX.Element {
                 >
                   <BookOpen size={15} />
                   API Docs
+                </button>
+
+                <button
+                  onClick={() => openMainView('thanks')}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
+                >
+                  <Heart size={15} />
+                  Thank You
                 </button>
 
                 <div className="grid grid-cols-2 gap-2 mt-2">

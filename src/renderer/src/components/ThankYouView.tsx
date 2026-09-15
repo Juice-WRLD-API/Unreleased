@@ -10,12 +10,11 @@ const DONORS: string[] = [
 ]
 
 // Placeholder dev/contributor list - replace with real names/handles.
-// freakylatif kept as a seed since it's already credited in the README.
 const DEVELOPERS: string[] = [
   'saint', 'hackinhood (X)'
 ]
 
-// Placeholder list for a third, unlabeled section - replace with real names.
+// Placeholder list for the fucking opps
 const OTHERS: string[] = [
   'Pure',
   'emzie',
@@ -79,7 +78,7 @@ export default function ThankYouView(): JSX.Element {
 
           <div className="rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-6 md:p-8 mt-6">
             <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-4">
-              Fuck You (oops)
+              Fuck You (opps)
             </p>
             <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
               {OTHERS.map((name) => (

@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
@@ -149,6 +149,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
+  { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -1538,6 +1539,7 @@ export default function Settings(): JSX.Element {
                   <LinkRow icon={MessageCircle} iconColor="#5865F2" label="Discord" href="https://discord.gg/jwa" />
                   <LinkRow icon={Globe} iconColor="#0891b2" label="API" href="https://juicewrldapi.com" />
                   <ActionRow icon={BookOpen} iconColor="#6366f1" label="API Docs" onClick={() => openMainView('docs')} />
+                  <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
 
                 {/* Only shown to accounts that aren't already one - these are
