@@ -54,6 +54,10 @@ import { useBackToClose } from '../hooks/useBackToClose'
 type Category = 'released' | 'unreleased' | 'unsurfaced' | 'recording_session' | ''
 type ViewMode = 'list' | 'detail' | 'grid'
 type TrackerTab = 'songs' | 'lyrics' | 'calendar' | 'producers'
+const TRACKER_TABS: TrackerTab[] = ['songs', 'lyrics', 'calendar', 'producers']
+function isTrackerTab(v: string): v is TrackerTab {
+  return (TRACKER_TABS as string[]).includes(v)
+}
 type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length'
 type SheetKind = 'filters' | 'sort' | 'view' | 'bulk' | null
 
@@ -810,6 +814,7 @@ export default function ApiTrackerView(): JSX.Element {
     playTrack, startRadio, addToQueue, account, shuffle,
     apiTrackerCategory, setApiTrackerCategory,
     apiTrackerEra, setApiTrackerEra,
+    apiTrackerTab, setApiTrackerTab,
     setActiveView, setApiFilesPath, setPendingEditorSongId,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
     openBulkEditor, currentTrack, isPlaying, fullEraNames,
@@ -818,6 +823,7 @@ export default function ApiTrackerView(): JSX.Element {
     account: s.account, shuffle: s.shuffle,
     apiTrackerCategory: s.apiTrackerCategory, setApiTrackerCategory: s.setApiTrackerCategory,
     apiTrackerEra: s.apiTrackerEra, setApiTrackerEra: s.setApiTrackerEra,
+    apiTrackerTab: s.apiTrackerTab, setApiTrackerTab: s.setApiTrackerTab,
     setActiveView: s.setActiveView, setApiFilesPath: s.setApiFilesPath,
     setPendingEditorSongId: s.setPendingEditorSongId,
     playlists: s.playlists, refreshPlaylists: s.refreshPlaylists, setShowUserAuth: s.setShowUserAuth,
@@ -834,7 +840,13 @@ export default function ApiTrackerView(): JSX.Element {
   // once so eraLabel() has something to show once the user opts in.
   useEffect(() => { loadEraFullNames().catch(() => {}) }, [])
 
-  const [trackerTab, setTrackerTab] = useState<TrackerTab>('songs')
+  const [trackerTab, setTrackerTab] = useState<TrackerTab>(
+    () => (isTrackerTab(apiTrackerTab) ? apiTrackerTab : 'songs'),
+  )
+  // Deep link is one-shot - consumed into the initial state above, so it must
+  // not linger and re-apply on a later render (e.g. after switching tabs by
+  // hand and coming back to this view).
+  useEffect(() => { if (apiTrackerTab) setApiTrackerTab('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [sheet, setSheet] = useState<SheetKind>(null)
   const [bulkSheetPage, setBulkSheetPage] = useState<'main' | 'playlists'>('main')
 

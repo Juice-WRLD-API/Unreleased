@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
-import { ChevronLeft, BarChart3, Play, Radio, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
+import { BarChart3, Play, Radio, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import {
   apiFetch, apiPeek, getSongById, songToTrack,
@@ -16,9 +16,8 @@ import SongContextMenu, { type SongContextMenuState } from './SongContextMenu'
 // Catalog-wide numbers from GET /stats/ and GET /plays/stats/ - everyone sees
 // the same thing here, unlike StatsView ("Your Wrapped"), which is personal
 // listening history built from this user's own play log. Reached from Home's
-// hero stat row (see HomeView.desktop/.mobile) and by direct URL; not a
-// persistent nav tab, so it behaves like Docs/News: a pushed page with a back
-// chevron rather than a bottom-nav destination.
+// hero stat row (see HomeView.desktop/.mobile), the Tracker's tab bar, and by
+// direct URL; not a persistent bottom-nav destination.
 //
 // /stats/ counts catalog rows (how many songs exist); /plays/stats/ counts
 // plays across every listener (how much they've been played) - two different
@@ -289,10 +288,9 @@ function RecentPlayRow({ play, cover, onPlay, onContextMenu }: {
 }
 
 export default function StatisticsView(): JSX.Element {
-  const { setActiveView, previousView, playTrack, playNext, setApiTrackerEra } = useStorePick(
-    'setActiveView', 'previousView', 'playTrack', 'playNext', 'setApiTrackerEra',
+  const { setActiveView, playTrack, playNext, setApiTrackerEra, setApiTrackerTab } = useStorePick(
+    'setActiveView', 'playTrack', 'playNext', 'setApiTrackerEra', 'setApiTrackerTab',
   )
-  const backView = previousView && previousView !== 'statistics' ? previousView : 'home'
   const canEdit = useCanEdit()
 
   // Consumed by ApiTrackerView on mount (see its own effect reading
@@ -300,6 +298,14 @@ export default function StatisticsView(): JSX.Element {
   // already had ready-made in the store, just previously unused.
   const openEraInTracker = (eraName: string): void => {
     setApiTrackerEra(eraName)
+    setActiveView('api-tracker')
+  }
+
+  // Tab bar below deep-links into the Tracker's own tab of the same name
+  // (ApiTrackerView reads apiTrackerTab once on mount) rather than always
+  // landing on Songs.
+  const openTrackerTab = (tab: string): void => {
+    setApiTrackerTab(tab)
     setActiveView('api-tracker')
   }
 
@@ -408,41 +414,32 @@ export default function StatisticsView(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-[var(--border)]">
+      <div className="flex-shrink-0 px-4 md:px-5 pt-4 md:pt-5 pb-4 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setActiveView(backView)}
-            title="Back"
-            aria-label="Back"
-            className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0"
-          >
-            <ChevronLeft size={18} />
-          </button>
           <h1 className="text-text-primary text-xl font-bold">Statistics</h1>
-          <span className="text-xs text-text-muted font-mono">juicewrldapi.com</span>
         </div>
 
-        <div className="flex items-center gap-0.5 mt-2.5 w-fit bg-surface-overlay rounded-md p-0.5">
+        <div className="flex items-center gap-0.5 mt-1 w-fit bg-surface-overlay rounded-md p-0.5">
           <button
-            onClick={() => setActiveView('api-tracker')}
+            onClick={() => openTrackerTab('songs')}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
           >
             <Music2 size={11} /> Songs
           </button>
           <button
-            onClick={() => setActiveView('api-tracker')}
+            onClick={() => openTrackerTab('lyrics')}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
           >
             <Mic2 size={11} /> Lyrics
           </button>
           <button
-            onClick={() => setActiveView('api-tracker')}
+            onClick={() => openTrackerTab('calendar')}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
           >
             <CalendarDays size={11} /> Overview
           </button>
           <button
-            onClick={() => setActiveView('api-tracker')}
+            onClick={() => openTrackerTab('producers')}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
           >
             <Users size={11} /> Producers
