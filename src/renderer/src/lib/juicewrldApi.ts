@@ -421,7 +421,12 @@ export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]
 }
 
 export function buildImageUrl(imageUrl: string | null | undefined): string | undefined {
-  if (!imageUrl) return undefined
+  // Songs with no cover set sometimes come back from the API with
+  // `image_url` as the literal string "null" rather than JSON null (see
+  // project_jwa_api_docs_drift) - falls through the falsy check below and
+  // gets built into a real-looking but bogus "/null" URL otherwise, which the
+  // API resolves to a placeholder that visibly reads "null".
+  if (!imageUrl || imageUrl === 'null') return undefined
   if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
   // Relative path - ensure single leading slash
   const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl
