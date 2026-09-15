@@ -448,13 +448,21 @@ export async function fetchChannels(): Promise<JWApiChannel[]> {
 }
 
 // The API serves cover art at full size - /files/cover-art/ hands back the art
-// embedded in an audio file (often a ~1MB 600x600 PNG) and /files/download/
-// hands back a standalone image file whole (a few hundred KB). Either is absurd
-// for a 36px list row, and it adds up fast when a virtualized list paints dozens
-// at once. `small=1` asks for a degraded ~128px JPEG instead (a few KB, same
-// image): plenty for anything drawn at thumbnail size, and a good first paint
-// for anything bigger.
+// embedded in an audio file, and /files/download/ hands back a standalone
+// image file whole. Most of these are a modest ~1MB 600x600 PNG, but some
+// source files carry cover art at absurd resolutions (20MB+ isn't
+// hypothetical) - either is overkill for a 36px list row, and it adds up fast
+// when a virtualized list paints dozens at once. `small=1` asks for a
+// degraded ~128px JPEG instead (a few KB, same image): plenty for anything
+// drawn at thumbnail size, and a good first paint for anything bigger.
 const SMALL_COVER_PARAM = 'small=1'
+
+// Every "full" (non-thumbnail) cover-art request is still capped at this px
+// size rather than asking for the raw embedded original - the API re-encodes
+// down to a JPEG at this resolution, which keeps even a 20MB source well
+// under a few hundred KB. Matches the documented max for the sibling
+// /files/image-thumbnail/ endpoint (same underlying resize path).
+const FULL_COVER_SIZE = 1024
 
 // Endpoints that honour `small`. /files/download/ only degrades when the path is
 // an image - for audio the API ignores the param - so it's matched by extension
@@ -468,9 +476,14 @@ function degradable(url: string): boolean {
 }
 
 export function buildCoverArtUrl(path: string, small = false, channel?: string): string {
-  const url = `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(path)}`
-  const c = channel ? `&channel=${encodeURIComponent(channel)}` : ''
-  return small ? `${url}&${SMALL_COVER_PARAM}${c}` : `${url}${c}`
+  const url = new URL(`${JWAPI_BASE}/files/cover-art/`)
+  url.searchParams.set('path', path)
+  if (channel) url.searchParams.set('channel', channel)
+  // size and small both degrade the same embedded original - size wins when
+  // both are passed (per the API), so only ever send one of the two.
+  if (small) url.searchParams.set('small', '1')
+  else url.searchParams.set('size', String(FULL_COVER_SIZE))
+  return url.toString()
 }
 
 /** Rewrites an already-built cover URL to the API's degraded variant.
@@ -482,7 +495,18 @@ export function buildCoverArtUrl(path: string, small = false, channel?: string):
  *  file's extracted art, an audio stream URL - passes through untouched. */
 export function smallCoverUrl(url: string | null | undefined): string | undefined {
   if (!url) return undefined
-  return degradable(url) ? `${url}&${SMALL_COVER_PARAM}` : url
+  if (!degradable(url)) return url
+  try {
+    // buildCoverArtUrl's "full" variant already carries `size=1024` - size
+    // wins over small on the API side, so that has to come out first or this
+    // would silently stay at 1024px instead of actually degrading.
+    const u = new URL(url)
+    u.searchParams.delete('size')
+    u.searchParams.set('small', '1')
+    return u.toString()
+  } catch {
+    return `${url}&${SMALL_COVER_PARAM}`
+  }
 }
 
 /** True when `url` has a cheaper degraded variant worth loading first - the
