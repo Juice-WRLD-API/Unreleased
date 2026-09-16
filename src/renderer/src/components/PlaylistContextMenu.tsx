@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download,
+  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download, ChevronRight,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -9,6 +9,7 @@ import * as userApi from '../lib/userApi'
 import type { PlaylistSummary } from '../lib/userApi'
 import { JWAPI_BASE } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
+import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
 
 // Self-contained context menu for an API playlist - usable from anywhere
@@ -16,16 +17,18 @@ import { Track } from '../types'
 // PlaylistsView mounted, since it talks to userApi/the store directly. Mirrors
 // the action set in PlaylistsView's open-playlist "⋯" menu.
 
-function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing }: {
+function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing, innerRef }: {
   icon: React.ElementType
   label: string
   onClick: () => void
   destructive?: boolean
   disabled?: boolean
   trailing?: React.ReactNode
+  innerRef?: React.Ref<HTMLButtonElement>
 }): JSX.Element {
   return (
     <button
+      ref={innerRef}
       onClick={(e) => { e.stopPropagation(); onClick() }}
       disabled={disabled}
       className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors hover:bg-surface-overlay disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -59,7 +62,13 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   const [playlist, setPlaylist] = useState(state.playlist)
   const [showPlaylists, setShowPlaylists] = useState(false)
+  const addAllItemRef = useRef<HTMLButtonElement>(null)
+  const addAllSubmenuRef = useRef<HTMLDivElement>(null)
+  const [addAllSubPos, setAddAllSubPos] = useState({ top: 0, left: 0 })
   const [showExport, setShowExport] = useState(false)
+  const exportItemRef = useRef<HTMLButtonElement>(null)
+  const exportSubmenuRef = useRef<HTMLDivElement>(null)
+  const [exportSubPos, setExportSubPos] = useState({ top: 0, left: 0 })
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState(state.playlist.name)
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -192,8 +201,8 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   // Keep the menu on-screen near the cursor. The 220x340 figures are just the
   // first-paint estimate - the layout effect below re-clamps against the
-  // actual rendered size, since content here grows a lot (renaming, the
-  // "Add all to playlist" submenu) after the initial guess.
+  // actual rendered size, since content here grows a bit (the rename field)
+  // after the initial guess.
   const MENU_W = 220
   const [pos, setPos] = useState(() => ({
     left: Math.max(8, Math.min(state.x, window.innerWidth - MENU_W - 8)),
@@ -215,14 +224,35 @@ export default function PlaylistContextMenu({ state, onClose }: {
     const top = Math.max(8, Math.min(state.y, window.innerHeight - rect.height - 8))
     const left = Math.max(8, Math.min(state.x, window.innerWidth - rect.width - 8))
     setPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [state.x, state.y, renaming, showPlaylists, showExport])
+  }, [state.x, state.y, renaming])
+
+  // "Add all to playlist" and "Export playlist" open flyouts beside the menu
+  // (matching SongContextMenu's "Add to playlist") instead of growing this
+  // menu inline - an inline list has no width cap of its own, so a long
+  // playlist name would keep stretching this box out to the edge of the
+  // screen. Hovering the row opens it, same as a native submenu.
+  useLayoutEffect(() => {
+    if (!showPlaylists) return
+    const item = addAllItemRef.current, menu = ref.current, sub = addAllSubmenuRef.current
+    if (!item || !menu || !sub) return
+    const { top, left } = placeFlyout(item, menu, sub)
+    setAddAllSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [showPlaylists, pos, otherPlaylists.length])
+
+  useLayoutEffect(() => {
+    if (!showExport) return
+    const item = exportItemRef.current, menu = ref.current, sub = exportSubmenuRef.current
+    if (!item || !menu || !sub) return
+    const { top, left } = placeFlyout(item, menu, sub)
+    setExportSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [showExport, pos])
 
   return createPortal(
     <>
       <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
       <div
         ref={ref}
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[210px]"
+        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[210px] overflow-x-hidden"
         style={{ left: pos.left, top: pos.top }}
         onClick={e => e.stopPropagation()}
       >
@@ -239,6 +269,54 @@ export default function PlaylistContextMenu({ state, onClose }: {
           </div>
         ) : (
           <>
+            {/* Rendered outside the hover-tracked div below (but still inside
+                this portal) so moving the mouse into a flyout doesn't count as
+                "left the trigger row" and close it. */}
+            {showExport && (
+              <div
+                ref={exportSubmenuRef}
+                onClick={e => e.stopPropagation()}
+                style={{ position: 'fixed', zIndex: 62, top: exportSubPos.top, left: exportSubPos.left }}
+                className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
+              >
+                <button onClick={exportJson}
+                  className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                  As JSON
+                </button>
+                <button onClick={exportM3u}
+                  className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                  As M3U
+                </button>
+              </div>
+            )}
+            {showPlaylists && (
+              <div
+                ref={addAllSubmenuRef}
+                onClick={e => e.stopPropagation()}
+                style={{ position: 'fixed', zIndex: 62, top: addAllSubPos.top, left: addAllSubPos.left }}
+                className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
+              >
+                <div className="max-h-44 overflow-y-auto">
+                  {otherPlaylists.map(p => (
+                    <button key={p.id} onClick={() => addAllTo(p.id)} title={p.name}
+                      className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Hovering a submenu row opens its flyout; hovering any other
+                row closes it again, the way a native submenu behaves.
+                Driving both from one handler also makes them mutually
+                exclusive. */}
+            <div
+              onMouseOver={(e) => {
+                const t = e.target as Node
+                setShowPlaylists(addAllItemRef.current?.contains(t) ?? false)
+                setShowExport(exportItemRef.current?.contains(t) ?? false)
+              }}
+            >
             <MenuItem icon={Play} label="Open" onClick={open} />
             <MenuItem icon={Shuffle} label="Play all" onClick={playAll} />
             <MenuItem icon={ListEnd} label="Add all to queue" onClick={queueAll} />
@@ -249,50 +327,29 @@ export default function PlaylistContextMenu({ state, onClose }: {
               onClick={downloadZip}
             />
             <MenuItem
+              innerRef={exportItemRef}
               icon={Download}
               label="Export playlist"
-              trailing={<span className="text-text-muted text-xs">{showExport ? '⌄' : '›'}</span>}
+              trailing={<ChevronRight size={13} className="text-text-muted" />}
               onClick={() => setShowExport(v => !v)}
             />
-            {showExport && (
-              <div className="border-t border-b border-[var(--border)]">
-                <button onClick={exportJson}
-                  className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
-                  As JSON
-                </button>
-                <button onClick={exportM3u}
-                  className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
-                  As M3U
-                </button>
-              </div>
-            )}
             <div className="border-t border-[var(--border)] my-1" />
             <MenuItem icon={shareCopied ? Check : Link} label={shareCopied ? 'Link copied!' : 'Copy share link'} onClick={copyShare} />
             <MenuItem icon={playlist.is_public ? Globe : Lock} label={playlist.is_public ? 'Make private' : 'Make public'} disabled={busy} onClick={togglePublic} />
             <div className="border-t border-[var(--border)] my-1" />
             <MenuItem icon={Pencil} label="Rename" onClick={() => { setRenameVal(playlist.name); setRenaming(true) }} />
             {otherPlaylists.length > 0 && (
-              <>
-                <MenuItem
-                  icon={FolderInput}
-                  label="Add all to playlist"
-                  trailing={<span className="text-text-muted text-xs">{showPlaylists ? '⌄' : '›'}</span>}
-                  onClick={() => setShowPlaylists(v => !v)}
-                />
-                {showPlaylists && (
-                  <div className="border-t border-b border-[var(--border)] max-h-40 overflow-y-auto">
-                    {otherPlaylists.map(p => (
-                      <button key={p.id} onClick={() => addAllTo(p.id)}
-                        className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
+              <MenuItem
+                innerRef={addAllItemRef}
+                icon={FolderInput}
+                label="Add all to playlist"
+                onClick={() => setShowPlaylists(v => !v)}
+                trailing={<ChevronRight size={13} className="text-text-muted" />}
+              />
             )}
             <div className="border-t border-[var(--border)] my-1" />
             <MenuItem icon={Trash2} label="Delete playlist" destructive onClick={del} />
+            </div>
           </>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft,
@@ -34,6 +34,7 @@ import { Folder, FolderPlus, FolderOpen, FolderMinus } from 'lucide-react'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
 import { ClampedMenu } from './ClampedMenu'
+import { placeFlyout } from '../lib/menuFlyout'
 import { loadEraFullNames, eraLabel } from '../lib/eras'
 import { getSkin } from '../lib/skins'
 
@@ -135,16 +136,18 @@ function totalDurationLabel(tracks: Track[]): string {
 // ── MenuItem helper ───────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing }: {
+function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing, innerRef }: {
   icon: React.ElementType<any>
   label: string
   onClick: () => void
   destructive?: boolean
   disabled?: boolean
   trailing?: React.ReactNode
+  innerRef?: React.Ref<HTMLButtonElement>
 }): JSX.Element {
   return (
     <button
+      ref={innerRef}
       onClick={onClick}
       disabled={disabled}
       className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors hover:bg-surface-overlay disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -532,10 +535,17 @@ export default function PlaylistsView(): JSX.Element {
   const [localRenameVal, setLocalRenameVal] = useState('')
   const [showAddAllMenu, setShowAddAllMenu] = useState(false)
   const addAllMenuRef = useRef<HTMLDivElement>(null)
+  const addAllItemRef = useRef<HTMLButtonElement>(null)
+  const [addAllSubPos, setAddAllSubPos] = useState({ top: 0, left: 0 })
   // The open-playlist hero's "⋯" menu (replaces the old cluster of loose
   // action buttons next to Play/Shuffle).
   const [showHeroMenu, setShowHeroMenu] = useState(false)
+  const [showHeroExportMenu, setShowHeroExportMenu] = useState(false)
+  const heroExportItemRef = useRef<HTMLButtonElement>(null)
+  const heroExportMenuRef = useRef<HTMLDivElement>(null)
+  const [heroExportSubPos, setHeroExportSubPos] = useState({ top: 0, left: 0 })
   const heroMenuRef = useRef<HTMLDivElement>(null)
+  const heroMenuBoxRef = useRef<HTMLDivElement>(null)
   const heroBtnRef = useRef<HTMLButtonElement>(null)
 
   // Drag-to-reorder
@@ -628,6 +638,27 @@ export default function PlaylistsView(): JSX.Element {
   const otherPlaylists = useMemo(() => playlists.filter(p => p.id !== selectedId), [playlists, selectedId])
   const isFollowingCurrent = useMemo(() => selectedId != null && followedPlaylists.some(f => f.id === selectedId), [followedPlaylists, selectedId])
   const dragEnabled = sort.field === 'default' && !search.trim()
+
+  // "Add all to playlist" opens a flyout beside the hero menu (matching
+  // SongContextMenu's "Add to playlist") instead of growing the menu inline -
+  // an inline list of playlist names has no width cap of its own, so a long
+  // name would keep stretching the menu out to the edge of the screen.
+  useLayoutEffect(() => {
+    if (!showAddAllMenu) return
+    const item = addAllItemRef.current, menu = heroMenuBoxRef.current, sub = addAllMenuRef.current
+    if (!item || !menu || !sub) return
+    const { top, left } = placeFlyout(item, menu, sub)
+    setAddAllSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [showAddAllMenu, otherPlaylists.length])
+
+  // "Export playlist" is the same kind of flyout as "Add all to playlist" above.
+  useLayoutEffect(() => {
+    if (!showHeroExportMenu) return
+    const item = heroExportItemRef.current, menu = heroMenuBoxRef.current, sub = heroExportMenuRef.current
+    if (!item || !menu || !sub) return
+    const { top, left } = placeFlyout(item, menu, sub)
+    setHeroExportSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [showHeroExportMenu])
 
   const displayTracks = useMemo(() => {
     let result = tracks
@@ -1184,6 +1215,43 @@ export default function PlaylistsView(): JSX.Element {
     setTimeout(() => setZipState('idle'), 3000)
   }, [zipState])
 
+  const downloadBlob = useCallback((content: string, mime: string, filename: string) => {
+    const blob = new Blob([content], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  const handleExportJson = useCallback(() => {
+    if (!detail) return
+    const name = detail.name ?? summary?.name ?? 'playlist'
+    const data = {
+      name: detail.name,
+      description: detail.description,
+      tracks: detail.items.map(i => ({
+        id: i.song.id,
+        title: i.song.name,
+        artist: i.song.credited_artists,
+        album: i.song.album ?? null,
+        era: i.song.era?.name ?? null,
+        path: i.song.path,
+        image_url: i.song.image_url,
+      })),
+    }
+    downloadBlob(JSON.stringify(data, null, 2), 'application/json', `${name}.json`)
+  }, [detail, summary, downloadBlob])
+
+  const handleExportM3u = useCallback(() => {
+    if (!detail) return
+    const name = detail.name ?? summary?.name ?? 'playlist'
+    const lines = ['#EXTM3U']
+    for (const t of tracks) {
+      lines.push(`#EXTINF:${Math.round(t.duration)},${t.artist} - ${t.title}`)
+      lines.push(t.streamUrl ?? t.path)
+    }
+    downloadBlob(lines.join('\n'), 'audio/x-mpegurl', `${name}.m3u`)
+  }, [detail, summary, tracks, downloadBlob])
+
   const handleTogglePublic = useCallback(async () => {
     if (!selectedId || !detail) return
     setTogglingPublic(true)
@@ -1310,7 +1378,7 @@ export default function PlaylistsView(): JSX.Element {
   // same cardMenu state - previously nothing rendered it there, so the menu
   // silently never appeared.
   const renderCardMenu = (): React.ReactNode => cardMenu && createPortal(
-    <ClampedMenu x={cardMenu.x} y={cardMenu.y} className="min-w-[210px]">
+    <ClampedMenu x={cardMenu.x} y={cardMenu.y} className="w-[210px]">
       {cardMenu.renaming ? (
         /* ── Inline rename input (shared by both kinds) ── */
         <div className="px-3 py-2 flex gap-2" onClick={e => e.stopPropagation()}>
@@ -2134,7 +2202,7 @@ export default function PlaylistsView(): JSX.Element {
           </div>
         )}
         {plBulkMenu && (
-          <ClampedMenu x={plBulkMenu.x} y={plBulkMenu.y} className="min-w-[210px]">
+          <ClampedMenu x={plBulkMenu.x} y={plBulkMenu.y} className="w-[210px]">
             <div className="px-3.5 py-2 text-xs text-text-muted">
               {selectedPlaylistKeys.size} {selectedPlaylistKeys.size === 1 ? 'playlist' : 'playlists'} selected
             </div>
@@ -2428,7 +2496,7 @@ export default function PlaylistsView(): JSX.Element {
                   <div className="relative" ref={heroMenuRef}>
                     <button
                       ref={heroBtnRef}
-                      onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v); setShowAddAllMenu(false) }}
+                      onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v); setShowAddAllMenu(false); setShowHeroExportMenu(false) }}
                       title="More"
                       className={`p-2.5 rounded-full text-sm transition-colors ${
                         heroLight
@@ -2443,23 +2511,79 @@ export default function PlaylistsView(): JSX.Element {
                         "Add all to playlist" list stays fully visible. */}
                     {showHeroMenu && createPortal(
                       <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => { setShowHeroMenu(false); setShowAddAllMenu(false) }} />
+                        <div className="fixed inset-0 z-[60]" onClick={() => { setShowHeroMenu(false); setShowAddAllMenu(false); setShowHeroExportMenu(false) }} />
                         {(() => {
                           const r = heroBtnRef.current?.getBoundingClientRect()
                           const top = r ? r.bottom + 6 : 0
                           const left = r ? Math.min(r.left, window.innerWidth - 218) : 0
                           return (
                             <div
-                              className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[210px] overflow-y-auto"
+                              ref={heroMenuBoxRef}
+                              className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[210px] overflow-x-hidden overflow-y-auto"
                               style={{ top, left, maxHeight: window.innerHeight - top - 8 }}
                               onClick={e => e.stopPropagation()}
                             >
+                              {/* Rendered outside the hover-tracked div below
+                                  (but still inside the menu box) so moving the
+                                  mouse into a flyout doesn't count as "left
+                                  the trigger row" and close it. */}
+                              {showHeroExportMenu && (
+                                <div
+                                  ref={heroExportMenuRef}
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ position: 'fixed', zIndex: 62, top: heroExportSubPos.top, left: heroExportSubPos.left }}
+                                  className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
+                                >
+                                  <button onClick={() => { setShowHeroMenu(false); setShowHeroExportMenu(false); handleExportJson() }}
+                                    className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                                    As JSON
+                                  </button>
+                                  <button onClick={() => { setShowHeroMenu(false); setShowHeroExportMenu(false); handleExportM3u() }}
+                                    className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                                    As M3U
+                                  </button>
+                                </div>
+                              )}
+                              {showAddAllMenu && otherPlaylists.length > 0 && tracks.length > 0 && (
+                                <div
+                                  ref={addAllMenuRef}
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ position: 'fixed', zIndex: 62, top: addAllSubPos.top, left: addAllSubPos.left }}
+                                  className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
+                                >
+                                  <div className="max-h-44 overflow-y-auto">
+                                    {otherPlaylists.map(p => (
+                                      <button key={p.id} onClick={async () => { setShowAddAllMenu(false); setShowHeroMenu(false); await handleAddAllTo(p.id, detail) }}
+                                        title={p.name}
+                                        className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
+                                        {p.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div
+                                onMouseOver={(e) => {
+                                  const t = e.target as Node
+                                  setShowAddAllMenu(addAllItemRef.current?.contains(t) ?? false)
+                                  setShowHeroExportMenu(heroExportItemRef.current?.contains(t) ?? false)
+                                }}
+                              >
                               <MenuItem
                                 icon={zipState === 'loading' ? Loader2 : Archive}
                                 label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
                                 disabled={zipState === 'loading' || tracks.length === 0}
                                 onClick={() => { handleZipDownload(tracks, detail.name ?? summary?.name ?? 'playlist') }}
                               />
+                              <MenuItem
+                                innerRef={heroExportItemRef}
+                                icon={Download}
+                                label="Export playlist"
+                                disabled={tracks.length === 0}
+                                trailing={<ChevronRight size={13} className="text-text-muted" />}
+                                onClick={() => setShowHeroExportMenu(v => !v)}
+                              />
+                              <div className="border-t border-[var(--border)] my-1" />
                               <MenuItem
                                 icon={shareCopied ? Check : Link}
                                 label={shareCopied ? 'Link copied!' : 'Copy share link'}
@@ -2472,33 +2596,23 @@ export default function PlaylistsView(): JSX.Element {
                                 disabled={togglingPublic}
                                 onClick={() => { handleTogglePublic() }}
                               />
-                              {otherPlaylists.length > 0 && tracks.length > 0 && (
-                                <>
-                                  <MenuItem
-                                    icon={FolderInput}
-                                    label="Add all to playlist"
-                                    disabled={addingAll}
-                                    trailing={<span className="text-text-muted text-xs">{showAddAllMenu ? '⌄' : '›'}</span>}
-                                    onClick={() => setShowAddAllMenu(v => !v)}
-                                  />
-                                  {showAddAllMenu && (
-                                    <div className="border-t border-b border-[var(--border)] max-h-40 overflow-y-auto">
-                                      {otherPlaylists.map(p => (
-                                        <button key={p.id} onClick={async () => { setShowAddAllMenu(false); setShowHeroMenu(false); await handleAddAllTo(p.id, detail) }}
-                                          title={p.name}
-                                          className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
-                                          {p.name}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                </>
-                              )}
                               <div className="border-t border-[var(--border)] my-1" />
                               {!renaming && (
                                 <MenuItem icon={Pencil} label="Rename" onClick={() => { setShowHeroMenu(false); setRenameValue(detail.name); setRenaming(true) }} />
                               )}
+                              {otherPlaylists.length > 0 && tracks.length > 0 && (
+                                <MenuItem
+                                  innerRef={addAllItemRef}
+                                  icon={FolderInput}
+                                  label="Add all to playlist"
+                                  disabled={addingAll}
+                                  trailing={<ChevronRight size={13} className="text-text-muted" />}
+                                  onClick={() => setShowAddAllMenu(v => !v)}
+                                />
+                              )}
+                              <div className="border-t border-[var(--border)] my-1" />
                               <MenuItem icon={Trash2} label="Delete playlist" destructive onClick={() => { setShowHeroMenu(false); deleteSelected() }} />
+                              </div>
                             </div>
                           )
                         })()}
@@ -3253,7 +3367,7 @@ export default function PlaylistsView(): JSX.Element {
 
       {/* Bulk context menu - shown when right-clicking a card during playlist multi-select */}
       {plBulkMenu && (
-        <ClampedMenu x={plBulkMenu.x} y={plBulkMenu.y} className="min-w-[210px]">
+        <ClampedMenu x={plBulkMenu.x} y={plBulkMenu.y} className="w-[210px]">
           <div className="px-3.5 py-2 text-xs text-text-muted">
             {selectedPlaylistKeys.size} {selectedPlaylistKeys.size === 1 ? 'playlist' : 'playlists'} selected
           </div>

@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft, X, Check, Heart, Shuffle,
-  Music2, ListPlus, Archive, FolderInput, MoreVertical, Search, ChevronUp, ChevronDown,
-  ImageOff, Globe, Lock, Link, ListEnd, HardDrive, Layers, LayoutGrid, Rows3,
+  Music2, ListPlus, Archive, FolderInput, MoreVertical, Search, ChevronUp, ChevronDown, ChevronRight,
+  ImageOff, Globe, Lock, Link, ListEnd, HardDrive, Layers, LayoutGrid, Rows3, Download,
   Image as ImageIcon, ArrowUpDown, AlignLeft, GripVertical, Rss,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -353,6 +353,7 @@ type SheetState =
   | { kind: 'card'; target: CardTarget }
   | { kind: 'folder'; folder: PlaylistFolder }
   | { kind: 'detail' }
+  | { kind: 'export' }
   | { kind: 'guest'; id: string }
   | { kind: 'sort' }
   | { kind: 'bulkTracks' }
@@ -1056,6 +1057,40 @@ export default function PlaylistsView(): JSX.Element {
     } catch { setZipState('error') }
     setTimeout(() => setZipState('idle'), 3000)
   }, [zipState])
+
+  const downloadBlob = useCallback((content: string, mime: string, filename: string) => {
+    const blob = new Blob([content], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  const handleExportJson = useCallback((name: string) => {
+    if (!detail) return
+    const data = {
+      name: detail.name,
+      description: detail.description,
+      tracks: detail.items.map(i => ({
+        id: i.song.id,
+        title: i.song.name,
+        artist: i.song.credited_artists,
+        album: i.song.album ?? null,
+        era: i.song.era?.name ?? null,
+        path: i.song.path,
+        image_url: i.song.image_url,
+      })),
+    }
+    downloadBlob(JSON.stringify(data, null, 2), 'application/json', `${name || 'playlist'}.json`)
+  }, [detail, downloadBlob])
+
+  const handleExportM3u = useCallback((trackList: Track[], name: string) => {
+    const lines = ['#EXTM3U']
+    for (const t of trackList) {
+      lines.push(`#EXTINF:${Math.round(t.duration)},${t.artist} - ${t.title}`)
+      lines.push(t.streamUrl ?? t.path)
+    }
+    downloadBlob(lines.join('\n'), 'audio/x-mpegurl', `${name || 'playlist'}.m3u`)
+  }, [downloadBlob])
 
   const handleTogglePublic = useCallback(async () => {
     if (!selectedId || !detail) return
@@ -2231,6 +2266,13 @@ export default function PlaylistsView(): JSX.Element {
               disabled={zipState === 'loading' || tracks.length === 0}
               onClick={() => { handleZipDownload(tracks, name || 'playlist'); closeSheet() }}
             />
+            <SheetItem
+              icon={Download}
+              label="Export playlist"
+              disabled={tracks.length === 0}
+              trailing={<ChevronRight size={17} className="text-text-muted shrink-0" />}
+              onClick={() => setSheet({ kind: 'export' })}
+            />
             {!isSharedView && (
               <>
                 <SheetItem
@@ -2426,6 +2468,19 @@ export default function PlaylistsView(): JSX.Element {
       {sheet?.kind === 'pick' && renderPickSheet(sheet)}
       {sheet?.kind === 'moveToFolder' && renderFolderPickSheet(sheet.keys)}
       {sheet?.kind === 'detail' && renderDetailSheet()}
+
+      {sheet?.kind === 'export' && (
+        <Sheet onClose={closeSheet} title="Export playlist">
+          <SheetItem
+            label="As JSON"
+            onClick={() => { handleExportJson(isLocal ? (localPl?.name ?? '') : (detail?.name ?? summary?.name ?? '')); closeSheet() }}
+          />
+          <SheetItem
+            label="As M3U"
+            onClick={() => { handleExportM3u(tracks, isLocal ? (localPl?.name ?? '') : (detail?.name ?? summary?.name ?? '')); closeSheet() }}
+          />
+        </Sheet>
+      )}
 
       {sheet?.kind === 'folder' && (
         <Sheet onClose={closeSheet} title={sheet.folder.name}>
