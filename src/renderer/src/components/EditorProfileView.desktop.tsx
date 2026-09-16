@@ -7,6 +7,7 @@ import {
 import { useStore } from '../store/useStore'
 import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers, updateDisplayName, updateAvatar, compressImageFile } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
+import { fetchEraList } from '../lib/erasApi'
 import ReportsTab from './ReportsTab'
 import type { AdminTab } from '../hooks/useAdminQueue'
 import CompProposalList, { CompFilterBar, filterCompProposals, compProposalSearchText, type CompFilterTab } from './CompProposalList'
@@ -241,6 +242,7 @@ export default function EditorProfileView(): JSX.Element {
     pendingReports: number | null
     totalUsers: number | null
     totalChannels: number
+    totalEras: number | null
     totalPending: number
     otpEnabled: boolean | null
     totalProposals: number | null
@@ -268,7 +270,8 @@ export default function EditorProfileView(): JSX.Element {
         isAdmin ? adminListApplications('pending') : Promise.resolve(null),
         isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
         isAdmin ? adminListUsers() : Promise.resolve(null),
-      ]).then(([propCounts, compCounts, apps, reps, users]) => {
+        isAdmin ? fetchEraList() : Promise.resolve(null),
+      ]).then(([propCounts, compCounts, apps, reps, users, eras]) => {
         if (cancelled) return
         const pendingApplications = apps?.length ?? null
         const pendingReports = reps?.length ?? null
@@ -280,6 +283,7 @@ export default function EditorProfileView(): JSX.Element {
           pendingReports,
           totalUsers: users?.length ?? null,
           totalChannels: channelsRef.current.length,
+          totalEras: eras?.length ?? null,
           totalPending: propCounts.pending + compCounts.pending + (pendingApplications ?? 0) + (pendingReports ?? 0),
           otpEnabled: isAdmin ? !!account?.otp_enabled : null,
           totalProposals: isAdmin ? propCounts.total : null,
@@ -711,7 +715,7 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Reports" value={adminPreview?.pendingReports} highlight={!!adminPreview?.pendingReports} onClick={() => openAdmin('reports')} />
                             <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
-                            <AdminStatBox label="Eras" value={undefined} onClick={() => openAdmin('eras')} />
+                            <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
                             <AdminStatBox
                               label="Security"
                               value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
