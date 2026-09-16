@@ -2800,6 +2800,408 @@ function FeedsMediaTab() {
   )
 }
 
+function ChatTab() {
+  const { Code, Section, MethodPath } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title="Overview">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Staff-only chat platform: Discord-like servers with text channels, 1:1 and group DMs, real-time
+          delivery over WebSocket, attachments, reactions, read receipts, message pinning, and threads. Direct
+          messages are end-to-end encrypted; server channels are plaintext (server-readable).
+        </p>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="text-xs text-text-muted">Base path</span>
+          <Code>/juicewrld/chat/</Code>
+          <span className="text-xs text-text-muted">(also </span>
+          <Code>/chat/</Code>
+          <span className="text-xs text-text-muted">depending on deployment routing)</span>
+        </div>
+        <div className="flex items-center gap-2 mt-1">
+          <span className="text-xs text-text-muted">WebSocket path</span>
+          <Code>/juicewrld/ws/chat/</Code>
+          <span className="text-xs text-text-muted">(also </span>
+          <Code>/ws/chat/</Code>
+          <span className="text-xs text-text-muted">)</span>
+        </div>
+      </Section>
+
+      <Section title="Access Control">
+        <p className="text-sm text-text-secondary">
+          Only staff with the <Code>administrator</Code> or <Code>manager</Code> role (or a Django superuser)
+          can use any endpoint here. Every request needs a token; a non-staff or unauthenticated caller gets{' '}
+          <Code>401</Code> or <Code>403</Code>. The same token authenticates the WebSocket via a query param.
+        </p>
+        <Pre>{`Authorization: Token YOUR_TOKEN_HERE`}</Pre>
+        <Table
+          headers={['Object', 'Rule']}
+          rows={[
+            ['Server channels', 'Caller must be a server member. Private channels additionally require the channel allow-list, server owner/admin, or platform admin'],
+            ['DMs', 'Caller must be a participant of the conversation'],
+            ['Editing a message', 'Author only'],
+            ['Deleting / pinning a message', 'Author, server owner/admin, or platform administrator'],
+          ]}
+        />
+      </Section>
+
+      <Section title="Conventions">
+        <p className="text-sm text-text-secondary">
+          Bodies are JSON except uploads (multipart). Timestamps are ISO-8601. List endpoints return{' '}
+          <Code>{'{ results: [...] }'}</Code>; message lists also return <Code>has_more</Code>. Errors return{' '}
+          <Code>{'{ detail: "..." }'}</Code>.
+        </p>
+        <Table
+          headers={['Code', 'Meaning']}
+          rows={[
+            ['200 / 201 / 204', 'OK / Created / Deleted (no body)'],
+            ['400', 'Validation error'],
+            ['401 / 403', 'Missing/invalid token / authenticated but not allowed'],
+            ['404', 'Not found or not visible to you'],
+            ['409', 'Conflict (e.g. member already exists)'],
+            ['429', 'Throttled'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">Throttle scopes</p>
+        <Table
+          headers={['Scope', 'Limit', 'Applies to']}
+          rows={[
+            [<Code>chat_send</Code>, '120/min', 'Creating channel or DM messages'],
+            [<Code>chat_edit</Code>, '120/min', 'Editing, deleting, pinning, reacting'],
+            [<Code>chat_upload</Code>, '60/min', 'Attachment uploads'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3"><Code>message</Code> shape:</p>
+        <Pre>{`{
+  "id": 501,
+  "channel": 8,
+  "conversation": null,
+  "author": { "id": 12, "username": "jdoe", "display_name": "J Doe", "avatar": "", "role": "manager" },
+  "content": "hello team",
+  "is_encrypted": false,
+  "ciphertext": "", "nonce": "", "key_version": null,
+  "parent": null,
+  "mentions": [15, 16],
+  "attachments": [
+    { "id": 3, "name": "log.txt", "url": "https://host/.../ab12_log.txt", "mime": "text/plain", "size": 2048,
+      "encrypted_name": "", "nonce": "", "key_version": null }
+  ],
+  "reactions": [ { "emoji": "fire", "count": 2, "user_ids": [12, 15], "me": true } ],
+  "reply_count": 0,
+  "pinned": false, "pinned_by": null, "pinned_at": null,
+  "edited_at": null, "deleted_at": null,
+  "created_at": "2026-09-16T19:00:00Z"
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          For DM messages, <Code>is_encrypted</Code> is <Code>true</Code>, <Code>content</Code> is empty, and{' '}
+          <Code>ciphertext</Code>/<Code>nonce</Code>/<Code>key_version</Code> are populated instead. Deleted
+          messages come back with empty <Code>content</Code>/<Code>ciphertext</Code>/<Code>nonce</Code>/
+          <Code>attachments</Code> and <Code>deleted_at</Code> set.
+        </p>
+      </Section>
+
+      <Section title="Servers">
+        <MethodPath method="GET" path="/servers/" />
+        <p className="text-xs text-text-muted mb-2">→ <Code>{'{ results: [server, ...] }'}</Code>. <Code>channels</Code> on each server only lists channels you can see.</p>
+        <MethodPath method="POST" path="/servers/" className="mt-2" />
+        <p className="text-xs text-text-muted mb-2">
+          <Code>{'{ name, description?, icon? }'}</Code> — creates the server, makes you owner, adds a default{' '}
+          <Code>general</Code> channel.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/servers/{id}/', 'Server detail'],
+            ['PATCH', '/servers/{id}/', 'Update name/description/icon (owner/admin)'],
+            ['DELETE', '/servers/{id}/', 'Delete (owner or platform admin)'],
+            ['GET', '/servers/{id}/members/', 'List members'],
+            ['POST', '/servers/{id}/members/', 'Add a member: { user_id, server_role } (owner/admin, 409 if already a member, 400 if target not staff)'],
+            ['PATCH', '/servers/{id}/members/{user_id}/', 'Update server_role and/or muted (owner/admin)'],
+            ['DELETE', '/servers/{id}/members/{user_id}/', 'Remove a member; you may remove yourself, owner cannot be removed'],
+            ['POST', '/servers/{id}/channels/', 'Create a channel: { name, topic?, category?, is_private?, allowed_members? } (owner/admin)'],
+            ['GET', '/channels/{id}/', 'Channel detail'],
+            ['PATCH', '/channels/{id}/', 'Update name/topic/category/position/is_private/allowed_members (owner/admin)'],
+            ['DELETE', '/channels/{id}/', 'Delete a channel (owner/admin)'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2"><Code>server_role</Code> is <Code>admin</Code> or <Code>member</Code> (owner can&apos;t be assigned). <Code>allowed_members</Code> only applies when <Code>is_private</Code> is true.</p>
+      </Section>
+
+      <Section title="Channel Messages (plaintext)">
+        <MethodPath method="GET" path="/channels/{id}/messages/?limit=30&before={messageId}" />
+        <Table
+          headers={['Param', 'Description']}
+          rows={[
+            [<Code>limit</Code>, 'Default 30, max 100'],
+            [<Code>{'before={id}'}</Code>, 'Older messages than that id (infinite scroll up)'],
+            [<Code>{'after={id}'}</Code>, 'Newer messages than that id (catch-up)'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          → <Code>{'{ results: [message, ...], has_more }'}</Code>, ascending by id. <Code>has_more</Code>{' '}
+          means older messages exist before the first item.
+        </p>
+        <MethodPath method="POST" path="/channels/{id}/messages/" className="mt-3" />
+        <Pre>{`{
+  "content": "hello",
+  "parent": null,
+  "mentions": [15],
+  "attachments": [ { "name": "log.txt", "url": "chat/attachments/ab12_log.txt", "mime": "text/plain", "size": 2048 } ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>content</Code> or at least one attachment is required. <Code>attachments[].url</Code> is the{' '}
+          <Code>url</Code> returned by the upload endpoint. <Code>mentions</Code> keeps only ids that are server
+          members. <Code>parent</Code> makes it a threaded reply. Returns the created <Code>message</Code>{' '}
+          (201) and broadcasts <Code>message.created</Code>.
+        </p>
+      </Section>
+
+      <Section title="Direct Messages (end-to-end encrypted)">
+        <p className="text-sm text-text-secondary">
+          DM bodies are encrypted client-side; the server stores and relays ciphertext only. See End-to-End
+          Encryption below for the full crypto flow.
+        </p>
+        <MethodPath method="GET" path="/dms/" className="mt-2" />
+        <p className="text-xs text-text-muted mb-2">→ <Code>{'{ results: [conversation, ...] }'}</Code></p>
+        <Pre>{`{
+  "id": 20,
+  "is_group": false,
+  "name": "",
+  "created_by": 12,
+  "current_key_version": 1,
+  "participants": [ { "id": 1, "user": user_brief, "muted": false, "joined_at": "..." } ],
+  "created_at": "...", "updated_at": "..."
+}`}</Pre>
+        <MethodPath method="POST" path="/dms/" className="mt-3" />
+        <Pre>{`{ "participant_ids": [15], "is_group": false, "name": "" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Your own id is added automatically; all participants must be staff. A 2-person non-group conversation
+          that already exists returns <Code>200</Code> with the existing conversation instead of duplicating
+          it. Groups (<Code>is_group: true</Code> or 3+ participants) may set <Code>name</Code>. Run the E2E
+          envelope distribution after creating, before sending encrypted messages.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/dms/{id}/', 'Conversation detail'],
+            ['PATCH', '/dms/{id}/', '{ name?, add_participant_ids?, remove_participant_ids? } (participant). Removing a participant bumps current_key_version — broadcasts conversation.updated, key.rotated on rotation'],
+            ['DELETE', '/dms/{id}/', 'Delete (creator or platform admin)'],
+            ['GET', '/dms/{id}/messages/?limit=30&before={messageId}', 'Same pagination as channels; returns encrypted message objects'],
+            ['POST', '/dms/{id}/messages/', 'Create an encrypted message (below)'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3"><Code>{'POST /dms/{id}/messages/'}</Code>:</p>
+        <Pre>{`{
+  "ciphertext": "base64...", "nonce": "base64...", "key_version": 1,
+  "parent": null,
+  "mentions": [15],
+  "attachments": [
+    { "name": "blob.bin", "url": "chat/attachments/xx_blob.bin", "mime": "application/octet-stream",
+      "size": 1024, "encrypted_name": "base64...", "nonce": "base64...", "key_version": 1 }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>ciphertext</Code> (with <Code>nonce</Code>/<Code>key_version</Code>) or at least one attachment
+          is required. Attachments must be encrypted client-side before upload, each with its own{' '}
+          <Code>nonce</Code>/<Code>key_version</Code> and optional <Code>encrypted_name</Code>.
+        </p>
+      </Section>
+
+      <Section title="Message Actions (channels and DMs)">
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/messages/{id}/', 'Fetch a message'],
+            ['PATCH', '/messages/{id}/', 'Author only. Plaintext: { content }. Encrypted: { ciphertext, nonce, key_version }. Sets edited_at, broadcasts message.updated'],
+            ['DELETE', '/messages/{id}/', 'Soft delete (author, server owner/admin, or platform admin); broadcasts message.deleted'],
+            ['POST / DELETE', '/messages/{id}/pin/', 'Pin / unpin; broadcasts message.pinned / message.unpinned'],
+            ['POST', '/messages/{id}/reactions/', '{ emoji } — add a reaction; broadcasts reaction.added'],
+            ['DELETE', '/messages/{id}/reactions/', '{ emoji } or ?emoji= — remove your reaction; broadcasts reaction.removed'],
+            ['GET', '/messages/{id}/thread/', 'Replies whose parent is this message'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">Create a reply by posting a normal message with <Code>parent</Code> set.</p>
+      </Section>
+
+      <Section title="Read State">
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['POST', '/channels/{id}/read/', '{ message_id } — marks the channel read up to that message; broadcasts read.receipt'],
+            ['POST', '/dms/{id}/read/', 'Same, for a conversation'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          <Code>message_id</Code> may be omitted to clear. Combine <Code>read.receipt</Code> events with each
+          message&apos;s <Code>created_at</Code>/id to render unread counts and read indicators.
+        </p>
+      </Section>
+
+      <Section title="Attachments">
+        <MethodPath method="POST" path="/uploads/" />
+        <p className="text-xs text-text-muted mb-2">
+          <Code>multipart/form-data</Code> with a <Code>file</Code> field. Max 25 MB, executable types rejected.
+          For DM attachments, encrypt the file bytes client-side first and upload the encrypted blob as{' '}
+          <Code>application/octet-stream</Code>.
+        </p>
+        <Pre>{`{ "name": "log.txt", "url": "chat/attachments/ab12_log.txt", "mime": "text/plain", "size": 2048 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Pass the returned <Code>url</Code> (+ <Code>name</Code>/<Code>mime</Code>/<Code>size</Code>) in a
+          message&apos;s <Code>attachments</Code>. DM attachments also need <Code>encrypted_name</Code>,{' '}
+          <Code>nonce</Code>, and <Code>key_version</Code>.
+        </p>
+        <MethodPath method="GET" path="/attachments/{attachmentId}/stream/" className="mt-3" />
+        <p className="text-xs text-text-muted">
+          Supports HTTP range requests. Access is checked against the message&apos;s channel/DM membership.
+          Since <Code>{'<img>'}</Code>/<Code>{'<audio>'}</Code> can&apos;t send an <Code>Authorization</Code>{' '}
+          header, this endpoint also accepts <Code>?token=</Code>; add <Code>?download=1</Code> to force
+          download disposition. For DM attachments the bytes are ciphertext — decrypt with the conversation
+          room key after fetching.
+        </p>
+      </Section>
+
+      <Section title="Presence">
+        <MethodPath method="GET" path="/presence/" />
+        <p className="text-xs text-text-muted">
+          → <Code>{'{ online: [12, 15, 16] }'}</Code> — currently connected staff user ids. Live changes arrive
+          as <Code>presence.update</Code> events.
+        </p>
+      </Section>
+
+      <Section title="WebSocket">
+        <Pre>{`wss://YOUR_HOST/juicewrld/ws/chat/?token=YOUR_TOKEN`}</Pre>
+        <p className="text-xs text-text-muted">
+          Authenticates from the <Code>token</Code> query param; closes with code <Code>4401</Code> if missing/
+          invalid or the user isn&apos;t staff. On connect you receive, in order:
+        </p>
+        <Pre>{`{ "type": "connected", "user_id": 12 }
+{ "type": "presence.snapshot", "online": [12, 15] }`}</Pre>
+        <p className="text-xs text-text-muted">
+          The server auto-subscribes you to your servers, visible channels, and conversations, and tells your
+          socket to resubscribe when membership changes.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Client → server</p>
+        <Table
+          headers={['Type', 'Payload', 'Effect']}
+          rows={[
+            [<Code>ping</Code>, '{}', 'Server replies { type: "pong" }'],
+            [<Code>typing.start</Code>, '{ target: { kind: "channel"|"conversation", id } }', 'Broadcasts typing (active) to that room'],
+            [<Code>typing.stop</Code>, 'same as above', 'Broadcasts typing (inactive)'],
+            [<Code>resync</Code>, '{}', 'Re-subscribes your socket; replies { type: "resynced" }'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">Server → client</p>
+        <Table
+          headers={['Type', 'Key fields']}
+          rows={[
+            [<Code>message.created</Code>, 'message'],
+            [<Code>message.updated</Code>, 'message'],
+            [<Code>message.deleted</Code>, 'message_id, channel, conversation'],
+            [<Code>message.pinned</Code> + ' / ' + <Code>message.unpinned</Code>, 'message'],
+            [<Code>reaction.added</Code> + ' / ' + <Code>reaction.removed</Code>, 'message_id, emoji, user_id, channel, conversation'],
+            [<Code>read.receipt</Code>, 'user_id, last_read_message_id, channel or conversation'],
+            [<Code>typing</Code>, 'user_id, active, kind, id'],
+            [<Code>presence.update</Code>, 'user_id, online'],
+            [<Code>member.joined</Code> + ' / ' + <Code>member.updated</Code> + ' / ' + <Code>member.left</Code>, 'server, member or user_id'],
+            [<Code>server.updated</Code>, 'server'],
+            [<Code>channel.created</Code> + ' / ' + <Code>channel.updated</Code>, 'server, channel'],
+            [<Code>channel.deleted</Code>, 'server, channel_id'],
+            [<Code>conversation.updated</Code>, 'conversation'],
+            [<Code>key.rotated</Code>, 'conversation, key_version'],
+            [<Code>device.added</Code>, 'conversation, user_id'],
+            [<Code>envelope.available</Code>, 'conversation, key_version'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          Recommended pattern: render optimistic UI from your own REST responses, reconcile/append via these
+          events for other users&apos; activity. On <Code>key.rotated</Code>, <Code>device.added</Code>, or{' '}
+          <Code>envelope.available</Code>, refetch envelopes for that conversation.
+        </p>
+      </Section>
+
+      <Section title="End-to-End Encryption (DMs only)">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          The server never sees DM plaintext — only device public keys, wrapped room keys, and ciphertext.
+          Server channels are plaintext and need none of this. Recommended library: libsodium (
+          <Code>libsodium-wrappers</Code>) or TweetNaCl.
+        </p>
+        <Table
+          headers={['Primitive', 'Use']}
+          rows={[
+            ['X25519 key pair', 'Identity key, one per device'],
+            ['Random 32-byte key', 'Room key, per conversation, versioned'],
+            [<Code>crypto_box_seal</Code>, "Wrap the room key to a device's X25519 public key"],
+            ['XChaCha20-Poly1305 secretbox', 'Encrypt messages/attachments with a fresh nonce per item, using the room key'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">1. Register a device key</p>
+        <Pre>{`POST /keys/devices/
+{ "device_id": "uuid-per-device", "public_key": "base64 X25519 pub", "algorithm": "x25519", "label": "Chrome on Win" }`}</Pre>
+        <p className="text-xs text-text-muted"><Code>GET /keys/devices/</Code> lists your devices, <Code>{'DELETE /keys/devices/{device_id}/'}</Code> revokes one.</p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">2. Establish a room key for a DM</p>
+        <p className="text-xs text-text-muted">
+          Create the conversation, then <Code>{'GET /dms/{id}/keys/'}</Code> for every participant device (
+          <Code>{'{ current_key_version, results: [device, ...] }'}</Code>), generate a random 32-byte room key
+          for that version, and seal it to each device&apos;s public key:
+        </p>
+        <Pre>{`POST /dms/{id}/envelopes/
+{
+  "envelopes": [
+    { "recipient_device": 3, "key_version": 1, "encrypted_key": "base64 sealed box" },
+    { "recipient_device": 4, "key_version": 1, "encrypted_key": "base64 sealed box" }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          The server validates every <Code>recipient_device</Code> belongs to a participant, bumps{' '}
+          <Code>current_key_version</Code> if you posted a higher version, and emits <Code>key.rotated</Code>{' '}
+          and <Code>envelope.available</Code>.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">3. Obtain your room key</p>
+        <Pre>{`GET /dms/{id}/envelopes/              // all versions wrapped for your devices
+GET /dms/{id}/envelopes/?key_version=1`}</Pre>
+        <p className="text-xs text-text-muted">
+          Each result has <Code>encrypted_key</Code>, <Code>key_version</Code>, <Code>recipient_device</Code>.
+          Open the sealed box with your device secret key and cache the room key by{' '}
+          <Code>(conversation_id, key_version)</Code>.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">4-6. Send, read, attachments</p>
+        <p className="text-xs text-text-muted">
+          Encrypt plaintext with the current room key + a fresh nonce, post <Code>ciphertext</Code>/<Code>nonce</Code>/
+          <Code>key_version</Code> to <Code>{'POST /dms/{id}/messages/'}</Code>. To read, look up the room key
+          for a message&apos;s <Code>key_version</Code> (fetching envelopes if needed) and decrypt. For
+          attachments: encrypt the file bytes (and optionally the filename) with the room key, upload the
+          encrypted blob, include <Code>nonce</Code>/<Code>key_version</Code>/<Code>encrypted_name</Code> in the
+          message, and decrypt after fetching <Code>{'GET /attachments/{id}/stream/'}</Code>.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">7. Key rotation and new devices</p>
+        <p className="text-xs text-text-muted">
+          Removing a participant bumps <Code>current_key_version</Code> — a remaining participant must generate
+          a fresh room key and redistribute envelopes to all current devices. A new device triggers{' '}
+          <Code>device.added</Code>; distribute the current room key to it. Refetch envelopes on{' '}
+          <Code>key.rotated</Code>/<Code>envelope.available</Code>. Old messages stay readable since
+          prior-version envelopes and cached room keys are retained.
+        </p>
+      </Section>
+
+      <Section title="Deployment Notes">
+        <p className="text-sm text-text-secondary">
+          The channel layer uses Redis (<Code>channels_redis</Code>) at{' '}
+          <Code>redis://localhost:6379/2</Code> by default; override with <Code>CHANNEL_REDIS_URL</Code>. Set{' '}
+          <Code>USE_INMEMORY_CHANNEL_LAYER=1</Code> to force the in-memory layer (single process only) — it
+          also falls back automatically if <Code>channels_redis</Code> isn&apos;t installed.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          Run <Code>pip install -r requirements.txt</Code> and <Code>python manage.py migrate</Code> after
+          deploying, and serve via the ASGI app so WebSockets work.
+        </p>
+      </Section>
+    </div>
+  )
+}
+
 export const TABS = [
   { id: 'overview',  label: 'Overview' },
   { id: 'songs',     label: 'Songs & Search' },
@@ -2809,6 +3211,7 @@ export const TABS = [
   { id: 'radio',     label: '999 FM' },
   { id: 'heardle',   label: 'Heardle' },
   { id: 'accounts',  label: 'Accounts' },
+  { id: 'chat',      label: 'Staff Chat' },
   { id: 'editor',    label: 'Editor Workflow' },
   { id: 'admin',     label: 'Admin' },
   { id: 'feedback',  label: 'Feedback & Reports' },
@@ -2828,6 +3231,7 @@ const TAB_CONTENT: Record<TabId, () => JSX.Element> = {
   radio:     RadioTab,
   heardle:   HeardleTab,
   accounts:  AccountsTab,
+  chat:      ChatTab,
   editor:    EditorWorkflowTab,
   admin:     AdminTab,
   feedback:  FeedbackTab,
