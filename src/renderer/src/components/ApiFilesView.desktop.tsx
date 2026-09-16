@@ -30,6 +30,8 @@ import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
 import { basename } from '../lib/compStagedChanges'
+import { queueCompUploads } from '../lib/compUploads'
+import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } from '../lib/droppedFiles'
 import { ClampedMenu } from './ClampedMenu'
 import { Track } from '../types'
 import { ProgressiveCover } from './ProgressiveCover'
@@ -731,12 +733,54 @@ export default function ApiFilesView(): JSX.Element {
     return draggedItems.some(d => parentFolder(d.path) !== entry.path)
   }
 
+  // ── Uploading local files ──────────────────────────────────────────────────
+  // Files or whole folders dragged in from the OS, or picked from the context
+  // menu, go straight to the background upload queue as one upload proposal
+  // per file. A dropped folder keeps its nesting under the target folder.
+  const [fileDragOver, setFileDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  // Folder the next picker selection uploads into.
+  const uploadTargetRef = useRef('')
+
+  const uploadLocalFiles = (folder: string, files: LocalUpload[]): void => {
+    if (files.length === 0) return
+    queueCompUploads(files.map(({ file, relPath }) => {
+      const path = folder ? `${folder}/${relPath}` : relPath
+      const form = new FormData()
+      form.append('file_path', path)
+      form.append('change_type', 'upload')
+      form.append('contributor_notes', '')
+      form.append('file', file)
+      if (activeChannel) form.append('channel', activeChannel)
+      return { label: relPath, form, bytes: file.size }
+    }))
+  }
+
+  const openUploadPicker = (folder: string, kind: 'files' | 'folder'): void => {
+    uploadTargetRef.current = folder
+    const input = kind === 'folder' ? folderInputRef.current : fileInputRef.current
+    if (!input) return
+    input.value = ''
+    input.click()
+  }
+
+  /** An OS file drag, as opposed to dragging rows around inside the listing. */
+  const isExternalDrag = (e: React.DragEvent): boolean =>
+    canPropose && draggedItems.length === 0 && isFileDrag(e.dataTransfer)
+
   const dropTargetProps = (entry: JWApiFileEntry): {
     onDragOver: (e: React.DragEvent) => void
     onDragLeave: () => void
     onDrop: (e: React.DragEvent) => void
   } => ({
     onDragOver: e => {
+      if (isExternalDrag(e) && entry.type === 'directory') {
+        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'
+        setFileDragOver(false)
+        setDropTarget(entry.path)
+        return
+      }
       if (!dropAllowed(entry)) return
       e.preventDefault(); e.dataTransfer.dropEffect = 'move'
       setDropTarget(entry.path)
@@ -744,6 +788,11 @@ export default function ApiFilesView(): JSX.Element {
     onDragLeave: () => setDropTarget(prev => (prev === entry.path ? null : prev)),
     onDrop: e => {
       e.preventDefault(); e.stopPropagation()
+      if (isExternalDrag(e)) {
+        setDropTarget(null); setFileDragOver(false)
+        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(entry.path, files)).catch(() => {})
+        return
+      }
       if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
       if (entry.type === 'directory') stageMovesInto(entry.path, draggedItems)
       // Onto a file: both sides move into a folder that doesn't exist yet, so
@@ -969,7 +1018,24 @@ export default function ApiFilesView(): JSX.Element {
 
         {/* Content */}
         <div
-          className="flex-1 overflow-y-auto px-5 pb-4"
+          className={`flex-1 overflow-y-auto px-5 pb-4 transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
+          // Dropping OS files/folders on empty space uploads into the folder
+          // being browsed; folder rows handle drops onto themselves.
+          onDragOver={e => {
+            if (isSearching || !isExternalDrag(e)) return
+            e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
+            setFileDragOver(true)
+          }}
+          onDragLeave={e => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileDragOver(false)
+          }}
+          onDrop={e => {
+            if (isSearching || !isExternalDrag(e)) return
+            e.preventDefault()
+            setFileDragOver(false)
+            const folder = currentPath
+            collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(folder, files)).catch(() => {})
+          }}
           onContextMenu={e => {
             // Entry rows stop propagation on their own context menu, so this
             // only fires for a right-click on actual empty space.
@@ -1401,6 +1467,15 @@ export default function ApiFilesView(): JSX.Element {
         </div>
       )}
 
+      {/* Hidden pickers behind the context menu's upload items. */}
+      <input ref={fileInputRef} type="file" multiple className="hidden"
+        onChange={e => uploadLocalFiles(uploadTargetRef.current, filesFromInput(e.target.files))} />
+      <input
+        ref={el => { folderInputRef.current = el; el?.setAttribute('webkitdirectory', '') }}
+        type="file" multiple className="hidden"
+        onChange={e => uploadLocalFiles(uploadTargetRef.current, filesFromInput(e.target.files))}
+      />
+
       {textFile && <TextFileViewer source={textFile} onClose={() => setTextFile(null)} />}
 
       {lightboxIndex >= 0 && lightboxItems.length > 0 && (
@@ -1553,6 +1628,20 @@ export default function ApiFilesView(): JSX.Element {
                 <div className="border-t border-[var(--border)] my-1" />
               </>
             )}
+            {canPropose && ctxMenu.entry.type === 'directory' && (
+              <>
+                <div className="border-t border-[var(--border)] my-1" />
+                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'files'); setCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <Upload size={14} className="text-text-muted" /> Upload files here
+                </button>
+                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'folder'); setCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FolderInput size={14} className="text-text-muted" /> Upload folder here
+                </button>
+                <div className="border-t border-[var(--border)] my-1" />
+              </>
+            )}
             {ctxMenu.entry.type === 'directory' ? (
               <button onClick={() => { downloadFolder(ctxMenu.entry); setCtxMenu(null) }}
                 disabled={zipStatus === 'starting' || zipStatus === 'zipping'}
@@ -1580,12 +1669,22 @@ export default function ApiFilesView(): JSX.Element {
             {canPropose && (
               <>
                 <div className="border-t border-[var(--border)] my-1" />
+                <button onClick={() => { openUploadPicker(currentPath, 'files'); setBgCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <Upload size={14} className="text-text-muted" /> Upload files
+                </button>
+                <button onClick={() => { openUploadPicker(currentPath, 'folder'); setBgCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FolderInput size={14} className="text-text-muted" /> Upload folder
+                </button>
+                {/* The Contributor page is still where an upload gets notes or a
+                    rename before it's proposed. */}
                 <button onClick={() => {
                   setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
                   setBgCtxMenu(null)
                   setActiveView('contributor')
                 }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Upload size={14} className="text-text-muted" /> Upload
+                  <FileText size={14} className="text-text-muted" /> Upload with notes…
                 </button>
                 <button onClick={() => { setNewFolderPrompt(''); setBgCtxMenu(null) }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
