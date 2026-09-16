@@ -344,11 +344,18 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
-            <div className="flex-1 min-w-0 min-h-0 flex flex-col border-b md:border-b-0 md:border-r border-[var(--border)]">
+            {/* On mobile this whole column stack scrolls as one unit (the
+                outer overflow-y-auto above), so this section can't rely on
+                flex-1 to size itself - with the format/preview sections below
+                it also competing for the modal's capped height, flex-1 would
+                shrink this to near-0 and hide every line button. A fixed
+                max-height keeps it usably tall and independently scrollable
+                on mobile; md: restores the desktop side-by-side fill. */}
+            <div className="md:flex-1 min-w-0 md:min-h-0 flex flex-col border-b md:border-b-0 md:border-r border-[var(--border)]">
               <p className="text-xs text-text-muted px-4 pt-3 pb-2 shrink-0">
                 Tap up to {MAX_LINES} lines to share - skip any you don't want, they don't have to be next to each other.
               </p>
-              <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-3">
+              <div className="max-h-56 md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto px-2 pb-3">
                 {lines.map((line, i) => {
                   const isSelected = selectedSet.has(i)
                   // A run of consecutive selected lines reads as one merged
