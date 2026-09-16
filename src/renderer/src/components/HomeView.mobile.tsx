@@ -1,4 +1,4 @@
-import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
@@ -65,7 +65,7 @@ function EmptyNote({ children }: { children: React.ReactNode }): JSX.Element {
 export default function HomeViewMobile(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
-    openProfile, showSection, recent, newsItems, games, playlistRow,
+    openProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
   // Whatever doesn't fit the bottom nav directly - its old in-bar "More" tab
@@ -169,6 +169,33 @@ export default function HomeViewMobile(): JSX.Element {
               ))}
             </div>
           )}
+        </Section>
+      )}
+
+      {showSection('albums') && albumRow.length > 0 && (
+        <Section
+          title="Albums"
+          icon={<Album size={15} />}
+          action={{ label: 'All', onClick: () => setActiveView('wrld') }}
+        >
+          <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
+            {albumRow.map((a) => (
+              <button key={a.key} onClick={a.open} className="w-[116px] shrink-0 text-left active:opacity-70 transition-opacity">
+                <div className="relative w-[116px] h-[116px] rounded-xl overflow-hidden bg-surface-overlay mb-1.5 flex items-center justify-center">
+                  {a.cover ? (
+                    <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
+                  ) : (
+                    <Music size={22} className="text-text-muted" />
+                  )}
+                  <span className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/65 flex items-center justify-center">
+                    <Play size={13} className="text-white ml-0.5" fill="currentColor" />
+                  </span>
+                </div>
+                <p className="text-text-primary text-xs leading-snug truncate">{a.title}</p>
+                <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
+              </button>
+            ))}
+          </div>
         </Section>
       )}
 

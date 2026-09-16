@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStorePick } from '../store/useStore'
 import { loadRecentTracks } from '../lib/recentTracks'
 import { filterListeningPlaysByDays } from '../lib/listeningPlays'
-import { playlistCoverUrl, apiFetch, apiPeek, type JWApiStats } from '../lib/juicewrldApi'
+import { playlistCoverUrl, apiFetch, apiPeek, buildImageUrl, loadAllSongs, songToTrack, type JWApiStats, type JWApiSong } from '../lib/juicewrldApi'
 import { peekPlaylistCover } from '../lib/userApi'
 import { loadStats as loadHeardleStats, todayKey as heardleToday } from '../lib/heardle'
 import { loadStats as loadWordleStats, todayKey as wordleToday } from '../lib/wordle'
@@ -11,8 +11,18 @@ import { ALL_CHANNEL, fetchNews, peekNews, type NewsItem } from '../lib/newsApi'
 import { isHomeSectionVisible } from '../lib/homeSections'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { resumeEffectsContext } from '../lib/audioEffects'
+import * as albumsApi from '../lib/albumsApi'
+import type { Album } from '../lib/albumsApi'
 import type { PlaylistSummary } from '../lib/userApi'
 import type { Track, ViewType } from '../types'
+
+export interface HomeAlbumCard {
+  key: string
+  title: string
+  subtitle: string
+  cover: string | undefined
+  open: () => void
+}
 
 // A daily puzzle (streak + played-today) vs. Tier List, which is a standing
 // ranking with no daily reset - same card shell, different second line.
@@ -98,6 +108,40 @@ export function useHomeData() {
   useEffect(() => {
     apiFetch<JWApiStats>('/stats/').then(setSiteStats).catch(() => undefined)
   }, [])
+
+  // Album objects carry track paths, not full song metadata - resolved
+  // against the whole catalog (?all=true, same fetch/cache the versions
+  // table and WrldView's own album browser use) for cover art and to build
+  // a playable queue. Newest release first, same "what's fresh" ordering as
+  // Recently played.
+  const [albums, setAlbums] = useState<Album[]>([])
+  const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
+  useEffect(() => {
+    albumsApi.fetchAlbums()
+      .then((list) => setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? ''))))
+      .catch(() => undefined)
+    loadAllSongs()
+      .then((list) => setAlbumSongIndex(new Map(list.filter((s) => s.path).map((s) => [s.path as string, s]))))
+      .catch(() => undefined)
+  }, [])
+
+  const albumRow: HomeAlbumCard[] = useMemo(() => albums.slice(0, 10).map((album) => {
+    const tracks = [...album.songs].sort((a, b) => a.order - b.order)
+    const coverSong = tracks[0] ? albumSongIndex.get(tracks[0].path) : undefined
+    return {
+      key: `a${album.id}`,
+      title: album.title,
+      subtitle: album.release_date ? album.release_date.slice(0, 4) : (album.artist?.name ?? ''),
+      cover: buildImageUrl(coverSong?.image_url),
+      open: () => {
+        const queue = tracks
+          .map((t) => albumSongIndex.get(t.path))
+          .filter((s): s is JWApiSong => !!s)
+          .map(songToTrack)
+        if (queue.length > 0) playTrack(queue[0], queue)
+      },
+    }
+  }), [albums, albumSongIndex, playTrack])
 
   const games = useMemo((): GameCard[] => {
     const heardle = loadHeardleStats('daily')
@@ -195,7 +239,7 @@ export function useHomeData() {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying,
     setActiveView, openProfile,
     showSection,
-    recent, newsItems, games, playlistRow,
+    recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats,
     openTrack, openNewsItem, openRadioFm,
   }

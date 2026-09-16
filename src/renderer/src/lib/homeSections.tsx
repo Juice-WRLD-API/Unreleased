@@ -1,4 +1,4 @@
-import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart } from 'lucide-react'
+import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 // The Home dashboard's sections - each independently shown/hidden from
@@ -15,6 +15,7 @@ export const HOME_SECTIONS: HomeSectionDef[] = [
   { id: 'recent', label: 'Recently played', icon: <Disc3 size={18} /> },
   { id: 'news', label: 'News', icon: <Newspaper size={18} /> },
   { id: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
+  { id: 'albums', label: 'Albums', icon: <Album size={18} /> },
   { id: 'games', label: 'Games', icon: <Gamepad2 size={18} /> },
   { id: 'radio', label: '999 FM', icon: <Radio size={18} /> },
   { id: 'listening', label: 'Your listening', icon: <Music2 size={18} /> },

@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
-import { useHomeData, type GameCard, type HomePlaylistCard } from '../hooks/useHomeData'
+import { useHomeData, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -156,6 +156,38 @@ function PlaylistsTile({ playlists, onAll, onContextMenu, span }: {
   )
 }
 
+function AlbumsTile({ albums, onAll, span }: {
+  albums: HomeAlbumCard[]
+  onAll: () => void
+  span: string
+}): JSX.Element {
+  const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
+  const { cols, count } = fitCount(width, albums.length, 1)
+  return (
+    <Tile title="Albums" icon={<Album size={15} />} action={{ label: 'All', onClick: onAll }} span={span}>
+      <CoverGrid cols={cols} bodyRef={bodyRef}>
+        {albums.slice(0, count).map((a) => (
+          <button key={a.key} onClick={a.open} className="group text-left min-w-0">
+            <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5 flex items-center justify-center">
+              {a.cover ? (
+                <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
+              ) : (
+                <Music size={20} className="text-text-muted" />
+              )}
+              <span className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-accent text-black flex items-center justify-center opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all">
+                <Play size={13} className="ml-0.5" fill="currentColor" />
+              </span>
+            </div>
+            <p className="text-text-primary text-xs leading-snug truncate group-hover:text-accent transition-colors">{a.title}</p>
+            <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
+          </button>
+        ))}
+      </CoverGrid>
+    </Tile>
+  )
+}
+
 // ─── Row A side: the one tile that scrolls ───────────────────────────────────
 
 function NewsTile({ items, onOpen, onAll, span }: {
@@ -303,7 +335,7 @@ function MoreMenu({ open, onClose, items, onSelect }: {
 export default function HomeViewDesktop(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
-    openProfile, showSection, recent, newsItems, games, playlistRow,
+    openProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
   const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
@@ -318,12 +350,13 @@ export default function HomeViewDesktop(): JSX.Element {
   const showRecent = showSection('recent') && recent.length > 0
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
+  const showAlbums = showSection('albums') && albumRow.length > 0
   const showRadio = showSection('radio')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')
   const showListening = showSection('listening')
 
-  const mainShown = showRecent || showPlaylists
+  const mainShown = showRecent || showPlaylists || showAlbums
   const sideShown = showNews || showRadio || showLiked || showGames
 
   return (
@@ -419,6 +452,13 @@ export default function HomeViewDesktop(): JSX.Element {
                     playlists={playlistRow}
                     onAll={() => setActiveView('playlists')}
                     onContextMenu={(p, e) => { if (p.playlist) setPlaylistMenu({ playlist: p.playlist, x: e.clientX, y: e.clientY }) }}
+                    span="shrink-0"
+                  />
+                )}
+                {showAlbums && (
+                  <AlbumsTile
+                    albums={albumRow}
+                    onAll={() => setActiveView('wrld')}
                     span="shrink-0"
                   />
                 )}
