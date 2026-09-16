@@ -2125,6 +2125,11 @@ export default function ApiTrackerView(): JSX.Element {
 
   const [search, setSearch] = useState(getInitialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(getInitialSearch)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  // Focus the search box on mount so arriving here (e.g. from the home
+  // page's search icon) lands the cursor ready to type instead of just
+  // opening the view.
+  useEffect(() => { searchInputRef.current?.focus() }, [])
   // Field-qualified tokens (e.g. `artists:"Juice WRLD"`) are stripped out of
   // the query the server sees (searchall has no per-field concept) and
   // applied client-side instead - see the fetchAllMode effect below, which
@@ -2926,6 +2931,7 @@ export default function ApiTrackerView(): JSX.Element {
             <div className="relative flex-1 min-w-0">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
               <input
+                ref={searchInputRef}
                 type="text"
                 placeholder='Search, or artists:"Juice WRLD"…'
                 value={search}
