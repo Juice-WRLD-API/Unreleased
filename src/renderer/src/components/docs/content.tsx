@@ -785,7 +785,7 @@ function AccountsTab() {
         <Table
           headers={['Access Level', 'Endpoints']}
           rows={[
-            ['No login', 'Songs, eras, categories, files, radio, stats, shared playlists, play tracking, feedback submission, report submission'],
+            ['No login', 'Songs, eras, categories, files, radio, stats, shared playlists, play tracking, feedback submission, report submission, /auth/register/, /auth/login/, public user profiles'],
             ['Any logged-in user', '/account/me/ (incl. PATCH), /application/, /library/*, GET /feedback/'],
             ['Editor or admin', '/me/, /editor/proposals/, /editor/leaderboard/, /badges/, /reports/ (read + review)'],
             ['Contributor', '/contributor/proposals/ (comp-file proposals, read/write your own)'],
@@ -823,6 +823,51 @@ function AccountsTab() {
           older, fixed-redirect variant of the same flow, no <Code>redirect_uri</Code> param on the URL step,
           same response shapes otherwise. Prefer the two-step flow above for a new integration.
         </p>
+      </Section>
+
+      <Section title="Username + Password Auth (Public Signup)">
+        <p className="text-sm text-text-secondary">
+          A second login path for public app users, parallel to Discord OAuth above — not the same as{' '}
+          <Code>/accounts/login/</Code> below, which is staff-only with OTP. Returns the same{' '}
+          <Code>{'{ token, user }'}</Code> shape as Discord login, so the two are interchangeable once you have a
+          token. Throttled under the <Code>auth</Code> scope.
+        </p>
+        <div className="space-y-4 mt-3">
+          <div>
+            <MethodPath method="POST" path={`/accounts/auth/register/`} />
+            <p className="text-xs text-text-muted mb-2">No auth required.</p>
+            <Pre>{`{
+  "username": "myuser",
+  "password": "secure-password",
+  "display_name": "Optional Display Name"
+}`}</Pre>
+            <Table
+              headers={['Field', 'Required', 'Rules']}
+              rows={[
+                [<Code>username</Code>, 'yes', '3–30 chars, case-insensitive unique, cannot start with "discord_"'],
+                [<Code>password</Code>, 'yes', 'Django password validators'],
+                [<Code>display_name</Code>, 'no', 'Max 120 chars; defaults to username if omitted'],
+              ]}
+            />
+            <p className="text-xs text-text-muted font-semibold mt-2">201:</p>
+            <Pre>{`{ "token": "abc123...", "user": { /* same shape as GET /accounts/account/me/ */ } }`}</Pre>
+            <p className="text-xs text-text-muted font-semibold mt-2">400 (field-level):</p>
+            <Pre>{`{
+  "username": ["That username is already taken."],
+  "password": ["This password is too common."]
+}`}</Pre>
+          </div>
+          <div>
+            <MethodPath method="POST" path={`/accounts/auth/login/`} />
+            <p className="text-xs text-text-muted mb-2">No auth required.</p>
+            <Pre>{`{ "username": "myuser", "password": "secure-password" }`}</Pre>
+            <p className="text-xs text-text-muted font-semibold mt-2">200:</p>
+            <Pre>{`{ "token": "abc123...", "user": { /* same shape as GET /accounts/account/me/ */ } }`}</Pre>
+            <p className="text-xs text-text-muted font-semibold mt-2">400:</p>
+            <Pre>{`{ "non_field_errors": ["Invalid username or password."] }`}</Pre>
+            <p className="text-xs text-text-muted">Disabled accounts return <Code>"Account is disabled."</Code> instead.</p>
+          </div>
+        </div>
       </Section>
 
       <Section title="Access Code Login">
@@ -869,6 +914,10 @@ Authorization: Token <token>`}</Pre>
   "discord_id": "123456789",
   "discord_username": "someuser",
   "discord_avatar": "https://cdn.discordapp.com/avatars/...",
+  "avatar": "data:image/jpeg;base64,...",   // custom upload, falls back to discord_avatar, else ""
+  "bio": "I love Juice WRLD",               // max 500 chars
+  "public_play_history": false,             // opt-in, default false
+  "public_playlists": false,                // opt-in, default false
   "is_editor": false,
   "is_administrator": false,
   "is_contributor": false,
@@ -899,13 +948,21 @@ Authorization: Token <token>`}</Pre>
               user has at least one flag set on; see Roles above for how per-channel access composes with the
               global booleans. <Code>news_subscriptions</Code> is capped at 50 entries.
             </p>
+            <p className="text-xs text-text-muted mt-2">
+              <Code>avatar</Code>, <Code>bio</Code>, <Code>public_play_history</Code>, and{' '}
+              <Code>public_playlists</Code> are newer fields, same defensive-read rule. Use <Code>avatar</Code> for
+              display everywhere on this payload — it&apos;s already resolved (custom upload preferred,{' '}
+              <Code>discord_avatar</Code> as fallback, empty string otherwise). See Custom Avatar and Public User
+              Profile below.
+            </p>
           </div>
           <div>
             <MethodPath method="PATCH" path={`/accounts/account/me/`} />
             <p className="text-xs text-text-muted mb-2">
               Updates the logged-in user&apos;s own <Code>display_name</Code>, <Code>user_preferences</Code>,{' '}
-              <Code>playlist_folders</Code>, and/or <Code>listening_plays</Code>. See the sections below for what
-              goes in each of the blob fields.
+              <Code>playlist_folders</Code>, <Code>listening_plays</Code>, <Code>avatar</Code>, <Code>bio</Code>,{' '}
+              <Code>public_play_history</Code>, and/or <Code>public_playlists</Code>. Partial update — send only
+              the fields you&apos;re changing. See the sections below for what goes in each of the blob fields.
             </p>
             <Pre>{`PATCH /accounts/account/me/
 
@@ -942,6 +999,93 @@ Authorization: Token <token>`}</Pre>
         </div>
       </Section>
 
+
+      <Section title="Custom Avatar">
+        <p className="text-sm text-text-secondary">
+          Custom avatars are stored on the user profile and returned resolved on the <Code>avatar</Code> field
+          (custom upload preferred, Discord avatar as fallback).
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Upload / update:</p>
+        <Pre>{`PATCH /accounts/account/me/
+
+{ "avatar": "data:image/jpeg;base64,/9j/4AAQ..." }`}</Pre>
+        <Table
+          headers={['Rule', 'Value']}
+          rows={[
+            ['Format', <>Must be a <Code>data:image/...</Code> data URI</>],
+            ['Max size', '500 KB (UTF-8 encoded string length)'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">Remove custom avatar:</p>
+        <Pre>{`PATCH /accounts/account/me/
+
+{ "avatar": "" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Clears the custom avatar. The response <Code>avatar</Code> field then falls back to{' '}
+          <Code>discord_avatar</Code> for Discord-linked accounts, or empty string otherwise.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          Compress/resize before upload (e.g. 256px, ~200KB target). Use the response <Code>avatar</Code> field
+          everywhere for display — don&apos;t read <Code>discord_avatar</Code> directly unless you specifically
+          need the raw Discord URL (still returned separately for Discord-linked accounts).
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          The resolved custom avatar also surfaces through the <Code>discord_avatar</Code> field name (unchanged)
+          on other endpoints that predate this feature: the Editor leaderboard, Heardle leaderboards/match
+          results, and the admin user list/detail. Treat <Code>discord_avatar</Code> on those payloads as the
+          resolved display avatar, not necessarily a Discord CDN URL.
+        </p>
+      </Section>
+
+      <Section title="Public User Profile">
+        <p className="text-sm text-text-secondary">
+          A limited public view of any active user, including non-editors, for profile pages / sharing.
+        </p>
+        <MethodPath method="GET" path={`/accounts/profile/{user_id}/`} />
+        <p className="text-xs text-text-muted mb-2">No auth required.</p>
+        <Pre>{`{
+  "id": 42,
+  "display_name": "someuser",
+  "avatar": "data:image/jpeg;base64,...",
+  "bio": "I love Juice WRLD",
+  "is_editor": false,
+  "is_contributor": false,
+  "public_play_history": true,
+  "public_playlists": true
+}`}</Pre>
+        <p className="text-xs text-text-muted font-semibold mt-3">Conditionally included (key omitted entirely when disabled, not null):</p>
+        <Table
+          headers={['Field', 'When included', 'Shape']}
+          rows={[
+            [<Code>play_history</Code>, <Code>public_play_history === true</Code>, <>Same shape as private <Code>listening_plays</Code>: <Code>{'[{ song, played_at }, ...]'}</Code></>],
+            [<Code>playlists</Code>, <Code>public_playlists === true</Code>, "The user's playlists where is_public === true"],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">Playlist entry shape (cover art omitted):</p>
+        <Pre>{`{
+  "id": 7,
+  "name": "Bangers",
+  "description": "",
+  "is_public": true,
+  "track_count": 24,
+  "cover_image_url": "https://...",
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-03-01T00:00:00Z"
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Base64 <Code>cover_image</Code> is omitted here. Use <Code>cover_image_url</Code>, or fetch the full
+          playlist via <Code>{'GET /library/playlists/public/{id}/'}</Code>.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">404:</p>
+        <Pre>{`{ "detail": "Profile not found." }`}</Pre>
+        <p className="text-xs text-text-muted">Invalid user id or inactive account.</p>
+        <p className="text-xs text-text-muted mt-2">
+          <Code>public_play_history</Code> and <Code>public_playlists</Code> default to <Code>false</Code> for
+          all users (existing and new) — public profiles won&apos;t include <Code>play_history</Code> or{' '}
+          <Code>playlists</Code> until the user opts in via <Code>PATCH /accounts/account/me/</Code>. A playlist
+          also needs its own <Code>is_public: true</Code> to appear, even with <Code>public_playlists</Code> on.
+        </p>
+      </Section>
 
       <Section title="Per-Song Preferences: Custom Titles, Covers, Playcounts">
         <p className="text-sm text-text-secondary leading-relaxed">
