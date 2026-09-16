@@ -166,11 +166,10 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           useAdminQueue) rather than refetching every time it's reselected -
           this is the explicit way back to fresh data instead. */}
       {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'security' && (
-        <div className="shrink-0 flex items-center justify-between px-3 pb-1.5">
-          <span className="text-[10px] text-text-muted">Data loads once per visit to this tab</span>
-          <button onClick={() => refresh()} disabled={loading}
+        <div className="shrink-0 flex items-center justify-end px-3 pb-1.5">
+          <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="flex items-center gap-1.5 text-xs font-semibold text-accent active:text-accent/80 transition-colors disabled:opacity-40">
-            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
       )}
