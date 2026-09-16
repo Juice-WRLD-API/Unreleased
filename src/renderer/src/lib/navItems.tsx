@@ -2,6 +2,7 @@ import { SearchCode, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2,
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
+import ChatNavIcon from '../components/chat/ChatNavIcon'
 
 // The primary nav destinations available to the desktop side menu (Sidebar).
 // `view` doubles as the stable id persisted in the saved order/visibility -
@@ -22,6 +23,8 @@ export interface NavItemDef {
   defaultHidden?: boolean
   /** Can't be toggled off from Settings - always occupies a bar slot. */
   alwaysVisible?: boolean
+  /** Only exists for managers/administrators - dropped from every list otherwise. */
+  staffOnly?: boolean
 }
 
 export const NAV_ITEMS: NavItemDef[] = [
@@ -42,6 +45,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   // Same as Games: hidden from mobile entirely, since Home's own Playlists
   // section is the real mobile entry point now.
   { view: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
+  { view: 'chat', label: 'Chat', icon: <ChatNavIcon size={18} />, staffOnly: true },
   // Off by default, addable from Settings → Menu items - same as Liked/Docs
   // below. (No mobileOverflow: that flag forces a tab into the "More" sheet
   // even once the user has explicitly turned it on, which reads as "I
@@ -107,7 +111,7 @@ export const DEFAULT_NAV_VISIBILITY: Record<string, boolean> = Object.fromEntrie
 // exist are skipped; items missing from `order` (e.g. a destination added in a
 // newer version than the saved order) keep their canonical position, appended
 // after the saved ones - so a stale persisted order never hides a new tab.
-export function orderedNavItems(order: ViewType[]): NavItemDef[] {
+export function orderedNavItems(order: ViewType[], includeStaff = false): NavItemDef[] {
   const byView = new Map(NAV_ITEMS.map((i) => [i.view, i]))
   const seen = new Set<ViewType>()
   const out: NavItemDef[] = []
@@ -116,7 +120,7 @@ export function orderedNavItems(order: ViewType[]): NavItemDef[] {
     if (item && !seen.has(view)) { out.push(item); seen.add(view) }
   }
   for (const item of NAV_ITEMS) if (!seen.has(item.view)) out.push(item)
-  return out
+  return includeStaff ? out : out.filter((i) => !i.staffOnly)
 }
 
 // Hard cap on the mobile bottom nav's direct buttons, Settings included - a

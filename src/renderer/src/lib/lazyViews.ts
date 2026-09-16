@@ -16,6 +16,7 @@ import { ViewType } from '../types'
 export const EditorPage = lazyView(() => import('../components/EditorPage'))
 export const AdminPage = lazyView(() => import('../components/AdminPage'))
 export const SharedPlaylistView = lazyView(() => import('../components/SharedPlaylistView'))
+export const PublicProfileView = lazyView(() => import('../components/PublicProfileView'))
 export const EditorProfileView = lazyView(() => import('../components/EditorProfileView'))
 export const NotFoundView = lazyView(() => import('../components/NotFoundView'))
 export const DocsPage = lazyView(() => import('../components/DocsPage'))
@@ -40,6 +41,7 @@ export const ApiFilesView = lazyView(() => import('../components/ApiFilesView'))
 // the route is still worth it - it's off the startup path either way.
 export const LikedSongsView = lazyView(() => import('../components/LikedSongsView'))
 export const DiagnosticsModal = lazyView(() => import('../components/DiagnosticsModal'))
+export const ChatView = lazyView(() => import('../components/ChatView'))
 
 // The same import() factories again, keyed by view, for warming a chunk ahead
 // of the navigation that needs it. Deliberately a second reference to the same
@@ -50,6 +52,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   editor: () => import('../components/EditorPage'),
   admin: () => import('../components/AdminPage'),
   'shared-playlist': () => import('../components/SharedPlaylistView'),
+  'public-profile': () => import('../components/PublicProfileView'),
   'editor-profile': () => import('../components/EditorProfileView'),
   'not-found': () => import('../components/NotFoundView'),
   docs: () => import('../components/DocsPage'),
@@ -70,6 +73,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   playlists: () => import('../components/PlaylistsView'),
   'api-files': () => import('../components/ApiFilesView'),
   liked: () => import('../components/LikedSongsView'),
+  chat: () => import('../components/ChatView'),
 }
 
 const started = new Set<ViewType>()

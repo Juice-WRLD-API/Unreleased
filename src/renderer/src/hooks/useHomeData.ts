@@ -64,12 +64,12 @@ export interface HomePlaylistCard {
 export function useHomeData() {
   const {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
-    listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile,
+    listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
     homeSectionVisibility, refreshPlaylists, setIsPlaying,
   } = useStorePick(
     'account', 'playlists', 'guestPlaylists', 'followedPlaylists', 'likedTrackIds',
-    'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile',
+    'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
     'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
     'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying',
   )
@@ -237,7 +237,7 @@ export function useHomeData() {
 
   return {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying,
-    setActiveView, openProfile,
+    setActiveView, openProfile, openOwnPublicProfile,
     showSection,
     recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats,

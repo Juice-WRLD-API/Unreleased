@@ -5,16 +5,17 @@ import {
   FolderOpen, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart,
+  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check,
 } from 'lucide-react'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
+import { hasChatAccess } from '../store/chatStore'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
-import { getToken, CONTRIBUTOR_ENABLED } from '../lib/userApi'
+import { getToken, CONTRIBUTOR_ENABLED, updateBio, updatePrivacySettings, updateDisplayName, updateAvatar, removeAvatar, compressImageFile } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH } from '../lib/appVersion'
 import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
@@ -59,13 +60,21 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'appearance' | 'playback' | 'shortcuts' | 'feedback' | 'about'
+type Tab = 'account' | 'appearance' | 'playback' | 'shortcuts' | 'feedback' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `devOnly` mirrors the same gate
 // the rows themselves are rendered behind, so a search never offers to jump
 // somewhere the tab doesn't actually exist.
 const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: boolean }[] = [
+  // Account
+  { tab: 'account', label: 'Display name' },
+  { tab: 'account', label: 'Profile photo' },
+  { tab: 'account', label: 'Bio' },
+  { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
+  { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
+  { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
+  { tab: 'account', label: 'Log out' },
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
@@ -102,8 +111,6 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'feedback', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
-  { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
-  { tab: 'about', label: 'Log out' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
   { tab: 'about', label: 'GitHub' },
@@ -227,6 +234,15 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Elem
 export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
+  const [bioSaving, setBioSaving] = useState(false)
+  const [privacyError, setPrivacyError] = useState<string | null>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
@@ -276,6 +292,99 @@ export default function Settings(): JSX.Element {
     uploads,
   } = useStorePick('setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'uploads')
 
+  const handleAvatarFile = async (file: File): Promise<void> => {
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const base64 = await compressImageFile(file, 256, 200)
+      const updated = await updateAvatar(base64)
+      useStore.setState({ account: updated })
+    } catch {
+      setAvatarError('Could not update photo. Try again.')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleAvatarRemove = async (): Promise<void> => {
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const updated = await removeAvatar()
+      useStore.setState({ account: updated })
+    } catch {
+      setAvatarError('Could not remove photo. Try again.')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  function startEditName(): void {
+    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  const saveDisplayName = async (): Promise<void> => {
+    const trimmed = nameInput.trim()
+    if (!trimmed) { setNameError('Name cannot be empty.'); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  // Bio - free text, saved on blur rather than per-keystroke.
+  const [bioDraft, setBioDraft] = useState(account?.bio ?? '')
+  useEffect(() => { setBioDraft(account?.bio ?? '') }, [account?.bio])
+  const saveBio = async (): Promise<void> => {
+    if (bioDraft === (account?.bio ?? '')) return
+    setBioSaving(true)
+    try {
+      const updated = await updateBio(bioDraft)
+      useStore.setState({ account: updated })
+    } catch {
+      setBioDraft(account?.bio ?? '')
+    } finally {
+      setBioSaving(false)
+    }
+  }
+
+  // Public profile toggles - optimistic, reverted on failure.
+  const togglePublicPlayHistory = async (): Promise<void> => {
+    if (!account) return
+    const next = !account.public_play_history
+    useStore.setState({ account: { ...account, public_play_history: next } })
+    setPrivacyError(null)
+    try {
+      const updated = await updatePrivacySettings({ public_play_history: next })
+      useStore.setState({ account: updated })
+    } catch {
+      useStore.setState({ account: { ...account, public_play_history: !next } })
+      setPrivacyError('Could not update. Try again.')
+    }
+  }
+  const togglePublicPlaylists = async (): Promise<void> => {
+    if (!account) return
+    const next = !account.public_playlists
+    useStore.setState({ account: { ...account, public_playlists: next } })
+    setPrivacyError(null)
+    try {
+      const updated = await updatePrivacySettings({ public_playlists: next })
+      useStore.setState({ account: updated })
+    } catch {
+      useStore.setState({ account: { ...account, public_playlists: !next } })
+      setPrivacyError('Could not update. Try again.')
+    }
+  }
+
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [customAccent, setCustomAccent] = useState(accentColor)
   // Drag-to-reorder state for the "Menu order" list - indices into the visible
@@ -319,7 +428,7 @@ export default function Settings(): JSX.Element {
   // Pinned items (alwaysVisible) are listed too - they reorder like any other
   // row - but they render without an eye, since isNavItemVisible short-circuits
   // on them and a toggle there would silently do nothing.
-  const navRows = orderedNavItems(navOrder)
+  const navRows = orderedNavItems(navOrder, hasChatAccess(account))
   const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
   const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
   const navIsDefault = navOrderIsDefault && navVisIsDefault
@@ -342,7 +451,7 @@ export default function Settings(): JSX.Element {
   // even when a web user rearranges the visible ones.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true).map((i) => i.view)
     const dragView = navRows[fromRow].view
     const targetView = navRows[toRow].view
     const from = full.indexOf(dragView)
@@ -467,6 +576,7 @@ export default function Settings(): JSX.Element {
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
+    { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
@@ -622,6 +732,139 @@ export default function Settings(): JSX.Element {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* ── Account ── */}
+            {!settingsQueryTrimmed && tab === 'account' && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-3">Account</h3>
+                {account ? (
+                  <>
+                    <div className="flex items-center gap-3 mb-4">
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAvatarFile(f); e.target.value = '' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        disabled={avatarUploading}
+                        className="relative w-16 h-16 shrink-0 rounded-full group"
+                      >
+                        {account.avatar ? (
+                          <img src={account.avatar} alt="" className="w-16 h-16 rounded-full object-cover ring-2 ring-[var(--border)]" />
+                        ) : (
+                          <div className="w-16 h-16 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xl font-bold">
+                            {(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface opacity-0 group-hover:opacity-100 transition-opacity">
+                          {avatarUploading ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
+                        </span>
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        {avatarError && <p className="text-[11px] text-red-400 mb-0.5">{avatarError}</p>}
+                        {editingName ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={nameInput}
+                              onChange={(e) => setNameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveDisplayName()
+                                if (e.key === 'Escape') setEditingName(false)
+                              }}
+                              maxLength={50}
+                              disabled={savingName}
+                              className="min-w-0 w-48 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                            />
+                            <button onClick={saveDisplayName} disabled={savingName} className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40" title="Save">
+                              {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            </button>
+                            <button onClick={() => setEditingName(false)} disabled={savingName} className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40" title="Cancel">
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={startEditName} className="flex items-center gap-1.5 group/name">
+                            <span className="text-text-primary text-base font-bold truncate">{account.display_name || account.discord_username}</span>
+                            <Pencil size={11} className="text-text-muted opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />
+                          </button>
+                        )}
+                        {nameError && <p className="text-[11px] text-red-400 mt-0.5">{nameError}</p>}
+                        <p className="text-text-muted text-xs mt-0.5">{account.discord_id ? 'Signed in with Discord' : 'Signed in'}</p>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1.5 px-0.5">Bio</p>
+                    <textarea
+                      value={bioDraft}
+                      onChange={(e) => setBioDraft(e.target.value.slice(0, 500))}
+                      onBlur={() => void saveBio()}
+                      placeholder="Tell people about yourself"
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted resize-none focus:outline-none focus:border-accent/50"
+                    />
+                    <div className="flex items-center justify-between px-0.5 mb-4">
+                      <span className="text-text-muted text-[11px]">{bioSaving ? 'Saving…' : `${bioDraft.length}/500`}</span>
+                    </div>
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1.5 px-0.5">Public profile</p>
+                    <Row icon={History} iconColor="#0f766e" label="Show listening history" sub="Visible to anyone with your profile link">
+                      <Toggle on={!!account.public_play_history} onClick={() => void togglePublicPlayHistory()} />
+                    </Row>
+                    <Row icon={Music2} iconColor="#0f766e" label="Show public playlists" sub="Lists playlists already marked public">
+                      <Toggle on={!!account.public_playlists} onClick={() => void togglePublicPlaylists()} />
+                    </Row>
+                    {privacyError && <p className="text-red-400 text-[11px] mt-1">{privacyError}</p>}
+
+                    <div className="mt-4 rounded-xl border border-[var(--border)] overflow-hidden">
+                      <button
+                        onClick={() => setShowToken(v => !v)}
+                        className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] text-text-secondary text-sm font-medium transition-colors"
+                      >
+                        <KeyRound size={15} />
+                        <span className="flex-1 text-left">Auth Token</span>
+                        {showToken ? <EyeOff size={14} className="text-text-muted" /> : <Eye size={14} className="text-text-muted" />}
+                      </button>
+                      {showToken && (
+                        <button
+                          onClick={() => {
+                            const t = getToken()
+                            if (t) {
+                              navigator.clipboard.writeText(t)
+                              setTokenCopied(true)
+                              setTimeout(() => setTokenCopied(false), 2000)
+                            }
+                          }}
+                          className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-raised)] transition-colors border-t border-[var(--border)] group"
+                          title="Click to copy"
+                        >
+                          <code className="flex-1 text-left text-[10px] font-mono text-text-muted truncate">
+                            {getToken() ?? '&#8212;'}
+                          </code>
+                          <span className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium transition-colors ${tokenCopied ? 'text-emerald-500' : 'text-text-muted group-hover:text-text-primary'}`}>
+                            {tokenCopied ? 'Copied!' : <><Copy size={11} /> Copy</>}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => logoutAccount()}
+                      className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/25 text-text-secondary hover:text-red-400 text-sm font-medium transition-colors mt-2"
+                    >
+                      <LogOut size={15} />
+                      Log out
+                    </button>
+                  </>
+                ) : (
+                  <p className="text-text-muted text-sm">Not signed in.</p>
+                )}
               </div>
             )}
 
@@ -1145,7 +1388,7 @@ export default function Settings(): JSX.Element {
                     )}
                   </div>
                   <div className="pl-[34px] space-y-1.5">
-                    {HOME_SECTIONS.map((section) => {
+                    {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
                       const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                       return (
                         <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">
@@ -1564,50 +1807,6 @@ export default function Settings(): JSX.Element {
                     Become a Contributor
                   </button>
                 )}
-                {account && (
-                  <div className="mt-2 rounded-xl border border-[var(--border)] overflow-hidden">
-                    <button
-                      onClick={() => setShowToken(v => !v)}
-                      className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] text-text-secondary text-sm font-medium transition-colors"
-                    >
-                      <KeyRound size={15} />
-                      <span className="flex-1 text-left">Auth Token</span>
-                      {showToken ? <EyeOff size={14} className="text-text-muted" /> : <Eye size={14} className="text-text-muted" />}
-                    </button>
-                    {showToken && (
-                      <button
-                        onClick={() => {
-                          const t = getToken()
-                          if (t) {
-                            navigator.clipboard.writeText(t)
-                            setTokenCopied(true)
-                            setTimeout(() => setTokenCopied(false), 2000)
-                          }
-                        }}
-                        className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-raised)] transition-colors border-t border-[var(--border)] group"
-                        title="Click to copy"
-                      >
-                        <code className="flex-1 text-left text-[10px] font-mono text-text-muted truncate">
-                          {getToken() ?? '&#8212;'}
-                        </code>
-                        <span className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium transition-colors ${tokenCopied ? 'text-emerald-500' : 'text-text-muted group-hover:text-text-primary'}`}>
-                          {tokenCopied ? 'Copied!' : <><Copy size={11} /> Copy</>}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {account && (
-                  <button
-                    onClick={() => logoutAccount()}
-                    className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/25 text-text-secondary hover:text-red-400 text-sm font-medium transition-colors mt-2"
-                  >
-                    <LogOut size={15} />
-                    Log out
-                  </button>
-                )}
-
                 <button
                   onClick={() => openMainView('docs')}
                   className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"

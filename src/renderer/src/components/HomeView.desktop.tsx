@@ -13,6 +13,8 @@ import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContext
 import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
+import { hasChatAccess } from '../store/chatStore'
+import HomeChatCard from './chat/HomeChatCard'
 
 // The desktop landing screen - same sections, same data (useHomeData) and the
 // same Settings → Home screen toggles as the mobile shell, laid out as a bento
@@ -335,7 +337,7 @@ function MoreMenu({ open, onClose, items, onSelect }: {
 export default function HomeViewDesktop(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
-    openProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
+    openProfile, openOwnPublicProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
   const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
@@ -355,9 +357,10 @@ export default function HomeViewDesktop(): JSX.Element {
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')
   const showListening = showSection('listening')
+  const showChat = showSection('chat') && hasChatAccess(account)
 
   const mainShown = showRecent || showPlaylists || showAlbums
-  const sideShown = showNews || showRadio || showLiked || showGames
+  const sideShown = showChat || showNews || showRadio || showLiked || showGames
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -365,8 +368,8 @@ export default function HomeViewDesktop(): JSX.Element {
         {/* ── Hero: one line, with "Your listening" folded in as numbers ── */}
         <div className="shrink-0 flex items-center gap-3.5 flex-wrap">
           <button
-            onClick={openProfile}
-            aria-label="Profile"
+            onClick={openOwnPublicProfile}
+            aria-label="Your public profile"
             className="w-11 h-11 shrink-0 rounded-full overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center text-text-muted hover:bg-surface-highest transition-colors"
           >
             {account?.avatar
@@ -376,6 +379,14 @@ export default function HomeViewDesktop(): JSX.Element {
           <h1 className="text-text-primary text-xl font-bold leading-tight truncate min-w-0">
             {greeting()}{account ? `, ${account.display_name}` : ''}
           </h1>
+          {account && userApi.showStaffProfile(account) && (
+            <button
+              onClick={openProfile}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors"
+            >
+              {userApi.staffProfileLabel(account)}
+            </button>
+          )}
           <button
             onClick={() => setActiveView('api-tracker')}
             aria-label="Search the catalog"
@@ -467,6 +478,7 @@ export default function HomeViewDesktop(): JSX.Element {
 
             {sideShown && (
               <div className="w-[300px] shrink-0 min-h-0 flex flex-col gap-3">
+                {showChat && <HomeChatCard variant="desktop" />}
                 {showNews && (
                   <NewsTile
                     items={newsItems}

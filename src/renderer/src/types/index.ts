@@ -136,4 +136,4 @@ export interface SyncedLyricLine {
   text: string
 }
 
-export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'editor-profile' | 'docs' | 'wrld' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'download' | 'thanks' | 'settings' | 'not-found'
+export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'public-profile' | 'editor-profile' | 'docs' | 'wrld' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'download' | 'thanks' | 'settings' | 'chat' | 'not-found'

@@ -1,6 +1,7 @@
 import { useStorePick } from '../store/useStore'
 import { orderedNavItems, isNavItemVisible, splitMobileNavTabs, type NavItemDef } from '../lib/navItems'
 import type { ViewType } from '../types'
+import { hasChatAccess } from '../store/chatStore'
 
 // Games ('heardle' - see NAV_ITEMS) and Playlists: Home's own sections cover
 // both directly, so a tab here would just be a second, less complete route
@@ -13,8 +14,8 @@ const MOBILE_HIDDEN_VIEWS: ViewType[] = ['heardle', 'playlists', 'wrld']
 // (the "More" trigger), and MoreNavSheet (its contents) all agree on what's
 // direct vs. overflowed vs. hidden.
 function useMobileEligibleItems(): NavItemDef[] {
-  const { navOrder } = useStorePick('navOrder')
-  return orderedNavItems(navOrder).filter((i) => !MOBILE_HIDDEN_VIEWS.includes(i.view))
+  const { navOrder, account } = useStorePick('navOrder', 'account')
+  return orderedNavItems(navOrder, hasChatAccess(account)).filter((i) => !MOBILE_HIDDEN_VIEWS.includes(i.view))
 }
 
 // The bar's direct slots come only from items the user has toggled on; the

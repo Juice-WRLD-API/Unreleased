@@ -1,9 +1,12 @@
 import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
+import { hasChatAccess } from '../store/chatStore'
+import HomeChatCard from './chat/HomeChatCard'
 
 // The mobile landing screen. All of its data comes from useHomeData, which the
 // desktop shell shares - this file is layout only: a stack of horizontally
@@ -65,7 +68,7 @@ function EmptyNote({ children }: { children: React.ReactNode }): JSX.Element {
 export default function HomeViewMobile(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
-    openProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
+    openProfile, openOwnPublicProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
   // Whatever doesn't fit the bottom nav directly - its old in-bar "More" tab
@@ -79,8 +82,8 @@ export default function HomeViewMobile(): JSX.Element {
     <div className="flex-1 min-h-0 overflow-y-auto pt-2 pb-4">
       <div className="flex items-center gap-2 px-4 pb-4">
         <button
-          onClick={openProfile}
-          aria-label="Profile"
+          onClick={openOwnPublicProfile}
+          aria-label="Your public profile"
           className="w-9 h-9 shrink-0 rounded-full overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center text-text-muted active:bg-surface-highest transition-colors"
         >
           {account?.avatar
@@ -88,6 +91,14 @@ export default function HomeViewMobile(): JSX.Element {
             : <User size={17} />}
         </button>
         <h1 className="flex-1 min-w-0 text-text-primary text-[26px] font-bold leading-tight">Home</h1>
+        {account && userApi.showStaffProfile(account) && (
+          <button
+            onClick={openProfile}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-full bg-surface-raised active:bg-surface-highest text-text-secondary text-xs font-semibold transition-colors shrink-0"
+          >
+            {userApi.staffProfileLabel(account)}
+          </button>
+        )}
         {moreTabs.length > 0 && (
           <button
             onClick={() => setShowMoreNav(true)}
@@ -98,6 +109,8 @@ export default function HomeViewMobile(): JSX.Element {
           </button>
         )}
       </div>
+
+      {showSection('chat') && hasChatAccess(account) && <HomeChatCard variant="mobile" />}
 
       {showSection('recent') && recent.length > 0 && (
         <Section title="Recently played" icon={<Disc3 size={15} />}>

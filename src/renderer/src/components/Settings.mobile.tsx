@@ -5,15 +5,16 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
+import { hasChatAccess } from '../store/chatStore'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
-import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel, compressImageFile, updateAvatar, removeAvatar } from '../lib/userApi'
+import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel, compressImageFile, updateAvatar, removeAvatar, updateBio, updatePrivacySettings } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH } from '../lib/appVersion'
 import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
@@ -454,6 +455,52 @@ export default function Settings(): JSX.Element {
     }
   }
 
+  // Bio - free text, saved on blur rather than per-keystroke.
+  const [bioDraft, setBioDraft] = useState(account?.bio ?? '')
+  const [bioSaving, setBioSaving] = useState(false)
+  useEffect(() => { setBioDraft(account?.bio ?? '') }, [account?.bio])
+  const saveBio = async (): Promise<void> => {
+    if (bioDraft === (account?.bio ?? '')) return
+    setBioSaving(true)
+    try {
+      const updated = await updateBio(bioDraft)
+      useStore.setState({ account: updated })
+    } catch {
+      setBioDraft(account?.bio ?? '')
+    } finally {
+      setBioSaving(false)
+    }
+  }
+
+  // Public profile toggles - optimistic, reverted on failure.
+  const [privacyError, setPrivacyError] = useState<string | null>(null)
+  const togglePublicPlayHistory = async (): Promise<void> => {
+    if (!account) return
+    const next = !account.public_play_history
+    useStore.setState({ account: { ...account, public_play_history: next } })
+    setPrivacyError(null)
+    try {
+      const updated = await updatePrivacySettings({ public_play_history: next })
+      useStore.setState({ account: updated })
+    } catch {
+      useStore.setState({ account: { ...account, public_play_history: !next } })
+      setPrivacyError('Could not update. Try again.')
+    }
+  }
+  const togglePublicPlaylists = async (): Promise<void> => {
+    if (!account) return
+    const next = !account.public_playlists
+    useStore.setState({ account: { ...account, public_playlists: next } })
+    setPrivacyError(null)
+    try {
+      const updated = await updatePrivacySettings({ public_playlists: next })
+      useStore.setState({ account: updated })
+    } catch {
+      useStore.setState({ account: { ...account, public_playlists: !next } })
+      setPrivacyError('Could not update. Try again.')
+    }
+  }
+
   // Clone the current look into a new editable skin, make it active (so the
   // editor previews live), and open the editor on it.
   const createSkin = (): void => {
@@ -484,7 +531,7 @@ export default function Settings(): JSX.Element {
   // reorder/show-hide row for either here would toggle something with no
   // visible effect. Desktop's Settings keeps them - Sidebar still has its own
   // tabs for both.
-  const navRows = orderedNavItems(navOrder).filter((i) => i.view !== 'heardle' && i.view !== 'playlists')
+  const navRows = orderedNavItems(navOrder, hasChatAccess(account)).filter((i) => i.view !== 'heardle' && i.view !== 'playlists')
   const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
   const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
   const navIsDefault = navOrderIsDefault && navVisIsDefault
@@ -507,7 +554,7 @@ export default function Settings(): JSX.Element {
   // even when a web user rearranges the visible ones.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true).map((i) => i.view)
     const dragView = navRows[fromRow].view
     const targetView = navRows[toRow].view
     const from = full.indexOf(dragView)
@@ -978,6 +1025,40 @@ export default function Settings(): JSX.Element {
                       )}
                     </div>
 
+                    <SettingsCard title="Bio">
+                      <textarea
+                        value={bioDraft}
+                        onChange={(e) => setBioDraft(e.target.value.slice(0, 500))}
+                        onBlur={() => void saveBio()}
+                        placeholder="Tell people about yourself"
+                        rows={3}
+                        className="w-full py-3 bg-transparent text-text-primary text-[15px] placeholder:text-text-muted resize-none focus:outline-none"
+                      />
+                      <div className="flex items-center justify-between pb-1">
+                        <span className="text-text-muted text-xs">{bioSaving ? 'Saving…' : `${bioDraft.length}/500`}</span>
+                      </div>
+                    </SettingsCard>
+
+                    <SettingsCard title="Public profile">
+                      <Row
+                        icon={History}
+                        iconColor="#0f766e"
+                        label="Show listening history"
+                        sub="Let anyone with your profile link see your recently played tracks"
+                      >
+                        <Toggle on={!!account.public_play_history} onClick={() => void togglePublicPlayHistory()} />
+                      </Row>
+                      <Row
+                        icon={Music2}
+                        iconColor="#0f766e"
+                        label="Show public playlists"
+                        sub="List your playlists that are already marked public on your profile"
+                      >
+                        <Toggle on={!!account.public_playlists} onClick={() => void togglePublicPlaylists()} />
+                      </Row>
+                      {privacyError && <p className="text-red-400 text-xs pb-2">{privacyError}</p>}
+                    </SettingsCard>
+
                     {showStaffProfile(account) && (
                       <SettingsCard>
                         <button
@@ -1353,7 +1434,7 @@ export default function Settings(): JSX.Element {
                     ) : undefined}
                   >
                     <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
-                      {HOME_SECTIONS.map((section) => {
+                      {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
                         const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                         return (
                           <div

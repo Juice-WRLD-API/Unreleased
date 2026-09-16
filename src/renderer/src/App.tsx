@@ -48,7 +48,9 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/download') return 'download'
   if (pathname === '/thank-you') return 'thanks'
   if (pathname === '/settings') return 'settings'
+  if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
+  if (pathname.startsWith('/u/')) return 'public-profile'
   if (pathname === '/auth/discord/callback') return 'api-tracker'
   return 'not-found'
 }
@@ -82,12 +84,13 @@ import MoreNavSheet from './components/MoreNavSheet'
 // eager bundle. Definitions live in lib/lazyViews so the nav chrome can warm a
 // chunk on hover/tap without importing this file; preloadView is the warmer.
 import {
-  EditorPage, AdminPage, SharedPlaylistView, EditorProfileView, NotFoundView,
+  EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
   DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
   StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
-  LikedSongsView, DiagnosticsModal, preloadView,
+  LikedSongsView, DiagnosticsModal, ChatView, preloadView,
 } from './lib/lazyViews'
+import { useChatBootstrap } from './hooks/useChatBootstrap'
 
 export default function App(): JSX.Element {
   const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel } = useStorePick(
@@ -99,6 +102,7 @@ export default function App(): JSX.Element {
   const bgView = activeView === 'wrld' ? (previousView ?? 'api-tracker') : activeView
   const isMobile = useIsMobile()
   useThemeEffects()
+  useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
   // builds, so this never runs for real users even if the token is baked into the bundle.
   useEffect(() => {
@@ -267,6 +271,7 @@ export default function App(): JSX.Element {
               : bgView === 'liked' ? <LikedSongsView />
               : bgView === 'playlists' ? <PlaylistsView />
               : bgView === 'shared-playlist' ? <SharedPlaylistView />
+              : bgView === 'public-profile' ? <PublicProfileView />
               : bgView === 'editor-profile' ? <EditorProfileView />
               : bgView === 'docs' ? <DocsPage />
               : bgView === 'news' ? <NewsView />
@@ -278,6 +283,7 @@ export default function App(): JSX.Element {
               : bgView === 'download' ? <DownloadAppView />
               : bgView === 'thanks' ? <ThankYouView />
               : bgView === 'albums-admin' ? <AlbumsAdminView />
+              : bgView === 'chat' ? <ChatView />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
             </Suspense>

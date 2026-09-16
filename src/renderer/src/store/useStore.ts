@@ -132,7 +132,7 @@ export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
 // The Settings dialog's tabs - the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'appearance' | 'playback' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'account' | 'appearance' | 'playback' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
 
 // ─── Non-queue state ──────────────────────────────────────────────────────────
 
@@ -560,6 +560,10 @@ interface AppActions {
   /** Single entry point for every "go to my profile" control (sidebar row,
    *  bottom nav tab, the player's profile hotkey). */
   openProfile: () => void
+  /** Navigates to the signed-in account's own public profile (/u/<id>) -
+   *  used by the Home hero avatar. Editor/staff access lives on its own
+   *  button on Home now (openProfile), not behind the avatar. */
+  openOwnPublicProfile: () => void
   setShowDiagnostics: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowMoreNav: (show: boolean) => void
@@ -1170,6 +1174,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'download': '/download',
       'thanks': '/thank-you',
       'settings': '/settings',
+      'chat': '/chat',
     }
     // Returning to Playlists with a playlist already open (it stays selected
     // across tab switches - see playlistsSelectedId above) should restore its
@@ -1226,6 +1231,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // themselves from, so the two can't drift apart.
     const view = userApi.staffProfileView(get().account)
     get().setActiveView(view)
+  },
+  openOwnPublicProfile: () => {
+    const account = get().account
+    if (!account) return
+    // public-profile's userId lives in the URL path itself (/u/<id>), not in
+    // store state, so this can't reuse setActiveView's path table - push
+    // directly and always set state (even if already on 'public-profile',
+    // e.g. navigating there from someone else's page) so the view re-reads
+    // the new path.
+    const path = `/u/${account.id}`
+    if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
+    set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
   setShowQueue: (showQueue) => set({ showQueue }),

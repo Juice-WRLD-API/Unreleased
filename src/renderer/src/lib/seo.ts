@@ -107,6 +107,8 @@ const ROUTES: Record<ViewType, SeoEntry> = {
   // Flip noindex off with NEWS_ENABLED when the /news backend ships.
   news: { path: '/news', title: 'News', description: 'Juice WRLD news and announcements.', noindex: true },
   'shared-playlist': { title: 'Shared playlist', description: 'A playlist shared from unreleased.', noindex: true },
+  'public-profile': { title: 'Profile', description: 'A public unreleased.gg user profile.', noindex: true },
+  chat: { path: '/chat', title: 'Staff chat', description: 'Staff-only chat.', noindex: true },
   'not-found': { title: 'Page not found', description: 'This page does not exist.', noindex: true },
 }
 
