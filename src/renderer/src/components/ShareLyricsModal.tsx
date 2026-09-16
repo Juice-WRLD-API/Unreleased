@@ -553,7 +553,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
               </div>
             </div>
 
-            <div className="min-w-0 min-h-0 flex flex-col items-center gap-4 p-5 overflow-auto">
+            <div className="min-w-0 shrink-0 md:min-h-0 md:shrink flex flex-col items-center gap-4 p-5 md:overflow-auto">
               <div
                 className="shrink-0 rounded-2xl overflow-hidden shadow-2xl border border-[var(--border)]"
                 style={{ width: cardW, height: cardH }}
