@@ -697,10 +697,12 @@ export default function EditorProfileView(): JSX.Element {
                     {/* Managers only ever reach Song edits + Comp files, so
                         they get those two counts, same as before. Admins
                         get one box per queue their nav actually opens into,
-                        plus Channels (free - already in the store) and a
-                        Total pending rollup in place of a meaningless
-                        "Stats" count. */}
-                    <div className={`grid gap-2 ${isAdmin ? 'grid-cols-4' : 'grid-cols-2'}`}>
+                        plus Channels and Eras (free - already in the store)
+                        and a Total pending rollup in place of a meaningless
+                        "Stats" count - 9 boxes total, so 3 columns (3 full
+                        rows) rather than 4 (which leaves the 9th orphaned
+                        alone on its own row). */}
+                    <div className={`grid gap-2 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                       <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                       <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
                       {isAdmin && (
@@ -727,7 +729,7 @@ export default function EditorProfileView(): JSX.Element {
                         button) get laid out right here instead, in the
                         space that freed up. */}
                     {isAdmin && (
-                      <div className="grid grid-cols-4 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         <AdminStatBox label="Total proposals" value={adminPreview?.totalProposals} />
                         <AdminStatBox label="Approved" value={adminPreview?.approvedProposals} highlight={!!adminPreview?.approvedProposals} />
                         <AdminStatBox label="Approval rate" value={adminPreview?.approvalPct != null ? `${adminPreview.approvalPct}%` : undefined} />

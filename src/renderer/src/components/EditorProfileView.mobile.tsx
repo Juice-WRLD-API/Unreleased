@@ -644,9 +644,11 @@ export default function EditorProfileView(): JSX.Element {
               <div className="flex flex-col gap-3 py-1 text-text-muted">
                 {/* Managers only ever reach Comp files, so they get that one
                     count; admins get one box per queue their nav opens into,
-                    plus Channels (free) and a Total pending rollup in place
-                    of a meaningless "Stats" count. */}
-                <div className={`grid gap-1.5 ${isAdmin ? 'grid-cols-4' : 'grid-cols-2'}`}>
+                    plus Channels and Eras (free) and a Total pending rollup
+                    in place of a meaningless "Stats" count - 9 boxes total,
+                    so 3 columns (3 full rows) rather than 4 (which leaves
+                    the 9th orphaned alone on its own row). */}
+                <div className={`grid gap-1.5 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
                   <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                   <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
                   {isAdmin && (
@@ -672,7 +674,7 @@ export default function EditorProfileView(): JSX.Element {
                     metrics (previously hidden behind that button) get laid
                     out right here instead, in the space that freed up. */}
                 {isAdmin && (
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1.5">
                     <AdminStatBox label="Total proposals" value={adminPreview?.totalProposals} />
                     <AdminStatBox label="Approved" value={adminPreview?.approvedProposals} highlight={!!adminPreview?.approvedProposals} />
                     <AdminStatBox label="Approval rate" value={adminPreview?.approvalPct != null ? `${adminPreview.approvalPct}%` : undefined} />
