@@ -42,37 +42,73 @@ const CATEGORY_ORDER: (keyof JWApiStats['category_stats'])[] = [
 const LIST_MAX_HEIGHT = 'max-h-[720px]'
 
 // ─── Era timeline ───────────────────────────────────────────────────────────
-// time_frame is free text — "(Month Year-Month Year)" or "(Month Year-Present)"
-// — not two structured date fields, so this parses it defensively: any era
-// that fails to parse is just left off the timeline rather than crashing or
-// distorting the scale. `now` also clamps a bad far-future end date (the live
-// data has had at least one) so one bad row can't blow out the whole axis.
+// time_frame is free text, not two structured date fields, e.g.
+// "October 17th 2018 - March 8th 2019", "October 2024 - Present", or just
+// "2017 - December 22nd 2017". This parses it defensively: any era that
+// fails to parse, has only a single date (no " - "), or is wrapped in "(...)"
+// (a placeholder/duplicate entry, not a real dated era) is left off the
+// timeline rather than crashing or distorting the scale. `now` also clamps a
+// bad far-future end date (the live data has had at least one) so one bad
+// row can't blow out the whole axis.
 const MONTHS: Record<string, number> = {
   january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
   july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
 }
 
-function parseMonthYear(s: string): Date | null {
-  const m = s.trim().match(/^([A-Za-z]+)\s+(\d{4})$/)
-  if (!m) return null
-  const month = MONTHS[m[1].toLowerCase()]
-  if (month === undefined) return null
-  return new Date(Number(m[2]), month, 1)
+interface ParsedDatePart { date: Date; exact: boolean }
+
+// Accepts "Month Dayth[,] Year" (exact day), "Month Year" or bare "Year"
+// (no day given - callers decide how to fill that in).
+function parseDatePart(s: string): ParsedDatePart | null {
+  const raw = s.trim()
+  const full = raw.match(/^([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/)
+  if (full) {
+    const month = MONTHS[full[1].toLowerCase()]
+    if (month === undefined) return null
+    return { date: new Date(Number(full[3]), month, Number(full[2])), exact: true }
+  }
+  const monthYear = raw.match(/^([A-Za-z]+)\s+(\d{4})$/)
+  if (monthYear) {
+    const month = MONTHS[monthYear[1].toLowerCase()]
+    if (month === undefined) return null
+    // No day given - assume the 1st of the month.
+    return { date: new Date(Number(monthYear[2]), month, 1), exact: false }
+  }
+  const yearOnly = raw.match(/^(\d{4})$/)
+  if (yearOnly) return { date: new Date(Number(yearOnly[1]), 0, 1), exact: false }
+  return null
 }
 
 function parseTimeFrame(timeFrame: string | undefined, now: Date): { start: Date; end: Date } | null {
-  const m = timeFrame?.trim().match(/^\(([^-]+)-(.+)\)$/)
-  if (!m) return null
-  const start = parseMonthYear(m[1])
-  if (!start) return null
-  const endRaw = m[2].trim()
-  const end = endRaw.toLowerCase() === 'present' ? now : parseMonthYear(endRaw)
-  if (!end) return null
-  // Push to the end of that month so a single-month range still gets a
-  // sliver of width instead of collapsing to zero.
-  const endOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0)
-  const clampedEnd = endOfMonth > now ? now : endOfMonth
-  return clampedEnd > start ? { start, end: clampedEnd } : null
+  const raw = timeFrame?.trim()
+  if (!raw) return null
+  // Entirely parenthesized ("(March 2022-March 2022)") marks a placeholder/
+  // duplicate entry, not a real dated era.
+  if (/^\(.*\)$/.test(raw)) return null
+  // Start and end are separated by " - ", though the live data isn't always
+  // consistent about the spacing around the dash - split on the dash itself
+  // and trim each side rather than requiring exact spacing.
+  const dashIndex = raw.indexOf('-')
+  if (dashIndex === -1) return null // single date, no range - not a span to plot
+  const startRaw = raw.slice(0, dashIndex).trim()
+  const endRaw = raw.slice(dashIndex + 1).trim()
+  const startParsed = parseDatePart(startRaw)
+  if (!startParsed) return null
+  let end: Date
+  if (endRaw.toLowerCase() === 'present') {
+    end = now
+  } else {
+    const endParsed = parseDatePart(endRaw)
+    if (!endParsed) return null
+    // An end with no explicit day covers the whole month - push to its last
+    // day so a single-month range still gets a sliver of width instead of
+    // collapsing to zero. An exact end date is used as-is.
+    end = endParsed.exact
+      ? endParsed.date
+      : new Date(endParsed.date.getFullYear(), endParsed.date.getMonth() + 1, 0)
+  }
+  const clampedEnd = end > now ? now : end
+  return clampedEnd > startParsed.date ? { start: startParsed.date, end: clampedEnd } : null
 }
 
 const monthYearLabel = (d: Date): string => d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
