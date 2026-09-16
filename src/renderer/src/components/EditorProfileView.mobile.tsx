@@ -5,7 +5,7 @@ import {
   Users, Shield, Pencil, Check,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers, updateDisplayName } from '../lib/userApi'
+import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers, updateDisplayName, updateAvatar, compressImageFile } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
 import ReportsTab from './ReportsTab.mobile'
 import AdminPage from './AdminPage.mobile'
@@ -158,6 +158,19 @@ export default function EditorProfileView(): JSX.Element {
   const [savingName, setSavingName] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
 
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+
+  const handleAvatarFile = async (file: File): Promise<void> => {
+    setAvatarUploading(true)
+    try {
+      const base64 = await compressImageFile(file, 256, 200)
+      const updated = await updateAvatar(base64)
+      useStore.setState({ account: updated })
+    } catch { /* ignore */ }
+    setAvatarUploading(false)
+  }
+
   function startEditName(): void {
     setNameInput(account?.display_name || account?.discord_username || '')
     setNameError(null)
@@ -307,13 +320,19 @@ export default function EditorProfileView(): JSX.Element {
       <div className="shrink-0 px-2 pt-1">
         <div className="flex items-center gap-1">
           <div className="flex-1 min-w-0 pl-2.5 flex items-center gap-3">
-            {account?.discord_avatar ? (
-              <img src={account.discord_avatar} alt="" className="w-11 h-11 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
-            ) : (
-              <div className="w-11 h-11 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold shrink-0">
-                {(account?.display_name || account?.discord_username || '?').charAt(0).toUpperCase()}
-              </div>
-            )}
+            <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAvatarFile(f); e.target.value = '' }} />
+            <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} className="relative w-11 h-11 shrink-0 rounded-full active:opacity-80">
+              {account?.avatar ? (
+                <img src={account.avatar} alt="" className="w-11 h-11 rounded-full object-cover ring-2 ring-[var(--border)]" />
+              ) : (
+                <div className="w-11 h-11 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold">
+                  {(account?.display_name || account?.discord_username || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface">
+                {avatarUploading ? <Loader2 size={10} className="animate-spin" /> : <Pencil size={10} />}
+              </span>
+            </button>
             <div className="flex-1 min-w-0">
               {editingName ? (
                 <div className="flex items-center gap-1">

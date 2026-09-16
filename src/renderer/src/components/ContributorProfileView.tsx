@@ -95,8 +95,8 @@ export default function ContributorProfileView(): JSX.Element {
           {/* Identity */}
           <Tile span="col-span-2 sm:col-span-2">
             <div className="flex items-center gap-3">
-              {account.discord_avatar ? (
-                <img src={account.discord_avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
+              {account.avatar ? (
+                <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
               ) : (
                 <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold shrink-0">
                   {(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}

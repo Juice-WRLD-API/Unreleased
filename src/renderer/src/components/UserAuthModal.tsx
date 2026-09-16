@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { ModalOverlay } from './Modal'
 import { X, Loader2, AlertCircle, Heart, ListMusic } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -8,9 +8,16 @@ interface Props {
 }
 
 export default function UserAuthModal({ onClose }: Props): JSX.Element {
-  const { loginWithDiscord } = useStorePick('loginWithDiscord')
+  const { loginWithDiscord, loginWithPassword, signupWithPassword } = useStorePick(
+    'loginWithDiscord',
+    'loginWithPassword',
+    'signupWithPassword',
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
 
   const start = async (): Promise<void> => {
     setError(null)
@@ -20,6 +27,29 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start Discord login')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const submitPassword = async (e: FormEvent): Promise<void> => {
+    e.preventDefault()
+    setError(null)
+    const name = username.trim()
+    if (!name || !password) {
+      setError('Enter a username and password.')
+      return
+    }
+    setLoading(true)
+    try {
+      if (mode === 'signup') {
+        await signupWithPassword(name, password)
+      } else {
+        await loginWithPassword(name, password)
+      }
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.')
     } finally {
       setLoading(false)
     }
@@ -40,7 +70,7 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-          <h2 className="text-text-primary text-sm font-semibold">Log in</h2>
+          <h2 className="text-text-primary text-sm font-semibold">{mode === 'signup' ? 'Create account' : 'Log in'}</h2>
           <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
             <X size={18} />
           </button>
@@ -48,7 +78,9 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
 
         <div className="px-5 py-5 space-y-4">
           <p className="text-sm text-text-muted leading-relaxed">
-            Log in with Discord to save favorite tracks and playlists that follow you on every device.
+            {mode === 'signup'
+              ? 'Create an account to save favorite tracks and playlists that follow you on every device.'
+              : 'Log in to save favorite tracks and playlists that follow you on every device.'}
           </p>
 
           <div className="space-y-2">
@@ -66,6 +98,54 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               {error}
             </div>
           )}
+
+          <form onSubmit={submitPassword} className="space-y-2.5">
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={loading}
+              className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              disabled={loading}
+              className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-xl bg-accent hover:opacity-90 text-white text-sm font-semibold transition-opacity flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {loading && <Loader2 size={16} className="animate-spin" />}
+              {mode === 'signup' ? 'Create account' : 'Log in'}
+            </button>
+          </form>
+
+          <div className="text-center text-xs text-text-muted">
+            {mode === 'signup' ? 'Already have an account?' : "Don't have an account?"}{' '}
+            <button
+              type="button"
+              onClick={() => { setError(null); setMode(mode === 'signup' ? 'login' : 'signup') }}
+              className="text-accent font-medium hover:underline"
+            >
+              {mode === 'signup' ? 'Log in' : 'Sign up'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 text-[10px] uppercase tracking-wide text-text-muted">
+            <span className="h-px flex-1 bg-[var(--border)]" />
+            or
+            <span className="h-px flex-1 bg-[var(--border)]" />
+          </div>
 
           <button
             onClick={start}

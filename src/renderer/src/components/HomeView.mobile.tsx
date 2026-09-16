@@ -83,8 +83,8 @@ export default function HomeViewMobile(): JSX.Element {
           aria-label="Profile"
           className="w-9 h-9 shrink-0 rounded-full overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center text-text-muted active:bg-surface-highest transition-colors"
         >
-          {account?.discord_avatar
-            ? <img src={account.discord_avatar} alt="" className="w-full h-full object-cover" />
+          {account?.avatar
+            ? <img src={account.avatar} alt="" className="w-full h-full object-cover" />
             : <User size={17} />}
         </button>
         <h1 className="flex-1 min-w-0 text-text-primary text-[26px] font-bold leading-tight">Home</h1>

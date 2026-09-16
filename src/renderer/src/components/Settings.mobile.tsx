@@ -13,7 +13,7 @@ import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
-import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
+import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel, compressImageFile, updateAvatar, removeAvatar } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH } from '../lib/appVersion'
 import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
@@ -422,6 +422,37 @@ export default function Settings(): JSX.Element {
   const [editingSkinId, setEditingSkinId] = useState<string | null>(null)
   const skinImportRef = useRef<HTMLInputElement>(null)
   const [skinImportError, setSkinImportError] = useState<string | null>(null)
+
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
+
+  const handleAvatarFile = async (file: File): Promise<void> => {
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const base64 = await compressImageFile(file, 256, 200)
+      const updated = await updateAvatar(base64)
+      useStore.setState({ account: updated })
+    } catch {
+      setAvatarError('Could not update photo. Try again.')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
+
+  const handleAvatarRemove = async (): Promise<void> => {
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const updated = await removeAvatar()
+      useStore.setState({ account: updated })
+    } catch {
+      setAvatarError('Could not remove photo. Try again.')
+    } finally {
+      setAvatarUploading(false)
+    }
+  }
 
   // Clone the current look into a new editable skin, make it active (so the
   // editor previews live), and open the editor on it.
@@ -850,8 +881,8 @@ export default function Settings(): JSX.Element {
               onClick={() => openSection('account')}
               className="w-full flex items-center gap-3.5 p-3.5 rounded-2xl bg-[var(--surface-overlay)] text-left active:bg-[var(--surface-raised)] transition-colors"
             >
-              {account?.discord_avatar
-                ? <img src={account.discord_avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+              {account?.avatar
+                ? <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
                 : (
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${account ? 'bg-accent/20 text-accent text-lg font-semibold' : 'bg-[var(--surface-raised)] text-text-muted'}`}>
                     {account
@@ -909,11 +940,42 @@ export default function Settings(): JSX.Element {
                         the platform idiom, and there's nothing to compare it
                         against on a screen it has to itself. */}
                     <div className="flex flex-col items-center text-center pt-2 pb-6">
-                      {account.discord_avatar
-                        ? <img src={account.discord_avatar} alt="" className="w-20 h-20 rounded-full object-cover" />
-                        : <div className="w-20 h-20 rounded-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) void handleAvatarFile(file)
+                          e.target.value = ''
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        disabled={avatarUploading}
+                        className="relative w-20 h-20 rounded-full active:opacity-80 transition-opacity"
+                      >
+                        {account.avatar
+                          ? <img src={account.avatar} alt="" className="w-20 h-20 rounded-full object-cover" />
+                          : <div className="w-20 h-20 rounded-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+                        <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface">
+                          {avatarUploading ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
+                        </span>
+                      </button>
                       <p className="mt-3 text-text-primary text-lg font-semibold truncate max-w-full">{account.display_name || account.discord_username}</p>
-                      <p className="text-text-muted text-xs">Signed in with Discord</p>
+                      <p className="text-text-muted text-xs">{account.discord_id ? 'Signed in with Discord' : 'Signed in'}</p>
+                      {avatarError && <p className="text-red-400 text-xs mt-1">{avatarError}</p>}
+                      {account.avatar && !avatarUploading && (
+                        <button
+                          type="button"
+                          onClick={() => void handleAvatarRemove()}
+                          className="mt-2 text-xs text-text-muted hover:text-red-400 transition-colors"
+                        >
+                          Remove photo
+                        </button>
+                      )}
                     </div>
 
                     {showStaffProfile(account) && (
@@ -979,16 +1041,16 @@ export default function Settings(): JSX.Element {
                       </div>
                       <p className="mt-3 text-text-primary text-lg font-semibold">Not signed in</p>
                       <p className="text-text-muted text-xs leading-relaxed mt-1 max-w-[280px]">
-                        Log in with Discord to save favorite tracks and playlists that follow you on every device.
+                        Log in to save favorite tracks and playlists that follow you on every device.
                       </p>
                     </div>
 
                     <button
                       onClick={() => setShowUserAuth(true)}
-                      className="w-full h-12 rounded-xl bg-[#5865F2] text-white text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 transition-opacity mb-4"
+                      className="w-full h-12 rounded-xl bg-accent text-white text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 transition-opacity mb-4"
                     >
                       <LogIn size={17} />
-                      Continue with Discord
+                      Log in
                     </button>
                   </>
                 )}

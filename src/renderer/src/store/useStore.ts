@@ -719,6 +719,8 @@ interface AppActions {
   loadAccount: () => Promise<void>
   loginWithDiscord: () => Promise<void>
   completeDiscordLogin: (code: string, state: string) => Promise<void>
+  signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
+  loginWithPassword: (username: string, password: string) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
@@ -1935,6 +1937,24 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
     const redirectUri = userApi.discordRedirectUri()
     const { token, user } = await userApi.exchangeDiscord(code, state, redirectUri)
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  signupWithPassword: async (username, password, displayName) => {
+    const { token, user } = await userApi.registerAccount({
+      username,
+      password,
+      display_name: displayName,
+    })
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  loginWithPassword: async (username, password) => {
+    const { token, user } = await userApi.passwordLogin({ username, password })
     userApi.setToken(token)
     set({ account: user })
     await get().loadAccount()

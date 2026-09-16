@@ -20,6 +20,7 @@ export interface AccountUser {
   discord_id: string
   discord_username: string
   discord_avatar: string
+  avatar?: string
   is_editor: boolean
   is_contributor: boolean
   // Optional: the API only started returning this with the manager role, so
@@ -250,6 +251,27 @@ export async function exchangeDiscord(
   }, false)
 }
 
+export async function registerAccount(payload: {
+  username: string
+  password: string
+  display_name?: string
+}): Promise<{ token: string; user: AccountUser }> {
+  return request(`${ACCOUNT_BASE}/auth/register/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, false)
+}
+
+export async function passwordLogin(payload: {
+  username: string
+  password: string
+}): Promise<{ token: string; user: AccountUser }> {
+  return request(`${ACCOUNT_BASE}/auth/login/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, false)
+}
+
 export async function logout(): Promise<void> {
   try {
     await request(`${ACCOUNT_BASE}/logout/`, { method: 'POST' })
@@ -267,6 +289,26 @@ export async function updateDisplayName(displayName: string): Promise<AccountUse
   const result = await request<AccountUser>(url, {
     method: 'PATCH',
     body: JSON.stringify({ display_name: displayName }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function updateAvatar(base64: string): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ avatar: base64 }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function removeAvatar(): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ avatar: '' }),
   })
   cacheSet(url, result)
   return result

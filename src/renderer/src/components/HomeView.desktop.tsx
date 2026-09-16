@@ -336,8 +336,8 @@ export default function HomeViewDesktop(): JSX.Element {
             aria-label="Profile"
             className="w-11 h-11 shrink-0 rounded-full overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center text-text-muted hover:bg-surface-highest transition-colors"
           >
-            {account?.discord_avatar
-              ? <img src={account.discord_avatar} alt="" className="w-full h-full object-cover" />
+            {account?.avatar
+              ? <img src={account.avatar} alt="" className="w-full h-full object-cover" />
               : <User size={19} />}
           </button>
           <h1 className="text-text-primary text-xl font-bold leading-tight truncate min-w-0">
