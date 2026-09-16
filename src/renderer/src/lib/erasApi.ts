@@ -22,8 +22,15 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   })
 }
 
+// The docs promise a bare array here, but the same admin base has already
+// been caught paginating a documented-as-bare-array list in practice (see
+// albumsApi.ts) - unwrap defensively rather than trusting either shape.
+function unwrapList<T>(data: T[] | { results: T[] }): T[] {
+  return Array.isArray(data) ? data : (data?.results ?? [])
+}
+
 export async function fetchEraList(): Promise<Era[]> {
-  return request(`${ACCOUNT_BASE}/admin/eras/`, { method: 'GET' })
+  return unwrapList(await request<Era[] | { results: Era[] }>(`${ACCOUNT_BASE}/admin/eras/`, { method: 'GET' }))
 }
 
 export async function adminCreateEra(payload: {
