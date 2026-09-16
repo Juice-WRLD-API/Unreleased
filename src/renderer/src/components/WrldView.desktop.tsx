@@ -9,25 +9,21 @@ import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
-import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, JWAPI_BASE, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource } from '../lib/juicewrldApi'
+import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource, loadAllSongs } from '../lib/juicewrldApi'
+import type { JWApiSong } from '../lib/juicewrldApi'
+import * as albumsApi from '../lib/albumsApi'
+import type { Album as WrldAlbum } from '../lib/albumsApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { searchRadioLibrary } from '../lib/radioLibrary'
 import type { RadioLibraryTrack } from '../lib/radioLibrary'
 import { resumeEffectsContext, EFFECTS_SUPPORTED } from '../lib/audioEffects'
 import { getVersionGroup } from '../lib/versionsApi'
-import type { JWApiSong } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
-
-// ── WrldData types ────────────────────────────────────────────────────────────
-
-interface WrldSong { name: string; id: number }
-interface WrldVersion { name: string; year: number; cover_url: string; songs: WrldSong[] }
-interface WrldAlbum { id: number; name: string; versions: WrldVersion[] }
 
 export default function WrldView(): JSX.Element {
   const {
@@ -211,31 +207,28 @@ export default function WrldView(): JSX.Element {
   const proposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Albums state ─────────────────────────────────────────────────────────────
+  // Album objects carry track paths, not full song metadata, so a
+  // path→song lookup built from the whole catalog resolves each track's
+  // name/art/id for display and playback - same ?all=true fetch the
+  // versions table uses, and it shares that fetch's cache.
   const [wrldAlbums, setWrldAlbums] = useState<WrldAlbum[]>([])
+  const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
   const [selectedAlbumId, setSelectedAlbumId] = useState<number | null>(null)
-  const [selectedVersionIdx, setSelectedVersionIdx] = useState(0)
-  const [playingAlbumSongId, setPlayingAlbumSongId] = useState<number | null>(null)
-  // Lives here (not inside AlbumDetail) because AlbumDetail is invoked as a
-  // plain function - see the note above ArtBox - and plain calls can't own hooks.
-  const [versionMenuOpen, setVersionMenuOpen] = useState(false)
+  const [playingAlbumSongPath, setPlayingAlbumSongPath] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/wrlddata.json')
-      .then(r => r.json())
-      .then(d => setWrldAlbums(d.albums ?? []))
+    albumsApi.fetchAlbums().then(setWrldAlbums).catch(() => {})
+    loadAllSongs()
+      .then(list => setAlbumSongIndex(new Map(list.filter(s => s.path).map(s => [s.path as string, s]))))
       .catch(() => {})
   }, [])
 
-  const handlePlayAlbumSong = async (songId: number) => {
-    setPlayingAlbumSongId(songId)
-    try {
-      const res = await fetch(`${JWAPI_BASE}/songs/${songId}/`)
-      if (res.ok) {
-        const song: JWApiSong = await res.json()
-        playTrack(songToTrack(song))
-      }
-    } catch {}
-    setPlayingAlbumSongId(null)
+  const handlePlayAlbumSong = (path: string) => {
+    const song = albumSongIndex.get(path)
+    if (!song) return
+    setPlayingAlbumSongPath(path)
+    playTrack(songToTrack(song))
+    setPlayingAlbumSongPath(null)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -686,19 +679,26 @@ export default function WrldView(): JSX.Element {
   const AlbumsGrid = () => (
     <div className="grid grid-cols-2 gap-2.5 pb-2">
       {wrldAlbums.map(album => {
-        const primaryVersion = album.versions[0]
+        const firstPath = [...album.songs].sort((a, b) => a.order - b.order)[0]?.path
+        const coverUrl = buildImageUrl(albumSongIndex.get(firstPath ?? '')?.image_url)
         return (
           <button
             key={album.id}
-            onClick={() => { setSelectedAlbumId(album.id); setSelectedVersionIdx(0); setVersionMenuOpen(false) }}
+            onClick={() => setSelectedAlbumId(album.id)}
             className="flex flex-col gap-1.5 text-left group/album"
           >
-            <div className="relative w-full aspect-square rounded-xl overflow-hidden shadow-lg ring-1 ring-white/[0.06] group-hover/album:ring-white/25 transition-all duration-200">
-              <img
-                src={primaryVersion.cover_url}
-                alt={album.name}
-                className="w-full h-full object-cover transition-transform duration-300 group-hover/album:scale-[1.04]"
-              />
+            <div className="relative w-full aspect-square rounded-xl overflow-hidden shadow-lg ring-1 ring-white/[0.06] group-hover/album:ring-white/25 transition-all duration-200 bg-white/[0.04]">
+              {coverUrl ? (
+                <img
+                  src={coverUrl}
+                  alt={album.title}
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover/album:scale-[1.04]"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <Music size={20} className="text-white/20" />
+                </div>
+              )}
               {/* Play overlay */}
               <div className="absolute inset-0 bg-black/0 group-hover/album:bg-black/30 transition-colors duration-200 flex items-center justify-center">
                 <div className="w-8 h-8 rounded-full bg-white/0 group-hover/album:bg-white flex items-center justify-center transition-all duration-200 opacity-0 group-hover/album:opacity-100 shadow-xl translate-y-1 group-hover/album:translate-y-0">
@@ -707,8 +707,8 @@ export default function WrldView(): JSX.Element {
               </div>
             </div>
             <div className="px-0.5">
-              <p className="text-white/85 text-[10px] font-semibold leading-tight line-clamp-2">{album.name}</p>
-              <p className="text-white/35 text-[9px] mt-0.5 tabular-nums">{primaryVersion.year}</p>
+              <p className="text-white/85 text-[10px] font-semibold leading-tight line-clamp-2">{album.title}</p>
+              <p className="text-white/35 text-[9px] mt-0.5 tabular-nums">{album.release_date?.slice(0, 4) ?? ''}</p>
             </div>
           </button>
         )
@@ -719,8 +719,8 @@ export default function WrldView(): JSX.Element {
   const AlbumDetail = ({ albumId }: { albumId: number }): JSX.Element | null => {
     const album = wrldAlbums.find(a => a.id === albumId)
     if (!album) return null
-    const version = album.versions[selectedVersionIdx] ?? album.versions[0]
-    const versionLabel = (v: WrldVersion): string => v.name.includes('Deluxe') ? 'Deluxe' : 'Standard'
+    const tracks = [...album.songs].sort((a, b) => a.order - b.order)
+    const coverUrl = buildImageUrl(albumSongIndex.get(tracks[0]?.path ?? '')?.image_url)
 
     return (
       <div className="flex flex-col gap-3">
@@ -734,65 +734,40 @@ export default function WrldView(): JSX.Element {
         </button>
 
         {/* Cover art */}
-        <div className="w-full aspect-square rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10">
-          <img src={version.cover_url} alt={album.name} className="w-full h-full object-cover" />
+        <div className="w-full aspect-square rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 bg-white/[0.04]">
+          {coverUrl ? (
+            <img src={coverUrl} alt={album.title} className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <Music size={28} className="text-white/20" />
+            </div>
+          )}
         </div>
 
         {/* Album info */}
         <div>
-          <p className="text-white/95 text-xs font-bold leading-snug">{album.name}</p>
-          <p className="text-white/40 text-[10px] mt-0.5">Juice WRLD · {version.year}</p>
+          <p className="text-white/95 text-xs font-bold leading-snug">{album.title}</p>
+          <p className="text-white/40 text-[10px] mt-0.5">
+            {album.artist?.name ?? 'Juice WRLD'}{album.release_date ? ` · ${album.release_date.slice(0, 4)}` : ''}
+          </p>
         </div>
-
-        {/* Version notch menu */}
-        {album.versions.length > 1 && (
-          <div className="relative">
-            <button
-              onClick={() => setVersionMenuOpen(o => !o)}
-              className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] transition-colors"
-            >
-              <span className="text-white/70 text-[9px] font-semibold tracking-wide truncate leading-none">
-                {versionLabel(version)}
-              </span>
-              <ChevronDown size={10} className={`text-white/30 shrink-0 transition-transform duration-150 ${versionMenuOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {versionMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setVersionMenuOpen(false)} />
-                <div className="absolute top-full left-0 right-0 mt-1 z-20 bg-black/95 backdrop-blur-xl rounded-lg border border-white/10 overflow-hidden py-1 shadow-2xl">
-                  {album.versions.map((v, i) => (
-                    <button
-                      key={i}
-                      onClick={() => { setSelectedVersionIdx(i); setVersionMenuOpen(false) }}
-                      className={`w-full px-3 py-1.5 text-left text-[9px] font-medium transition-colors ${
-                        selectedVersionIdx === i
-                          ? 'text-white/90 bg-white/[0.08]'
-                          : 'text-white/45 hover:text-white/80 hover:bg-white/[0.05]'
-                      }`}
-                    >
-                      {versionLabel(v)}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
 
         {/* Divider */}
         <div className="h-px bg-white/[0.07]" />
 
         {/* Track list */}
         <div className="flex flex-col -mx-1.5">
-          {version.songs.map((song, idx) => {
-            const isActive = currentTrack?.id === `jw-${song.id}`
-            const isLoading = playingAlbumSongId === song.id
+          {tracks.map((track, idx) => {
+            const song = albumSongIndex.get(track.path)
+            const isActive = !!song && currentTrack?.id === `jw-${song.id}`
+            const isLoading = playingAlbumSongPath === track.path
 
             return (
               <button
-                key={`${song.id}-${idx}`}
-                onClick={() => handlePlayAlbumSong(song.id)}
-                className="flex items-center gap-2 px-2 py-[5px] rounded-lg hover:bg-white/[0.07] active:bg-white/10 transition-colors group/song text-left"
+                key={`${track.path}-${idx}`}
+                onClick={() => handlePlayAlbumSong(track.path)}
+                disabled={!song}
+                className="flex items-center gap-2 px-2 py-[5px] rounded-lg hover:bg-white/[0.07] active:bg-white/10 transition-colors group/song text-left disabled:opacity-40"
               >
                 {/* Track number / playing indicator */}
                 <div className="w-5 shrink-0 flex items-center justify-center">
@@ -815,9 +790,9 @@ export default function WrldView(): JSX.Element {
                       ? 'text-[var(--accent)] font-semibold'
                       : 'text-white/70 group-hover/song:text-white/95'
                   }`}
-                  title={song.name}
+                  title={song?.name ?? track.path}
                 >
-                  {song.name}
+                  {song?.name ?? track.path.split('/').pop()}
                 </span>
               </button>
             )

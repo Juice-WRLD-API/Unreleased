@@ -80,7 +80,7 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Other same-origin static files (favicon, manifest, icons, wrlddata.json):
+  // Other same-origin static files (favicon, manifest, icons):
   // network-first, cache as offline fallback.
   event.respondWith((async () => {
     try {
