@@ -428,7 +428,7 @@ export default function EditorProfileView(): JSX.Element {
                   <Plus size={12} /> New song
                 </button>
               )}
-              {(account?.is_editor || account?.is_administrator) && (
+              {account?.is_administrator && (
                 <button
                   onClick={() => setActiveView('albums-admin')}
                   className="flex items-center gap-1 h-8 px-3 rounded-full bg-surface-raised active:bg-surface-highest text-text-secondary text-xs font-semibold transition-colors"
@@ -641,46 +641,54 @@ export default function EditorProfileView(): JSX.Element {
           {/* Admin/Manager entry point - full width */}
           {canReviewStaff && (
             <Tile title={isAdmin ? 'Admin' : 'Manager'} icon={<ShieldCheck size={13} />} span="col-span-2">
-              <div className="flex flex-col gap-3 py-1 text-text-muted">
-                {/* Managers only ever reach Comp files, so they get that one
-                    count; admins get one box per queue their nav opens into,
-                    plus Channels and Eras (free) and a Total pending rollup
-                    in place of a meaningless "Stats" count - 9 boxes total,
-                    so 3 columns (3 full rows) rather than 4 (which leaves
-                    the 9th orphaned alone on its own row). */}
-                <div className={`grid gap-1.5 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                  <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
-                  <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
-                  {isAdmin && (
-                    <>
-                      <AdminStatBox label="Applications" value={adminPreview?.pendingApplications} highlight={!!adminPreview?.pendingApplications} onClick={() => openAdmin('applications')} />
-                      <AdminStatBox label="Reports" value={adminPreview?.pendingReports} highlight={!!adminPreview?.pendingReports} onClick={() => openAdmin('reports')} />
-                      <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
-                      <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
-                      <AdminStatBox label="Eras" value={undefined} onClick={() => openAdmin('eras')} />
-                      <AdminStatBox label="Total pending" value={adminPreview?.totalPending} highlight={!!adminPreview?.totalPending} />
-                      <AdminStatBox
-                        label="Security"
-                        value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
-                        highlight={adminPreview?.otpEnabled === false}
-                        onClick={() => openAdmin('security')}
-                      />
-                    </>
-                  )}
+              <div className="flex gap-3 py-1 text-text-muted">
+                {/* Split into two side-by-side groups so the tile reads as
+                    "queues to open" vs "numbers to glance at" instead of one
+                    undifferentiated wall of boxes. Managers only ever reach
+                    Comp files (opens a queue), so they never see a Stats
+                    group at all and Queues just takes the full width on its
+                    own. Admins get one button per queue their nav actually
+                    opens into, plus Channels and Eras (free). */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Queues</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
+                    <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
+                    {isAdmin && (
+                      <>
+                        <AdminStatBox label="Applications" value={adminPreview?.pendingApplications} highlight={!!adminPreview?.pendingApplications} onClick={() => openAdmin('applications')} />
+                        <AdminStatBox label="Reports" value={adminPreview?.pendingReports} highlight={!!adminPreview?.pendingReports} onClick={() => openAdmin('reports')} />
+                        <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
+                        <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
+                        <AdminStatBox label="Eras" value={undefined} onClick={() => openAdmin('eras')} />
+                        <AdminStatBox
+                          label="Security"
+                          value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
+                          highlight={adminPreview?.otpEnabled === false}
+                          onClick={() => openAdmin('security')}
+                        />
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                {/* Every section already opens from the stat box above it -
+                {/* Every queue already opens from the button to its left -
                     no leftover "Stats" button, so the old Stats tab's own
-                    metrics (previously hidden behind that button) get laid
-                    out right here instead, in the space that freed up. */}
+                    metrics (previously hidden behind that button), plus the
+                    Total pending rollup, land here instead as plain
+                    non-clickable numbers. */}
                 {isAdmin && (
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <AdminStatBox label="Total proposals" value={adminPreview?.totalProposals} />
-                    <AdminStatBox label="Approved" value={adminPreview?.approvedProposals} highlight={!!adminPreview?.approvedProposals} />
-                    <AdminStatBox label="Approval rate" value={adminPreview?.approvalPct != null ? `${adminPreview.approvalPct}%` : undefined} />
-                    <AdminStatBox label="Editors" value={adminPreview?.editors} />
-                    <AdminStatBox label="Managers" value={adminPreview?.managers} />
-                    <AdminStatBox label="Applicants" value={adminPreview?.applicants} />
+                  <div className="flex-1 min-w-0 pl-3 border-l border-[var(--border)]">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Stats</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <AdminStatBox label="Total pending" value={adminPreview?.totalPending} highlight={!!adminPreview?.totalPending} />
+                      <AdminStatBox label="Total proposals" value={adminPreview?.totalProposals} />
+                      <AdminStatBox label="Approved" value={adminPreview?.approvedProposals} highlight={!!adminPreview?.approvedProposals} />
+                      <AdminStatBox label="Approval rate" value={adminPreview?.approvalPct != null ? `${adminPreview.approvalPct}%` : undefined} />
+                      <AdminStatBox label="Editors" value={adminPreview?.editors} />
+                      <AdminStatBox label="Managers" value={adminPreview?.managers} />
+                      <AdminStatBox label="Applicants" value={adminPreview?.applicants} />
+                    </div>
                   </div>
                 )}
               </div>
