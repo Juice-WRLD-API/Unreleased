@@ -304,6 +304,11 @@ export default function EditorProfileView(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReviewStaff, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
 
+  // Admins without 2FA get everything in the Admin tile hidden except the
+  // Security box itself, so a compromised (password-only) admin account
+  // can't be used to browse or act on admin-only data from this dashboard.
+  const otpLocked = isAdmin && adminPreview?.otpEnabled === false
+
   const handleEdit = (p: SongEditProposal): void => {
     // p.song is null for 'create' proposals (new song, no backing record yet) -
     // EditorPage handles that case, so don't block it here.
@@ -708,28 +713,41 @@ export default function EditorProfileView(): JSX.Element {
                         of one undifferentiated wall of boxes. Managers only
                         ever reach Song edits + Comp files (both open a
                         queue), so they never see a Stats group at all and
-                        Queues just takes the full width on its own. */}
+                        Queues just takes the full width on its own. Admins
+                        without 2FA only see the Security box (highlighted)
+                        so they can find and turn it on - every other
+                        number/button here is an account-wide admin surface
+                        and stays gated until then. */}
                     <div className="flex-1 min-w-0">
                       <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Queues</p>
                       <div className="grid grid-cols-2 gap-2">
-                        <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
-                        <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
-                        {isAdmin && (
+                        {!otpLocked && (
+                          <>
+                            <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
+                            <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
+                          </>
+                        )}
+                        {isAdmin && !otpLocked && (
                           <>
                             <AdminStatBox label="Applications" value={adminPreview?.pendingApplications} highlight={!!adminPreview?.pendingApplications} onClick={() => openAdmin('applications')} />
                             <AdminStatBox label="Reports" value={adminPreview?.pendingReports} highlight={!!adminPreview?.pendingReports} onClick={() => openAdmin('reports')} />
                             <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
                             <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
-                            <AdminStatBox
-                              label="Security"
-                              value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
-                              highlight={adminPreview?.otpEnabled === false}
-                              onClick={() => openAdmin('security')}
-                            />
                           </>
                         )}
+                        {isAdmin && (
+                          <AdminStatBox
+                            label="Security"
+                            value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
+                            highlight={adminPreview?.otpEnabled === false}
+                            onClick={() => openAdmin('security')}
+                          />
+                        )}
                       </div>
+                      {otpLocked && (
+                        <p className="text-[10px] text-text-muted mt-1.5">Enable 2FA to unlock the rest of the admin tile.</p>
+                      )}
                     </div>
 
                     {/* Every queue already opens from the button to its left
@@ -737,7 +755,7 @@ export default function EditorProfileView(): JSX.Element {
                         own metrics (previously hidden behind that button),
                         plus the Total pending rollup, land here instead as
                         plain non-clickable numbers. */}
-                    {isAdmin && (
+                    {isAdmin && !otpLocked && (
                       <div className="flex-1 min-w-0 pl-4 border-l border-[var(--border)]">
                         <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Stats</p>
                         <div className="grid grid-cols-2 gap-2">
