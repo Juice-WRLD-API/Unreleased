@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
 import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check } from 'lucide-react'
 import { ModalOverlay } from './Modal'
-import { parseLrc, isLrcFormat, getCurrentLineIndex } from '../lib/lyrics'
+import { parseLrc, isLrcFormat, getCurrentLineIndex, splitColorWords } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
 import { getAudioCurrentTime } from './Player'
 import { useStore } from '../store/useStore'
@@ -598,7 +598,11 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                           textShadow: '0 2px 14px rgba(0,0,0,0.55)',
                         }}
                       >
-                        {line}
+                        {splitColorWords(line).map((seg, si) => (
+                          seg.color
+                            ? <span key={si} style={{ color: seg.color }}>{seg.text}</span>
+                            : seg.text
+                        ))}
                       </p>
                     ))}
                   </div>

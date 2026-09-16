@@ -6,7 +6,7 @@ import { ModalOverlay, LockToggle } from './Modal'
 import CoverEditor from './CoverEditor'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
+import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
 import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, JWAPI_BASE, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource } from '../lib/juicewrldApi'
@@ -2430,7 +2430,13 @@ const LyricsPanel = memo(function LyricsPanel({
                 }}
               >
                 {splitAdLibs(line.text).map((seg, si) => (
-                  <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>{seg.text}</span>
+                  <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>
+                    {splitColorWords(seg.text).map((cseg, ci) => (
+                      cseg.color
+                        ? <span key={ci} style={{ color: cseg.color }}>{cseg.text}</span>
+                        : cseg.text
+                    ))}
+                  </span>
                 ))}
               </div>
             )
