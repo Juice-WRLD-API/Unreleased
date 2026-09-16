@@ -636,6 +636,11 @@ interface AppActions {
   /** Preferred version *label* within this song's version group (e.g. "v1") -
    *  playing any member of the group then plays this one. Null clears it. */
   setSongDefaultVersion: (songId: number, version: string | null) => void
+  /** Replaces a song's own excluded-versions list outright - callers (the
+   *  Change-version menu) work out which row(s) to patch themselves, the same
+   *  way they already do for default_version, since an excluded label can
+   *  live on a different member's row than the one being toggled from. */
+  setSongExcludedVersions: (songId: number, versions: string[]) => void
   /** Drops every override for a song, playcount included. */
   clearSongPref: (songId: number) => void
   /** Credits one play. Called by the Player once a track passes the listened
@@ -1542,6 +1547,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setSongName: (songId, name) => get()._writeSongPref(songId, { name: normalizePrefText(name) }),
   setSongCover: (songId, coverUrl) => get()._writeSongPref(songId, { cover_url: normalizePrefText(coverUrl) }),
   setSongDefaultVersion: (songId, version) => get()._writeSongPref(songId, { default_version: normalizePrefText(version) }),
+
+  setSongExcludedVersions: (songId, versions) => get()._writeSongPref(songId, { excluded_versions: versions }),
 
   clearSongPref: (songId) => {
     const before = get().songPrefs

@@ -17,7 +17,7 @@ import { ProgressiveCover } from './ProgressiveCover'
 import { buildImageUrl, buildStreamUrl, JWAPI_BASE, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
-import { fisherYates } from '../store/queueSlice'
+import { fisherYates, groupExcludedVersions, isExcludedVersion } from '../store/queueSlice'
 import LikedSongsView from './LikedSongsView'
 import { AlbumArtThumb } from './LibraryTab'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
@@ -2220,7 +2220,15 @@ export default function PlaylistsView(): JSX.Element {
       const groups = await groupItemsByVersion(tracks, t => userApi.trackIdToSongId(t.id) ?? -1)
       const groupedIds = new Set(groups.flatMap(g => g.members.map(m => m.item.id)))
       const units: Track[][] = [
-        ...groups.map(g => g.members.map(m => m.item)),
+        ...groups.map(g => {
+          // Excluded versions don't get an automatic pick here - if that
+          // empties the group (every version excluded, which shouldn't
+          // normally happen), fall back to the full group rather than
+          // dropping the song from shuffle entirely.
+          const excluded = groupExcludedVersions(g.members[0].meta.songId, g.members.map(m => m.meta))
+          const playable = g.members.filter(m => !isExcludedVersion(m.meta, excluded))
+          return (playable.length > 0 ? playable : g.members).map(m => m.item)
+        }),
         ...tracks.filter(t => !groupedIds.has(t.id)).map(t => [t]),
       ]
       const shuffled = fisherYates(units).flatMap(u => (u.length > 1 ? fisherYates(u) : u))

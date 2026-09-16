@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Layers, ChevronRight, Loader2, Star } from 'lucide-react'
+import { Layers, ChevronRight, Loader2, Star, Ban } from 'lucide-react'
 import { getVersionGroup } from '../lib/versionsApi'
 import { getSongsByIds, JWApiSong } from '../lib/juicewrldApi'
 import { useStore } from '../store/useStore'
@@ -43,10 +43,11 @@ export default function ChangeVersionMenuItem({
   const [versions, setVersions] = useState<VersionOption[] | null>(null)
   const flyoutRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
-  const { songPrefs, setSongDefaultVersion } = useStore(
+  const { songPrefs, setSongDefaultVersion, setSongExcludedVersions } = useStore(
     useShallow((s) => ({
       songPrefs: s.songPrefs,
       setSongDefaultVersion: s.setSongDefaultVersion,
+      setSongExcludedVersions: s.setSongExcludedVersions,
     }))
   )
 
@@ -62,6 +63,18 @@ export default function ChangeVersionMenuItem({
       if (d) return d
     }
     return null
+  }, [songPrefs, songId, versions])
+
+  // Union of every member's excluded labels - exclusion, like the default
+  // version, is really a property of the whole group (queueSlice's
+  // groupExcludedVersions mirrors this for the actual shuffle-play filter).
+  const excludedVersions = useMemo(() => {
+    const set = new Set<string>()
+    for (const label of songPrefs[songId]?.excluded_versions ?? []) set.add(label.toLowerCase())
+    for (const v of versions ?? []) {
+      for (const label of songPrefs[v.song.id]?.excluded_versions ?? []) set.add(label.toLowerCase())
+    }
+    return set
   }, [songPrefs, songId, versions])
 
   // Siblings load on first open, not when the parent menu mounts - see the
@@ -126,6 +139,7 @@ export default function ChangeVersionMenuItem({
         <div
           ref={flyoutRef}
           onClick={(e) => e.stopPropagation()}
+          onMouseOver={(e) => e.stopPropagation()}
           style={{ position: 'fixed', zIndex: 10000, top: pos.top, left: pos.left }}
           className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
         >
@@ -139,6 +153,7 @@ export default function ChangeVersionMenuItem({
           ) : (
             versions.map(({ song, label, version }) => {
               const isDefault = !!version && defaultVersion?.toLowerCase() === version.toLowerCase()
+              const isExcluded = !!version && excludedVersions.has(version.toLowerCase())
               return (
                 <div
                   key={song.id}
@@ -172,6 +187,36 @@ export default function ChangeVersionMenuItem({
                       className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors ${isDefault ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
                     >
                       <Star size={13} fill={isDefault ? 'currentColor' : 'none'} />
+                    </button>
+                  )}
+                  {version && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const label = version.toLowerCase()
+                        if (!isExcluded) {
+                          const own = songPrefs[songId]?.excluded_versions ?? []
+                          setSongExcludedVersions(songId, [...own, version])
+                          return
+                        }
+                        // Un-excluding has to clear wherever the label
+                        // actually lives (own row or an inherited sibling's),
+                        // same reasoning as the star button above.
+                        const ownExcluded = songPrefs[songId]?.excluded_versions ?? []
+                        if (ownExcluded.some(v => v.toLowerCase() === label)) {
+                          setSongExcludedVersions(songId, ownExcluded.filter(v => v.toLowerCase() !== label))
+                        }
+                        for (const v of versions ?? []) {
+                          const sibExcluded = songPrefs[v.song.id]?.excluded_versions ?? []
+                          if (sibExcluded.some(x => x.toLowerCase() === label)) {
+                            setSongExcludedVersions(v.song.id, sibExcluded.filter(x => x.toLowerCase() !== label))
+                          }
+                        }
+                      }}
+                      title={isExcluded ? 'Excluded - click to allow again' : `Never auto-pick "${version}" for this song`}
+                      className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors ${isExcluded ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
+                    >
+                      <Ban size={13} />
                     </button>
                   )}
                 </div>

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen,
   ChevronDown, ChevronRight, ChevronLeft, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag,
-  Layers, Star, FileAudio2, X,
+  Layers, Star, FileAudio2, X, Ban,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -140,12 +140,12 @@ export default function SongContextMenu({
   liked, onToggleLike, removeAction, song, disableChangeVersion,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
-  const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist, songPrefs, setSongDefaultVersion } = useStore(
+  const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist, songPrefs, setSongDefaultVersion, setSongExcludedVersions } = useStore(
     useShallow(s => ({
       playlists: s.playlists, account: s.account, refreshPlaylists: s.refreshPlaylists,
       setShowUserAuth: s.setShowUserAuth, playTrack: s.playTrack,
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
-      songPrefs: s.songPrefs, setSongDefaultVersion: s.setSongDefaultVersion,
+      songPrefs: s.songPrefs, setSongDefaultVersion: s.setSongDefaultVersion, setSongExcludedVersions: s.setSongExcludedVersions,
     }))
   )
   const isMobile = useIsMobile()
@@ -228,6 +228,37 @@ export default function SongContextMenu({
     if (songPrefs[songId]?.default_version?.toLowerCase() === version.toLowerCase()) setSongDefaultVersion(songId, null)
     for (const v of mobileVersions ?? []) {
       if (songPrefs[v.song.id]?.default_version?.toLowerCase() === version.toLowerCase()) setSongDefaultVersion(v.song.id, null)
+    }
+  }
+
+  const mobileExcludedVersions = (() => {
+    const set = new Set<string>()
+    if (songId == null) return set
+    for (const label of songPrefs[songId]?.excluded_versions ?? []) set.add(label.toLowerCase())
+    for (const v of mobileVersions ?? []) {
+      for (const label of songPrefs[v.song.id]?.excluded_versions ?? []) set.add(label.toLowerCase())
+    }
+    return set
+  })()
+
+  const toggleMobileExcludedVersion = (version: string): void => {
+    if (songId == null) return
+    const label = version.toLowerCase()
+    const isExcluded = mobileExcludedVersions.has(label)
+    if (!isExcluded) {
+      const own = songPrefs[songId]?.excluded_versions ?? []
+      setSongExcludedVersions(songId, [...own, version])
+      return
+    }
+    const ownExcluded = songPrefs[songId]?.excluded_versions ?? []
+    if (ownExcluded.some(v => v.toLowerCase() === label)) {
+      setSongExcludedVersions(songId, ownExcluded.filter(v => v.toLowerCase() !== label))
+    }
+    for (const v of mobileVersions ?? []) {
+      const sibExcluded = songPrefs[v.song.id]?.excluded_versions ?? []
+      if (sibExcluded.some(x => x.toLowerCase() === label)) {
+        setSongExcludedVersions(v.song.id, sibExcluded.filter(x => x.toLowerCase() !== label))
+      }
     }
   }
 
@@ -453,6 +484,7 @@ export default function SongContextMenu({
             <p className="px-5 py-3 text-sm text-text-muted">No other versions linked.</p>
           ) : mobileVersions.map(({ song: v, label, version }) => {
             const isDefault = !!version && mobileDefaultVersion?.toLowerCase() === version.toLowerCase()
+            const isExcluded = !!version && mobileExcludedVersions.has(version.toLowerCase())
             return (
               <div key={v.id} className="flex items-center gap-1 pl-5 pr-3">
                 <button
@@ -469,6 +501,15 @@ export default function SongContextMenu({
                     className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-full ${isDefault ? 'text-accent' : 'text-text-muted'}`}
                   >
                     <Star size={16} fill={isDefault ? 'currentColor' : 'none'} />
+                  </button>
+                )}
+                {version && (
+                  <button
+                    onClick={() => toggleMobileExcludedVersion(version)}
+                    title={isExcluded ? 'Excluded - tap to allow again' : `Never auto-pick "${version}" for this song`}
+                    className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-full ${isExcluded ? 'text-red-400' : 'text-text-muted'}`}
+                  >
+                    <Ban size={16} />
                   </button>
                 )}
               </div>

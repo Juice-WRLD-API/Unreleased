@@ -200,6 +200,25 @@ function groupDefaultVersion(songId: number, group: SongVersionMeta[]): string |
   return null
 }
 
+/** Version labels this user never wants auto-picked from `songId`'s group
+ *  (e.g. compact view's shuffle-play) - a union across every member's own
+ *  excluded list, since exclusion (like the default version) is really a
+ *  property of the group rather than any one row. */
+export function groupExcludedVersions(songId: number, group: SongVersionMeta[]): Set<string> {
+  const excluded = new Set<string>()
+  for (const label of peekSongPref(songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
+  for (const member of group) {
+    for (const label of peekSongPref(member.songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
+  }
+  return excluded
+}
+
+/** True if `meta`'s version label is in `excluded` - used to filter a
+ *  group's members before an automatic pick. Members with no version label
+ *  (recording sessions, etc.) are never excludable this way. */
+export const isExcludedVersion = (meta: SongVersionMeta | null | undefined, excluded: Set<string>): boolean =>
+  !!meta?.version && excluded.has(meta.version.trim().toLowerCase())
+
 const apiSongId = (track: Track): number | null => {
   if (!track.id.startsWith('jw-')) return null
   const songId = Number(track.id.slice(3))

@@ -29,6 +29,12 @@ export interface SongPreference {
    *  groups being merged. A default set on any member governs the whole group;
    *  see queueSlice's groupDefaultVersion. */
   default_version: string | null
+  /** Version *labels* (same matching rules as `default_version`) this user
+   *  never wants picked automatically within the group - e.g. a random pick
+   *  for a compact-view shuffle-play. Doesn't affect explicitly choosing the
+   *  version from the "Change version" menu. Excluded on any member governs
+   *  the whole group; see queueSlice's groupExcludedVersions. */
+  excluded_versions: string[]
   /** How many times this user has played the song. */
   playcount: number
 }
@@ -66,13 +72,14 @@ export function hasAnyDefaultVersion(): boolean {
 /** A row with no overrides yet, so callers can patch a song that has no
  *  preferences without repeating the defaults. */
 export function emptySongPref(songId: number): SongPreference {
-  return { song: songId, name: null, cover_url: null, default_version: null, playcount: 0 }
+  return { song: songId, name: null, cover_url: null, default_version: null, excluded_versions: [], playcount: 0 }
 }
 
 /** True once a row carries no overrides and no play history - the store drops
  *  these instead of keeping empty rows around forever. */
 export function isEmptySongPref(p: SongPreference): boolean {
-  return p.name == null && p.cover_url == null && p.default_version == null && p.playcount === 0
+  return p.name == null && p.cover_url == null && p.default_version == null
+    && (p.excluded_versions?.length ?? 0) === 0 && p.playcount === 0
 }
 
 /** Normalizes a user-entered name/version to either a non-empty trimmed
@@ -94,7 +101,7 @@ export const SERVER_PREFS_LIMIT = 500
 export function capSongPrefs(prefs: SongPreference[], max = SERVER_PREFS_LIMIT): SongPreference[] {
   if (prefs.length <= max) return prefs
   const hasOverride = (p: SongPreference): boolean =>
-    p.name != null || p.cover_url != null || p.default_version != null
+    p.name != null || p.cover_url != null || p.default_version != null || (p.excluded_versions?.length ?? 0) > 0
   return [...prefs]
     .sort((a, b) => (Number(hasOverride(b)) - Number(hasOverride(a))) || (b.playcount - a.playcount))
     .slice(0, max)
