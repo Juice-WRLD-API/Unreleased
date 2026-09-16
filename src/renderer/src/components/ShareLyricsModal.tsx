@@ -330,7 +330,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     <ModalOverlay
       onClose={onClose}
       standalone
-      zIndexClassName="z-50"
+      zIndexClassName="z-[170]"
       panelClassName="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-4xl h-[680px] max-h-[88vh]"
       minWidth={520} minHeight={480}
     >
