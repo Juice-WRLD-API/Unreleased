@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react'
-import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSquare, Check, AlertCircle } from 'lucide-react'
-import * as userApi from '../lib/userApi'
+import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSquare, Check } from 'lucide-react'
 import type { SongEditProposal } from '../lib/userApi'
 import { STATUS_STYLES, formatDate, changeTypeLabel } from '../lib/proposalSearch'
 import { ProposalDiff } from './adminShared'
@@ -38,22 +36,11 @@ export default function ProposalListItem({
   // own - this is the only way to see what it actually changed. Pending
   // proposals skip this: their data is already on screen via the Edit
   // button, and it's still a live draft rather than a settled diff.
+  // No fetch here on purpose: the list response this row came from already
+  // carries the whole proposal (proposed_data, original_snapshot, review
+  // notes), and a submitted proposal's diff is immutable, so there's nothing
+  // fresher to go get. Expanding is pure render.
   const viewable = p.status !== 'pending'
-  const [detail, setDetail] = useState<SongEditProposal | null>(null)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [detailError, setDetailError] = useState<string | null>(null)
-
-  // Fetches once, the first time this row is actually opened - not eagerly
-  // for every row up front, and not refetched on a later re-open.
-  useEffect(() => {
-    if (!expanded || detail || detailLoading) return
-    setDetailLoading(true)
-    setDetailError(null)
-    userApi.getProposal(p.id)
-      .then(setDetail)
-      .catch((e) => setDetailError(e instanceof Error ? e.message : 'Failed to load proposal'))
-      .finally(() => setDetailLoading(false))
-  }, [expanded, detail, detailLoading, p.id])
 
   const toggleExpanded = (): void => {
     if (!viewable) return
@@ -116,31 +103,19 @@ export default function ProposalListItem({
 
       {expanded && viewable && (
         <div className="border-t border-[var(--border)] bg-[var(--surface-raised)]">
-          {detailLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 size={16} className="animate-spin text-text-muted" />
-            </div>
-          ) : detailError ? (
-            <p className="flex items-center gap-1.5 px-4 py-3 text-[11px] text-red-400">
-              <AlertCircle size={12} /> {detailError}
+          {(p.reviewer_username || p.review_notes) && (
+            <p className="flex items-start gap-1.5 px-4 pt-3 text-[11px] text-text-muted italic">
+              <Check size={11} className="shrink-0 mt-0.5" />
+              {p.reviewer_username ? `${p.reviewer_username}: ` : ''}{p.review_notes || '(no review notes)'}
             </p>
-          ) : (
-            <>
-              {(p.reviewer_username || p.review_notes) && (
-                <p className="flex items-start gap-1.5 px-4 pt-3 text-[11px] text-text-muted italic">
-                  <Check size={11} className="shrink-0 mt-0.5" />
-                  {p.reviewer_username ? `${p.reviewer_username}: ` : ''}{p.review_notes || '(no review notes)'}
-                </p>
-              )}
-              {p.editor_notes && (
-                <p className="flex items-start gap-1.5 px-4 pt-2 text-[11px] text-text-muted italic">
-                  <MessageSquare size={11} className="shrink-0 mt-0.5" />
-                  {p.editor_notes}
-                </p>
-              )}
-              <ProposalDiff proposal={detail ?? p} stacked={isMobile} />
-            </>
           )}
+          {p.editor_notes && (
+            <p className="flex items-start gap-1.5 px-4 pt-2 text-[11px] text-text-muted italic">
+              <MessageSquare size={11} className="shrink-0 mt-0.5" />
+              {p.editor_notes}
+            </p>
+          )}
+          <ProposalDiff proposal={p} stacked={isMobile} />
         </div>
       )}
     </div>
