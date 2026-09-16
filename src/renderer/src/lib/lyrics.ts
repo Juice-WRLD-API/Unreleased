@@ -110,6 +110,30 @@ export function splitAdLibs(text: string): { text: string; adLib: boolean }[] {
   return parts.length > 0 ? parts : [{ text, adLib: false }]
 }
 
+export interface ColorWordRule { phrase: string; color: string }
+
+/** Hardcoded word/phrase -> color easter egg for the synced lyrics view.
+ *  Edit this list directly to add or change pairs. */
+export const LYRIC_COLOR_WORDS: ColorWordRule[] = [
+  { phrase: 'R Kelly', color: '#fcba03' },
+    { phrase: 'R. Kelly', color: '#fcba03' },
+]
+
+/**
+ * Split a run of lyric text around any configured color-word phrases, so the
+ * renderer can color just the matched text and leave the rest untouched.
+ * Case-insensitive; matched phrases keep their original casing in the output.
+ */
+export function splitColorWords(text: string, rules: ColorWordRule[] = LYRIC_COLOR_WORDS): { text: string; color?: string }[] {
+  if (rules.length === 0 || !text) return [{ text }]
+  const pattern = rules.map(r => r.phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  const parts = text.split(new RegExp(`(${pattern})`, 'gi')).filter(p => p !== undefined && p !== '')
+  return parts.map(part => {
+    const rule = rules.find(r => r.phrase.toLowerCase() === part.toLowerCase())
+    return rule ? { text: part, color: rule.color } : { text: part }
+  })
+}
+
 /**
  * Save a synced (LRC) lyrics string as a local .lrc file - a plain client-side
  * Blob download, not a server fetch, since the lyrics text is already in

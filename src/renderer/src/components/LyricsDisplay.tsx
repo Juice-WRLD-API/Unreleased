@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Download } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY } from '../lib/lyrics'
+import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { useStore } from '../store/useStore'
 import { seekAudio, getAudioCurrentTime } from './Player'
 
@@ -186,7 +186,13 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
               style={lineStyle}
             >
               {splitAdLibs(line.text).map((seg, si) => (
-                <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>{seg.text}</span>
+                <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>
+                  {splitColorWords(seg.text).map((cseg, ci) => (
+                    cseg.color
+                      ? <span key={ci} style={{ color: cseg.color }}>{cseg.text}</span>
+                      : cseg.text
+                  ))}
+                </span>
               ))}
             </div>
           )
