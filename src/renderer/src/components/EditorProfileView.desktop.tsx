@@ -122,14 +122,18 @@ export default function EditorProfileView(): JSX.Element {
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
 
   const handleAvatarFile = async (file: File): Promise<void> => {
+    setAvatarError(null)
     setAvatarUploading(true)
     try {
       const base64 = await compressImageFile(file, 256, 200)
       const updated = await updateAvatar(base64)
       useStore.setState({ account: updated })
-    } catch { /* ignore */ }
+    } catch {
+      setAvatarError('Could not update photo.')
+    }
     setAvatarUploading(false)
   }
 
@@ -391,6 +395,7 @@ export default function EditorProfileView(): JSX.Element {
                         </span>
                       </button>
                       <div className="min-w-0">
+                        {avatarError && <p className="text-[10px] text-red-400 mb-0.5">{avatarError}</p>}
                         {editingName ? (
                           <div className="flex items-center gap-1">
                             <input
