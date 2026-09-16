@@ -21,6 +21,9 @@ export interface AccountUser {
   discord_username: string
   discord_avatar: string
   avatar?: string
+  bio?: string
+  public_play_history?: boolean
+  public_playlists?: boolean
   is_editor: boolean
   is_contributor: boolean
   // Optional: the API only started returning this with the manager role, so
@@ -148,6 +151,19 @@ export interface PlaylistDetail {
   items: PlaylistItemEntry[]
   created_at: string
   updated_at: string
+}
+
+export interface PublicProfile {
+  id: number
+  display_name: string
+  avatar: string
+  bio: string
+  is_editor: boolean
+  is_contributor: boolean
+  public_play_history: boolean
+  public_playlists: boolean
+  play_history?: ListeningPlayEvent[]
+  playlists?: PlaylistSummary[]
 }
 
 export function getToken(): string | null {
@@ -312,6 +328,34 @@ export async function removeAvatar(): Promise<AccountUser> {
   })
   cacheSet(url, result)
   return result
+}
+
+export async function updateBio(bio: string): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ bio }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function updatePrivacySettings(payload: {
+  public_play_history?: boolean
+  public_playlists?: boolean
+}): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function getPublicProfile(userId: number): Promise<PublicProfile> {
+  const url = `${ACCOUNT_BASE}/profile/${userId}/`
+  return request(url, { method: 'GET' }, false, url)
 }
 
 export async function getFavorites(): Promise<FavoriteEntry[]> {
