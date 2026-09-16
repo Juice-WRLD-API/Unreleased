@@ -1,0 +1,208 @@
+import * as api from './chatApi'
+import type { ChatAttachment, ChatMessage, Conversation, UploadedFile } from './chatApi'
+import {
+  decryptBytes, decryptName, decryptText, encryptBytes, encryptName, encryptText,
+  generateIdentity, generateRoomKey, openRoomKey, sealRoomKey, toB64,
+} from './chatCrypto'
+import { getRoomKey, loadDevice, putRoomKey, saveDevice, type LocalDevice } from './chatKeyStore'
+
+export interface ActiveDevice extends LocalDevice {
+  serverId: number
+}
+
+let devicePromise: Promise<ActiveDevice> | null = null
+let deviceUserId: number | null = null
+
+function deviceLabel(): string {
+  const ua = navigator.userAgent
+  const app = (window as unknown as { electron?: unknown }).electron ? 'Unreleased Desktop' : null
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser'
+  const os = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown'
+  return `${app ?? browser} on ${os}`
+}
+
+async function setupDevice(userId: number): Promise<ActiveDevice> {
+  let local = await loadDevice(userId)
+  if (!local) {
+    local = { userId, deviceId: crypto.randomUUID(), identity: await generateIdentity(), registered: false }
+    await saveDevice(local)
+  }
+  const publicKey = await toB64(local.identity.publicKey)
+  const mine = await api.listMyDevices()
+  let server = mine.find((d) => d.device_id === local!.deviceId)
+  if (server && server.public_key !== publicKey) {
+    // The server remembers this device id under another key - a stale record
+    // from a wiped key store. Replace it rather than trusting envelopes we
+    // could never open.
+    await api.revokeDevice(local.deviceId).catch(() => undefined)
+    server = undefined
+  }
+  if (!server) {
+    server = await api.registerDevice({ device_id: local.deviceId, public_key: publicKey, algorithm: 'x25519', label: deviceLabel() })
+  }
+  if (!local.registered) {
+    local.registered = true
+    await saveDevice(local)
+  }
+  return { ...local, serverId: server.id }
+}
+
+export function ensureDevice(userId: number): Promise<ActiveDevice> {
+  if (!devicePromise || deviceUserId !== userId) {
+    deviceUserId = userId
+    devicePromise = setupDevice(userId).catch((err) => {
+      devicePromise = null
+      throw err
+    })
+  }
+  return devicePromise
+}
+
+export function resetDevice(): void {
+  devicePromise = null
+  deviceUserId = null
+}
+
+// Opens whichever envelope for (conversation, version) is addressed to this
+// device, caching the recovered key. Null when none exists for us yet.
+const keyFetches = new Map<string, Promise<Uint8Array | null>>()
+
+export function fetchRoomKey(userId: number, conversationId: number, version: number): Promise<Uint8Array | null> {
+  const id = `${conversationId}:${version}`
+  const inFlight = keyFetches.get(id)
+  if (inFlight) return inFlight
+  const run = (async () => {
+    const cached = await getRoomKey(conversationId, version)
+    if (cached) return cached
+    const device = await ensureDevice(userId)
+    const envelopes = await api.listEnvelopes(conversationId, version)
+    const mine = envelopes.find((e) => e.recipient_device === device.serverId && e.key_version === version)
+    if (!mine) return null
+    const key = await openRoomKey(mine.encrypted_key, device.identity)
+    await putRoomKey(conversationId, version, key)
+    return key
+  })().finally(() => keyFetches.delete(id))
+  keyFetches.set(id, run)
+  return run
+}
+
+async function sealForDevices(
+  conversationId: number,
+  version: number,
+  key: Uint8Array,
+  filter?: (ownerId: number) => boolean,
+): Promise<void> {
+  const { results } = await api.listConversationDevices(conversationId)
+  const targets = results.filter((d) => !filter || filter(d.owner))
+  if (targets.length === 0) return
+  const envelopes = await Promise.all(targets.map(async (d) => ({
+    recipient_device: d.id,
+    key_version: version,
+    encrypted_key: await sealRoomKey(key, d.public_key),
+  })))
+  await api.postEnvelopes(conversationId, envelopes)
+}
+
+// Generates and distributes a fresh key for the conversation's current version.
+export async function establishRoomKey(userId: number, conversationId: number): Promise<{ key: Uint8Array; version: number }> {
+  await ensureDevice(userId)
+  const { current_key_version: version } = await api.listConversationDevices(conversationId)
+  const key = await generateRoomKey()
+  await sealForDevices(conversationId, version, key)
+  await putRoomKey(conversationId, version, key)
+  return { key, version }
+}
+
+export type KeyResolution =
+  | { state: 'ready'; key: Uint8Array; version: number }
+  | { state: 'waiting' }
+
+// Current-version key for a conversation: cached or enveloped, otherwise we
+// create one - but only when nothing has been said under this version yet,
+// since a key someone else already used can't be replaced.
+export async function resolveRoomKey(userId: number, conversation: Conversation, hasMessagesAtVersion: boolean): Promise<KeyResolution> {
+  const version = conversation.current_key_version
+  const existing = await fetchRoomKey(userId, conversation.id, version)
+  if (existing) return { state: 'ready', key: existing, version }
+  if (hasMessagesAtVersion) return { state: 'waiting' }
+  // Stagger so two participants opening a fresh DM together rarely both mint
+  // a key; the second one re-checks and adopts the first's.
+  await new Promise((r) => setTimeout(r, 200 + Math.random() * 900))
+  const raced = await fetchRoomKey(userId, conversation.id, version)
+  if (raced) return { state: 'ready', key: raced, version }
+  const established = await establishRoomKey(userId, conversation.id)
+  return { state: 'ready', ...established }
+}
+
+// A participant's new device needs the key everyone else already has.
+export async function shareKeyWithUser(userId: number, conversation: Conversation, targetUserId: number): Promise<void> {
+  const version = conversation.current_key_version
+  const key = await getRoomKey(conversation.id, version)
+  if (!key) return
+  await sealForDevices(conversation.id, version, key, (owner) => owner === targetUserId)
+}
+
+export async function decryptMessage(userId: number, message: ChatMessage): Promise<string> {
+  if (!message.is_encrypted || !message.conversation || message.key_version == null) return message.content
+  if (message.deleted_at || !message.ciphertext) return ''
+  const key = await fetchRoomKey(userId, message.conversation, message.key_version)
+  if (!key) throw new Error('missing-key')
+  return decryptText(message.ciphertext, message.nonce, key)
+}
+
+export async function encryptForSend(text: string, key: Uint8Array): Promise<{ ciphertext: string; nonce: string }> {
+  return encryptText(text, key)
+}
+
+export async function uploadEncryptedFile(file: File, key: Uint8Array, version: number): Promise<api.AttachmentInput> {
+  const plain = new Uint8Array(await file.arrayBuffer())
+  const { bytes, nonce } = await encryptBytes(plain, key)
+  const uploaded: UploadedFile = await api.uploadChatFile(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'attachment.bin')
+  return {
+    ...uploaded,
+    name: 'attachment.bin',
+    mime: 'application/octet-stream',
+    size: file.size,
+    nonce,
+    key_version: version,
+    encrypted_name: await encryptName(file.name, key),
+  }
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', svg: 'image/svg+xml',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4',
+  mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac',
+  pdf: 'application/pdf', txt: 'text/plain', json: 'application/json', zip: 'application/zip',
+}
+
+export function mimeFromName(name: string, fallback = 'application/octet-stream'): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return MIME_BY_EXT[ext] ?? fallback
+}
+
+export interface DecryptedAttachment {
+  name: string
+  mime: string
+  blob: Blob
+}
+
+export async function decryptAttachmentMeta(userId: number, conversationId: number, att: ChatAttachment): Promise<{ name: string; mime: string }> {
+  if (!att.encrypted_name || att.key_version == null) return { name: att.name, mime: att.mime }
+  const key = await fetchRoomKey(userId, conversationId, att.key_version)
+  if (!key) throw new Error('missing-key')
+  const name = await decryptName(att.encrypted_name, key)
+  return { name, mime: mimeFromName(name) }
+}
+
+export async function decryptAttachment(userId: number, conversationId: number, att: ChatAttachment): Promise<DecryptedAttachment> {
+  if (att.key_version == null || !att.nonce) throw new Error('not-encrypted')
+  const [meta, key, cipher] = await Promise.all([
+    decryptAttachmentMeta(userId, conversationId, att),
+    fetchRoomKey(userId, conversationId, att.key_version),
+    api.fetchAttachmentBytes(att.id),
+  ])
+  if (!key) throw new Error('missing-key')
+  const plain = await decryptBytes(cipher, att.nonce, key)
+  return { ...meta, blob: new Blob([plain as Uint8Array<ArrayBuffer>], { type: meta.mime || 'application/octet-stream' }) }
+}

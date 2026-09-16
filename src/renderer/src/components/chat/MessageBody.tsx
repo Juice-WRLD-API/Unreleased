@@ -1,0 +1,69 @@
+import { memo, useMemo } from 'react'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { KeyRound, ShieldAlert } from 'lucide-react'
+import type { ChatUserBrief } from '../../lib/chatApi'
+import { useChatStore, type UiMessage } from '../../store/chatStore'
+import { linkMentions } from './people'
+
+function urlTransform(url: string): string {
+  return url.startsWith('mention:') ? url : defaultUrlTransform(url)
+}
+
+function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBrief[]; meId: number | null }): JSX.Element {
+  const components = useMemo<Components>(() => ({
+    a: ({ href, children }) => {
+      if (href?.startsWith('mention:')) {
+        const self = Number(href.slice(8)) === meId
+        return (
+          <span className={`inline-block rounded-md px-1 font-semibold ${self ? 'bg-amber-400/20 text-amber-300' : 'bg-accent/15 text-accent'}`}>
+            {children}
+          </span>
+        )
+      }
+      return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
+    },
+    img: ({ src, alt }) => <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>,
+  }), [meId])
+  const source = useMemo(() => linkMentions(text, people), [text, people])
+  return (
+    <div className="chat-md text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
+        {source}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+const MemoMarkdown = memo(MarkdownText)
+
+export default function MessageBody({ message, people }: { message: UiMessage; people: ChatUserBrief[] }): JSX.Element | null {
+  const meId = useChatStore((s) => s.meId)
+  const decrypted = useChatStore((s) => (message.is_encrypted ? s.plain[message.id] : undefined))
+
+  if (message.deleted_at) {
+    return <p className="text-sm italic text-text-muted">This message was deleted.</p>
+  }
+
+  if (!message.is_encrypted) {
+    return message.content ? <MemoMarkdown text={message.content} people={people} meId={meId} /> : null
+  }
+
+  if (!message.ciphertext && message.id > 0 && !decrypted) return null
+  if (!decrypted) {
+    return (
+      <div className="flex items-center gap-2 py-0.5">
+        <span className="h-3 w-40 max-w-full rounded bg-surface-raised animate-pulse" />
+      </div>
+    )
+  }
+  if ('error' in decrypted) {
+    return (
+      <p className="inline-flex items-center gap-1.5 text-sm text-text-muted italic">
+        {decrypted.error === 'missing-key' ? <KeyRound size={13} /> : <ShieldAlert size={13} />}
+        {decrypted.error === 'missing-key' ? 'Waiting for the key to decrypt this message' : 'Unable to decrypt this message'}
+      </p>
+    )
+  }
+  return decrypted.text ? <MemoMarkdown text={decrypted.text} people={people} meId={meId} /> : null
+}
