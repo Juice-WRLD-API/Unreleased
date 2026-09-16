@@ -116,7 +116,25 @@ const monthYearLabel = (d: Date): string => d.toLocaleDateString(undefined, { mo
 // Golden-angle hue steps give N well-spread, non-repeating colors without a
 // hand-picked palette — needed here since the era count is open-ended (34
 // today, whatever the API adds later).
-const eraColor = (i: number): string => `hsl(${Math.round((i * 137.508) % 360)}, 62%, 52%)`
+const eraColorForIndex = (i: number): string => `hsl(${Math.round((i * 137.508) % 360)}, 62%, 52%)`
+
+// Hand-picked colors for specific eras (keyed by the API's abbreviated
+// `name`, matching TimelineRow.key), overriding the generated golden-angle
+// hue above. Add entries here to recolor a particular era in the timeline.
+const ERA_COLOR_OVERRIDES: Record<string, string> = {
+  WOD: '#b2ff59',
+  'GB&GR': '#0a92fa',
+  POST: '#525252',
+  DRFL: '#f07229',
+  OUT: '#9122f2',
+  ND: '#2e0101',
+  bdm: '#171717',
+  afflictions: '#000000',
+  'HIH 999': '#ad0037',
+  'jw 999': '#d93434',
+}
+
+const eraColor = (i: number, key: string): string => ERA_COLOR_OVERRIDES[key] ?? eraColorForIndex(i)
 
 interface TimelineRow { key: string; label: string; count: number; start: Date; end: Date }
 
@@ -126,22 +144,27 @@ function EraTimeline({ rows, start, end, onSelect }: {
   end: Date
   onSelect: (eraName: string) => void
 }): JSX.Element {
+  const totalCount = rows.reduce((sum, r) => sum + r.count, 1)
   return (
     <div>
       <div className="flex h-8 rounded-lg overflow-hidden">
         {rows.map((r, i) => {
-          const ms = r.end.getTime() - r.start.getTime()
-          const shareOfSpan = (ms / (end.getTime() - start.getTime())) * 100
+          // Width is proportional to song count, not calendar duration - a
+          // sparsely-covered era stays a sliver next to a heavily-covered
+          // one even if it spanned years, and vice versa. That deliberately
+          // gives up a linear time axis in exchange for showing where the
+          // catalog actually is.
+          const shareOfSpan = (r.count / totalCount) * 100
           return (
             <button
               key={r.key}
               onClick={() => onSelect(r.key)}
-              // flexGrow proportional to duration (not a % width) so tiny
+              // flexGrow proportional to song count (not a % width) so tiny
               // segments still get their minWidth floor without the row's
               // total overflowing past 100% — flexbox reflows the rest to
               // make room instead.
               className="h-full flex items-center justify-center overflow-hidden shrink-0 transition-[filter] hover:brightness-110"
-              style={{ flexGrow: ms, flexBasis: 0, minWidth: '6px', backgroundColor: eraColor(i) }}
+              style={{ flexGrow: r.count, flexBasis: 0, minWidth: '6px', backgroundColor: eraColor(i, r.key) }}
               title={`${r.label} — ${monthYearLabel(r.start)} to ${monthYearLabel(r.end)} — ${r.count.toLocaleString()} songs — view in Tracker`}
             >
               {shareOfSpan > 3 && (
