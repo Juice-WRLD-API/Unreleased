@@ -19,6 +19,7 @@ import {
 import ReportsTab from './ReportsTab.mobile'
 import CompProposalsTab from './CompProposalsTab.mobile'
 import ChannelsTab from './ChannelsTab.mobile'
+import EraTab from './EraTab.mobile'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
@@ -165,7 +166,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
       {/* A tab's data loads once per visit (see the sig comment in
           useAdminQueue) rather than refetching every time it's reselected -
           this is the explicit way back to fresh data instead. */}
-      {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'security' && (
+      {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'security' && (
         <div className="shrink-0 flex items-center justify-end px-3 pb-1.5">
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="flex items-center gap-1.5 text-xs font-semibold text-accent active:text-accent/80 transition-colors disabled:opacity-40">
@@ -225,6 +226,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('channels') && (
           <div className={tab === 'channels' ? 'h-full' : 'hidden'}>
             <ChannelsTab />
+          </div>
+        )}
+        {visited.has('eras') && (
+          <div className={tab === 'eras' ? 'h-full' : 'hidden'}>
+            <EraTab />
           </div>
         )}
         {visited.has('security') && (
