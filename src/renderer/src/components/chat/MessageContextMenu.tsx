@@ -53,9 +53,9 @@ export default function MessageContextMenu({
             key={name}
             onClick={act(() => onReact(name))}
             title={`:${name}:`}
-            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
+            className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
           >
-            <EmojiImg name={name} className="h-5 w-5" />
+            <EmojiImg name={name} className="h-6 w-6" />
           </button>
         ))}
         <button

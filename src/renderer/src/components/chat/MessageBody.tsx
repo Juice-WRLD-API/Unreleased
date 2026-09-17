@@ -39,7 +39,7 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
     img: ({ src, alt, title, ...rest }) => {
       const emojiName = (rest as Record<string, unknown>)['data-emoji']
       if (typeof emojiName === 'string') {
-        return <img src={typeof src === 'string' ? src : undefined} alt={alt} title={title} draggable={false} className="inline-block h-[1.2em] w-[1.2em] align-[-0.2em] object-contain" />
+        return <img src={typeof src === 'string' ? src : undefined} alt={alt} title={title} draggable={false} className="inline-block h-[1.5em] w-[1.5em] align-[-0.3em] object-contain" />
       }
       return <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>
     },

@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
@@ -20,6 +20,7 @@ import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
 } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
+import { NOTIFICATION_SOUNDS, getNotificationSoundId, setNotificationSoundId, playNotificationSound } from '../lib/notifications'
 import { IS_IOS } from '../lib/platform'
 import { formatBytes } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
@@ -142,6 +143,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'playback', label: 'Prefer OG version' },
   { tab: 'playback', label: 'Rotate suggested covers' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
+  { tab: 'playback', label: 'Notification sound' },
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
   // Feedback / About
@@ -448,6 +450,12 @@ export default function Settings(): JSX.Element {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [customAccent, setCustomAccent] = useState(accentColor)
   const [sleepMinutes, setSleepMinutes] = useState(30)
+  const [notificationSound, setNotificationSoundState] = useState(getNotificationSoundId())
+  const chooseNotificationSound = (id: string): void => {
+    setNotificationSoundId(id)
+    setNotificationSoundState(id)
+    playNotificationSound(id)
+  }
   const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Custom skins - which one the editor modal is open on (null = closed), the
   // hidden file input for Import, and a transient "that file wasn't a skin"
@@ -1620,6 +1628,22 @@ export default function Settings(): JSX.Element {
                         </button>
                       </>
                     )}
+                  </Block>
+                  <Block
+                    icon={Bell}
+                    iconColor="#f59e0b"
+                    label="Notification sound"
+                    sub="Plays when a chat message or news post notification fires"
+                  >
+                    <select
+                      value={notificationSound}
+                      onChange={(e) => chooseNotificationSound(e.target.value)}
+                      className="w-full h-11 rounded-xl bg-[var(--surface-highest)] text-text-primary text-sm px-3"
+                    >
+                      {NOTIFICATION_SOUNDS.map((s) => (
+                        <option key={s.id} value={s.id}>{s.label}</option>
+                      ))}
+                    </select>
                   </Block>
                   <Block
                     icon={CloudUpload}

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } fr
 import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle,
   PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud,
-  FolderOpen, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
+  FolderOpen, Monitor, BellOff, Bell, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check,
@@ -21,6 +21,7 @@ import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
 } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
+import { NOTIFICATION_SOUNDS, getNotificationSoundId, setNotificationSoundId, playNotificationSound } from '../lib/notifications'
 import { formatBytes } from '../lib/format'
 import type { ViewType } from '../types'
 import ReportForm from './ReportForm'
@@ -103,6 +104,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Rotate suggested covers' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
   { tab: 'playback', label: 'Sleep timer' },
+  { tab: 'playback', label: 'Notification sound' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
   // Shortcuts
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
@@ -427,6 +429,12 @@ export default function Settings(): JSX.Element {
   const [ctrlDragIdx, setCtrlDragIdx] = useState<number | null>(null)
   const [ctrlOverIdx, setCtrlOverIdx] = useState<number | null>(null)
   const [sleepMinutes, setSleepMinutes] = useState(30)
+  const [notificationSound, setNotificationSoundState] = useState(getNotificationSoundId())
+  const chooseNotificationSound = (id: string): void => {
+    setNotificationSoundId(id)
+    setNotificationSoundState(id)
+    playNotificationSound(id)
+  }
   const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Custom skins - which one the editor modal is open on (null = closed), the
   // hidden file input for Import, and a transient "that file wasn't a skin"
@@ -1609,6 +1617,17 @@ export default function Settings(): JSX.Element {
                       {sleepTimerEnd ? 'Cancel' : 'Start'}
                     </button>
                   </div>
+                </Row>
+                <Row icon={Bell} iconColor="#f59e0b" label="Notification sound" sub="Plays when a chat message or news post notification fires">
+                  <select
+                    value={notificationSound}
+                    onChange={(e) => chooseNotificationSound(e.target.value)}
+                    className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
+                  >
+                    {NOTIFICATION_SOUNDS.map((s) => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </select>
                 </Row>
                 <Row
                   icon={CloudUpload}

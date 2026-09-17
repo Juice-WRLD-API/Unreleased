@@ -4,8 +4,10 @@ import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import ReactionPicker from './ReactionPicker'
-import { emojiGlyph } from './emoji'
+import { emojiGlyph, EMOJI_IMG } from './emoji'
 import { mentionIdsIn } from './people'
+
+const EMOJI_NAMES = Object.keys(EMOJI_IMG).sort()
 import { ChatAvatar, errorText, formatBytes, useChatToast } from './ui'
 
 export interface ComposerHandle {
@@ -52,6 +54,7 @@ const Composer = forwardRef<ComposerHandle, {
   const [text, setText] = useState(() => drafts.get(draftKey) ?? '')
   const [files, setFiles] = useState<PendingFile[]>([])
   const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null)
+  const [emojiQuery, setEmojiQuery] = useState<{ start: number; query: string; index: number } | null>(null)
   const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -136,6 +139,34 @@ const Composer = forwardRef<ComposerHandle, {
     else setMention(null)
   }
 
+  const emojiCandidates = useMemo(() => {
+    if (!emojiQuery) return []
+    const q = emojiQuery.query.toLowerCase()
+    return EMOJI_NAMES.filter((n) => n.startsWith(q)).slice(0, 6)
+  }, [emojiQuery])
+
+  const updateEmojiQuery = (value: string, caret: number): void => {
+    const upto = value.slice(0, caret)
+    const match = /(^|\s):([a-z0-9_]{1,32})$/i.exec(upto)
+    if (match) setEmojiQuery({ start: caret - match[2].length - 1, query: match[2], index: 0 })
+    else setEmojiQuery(null)
+  }
+
+  const applyEmoji = (name: string): void => {
+    if (!emojiQuery) return
+    const el = textarea.current
+    const caret = el?.selectionStart ?? text.length
+    const insert = `:${name}: `
+    const next = text.slice(0, emojiQuery.start) + insert + text.slice(caret)
+    setText(next)
+    setEmojiQuery(null)
+    requestAnimationFrame(() => {
+      const pos = emojiQuery.start + insert.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
   const applyMention = (user: ChatUserBrief): void => {
     if (!mention) return
     const el = textarea.current
@@ -193,6 +224,20 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (emojiQuery && emojiCandidates.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setEmojiQuery({ ...emojiQuery, index: (emojiQuery.index + dir + emojiCandidates.length) % emojiCandidates.length })
+        return
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        applyEmoji(emojiCandidates[emojiQuery.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setEmojiQuery(null); return }
+    }
     if (mention && candidates.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -235,6 +280,23 @@ const Composer = forwardRef<ComposerHandle, {
               <ChatAvatar user={p} size={24} presence />
               <span className="text-sm text-text-primary truncate">{p.display_name || p.username}</span>
               <span className="text-xs text-text-muted truncate">@{p.username}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!mention && emojiQuery && emojiCandidates.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Emoji</p>
+          {emojiCandidates.map((name, i) => (
+            <button
+              key={name}
+              onMouseDown={(e) => { e.preventDefault(); applyEmoji(name) }}
+              onMouseEnter={() => setEmojiQuery({ ...emojiQuery, index: i })}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === emojiQuery.index ? 'bg-surface-overlay' : ''}`}
+            >
+              <img src={EMOJI_IMG[name]} alt="" className="h-5 w-5 shrink-0 object-contain" />
+              <span className="text-sm text-text-primary truncate">:{name}:</span>
             </button>
           ))}
         </div>
@@ -313,12 +375,13 @@ const Composer = forwardRef<ComposerHandle, {
             onChange={(e) => {
               setText(e.target.value)
               updateMention(e.target.value, e.target.selectionStart)
+              updateEmojiQuery(e.target.value, e.target.selectionStart)
               if (e.target.value) noteTyping()
               else stopTyping()
             }}
             onKeyDown={onKeyDown}
-            onClick={(e) => updateMention(text, e.currentTarget.selectionStart)}
-            onBlur={() => { window.setTimeout(() => setMention(null), 120) }}
+            onClick={(e) => { updateMention(text, e.currentTarget.selectionStart); updateEmojiQuery(text, e.currentTarget.selectionStart) }}
+            onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null) }, 120) }}
             onPaste={(e) => {
               const pasted = Array.from(e.clipboardData.files)
               if (pasted.length) {

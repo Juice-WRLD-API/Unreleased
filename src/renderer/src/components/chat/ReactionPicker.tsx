@@ -55,9 +55,9 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
                   key={`${g.label}-${name}`}
                   onClick={() => pick(name)}
                   onMouseEnter={() => setHover(name)}
-                  className="h-8 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
+                  className="h-9 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
                 >
-                  <EmojiImg name={name} className="h-5 w-5" />
+                  <EmojiImg name={name} className="h-6 w-6" />
                 </button>
               ))}
             </div>
@@ -68,7 +68,7 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
         )}
       </div>
       <div className="h-8 px-3 flex items-center gap-2 border-t border-[var(--border)] text-xs text-text-muted">
-        {hover ? <><EmojiImg name={hover} className="h-4 w-4" /><span>:{hover}:</span></> : 'Pick a reaction'}
+        {hover ? <><EmojiImg name={hover} className="h-5 w-5" /><span>:{hover}:</span></> : 'Pick a reaction'}
       </div>
     </ClampedMenu>,
     document.body,

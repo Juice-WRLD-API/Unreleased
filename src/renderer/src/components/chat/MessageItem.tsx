@@ -378,13 +378,13 @@ function MessageItem({
                 key={r.emoji}
                 onClick={() => react(r.emoji)}
                 title={`:${r.emoji}:`}
-                className={`chat-pop h-6 pl-1.5 pr-2 rounded-full border text-xs flex items-center gap-1 transition-colors ${
+                className={`chat-pop h-7 pl-1.5 pr-2 rounded-full border text-xs flex items-center gap-1 transition-colors ${
                   r.me
                     ? 'border-accent/60 bg-accent/15 text-text-primary'
                     : 'border-[var(--border)] bg-surface-raised/60 text-text-secondary hover:border-text-muted'
                 }`}
               >
-                <EmojiImg name={r.emoji} className="h-3.5 w-3.5" />
+                <EmojiImg name={r.emoji} className="h-4 w-4" />
                 <span className="tabular-nums font-semibold">{r.count}</span>
               </button>
             ))}
@@ -425,8 +425,8 @@ function MessageItem({
       {!pending && !deleted && !editing && !isMobile && (
         <div className="absolute -top-3 right-4 z-10 hidden group-hover:flex items-center gap-0.5 rounded-xl border border-[var(--border)] bg-surface shadow-lg p-0.5">
           {quickReactions(3).map((name) => (
-            <button key={name} onClick={() => react(name)} title={`:${name}:`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition">
-              <EmojiImg name={name} className="h-5 w-5" />
+            <button key={name} onClick={() => react(name)} title={`:${name}:`} className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition">
+              <EmojiImg name={name} className="h-6 w-6" />
             </button>
           ))}
           <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
@@ -471,8 +471,8 @@ function MessageItem({
         <ActionSheet onClose={() => setSheet(false)}>
           <div className="flex justify-between px-1 pb-2">
             {QUICK_REACTIONS.map((name) => (
-              <button key={name} onClick={() => { react(name); setSheet(false) }} className="w-12 h-12 rounded-full bg-surface-raised flex items-center justify-center active:scale-95 transition">
-                <EmojiImg name={name} className="h-7 w-7" />
+              <button key={name} onClick={() => { react(name); setSheet(false) }} className="w-14 h-14 rounded-full bg-surface-raised flex items-center justify-center active:scale-95 transition">
+                <EmojiImg name={name} className="h-8 w-8" />
               </button>
             ))}
           </div>
