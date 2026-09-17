@@ -14,6 +14,9 @@ import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
 import { apiRequest } from './apiClient'
 import { fetchNews, NEWS_ENABLED, type NewsItem } from './newsApi'
+import { notificationsSupported, notificationPermission, ensureNotifyPermission, focusAppWindow } from './notifications'
+
+export { notificationsSupported, notificationPermission, ensureNotifyPermission }
 
 const SUBS_KEY = 'unreleased:newsSubscriptions'
 const ENABLED_KEY = 'unreleased:newsNotificationsEnabled'
@@ -94,27 +97,6 @@ export function setNotificationsEnabled(on: boolean): void {
 
 // ─── Permission + delivery ────────────────────────────────────────────────────
 
-export function notificationsSupported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window
-}
-
-export function notificationPermission(): NotificationPermission {
-  return notificationsSupported() ? Notification.permission : 'denied'
-}
-
-// Asks the OS/browser for permission if we don't have it yet. Returns whether
-// notifications are usable afterwards.
-export async function ensureNotifyPermission(): Promise<boolean> {
-  if (!notificationsSupported()) return false
-  if (Notification.permission === 'granted') return true
-  if (Notification.permission === 'denied') return false
-  try {
-    return (await Notification.requestPermission()) === 'granted'
-  } catch {
-    return false
-  }
-}
-
 // Fires a single OS notification for a post. Clicking it focuses the app (in
 // Electron) and routes to News via the callback.
 export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) => void): void {
@@ -127,9 +109,7 @@ export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) =>
       tag: `news-${item.id}`, // dedupes if the same post somehow fires twice
     })
     n.onclick = () => {
-      const el = (window as unknown as { electron?: { focusMainWindow?: () => void } }).electron
-      el?.focusMainWindow?.()
-      window.focus()
+      focusAppWindow()
       onOpen(item)
       n.close()
     }

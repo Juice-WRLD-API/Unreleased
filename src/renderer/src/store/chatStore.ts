@@ -3,6 +3,9 @@ import * as api from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation } from '../lib/chatApi'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
 import type { AccountUser } from '../lib/userApi'
+import { chatNotificationsEnabled, fireChatNotification } from '../lib/chatNotifications'
+import { ensureNotifyPermission } from '../lib/notifications'
+import { useStore } from './useStore'
 
 export interface RoomRef { kind: RoomKind; id: number }
 
@@ -214,6 +217,34 @@ export const useChatStore = create<ChatState>((set, get) => {
     return !!a && roomKey(a) === key && document.visibilityState === 'visible'
   }
 
+  const notifyNewMessage = (key: string, msg: ChatMessage): void => {
+    const room = parseRoomKey(key)
+    let title: string
+    if (room.kind === 'channel') {
+      const server = get().servers.find((s) => s.channels.some((c) => c.id === room.id))
+      const channel = server?.channels.find((c) => c.id === room.id)
+      title = channel ? `${displayName(msg.author)} in #${channel.name}` : displayName(msg.author)
+    } else {
+      const conv = get().conversations.find((c) => c.id === room.id)
+      title = conv?.is_group ? `${displayName(msg.author)} in ${conv.name || 'Group chat'}` : displayName(msg.author)
+    }
+    const body = msg.is_encrypted
+      ? 'Sent a new message'
+      : msg.content?.trim() || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
+    fireChatNotification({
+      id: msg.id,
+      title,
+      body,
+      icon: msg.author.avatar,
+      onOpen: () => {
+        useStore.setState({ activeView: 'chat' })
+        const path = room.kind === 'channel' ? `/chat/c/${room.id}` : `/chat/dm/${room.id}`
+        if (window.location.pathname !== path) window.history.pushState({ view: 'chat' }, '', path)
+        get().openRoom(room)
+      },
+    })
+  }
+
   const bumpUnread = (msg: ChatMessage): void => {
     const key = messageRoom(msg)
     const meId = get().meId
@@ -228,6 +259,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         ? { ...s.mentions, [key]: (s.mentions[key] ?? 0) + 1 }
         : s.mentions,
     }))
+    notifyNewMessage(key, msg)
   }
 
   // Our own message echoed back by the socket while its REST call is still in
@@ -576,6 +608,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         },
       )
       socket.connect()
+      if (chatNotificationsEnabled()) void ensureNotifyPermission()
       typingTimer = window.setInterval(() => {
         const now = Date.now()
         const typing = get().typing
