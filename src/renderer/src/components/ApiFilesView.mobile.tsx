@@ -23,6 +23,7 @@ import {
   JWApiSong,
   JWApiPaginatedResponse,
   JWAPI_BASE,
+  ZIP_OPERATIONS_ENABLED,
 } from '../lib/juicewrldApi'
 import { getFileExt, getMediaType } from '../lib/fileTypes'
 import { formatBytes } from '../lib/format'
@@ -1051,16 +1052,18 @@ export default function ApiFilesView(): JSX.Element {
                 aria-label="Propose deletion"
               ><Trash2 size={19} /></button>
             )}
-            <button
-              onClick={downloadZip}
-              disabled={selectedPaths.size === 0 || zipBusy}
-              className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-50 active:opacity-80"
-            >
-              {zipBusy ? <><Loader2 size={17} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Zipping…'}</>
-                : zipStatus === 'done' ? <><Check size={17} /> Downloaded</>
-                : zipStatus === 'error' ? <><X size={17} /> Failed</>
-                : <><PackageOpen size={17} /> Download ZIP</>}
-            </button>
+            {ZIP_OPERATIONS_ENABLED && (
+              <button
+                onClick={downloadZip}
+                disabled={selectedPaths.size === 0 || zipBusy}
+                className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-50 active:opacity-80"
+              >
+                {zipBusy ? <><Loader2 size={17} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Zipping…'}</>
+                  : zipStatus === 'done' ? <><Check size={17} /> Downloaded</>
+                  : zipStatus === 'error' ? <><X size={17} /> Failed</>
+                  : <><PackageOpen size={17} /> Download ZIP</>}
+              </button>
+            )}
           </div>
           </div>
         )}
@@ -1076,7 +1079,7 @@ export default function ApiFilesView(): JSX.Element {
           <Check size={14} className="text-accent" /> {toast}
         </div>
       )}
-      {!selectMode && zipStatus !== 'idle' && (
+      {ZIP_OPERATIONS_ENABLED && !selectMode && zipStatus !== 'idle' && (
         <div
           className="fixed left-1/2 -translate-x-1/2 z-[75] flex items-center gap-2 px-4 py-2.5 rounded-full bg-surface-highest text-text-primary text-[13px] shadow-2xl animate-slide-up"
           style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 92px)' }}
@@ -1260,8 +1263,10 @@ export default function ApiFilesView(): JSX.Element {
               )}
 
               {sheetEntry.type === 'directory' ? (
-                <SheetItem icon={PackageOpen} label="Download folder (ZIP)" disabled={zipBusy}
-                  onClick={() => { downloadFolder(sheetEntry); closeSheet() }} />
+                ZIP_OPERATIONS_ENABLED && (
+                  <SheetItem icon={PackageOpen} label="Download folder (ZIP)" disabled={zipBusy}
+                    onClick={() => { downloadFolder(sheetEntry); closeSheet() }} />
+                )
               ) : (
                 <SheetItem icon={Download} label="Download" onClick={() => { handleDownload(sheetEntry); closeSheet() }} />
               )}

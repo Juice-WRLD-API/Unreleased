@@ -7,7 +7,7 @@ import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import type { PlaylistSummary } from '../lib/userApi'
-import { JWAPI_BASE } from '../lib/juicewrldApi'
+import { JWAPI_BASE, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
 import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
@@ -320,12 +320,14 @@ export default function PlaylistContextMenu({ state, onClose }: {
             <MenuItem icon={Play} label="Open" onClick={open} />
             <MenuItem icon={Shuffle} label="Play all" onClick={playAll} />
             <MenuItem icon={ListEnd} label="Add all to queue" onClick={queueAll} />
-            <MenuItem
-              icon={zipState === 'loading' ? Loader2 : Archive}
-              label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
-              disabled={zipState === 'loading'}
-              onClick={downloadZip}
-            />
+            {ZIP_OPERATIONS_ENABLED && (
+              <MenuItem
+                icon={zipState === 'loading' ? Loader2 : Archive}
+                label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
+                disabled={zipState === 'loading'}
+                onClick={downloadZip}
+              />
+            )}
             <MenuItem
               innerRef={exportItemRef}
               icon={Download}

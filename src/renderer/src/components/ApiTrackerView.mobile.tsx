@@ -15,7 +15,7 @@ import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useLongPress } from './mobile/useLongPress'
 import {
   apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, JWAPI_BASE,
-  JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
+  JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra, ZIP_OPERATIONS_ENABLED,
 } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
@@ -2043,7 +2043,7 @@ export default function ApiTrackerView(): JSX.Element {
               className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
             >Select all</button>
           </div>
-          {(bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
+          {ZIP_OPERATIONS_ENABLED && (bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
             <div className="px-4 py-2 flex items-start gap-2 bg-amber-500/10 text-amber-500 text-xs font-medium">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
               {bulkZipStatus === 'none'
@@ -2055,14 +2055,14 @@ export default function ApiTrackerView(): JSX.Element {
             {([
               { key: 'queue', icon: ListPlus, label: 'Queue', disabled: !canBulkAddToQueue, onClick: bulkAddToQueue },
               { key: 'playlist', icon: Plus, label: 'Playlist', disabled: !canBulkAddToPlaylist, onClick: () => { setBulkSheetPage('playlists'); setSheet('bulk') } },
-              {
+              ...(ZIP_OPERATIONS_ENABLED ? [{
                 key: 'zip',
                 icon: bulkZipStatus === 'zipping' ? Loader2 : bulkZipStatus === 'done' ? Check : PackageOpen,
                 label: bulkZipStatus === 'zipping' ? 'Zipping' : bulkZipStatus === 'done' ? 'Done' : 'ZIP',
                 disabled: bulkZipStatus === 'zipping',
                 onClick: bulkDownloadZip,
                 spin: bulkZipStatus === 'zipping',
-              },
+              }] as const : []),
               { key: 'more', icon: MoreVertical, label: 'More', disabled: false, onClick: () => { setBulkSheetPage('main'); setSheet('bulk') } },
             ] as const).map((action) => (
               <button
@@ -2258,12 +2258,14 @@ export default function ApiTrackerView(): JSX.Element {
                 trailing={<ChevronRight size={16} className="text-text-muted shrink-0" />}
                 onClick={() => setBulkSheetPage('playlists')}
               />
-              <SheetItem
-                icon={bulkZipStatus === 'zipping' ? Loader2 : PackageOpen}
-                label={bulkZipStatus === 'zipping' ? 'Zipping…' : 'Download ZIP'}
-                disabled={bulkZipStatus === 'zipping'}
-                onClick={() => { bulkDownloadZip(); closeSheet() }}
-              />
+              {ZIP_OPERATIONS_ENABLED && (
+                <SheetItem
+                  icon={bulkZipStatus === 'zipping' ? Loader2 : PackageOpen}
+                  label={bulkZipStatus === 'zipping' ? 'Zipping…' : 'Download ZIP'}
+                  disabled={bulkZipStatus === 'zipping'}
+                  onClick={() => { bulkDownloadZip(); closeSheet() }}
+                />
+              )}
               {canEdit && (
                 <>
                   <SheetDivider />

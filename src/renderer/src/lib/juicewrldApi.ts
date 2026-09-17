@@ -11,6 +11,10 @@ import { peekSessionEditLink } from './sessionEditLinksMirror'
 
 export const JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
 
+// Backend zip endpoints are temporarily disabled - flip this back to true to restore
+// the ZIP download UI (playlist/song/file-browser download-as-ZIP buttons and menu items).
+export const ZIP_OPERATIONS_ENABLED = false
+
 // ─── API Types ────────────────────────────────────────────────────────────────
 
 export interface JWApiEra {

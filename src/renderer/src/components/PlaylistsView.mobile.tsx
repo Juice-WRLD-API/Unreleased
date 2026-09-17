@@ -12,7 +12,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
+import { JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { getSkin } from '../lib/skins'
 import { libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
@@ -2150,15 +2150,17 @@ export default function PlaylistsView(): JSX.Element {
                 await refreshPlaylists()
               }}
             />
-            <SheetItem
-              icon={Archive}
-              label="Download as ZIP"
-              onClick={async () => {
-                closeSheet()
-                const d = await userApi.getPlaylist((target.playlist as PlaylistSummary).id).catch(() => null)
-                if (d) handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), pl.name)
-              }}
-            />
+            {ZIP_OPERATIONS_ENABLED && (
+              <SheetItem
+                icon={Archive}
+                label="Download as ZIP"
+                onClick={async () => {
+                  closeSheet()
+                  const d = await userApi.getPlaylist((target.playlist as PlaylistSummary).id).catch(() => null)
+                  if (d) handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), pl.name)
+                }}
+              />
+            )}
           </>
         )}
         <SheetDivider />
@@ -2260,12 +2262,14 @@ export default function PlaylistsView(): JSX.Element {
         {!isLocal && (
           <>
             <SheetDivider />
-            <SheetItem
-              icon={zipState === 'loading' ? Loader2 : Archive}
-              label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
-              disabled={zipState === 'loading' || tracks.length === 0}
-              onClick={() => { handleZipDownload(tracks, name || 'playlist'); closeSheet() }}
-            />
+            {ZIP_OPERATIONS_ENABLED && (
+              <SheetItem
+                icon={zipState === 'loading' ? Loader2 : Archive}
+                label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
+                disabled={zipState === 'loading' || tracks.length === 0}
+                onClick={() => { handleZipDownload(tracks, name || 'playlist'); closeSheet() }}
+              />
+            )}
             <SheetItem
               icon={Download}
               label="Export playlist"

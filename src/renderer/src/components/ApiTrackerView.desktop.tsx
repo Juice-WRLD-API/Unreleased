@@ -15,7 +15,7 @@ import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
 import {
   apiFetch, apiPeek, songToTrack, parseDuration, buildStreamUrl, CATEGORY_LABELS, CATEGORY_COLORS, JWAPI_BASE,
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
-  parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
+  parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource, ZIP_OPERATIONS_ENABLED,
 } from '../lib/juicewrldApi'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
@@ -618,8 +618,12 @@ function BulkContextMenu({
           {canBulkEdit && (
             <MenuItem icon={<Pencil size={14} />} label="Edit" onClick={onBulkEdit} />
           )}
-          <div className="my-1 border-t border-[var(--border)]" />
-          <MenuItem icon={<PackageOpen size={14} />} label="Download ZIP" onClick={onDownloadZip} />
+          {ZIP_OPERATIONS_ENABLED && (
+            <>
+              <div className="my-1 border-t border-[var(--border)]" />
+              <MenuItem icon={<PackageOpen size={14} />} label="Download ZIP" onClick={onDownloadZip} />
+            </>
+          )}
         </>
       )}
     </div>
@@ -3622,7 +3626,7 @@ export default function ApiTrackerView(): JSX.Element {
       {/* Bulk selection action bar */}
       {selectMode && (
         <div className="shrink-0 border-t border-[var(--border)] bg-surface relative">
-          {(bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
+          {ZIP_OPERATIONS_ENABLED && (bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
             <div className="px-4 py-2 flex items-center gap-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-500 text-xs font-medium">
               <AlertTriangle size={14} className="shrink-0" />
               {bulkZipStatus === 'none'
@@ -3735,34 +3739,36 @@ export default function ApiTrackerView(): JSX.Element {
               )}
             </button>
           )}
-          <button
-            onClick={bulkDownloadZip}
-            disabled={selected.size === 0 || bulkZipStatus === 'zipping'}
-            title={
-              bulkZipStatus === 'partial'
-                ? `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} couldn't be included (no file available)`
-                : bulkZipStatus === 'none'
-                ? 'None of the selected songs have a downloadable file'
-                : undefined
-            }
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90 ${
-              bulkZipStatus === 'partial' || bulkZipStatus === 'none' ? 'bg-amber-500 text-white' : 'bg-accent text-white'
-            }`}
-          >
-            {bulkZipStatus === 'zipping' ? (
-              <><Loader2 size={13} className="animate-spin" /> Zipping…</>
-            ) : bulkZipStatus === 'done' ? (
-              <><Check size={13} /> Done</>
-            ) : bulkZipStatus === 'partial' ? (
-              <><AlertTriangle size={13} /> {bulkZipSkipped} skipped</>
-            ) : bulkZipStatus === 'none' ? (
-              <><AlertTriangle size={13} /> No files available</>
-            ) : bulkZipStatus === 'error' ? (
-              <><X size={13} /> Error</>
-            ) : (
-              <><PackageOpen size={13} /> Download ZIP</>
-            )}
-          </button>
+          {ZIP_OPERATIONS_ENABLED && (
+            <button
+              onClick={bulkDownloadZip}
+              disabled={selected.size === 0 || bulkZipStatus === 'zipping'}
+              title={
+                bulkZipStatus === 'partial'
+                  ? `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} couldn't be included (no file available)`
+                  : bulkZipStatus === 'none'
+                  ? 'None of the selected songs have a downloadable file'
+                  : undefined
+              }
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90 ${
+                bulkZipStatus === 'partial' || bulkZipStatus === 'none' ? 'bg-amber-500 text-white' : 'bg-accent text-white'
+              }`}
+            >
+              {bulkZipStatus === 'zipping' ? (
+                <><Loader2 size={13} className="animate-spin" /> Zipping…</>
+              ) : bulkZipStatus === 'done' ? (
+                <><Check size={13} /> Done</>
+              ) : bulkZipStatus === 'partial' ? (
+                <><AlertTriangle size={13} /> {bulkZipSkipped} skipped</>
+              ) : bulkZipStatus === 'none' ? (
+                <><AlertTriangle size={13} /> No files available</>
+              ) : bulkZipStatus === 'error' ? (
+                <><X size={13} /> Error</>
+              ) : (
+                <><PackageOpen size={13} /> Download ZIP</>
+              )}
+            </button>
+          )}
           <button
             onClick={exitSelectMode}
             className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"

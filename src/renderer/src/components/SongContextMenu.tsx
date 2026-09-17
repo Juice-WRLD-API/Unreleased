@@ -7,7 +7,7 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
-import { buildStreamUrl, findSessionZips, songToTrack, getSongsByIds, JWApiSong, JWApiFileEntry } from '../lib/juicewrldApi'
+import { buildStreamUrl, findSessionZips, songToTrack, getSongsByIds, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import ChangeVersionMenuItem from './ChangeVersionMenuItem'
 import { placeFlyout } from '../lib/menuFlyout'
@@ -549,7 +549,7 @@ export default function SongContextMenu({
         {versionsEnabled && !disableChangeVersion && songId != null && songId > 0 && (
           <SheetItem icon={Layers} label="Change version" trailing={<ChevronRight size={16} className="text-text-muted" />} onClick={() => setMobileSub('versions')} />
         )}
-        {song && !track.path && track.genre === 'recording_session' && (
+        {ZIP_OPERATIONS_ENABLED && song && !track.path && track.genre === 'recording_session' && (
           <>
             <SheetDivider />
             <SheetItem
@@ -771,7 +771,7 @@ export default function SongContextMenu({
               menuPos={pos}
             />
           )}
-          {song && !track.path && track.genre === 'recording_session' && (
+          {ZIP_OPERATIONS_ENABLED && song && !track.path && track.genre === 'recording_session' && (
             <>
               <Divider />
               <MenuItem

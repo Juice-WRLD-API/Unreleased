@@ -25,6 +25,7 @@ import {
   JWApiBrowseResponse,
   JWApiPaginatedResponse,
   JWAPI_BASE,
+  ZIP_OPERATIONS_ENABLED,
 } from '../lib/juicewrldApi'
 import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
 import { useMultiSelect } from '../hooks/useMultiSelect'
@@ -1387,21 +1388,23 @@ export default function ApiFilesView(): JSX.Element {
                 <Trash2 size={13} /> Propose deletion
               </button>
             )}
-            <button
-              onClick={downloadZip}
-              disabled={selectedPaths.size === 0 || zipStatus === 'starting' || zipStatus === 'zipping'}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
-            >
-              {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Zipping…'}</>
-              ) : zipStatus === 'done' ? (
-                <><Check size={13} /> Done</>
-              ) : zipStatus === 'error' ? (
-                <><X size={13} /> Error</>
-              ) : (
-                <><PackageOpen size={13} /> Download ZIP</>
-              )}
-            </button>
+            {ZIP_OPERATIONS_ENABLED && (
+              <button
+                onClick={downloadZip}
+                disabled={selectedPaths.size === 0 || zipStatus === 'starting' || zipStatus === 'zipping'}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
+              >
+                {zipStatus === 'starting' || zipStatus === 'zipping' ? (
+                  <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Zipping…'}</>
+                ) : zipStatus === 'done' ? (
+                  <><Check size={13} /> Done</>
+                ) : zipStatus === 'error' ? (
+                  <><X size={13} /> Error</>
+                ) : (
+                  <><PackageOpen size={13} /> Download ZIP</>
+                )}
+              </button>
+            )}
             <button
               onClick={exitSelectMode}
               className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
@@ -1422,7 +1425,7 @@ export default function ApiFilesView(): JSX.Element {
       {/* Folder-download progress toast - the selection bar above already
           shows zip status while selectMode is active, so this only covers
           the single-folder "Download folder" context-menu action. */}
-      {!selectMode && zipStatus !== 'idle' && (
+      {ZIP_OPERATIONS_ENABLED && !selectMode && zipStatus !== 'idle' && (
         <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
             <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting ZIP…' : 'Zipping folder…'}</>
@@ -1643,11 +1646,13 @@ export default function ApiFilesView(): JSX.Element {
               </>
             )}
             {ctxMenu.entry.type === 'directory' ? (
-              <button onClick={() => { downloadFolder(ctxMenu.entry); setCtxMenu(null) }}
-                disabled={zipStatus === 'starting' || zipStatus === 'zipping'}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50">
-                <PackageOpen size={14} className="text-text-muted" /> Download folder (ZIP)
-              </button>
+              ZIP_OPERATIONS_ENABLED && (
+                <button onClick={() => { downloadFolder(ctxMenu.entry); setCtxMenu(null) }}
+                  disabled={zipStatus === 'starting' || zipStatus === 'zipping'}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50">
+                  <PackageOpen size={14} className="text-text-muted" /> Download folder (ZIP)
+                </button>
+              )
             ) : (
               <button onClick={() => { handleDownload(ctxMenu.entry); setCtxMenu(null) }}
                 className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
