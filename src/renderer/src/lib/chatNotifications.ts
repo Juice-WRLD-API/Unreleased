@@ -32,11 +32,26 @@ export interface ChatNotificationPayload {
   onOpen: () => void
 }
 
-// Fires a single OS notification for a new chat message. Clicking it focuses
-// the app (in Electron) and routes to the room via the callback.
+// In-app banner (Discord-style toast) subscribers - kept separate from the OS
+// Notification API so the banner still shows even when OS permission was
+// never granted, as long as the user hasn't turned chat notifications off.
+type BannerListener = (payload: ChatNotificationPayload) => void
+const bannerListeners = new Set<BannerListener>()
+
+export function onChatNotificationBanner(listener: BannerListener): () => void {
+  bannerListeners.add(listener)
+  return () => bannerListeners.delete(listener)
+}
+
+// Fires a chat notification: plays the chime, shows the in-app banner, and -
+// if the OS permission was granted - a native OS notification too. Clicking
+// either focuses the app (in Electron) and routes to the room via the callback.
 export function fireChatNotification(payload: ChatNotificationPayload): void {
-  if (!chatNotificationsEnabled() || !notificationsSupported() || Notification.permission !== 'granted') return
+  if (!chatNotificationsEnabled()) return
   playNotificationSound()
+  for (const listener of bannerListeners) listener(payload)
+
+  if (!notificationsSupported() || Notification.permission !== 'granted') return
   try {
     const n = new Notification(payload.title, {
       body: payload.body,

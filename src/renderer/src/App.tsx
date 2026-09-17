@@ -62,6 +62,7 @@ import RadioFmPlayer from './components/RadioFmPlayer'
 import RadioVotePopup from './components/RadioVotePopup'
 import LastfmScrobbler from './components/LastfmScrobbler'
 import NewsNotifier from './components/NewsNotifier'
+import ChatNotificationBanner from './components/ChatNotificationBanner'
 import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
 import BulkEditModal from './components/BulkEditModal'
@@ -335,6 +336,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><RadioVotePopup /></ErrorBoundary>
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       <ErrorBoundary fallback={null}><MoreNavSheet /></ErrorBoundary>
       {showDiagnostics && (
