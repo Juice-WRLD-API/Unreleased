@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AtSign, Hash, KeyRound, Loader2, Lock, ShieldCheck, Upload } from 'lucide-react'
 import { conversationTitle, displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import Composer, { type ComposerHandle } from './Composer'
@@ -135,6 +135,24 @@ export default function RoomPane({ room, header, enterSends = true }: {
     const mine = [...items].reverse().find((m) => m.author.id === meId && m.id > 0 && !m.deleted_at)
     if (mine) setEditingId(mine.id)
   }, [room, meId])
+
+  // Composer's own onKeyDown only catches ArrowUp while its textarea is
+  // focused. If focus is elsewhere (or nowhere - e.g. right after opening a
+  // room), the browser's default behavior scrolls the page instead. Mirror
+  // that everywhere else so ArrowUp reliably edits the last message unless
+  // some other editable field is legitimately focused.
+  useEffect(() => {
+    const onWindowKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'ArrowUp' || e.metaKey || e.ctrlKey || e.altKey || editingId !== null) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      e.preventDefault()
+      editLast()
+      composer.current?.focus()
+    }
+    window.addEventListener('keydown', onWindowKeyDown)
+    return () => window.removeEventListener('keydown', onWindowKeyDown)
+  }, [editLast, editingId])
 
   const onEditingChange = useCallback((id: number | null) => {
     setEditingId(id)
