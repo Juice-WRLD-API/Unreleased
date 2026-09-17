@@ -6,6 +6,7 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { displayName, useChatStore, type UiMessage } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
 import AttachmentList from './AttachmentView'
 import MessageBody from './MessageBody'
 import MessageContextMenu from './MessageContextMenu'
@@ -126,6 +127,8 @@ function MessageItem({
     return p && 'text' in p ? p.text : ''
   })
   const toast = useChatToast()
+  const openPublicProfile = useStore((s) => s.openPublicProfile)
+  const openProfile = (): void => openPublicProfile(message.author.id)
 
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -199,14 +202,19 @@ function MessageItem({
             {clockTime(message.created_at).replace(/\s?[AP]M$/i, '')}
           </span>
         ) : (
-          <ChatAvatar user={message.author} size={36} className="mt-0.5" />
+          <ChatAvatar user={message.author} size={36} className="mt-0.5" onClick={openProfile} />
         )}
       </div>
 
       <div className={`flex-1 min-w-0 ${pending && !failed ? 'opacity-60' : ''}`}>
         {!grouped && (
           <div className="flex items-baseline gap-2 min-w-0">
-            <span className="text-sm font-semibold text-text-primary truncate">{displayName(message.author)}</span>
+            <span
+              className="text-sm font-semibold text-text-primary truncate cursor-pointer hover:underline"
+              onClick={openProfile}
+            >
+              {displayName(message.author)}
+            </span>
             <RoleTag role={message.author.role} />
             <span className="text-[11px] text-text-muted shrink-0" title={fullStamp(message.created_at)}>{clockTime(message.created_at)}</span>
             {message.pinned && !inThread && <Pin size={11} className="text-amber-400 shrink-0 self-center" />}

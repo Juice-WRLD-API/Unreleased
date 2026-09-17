@@ -564,6 +564,9 @@ interface AppActions {
    *  used by the Home hero avatar. Editor/staff access lives on its own
    *  button on Home now (openProfile), not behind the avatar. */
   openOwnPublicProfile: () => void
+  /** Navigates to any user's public profile (/u/<id>) - used by avatar/name
+   *  clicks in chat messages and member lists. */
+  openPublicProfile: (userId: number) => void
   setShowDiagnostics: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowMoreNav: (show: boolean) => void
@@ -1235,12 +1238,15 @@ export const useStore = create<AppStore>((set, get, store) => ({
   openOwnPublicProfile: () => {
     const account = get().account
     if (!account) return
+    get().openPublicProfile(account.id)
+  },
+  openPublicProfile: (userId) => {
     // public-profile's userId lives in the URL path itself (/u/<id>), not in
     // store state, so this can't reuse setActiveView's path table - push
     // directly and always set state (even if already on 'public-profile',
     // e.g. navigating there from someone else's page) so the view re-reads
     // the new path.
-    const path = `/u/${account.id}`
+    const path = `/u/${userId}`
     if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
     set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },

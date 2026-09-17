@@ -56,11 +56,12 @@ function hueFor(seed: number | string): number {
   return HUES[Math.abs(h) % HUES.length]
 }
 
-export function ChatAvatar({ user, size = 36, presence, className = '' }: {
+export function ChatAvatar({ user, size = 36, presence, className = '', onClick }: {
   user: Pick<ChatUserBrief, 'id' | 'avatar' | 'display_name' | 'username'>
   size?: number
   presence?: boolean
   className?: string
+  onClick?: () => void
 }): JSX.Element {
   const online = useChatStore((s) => !!s.online[user.id])
   const [broken, setBroken] = useState(false)
@@ -68,7 +69,11 @@ export function ChatAvatar({ user, size = 36, presence, className = '' }: {
   const dot = Math.max(8, Math.round(size * 0.3))
   const hue = hueFor(user.id)
   return (
-    <span className={`relative inline-flex shrink-0 ${className}`} style={{ width: size, height: size }}>
+    <span
+      className={`relative inline-flex shrink-0 ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      style={{ width: size, height: size }}
+      onClick={onClick}
+    >
       {user.avatar && !broken ? (
         <img src={user.avatar} alt="" onError={() => setBroken(true)} className="w-full h-full rounded-full object-cover bg-surface-raised" />
       ) : (

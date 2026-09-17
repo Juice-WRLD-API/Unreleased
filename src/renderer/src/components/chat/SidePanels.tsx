@@ -3,6 +3,7 @@ import { Crown, Loader2, MessageSquare, MoreHorizontal, Pin, Shield, UserMinus, 
 import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
 import { displayName, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
 import Composer from './Composer'
 import MessageBody from './MessageBody'
 import MessageItem, { ConfirmDialog } from './MessageItem'
@@ -120,6 +121,7 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage }: {
 }): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const loadMembers = useChatStore((s) => s.loadMembers)
+  const openPublicProfile = useStore((s) => s.openPublicProfile)
   const toast = useChatToast()
   const [menu, setMenu] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -127,6 +129,7 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage }: {
   useDismiss(menu, () => setMenu(false), ref)
   const isOwner = member.user.id === ownerId
   const isMe = member.user.id === meId
+  const openProfile = (): void => openPublicProfile(member.user.id)
 
   const act = (fn: () => Promise<unknown>, ok: string): void => {
     setMenu(false)
@@ -135,9 +138,9 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage }: {
 
   return (
     <div ref={ref} className="group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
-      <ChatAvatar user={member.user} size={32} presence />
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm truncate flex items-center gap-1 ${member.muted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
+      <ChatAvatar user={member.user} size={32} presence onClick={openProfile} />
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={openProfile}>
+        <p className={`text-sm truncate flex items-center gap-1 hover:underline ${member.muted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
           {displayName(member.user)}
           {isOwner && <Crown size={12} className="text-amber-400 shrink-0" />}
           {!isOwner && member.server_role === 'admin' && <Shield size={12} className="text-sky-400 shrink-0" />}
@@ -252,6 +255,7 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
 export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversationId: number; onClose: () => void; onAddPeople: () => void }): JSX.Element {
   const conv = useChatStore((s) => s.conversations.find((c) => c.id === conversationId))
   const meId = useChatStore((s) => s.meId)
+  const openPublicProfile = useStore((s) => s.openPublicProfile)
   const toast = useChatToast()
   const [confirm, setConfirm] = useState<number | null>(null)
   if (!conv) return <PanelShell title="Details" onClose={onClose}><div /></PanelShell>
@@ -260,9 +264,9 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto p-2">
         {conv.participants.map((p) => (
           <div key={p.id} className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
-            <ChatAvatar user={p.user} size={32} presence />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-text-primary truncate">{displayName(p.user)}{p.user.id === meId && <span className="text-text-muted"> (you)</span>}</p>
+            <ChatAvatar user={p.user} size={32} presence onClick={() => openPublicProfile(p.user.id)} />
+            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openPublicProfile(p.user.id)}>
+              <p className="text-sm text-text-primary truncate hover:underline">{displayName(p.user)}{p.user.id === meId && <span className="text-text-muted"> (you)</span>}</p>
               <p className="text-[11px] text-text-muted truncate">Joined {relativeTime(p.joined_at)}</p>
             </div>
             {conv.is_group && p.user.id !== meId && (
