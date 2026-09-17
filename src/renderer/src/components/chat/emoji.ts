@@ -41,3 +41,11 @@ export function rememberEmoji(name: string): void {
     localStorage.setItem(RECENT_KEY, JSON.stringify(next))
   } catch {}
 }
+
+// Most-recently-used reactions first, padded out with the defaults so the
+// quick-react row always has `count` options even before a user reacts.
+export function quickReactions(count = 3): string[] {
+  const recent = recentEmoji()
+  const merged = [...recent, ...QUICK_REACTIONS.filter((n) => !recent.includes(n))]
+  return merged.slice(0, count)
+}

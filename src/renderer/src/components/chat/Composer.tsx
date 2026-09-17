@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { FileText, Lock, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import { CornerUpLeft, FileText, Lock, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
+import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import ReactionPicker from './ReactionPicker'
 import { emojiGlyph } from './emoji'
 import { mentionIdsIn } from './people'
@@ -26,15 +26,23 @@ const Composer = forwardRef<ComposerHandle, {
   people: ChatUserBrief[]
   placeholder: string
   parent?: number | null
+  replyTo?: UiMessage | null
+  onCancelReply?: () => void
   disabledReason?: string | null
   encrypted?: boolean
   onEditLast?: () => void
   compact?: boolean
   enterSends?: boolean
-}>(function Composer({ room, people, placeholder, parent = null, disabledReason, encrypted, onEditLast, compact, enterSends = true }, ref) {
+}>(function Composer({ room, people, placeholder, parent = null, replyTo, onCancelReply, disabledReason, encrypted, onEditLast, compact, enterSends = true }, ref) {
   const send = useChatStore((s) => s.send)
   const sendTyping = useChatStore((s) => s.sendTyping)
   const meId = useChatStore((s) => s.meId)
+  const replyPreview = useChatStore((s) => {
+    if (!replyTo) return ''
+    if (!replyTo.is_encrypted) return replyTo.content
+    const p = s.plain[replyTo.id]
+    return p && 'text' in p ? p.text : ''
+  })
   const toast = useChatToast()
   const draftKey = `${roomKey(room)}:${parent ?? 'root'}`
 
@@ -54,6 +62,8 @@ const Composer = forwardRef<ComposerHandle, {
   }, [draftKey])
 
   useEffect(() => { drafts.set(draftKey, text) }, [draftKey, text])
+
+  useEffect(() => { if (replyTo) textarea.current?.focus() }, [replyTo])
 
   useEffect(() => {
     const el = textarea.current
@@ -160,6 +170,7 @@ const Composer = forwardRef<ComposerHandle, {
     setMention(null)
     drafts.delete(draftKey)
     stopTyping()
+    onCancelReply?.()
     send(room, { text: body, files: outgoing, parent, mentions: mentionIdsIn(body, people) })
       .catch((err) => toast(errorText(err, 'Message failed to send')))
   }
@@ -209,6 +220,17 @@ const Composer = forwardRef<ComposerHandle, {
               <span className="text-xs text-text-muted truncate">@{p.username}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {replyTo && (
+        <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-surface-raised/70 px-2.5 py-1.5 text-xs">
+          <CornerUpLeft size={13} className="shrink-0 text-text-muted" />
+          <span className="shrink-0 font-semibold text-text-secondary">Replying to {displayName(replyTo.author)}</span>
+          <span className="min-w-0 flex-1 truncate text-text-muted">{replyPreview || (replyTo.attachments.length ? 'Attachment' : '')}</span>
+          <button onClick={onCancelReply} title="Cancel reply" className="shrink-0 text-text-muted hover:text-text-primary">
+            <X size={14} />
+          </button>
         </div>
       )}
 

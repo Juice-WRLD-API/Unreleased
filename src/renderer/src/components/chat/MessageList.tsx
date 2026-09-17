@@ -38,12 +38,13 @@ function SeenBy({ users }: { users: ChatUserBrief[] }): JSX.Element {
   )
 }
 
-export default function MessageList({ room, people, canModerate, editingId, onStartEdit, intro }: {
+export default function MessageList({ room, people, canModerate, editingId, onStartEdit, onReply, intro }: {
   room: RoomRef
   people: ChatUserBrief[]
   canModerate: boolean
   editingId: number | null
   onStartEdit: (id: number | null) => void
+  onReply?: (message: UiMessage) => void
   intro: ReactNode
 }): JSX.Element {
   const key = roomKey(room)
@@ -260,6 +261,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
                     editing={editingId === m.id}
                     onStartEdit={onStartEdit}
                     onOpenThread={openThread}
+                    onReply={onReply}
                     activeThread={threadRootId === m.id}
                     highlight={flashId === m.id}
                   />

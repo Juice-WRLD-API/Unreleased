@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AtSign, Hash, KeyRound, Loader2, Lock, ShieldCheck, Upload } from 'lucide-react'
-import { conversationTitle, displayName, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
+import { conversationTitle, displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import Composer, { type ComposerHandle } from './Composer'
 import MessageList from './MessageList'
 import { useRoomPeople } from './people'
@@ -126,6 +126,7 @@ export default function RoomPane({ room, header, enterSends = true }: {
   const meId = useChatStore((s) => s.meId)
   const composer = useRef<ComposerHandle>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [replyTo, setReplyTo] = useState<UiMessage | null>(null)
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
 
@@ -138,6 +139,11 @@ export default function RoomPane({ room, header, enterSends = true }: {
   const onEditingChange = useCallback((id: number | null) => {
     setEditingId(id)
     if (id === null) composer.current?.focus()
+  }, [])
+
+  const onReply = useCallback((message: UiMessage) => {
+    setReplyTo(message)
+    composer.current?.focus()
   }, [])
 
   const disabledReason = room.kind === 'conversation' && keyState === 'waiting'
@@ -190,6 +196,7 @@ export default function RoomPane({ room, header, enterSends = true }: {
         canModerate={info.canModerate}
         editingId={editingId}
         onStartEdit={onEditingChange}
+        onReply={onReply}
         intro={<ChannelIntro room={room} title={info.title} />}
       />
 
@@ -198,7 +205,10 @@ export default function RoomPane({ room, header, enterSends = true }: {
         ref={composer}
         room={room}
         people={people}
-        placeholder={room.kind === 'channel' ? `Message #${info.title}` : `Message ${info.title}`}
+        placeholder={replyTo ? `Reply to ${displayName(replyTo.author)}` : room.kind === 'channel' ? `Message #${info.title}` : `Message ${info.title}`}
+        parent={replyTo?.id ?? null}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
         disabledReason={disabledReason}
         encrypted={info.encrypted}
         onEditLast={editLast}

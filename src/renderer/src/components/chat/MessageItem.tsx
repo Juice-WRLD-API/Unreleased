@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertCircle, Copy, CornerDownRight, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
+  AlertCircle, CornerDownRight, CornerUpLeft, Copy, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
@@ -9,7 +9,7 @@ import { displayName, useChatStore, type UiMessage } from '../../store/chatStore
 import AttachmentList from './AttachmentView'
 import MessageBody from './MessageBody'
 import ReactionPicker from './ReactionPicker'
-import { QUICK_REACTIONS, emojiGlyph, rememberEmoji } from './emoji'
+import { QUICK_REACTIONS, emojiGlyph, quickReactions, rememberEmoji } from './emoji'
 import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
 
 export interface MessageItemProps {
@@ -22,6 +22,7 @@ export interface MessageItemProps {
   editing: boolean
   onStartEdit: (id: number | null) => void
   onOpenThread?: (id: number) => void
+  onReply?: (message: UiMessage) => void
   highlight?: boolean
 }
 
@@ -110,7 +111,7 @@ function SheetRow({ icon, label, onClick, danger }: { icon: JSX.Element; label: 
 }
 
 function MessageItem({
-  message, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, highlight,
+  message, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, onReply, highlight,
 }: MessageItemProps): JSX.Element {
   const isMobile = useIsMobile()
   const meId = useChatStore((s) => s.meId)
@@ -286,13 +287,16 @@ function MessageItem({
 
       {!pending && !deleted && !editing && !isMobile && (
         <div className="absolute -top-3 right-4 z-10 hidden group-hover:flex items-center gap-0.5 rounded-xl border border-[var(--border)] bg-surface shadow-lg p-0.5">
-          {QUICK_REACTIONS.slice(0, 3).map((name) => (
+          {quickReactions(3).map((name) => (
             <button key={name} onClick={() => react(name)} title={`:${name}:`} className="w-8 h-8 rounded-lg text-base hover:bg-surface-overlay hover:scale-110 transition">
               {emojiGlyph(name)}
             </button>
           ))}
           <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
           <ToolbarButton label="Add reaction" onClick={(e) => openPickerAt(e.currentTarget)}><SmilePlus size={16} /></ToolbarButton>
+          {!inThread && onReply && (
+            <ToolbarButton label="Reply" onClick={() => onReply(message)}><CornerUpLeft size={16} /></ToolbarButton>
+          )}
           {!inThread && onOpenThread && (
             <ToolbarButton label="Reply in thread" onClick={() => onOpenThread(message.id)}><MessageSquareReply size={16} /></ToolbarButton>
           )}
@@ -324,6 +328,7 @@ function MessageItem({
               </button>
             ))}
           </div>
+          {!inThread && onReply && <SheetRow icon={<CornerUpLeft size={18} />} label="Reply" onClick={() => { setSheet(false); onReply(message) }} />}
           {!inThread && onOpenThread && <SheetRow icon={<MessageSquareReply size={18} />} label="Reply in thread" onClick={() => { setSheet(false); onOpenThread(message.id) }} />}
           {canEdit && <SheetRow icon={<Pencil size={18} />} label="Edit message" onClick={() => { setSheet(false); onStartEdit(message.id) }} />}
           {canPin && <SheetRow icon={message.pinned ? <PinOff size={18} /> : <Pin size={18} />} label={message.pinned ? 'Unpin' : 'Pin message'} onClick={() => { setSheet(false); run(() => togglePin(message), 'Could not update pin') }} />}
