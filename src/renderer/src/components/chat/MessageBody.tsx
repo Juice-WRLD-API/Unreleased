@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
@@ -46,7 +47,7 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
   const source = useMemo(() => linkMentions(text, people), [text, people])
   return (
     <div className="chat-md select-text text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeChatEmoji]} components={components} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={[rehypeChatEmoji]} components={components} urlTransform={urlTransform}>
         {source}
       </ReactMarkdown>
     </div>

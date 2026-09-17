@@ -13,7 +13,8 @@
   "private": true,
   "dependencies": {
     "music-metadata": "^11.13.0",
-    "node-id3": "^0.2.9"
+    "node-id3": "^0.2.9",
+    "remark-breaks": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
