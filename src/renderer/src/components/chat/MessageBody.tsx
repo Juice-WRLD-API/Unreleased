@@ -7,6 +7,7 @@ import { splitReplyRef } from '../../lib/chatReplyRef'
 import { decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
+import rehypeChatEmoji from './emojiRehype'
 import { linkMentions } from './people'
 import SongShareCard from './SongShareCard'
 
@@ -33,12 +34,18 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
       }
       return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     },
-    img: ({ src, alt }) => <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>,
+    img: ({ src, alt, title, ...rest }) => {
+      const emojiName = (rest as Record<string, unknown>)['data-emoji']
+      if (typeof emojiName === 'string') {
+        return <img src={typeof src === 'string' ? src : undefined} alt={alt} title={title} draggable={false} className="inline-block h-[1.2em] w-[1.2em] align-[-0.2em] object-contain" />
+      }
+      return <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>
+    },
   }), [meId, openPublicProfile])
   const source = useMemo(() => linkMentions(text, people), [text, people])
   return (
     <div className="chat-md text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeChatEmoji]} components={components} urlTransform={urlTransform}>
         {source}
       </ReactMarkdown>
     </div>
