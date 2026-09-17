@@ -2,7 +2,9 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { CornerUpLeft, FileText, Lock, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
+import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import GifPicker from './GifPicker'
 import ReactionPicker from './ReactionPicker'
 import { emojiGlyph, EMOJI_IMG } from './emoji'
 import { mentionIdsIn } from './people'
@@ -56,6 +58,7 @@ const Composer = forwardRef<ComposerHandle, {
   const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null)
   const [emojiQuery, setEmojiQuery] = useState<{ start: number; query: string; index: number } | null>(null)
   const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
+  const [gifAt, setGifAt] = useState<{ x: number; y: number } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const typingSentAt = useRef(0)
@@ -191,6 +194,14 @@ const Composer = forwardRef<ComposerHandle, {
       el?.focus()
       el?.setSelectionRange(start + value.length, start + value.length)
     })
+  }
+
+  // Picked GIFs send immediately (no caption step), matching the picker's
+  // click-to-send convention elsewhere.
+  const sendGif = (gif: GifResult): void => {
+    fetchGifFile(gif)
+      .then((file) => send(room, { text: '', files: [file], parent, mentions: [] }))
+      .catch((err) => toast(errorText(err, 'Could not send GIF')))
   }
 
   const submit = (): void => {
@@ -405,6 +416,20 @@ const Composer = forwardRef<ComposerHandle, {
               <SmilePlus size={18} />
             </button>
           )}
+          {!compact && gifPickerConfigured() && (
+            <button
+              type="button"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setGifAt({ x: r.right - 320, y: r.top - 320 })
+              }}
+              disabled={!!disabledReason}
+              title="GIF"
+              className="hidden md:flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-[10px] font-bold text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
+            >
+              GIF
+            </button>
+          )}
           <button
             type="button"
             onClick={submit}
@@ -430,6 +455,9 @@ const Composer = forwardRef<ComposerHandle, {
 
       {emojiAt && (
         <ReactionPicker x={emojiAt.x} y={emojiAt.y} onPick={(name) => insertAtCaret(emojiGlyph(name))} onClose={() => setEmojiAt(null)} />
+      )}
+      {gifAt && (
+        <GifPicker x={gifAt.x} y={gifAt.y} onPick={sendGif} onClose={() => setGifAt(null)} />
       )}
     </div>
   )
