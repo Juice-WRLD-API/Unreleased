@@ -1,17 +1,72 @@
-import { useMemo, useRef, useState } from 'react'
-import { ChevronDown, Lock, MessagesSquare, Pencil, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
 import { useOpenModal } from './modalHost'
 import { ChannelIcon, ChatAvatar, CountBadge, ServerGlyph, shortStamp, useDismiss } from './ui'
 import { MenuItem } from './SidePanels'
 
-function RailButton({ label, active, unread, mentions, onClick, children }: {
+// Minimal cursor-positioned menu for the single pin/unpin action, used from a
+// right-click on a server rail icon or a DM row. Mirrors PlaylistContextMenu's
+// portal + fixed-position + clamp-on-mount approach at a much smaller scale.
+function PinMenu({ x, y, pinned, label, onToggle, onClose }: {
+  x: number
+  y: number
+  pinned: boolean
+  label: string
+  onToggle: () => void
+  onClose: () => void
+}): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: x, top: y })
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    setPos({
+      left: Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)),
+    })
+  }, [x, y])
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
+      <div
+        ref={ref}
+        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[180px] overflow-hidden"
+        style={{ left: pos.left, top: pos.top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={() => { onToggle(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
+        >
+          {pinned ? <PinOff size={14} className="text-text-muted" /> : <Pin size={14} className="text-text-muted" />}
+          <span className="flex-1 text-left">{pinned ? `Unpin ${label}` : `Pin ${label}`}</span>
+        </button>
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+function RailButton({ label, active, unread, mentions, pinned, onClick, onContextMenu, children }: {
   label: string
   active: boolean
   unread?: boolean
   mentions?: number
+  pinned?: boolean
   onClick: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
   children: React.ReactNode
 }): JSX.Element {
   return (
@@ -21,8 +76,13 @@ function RailButton({ label, active, unread, mentions, onClick, children }: {
           active ? 'h-10' : unread ? 'h-2 group-hover:h-5' : 'h-0 group-hover:h-5'
         }`}
       />
-      <button onClick={onClick} title={label} aria-label={label} className="relative">
+      <button onClick={onClick} onContextMenu={onContextMenu} title={label} aria-label={label} className="relative">
         {children}
+        {pinned && (
+          <span className="absolute -top-1 -left-1 w-3.5 h-3.5 rounded-full bg-surface-raised ring-[3px] ring-[var(--chat-rail)] flex items-center justify-center text-text-secondary">
+            <Pin size={8} />
+          </span>
+        )}
         {!!mentions && (
           <span className="absolute -bottom-1 -right-1 ring-[3px] ring-[var(--chat-rail)] rounded-full">
             <CountBadge count={mentions} mention />
@@ -40,9 +100,16 @@ export function ServerRail(): JSX.Element {
   const unread = useChatStore((s) => s.unread)
   const mentions = useChatStore((s) => s.mentions)
   const conversations = useChatStore((s) => s.conversations)
+  const pinnedServers = useChatStore((s) => s.pinnedServers)
+  const togglePinServer = useChatStore((s) => s.togglePinServer)
   const openModal = useOpenModal()
+  const [ctxMenu, setCtxMenu] = useState<{ serverId: number; x: number; y: number } | null>(null)
 
   const dmUnread = conversations.reduce((n, c) => n + (unread[`d:${c.id}`] ?? 0), 0)
+  const orderedServers = useMemo(
+    () => [...servers].sort((a, b) => Number(pinnedServers.includes(b.id)) - Number(pinnedServers.includes(a.id))),
+    [servers, pinnedServers],
+  )
 
   return (
     <nav className="w-[72px] shrink-0 flex flex-col items-center gap-2 py-3 bg-[var(--chat-rail)] border-r border-[var(--border)] overflow-y-auto no-scrollbar" style={{ ['--chat-ring' as string]: 'var(--chat-rail)' }}>
@@ -54,12 +121,21 @@ export function ServerRail(): JSX.Element {
         </span>
       </RailButton>
       <span className="w-8 h-px bg-[var(--border)] my-0.5" />
-      {servers.map((server) => {
+      {orderedServers.map((server) => {
         const keys = server.channels.map((c) => `c:${c.id}`)
         const hasUnread = keys.some((k) => (unread[k] ?? 0) > 0)
         const mentionCount = keys.reduce((n, k) => n + (mentions[k] ?? 0), 0)
         return (
-          <RailButton key={server.id} label={server.name} active={activeServerId === server.id} unread={hasUnread} mentions={mentionCount} onClick={() => selectServer(server.id)}>
+          <RailButton
+            key={server.id}
+            label={server.name}
+            active={activeServerId === server.id}
+            unread={hasUnread}
+            mentions={mentionCount}
+            pinned={pinnedServers.includes(server.id)}
+            onClick={() => selectServer(server.id)}
+            onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ serverId: server.id, x: e.clientX, y: e.clientY }) }}
+          >
             <ServerGlyph server={server} active={activeServerId === server.id} />
           </RailButton>
         )
@@ -69,6 +145,16 @@ export function ServerRail(): JSX.Element {
           <Plus size={22} />
         </span>
       </RailButton>
+      {ctxMenu && (
+        <PinMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          pinned={pinnedServers.includes(ctxMenu.serverId)}
+          label="server"
+          onToggle={() => togglePinServer(ctxMenu.serverId)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </nav>
   )
 }
@@ -215,7 +301,12 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   )
 }
 
-function DmRow({ conv, onPicked }: { conv: Conversation; onPicked?: () => void }): JSX.Element {
+function DmRow({ conv, pinned, onPicked, onContextMenu }: {
+  conv: Conversation
+  pinned: boolean
+  onPicked?: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const active = useChatStore((s) => s.active)
   const openRoom = useChatStore((s) => s.openRoom)
@@ -238,6 +329,7 @@ function DmRow({ conv, onPicked }: { conv: Conversation; onPicked?: () => void }
   return (
     <button
       onClick={() => { openRoom({ kind: 'conversation', id: conv.id }); onPicked?.() }}
+      onContextMenu={onContextMenu}
       className={`w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${isActive ? 'bg-surface-highest' : 'hover:bg-surface-raised/70'}`}
     >
       {conv.is_group || others.length !== 1 ? (
@@ -251,6 +343,7 @@ function DmRow({ conv, onPicked }: { conv: Conversation; onPicked?: () => void }
       )}
       <span className="flex-1 min-w-0">
         <span className="flex items-baseline gap-2">
+          {pinned && <Pin size={11} className="shrink-0 text-text-muted" />}
           <span className={`flex-1 min-w-0 truncate text-[15px] md:text-sm ${count > 0 ? 'font-bold text-text-primary' : 'font-medium text-text-primary'}`}>{conversationTitle(conv, meId)}</span>
           {last && <span className="text-[10px] text-text-muted shrink-0">{shortStamp(last.created_at)}</span>}
         </span>
@@ -269,8 +362,11 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
   const conversations = useChatStore((s) => s.conversations)
   const lastMessage = useChatStore((s) => s.lastMessage)
   const meId = useChatStore((s) => s.meId)
+  const pinnedConversations = useChatStore((s) => s.pinnedConversations)
+  const togglePinConversation = useChatStore((s) => s.togglePinConversation)
   const openModal = useOpenModal()
   const [query, setQuery] = useState('')
+  const [ctxMenu, setCtxMenu] = useState<{ convId: number; x: number; y: number } | null>(null)
 
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -278,11 +374,14 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
       .filter((c) => !q || conversationTitle(c, meId).toLowerCase().includes(q))
       .slice()
       .sort((a, b) => {
+        const pinDiff = Number(pinnedConversations.includes(b.id)) - Number(pinnedConversations.includes(a.id))
+        if (pinDiff !== 0) return pinDiff
         const la = lastMessage[`d:${a.id}`]?.created_at ?? a.updated_at
         const lb = lastMessage[`d:${b.id}`]?.created_at ?? b.updated_at
         return lb.localeCompare(la)
       })
-  }, [conversations, lastMessage, query, meId])
+  }, [conversations, lastMessage, query, meId, pinnedConversations])
+  const pinnedCount = sorted.filter((c) => pinnedConversations.includes(c.id)).length
 
   return (
     <div className="flex-1 min-h-0 flex flex-col" style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
@@ -301,7 +400,22 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
         />
       </div>
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-0.5">
-        {sorted.map((c) => <DmRow key={c.id} conv={c} onPicked={onPicked} />)}
+        {pinnedCount > 0 && (
+          <div className="px-2 pt-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">Pinned</div>
+        )}
+        {sorted.map((c, i) => (
+          <div key={c.id}>
+            {i === pinnedCount && pinnedCount > 0 && (
+              <div className="px-2 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">All chats</div>
+            )}
+            <DmRow
+              conv={c}
+              pinned={pinnedConversations.includes(c.id)}
+              onPicked={onPicked}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ convId: c.id, x: e.clientX, y: e.clientY }) }}
+            />
+          </div>
+        ))}
         {conversations.length === 0 && (
           <div className="px-4 py-10 text-center">
             <span className="mx-auto w-12 h-12 rounded-2xl bg-accent/15 text-accent flex items-center justify-center mb-3"><ShieldCheck size={22} /></span>

@@ -499,8 +499,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         meId: account.id,
         me: { id: account.id, username: account.discord_username, display_name: account.display_name, avatar: account.avatar ?? account.discord_avatar, role: account.is_administrator ? 'administrator' : 'manager' },
         lastRead: loadLastRead(account.id),
-        ...loadPinned(account.id),
       })
+      const pinned = loadPinned(account.id)
+      set({ pinnedServers: pinned.servers, pinnedConversations: pinned.conversations })
       socket = new ChatSocket(
         (ev) => {
           if (ev.type === 'connected') set({ meId: ev.user_id })
@@ -557,7 +558,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       lastRoomBySpace.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
-        servers: [], members: {}, conversations: [], activeServerId: null, active: null,
+        servers: [], members: {}, conversations: [], pinnedServers: [], pinnedConversations: [], activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, keyState: {}, plain: {},
       })
@@ -595,6 +596,26 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (target != null) get().openRoom({ kind: 'channel', id: target })
       else set({ active: null })
       void get().loadMembers(id)
+    },
+
+    togglePinServer: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const pinnedServers = s.pinnedServers.includes(id) ? s.pinnedServers.filter((x) => x !== id) : [...s.pinnedServers, id]
+        savePinned(meId, { servers: pinnedServers, conversations: s.pinnedConversations })
+        return { pinnedServers }
+      })
+    },
+
+    togglePinConversation: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const pinnedConversations = s.pinnedConversations.includes(id) ? s.pinnedConversations.filter((x) => x !== id) : [...s.pinnedConversations, id]
+        savePinned(meId, { servers: s.pinnedServers, conversations: pinnedConversations })
+        return { pinnedConversations }
+      })
     },
 
     openRoom: (room) => {
