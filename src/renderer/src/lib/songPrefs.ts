@@ -69,6 +69,16 @@ export function hasAnyDefaultVersion(): boolean {
   return false
 }
 
+/** True if any song has excluded versions set. Same purpose as
+ *  hasAnyDefaultVersion - skip the version-group lookup entirely when nobody
+ *  has excluded anything. */
+export function hasAnyExcludedVersion(): boolean {
+  for (const songId in _prefs) {
+    if (_prefs[songId].excluded_versions?.length) return true
+  }
+  return false
+}
+
 /** A row with no overrides yet, so callers can patch a song that has no
  *  preferences without repeating the defaults. */
 export function emptySongPref(songId: number): SongPreference {
