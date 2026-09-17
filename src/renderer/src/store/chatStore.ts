@@ -347,9 +347,19 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
-      case 'message.created':
+      case 'message.created': {
+        // The socket has no "conversation created" push - a brand-new DM only
+        // ever surfaces as a message event, so a first-time recipient has no
+        // local record of the conversation to hang it on. Backfill it here.
+        const convId = ev.message.conversation
+        if (convId != null && !s.conversations.some((c) => c.id === convId)) {
+          void api.getConversation(convId)
+            .then((conv) => set((st) => st.conversations.some((c) => c.id === conv.id) ? {} : { conversations: [conv, ...st.conversations] }))
+            .catch(() => undefined)
+        }
         applyMessage(ev.message, true)
         return
+      }
       case 'message.updated':
       case 'message.pinned':
       case 'message.unpinned':
