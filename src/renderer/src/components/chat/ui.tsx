@@ -70,7 +70,7 @@ export function ChatAvatar({ user, size = 36, presence, className = '', onClick 
   const hue = hueFor(user.id)
   return (
     <span
-      className={`relative inline-flex shrink-0 ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      className={`relative inline-flex shrink-0 rounded-full ${onClick ? 'cursor-pointer' : ''} ${className}`}
       style={{ width: size, height: size }}
       onClick={onClick}
     >
