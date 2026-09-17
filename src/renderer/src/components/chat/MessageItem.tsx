@@ -11,7 +11,8 @@ import AttachmentList from './AttachmentView'
 import MessageBody from './MessageBody'
 import MessageContextMenu from './MessageContextMenu'
 import ReactionPicker from './ReactionPicker'
-import { QUICK_REACTIONS, emojiGlyph, quickReactions, rememberEmoji } from './emoji'
+import EmojiImg from './EmojiImg'
+import { QUICK_REACTIONS, quickReactions, rememberEmoji } from './emoji'
 import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
 
 export interface MessageItemProps {
@@ -262,7 +263,7 @@ function MessageItem({
                     : 'border-[var(--border)] bg-surface-raised/60 text-text-secondary hover:border-text-muted'
                 }`}
               >
-                <span className="text-sm leading-none">{emojiGlyph(r.emoji)}</span>
+                <EmojiImg name={r.emoji} className="h-3.5 w-3.5" />
                 <span className="tabular-nums font-semibold">{r.count}</span>
               </button>
             ))}
@@ -303,8 +304,8 @@ function MessageItem({
       {!pending && !deleted && !editing && !isMobile && (
         <div className="absolute -top-3 right-4 z-10 hidden group-hover:flex items-center gap-0.5 rounded-xl border border-[var(--border)] bg-surface shadow-lg p-0.5">
           {quickReactions(3).map((name) => (
-            <button key={name} onClick={() => react(name)} title={`:${name}:`} className="w-8 h-8 rounded-lg text-base hover:bg-surface-overlay hover:scale-110 transition">
-              {emojiGlyph(name)}
+            <button key={name} onClick={() => react(name)} title={`:${name}:`} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition">
+              <EmojiImg name={name} className="h-5 w-5" />
             </button>
           ))}
           <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
@@ -349,8 +350,8 @@ function MessageItem({
         <ActionSheet onClose={() => setSheet(false)}>
           <div className="flex justify-between px-1 pb-2">
             {QUICK_REACTIONS.map((name) => (
-              <button key={name} onClick={() => { react(name); setSheet(false) }} className="w-12 h-12 rounded-full bg-surface-raised text-2xl active:scale-95 transition">
-                {emojiGlyph(name)}
+              <button key={name} onClick={() => { react(name); setSheet(false) }} className="w-12 h-12 rounded-full bg-surface-raised flex items-center justify-center active:scale-95 transition">
+                <EmojiImg name={name} className="h-7 w-7" />
               </button>
             ))}
           </div>

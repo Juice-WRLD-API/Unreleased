@@ -2,7 +2,8 @@ import { useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { CornerUpLeft, Copy, MessageSquareReply, Pencil, Pin, PinOff, SmilePlus, Trash2 } from 'lucide-react'
 import { ClampedMenu } from '../ClampedMenu'
-import { emojiGlyph, quickReactions } from './emoji'
+import EmojiImg from './EmojiImg'
+import { quickReactions } from './emoji'
 import { useDismiss } from './ui'
 
 function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }): JSX.Element {
@@ -52,9 +53,9 @@ export default function MessageContextMenu({
             key={name}
             onClick={act(() => onReact(name))}
             title={`:${name}:`}
-            className="w-8 h-8 rounded-lg text-base flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
           >
-            {emojiGlyph(name)}
+            <EmojiImg name={name} className="h-5 w-5" />
           </button>
         ))}
         <button

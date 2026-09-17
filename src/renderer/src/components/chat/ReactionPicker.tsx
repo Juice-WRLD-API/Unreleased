@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ClampedMenu } from '../ClampedMenu'
-import { PICKER_GROUPS, emojiGlyph, recentEmoji, rememberEmoji } from './emoji'
+import EmojiImg from './EmojiImg'
+import { PICKER_GROUPS, recentEmoji, rememberEmoji } from './emoji'
 import { useDismiss } from './ui'
 
 export default function ReactionPicker({ x, y, onPick, onClose }: {
@@ -54,9 +55,9 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
                   key={`${g.label}-${name}`}
                   onClick={() => pick(name)}
                   onMouseEnter={() => setHover(name)}
-                  className="h-8 rounded-lg text-xl leading-none flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
+                  className="h-8 rounded-lg flex items-center justify-center hover:bg-surface-overlay hover:scale-110 transition"
                 >
-                  {emojiGlyph(name)}
+                  <EmojiImg name={name} className="h-5 w-5" />
                 </button>
               ))}
             </div>
@@ -67,7 +68,7 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
         )}
       </div>
       <div className="h-8 px-3 flex items-center gap-2 border-t border-[var(--border)] text-xs text-text-muted">
-        {hover ? <><span className="text-base">{emojiGlyph(hover)}</span><span>:{hover}:</span></> : 'Pick a reaction'}
+        {hover ? <><EmojiImg name={hover} className="h-4 w-4" /><span>:{hover}:</span></> : 'Pick a reaction'}
       </div>
     </ClampedMenu>,
     document.body,
