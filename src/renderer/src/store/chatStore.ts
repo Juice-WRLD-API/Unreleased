@@ -644,7 +644,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       get().teardown()
       set({
         meId: account.id,
-        me: { id: account.id, username: account.discord_username || account.username || '', display_name: account.display_name, avatar: account.avatar ?? account.discord_avatar, role: account.is_administrator ? 'administrator' : 'manager' },
+        me: { id: account.id, username: account.discord_username || account.username || account.display_name || '', display_name: account.display_name, avatar: account.avatar ?? account.discord_avatar, role: account.is_administrator ? 'administrator' : 'manager' },
         lastRead: loadLastRead(account.id),
       })
       const pinned = loadPinned(account.id)
