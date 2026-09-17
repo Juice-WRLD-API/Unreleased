@@ -37,11 +37,28 @@ export function useStaffDirectory(): ChatUserBrief[] {
   }, [members, conversations, meId])
 }
 
-const MENTION_RE = /(^|[\s(])@([A-Za-z0-9_.-]{2,32})/g
+// A fixed [A-Za-z0-9_.-] charset silently failed to re-match usernames that
+// contain anything outside it (accented letters, apostrophes, etc.) - those
+// people could be picked from the @ autocomplete but the inserted text never
+// turned into a real mention. Match against the *actual* known usernames
+// instead, so any username works regardless of what characters it contains.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function mentionRegex(people: ChatUserBrief[]): RegExp | null {
+  const usernames = [...new Set(people.map((p) => p.username).filter(Boolean))]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+  if (!usernames.length) return null
+  return new RegExp(`(^|[\\s(])@(${usernames.join('|')})(?=[^\\w]|$)`, 'gi')
+}
 
 export function mentionIdsIn(text: string, people: ChatUserBrief[]): number[] {
+  const re = mentionRegex(people)
+  if (!re) return []
   const ids = new Set<number>()
-  for (const match of text.matchAll(MENTION_RE)) {
+  for (const match of text.matchAll(re)) {
     const handle = match[2].toLowerCase()
     const user = people.find((p) => p.username.toLowerCase() === handle)
     if (user) ids.add(user.id)
@@ -50,8 +67,9 @@ export function mentionIdsIn(text: string, people: ChatUserBrief[]): number[] {
 }
 
 export function linkMentions(text: string, people: ChatUserBrief[]): string {
-  if (!people.length || !text.includes('@')) return text
-  return text.replace(MENTION_RE, (whole, lead: string, handle: string) => {
+  const re = mentionRegex(people)
+  if (!re || !text.includes('@')) return text
+  return text.replace(re, (whole, lead: string, handle: string) => {
     const user = people.find((p) => p.username.toLowerCase() === handle.toLowerCase())
     return user ? `${lead}[@${user.display_name || user.username}](mention:${user.id})` : whole
   })
