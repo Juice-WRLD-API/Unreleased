@@ -54,6 +54,31 @@ function commitHash() {
   }
 }
 
+// The branch this build was made from, so the running app can check its own
+// COMMIT_HASH against *that* branch's tip on GitHub instead of a hardcoded
+// guess - a build made from `web-dev` has no reason to ever match `web`'s
+// latest commit, and comparing against the wrong branch makes the About
+// page's freshness indicator permanently wrong for anyone not on the one
+// branch that was hardcoded.
+function branchName() {
+  const envBranch =
+    process.env.BRANCH_NAME ||
+    process.env.CF_PAGES_BRANCH ||
+    process.env.VERCEL_GIT_COMMIT_REF ||
+    process.env.GITHUB_REF_NAME
+  if (envBranch) return envBranch
+
+  try {
+    const gitDir = resolveGitDir(__dirname)
+    if (!gitDir) return 'unknown'
+    const head = readFileSync(resolve(gitDir, 'HEAD'), 'utf-8').trim()
+    if (head.startsWith('ref:')) return head.slice(4).trim().replace(/^refs\/heads\//, '')
+    return 'unknown' // detached HEAD - no branch to compare against
+  } catch {
+    return 'unknown'
+  }
+}
+
 // The production CSP (style-src 'self', see index.html) blocks the inline
 // <style> tags Vite's dev server injects for HMR, so every view renders
 // unstyled under `npm run dev`. The meta tag is only meaningful in the built
@@ -76,6 +101,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')).version),
     __COMMIT_HASH__: JSON.stringify(commitHash()),
+    __BRANCH_NAME__: JSON.stringify(branchName()),
   },
   build: {
     outDir: resolve(__dirname, 'dist'),

@@ -16,9 +16,13 @@ export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSIO
 // undefined-guard as APP_VERSION above, for the same reason.
 export const COMMIT_HASH = typeof __COMMIT_HASH__ !== 'undefined' ? __COMMIT_HASH__ : 'dev'
 
-// The branch the web player is deployed from - what "latest" means for the
-// commit-freshness check below.
-const DEPLOY_BRANCH = 'web'
+// The branch this build was actually made from, read from the
+// `__BRANCH_NAME__` build-time define in vite.config.ts - what "latest"
+// means for the commit-freshness check below. A hardcoded branch here would
+// be wrong for anyone not building from that exact branch (a `web-dev`
+// build, say, has no reason to ever match `web`'s tip), which is what made
+// the freshness bulb read permanently red regardless of actual freshness.
+const BUILD_BRANCH = typeof __BRANCH_NAME__ !== 'undefined' ? __BRANCH_NAME__ : 'unknown'
 const REPO = 'Juice-WRLD-API/Unreleased'
 
 // 'error' covers both a rate-limited response (403/429 - GitHub's
@@ -44,7 +48,7 @@ function useCommitFreshness(): [CommitFreshness, () => void] {
   const [nonce, setNonce] = useState(0)
 
   useEffect(() => {
-    if (COMMIT_HASH === 'dev' || COMMIT_HASH === 'unknown') {
+    if (COMMIT_HASH === 'dev' || COMMIT_HASH === 'unknown' || BUILD_BRANCH === 'unknown') {
       setFreshness('unknown')
       return
     }
@@ -54,7 +58,7 @@ function useCommitFreshness(): [CommitFreshness, () => void] {
     }
     setFreshness('checking')
     let cancelled = false
-    fetch(`https://api.github.com/repos/${REPO}/commits/${DEPLOY_BRANCH}`, {
+    fetch(`https://api.github.com/repos/${REPO}/commits/${BUILD_BRANCH}`, {
       headers: { Accept: 'application/vnd.github+json' },
       // Our own `cached` module var already governs staleness (see CACHE_MS
       // above) - the browser's HTTP cache doing the same thing underneath it
