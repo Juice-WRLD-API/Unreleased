@@ -224,7 +224,6 @@ export default function RoomPane({ room, header, enterSends = true }: {
         room={room}
         people={people}
         placeholder={replyTo ? `Reply to ${displayName(replyTo.author)}` : room.kind === 'channel' ? `Message #${info.title}` : `Message ${info.title}`}
-        parent={replyTo?.id ?? null}
         replyTo={replyTo}
         onCancelReply={() => setReplyTo(null)}
         disabledReason={disabledReason}

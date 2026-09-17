@@ -161,8 +161,16 @@ const Composer = forwardRef<ComposerHandle, {
 
   const submit = (): void => {
     if (disabledReason) return
-    const body = text.trim()
+    let body = text.trim()
     if (!body && files.length === 0) return
+    // Plain "Reply" (as opposed to replying inside a thread, which never sets
+    // `replyTo`) posts a normal message in the room - it isn't threaded, so
+    // the original message is quoted inline to keep the context visible.
+    if (replyTo) {
+      const quoted = (replyPreview || (replyTo.attachments.length ? 'Attachment' : '')).split('\n')[0].slice(0, 140)
+      const quoteLine = `> **${displayName(replyTo.author)}:** ${quoted || '…'}`
+      body = body ? `${quoteLine}\n${body}` : quoteLine
+    }
     const outgoing = files.map((f) => f.file)
     files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
     setText('')
