@@ -769,7 +769,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       set((s) => ({
         servers,
         conversations,
-        online: online ? Object.fromEntries(online.map((id) => [id, true as const])) : s.online,
+        // Once the socket is open, presence.snapshot/presence.update keep `online`
+        // current; overwriting it here with a REST snapshot that can race those
+        // live events wipes users who are actually online and flaps the UI.
+        online: online && s.status !== 'open' ? Object.fromEntries(online.map((id) => [id, true as const])) : s.online,
       }))
     },
 
