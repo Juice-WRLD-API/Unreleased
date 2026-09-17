@@ -385,6 +385,7 @@ export default function PublicProfileView(): JSX.Element {
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
+          <p className="text-text-muted text-sm truncate">@{profile.username}</p>
           {(profile.is_editor || profile.is_contributor) && (
             <div className="flex items-center gap-2 mt-1">
               {profile.is_editor && (

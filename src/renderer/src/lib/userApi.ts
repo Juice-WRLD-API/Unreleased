@@ -155,6 +155,7 @@ export interface PlaylistDetail {
 
 export interface PublicProfile {
   id: number
+  username: string
   display_name: string
   avatar: string
   bio: string

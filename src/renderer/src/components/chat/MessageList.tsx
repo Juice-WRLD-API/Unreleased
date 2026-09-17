@@ -30,10 +30,16 @@ function NewDivider(): JSX.Element {
 }
 
 function SeenBy({ users }: { users: ChatUserBrief[] }): JSX.Element {
+  // Every message row (avatar + name + body) is left-aligned, not bubble-
+  // style per-sender, so this indents to line up under the message text
+  // instead of floating on the opposite side of the room.
   return (
-    <div className="flex justify-end items-center gap-1 px-5 pt-1" title={`Seen by ${users.map((u) => u.display_name || u.username).join(', ')}`}>
-      {users.slice(0, 5).map((u) => <ChatAvatar key={u.id} user={u} size={14} />)}
-      {users.length > 5 && <span className="text-[10px] text-text-muted">+{users.length - 5}</span>}
+    <div className="flex gap-3 px-4 md:px-5 pt-1" title={`Seen by ${users.map((u) => u.display_name || u.username).join(', ')}`}>
+      <span className="w-9 shrink-0" />
+      <div className="flex items-center gap-1">
+        {users.slice(0, 5).map((u) => <ChatAvatar key={u.id} user={u} size={14} />)}
+        {users.length > 5 && <span className="text-[10px] text-text-muted">+{users.length - 5}</span>}
+      </div>
     </div>
   )
 }

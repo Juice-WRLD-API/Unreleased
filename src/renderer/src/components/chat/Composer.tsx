@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { CornerUpLeft, FileText, Lock, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import { CornerUpLeft, FileText, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
@@ -418,15 +418,6 @@ const Composer = forwardRef<ComposerHandle, {
           </button>
         </div>
       </div>
-
-      {!compact && (
-        <div className="hidden md:flex items-center justify-between px-2 pt-1.5 text-[10px] text-text-muted select-none">
-          <span>
-            <kbd className="font-sans">Enter</kbd> to send · <kbd className="font-sans">Shift+Enter</kbd> for a new line · <kbd className="font-sans">↑</kbd> to edit
-          </span>
-          {encrypted && <span className="inline-flex items-center gap-1"><Lock size={10} />End-to-end encrypted</span>}
-        </div>
-      )}
 
       {emojiAt && (
         <ReactionPicker x={emojiAt.x} y={emojiAt.y} onPick={(name) => insertAtCaret(emojiGlyph(name))} onClose={() => setEmojiAt(null)} />
