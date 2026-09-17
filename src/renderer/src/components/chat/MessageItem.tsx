@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertCircle, CornerDownRight, CornerUpLeft, Copy, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
+  AlertCircle, CornerDownRight, CornerUpLeft, Copy, Forward, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
@@ -10,6 +10,7 @@ import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, useChatStore, useMessageById, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import AttachmentList, { kindOf } from './AttachmentView'
+import ForwardMessageModal from './ForwardMessageModal'
 import MessageBody from './MessageBody'
 import MessageContextMenu from './MessageContextMenu'
 import ReactionPicker from './ReactionPicker'
@@ -253,6 +254,7 @@ function MessageItem({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [sheet, setSheet] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [forwarding, setForwarding] = useState(false)
   const pressTimer = useRef<number | null>(null)
 
   const mine = message.author.id === meId
@@ -266,6 +268,7 @@ function MessageItem({
   const canCopy = !deleted && !!plainText
   const imageAttachment = !deleted ? message.attachments.find((a) => kindOf(a.mime, a.name) === 'image') : undefined
   const canCopyImage = !!imageAttachment
+  const canForward = !pending && !deleted && (!!bodyText || message.attachments.length > 0)
 
   const run = (fn: () => Promise<unknown>, failure: string) => {
     fn().catch((err) => toast(errorText(err, failure)))
@@ -504,6 +507,8 @@ function MessageItem({
           onCopy={() => { void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }}
           canCopyImage={canCopyImage}
           onCopyImage={() => run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image')}
+          canForward={canForward}
+          onForward={() => setForwarding(true)}
           canDelete={canDelete}
           onDelete={() => setConfirmDelete(true)}
         />
@@ -524,9 +529,12 @@ function MessageItem({
           {canPin && <SheetRow icon={message.pinned ? <PinOff size={18} /> : <Pin size={18} />} label={message.pinned ? 'Unpin' : 'Pin message'} onClick={() => { setSheet(false); run(() => togglePin(message), 'Could not update pin') }} />}
           {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }} />}
           {canCopyImage && <SheetRow icon={<ImageIcon size={18} />} label="Copy image" onClick={() => { setSheet(false); run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image') }} />}
+          {canForward && <SheetRow icon={<Forward size={18} />} label="Forward message" onClick={() => { setSheet(false); setForwarding(true) }} />}
           {canDelete && <SheetRow icon={<Trash2 size={18} />} label="Delete message" danger onClick={() => { setSheet(false); setConfirmDelete(true) }} />}
         </ActionSheet>
       )}
+
+      {forwarding && <ForwardMessageModal message={message} bodyText={bodyText} onClose={() => setForwarding(false)} />}
 
       {confirmDelete && (
         <ConfirmDialog
