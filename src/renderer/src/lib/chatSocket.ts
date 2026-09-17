@@ -29,6 +29,7 @@ export type SocketStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'un
 
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000]
 const PING_MS = 25_000
+const PONG_TIMEOUT_MS = 10_000
 const UNAUTHORIZED = 4401
 
 function wsUrl(token: string): string {
@@ -44,6 +45,7 @@ export class ChatSocket {
   private attempt = 0
   private retryTimer: number | null = null
   private pingTimer: number | null = null
+  private pongTimer: number | null = null
   private disposed = true
   private readonly onVisible = () => {
     if (document.visibilityState === 'visible') this.checkHealth()
@@ -114,7 +116,12 @@ export class ChatSocket {
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return
       try {
-        this.onEvent(JSON.parse(ev.data as string) as ChatEvent)
+        const parsed = JSON.parse(ev.data as string) as ChatEvent
+        if (parsed.type === 'pong' && this.pongTimer !== null) {
+          window.clearTimeout(this.pongTimer)
+          this.pongTimer = null
+        }
+        this.onEvent(parsed)
       } catch (err) {
         console.warn('[chat] bad frame', err)
       }
@@ -141,13 +148,26 @@ export class ChatSocket {
 
   private startPing(): void {
     this.stopPing()
-    this.pingTimer = window.setInterval(() => this.send({ type: 'ping' }), PING_MS)
+    this.pingTimer = window.setInterval(() => {
+      if (!this.send({ type: 'ping' })) return
+      // A dead-but-not-closed TCP connection (sleep/wake, network switch, an
+      // idle-killing proxy) leaves readyState stuck at OPEN forever - no
+      // close/error event ever fires, so nothing else here would notice the
+      // socket is a zombie. An unanswered ping is the only signal we get;
+      // force-closing on timeout hands off to the normal reconnect path.
+      if (this.pongTimer !== null) window.clearTimeout(this.pongTimer)
+      this.pongTimer = window.setTimeout(() => this.ws?.close(), PONG_TIMEOUT_MS)
+    }, PING_MS)
   }
 
   private stopPing(): void {
     if (this.pingTimer !== null) {
       window.clearInterval(this.pingTimer)
       this.pingTimer = null
+    }
+    if (this.pongTimer !== null) {
+      window.clearTimeout(this.pongTimer)
+      this.pongTimer = null
     }
   }
 
