@@ -24,10 +24,16 @@ function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }:
   hasAttachment: boolean
   people: ChatUserBrief[]
 }): JSX.Element {
+  // authorId/name/snippet ride in the message body, so any sender can forge
+  // them to make a reply bar look like a quote from someone else. Only the
+  // live message (fetched independently, not trusted from this payload) can
+  // confirm who actually said what - without it, show a neutral placeholder
+  // instead of attributing unverified text to a specific person.
   const live = useMessageById(replyToId)
-  const author = live?.author ?? people.find((p) => p.id === authorId)
+  const verified = !!live
+  const author = live?.author
   const deleted = !!live?.deleted_at
-  const preview = deleted ? 'Original message was deleted' : (snippet || (hasAttachment ? 'Attachment' : ''))
+  const preview = deleted ? 'Original message was deleted' : verified ? (snippet || (hasAttachment ? 'Attachment' : '')) : 'Original message'
   return (
     <button
       onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('chat:jump', { detail: replyToId })) }}
@@ -35,9 +41,11 @@ function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }:
     >
       <CornerUpLeft size={12} className="shrink-0 opacity-70" />
       {author && <ChatAvatar user={author} size={14} />}
-      <span className={`shrink-0 font-semibold ${deleted ? 'italic text-text-muted' : 'text-text-secondary group-hover/reply:text-text-primary'}`}>
-        {deleted ? 'Unknown' : (author ? displayName(author) : name)}
-      </span>
+      {verified && (
+        <span className={`shrink-0 font-semibold ${deleted ? 'italic text-text-muted' : 'text-text-secondary group-hover/reply:text-text-primary'}`}>
+          {deleted ? 'Unknown' : (author ? displayName(author) : name)}
+        </span>
+      )}
       <span className="min-w-0 truncate">{preview || '…'}</span>
     </button>
   )

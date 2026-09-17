@@ -165,6 +165,9 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   const copyShare = async (): Promise<void> => {
+    if (!playlist.is_public) {
+      if (!window.confirm('This playlist is private. Copying a share link will make it public so anyone with the link can open it. Continue?')) return
+    }
     try {
       if (!playlist.is_public) {
         await userApi.updatePlaylist(playlist.id, { is_public: true })
@@ -178,13 +181,14 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   const shareToChat = async (): Promise<void> => {
-    try {
-      if (!playlist.is_public) {
+    if (!playlist.is_public) {
+      if (!window.confirm('This playlist is private. Sharing it to chat will make it public so recipients can open it. Continue?')) return
+      try {
         await userApi.updatePlaylist(playlist.id, { is_public: true })
         setPlaylist(p => ({ ...p, is_public: true }))
         await refreshPlaylists()
-      }
-    } catch {}
+      } catch { return }
+    }
     setShareToChatOpen(true)
   }
 
