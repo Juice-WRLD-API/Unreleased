@@ -65,6 +65,21 @@ function saveLastRead(userId: number, map: Record<string, number>): void {
   try { localStorage.setItem(`unreleased:chat:lastRead:${userId}`, JSON.stringify(map)) } catch {}
 }
 
+interface PinnedIds { servers: number[]; conversations: number[] }
+
+function loadPinned(userId: number): PinnedIds {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:pinned:${userId}`) ?? '{}') as Partial<PinnedIds>
+    return { servers: raw.servers ?? [], conversations: raw.conversations ?? [] }
+  } catch {
+    return { servers: [], conversations: [] }
+  }
+}
+
+function savePinned(userId: number, pinned: PinnedIds): void {
+  try { localStorage.setItem(`unreleased:chat:pinned:${userId}`, JSON.stringify(pinned)) } catch {}
+}
+
 async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let i = 0
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -94,6 +109,8 @@ interface ChatState {
   servers: ChatServer[]
   members: Record<number, ChatMember[]>
   conversations: Conversation[]
+  pinnedServers: number[]
+  pinnedConversations: number[]
 
   activeServerId: number | null
   active: RoomRef | null
@@ -118,6 +135,8 @@ interface ChatState {
   refreshLists: () => Promise<void>
 
   selectServer: (id: number | null) => void
+  togglePinServer: (id: number) => void
+  togglePinConversation: (id: number) => void
   openRoom: (room: RoomRef) => void
   loadOlder: (room: RoomRef) => Promise<void>
   setPanel: (panel: 'members' | 'pins' | null) => void
@@ -455,6 +474,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     servers: [],
     members: {},
     conversations: [],
+    pinnedServers: [],
+    pinnedConversations: [],
     activeServerId: null,
     active: null,
     threadRootId: null,
@@ -478,6 +499,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         meId: account.id,
         me: { id: account.id, username: account.discord_username, display_name: account.display_name, avatar: account.avatar ?? account.discord_avatar, role: account.is_administrator ? 'administrator' : 'manager' },
         lastRead: loadLastRead(account.id),
+        ...loadPinned(account.id),
       })
       socket = new ChatSocket(
         (ev) => {
