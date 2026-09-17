@@ -39,7 +39,11 @@
          lists every host the renderer actually calls: the API, its
          match-play websocket, Last.fm scrobbling, the two lyrics CORS
          proxies (see EditorPage.tsx), and Cloudflare's beacon report
-         endpoint. -->
+         endpoint - plus data:/blob:, since fetch() (unlike a plain <img> src)
+         is governed by connect-src even for those schemes, and coverImage.ts
+         (copy/save cover, and ShareLyricsModal's export) fetches a cover's
+         own data:/blob: URL right back out to get bytes it can embed, not to
+         reach any actual network origin. -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
       script-src 'self' 'wasm-unsafe-eval' 'sha256-xjpTVCo7o4K9QG8ZmAgfjVUbc2OdYbdKgT/ClSf5AWE=' 'sha256-b1jw+VU6Z+2+MRzlWRKIER82x08obZjR7Y3a9A7hu74=' 'sha256-DalSI+ICv7kcV+43N8QN6XuXql+ZJwy3Yj2YOF8AtBA=' https://static.cloudflareinsights.com;
@@ -47,7 +51,7 @@
       img-src 'self' data: blob: local-media: https:;
       media-src 'self' blob: local-media: https:;
       font-src 'self';
-      connect-src 'self' https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com https://cloudflareinsights.com local-media:;
+      connect-src 'self' data: blob: https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com https://cloudflareinsights.com local-media:;
       worker-src 'self';
       object-src 'none';
       base-uri 'self';

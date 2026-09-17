@@ -6,8 +6,11 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
-import { getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying } from '../lib/userApi'
-import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState } from '../lib/userApi'
+import {
+  getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
+  adminGetUser, adminUpdateUser,
+} from '../lib/userApi'
+import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser } from '../lib/userApi'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -160,8 +163,14 @@ export default function PublicProfileView(): JSX.Element {
   const [trackMenu, setTrackMenu] = useState<SongContextMenuState | null>(null)
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistMenuState | null>(null)
 
+  const [adminOpen, setAdminOpen] = useState(false)
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminActionLoading, setAdminActionLoading] = useState(false)
+
   const isOwnProfile = !!account && !!profile && account.id === profile.id
   const isMuted = !!profile && mutedUserIds.includes(profile.id)
+  const isAdmin = !!account?.is_administrator
 
   useEffect(() => {
     if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
@@ -170,6 +179,29 @@ export default function PublicProfileView(): JSX.Element {
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false))
   }, [userId])
+
+  // Admins get a "Manage" panel with the same role/status controls as the
+  // admin console's Users tab - fetched only for admins viewing someone
+  // else's profile, since a non-admin's request would just 403.
+  useEffect(() => {
+    if (!isAdmin || isOwnProfile || !profile) { setAdminUser(null); return }
+    setAdminLoading(true)
+    adminGetUser(profile.id)
+      .then(setAdminUser)
+      .catch(() => setAdminUser(null))
+      .finally(() => setAdminLoading(false))
+  }, [isAdmin, isOwnProfile, profile])
+
+  const doAdminUpdate = async (payload: Parameters<typeof adminUpdateUser>[1]): Promise<void> => {
+    if (!adminUser) return
+    setAdminActionLoading(true)
+    try {
+      const updated = await adminUpdateUser(adminUser.user_id, payload)
+      setAdminUser(updated)
+    } catch {} finally {
+      setAdminActionLoading(false)
+    }
+  }
 
   useEffect(() => {
     const plays = profile?.play_history
@@ -459,9 +491,65 @@ export default function PublicProfileView(): JSX.Element {
               {messaging ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
               Message
             </button>
+            {isAdmin && (
+              <button
+                onClick={() => setAdminOpen((v) => !v)}
+                title="Admin actions"
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
+                  adminOpen
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+                }`}
+              >
+                <ShieldCheck size={15} /> Manage
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {isAdmin && !isOwnProfile && adminOpen && (
+        <div className="mb-4 p-4 rounded-xl border border-[var(--border)] bg-surface-overlay/50 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Admin actions</p>
+          {adminLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+          ) : !adminUser ? (
+            <p className="text-text-muted text-xs italic">Couldn't load admin details for this user.</p>
+          ) : adminActionLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Updating…</div>
+          ) : adminUser.role === 'administrator' ? (
+            <p className="text-text-muted text-xs italic">Administrators can only be modified from the admin console.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {adminUser.role === 'editor' ? (
+                <button onClick={() => void doAdminUpdate({ role: 'applicant' })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Editor</button>
+              ) : (
+                <button onClick={() => void doAdminUpdate({ role: 'editor' })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Editor</button>
+              )}
+              {adminUser.contributor_enabled ? (
+                <button onClick={() => void doAdminUpdate({ contributor_enabled: false })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Contrib</button>
+              ) : (
+                <button onClick={() => void doAdminUpdate({ contributor_enabled: true })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Contrib</button>
+              )}
+              {adminUser.manager_enabled ? (
+                <button onClick={() => void doAdminUpdate({ manager_enabled: false })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Manager</button>
+              ) : (
+                <button onClick={() => void doAdminUpdate({ manager_enabled: true })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Manager</button>
+              )}
+              <button onClick={() => void doAdminUpdate({ is_active: !adminUser.is_active })}
+                className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
+                {adminUser.is_active ? 'Disable account' : 'Enable account'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {profile.bio && (
         <p className="text-text-secondary text-sm leading-relaxed mt-3 mb-2 max-w-xl whitespace-pre-wrap">{profile.bio}</p>

@@ -1,12 +1,14 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
-import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check } from 'lucide-react'
+import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check, MessagesSquare } from 'lucide-react'
 import { ModalOverlay } from './Modal'
 import { parseLrc, isLrcFormat, getCurrentLineIndex, splitColorWords } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
 import { getAudioCurrentTime } from './Player'
 import { useStore } from '../store/useStore'
+import { hasChatAccess } from '../store/chatStore'
+import ShareLyricsCardModal from './chat/ShareLyricsCardModal'
 import { FONTS, getFont } from '../lib/fonts'
 import logo from '../assets/logo.png'
 
@@ -216,6 +218,17 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     let cancelled = false
     setArtDataUrl(null)
     if (!imageUrl) return
+    // A cover that's already a data:/blob: URL (an era/personal override
+    // picked from a local file, rather than a curated API image) is already
+    // export-safe as-is - it was never cross-origin, so there's nothing for
+    // html-to-image to taint. Re-fetching it here would only convert it back
+    // into the exact same data: URL, and the CSP's connect-src (unlike
+    // img-src) doesn't allow fetch() of data:/blob: at all, so that fetch
+    // silently fails and export loses a cover the preview shows just fine.
+    if (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
+      setArtDataUrl(imageUrl)
+      return
+    }
     fetchImageDataUrl(imageUrl).then(url => { if (!cancelled) setArtDataUrl(url) }).catch(() => {})
     return () => { cancelled = true }
   }, [imageUrl])
@@ -230,8 +243,11 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   const safeArtSrc = exporting ? (artDataUrl ?? undefined) : previewArtSrc
 
   const cardRef = useRef<HTMLDivElement>(null)
-  const [busy, setBusy] = useState<'download' | 'copy' | 'share' | null>(null)
+  const [busy, setBusy] = useState<'download' | 'copy' | 'share' | 'chat' | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const canShareToChat = hasChatAccess(useStore((s) => s.account))
+  const [chatShareFile, setChatShareFile] = useState<File | null>(null)
 
   // Plain toggle: click an unselected line to add it (up to MAX_LINES), click
   // a selected one to drop it - so a selection can skip lines in between
@@ -326,7 +342,23 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     }
   }
 
+  const handleShareToChat = async (): Promise<void> => {
+    if (!cardRef.current) return
+    setError(null)
+    setBusy('chat')
+    try {
+      const blob = await withExportMode(() => toBlob(cardRef.current!, renderOpts))
+      if (!blob) throw new Error('empty blob')
+      setChatShareFile(new File([blob], `${fileName}.png`, { type: 'image/png' }))
+    } catch {
+      setError('Could not generate the image.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
+    <>
     <ModalOverlay
       onClose={onClose}
       standalone
@@ -657,6 +689,17 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                     {busy === 'share' ? <Loader2 size={15} className="animate-spin" /> : <Share2 size={15} />} Share
                   </button>
                 )}
+                {canShareToChat && (
+                  <button
+                    onClick={handleShareToChat}
+                    disabled={busy !== null || selectedLines.length === 0}
+                    title="Share to chat"
+                    aria-label="Share to chat"
+                    className="flex items-center justify-center px-3 py-2.5 rounded-xl bg-surface-overlay hover:bg-surface-highest disabled:opacity-50 text-text-primary transition-colors"
+                  >
+                    {busy === 'chat' ? <Loader2 size={15} className="animate-spin" /> : <MessagesSquare size={15} />}
+                  </button>
+                )}
               </div>
               {error && <p className="text-red-400 text-xs -mt-2">{error}</p>}
             </div>
@@ -664,5 +707,14 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
         </div>
       )}
     </ModalOverlay>
+    {chatShareFile && (
+      <ShareLyricsCardModal
+        file={chatShareFile}
+        title={title}
+        artist={artist}
+        onClose={() => setChatShareFile(null)}
+      />
+    )}
+    </>
   )
 }

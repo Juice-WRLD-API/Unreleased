@@ -118,7 +118,7 @@ function deleteConversation(id: number, toast: (msg: string) => void): void {
     .catch((err) => toast(errorText(err, 'Could not delete chat')))
 }
 
-const RECENT_DM_LIMIT = 6
+const RECENT_DM_LIMIT = 3
 
 function RecentDmButton({ conv, active, onClick, onContextMenu }: {
   conv: Conversation

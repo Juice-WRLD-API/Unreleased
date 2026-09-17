@@ -1067,6 +1067,10 @@ export async function adminListUsers(roleFilter?: string): Promise<AdminUser[]> 
   return request(url.toString(), { method: 'GET' })
 }
 
+export async function adminGetUser(userId: number): Promise<AdminUser> {
+  return request(`${ACCOUNT_BASE}/admin/users/${userId}/`, { method: 'GET' })
+}
+
 export async function adminUpdateUser(userId: number, payload: {
   role?: 'editor' | 'contributor' | 'manager' | 'applicant'
   contributor_enabled?: boolean
