@@ -22,26 +22,32 @@
          plugin/object embed, so this closes off the main injection→escalation
          path for a compromised dependency or an XSS in rendered content
          (react-markdown here is already sanitized - see lib/Markdown.tsx -
-         this is the second layer). The two inline <script> blocks below are
-         pinned by hash rather than 'unsafe-inline'; if either one's source
-         changes, its hash here has to be recomputed or it silently stops
-         running (the CSP violation shows as a console error, not a crash).
-         'wasm-unsafe-eval' is scoped to WebAssembly instantiation only (not
-         plain eval/new Function) and is required by libsodium-wrappers,
-         which the staff chat E2E crypto (lib/chatCrypto.ts) loads as WASM.
-         local-media: is the custom scheme the desktop build streams local
-         audio/video through (see electron/main.js); it's a no-op origin on
-         the web build. connect-src lists every host the renderer actually
-         calls: the API, its match-play websocket, Last.fm scrobbling, and
-         the two lyrics CORS proxies (see EditorPage.tsx). -->
+         this is the second layer). The inline <script> blocks below are
+         pinned by hash rather than 'unsafe-inline'; if any of them changes,
+         its hash here has to be recomputed or it silently stops running (the
+         CSP violation shows as a console error, not a crash). Two of the
+         pinned hashes are ours (base-href fixup, SEO); the third
+         (sha256-DalSI...) plus static.cloudflareinsights.com are Cloudflare's
+         own Web Analytics beacon, injected at the edge, not shipped in this
+         file - if Cloudflare rotates that snippet this hash will need
+         updating too. 'wasm-unsafe-eval' is scoped to WebAssembly
+         instantiation only (not plain eval/new Function) and is required by
+         libsodium-wrappers, which the staff chat E2E crypto
+         (lib/chatCrypto.ts) loads as WASM. local-media: is the custom scheme
+         the desktop build streams local audio/video through (see
+         electron/main.js); it's a no-op origin on the web build. connect-src
+         lists every host the renderer actually calls: the API, its
+         match-play websocket, Last.fm scrobbling, the two lyrics CORS
+         proxies (see EditorPage.tsx), and Cloudflare's beacon report
+         endpoint. -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
-      script-src 'self' 'wasm-unsafe-eval' 'sha256-xjpTVCo7o4K9QG8ZmAgfjVUbc2OdYbdKgT/ClSf5AWE=' 'sha256-b1jw+VU6Z+2+MRzlWRKIER82x08obZjR7Y3a9A7hu74=';
+      script-src 'self' 'wasm-unsafe-eval' 'sha256-xjpTVCo7o4K9QG8ZmAgfjVUbc2OdYbdKgT/ClSf5AWE=' 'sha256-b1jw+VU6Z+2+MRzlWRKIER82x08obZjR7Y3a9A7hu74=' 'sha256-DalSI+ICv7kcV+43N8QN6XuXql+ZJwy3Yj2YOF8AtBA=' https://static.cloudflareinsights.com;
       style-src 'self';
       img-src 'self' data: blob: local-media: https:;
       media-src 'self' blob: local-media: https:;
       font-src 'self';
-      connect-src 'self' https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com local-media:;
+      connect-src 'self' https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com https://cloudflareinsights.com local-media:;
       worker-src 'self';
       object-src 'none';
       base-uri 'self';
