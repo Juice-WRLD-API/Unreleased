@@ -4,11 +4,12 @@ import remarkGfm from 'remark-gfm'
 import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeSongShare } from '../../lib/chatShare'
+import { decodePlaylistShare, decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import rehypeChatEmoji from './emojiRehype'
 import { linkMentions } from './people'
+import PlaylistShareCard from './PlaylistShareCard'
 import SongShareCard from './SongShareCard'
 
 function urlTransform(url: string): string {
@@ -44,7 +45,7 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
   }), [meId, openPublicProfile])
   const source = useMemo(() => linkMentions(text, people), [text, people])
   return (
-    <div className="chat-md text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
+    <div className="chat-md select-text text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeChatEmoji]} components={components} urlTransform={urlTransform}>
         {source}
       </ReactMarkdown>
@@ -66,7 +67,9 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     const body = splitReplyRef(message.content).body
     if (!body) return null
     const song = decodeSongShare(body)
-    return song ? <SongShareCard song={song} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (song) return <SongShareCard song={song} />
+    const playlist = decodePlaylistShare(body)
+    return playlist ? <PlaylistShareCard playlist={playlist} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -89,5 +92,7 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   const decryptedBody = splitReplyRef(decrypted.text).body
   if (!decryptedBody) return null
   const decryptedSong = decodeSongShare(decryptedBody)
-  return decryptedSong ? <SongShareCard song={decryptedSong} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
+  if (decryptedSong) return <SongShareCard song={decryptedSong} />
+  const decryptedPlaylist = decodePlaylistShare(decryptedBody)
+  return decryptedPlaylist ? <PlaylistShareCard playlist={decryptedPlaylist} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

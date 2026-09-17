@@ -87,6 +87,53 @@ export function decodeSongShare(content: string): SharedSongPayload | null {
   }
 }
 
+// Same "prefix + JSON in plain chat text" scheme as song shares, and the same
+// untrusted-input rules apply on decode - any chat member could hand-craft
+// this text, and imageUrl is the only field here that names a URL, so it gets
+// the same scheme/host restriction as a song's cover.
+export const PLAYLIST_SHARE_PREFIX = 'unreleased:playlist:'
+
+export interface SharedPlaylistPayload {
+  playlistId: number
+  name: string
+  imageUrl?: string
+  trackCount?: number
+}
+
+export function encodePlaylistShare(playlist: { id: number; name: string; cover_image_url?: string | null; cover_image?: string | null; track_count?: number }): string {
+  const payload: SharedPlaylistPayload = {
+    playlistId: playlist.id,
+    name: playlist.name,
+    imageUrl: playlist.cover_image_url || playlist.cover_image || undefined,
+    trackCount: playlist.track_count,
+  }
+  return `${PLAYLIST_SHARE_PREFIX}${JSON.stringify(payload)}`
+}
+
+export function decodePlaylistShare(content: string): SharedPlaylistPayload | null {
+  if (!content.startsWith(PLAYLIST_SHARE_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(content.slice(PLAYLIST_SHARE_PREFIX.length))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+
+  if (!Number.isInteger(p.playlistId) || (p.playlistId as number) <= 0) return null
+  if (!isSafeText(p.name)) return null
+  if (p.imageUrl !== undefined && !isSafeImageUrl(p.imageUrl)) return null
+  if (p.trackCount !== undefined && (typeof p.trackCount !== 'number' || !Number.isFinite(p.trackCount) || p.trackCount < 0)) return null
+
+  return {
+    playlistId: p.playlistId as number,
+    name: p.name as string,
+    imageUrl: p.imageUrl as string | undefined,
+    trackCount: p.trackCount as number | undefined,
+  }
+}
+
 export function songShareToTrack(payload: SharedSongPayload): Track {
   return {
     id: `jw-${payload.songId}`,

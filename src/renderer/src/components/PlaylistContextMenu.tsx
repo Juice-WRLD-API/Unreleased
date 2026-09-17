@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download, ChevronRight,
+  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download, ChevronRight, Share2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -11,6 +11,8 @@ import { JWAPI_BASE, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
 import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
+import { hasChatAccess } from '../store/chatStore'
+import SharePlaylistModal from './chat/SharePlaylistModal'
 
 // Self-contained context menu for an API playlist - usable from anywhere
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing
@@ -52,9 +54,9 @@ export default function PlaylistContextMenu({ state, onClose }: {
   state: PlaylistContextMenuState
   onClose: () => void
 }): JSX.Element {
-  const { playlists, playCollection, addToQueue, refreshPlaylists, setPendingPlaylistId, setActiveView } = useStore(
+  const { playlists, account, playCollection, addToQueue, refreshPlaylists, setPendingPlaylistId, setActiveView } = useStore(
     useShallow(s => ({
-      playlists: s.playlists, playCollection: s.playCollection, addToQueue: s.addToQueue,
+      playlists: s.playlists, account: s.account, playCollection: s.playCollection, addToQueue: s.addToQueue,
       refreshPlaylists: s.refreshPlaylists, setPendingPlaylistId: s.setPendingPlaylistId,
       setActiveView: s.setActiveView,
     }))
@@ -74,8 +76,14 @@ export default function PlaylistContextMenu({ state, onClose }: {
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [shareCopied, setShareCopied] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [shareToChatOpen, setShareToChatOpen] = useState(false)
+  const canShareToChat = hasChatAccess(account)
 
   const otherPlaylists = playlists.filter(p => p.id !== playlist.id)
+
+  if (shareToChatOpen) {
+    return <SharePlaylistModal playlist={playlist} onClose={onClose} />
+  }
 
   const open = (): void => { setPendingPlaylistId(playlist.id); setActiveView('playlists'); onClose() }
 
@@ -167,6 +175,17 @@ export default function PlaylistContextMenu({ state, onClose }: {
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
     } catch {}
+  }
+
+  const shareToChat = async (): Promise<void> => {
+    try {
+      if (!playlist.is_public) {
+        await userApi.updatePlaylist(playlist.id, { is_public: true })
+        setPlaylist(p => ({ ...p, is_public: true }))
+        await refreshPlaylists()
+      }
+    } catch {}
+    setShareToChatOpen(true)
   }
 
   const togglePublic = async (): Promise<void> => {
@@ -336,6 +355,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
               onClick={() => setShowExport(v => !v)}
             />
             <div className="border-t border-[var(--border)] my-1" />
+            {canShareToChat && <MenuItem icon={Share2} label="Share to chat" onClick={() => void shareToChat()} />}
             <MenuItem icon={shareCopied ? Check : Link} label={shareCopied ? 'Link copied!' : 'Copy share link'} onClick={copyShare} />
             <MenuItem icon={playlist.is_public ? Globe : Lock} label={playlist.is_public ? 'Make private' : 'Make public'} disabled={busy} onClick={togglePublic} />
             <div className="border-t border-[var(--border)] my-1" />
