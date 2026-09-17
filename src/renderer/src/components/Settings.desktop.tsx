@@ -16,7 +16,7 @@ import { hasChatAccess } from '../store/chatStore'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateBio, updatePrivacySettings, updateDisplayName, updateAvatar, removeAvatar, compressImageFile } from '../lib/userApi'
-import { APP_VERSION, COMMIT_HASH } from '../lib/appVersion'
+import { APP_VERSION, COMMIT_HASH, useCommitFreshness } from '../lib/appVersion'
 import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
 } from '../lib/lastfm'
@@ -228,6 +228,22 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Elem
           making it look off-center even when it's geometrically centered. */}
       <span className={`absolute inset-y-0 my-auto w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
     </button>
+  )
+}
+
+// Green when this build's commit is the latest on the deploy branch, red
+// when a newer commit has shipped since. Nothing rendered while checking or
+// if the check fails (offline, rate-limited) - a wrong-looking indicator is
+// worse than no indicator.
+function CommitFreshnessBulb(): JSX.Element | null {
+  const freshness = useCommitFreshness()
+  if (freshness === 'checking' || freshness === 'unknown') return null
+  const latest = freshness === 'latest'
+  return (
+    <span
+      className={`inline-block w-2 h-2 rounded-full shrink-0 ${latest ? 'bg-green-500' : 'bg-red-500'}`}
+      title={latest ? 'Running the latest commit' : 'A newer commit has been deployed'}
+    />
   )
 }
 
@@ -1748,16 +1764,19 @@ export default function Settings(): JSX.Element {
                     juicewrldapi.com
                   </a>
                 </p>
-                <p className="text-text-muted text-xs mb-3">
-                  Last updated to commit{' '}
-                  <a
-                    href={`https://github.com/Juice-WRLD-API/Unreleased/commit/${COMMIT_HASH}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent font-mono hover:underline"
-                  >
-                    {COMMIT_HASH}
-                  </a>
+                <p className="text-text-muted text-xs mb-3 flex items-center gap-1.5">
+                  <span>
+                    Last updated to commit{' '}
+                    <a
+                      href={`https://github.com/Juice-WRLD-API/Unreleased/commit/${COMMIT_HASH}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent font-mono hover:underline"
+                    >
+                      {COMMIT_HASH}
+                    </a>
+                  </span>
+                  <CommitFreshnessBulb />
                 </p>
                 <div className="flex flex-wrap gap-2 mb-4">
                   <a
