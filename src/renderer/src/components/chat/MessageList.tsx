@@ -123,14 +123,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
     if (initialScrollDone.current !== key) {
       initialScrollDone.current = key
       prevLast.current = lastId
-      const divider = el.querySelector('[data-new-divider]') as HTMLElement | null
-      if (divider && divider.offsetTop > el.clientHeight * 0.6) {
-        el.scrollTop = divider.offsetTop - 80
-        atBottom.current = false
-        setShowJump(true)
-      } else {
-        scrollToBottom()
-      }
+      scrollToBottom()
       return
     }
     if (lastId !== prevLast.current) {
