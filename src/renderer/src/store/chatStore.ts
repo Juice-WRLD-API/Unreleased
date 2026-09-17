@@ -83,6 +83,21 @@ function savePinned(userId: number, pinned: PinnedIds): void {
   try { localStorage.setItem(`unreleased:chat:pinned:${userId}`, JSON.stringify(pinned)) } catch {}
 }
 
+interface MutedIds { servers: number[]; conversations: number[] }
+
+function loadMuted(userId: number): MutedIds {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:muted:${userId}`) ?? '{}') as Partial<MutedIds>
+    return { servers: raw.servers ?? [], conversations: raw.conversations ?? [] }
+  } catch {
+    return { servers: [], conversations: [] }
+  }
+}
+
+function saveMuted(userId: number, muted: MutedIds): void {
+  try { localStorage.setItem(`unreleased:chat:muted:${userId}`, JSON.stringify(muted)) } catch {}
+}
+
 interface OrderIds { servers: number[]; conversations: number[] }
 
 function loadOrder(userId: number): OrderIds {
@@ -129,6 +144,8 @@ interface ChatState {
   conversations: Conversation[]
   pinnedServers: number[]
   pinnedConversations: number[]
+  mutedServers: number[]
+  mutedConversations: number[]
   serverOrder: number[]
   conversationOrder: number[]
 
@@ -157,6 +174,8 @@ interface ChatState {
   selectServer: (id: number | null) => void
   togglePinServer: (id: number) => void
   togglePinConversation: (id: number) => void
+  toggleMuteServer: (id: number) => void
+  toggleMuteConversation: (id: number) => void
   setServerOrder: (ids: number[]) => void
   setConversationOrder: (ids: number[]) => void
   openRoom: (room: RoomRef) => void
@@ -223,6 +242,13 @@ export const useChatStore = create<ChatState>((set, get) => {
     return !!a && roomKey(a) === key && document.visibilityState === 'visible'
   }
 
+  const isMuted = (key: string): boolean => {
+    const room = parseRoomKey(key)
+    if (room.kind === 'conversation') return get().mutedConversations.includes(room.id)
+    const server = get().servers.find((s) => s.channels.some((c) => c.id === room.id))
+    return !!server && get().mutedServers.includes(server.id)
+  }
+
   const notifyNewMessage = (key: string, msg: ChatMessage): void => {
     const room = parseRoomKey(key)
     let title: string
@@ -259,6 +285,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       get().markRead(parseRoomKey(key))
       return
     }
+    if (isMuted(key)) return
     set((s) => ({
       unread: { ...s.unread, [key]: (s.unread[key] ?? 0) + 1 },
       mentions: meId && msg.mentions.includes(meId)
@@ -609,6 +636,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     conversations: [],
     pinnedServers: [],
     pinnedConversations: [],
+    mutedServers: [],
+    mutedConversations: [],
     serverOrder: [],
     conversationOrder: [],
     activeServerId: null,
@@ -637,7 +666,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       })
       const pinned = loadPinned(account.id)
       const order = loadOrder(account.id)
-      set({ pinnedServers: pinned.servers, pinnedConversations: pinned.conversations, serverOrder: order.servers, conversationOrder: order.conversations })
+      const muted = loadMuted(account.id)
+      set({
+        pinnedServers: pinned.servers, pinnedConversations: pinned.conversations,
+        serverOrder: order.servers, conversationOrder: order.conversations,
+        mutedServers: muted.servers, mutedConversations: muted.conversations,
+      })
       socket = new ChatSocket(
         (ev) => {
           if (ev.type === 'connected') set({ meId: ev.user_id })
@@ -719,7 +753,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       lastRoomBySpace.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
-        servers: [], members: {}, conversations: [], pinnedServers: [], pinnedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
+        servers: [], members: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, keyState: {}, plain: {},
       })
@@ -776,6 +810,26 @@ export const useChatStore = create<ChatState>((set, get) => {
         const pinnedConversations = s.pinnedConversations.includes(id) ? s.pinnedConversations.filter((x) => x !== id) : [...s.pinnedConversations, id]
         savePinned(meId, { servers: s.pinnedServers, conversations: pinnedConversations })
         return { pinnedConversations }
+      })
+    },
+
+    toggleMuteServer: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const mutedServers = s.mutedServers.includes(id) ? s.mutedServers.filter((x) => x !== id) : [...s.mutedServers, id]
+        saveMuted(meId, { servers: mutedServers, conversations: s.mutedConversations })
+        return { mutedServers }
+      })
+    },
+
+    toggleMuteConversation: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const mutedConversations = s.mutedConversations.includes(id) ? s.mutedConversations.filter((x) => x !== id) : [...s.mutedConversations, id]
+        saveMuted(meId, { servers: s.mutedServers, conversations: mutedConversations })
+        return { mutedConversations }
       })
     },
 

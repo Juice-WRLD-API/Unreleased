@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
+import { BellOff, BellRing, ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
@@ -8,16 +8,22 @@ import { useStorePick } from '../../store/useStore'
 import { useOpenModal } from './modalHost'
 import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp, useChatToast, useDismiss } from './ui'
 import { MenuItem } from './SidePanels'
+import { ConfirmDialog } from './MessageItem'
 
-// Minimal cursor-positioned menu for the single pin/unpin action, used from a
-// right-click on a server rail icon or a DM row. Mirrors PlaylistContextMenu's
-// portal + fixed-position + clamp-on-mount approach at a much smaller scale.
-function PinMenu({ x, y, pinned, label, onToggle, onClose }: {
+interface RoomMenuItem {
+  label: string
+  icon: React.ReactNode
+  onClick: () => void
+  danger?: boolean
+}
+
+// Cursor-positioned menu for pin/mute/delete actions, used from a right-click
+// on a server rail icon or a DM row. Mirrors PlaylistContextMenu's portal +
+// fixed-position + clamp-on-mount approach at a much smaller scale.
+function RoomMenu({ x, y, items, onClose }: {
   x: number
   y: number
-  pinned: boolean
-  label: string
-  onToggle: () => void
+  items: RoomMenuItem[]
   onClose: () => void
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
@@ -44,17 +50,20 @@ function PinMenu({ x, y, pinned, label, onToggle, onClose }: {
       <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
       <div
         ref={ref}
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[180px] overflow-hidden"
+        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[190px] overflow-hidden"
         style={{ left: pos.left, top: pos.top }}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={() => { onToggle(); onClose() }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          {pinned ? <PinOff size={14} className="text-text-muted" /> : <Pin size={14} className="text-text-muted" />}
-          <span className="flex-1 text-left">{pinned ? `Unpin ${label}` : `Pin ${label}`}</span>
-        </button>
+        {items.map((item, i) => (
+          <button
+            key={i}
+            onClick={() => { item.onClick(); onClose() }}
+            className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors hover:bg-surface-overlay ${item.danger ? 'text-red-400' : 'text-text-primary'}`}
+          >
+            <span className={item.danger ? 'text-red-400' : 'text-text-muted'}>{item.icon}</span>
+            <span className="flex-1 text-left">{item.label}</span>
+          </button>
+        ))}
       </div>
     </>,
     document.body,
@@ -93,6 +102,17 @@ function RailButton({ label, active, unread, mentions, pinned, onClick, onContex
       </button>
     </div>
   )
+}
+
+function deleteConversation(id: number, toast: (msg: string) => void): void {
+  api.deleteConversation(id)
+    .then(() => {
+      useChatStore.setState((s) => ({
+        conversations: s.conversations.filter((c) => c.id !== id),
+        active: s.active?.kind === 'conversation' && s.active.id === id ? null : s.active,
+      }))
+    })
+    .catch((err) => toast(errorText(err, 'Could not delete chat')))
 }
 
 const RECENT_DM_LIMIT = 6
@@ -135,10 +155,16 @@ export function ServerRail(): JSX.Element {
   const pinnedConversations = useChatStore((s) => s.pinnedConversations)
   const togglePinServer = useChatStore((s) => s.togglePinServer)
   const togglePinConversation = useChatStore((s) => s.togglePinConversation)
+  const mutedServers = useChatStore((s) => s.mutedServers)
+  const mutedConversations = useChatStore((s) => s.mutedConversations)
+  const toggleMuteServer = useChatStore((s) => s.toggleMuteServer)
+  const toggleMuteConversation = useChatStore((s) => s.toggleMuteConversation)
   const serverOrder = useChatStore((s) => s.serverOrder)
   const setServerOrder = useChatStore((s) => s.setServerOrder)
   const openModal = useOpenModal()
+  const toast = useChatToast()
   const [ctxMenu, setCtxMenu] = useState<{ kind: 'server' | 'conversation'; id: number; x: number; y: number } | null>(null)
+  const [confirmDeleteConvId, setConfirmDeleteConvId] = useState<number | null>(null)
   const [dragServerId, setDragServerId] = useState<number | null>(null)
   const [dropServerTarget, setDropServerTarget] = useState<number | null>(null)
 
@@ -253,14 +279,44 @@ export function ServerRail(): JSX.Element {
           <Plus size={22} />
         </span>
       </RailButton>
-      {ctxMenu && (
-        <PinMenu
-          x={ctxMenu.x}
-          y={ctxMenu.y}
-          pinned={ctxMenu.kind === 'server' ? pinnedServers.includes(ctxMenu.id) : pinnedConversations.includes(ctxMenu.id)}
-          label={ctxMenu.kind === 'server' ? 'server' : 'chat'}
-          onToggle={() => (ctxMenu.kind === 'server' ? togglePinServer(ctxMenu.id) : togglePinConversation(ctxMenu.id))}
-          onClose={() => setCtxMenu(null)}
+      {ctxMenu && (() => {
+        const isServer = ctxMenu.kind === 'server'
+        const pinned = isServer ? pinnedServers.includes(ctxMenu.id) : pinnedConversations.includes(ctxMenu.id)
+        const muted = isServer ? mutedServers.includes(ctxMenu.id) : mutedConversations.includes(ctxMenu.id)
+        const label = isServer ? 'server' : 'chat'
+        const items: RoomMenuItem[] = [
+          {
+            label: pinned ? `Unpin ${label}` : `Pin ${label}`,
+            icon: pinned ? <PinOff size={14} /> : <Pin size={14} />,
+            onClick: () => (isServer ? togglePinServer(ctxMenu.id) : togglePinConversation(ctxMenu.id)),
+          },
+          {
+            label: muted ? `Unmute ${label}` : `Mute ${label}`,
+            icon: muted ? <BellRing size={14} /> : <BellOff size={14} />,
+            onClick: () => (isServer ? toggleMuteServer(ctxMenu.id) : toggleMuteConversation(ctxMenu.id)),
+          },
+        ]
+        if (!isServer) {
+          items.push({
+            label: 'Delete chat',
+            icon: <Trash2 size={14} />,
+            danger: true,
+            onClick: () => setConfirmDeleteConvId(ctxMenu.id),
+          })
+        }
+        return <RoomMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={() => setCtxMenu(null)} />
+      })()}
+      {confirmDeleteConvId !== null && (
+        <ConfirmDialog
+          title="Delete this chat?"
+          body="The conversation and its messages will be removed for everyone. This can't be undone."
+          confirmLabel="Delete chat"
+          onCancel={() => setConfirmDeleteConvId(null)}
+          onConfirm={() => {
+            const id = confirmDeleteConvId
+            setConfirmDeleteConvId(null)
+            deleteConversation(id, toast)
+          }}
         />
       )}
     </nav>
@@ -533,9 +589,10 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   )
 }
 
-function DmRow({ conv, pinned, onPicked, onContextMenu, draggable, isDragging, isDropTarget, onDragStart, onDragEnd, onDragOver, onDrop }: {
+function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDragging, isDropTarget, onDragStart, onDragEnd, onDragOver, onDrop }: {
   conv: Conversation
   pinned: boolean
+  muted: boolean
   onPicked?: () => void
   onContextMenu: (e: React.MouseEvent) => void
   draggable?: boolean
@@ -588,6 +645,7 @@ function DmRow({ conv, pinned, onPicked, onContextMenu, draggable, isDragging, i
       <span className="flex-1 min-w-0">
         <span className="flex items-baseline gap-2">
           {pinned && <Pin size={11} className="shrink-0 text-text-muted" />}
+          {muted && <BellOff size={11} className="shrink-0 text-text-muted" />}
           <span className={`flex-1 min-w-0 truncate text-[15px] md:text-sm ${count > 0 ? 'font-bold text-text-primary' : 'font-medium text-text-primary'}`}>{conversationTitle(conv, meId)}</span>
           {last && <span className="text-[10px] text-text-muted shrink-0">{shortStamp(last.created_at)}</span>}
         </span>
@@ -608,11 +666,15 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
   const meId = useChatStore((s) => s.meId)
   const pinnedConversations = useChatStore((s) => s.pinnedConversations)
   const togglePinConversation = useChatStore((s) => s.togglePinConversation)
+  const mutedConversations = useChatStore((s) => s.mutedConversations)
+  const toggleMuteConversation = useChatStore((s) => s.toggleMuteConversation)
   const conversationOrder = useChatStore((s) => s.conversationOrder)
   const setConversationOrder = useChatStore((s) => s.setConversationOrder)
   const openModal = useOpenModal()
+  const toast = useChatToast()
   const [query, setQuery] = useState('')
   const [ctxMenu, setCtxMenu] = useState<{ convId: number; x: number; y: number } | null>(null)
+  const [confirmDeleteConvId, setConfirmDeleteConvId] = useState<number | null>(null)
   const [dragConvId, setDragConvId] = useState<number | null>(null)
   const [dropConvTarget, setDropConvTarget] = useState<number | null>(null)
 
@@ -696,6 +758,7 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
             <DmRow
               conv={c}
               pinned={pinnedConversations.includes(c.id)}
+              muted={mutedConversations.includes(c.id)}
               onPicked={onPicked}
               onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ convId: c.id, x: e.clientX, y: e.clientY }) }}
               draggable={!query.trim()}
@@ -726,14 +789,40 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
       </div>
       <StatusBar />
       {showFooter && <MeFooter />}
-      {ctxMenu && (
-        <PinMenu
-          x={ctxMenu.x}
-          y={ctxMenu.y}
-          pinned={pinnedConversations.includes(ctxMenu.convId)}
-          label="chat"
-          onToggle={() => togglePinConversation(ctxMenu.convId)}
-          onClose={() => setCtxMenu(null)}
+      {ctxMenu && (() => {
+        const pinned = pinnedConversations.includes(ctxMenu.convId)
+        const muted = mutedConversations.includes(ctxMenu.convId)
+        const items: RoomMenuItem[] = [
+          {
+            label: pinned ? 'Unpin chat' : 'Pin chat',
+            icon: pinned ? <PinOff size={14} /> : <Pin size={14} />,
+            onClick: () => togglePinConversation(ctxMenu.convId),
+          },
+          {
+            label: muted ? 'Unmute chat' : 'Mute chat',
+            icon: muted ? <BellRing size={14} /> : <BellOff size={14} />,
+            onClick: () => toggleMuteConversation(ctxMenu.convId),
+          },
+          {
+            label: 'Delete chat',
+            icon: <Trash2 size={14} />,
+            danger: true,
+            onClick: () => setConfirmDeleteConvId(ctxMenu.convId),
+          },
+        ]
+        return <RoomMenu x={ctxMenu.x} y={ctxMenu.y} items={items} onClose={() => setCtxMenu(null)} />
+      })()}
+      {confirmDeleteConvId !== null && (
+        <ConfirmDialog
+          title="Delete this chat?"
+          body="The conversation and its messages will be removed for everyone. This can't be undone."
+          confirmLabel="Delete chat"
+          onCancel={() => setConfirmDeleteConvId(null)}
+          onConfirm={() => {
+            const id = confirmDeleteConvId
+            setConfirmDeleteConvId(null)
+            deleteConversation(id, toast)
+          }}
         />
       )}
     </div>
