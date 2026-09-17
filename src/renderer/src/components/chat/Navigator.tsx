@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
+import * as api from '../../lib/chatApi'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
 import { useStorePick } from '../../store/useStore'
 import { useOpenModal } from './modalHost'
-import { ChannelIcon, ChatAvatar, CountBadge, ServerGlyph, shortStamp, useDismiss } from './ui'
+import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp, useChatToast, useDismiss } from './ui'
 import { MenuItem } from './SidePanels'
 
 // Minimal cursor-positioned menu for the single pin/unpin action, used from a
@@ -94,22 +95,102 @@ function RailButton({ label, active, unread, mentions, pinned, onClick, onContex
   )
 }
 
+const RECENT_DM_LIMIT = 6
+
+function RecentDmButton({ conv, active, onClick, onContextMenu }: {
+  conv: Conversation
+  active: boolean
+  onClick: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}): JSX.Element {
+  const meId = useChatStore((s) => s.meId)
+  const count = useChatStore((s) => s.unread[`d:${conv.id}`] ?? 0)
+  const mention = useChatStore((s) => s.mentions[`d:${conv.id}`] ?? 0)
+  const others = conv.participants.filter((p) => p.user.id !== meId)
+  const title = conversationTitle(conv, meId)
+  return (
+    <RailButton label={title} active={active} unread={count > 0} mentions={mention} onClick={onClick} onContextMenu={onContextMenu}>
+      {others[0] ? (
+        <ChatAvatar user={others[0].user} size={44} presence className={`transition-all duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`} />
+      ) : (
+        <span className={`w-11 h-11 flex items-center justify-center bg-surface-raised text-text-secondary transition-all duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}>
+          <MessagesSquare size={18} />
+        </span>
+      )}
+    </RailButton>
+  )
+}
+
 export function ServerRail(): JSX.Element {
   const servers = useChatStore((s) => s.servers)
   const activeServerId = useChatStore((s) => s.activeServerId)
+  const active = useChatStore((s) => s.active)
   const selectServer = useChatStore((s) => s.selectServer)
+  const openRoom = useChatStore((s) => s.openRoom)
   const unread = useChatStore((s) => s.unread)
   const mentions = useChatStore((s) => s.mentions)
   const conversations = useChatStore((s) => s.conversations)
+  const lastMessage = useChatStore((s) => s.lastMessage)
   const pinnedServers = useChatStore((s) => s.pinnedServers)
+  const pinnedConversations = useChatStore((s) => s.pinnedConversations)
   const togglePinServer = useChatStore((s) => s.togglePinServer)
+  const togglePinConversation = useChatStore((s) => s.togglePinConversation)
+  const serverOrder = useChatStore((s) => s.serverOrder)
+  const setServerOrder = useChatStore((s) => s.setServerOrder)
   const openModal = useOpenModal()
-  const [ctxMenu, setCtxMenu] = useState<{ serverId: number; x: number; y: number } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{ kind: 'server' | 'conversation'; id: number; x: number; y: number } | null>(null)
+  const [dragServerId, setDragServerId] = useState<number | null>(null)
+  const [dropServerTarget, setDropServerTarget] = useState<number | null>(null)
 
   const dmUnread = conversations.reduce((n, c) => n + (unread[`d:${c.id}`] ?? 0), 0)
-  const orderedServers = useMemo(
-    () => [...servers].sort((a, b) => Number(pinnedServers.includes(b.id)) - Number(pinnedServers.includes(a.id))),
-    [servers, pinnedServers],
+  const orderedServers = useMemo(() => {
+    const orderIndex = new Map(serverOrder.map((id, i) => [id, i]))
+    return [...servers].sort((a, b) => {
+      const pinDiff = Number(pinnedServers.includes(b.id)) - Number(pinnedServers.includes(a.id))
+      if (pinDiff !== 0) return pinDiff
+      const ia = orderIndex.get(a.id)
+      const ib = orderIndex.get(b.id)
+      if (ia != null && ib != null) return ia - ib
+      if (ia != null) return -1
+      if (ib != null) return 1
+      return 0
+    })
+  }, [servers, pinnedServers, serverOrder])
+
+  // Drag a server icon onto another to reorder it. Reordering only happens
+  // within the same pinned/unpinned partition (pinned icons always sort
+  // first); dropping inserts the dragged server just before the hovered one,
+  // or at the end of its partition when dropped on the trailing gap.
+  const dropServer = (): void => {
+    const id = dragServerId
+    const targetId = dropServerTarget
+    setDragServerId(null)
+    setDropServerTarget(null)
+    if (id == null || id === targetId) return
+    const draggedPinned = pinnedServers.includes(id)
+    const partition = orderedServers.filter((s) => pinnedServers.includes(s.id) === draggedPinned)
+    const dragged = partition.find((s) => s.id === id)
+    if (!dragged) return
+    const withoutDragged = partition.filter((s) => s.id !== id)
+    const hoverIdx = targetId != null ? withoutDragged.findIndex((s) => s.id === targetId) : -1
+    const index = hoverIdx === -1 ? withoutDragged.length : hoverIdx
+    const nextPartition = [...withoutDragged.slice(0, index), dragged, ...withoutDragged.slice(index)]
+    if (nextPartition.every((s, i) => s.id === partition[i]?.id)) return
+    const otherIds = serverOrder.filter((oid) => !partition.some((s) => s.id === oid))
+    setServerOrder([...otherIds, ...nextPartition.map((s) => s.id)])
+  }
+  // Like Discord's DM rail: quick access to your most recently active
+  // conversations right alongside the servers, without needing to switch
+  // into the DM space first.
+  const recentDms = useMemo(
+    () => [...conversations]
+      .sort((a, b) => {
+        const la = lastMessage[`d:${a.id}`]?.created_at ?? a.updated_at
+        const lb = lastMessage[`d:${b.id}`]?.created_at ?? b.updated_at
+        return lb.localeCompare(la)
+      })
+      .slice(0, RECENT_DM_LIMIT),
+    [conversations, lastMessage],
   )
 
   return (
@@ -121,26 +202,52 @@ export function ServerRail(): JSX.Element {
           <MessagesSquare size={20} />
         </span>
       </RailButton>
+      {recentDms.map((conv) => (
+        <RecentDmButton
+          key={conv.id}
+          conv={conv}
+          active={active?.kind === 'conversation' && active.id === conv.id}
+          onClick={() => openRoom({ kind: 'conversation', id: conv.id })}
+          onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ kind: 'conversation', id: conv.id, x: e.clientX, y: e.clientY }) }}
+        />
+      ))}
       <span className="w-8 h-px bg-[var(--border)] my-0.5" />
       {orderedServers.map((server) => {
         const keys = server.channels.map((c) => `c:${c.id}`)
         const hasUnread = keys.some((k) => (unread[k] ?? 0) > 0)
         const mentionCount = keys.reduce((n, k) => n + (mentions[k] ?? 0), 0)
+        const isDropTarget = dragServerId != null && dragServerId !== server.id && dropServerTarget === server.id
         return (
-          <RailButton
+          <div
             key={server.id}
-            label={server.name}
-            active={activeServerId === server.id}
-            unread={hasUnread}
-            mentions={mentionCount}
-            pinned={pinnedServers.includes(server.id)}
-            onClick={() => selectServer(server.id)}
-            onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ serverId: server.id, x: e.clientX, y: e.clientY }) }}
+            className={`w-full flex justify-center rounded-2xl transition-all ${dragServerId === server.id ? 'opacity-40' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+            draggable
+            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragServerId(server.id) }}
+            onDragEnd={() => { setDragServerId(null); setDropServerTarget(null) }}
+            onDragOver={(e) => { if (dragServerId == null || dragServerId === server.id) return; e.preventDefault(); setDropServerTarget(server.id) }}
+            onDrop={(e) => { if (dragServerId == null) return; e.preventDefault(); dropServer() }}
           >
-            <ServerGlyph server={server} active={activeServerId === server.id} />
-          </RailButton>
+            <RailButton
+              label={server.name}
+              active={activeServerId === server.id}
+              unread={hasUnread}
+              mentions={mentionCount}
+              pinned={pinnedServers.includes(server.id)}
+              onClick={() => selectServer(server.id)}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ kind: 'server', id: server.id, x: e.clientX, y: e.clientY }) }}
+            >
+              <ServerGlyph server={server} active={activeServerId === server.id} />
+            </RailButton>
+          </div>
         )
       })}
+      {dragServerId != null && (
+        <div
+          className="w-8 h-3 -my-1.5"
+          onDragOver={(e) => { e.preventDefault(); setDropServerTarget(null) }}
+          onDrop={(e) => { e.preventDefault(); dropServer() }}
+        />
+      )}
       <RailButton label="Create a server" active={false} onClick={() => openModal({ kind: 'create-server' })}>
         <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-accent group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-all duration-200">
           <Plus size={22} />
@@ -150,9 +257,9 @@ export function ServerRail(): JSX.Element {
         <PinMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
-          pinned={pinnedServers.includes(ctxMenu.serverId)}
-          label="server"
-          onToggle={() => togglePinServer(ctxMenu.serverId)}
+          pinned={ctxMenu.kind === 'server' ? pinnedServers.includes(ctxMenu.id) : pinnedConversations.includes(ctxMenu.id)}
+          label={ctxMenu.kind === 'server' ? 'server' : 'chat'}
+          onToggle={() => (ctxMenu.kind === 'server' ? togglePinServer(ctxMenu.id) : togglePinConversation(ctxMenu.id))}
           onClose={() => setCtxMenu(null)}
         />
       )}
@@ -240,7 +347,10 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   const openModal = useOpenModal()
   const [menu, setMenu] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const [dragId, setDragId] = useState<number | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ category: string; index: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const toast = useChatToast()
   useDismiss(menu, () => setMenu(false), menuRef)
 
   const groups = useMemo(() => {
@@ -251,6 +361,52 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
     }
     return [...map.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
   }, [server])
+
+  // Drag a channel row onto another row (or the empty space below a group)
+  // to reorder it within a category, or into a different category entirely.
+  // Renumbers the whole destination list (0..n-1) rather than computing a
+  // fractional position, mirroring RenameCategoryModal's bulk-PATCH-then-
+  // merge approach so a failed request can be rolled back wholesale.
+  const dropChannel = async (targetCategory: string, targetIndex: number): Promise<void> => {
+    const id = dragId
+    setDragId(null)
+    setDropTarget(null)
+    if (id == null || !server) return
+    const dragged = server.channels.find((c) => c.id === id)
+    if (!dragged) return
+    const currentList = groups.find(([cat]) => cat === targetCategory)?.[1] ?? []
+    const withoutDragged = currentList.filter((c) => c.id !== id)
+    const index = Math.max(0, Math.min(targetIndex, withoutDragged.length))
+    const nextList = [...withoutDragged.slice(0, index), dragged, ...withoutDragged.slice(index)]
+    if (dragged.category === targetCategory && nextList.every((c, i) => c.id === currentList[i]?.id)) return
+
+    const positions = new Map(nextList.map((c, i) => [c.id, i]))
+    const prevServers = useChatStore.getState().servers
+    useChatStore.setState((s) => ({
+      servers: s.servers.map((x) => x.id !== serverId ? x : {
+        ...x,
+        channels: x.channels.map((c) => {
+          const position = positions.get(c.id)
+          if (position === undefined) return c
+          return { ...c, position, category: c.id === id ? targetCategory : c.category }
+        }),
+      }),
+    }))
+    try {
+      const results = await Promise.all(nextList.map((c) =>
+        api.updateChannel(c.id, c.id === id ? { position: positions.get(c.id), category: targetCategory } : { position: positions.get(c.id) }),
+      ))
+      useChatStore.setState((s) => ({
+        servers: s.servers.map((x) => x.id !== serverId ? x : {
+          ...x,
+          channels: x.channels.map((c) => results.find((r) => r.id === c.id) ?? c),
+        }),
+      }))
+    } catch (err) {
+      useChatStore.setState({ servers: prevServers })
+      toast(errorText(err, 'Could not reorder channels'))
+    }
+  }
 
   if (!server) return null
   const canManage = me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
@@ -281,7 +437,11 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-3">
         {server.description && <p className="px-2 text-xs text-text-muted leading-relaxed">{server.description}</p>}
         {groups.map(([category, channels]) => (
-          <div key={category || '_'}>
+          <div
+            key={category || '_'}
+            onDragOver={(e) => { if (dragId == null) return; e.preventDefault(); setDropTarget({ category, index: channels.length }) }}
+            onDrop={(e) => { if (dragId == null) return; e.preventDefault(); void dropChannel(category, channels.length) }}
+          >
             {category && (
               <div className="group flex items-center pr-1">
                 <button onClick={() => setCollapsed((c) => ({ ...c, [category]: !c[category] }))} className="flex-1 flex items-center gap-1 px-1 py-1 text-[11px] font-bold uppercase tracking-wider text-text-muted hover:text-text-secondary text-left">
@@ -301,36 +461,62 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
               </div>
             )}
             <div className="space-y-px">
-              {channels.map((c) => {
+              {channels.map((c, idx) => {
                 const key = roomKey({ kind: 'channel', id: c.id })
                 const isActive = active?.kind === 'channel' && active.id === c.id
                 const count = unread[key] ?? 0
                 const mention = mentions[key] ?? 0
+                const showDropBefore = dragId != null && dragId !== c.id && dropTarget?.category === category && dropTarget.index === idx
                 if (collapsed[category] && !isActive && count === 0) return null
                 return (
-                  <div key={c.id} className="group relative">
-                    <button
-                      onClick={() => { openRoom({ kind: 'channel', id: c.id }); onPicked?.() }}
-                      className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-                        isActive ? 'bg-surface-highest text-text-primary' : count > 0 ? 'text-text-primary hover:bg-surface-raised/70' : 'text-text-muted hover:text-text-secondary hover:bg-surface-raised/70'
-                      }`}
+                  <div key={c.id}>
+                    {showDropBefore && <div className="h-0.5 mx-2 my-0.5 rounded-full bg-accent" />}
+                    <div
+                      className={`group relative ${dragId === c.id ? 'opacity-40' : ''}`}
+                      draggable={canManage}
+                      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragId(c.id) }}
+                      onDragEnd={() => { setDragId(null); setDropTarget(null) }}
+                      onDragOver={(e) => {
+                        if (dragId == null) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const before = e.clientY < rect.top + rect.height / 2
+                        setDropTarget({ category, index: before ? idx : idx + 1 })
+                      }}
+                      onDrop={(e) => {
+                        if (dragId == null) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        void dropChannel(category, dropTarget?.category === category ? dropTarget.index : idx)
+                      }}
                     >
-                      <ChannelIcon isPrivate={c.is_private} className="shrink-0 opacity-80" />
-                      <span className={`flex-1 min-w-0 truncate text-[15px] md:text-sm ${count > 0 ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
-                      {mention > 0 ? <CountBadge count={mention} mention /> : count > 0 && !isActive ? <span className="w-2 h-2 rounded-full bg-text-primary" /> : null}
-                    </button>
-                    {canManage && (
                       <button
-                        onClick={() => openModal({ kind: 'channel', serverId, channel: c })}
-                        title="Edit channel"
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hidden md:group-hover:flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-highest"
+                        onClick={() => { openRoom({ kind: 'channel', id: c.id }); onPicked?.() }}
+                        className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+                          isActive ? 'bg-surface-highest text-text-primary' : count > 0 ? 'text-text-primary hover:bg-surface-raised/70' : 'text-text-muted hover:text-text-secondary hover:bg-surface-raised/70'
+                        }`}
                       >
-                        <Settings size={12} />
+                        <ChannelIcon isPrivate={c.is_private} className="shrink-0 opacity-80" />
+                        <span className={`flex-1 min-w-0 truncate text-[15px] md:text-sm ${count > 0 ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
+                        {mention > 0 ? <CountBadge count={mention} mention /> : count > 0 && !isActive ? <span className="w-2 h-2 rounded-full bg-text-primary" /> : null}
                       </button>
-                    )}
+                      {canManage && (
+                        <button
+                          onClick={() => openModal({ kind: 'channel', serverId, channel: c })}
+                          title="Edit channel"
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hidden md:group-hover:flex items-center justify-center text-text-muted hover:text-text-primary bg-surface-highest"
+                        >
+                          <Settings size={12} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
+              {dragId != null && dropTarget?.category === category && dropTarget.index === channels.length && channels.length > 0 && (
+                <div className="h-0.5 mx-2 my-0.5 rounded-full bg-accent" />
+              )}
             </div>
           </div>
         ))}
@@ -347,11 +533,18 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   )
 }
 
-function DmRow({ conv, pinned, onPicked, onContextMenu }: {
+function DmRow({ conv, pinned, onPicked, onContextMenu, draggable, isDragging, isDropTarget, onDragStart, onDragEnd, onDragOver, onDrop }: {
   conv: Conversation
   pinned: boolean
   onPicked?: () => void
   onContextMenu: (e: React.MouseEvent) => void
+  draggable?: boolean
+  isDragging?: boolean
+  isDropTarget?: boolean
+  onDragStart?: (e: React.DragEvent) => void
+  onDragEnd?: () => void
+  onDragOver?: (e: React.DragEvent) => void
+  onDrop?: (e: React.DragEvent) => void
 }): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const active = useChatStore((s) => s.active)
@@ -376,7 +569,12 @@ function DmRow({ conv, pinned, onPicked, onContextMenu }: {
     <button
       onClick={() => { openRoom({ kind: 'conversation', id: conv.id }); onPicked?.() }}
       onContextMenu={onContextMenu}
-      className={`w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${isActive ? 'bg-surface-highest' : 'hover:bg-surface-raised/70'}`}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={`w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${isActive ? 'bg-surface-highest' : 'hover:bg-surface-raised/70'} ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
     >
       {conv.is_group || others.length !== 1 ? (
         <span className="relative w-10 h-10 shrink-0">
@@ -410,24 +608,56 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
   const meId = useChatStore((s) => s.meId)
   const pinnedConversations = useChatStore((s) => s.pinnedConversations)
   const togglePinConversation = useChatStore((s) => s.togglePinConversation)
+  const conversationOrder = useChatStore((s) => s.conversationOrder)
+  const setConversationOrder = useChatStore((s) => s.setConversationOrder)
   const openModal = useOpenModal()
   const [query, setQuery] = useState('')
   const [ctxMenu, setCtxMenu] = useState<{ convId: number; x: number; y: number } | null>(null)
+  const [dragConvId, setDragConvId] = useState<number | null>(null)
+  const [dropConvTarget, setDropConvTarget] = useState<number | null>(null)
 
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const orderIndex = new Map(conversationOrder.map((id, i) => [id, i]))
     return conversations
       .filter((c) => !q || conversationTitle(c, meId).toLowerCase().includes(q))
       .slice()
       .sort((a, b) => {
         const pinDiff = Number(pinnedConversations.includes(b.id)) - Number(pinnedConversations.includes(a.id))
         if (pinDiff !== 0) return pinDiff
+        const ia = orderIndex.get(a.id)
+        const ib = orderIndex.get(b.id)
+        if (ia != null && ib != null) return ia - ib
+        if (ia != null) return -1
+        if (ib != null) return 1
         const la = lastMessage[`d:${a.id}`]?.created_at ?? a.updated_at
         const lb = lastMessage[`d:${b.id}`]?.created_at ?? b.updated_at
         return lb.localeCompare(la)
       })
-  }, [conversations, lastMessage, query, meId, pinnedConversations])
+  }, [conversations, lastMessage, query, meId, pinnedConversations, conversationOrder])
   const pinnedCount = sorted.filter((c) => pinnedConversations.includes(c.id)).length
+
+  // Mirrors ServerRail's dropServer: reorder within the same pinned/unpinned
+  // partition only, inserting the dragged chat just before the hovered one
+  // (or at the end of its partition when target is null).
+  const dropConversation = (): void => {
+    const id = dragConvId
+    const targetId = dropConvTarget
+    setDragConvId(null)
+    setDropConvTarget(null)
+    if (id == null || id === targetId) return
+    const draggedPinned = pinnedConversations.includes(id)
+    const partition = sorted.filter((c) => pinnedConversations.includes(c.id) === draggedPinned)
+    const dragged = partition.find((c) => c.id === id)
+    if (!dragged) return
+    const withoutDragged = partition.filter((c) => c.id !== id)
+    const hoverIdx = targetId != null ? withoutDragged.findIndex((c) => c.id === targetId) : -1
+    const index = hoverIdx === -1 ? withoutDragged.length : hoverIdx
+    const nextPartition = [...withoutDragged.slice(0, index), dragged, ...withoutDragged.slice(index)]
+    if (nextPartition.every((c, i) => c.id === partition[i]?.id)) return
+    const otherIds = conversationOrder.filter((oid) => !partition.some((c) => c.id === oid))
+    setConversationOrder([...otherIds, ...nextPartition.map((c) => c.id)])
+  }
 
   return (
     <div className="flex-1 min-h-0 flex flex-col" style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
@@ -452,16 +682,39 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
         {sorted.map((c, i) => (
           <div key={c.id}>
             {i === pinnedCount && pinnedCount > 0 && (
-              <div className="px-2 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">All chats</div>
+              <>
+                {dragConvId != null && pinnedConversations.includes(dragConvId) && (
+                  <div
+                    className="h-2 -my-1"
+                    onDragOver={(e) => { e.preventDefault(); setDropConvTarget(null) }}
+                    onDrop={(e) => { e.preventDefault(); dropConversation() }}
+                  />
+                )}
+                <div className="px-2 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">All chats</div>
+              </>
             )}
             <DmRow
               conv={c}
               pinned={pinnedConversations.includes(c.id)}
               onPicked={onPicked}
               onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ convId: c.id, x: e.clientX, y: e.clientY }) }}
+              draggable={!query.trim()}
+              isDragging={dragConvId === c.id}
+              isDropTarget={dragConvId != null && dragConvId !== c.id && dropConvTarget === c.id}
+              onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragConvId(c.id) }}
+              onDragEnd={() => { setDragConvId(null); setDropConvTarget(null) }}
+              onDragOver={(e) => { if (dragConvId == null || dragConvId === c.id) return; e.preventDefault(); setDropConvTarget(c.id) }}
+              onDrop={(e) => { if (dragConvId == null) return; e.preventDefault(); dropConversation() }}
             />
           </div>
         ))}
+        {dragConvId != null && !pinnedConversations.includes(dragConvId) && (
+          <div
+            className="h-3 -my-1.5"
+            onDragOver={(e) => { e.preventDefault(); setDropConvTarget(null) }}
+            onDrop={(e) => { e.preventDefault(); dropConversation() }}
+          />
+        )}
         {conversations.length === 0 && (
           <div className="px-4 py-10 text-center">
             <span className="mx-auto w-12 h-12 rounded-2xl bg-accent/15 text-accent flex items-center justify-center mb-3"><ShieldCheck size={22} /></span>

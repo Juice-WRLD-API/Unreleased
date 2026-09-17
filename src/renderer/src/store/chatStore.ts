@@ -80,6 +80,21 @@ function savePinned(userId: number, pinned: PinnedIds): void {
   try { localStorage.setItem(`unreleased:chat:pinned:${userId}`, JSON.stringify(pinned)) } catch {}
 }
 
+interface OrderIds { servers: number[]; conversations: number[] }
+
+function loadOrder(userId: number): OrderIds {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:order:${userId}`) ?? '{}') as Partial<OrderIds>
+    return { servers: raw.servers ?? [], conversations: raw.conversations ?? [] }
+  } catch {
+    return { servers: [], conversations: [] }
+  }
+}
+
+function saveOrder(userId: number, order: OrderIds): void {
+  try { localStorage.setItem(`unreleased:chat:order:${userId}`, JSON.stringify(order)) } catch {}
+}
+
 async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let i = 0
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -111,6 +126,8 @@ interface ChatState {
   conversations: Conversation[]
   pinnedServers: number[]
   pinnedConversations: number[]
+  serverOrder: number[]
+  conversationOrder: number[]
 
   activeServerId: number | null
   active: RoomRef | null
@@ -137,6 +154,8 @@ interface ChatState {
   selectServer: (id: number | null) => void
   togglePinServer: (id: number) => void
   togglePinConversation: (id: number) => void
+  setServerOrder: (ids: number[]) => void
+  setConversationOrder: (ids: number[]) => void
   openRoom: (room: RoomRef) => void
   loadOlder: (room: RoomRef) => Promise<void>
   setPanel: (panel: 'members' | 'pins' | null) => void
@@ -477,6 +496,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     conversations: [],
     pinnedServers: [],
     pinnedConversations: [],
+    serverOrder: [],
+    conversationOrder: [],
     activeServerId: null,
     active: null,
     threadRootId: null,
@@ -502,7 +523,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         lastRead: loadLastRead(account.id),
       })
       const pinned = loadPinned(account.id)
-      set({ pinnedServers: pinned.servers, pinnedConversations: pinned.conversations })
+      const order = loadOrder(account.id)
+      set({ pinnedServers: pinned.servers, pinnedConversations: pinned.conversations, serverOrder: order.servers, conversationOrder: order.conversations })
       socket = new ChatSocket(
         (ev) => {
           if (ev.type === 'connected') set({ meId: ev.user_id })
@@ -559,7 +581,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       lastRoomBySpace.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
-        servers: [], members: {}, conversations: [], pinnedServers: [], pinnedConversations: [], activeServerId: null, active: null,
+        servers: [], members: {}, conversations: [], pinnedServers: [], pinnedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, keyState: {}, plain: {},
       })
@@ -616,6 +638,24 @@ export const useChatStore = create<ChatState>((set, get) => {
         const pinnedConversations = s.pinnedConversations.includes(id) ? s.pinnedConversations.filter((x) => x !== id) : [...s.pinnedConversations, id]
         savePinned(meId, { servers: s.pinnedServers, conversations: pinnedConversations })
         return { pinnedConversations }
+      })
+    },
+
+    setServerOrder: (ids) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        saveOrder(meId, { servers: ids, conversations: s.conversationOrder })
+        return { serverOrder: ids }
+      })
+    },
+
+    setConversationOrder: (ids) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        saveOrder(meId, { servers: s.serverOrder, conversations: ids })
+        return { conversationOrder: ids }
       })
     },
 
