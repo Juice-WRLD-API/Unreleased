@@ -292,14 +292,29 @@ export const useChatStore = create<ChatState>((set, get) => {
       case 'presence.snapshot':
         set({ online: Object.fromEntries(ev.online.map((id) => [id, true as const])) })
         return
-      case 'presence.update':
+      case 'presence.update': {
+        const cameOnline = ev.online && !s.online[ev.user_id]
         set((st) => {
           const online = { ...st.online }
           if (ev.online) online[ev.user_id] = true
           else delete online[ev.user_id]
           return { online }
         })
+        // A missed device.added/envelope push only heals when someone is next
+        // online at the same time as us - reconcile both directions here since
+        // key sharing otherwise never retries once that one-shot event is lost.
+        if (cameOnline && s.meId) {
+          for (const conv of s.conversations) {
+            if (!conv.participants.some((p) => p.user.id === ev.user_id)) continue
+            if (s.keyState[conv.id] === 'ready') {
+              void e2e().then((m) => m.shareKeyWithUser(s.meId!, conv, ev.user_id)).catch(() => undefined)
+            } else {
+              void get().resolveKey(conv.id)
+            }
+          }
+        }
         return
+      }
       case 'message.created':
         applyMessage(ev.message, true)
         return
@@ -455,6 +470,27 @@ export const useChatStore = create<ChatState>((set, get) => {
     for (const m of page.results) applyMessage(m, false)
   }
 
+  // Re-derives key state for every conversation and, for ones we already hold
+  // the key on, re-shares it to any currently-online participant. Covers gaps
+  // left by the one-shot device.added/envelope.available push: a device that
+  // was offline when that event fired never gets another chance otherwise.
+  const reconcileKeys = async (): Promise<void> => {
+    const s = get()
+    const meId = s.meId
+    if (!meId) return
+    const m = await e2e()
+    for (const conv of s.conversations) {
+      if (s.keyState[conv.id] === 'ready') {
+        for (const p of conv.participants) {
+          if (p.user.id === meId || !s.online[p.user.id]) continue
+          void m.shareKeyWithUser(meId, conv, p.user.id).catch(() => undefined)
+        }
+      } else {
+        void get().resolveKey(conv.id)
+      }
+    }
+  }
+
   const primeRoom = async (key: string): Promise<void> => {
     const ref = parseRoomKey(key)
     const meId = get().meId
@@ -533,7 +569,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         (status) => {
           const prev = get().status
           set({ status })
-          if (status === 'open' && prev === 'reconnecting') void catchUp().catch(() => undefined)
+          if (status === 'open' && prev === 'reconnecting') {
+            void catchUp().catch(() => undefined)
+            void reconcileKeys().catch(() => undefined)
+          }
         },
       )
       socket.connect()
@@ -560,6 +599,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           ]
           void pool(keys, 6, primeRoom)
           void e2e().then((m) => m.ensureDevice(account.id)).catch((err) => console.warn('[chat] device setup failed', err))
+          void reconcileKeys().catch(() => undefined)
         } catch (err) {
           set({ initialized: true, loadError: (err as Error).message || 'Could not load chat' })
           initPromise = null
