@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import * as api from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation } from '../lib/chatApi'
+import { splitReplyRef } from '../lib/chatReplyRef'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
 import type { AccountUser } from '../lib/userApi'
 import { chatNotificationsEnabled, fireChatNotification } from '../lib/chatNotifications'
@@ -262,7 +263,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     const body = msg.is_encrypted
       ? 'Sent a new message'
-      : msg.content?.trim() || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
+      : splitReplyRef(msg.content ?? '').body.trim() || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
     fireChatNotification({
       id: msg.id,
       title,
@@ -1137,6 +1138,24 @@ export const useChatStore = create<ChatState>((set, get) => {
 
 export function displayName(user: Pick<ChatUserBrief, 'display_name' | 'username'>): string {
   return user.display_name || user.username || 'Unknown'
+}
+
+// Looks up a message by id across whichever room/thread lists are currently
+// loaded, so a reply reference can reflect the live message (e.g. deleted)
+// without a dedicated lookup endpoint.
+export function useMessageById(id: number | null): UiMessage | undefined {
+  return useChatStore((s) => {
+    if (id == null) return undefined
+    for (const room of Object.values(s.rooms)) {
+      const found = room.items.find((m) => m.id === id)
+      if (found) return found
+    }
+    for (const thread of Object.values(s.threads)) {
+      const found = thread.items.find((m) => m.id === id)
+      if (found) return found
+    }
+    return undefined
+  })
 }
 
 export function conversationTitle(conv: Conversation, meId: number | null): string {

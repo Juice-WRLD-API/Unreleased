@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { CornerUpLeft, FileText, Lock, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
+import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import ReactionPicker from './ReactionPicker'
 import { emojiGlyph } from './emoji'
@@ -39,9 +40,11 @@ const Composer = forwardRef<ComposerHandle, {
   const meId = useChatStore((s) => s.meId)
   const replyPreview = useChatStore((s) => {
     if (!replyTo) return ''
-    if (!replyTo.is_encrypted) return replyTo.content
-    const p = s.plain[replyTo.id]
-    return p && 'text' in p ? p.text : ''
+    const raw = replyTo.is_encrypted
+      ? (() => { const p = s.plain[replyTo.id]; return p && 'text' in p ? p.text : '' })()
+      : replyTo.content
+    const { ref, body } = splitReplyRef(raw)
+    return body || (ref ? ref.snippet : raw)
   })
   const toast = useChatToast()
   const draftKey = `${roomKey(room)}:${parent ?? 'root'}`
@@ -165,11 +168,17 @@ const Composer = forwardRef<ComposerHandle, {
     if (!body && files.length === 0) return
     // Plain "Reply" (as opposed to replying inside a thread, which never sets
     // `replyTo`) posts a normal message in the room - it isn't threaded, so
-    // the original message is quoted inline to keep the context visible.
+    // the link back to the original message rides along as a small envelope
+    // in the body, which MessageItem renders as a reply bar rather than text.
     if (replyTo) {
-      const quoted = (replyPreview || (replyTo.attachments.length ? 'Attachment' : '')).split('\n')[0].slice(0, 140)
-      const quoteLine = `> **${displayName(replyTo.author)}:** ${quoted || '…'}`
-      body = body ? `${quoteLine}\n${body}` : quoteLine
+      const snippet = replyPreview.split('\n')[0].slice(0, 140)
+      body = `${encodeReplyRef({
+        id: replyTo.id,
+        authorId: replyTo.author.id,
+        name: displayName(replyTo.author),
+        snippet,
+        hasAttachment: replyTo.attachments.length > 0,
+      })}${body}`
     }
     const outgoing = files.map((f) => f.file)
     files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))

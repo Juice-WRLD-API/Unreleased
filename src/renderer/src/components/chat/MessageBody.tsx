@@ -3,6 +3,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import remarkGfm from 'remark-gfm'
 import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
+import { splitReplyRef } from '../../lib/chatReplyRef'
 import { decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
@@ -55,9 +56,10 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   }
 
   if (!message.is_encrypted) {
-    if (!message.content) return null
-    const song = decodeSongShare(message.content)
-    return song ? <SongShareCard song={song} /> : <MemoMarkdown text={message.content} people={people} meId={meId} />
+    const body = splitReplyRef(message.content).body
+    if (!body) return null
+    const song = decodeSongShare(body)
+    return song ? <SongShareCard song={song} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -77,6 +79,8 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     )
   }
   if (!decrypted.text) return null
-  const decryptedSong = decodeSongShare(decrypted.text)
-  return decryptedSong ? <SongShareCard song={decryptedSong} /> : <MemoMarkdown text={decrypted.text} people={people} meId={meId} />
+  const decryptedBody = splitReplyRef(decrypted.text).body
+  if (!decryptedBody) return null
+  const decryptedSong = decodeSongShare(decryptedBody)
+  return decryptedSong ? <SongShareCard song={decryptedSong} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

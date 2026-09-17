@@ -5,7 +5,8 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
-import { displayName, useChatStore, type UiMessage } from '../../store/chatStore'
+import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
+import { displayName, useChatStore, useMessageById, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import AttachmentList from './AttachmentView'
 import MessageBody from './MessageBody'
@@ -13,6 +14,33 @@ import MessageContextMenu from './MessageContextMenu'
 import ReactionPicker from './ReactionPicker'
 import { QUICK_REACTIONS, emojiGlyph, quickReactions, rememberEmoji } from './emoji'
 import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
+
+function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }: {
+  replyToId: number
+  authorId: number
+  name: string
+  snippet: string
+  hasAttachment: boolean
+  people: ChatUserBrief[]
+}): JSX.Element {
+  const live = useMessageById(replyToId)
+  const author = live?.author ?? people.find((p) => p.id === authorId)
+  const deleted = !!live?.deleted_at
+  const preview = deleted ? 'Original message was deleted' : (snippet || (hasAttachment ? 'Attachment' : ''))
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('chat:jump', { detail: replyToId })) }}
+      className="mb-0.5 flex max-w-full items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary group/reply"
+    >
+      <CornerUpLeft size={12} className="shrink-0 opacity-70" />
+      {author && <ChatAvatar user={author} size={14} />}
+      <span className={`shrink-0 font-semibold ${deleted ? 'italic text-text-muted' : 'text-text-secondary group-hover/reply:text-text-primary'}`}>
+        {deleted ? 'Unknown' : (author ? displayName(author) : name)}
+      </span>
+      <span className="min-w-0 truncate">{preview || '…'}</span>
+    </button>
+  )
+}
 
 export interface MessageItemProps {
   message: UiMessage
@@ -139,6 +167,8 @@ function MessageItem({
   const mine = message.author.id === meId
   const deleted = !!message.deleted_at
   const pending = message.id < 0
+  const { ref: replyRef, body: bodyText } = deleted ? { ref: null, body: plainText } : splitReplyRef(plainText)
+  const effectiveGrouped = grouped && !replyRef
   const canEdit = mine && !deleted && !pending && (!message.is_encrypted || !!plainText)
   const canDelete = !pending && !deleted && (mine || canModerate)
   const canPin = !pending && !deleted && (mine || canModerate)
@@ -191,13 +221,13 @@ function MessageItem({
         setMenu({ x: e.clientX, y: e.clientY })
       }}
       className={`group relative flex gap-3 px-4 md:px-5 transition-colors ${
-        grouped ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'
+        effectiveGrouped ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'
       } ${highlight ? 'chat-flash' : ''} ${editing || activeThread ? 'bg-accent/[0.04]' : 'hover:bg-surface-raised/40'} ${
         activeThread ? 'border-l-2 border-accent/60' : message.pinned && !inThread ? 'border-l-2 border-amber-400/60' : 'border-l-2 border-transparent'
       }`}
     >
       <div className="w-9 shrink-0 flex justify-center">
-        {grouped ? (
+        {effectiveGrouped ? (
           <span className="text-[10px] text-text-muted opacity-0 group-hover:opacity-100 transition-opacity leading-[1.6rem] tabular-nums select-none" title={fullStamp(message.created_at)}>
             {clockTime(message.created_at).replace(/\s?[AP]M$/i, '')}
           </span>
@@ -207,7 +237,17 @@ function MessageItem({
       </div>
 
       <div className={`flex-1 min-w-0 ${pending && !failed ? 'opacity-60' : ''}`}>
-        {!grouped && (
+        {replyRef && (
+          <ReplyBar
+            replyToId={replyRef.id}
+            authorId={replyRef.authorId}
+            name={replyRef.name}
+            snippet={replyRef.snippet}
+            hasAttachment={replyRef.hasAttachment}
+            people={people}
+          />
+        )}
+        {!effectiveGrouped && (
           <div className="flex items-baseline gap-2 min-w-0">
             <span
               className="text-sm font-semibold text-text-primary truncate cursor-pointer hover:underline"
@@ -223,11 +263,11 @@ function MessageItem({
 
         {editing ? (
           <InlineEditor
-            initial={plainText}
+            initial={bodyText}
             onCancel={() => onStartEdit(null)}
             onSave={async (text) => {
               try {
-                await edit(message, text)
+                await edit(message, replyRef ? `${encodeReplyRef(replyRef)}${text}` : text)
                 onStartEdit(null)
               } catch (err) {
                 toast(errorText(err, 'Could not save edit'))
@@ -339,7 +379,7 @@ function MessageItem({
           pinned={message.pinned}
           onTogglePin={() => run(() => togglePin(message), 'Could not update pin')}
           canCopy={canCopy}
-          onCopy={() => { void navigator.clipboard.writeText(plainText); toast('Copied to clipboard', 'ok') }}
+          onCopy={() => { void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }}
           canDelete={canDelete}
           onDelete={() => setConfirmDelete(true)}
         />
@@ -358,7 +398,7 @@ function MessageItem({
           {!inThread && onOpenThread && <SheetRow icon={<MessageSquareReply size={18} />} label="Reply in thread" onClick={() => { setSheet(false); onOpenThread(message.id) }} />}
           {canEdit && <SheetRow icon={<Pencil size={18} />} label="Edit message" onClick={() => { setSheet(false); onStartEdit(message.id) }} />}
           {canPin && <SheetRow icon={message.pinned ? <PinOff size={18} /> : <Pin size={18} />} label={message.pinned ? 'Unpin' : 'Pin message'} onClick={() => { setSheet(false); run(() => togglePin(message), 'Could not update pin') }} />}
-          {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void navigator.clipboard.writeText(plainText); toast('Copied to clipboard', 'ok') }} />}
+          {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }} />}
           {canDelete && <SheetRow icon={<Trash2 size={18} />} label="Delete message" danger onClick={() => { setSheet(false); setConfirmDelete(true) }} />}
         </ActionSheet>
       )}
