@@ -21,6 +21,11 @@ export interface AccountUser {
   display_name: string
   discord_id: string
   discord_username: string
+  // The account's actual login handle, set on every account (auto-generated
+  // for Discord signups, chosen at signup for username/password accounts -
+  // see Username + Password Auth docs). discord_username is empty for the
+  // latter, so this is the fallback wherever a handle must never be blank.
+  username?: string
   discord_avatar: string
   avatar?: string
   bio?: string

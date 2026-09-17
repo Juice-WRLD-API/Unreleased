@@ -46,8 +46,15 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+// "everyone" isn't a real username - there's no backend "mention everyone"
+// primitive to hook into, so it rides the same @-mention plumbing as a real
+// user: matched by the same regex, and resolved to every current room
+// member's id so the normal per-user mention/notification path (mentions[]
+// sent to the server, badge-incremented per recipient) fires for each of them.
+export const EVERYONE_HANDLE = 'everyone'
+
 function mentionRegex(people: ChatUserBrief[]): RegExp | null {
-  const usernames = [...new Set(people.map((p) => p.username).filter(Boolean))]
+  const usernames = [...new Set(people.map((p) => p.username).filter(Boolean)), EVERYONE_HANDLE]
     .sort((a, b) => b.length - a.length)
     .map(escapeRegExp)
   if (!usernames.length) return null
@@ -60,6 +67,10 @@ export function mentionIdsIn(text: string, people: ChatUserBrief[]): number[] {
   const ids = new Set<number>()
   for (const match of text.matchAll(re)) {
     const handle = match[2].toLowerCase()
+    if (handle === EVERYONE_HANDLE) {
+      for (const p of people) ids.add(p.id)
+      continue
+    }
     const user = people.find((p) => p.username.toLowerCase() === handle)
     if (user) ids.add(user.id)
   }
@@ -70,6 +81,7 @@ export function linkMentions(text: string, people: ChatUserBrief[]): string {
   const re = mentionRegex(people)
   if (!re || !text.includes('@')) return text
   return text.replace(re, (whole, lead: string, handle: string) => {
+    if (handle.toLowerCase() === EVERYONE_HANDLE) return `${lead}[@everyone](mention:everyone)`
     const user = people.find((p) => p.username.toLowerCase() === handle.toLowerCase())
     return user ? `${lead}[@${user.display_name || user.username}](mention:${user.id})` : whole
   })

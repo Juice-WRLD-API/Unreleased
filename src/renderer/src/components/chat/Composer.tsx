@@ -1,12 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { CornerUpLeft, FileText, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import { AtSign, CornerUpLeft, FileText, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import ReactionPicker from './ReactionPicker'
 import { emojiGlyph, EMOJI_IMG } from './emoji'
-import { mentionIdsIn } from './people'
+import { EVERYONE_HANDLE, mentionIdsIn } from './people'
 
 const EMOJI_NAMES = Object.keys(EMOJI_IMG).sort()
 import { ChatAvatar, errorText, formatBytes, useChatToast } from './ui'
@@ -125,14 +125,19 @@ const Composer = forwardRef<ComposerHandle, {
     typingStop.current = window.setTimeout(stopTyping, 4000)
   }
 
-  const candidates = useMemo(() => {
+  const candidates = useMemo((): (ChatUserBrief | typeof EVERYONE_HANDLE)[] => {
     if (!mention) return []
     const q = mention.query.toLowerCase()
-    return people
+    const users = people
       .filter((p) => p.id !== meId)
       .filter((p) => !q || p.username.toLowerCase().includes(q) || p.display_name.toLowerCase().includes(q))
       .slice(0, 6)
-  }, [mention, people, meId])
+    // room.kind === 'conversation' already notifies every participant on
+    // every message, so @everyone only makes sense (and only matters) in a
+    // shared channel with more than a couple of members.
+    if (room.kind === 'channel' && EVERYONE_HANDLE.startsWith(q)) return [EVERYONE_HANDLE as typeof EVERYONE_HANDLE, ...users].slice(0, 6)
+    return users
+  }, [mention, people, meId, room.kind])
 
   const updateMention = (value: string, caret: number): void => {
     const upto = value.slice(0, caret)
@@ -169,11 +174,11 @@ const Composer = forwardRef<ComposerHandle, {
     })
   }
 
-  const applyMention = (user: ChatUserBrief): void => {
+  const applyMention = (user: ChatUserBrief | typeof EVERYONE_HANDLE): void => {
     if (!mention) return
     const el = textarea.current
     const caret = el?.selectionStart ?? text.length
-    const insert = `@${user.username} `
+    const insert = `@${user === EVERYONE_HANDLE ? EVERYONE_HANDLE : user.username} `
     const next = text.slice(0, mention.start) + insert + text.slice(caret)
     setText(next)
     setMention(null)
@@ -274,14 +279,24 @@ const Composer = forwardRef<ComposerHandle, {
           <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Members</p>
           {candidates.map((p, i) => (
             <button
-              key={p.id}
+              key={p === EVERYONE_HANDLE ? EVERYONE_HANDLE : p.id}
               onMouseDown={(e) => { e.preventDefault(); applyMention(p) }}
               onMouseEnter={() => setMention({ ...mention, index: i })}
               className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === mention.index ? 'bg-surface-overlay' : ''}`}
             >
-              <ChatAvatar user={p} size={24} presence />
-              <span className="text-sm text-text-primary truncate">{p.display_name || p.username}</span>
-              <span className="text-xs text-text-muted truncate">@{p.username}</span>
+              {p === EVERYONE_HANDLE ? (
+                <>
+                  <span className="h-6 w-6 shrink-0 rounded-full bg-surface-raised flex items-center justify-center text-text-secondary"><AtSign size={13} /></span>
+                  <span className="text-sm text-text-primary truncate">everyone</span>
+                  <span className="text-xs text-text-muted truncate">Notify everyone in this channel</span>
+                </>
+              ) : (
+                <>
+                  <ChatAvatar user={p} size={24} presence />
+                  <span className="text-sm text-text-primary truncate">{p.display_name || p.username}</span>
+                  <span className="text-xs text-text-muted truncate">@{p.username}</span>
+                </>
+              )}
             </button>
           ))}
         </div>

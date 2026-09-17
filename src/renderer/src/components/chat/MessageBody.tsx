@@ -22,6 +22,9 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
   const openPublicProfile = useStore((s) => s.openPublicProfile)
   const components = useMemo<Components>(() => ({
     a: ({ href, children }) => {
+      if (href === 'mention:everyone') {
+        return <span className="inline-block rounded-md px-1 font-semibold bg-amber-400/20 text-amber-300">{children}</span>
+      }
       if (href?.startsWith('mention:')) {
         const userId = Number(href.slice(8))
         const self = userId === meId
