@@ -32,12 +32,17 @@ const PING_MS = 25_000
 const PONG_TIMEOUT_MS = 10_000
 const UNAUTHORIZED = 4401
 
-function wsUrl(token: string): string {
+// The API documents both routes; which one the proxy actually upgrades depends
+// on deployment (the prefixed one has been answering 502), so rotate through
+// them on handshake failure and stick with whichever opens.
+const WS_PATHS = ['/juicewrld/ws/chat/', '/ws/chat/']
+
+function wsUrl(token: string, path: string): string {
   const env = import.meta.env.VITE_JWAPI_WS as string | undefined
   const origin = env
     ? env.replace(/\/$/, '')
     : JWAPI_BASE.replace(/\/juicewrld\/?$/, '').replace(/^http/, 'ws')
-  return `${origin}/juicewrld/ws/chat/?token=${encodeURIComponent(token)}`
+  return `${origin}${path}?token=${encodeURIComponent(token)}`
 }
 
 export class ChatSocket {
@@ -46,6 +51,8 @@ export class ChatSocket {
   private retryTimer: number | null = null
   private pingTimer: number | null = null
   private pongTimer: number | null = null
+  private pongSeen = false
+  private pathIndex = 0
   private disposed = true
   private readonly onVisible = () => {
     if (document.visibilityState === 'visible') this.checkHealth()
@@ -105,22 +112,25 @@ export class ChatSocket {
       return
     }
     this.onStatus(this.attempt > 0 ? 'reconnecting' : 'connecting')
-    const ws = new WebSocket(wsUrl(token))
+    const ws = new WebSocket(wsUrl(token, WS_PATHS[this.pathIndex]))
     this.ws = ws
+    let opened = false
     ws.onopen = () => {
       if (this.ws !== ws || this.disposed) return
+      opened = true
       this.attempt = 0
       this.onStatus('open')
       this.startPing()
     }
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return
+      if (this.pongTimer !== null) {
+        window.clearTimeout(this.pongTimer)
+        this.pongTimer = null
+      }
       try {
         const parsed = JSON.parse(ev.data as string) as ChatEvent
-        if (parsed.type === 'pong' && this.pongTimer !== null) {
-          window.clearTimeout(this.pongTimer)
-          this.pongTimer = null
-        }
+        if (parsed.type === 'pong') this.pongSeen = true
         this.onEvent(parsed)
       } catch (err) {
         console.warn('[chat] bad frame', err)
@@ -137,8 +147,17 @@ export class ChatSocket {
         return
       }
       this.onStatus('reconnecting')
-      const delay = RECONNECT_DELAYS_MS[Math.min(this.attempt, RECONNECT_DELAYS_MS.length - 1)]
-      this.attempt++
+      let delay: number
+      if (!opened && (this.pathIndex + 1) % WS_PATHS.length !== 0) {
+        // Handshake failed on this route but another is still untried this
+        // round - move on to it right away instead of backing off.
+        this.pathIndex++
+        delay = 250
+      } else {
+        if (!opened) this.pathIndex = 0
+        delay = RECONNECT_DELAYS_MS[Math.min(this.attempt, RECONNECT_DELAYS_MS.length - 1)]
+        this.attempt++
+      }
       this.retryTimer = window.setTimeout(() => {
         this.retryTimer = null
         this.open()
@@ -152,9 +171,10 @@ export class ChatSocket {
       if (!this.send({ type: 'ping' })) return
       // A dead-but-not-closed TCP connection (sleep/wake, network switch, an
       // idle-killing proxy) leaves readyState stuck at OPEN forever - no
-      // close/error event ever fires, so nothing else here would notice the
-      // socket is a zombie. An unanswered ping is the only signal we get;
-      // force-closing on timeout hands off to the normal reconnect path.
+      // close/error event ever fires. An unanswered ping is the only signal,
+      // but only trust it once the server has shown it answers pings at all,
+      // otherwise a quiet healthy socket would be torn down every cycle.
+      if (!this.pongSeen) return
       if (this.pongTimer !== null) window.clearTimeout(this.pongTimer)
       this.pongTimer = window.setTimeout(() => this.ws?.close(), PONG_TIMEOUT_MS)
     }, PING_MS)
