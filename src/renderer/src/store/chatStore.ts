@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import * as api from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation } from '../lib/chatApi'
+import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
 import type { AccountUser } from '../lib/userApi'
@@ -260,7 +261,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     const body = msg.is_encrypted
       ? 'Sent a new message'
-      : splitReplyRef(msg.content ?? '').body.trim() || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
+      : splitForwardRef(splitReplyRef(msg.content ?? '').body).body.trim() || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
     fireChatNotification({
       id: msg.id,
       title,

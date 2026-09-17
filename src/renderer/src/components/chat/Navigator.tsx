@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { BellOff, BellRing, ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
+import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
 import { useStorePick } from '../../store/useStore'
@@ -617,7 +618,7 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
     if (!last) return null
     if (last.deleted_at) return 'Message deleted'
     const p = s.plain[last.id]
-    if (p && 'text' in p && p.text) return splitReplyRef(p.text).body || p.text
+    if (p && 'text' in p && p.text) return splitForwardRef(splitReplyRef(p.text).body).body || p.text
     if (last.attachments.length) return `Sent ${last.attachments.length === 1 ? 'an attachment' : `${last.attachments.length} attachments`}`
     return p && 'error' in p ? 'Encrypted message' : '…'
   })

@@ -4,6 +4,7 @@ import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
+import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
 import { decodePlaylistShare, decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
@@ -65,7 +66,8 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   }
 
   if (!message.is_encrypted) {
-    const body = splitReplyRef(message.content).body
+    const afterReply = splitReplyRef(message.content).body
+    const body = splitForwardRef(afterReply).body
     if (!body) return null
     const song = decodeSongShare(body)
     if (song) return <SongShareCard song={song} />
@@ -90,7 +92,8 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     )
   }
   if (!decrypted.text) return null
-  const decryptedBody = splitReplyRef(decrypted.text).body
+  const decryptedAfterReply = splitReplyRef(decrypted.text).body
+  const decryptedBody = splitForwardRef(decryptedAfterReply).body
   if (!decryptedBody) return null
   const decryptedSong = decodeSongShare(decryptedBody)
   if (decryptedSong) return <SongShareCard song={decryptedSong} />

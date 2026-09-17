@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { CornerUpLeft, FileText, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
+import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import ReactionPicker from './ReactionPicker'
@@ -45,7 +46,8 @@ const Composer = forwardRef<ComposerHandle, {
     const raw = replyTo.is_encrypted
       ? (() => { const p = s.plain[replyTo.id]; return p && 'text' in p ? p.text : '' })()
       : replyTo.content
-    const { ref, body } = splitReplyRef(raw)
+    const { ref, body: afterReply } = splitReplyRef(raw)
+    const body = splitForwardRef(afterReply).body
     return body || (ref ? ref.snippet : raw)
   })
   const toast = useChatToast()
