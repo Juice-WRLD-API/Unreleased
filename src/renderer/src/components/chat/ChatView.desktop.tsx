@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MessagesSquare, ShieldCheck, SquarePen } from 'lucide-react'
 import { useChatStore } from '../../store/chatStore'
 import { useOpenModal } from './modalHost'
@@ -36,6 +36,25 @@ function EmptyMain(): JSX.Element {
   )
 }
 
+// Below this, the fixed-width rail + channel list + a pushed-in side panel
+// would leave the message pane with too little room, so the panel floats
+// over the messages instead of squeezing them.
+const COMPACT_PANEL_QUERY = '(max-width: 1100px)'
+
+function useCompactPanel(): boolean {
+  const [compact, setCompact] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(COMPACT_PANEL_QUERY).matches
+  )
+  useEffect(() => {
+    const mql = window.matchMedia(COMPACT_PANEL_QUERY)
+    const onChange = (): void => setCompact(mql.matches)
+    onChange()
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [])
+  return compact
+}
+
 export default function ChatViewDesktop(): JSX.Element {
   const active = useChatStore((s) => s.active)
   const activeServerId = useChatStore((s) => s.activeServerId)
@@ -43,9 +62,14 @@ export default function ChatViewDesktop(): JSX.Element {
   const openThread = useChatStore((s) => s.openThread)
   const openModal = useOpenModal()
   const [panel, setPanel] = useState<SidePanel>(null)
+  const compact = useCompactPanel()
 
   const serverId = active?.kind === 'channel' ? activeServerId : null
   const showThread = !!active && threadRootId !== null
+  const sideOpen = showThread || panel !== null
+  const sideClassName = compact
+    ? 'absolute inset-y-0 right-0 z-30 shadow-2xl'
+    : ''
 
   return (
     <div className="flex-1 min-w-0 h-full flex bg-surface overflow-hidden" style={{ ['--chat-rail' as string]: 'var(--sidebar, var(--surface))' }}>
@@ -53,7 +77,7 @@ export default function ChatViewDesktop(): JSX.Element {
       <div className="w-[264px] shrink-0 min-h-0 flex flex-col bg-surface-raised/30 border-r border-[var(--border)]">
         {activeServerId === null ? <DmList /> : <ChannelList serverId={activeServerId} />}
       </div>
-      <main className="flex-1 min-w-0 min-h-0 flex">
+      <main className="relative flex-1 min-w-0 min-h-0 flex">
         {active ? (
           <RoomPane
             key={`${active.kind}:${active.id}`}
@@ -63,13 +87,17 @@ export default function ChatViewDesktop(): JSX.Element {
         ) : (
           <EmptyMain />
         )}
-        {active && showThread && <ThreadPanel room={active} rootId={threadRootId!} onClose={() => openThread(null)} />}
-        {active && !showThread && panel === 'pins' && <PinsPanel room={active} onClose={() => setPanel(null)} />}
-        {active && !showThread && panel === 'members' && serverId !== null && (
-          <MembersPanel serverId={serverId} onClose={() => setPanel(null)} onAddMembers={() => openModal({ kind: 'add-members', serverId })} />
-        )}
-        {active?.kind === 'conversation' && !showThread && panel === 'info' && (
-          <DmInfoPanel conversationId={active.id} onClose={() => setPanel(null)} onAddPeople={() => openModal({ kind: 'add-to-dm', conversationId: active.id })} />
+        {sideOpen && (
+          <div className={sideClassName}>
+            {active && showThread && <ThreadPanel room={active} rootId={threadRootId!} onClose={() => openThread(null)} />}
+            {active && !showThread && panel === 'pins' && <PinsPanel room={active} onClose={() => setPanel(null)} />}
+            {active && !showThread && panel === 'members' && serverId !== null && (
+              <MembersPanel serverId={serverId} onClose={() => setPanel(null)} onAddMembers={() => openModal({ kind: 'add-members', serverId })} />
+            )}
+            {active?.kind === 'conversation' && !showThread && panel === 'info' && (
+              <DmInfoPanel conversationId={active.id} onClose={() => setPanel(null)} onAddPeople={() => openModal({ kind: 'add-to-dm', conversationId: active.id })} />
+            )}
+          </div>
         )}
       </main>
     </div>

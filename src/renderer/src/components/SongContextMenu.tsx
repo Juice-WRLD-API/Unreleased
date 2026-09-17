@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen,
   ChevronDown, ChevronRight, ChevronLeft, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag,
-  Layers, Star, FileAudio2, X, Ban,
+  Layers, Star, FileAudio2, X, Ban, Share2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -14,6 +14,8 @@ import { placeFlyout } from '../lib/menuFlyout'
 import { versionsEnabled, getVersionGroup } from '../lib/versionsApi'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
+import { hasChatAccess } from '../store/chatStore'
+import ShareSongModal from './chat/ShareSongModal'
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
@@ -170,6 +172,7 @@ export default function SongContextMenu({
   const [contained, setContained] = useState<Set<number>>(new Set())
   const [zipLoading, setZipLoading] = useState(false)
   const [zipCandidates, setZipCandidates] = useState<JWApiFileEntry[] | null>(null)
+  const [shareOpen, setShareOpen] = useState(false)
 
   // Mobile only: "Add to playlist" and "Change version" replace the whole
   // sheet's content instead of opening a desktop-style flyout (there's no
@@ -349,6 +352,10 @@ export default function SongContextMenu({
   // but it can join one of the device-local playlists instead.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
   const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly)
+  // Sharing rides the song's own stream URL, so it only makes sense for
+  // real API songs (not local-only files, which nobody else can reach) and
+  // only for staff, who are the only ones with a chat to share into.
+  const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl
   // Sessions/unsurfaced are treated as unplayable - don't offer Play / Play
   // next / Add to queue for them (they'd never actually play). Local files
   // (no category in genre) stay playable as long as they have a path.
@@ -386,6 +393,10 @@ export default function SongContextMenu({
     const { top, left } = placeFlyout(item, menu, sub)
     setSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
   }, [playlistsOpen, creating, pos, playlists.length, localPlaylists.length, contained])
+
+  if (shareOpen && canShareToChat) {
+    return <ShareSongModal track={track} songId={songId as number} onClose={onClose} />
+  }
 
   if (isMobile) {
     if (panel === 'zip') {
@@ -539,6 +550,7 @@ export default function SongContextMenu({
         {canAddToPlaylist && (
           <SheetItem icon={Plus} label="Add to playlist" trailing={<ChevronRight size={16} className="text-text-muted" />} onClick={() => setMobileSub('playlists')} />
         )}
+        {canShareToChat && <SheetItem icon={Share2} label="Share to chat" onClick={() => setShareOpen(true)} />}
         {onShowInFiles && track.path && <SheetItem icon={Folder} label="Show in Files" onClick={() => { onShowInFiles(); onClose() }} />}
         {canEdit && songId != null && songId > 0 && (
           <SheetItem icon={Pencil} label="Edit" onClick={() => { useStore.getState().openSongEditor(songId); onClose() }} />
@@ -746,6 +758,9 @@ export default function SongContextMenu({
               trailing={<ChevronRight size={13} className="text-text-muted" />}
               onClick={() => setPlaylistsOpen(o => !o)}
             />
+          )}
+          {canShareToChat && (
+            <MenuItem icon={<Share2 size={14} />} label="Share to chat" onClick={() => setShareOpen(true)} />
           )}
           {onShowInFiles && track.path && (
             <MenuItem icon={<Folder size={14} />} label="Show in Files" onClick={() => { onShowInFiles(); onClose() }} />

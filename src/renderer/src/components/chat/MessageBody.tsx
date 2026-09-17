@@ -3,8 +3,10 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import remarkGfm from 'remark-gfm'
 import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
+import { decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { linkMentions } from './people'
+import SongShareCard from './SongShareCard'
 
 function urlTransform(url: string): string {
   return url.startsWith('mention:') ? url : defaultUrlTransform(url)
@@ -46,7 +48,9 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   }
 
   if (!message.is_encrypted) {
-    return message.content ? <MemoMarkdown text={message.content} people={people} meId={meId} /> : null
+    if (!message.content) return null
+    const song = decodeSongShare(message.content)
+    return song ? <SongShareCard song={song} /> : <MemoMarkdown text={message.content} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -65,5 +69,7 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
       </p>
     )
   }
-  return decrypted.text ? <MemoMarkdown text={decrypted.text} people={people} meId={meId} /> : null
+  if (!decrypted.text) return null
+  const decryptedSong = decodeSongShare(decrypted.text)
+  return decryptedSong ? <SongShareCard song={decryptedSong} /> : <MemoMarkdown text={decrypted.text} people={people} meId={meId} />
 }
