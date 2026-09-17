@@ -427,6 +427,16 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
       </div>
       <StatusBar />
       {showFooter && <MeFooter />}
+      {ctxMenu && (
+        <PinMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          pinned={pinnedConversations.includes(ctxMenu.convId)}
+          label="chat"
+          onToggle={() => togglePinConversation(ctxMenu.convId)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   )
 }
