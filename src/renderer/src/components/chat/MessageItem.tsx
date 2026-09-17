@@ -17,6 +17,7 @@ export interface MessageItemProps {
   people: ChatUserBrief[]
   canModerate: boolean
   inThread?: boolean
+  activeThread?: boolean
   editing: boolean
   onStartEdit: (id: number | null) => void
   onOpenThread?: (id: number) => void
@@ -109,7 +110,7 @@ function SheetRow({ icon, label, onClick, danger }: { icon: JSX.Element; label: 
 }
 
 function MessageItem({
-  message, grouped, people, canModerate, inThread, editing, onStartEdit, onOpenThread, highlight, compactMobile,
+  message, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, highlight, compactMobile,
 }: MessageItemProps): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const toggleReaction = useChatStore((s) => s.toggleReaction)
@@ -179,8 +180,8 @@ function MessageItem({
       onContextMenu={(e) => { if (compactMobile) e.preventDefault() }}
       className={`group relative flex gap-3 px-4 md:px-5 transition-colors ${
         grouped ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'
-      } ${highlight ? 'chat-flash' : ''} ${editing ? 'bg-accent/[0.04]' : 'hover:bg-surface-raised/40'} ${
-        message.pinned && !inThread ? 'border-l-2 border-amber-400/60' : 'border-l-2 border-transparent'
+      } ${highlight ? 'chat-flash' : ''} ${editing || activeThread ? 'bg-accent/[0.04]' : 'hover:bg-surface-raised/40'} ${
+        activeThread ? 'border-l-2 border-accent/60' : message.pinned && !inThread ? 'border-l-2 border-amber-400/60' : 'border-l-2 border-transparent'
       }`}
     >
       <div className="w-9 shrink-0 flex justify-center">
@@ -258,13 +259,17 @@ function MessageItem({
           </div>
         )}
 
-        {!inThread && message.reply_count > 0 && !deleted && onOpenThread && (
+        {!inThread && (message.reply_count > 0 || activeThread) && !deleted && onOpenThread && (
           <button
             onClick={() => onOpenThread(message.id)}
-            className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 -ml-2 text-xs font-semibold text-accent hover:bg-accent/10 transition-colors"
+            className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 -ml-2 text-xs font-semibold transition-colors ${
+              activeThread ? 'bg-accent/15 text-accent' : 'text-accent hover:bg-accent/10'
+            }`}
           >
             <CornerDownRight size={13} />
-            {message.reply_count} {message.reply_count === 1 ? 'reply' : 'replies'}
+            {message.reply_count > 0
+              ? `${message.reply_count} ${message.reply_count === 1 ? 'reply' : 'replies'}`
+              : 'Thread open'}
           </button>
         )}
 

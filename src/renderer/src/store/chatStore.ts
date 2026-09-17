@@ -224,19 +224,20 @@ export const useChatStore = create<ChatState>((set, get) => {
     const key = messageRoom(msg)
     if (!key) return
     if (isNew && ownEchoPending(msg, key)) {
-      if (msg.parent) {
-        mapMessage(msg.parent, (p) => ({ ...p, reply_count: p.reply_count + 1 }))
-      } else {
-        set((s) => ({ lastMessage: { ...s.lastMessage, [key]: msg } }))
-      }
+      // reply_count for our own pending reply was already bumped optimistically
+      // when the temp message was placed (see send()); nothing more to do here.
+      if (!msg.parent) set((s) => ({ lastMessage: { ...s.lastMessage, [key]: msg } }))
       return
     }
     if (msg.parent) {
       set((s) => {
         const thread = s.threads[msg.parent!]
+        // Already counted (via the optimistic bump in send(), or a prior event
+        // for this same message) if this id is already sitting in the thread.
+        const alreadyCounted = thread?.items.some((m) => m.id === msg.id) ?? false
         const threads = thread ? { ...s.threads, [msg.parent!]: { ...thread, items: upsert(thread.items, msg) } } : s.threads
         const room = s.rooms[key]
-        const rooms = room && isNew
+        const rooms = room && isNew && !alreadyCounted
           ? { ...s.rooms, [key]: { ...room, items: room.items.map((m) => m.id === msg.parent ? { ...m, reply_count: m.reply_count + 1 } : m) } }
           : s.rooms
         return { threads, rooms }
@@ -714,6 +715,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
       }
       place((items) => items.concat(temp))
+      if (temp.parent) {
+        patchRoom(key, (r) => ({ items: r.items.map((m) => m.id === temp.parent ? { ...m, reply_count: m.reply_count + 1 } : m) }))
+      }
 
       const attempt = async (): Promise<void> => {
         place((items) => items.map((m) => m.id === tempId ? { ...m, sendState: 'sending' } : m))
@@ -740,7 +744,10 @@ export const useChatStore = create<ChatState>((set, get) => {
             })
             setPlain(created.id, { text })
           }
-          place((items) => upsert(items.filter((x) => x.id !== tempId), { ...created, localId }))
+          // Replace in place rather than re-sorting by id: if two messages are
+          // sent in quick succession, whichever request's response lands first
+          // must not jump ahead of one sent earlier but still in flight.
+          place((items) => items.map((m) => m.id === tempId ? { ...created, localId } : m))
           if (!created.parent) {
             set((s) => ({ lastMessage: { ...s.lastMessage, [key]: created } }))
             get().markRead(room)
@@ -777,7 +784,14 @@ export const useChatStore = create<ChatState>((set, get) => {
         set((s) => {
           const rooms: Record<string, RoomMessages> = {}
           for (const [k, r] of Object.entries(s.rooms)) rooms[k] = { ...r, items: r.items.filter((m) => m.id !== message.id) }
-          return { rooms }
+          const threads = { ...s.threads }
+          if (message.parent != null && threads[message.parent]) {
+            threads[message.parent] = { ...threads[message.parent], items: threads[message.parent].items.filter((m) => m.id !== message.id) }
+            const key = messageRoom(message)
+            const room = key ? rooms[key] ?? s.rooms[key] : undefined
+            if (key && room) rooms[key] = { ...room, items: room.items.map((m) => m.id === message.parent ? { ...m, reply_count: Math.max(0, m.reply_count - 1) } : m) }
+          }
+          return { rooms, threads }
         })
         return
       }

@@ -50,6 +50,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
   const state = useChatStore((s) => s.rooms[key])
   const loadOlder = useChatStore((s) => s.loadOlder)
   const openThread = useChatStore((s) => s.openThread)
+  const threadRootId = useChatStore((s) => s.threadRootId)
   const markRead = useChatStore((s) => s.markRead)
   const receipts = useChatStore((s) => s.receipts[key])
   const meId = useChatStore((s) => s.meId)
@@ -259,6 +260,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
                     editing={editingId === m.id}
                     onStartEdit={onStartEdit}
                     onOpenThread={openThread}
+                    activeThread={threadRootId === m.id}
                     highlight={flashId === m.id}
                   />
                 </div>
