@@ -5,6 +5,7 @@ import { ViewType } from '../types'
 import { navTabFor, tabEntryView } from '../lib/navItems'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { preloadView } from '../lib/lazyViews'
+import { useChatStore } from '../store/chatStore'
 
 // The mobile nav bar - the counterpart to the desktop Sidebar, which it now
 // shares its destination list with. It used to hardcode its own four tabs,
@@ -31,6 +32,12 @@ export default function BottomNav(): JSX.Element {
     useStorePick('activeView', 'setActiveView', 'toggleSettings')
   const showSettings = activeView === 'settings'
   const { tabs } = useMobileNavSplit()
+  const mobileRoomOpen = useChatStore((s) => s.mobileRoomOpen)
+  // Same full-immersion treatment as WRLD below: once a chat room is open,
+  // its own overlay covers the space this bar would have used, and the
+  // back gesture/header already gets you out - a nav bar peeking behind it
+  // is just visual noise.
+  const hidden = activeView === 'wrld' || (activeView === 'chat' && mobileRoomOpen)
 
   const navigateTo = (view: ViewType): void => {
     // Re-tapping the already-active Playlists tab dispatches a back event
@@ -76,14 +83,15 @@ export default function BottomNav(): JSX.Element {
   return (
     <nav
       ref={navRef}
-      // Hidden on WRLD (mobile) - that tab wants full-screen immersion, and
-      // its own layout already reclaims the freed space (see
-      // --bottom-nav-height, published below and read there).
+      // Hidden on WRLD (mobile) and while a chat room is open - both want
+      // full-screen immersion, and their own layouts already reclaim the
+      // freed space (see --bottom-nav-height, published below and read
+      // there).
       // bg-surface, not bg-sidebar: on the dark skin --sidebar is pure black,
       // noticeably blacker than the app's own --surface - stacked with the
       // safe-area-inset-bottom padding below the icons, that read as a stark,
       // "dead" slab distinct from the rest of the app instead of part of it.
-      className={`md:hidden ${activeView === 'wrld' ? 'hidden' : 'flex'} items-stretch bg-surface shrink-0`}
+      className={`md:hidden ${hidden ? 'hidden' : 'flex'} items-stretch bg-surface shrink-0`}
       style={{ borderTop: '1px solid var(--border)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       {tabs.map((tab) => {
