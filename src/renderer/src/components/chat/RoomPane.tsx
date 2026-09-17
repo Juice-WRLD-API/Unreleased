@@ -18,7 +18,7 @@ function TypingIndicator({ room }: { room: RoomRef }): JSX.Element {
     : names.length === 2 ? `${names[0]} and ${names[1]} are typing`
     : 'Several people are typing'
   return (
-    <div className={`h-5 px-5 flex items-center gap-2 text-[11px] text-text-muted transition-opacity ${label ? 'opacity-100' : 'opacity-0'}`} aria-live="polite">
+    <div className={`px-5 flex items-center gap-2 text-[11px] text-text-muted transition-[height,opacity] overflow-hidden ${label ? 'h-5 opacity-100' : 'h-0 opacity-0'}`} aria-live="polite">
       {label && (
         <>
           <span className="flex gap-0.5">
