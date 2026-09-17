@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { ChevronDown, Lock, MessagesSquare, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
+import { ChevronDown, Lock, MessagesSquare, Pencil, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
 import { useOpenModal } from './modalHost'
@@ -157,9 +157,14 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
                   <span className="truncate">{category}</span>
                 </button>
                 {canManage && (
-                  <button onClick={() => openModal({ kind: 'channel', serverId })} title="Create channel" className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-text-primary transition-opacity">
-                    <Plus size={14} />
-                  </button>
+                  <span className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                    <button onClick={() => openModal({ kind: 'rename-category', serverId, category })} title="Rename category" className="p-1 text-text-muted hover:text-text-primary">
+                      <Pencil size={12} />
+                    </button>
+                    <button onClick={() => openModal({ kind: 'channel', serverId })} title="Create channel" className="p-1 text-text-muted hover:text-text-primary">
+                      <Plus size={14} />
+                    </button>
+                  </span>
                 )}
               </div>
             )}
