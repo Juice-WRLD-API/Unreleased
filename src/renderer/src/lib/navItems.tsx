@@ -41,7 +41,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   // only the label is Games, so the tab can hold more than one game later.
   // Excluded from the mobile bar/More entirely (see useMobileNavTabs'
   // MOBILE_HIDDEN_VIEWS) - Home's Games section already covers it directly.
-  { view: 'heardle', label: 'Games', icon: <Gamepad2 size={18} /> },
+  { view: 'heardle', label: 'Games', icon: <Gamepad2 size={18} />, defaultHidden: true },
   // Same as Games: hidden from mobile entirely, since Home's own Playlists
   // section is the real mobile entry point now.
   { view: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
