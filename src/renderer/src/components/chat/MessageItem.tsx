@@ -8,6 +8,7 @@ import type { ChatUserBrief } from '../../lib/chatApi'
 import { displayName, useChatStore, type UiMessage } from '../../store/chatStore'
 import AttachmentList from './AttachmentView'
 import MessageBody from './MessageBody'
+import MessageContextMenu from './MessageContextMenu'
 import ReactionPicker from './ReactionPicker'
 import { QUICK_REACTIONS, emojiGlyph, quickReactions, rememberEmoji } from './emoji'
 import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
@@ -127,6 +128,7 @@ function MessageItem({
   const toast = useChatToast()
 
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [sheet, setSheet] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const pressTimer = useRef<number | null>(null)
@@ -137,6 +139,7 @@ function MessageItem({
   const canEdit = mine && !deleted && !pending && (!message.is_encrypted || !!plainText)
   const canDelete = !pending && !deleted && (mine || canModerate)
   const canPin = !pending && !deleted && (mine || canModerate)
+  const canCopy = !deleted && !!plainText
 
   const run = (fn: () => Promise<unknown>, failure: string) => {
     fn().catch((err) => toast(errorText(err, failure)))
@@ -179,7 +182,11 @@ function MessageItem({
       onTouchStart={onTouchStart}
       onTouchEnd={cancelPress}
       onTouchMove={cancelPress}
-      onContextMenu={(e) => { if (isMobile) e.preventDefault() }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        if (isMobile || pending || deleted || editing) return
+        setMenu({ x: e.clientX, y: e.clientY })
+      }}
       className={`group relative flex gap-3 px-4 md:px-5 transition-colors ${
         grouped ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'
       } ${highlight ? 'chat-flash' : ''} ${editing || activeThread ? 'bg-accent/[0.04]' : 'hover:bg-surface-raised/40'} ${
@@ -301,16 +308,6 @@ function MessageItem({
             <ToolbarButton label="Reply in thread" onClick={() => onOpenThread(message.id)}><MessageSquareReply size={16} /></ToolbarButton>
           )}
           {canEdit && <ToolbarButton label="Edit" onClick={() => onStartEdit(message.id)}><Pencil size={15} /></ToolbarButton>}
-          {canPin && (
-            <ToolbarButton label={message.pinned ? 'Unpin' : 'Pin'} onClick={() => run(() => togglePin(message), 'Could not update pin')}>
-              {message.pinned ? <PinOff size={15} /> : <Pin size={15} />}
-            </ToolbarButton>
-          )}
-          {plainText && (
-            <ToolbarButton label="Copy text" onClick={() => { void navigator.clipboard.writeText(plainText); toast('Copied to clipboard', 'ok') }}>
-              <Copy size={15} />
-            </ToolbarButton>
-          )}
           {canDelete && (
             <ToolbarButton label="Delete" danger onClick={(e) => (e.shiftKey ? doDelete() : setConfirmDelete(true))}><Trash2 size={15} /></ToolbarButton>
           )}
@@ -318,6 +315,27 @@ function MessageItem({
       )}
 
       {picker && <ReactionPicker x={picker.x} y={picker.y} onPick={react} onClose={() => setPicker(null)} />}
+
+      {menu && (
+        <MessageContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          onReact={react}
+          onMoreReactions={() => setPicker({ x: menu.x, y: menu.y })}
+          onReply={!inThread && onReply ? () => onReply(message) : undefined}
+          onOpenThread={!inThread && onOpenThread ? () => onOpenThread(message.id) : undefined}
+          canEdit={canEdit}
+          onEdit={() => onStartEdit(message.id)}
+          canPin={canPin}
+          pinned={message.pinned}
+          onTogglePin={() => run(() => togglePin(message), 'Could not update pin')}
+          canCopy={canCopy}
+          onCopy={() => { void navigator.clipboard.writeText(plainText); toast('Copied to clipboard', 'ok') }}
+          canDelete={canDelete}
+          onDelete={() => setConfirmDelete(true)}
+        />
+      )}
 
       {sheet && (
         <ActionSheet onClose={() => setSheet(false)}>
