@@ -68,8 +68,8 @@ export default function ChatViewDesktop(): JSX.Element {
   const showThread = !!active && threadRootId !== null
   const sideOpen = showThread || panel !== null
   const sideClassName = compact
-    ? 'absolute inset-y-0 right-0 z-30 shadow-2xl'
-    : ''
+    ? 'flex h-full absolute inset-y-0 right-0 z-30 shadow-2xl'
+    : 'flex h-full'
 
   return (
     <div className="flex-1 min-w-0 h-full flex bg-surface overflow-hidden" style={{ ['--chat-rail' as string]: 'var(--sidebar, var(--surface))' }}>
