@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useChatStore } from '../store/chatStore'
 import { getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId } from '../lib/userApi'
 import type { PublicProfile, PlaylistSummary, PlaylistDetail } from '../lib/userApi'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
@@ -128,11 +129,13 @@ export default function PublicProfileView(): JSX.Element {
     'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'account', 'playlistFolders', 'setPendingPlaylistId',
   )
   const canEdit = useCanEdit()
+  const startDm = useChatStore((s) => s.startDm)
   const userId = Number(window.location.pathname.split('/u/')[1]?.split('/')[0] ?? '')
 
   const [profile, setProfile] = useState<PublicProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [messaging, setMessaging] = useState(false)
 
   const [recentTracks, setRecentTracks] = useState<Track[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
@@ -208,6 +211,17 @@ export default function PublicProfileView(): JSX.Element {
 
   function openSongInfo(songId: number): void {
     useStore.getState().setInfoSongId(songId)
+  }
+
+  async function messageUser(): Promise<void> {
+    if (!profile || messaging) return
+    setMessaging(true)
+    try {
+      await startDm([profile.id])
+      setActiveView('chat')
+    } catch {
+      setMessaging(false)
+    }
   }
 
   function openTrackMenu(e: React.MouseEvent, track: Track): void {
@@ -369,8 +383,8 @@ export default function PublicProfileView(): JSX.Element {
             ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
             : <User size={26} className="text-text-muted" />}
         </div>
-        <div>
-          <h1 className="text-text-primary text-2xl font-bold">{profile.display_name}</h1>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
           {(profile.is_editor || profile.is_contributor) && (
             <div className="flex items-center gap-2 mt-1">
               {profile.is_editor && (
@@ -386,6 +400,16 @@ export default function PublicProfileView(): JSX.Element {
             </div>
           )}
         </div>
+        {!isOwnProfile && (
+          <button
+            onClick={() => void messageUser()}
+            disabled={messaging}
+            className="flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform disabled:opacity-60 disabled:pointer-events-none"
+          >
+            {messaging ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+            Message
+          </button>
+        )}
       </div>
 
       {profile.bio && (
