@@ -56,6 +56,11 @@ function useCommitFreshness(): [CommitFreshness, () => void] {
     let cancelled = false
     fetch(`https://api.github.com/repos/${REPO}/commits/${DEPLOY_BRANCH}`, {
       headers: { Accept: 'application/vnd.github+json' },
+      // Our own `cached` module var already governs staleness (see CACHE_MS
+      // above) - the browser's HTTP cache doing the same thing underneath it
+      // is what makes refresh() look like a no-op, since a plain GET here is
+      // otherwise a normal cacheable request the browser is free to reuse.
+      cache: 'no-store',
     })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: { sha?: string }) => {
