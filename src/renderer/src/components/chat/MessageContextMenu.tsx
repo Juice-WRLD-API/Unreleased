@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { CornerUpLeft, Copy, MessageSquareReply, Pencil, Pin, PinOff, SmilePlus, Trash2 } from 'lucide-react'
+import { CornerUpLeft, Copy, Image, MessageSquareReply, Pencil, Pin, PinOff, SmilePlus, Trash2 } from 'lucide-react'
 import { ClampedMenu } from '../ClampedMenu'
 import EmojiImg from './EmojiImg'
 import { quickReactions } from './emoji'
@@ -21,7 +21,7 @@ function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; lab
 }
 
 export default function MessageContextMenu({
-  x, y, onClose, onReact, onMoreReactions, onReply, onOpenThread, canEdit, onEdit, canPin, pinned, onTogglePin, canCopy, onCopy, canDelete, onDelete,
+  x, y, onClose, onReact, onMoreReactions, onReply, onOpenThread, canEdit, onEdit, canPin, pinned, onTogglePin, canCopy, onCopy, canCopyImage, onCopyImage, canDelete, onDelete,
 }: {
   x: number
   y: number
@@ -37,6 +37,8 @@ export default function MessageContextMenu({
   onTogglePin: () => void
   canCopy: boolean
   onCopy: () => void
+  canCopyImage: boolean
+  onCopyImage: () => void
   canDelete: boolean
   onDelete: () => void
 }): JSX.Element {
@@ -72,6 +74,7 @@ export default function MessageContextMenu({
       {canEdit && <MenuItem icon={<Pencil size={15} />} label="Edit Message" onClick={act(onEdit)} />}
       {canPin && <MenuItem icon={pinned ? <PinOff size={15} /> : <Pin size={15} />} label={pinned ? 'Unpin Message' : 'Pin Message'} onClick={act(onTogglePin)} />}
       {canCopy && <MenuItem icon={<Copy size={15} />} label="Copy Text" onClick={act(onCopy)} />}
+      {canCopyImage && <MenuItem icon={<Image size={15} />} label="Copy Image" onClick={act(onCopyImage)} />}
       {canDelete && (
         <>
           <div className="my-1 border-t border-[var(--border)]" />

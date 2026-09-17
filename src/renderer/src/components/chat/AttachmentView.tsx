@@ -5,9 +5,9 @@ import { useChatStore } from '../../store/chatStore'
 import MediaLightbox, { type LightboxItem } from '../MediaLightbox'
 import { formatBytes } from './ui'
 
-type Kind = 'image' | 'video' | 'audio' | 'file'
+export type Kind = 'image' | 'video' | 'audio' | 'file'
 
-function kindOf(mime: string, name: string): Kind {
+export function kindOf(mime: string, name: string): Kind {
   const m = mime.toLowerCase()
   if (m.startsWith('image/')) return 'image'
   if (m.startsWith('video/')) return 'video'

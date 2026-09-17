@@ -1,14 +1,15 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertCircle, CornerDownRight, CornerUpLeft, Copy, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
+  AlertCircle, CornerDownRight, CornerUpLeft, Copy, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
+import { chatAttachmentUrl } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { displayName, useChatStore, useMessageById, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
-import AttachmentList from './AttachmentView'
+import AttachmentList, { kindOf } from './AttachmentView'
 import MessageBody from './MessageBody'
 import MessageContextMenu from './MessageContextMenu'
 import ReactionPicker from './ReactionPicker'
@@ -263,9 +264,38 @@ function MessageItem({
   const canDelete = !pending && !deleted && (mine || canModerate)
   const canPin = !pending && !deleted && (mine || canModerate)
   const canCopy = !deleted && !!plainText
+  const imageAttachment = !deleted ? message.attachments.find((a) => kindOf(a.mime, a.name) === 'image') : undefined
+  const canCopyImage = !!imageAttachment
 
   const run = (fn: () => Promise<unknown>, failure: string) => {
     fn().catch((err) => toast(errorText(err, failure)))
+  }
+
+  // Copies the message's first image attachment as a PNG blob - the Clipboard
+  // API only reliably accepts image/png across browsers/Electron, so anything
+  // else (jpeg, webp, gif) gets re-encoded via canvas first.
+  const copyImage = async (): Promise<void> => {
+    if (!imageAttachment) return
+    let blob: Blob
+    if (message.is_encrypted && message.conversation && meId) {
+      const { decryptAttachment } = await import('../../lib/chatE2E')
+      blob = (await decryptAttachment(meId, message.conversation, imageAttachment)).blob
+    } else {
+      const res = await fetch(chatAttachmentUrl(imageAttachment.id))
+      if (!res.ok) throw new Error('Could not load image')
+      blob = await res.blob()
+    }
+    if (blob.type !== 'image/png') {
+      const bitmap = await createImageBitmap(blob)
+      const canvas = document.createElement('canvas')
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
+      blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not convert image'))), 'image/png'),
+      )
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
   }
 
   const react = (name: string): void => {
@@ -472,6 +502,8 @@ function MessageItem({
           onTogglePin={() => run(() => togglePin(message), 'Could not update pin')}
           canCopy={canCopy}
           onCopy={() => { void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }}
+          canCopyImage={canCopyImage}
+          onCopyImage={() => run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image')}
           canDelete={canDelete}
           onDelete={() => setConfirmDelete(true)}
         />
@@ -491,6 +523,7 @@ function MessageItem({
           {canEdit && <SheetRow icon={<Pencil size={18} />} label="Edit message" onClick={() => { setSheet(false); onStartEdit(message.id) }} />}
           {canPin && <SheetRow icon={message.pinned ? <PinOff size={18} /> : <Pin size={18} />} label={message.pinned ? 'Unpin' : 'Pin message'} onClick={() => { setSheet(false); run(() => togglePin(message), 'Could not update pin') }} />}
           {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }} />}
+          {canCopyImage && <SheetRow icon={<ImageIcon size={18} />} label="Copy image" onClick={() => { setSheet(false); run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image') }} />}
           {canDelete && <SheetRow icon={<Trash2 size={18} />} label="Delete message" danger onClick={() => { setSheet(false); setConfirmDelete(true) }} />}
         </ActionSheet>
       )}
