@@ -6,8 +6,8 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
-import { getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId } from '../lib/userApi'
-import type { PublicProfile, PlaylistSummary, PlaylistDetail } from '../lib/userApi'
+import { getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying } from '../lib/userApi'
+import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState } from '../lib/userApi'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -24,6 +24,11 @@ import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
 // {song, played_at} - resolving every row would mean one fetch per play, so
 // this caps how many of the newest rows we bother resolving.
 const RECENT_PLAYS_DISPLAY_LIMIT = 10
+
+// The server itself expires now_playing after 5 minutes without a push (see
+// docs/content.tsx "Now Playing") - polling well inside that window keeps the
+// live indicator from lagging behind a track change or a stop.
+const NOW_PLAYING_POLL_MS = 15_000
 
 // How many of the profile owner's top songs the compact Wrapped teaser shows -
 // the full breakdown lives behind "View full Wrapped" for the owner's own page.
@@ -140,6 +145,9 @@ export default function PublicProfileView(): JSX.Element {
   const [recentTracks, setRecentTracks] = useState<Track[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
 
+  const [nowPlaying, setNowPlaying] = useState<NowPlayingState | null>(null)
+  const [nowPlayingTrack, setNowPlayingTrack] = useState<Track | null>(null)
+
   const [wrappedStats, setWrappedStats] = useState<ListeningStats | null>(null)
   const [wrappedLoading, setWrappedLoading] = useState(false)
 
@@ -176,6 +184,31 @@ export default function PublicProfileView(): JSX.Element {
       .catch(() => setRecentTracks([]))
       .finally(() => setRecentLoading(false))
   }, [profile])
+
+  // Live "currently listening" indicator - polled independently of the
+  // profile fetch since it's the one piece of this page that goes stale
+  // within seconds rather than staying fixed for the session.
+  useEffect(() => {
+    if (!profile?.public_now_playing || !Number.isFinite(userId) || userId <= 0) { setNowPlaying(null); return }
+    let cancelled = false
+    const poll = (): void => {
+      getNowPlaying(userId)
+        .then((res) => { if (!cancelled) setNowPlaying(res.now_playing) })
+        .catch(() => { if (!cancelled) setNowPlaying(null) })
+    }
+    poll()
+    const id = setInterval(poll, NOW_PLAYING_POLL_MS)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [profile?.public_now_playing, userId])
+
+  useEffect(() => {
+    if (!nowPlaying) { setNowPlayingTrack(null); return }
+    let cancelled = false
+    getSongsByIds([nowPlaying.song])
+      .then((songs) => { if (!cancelled) setNowPlayingTrack(songs[0] ? songToTrack(songs[0]) : null) })
+      .catch(() => { if (!cancelled) setNowPlayingTrack(null) })
+    return () => { cancelled = true }
+  }, [nowPlaying?.song])
 
   // Compact "Wrapped" teaser - built entirely from the same timestamped
   // play_history the "Recently played" section uses, all-time (the profile
@@ -415,6 +448,38 @@ export default function PublicProfileView(): JSX.Element {
 
       {profile.bio && (
         <p className="text-text-secondary text-sm leading-relaxed mt-3 mb-2 max-w-xl whitespace-pre-wrap">{profile.bio}</p>
+      )}
+
+      {nowPlaying && nowPlayingTrack && (
+        <div
+          className="group flex items-center gap-3 mt-4 px-3 py-2.5 rounded-xl border border-accent/30 bg-accent/5 hover:bg-accent/10 cursor-pointer transition-colors"
+          onClick={() => playTrack(nowPlayingTrack)}
+          onContextMenu={(e) => openTrackMenu(e, nowPlayingTrack)}
+        >
+          <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-surface-overlay shrink-0">
+            <AlbumArtThumbnail track={nowPlayingTrack} fill className="w-full h-full" />
+            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+              <Play size={13} fill="white" className="text-white ml-0.5" />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="flex items-center gap-1.5 text-accent text-[10px] font-bold uppercase tracking-widest">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent" />
+              </span>
+              Listening now
+            </p>
+            <p className="text-text-primary text-sm truncate" title={nowPlayingTrack.title}>{nowPlayingTrack.title}</p>
+          </div>
+          <button
+            onClick={(e) => openTrackMenu(e, nowPlayingTrack)}
+            className="p-1.5 text-text-muted hover:text-text-primary transition-colors shrink-0"
+            title="More options"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+        </div>
       )}
 
       {!profile.public_play_history && !profile.public_playlists && (

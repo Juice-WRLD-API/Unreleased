@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Check, Hash, ImagePlus, Loader2, Lock, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatChannel, ChatUserBrief } from '../../lib/chatApi'
-import { adminListUsers, compressImageFile } from '../../lib/userApi'
+import { adminListUsers, compressImageFile, useNowPlayingByIds } from '../../lib/userApi'
 import { displayName, useChatStore } from '../../store/chatStore'
 import { ConfirmDialog } from './MessageItem'
 import { useStaffDirectory } from './people'
@@ -144,6 +144,7 @@ function PeoplePicker({ selected, onChange, exclude, max }: {
     .filter((p) => !exclude?.has(p.id))
     .filter((p) => !q || p.username.toLowerCase().includes(q) || p.display_name.toLowerCase().includes(q))
   const byId = /^\d+$/.test(q) && !people.some((p) => String(p.id) === q) ? Number(q) : null
+  const nowPlaying = useNowPlayingByIds(visible.map((p) => p.id))
 
   const toggle = (p: ChatUserBrief): void => {
     if (selectedIds.has(p.id)) onChange(selected.filter((x) => x.id !== p.id))
@@ -186,7 +187,7 @@ function PeoplePicker({ selected, onChange, exclude, max }: {
               onClick={() => toggle(p)}
               className={`w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${on ? 'bg-accent/10' : 'hover:bg-surface-raised/70'}`}
             >
-              <ChatAvatar user={p} size={34} presence />
+              <ChatAvatar user={p} size={34} presence listening={!!nowPlaying[p.id]} />
               <span className="flex-1 min-w-0">
                 <span className="block text-sm text-text-primary truncate">{displayName(p)}</span>
                 <span className="block text-xs text-text-muted truncate">@{p.username} · {p.role === 'administrator' ? 'Admin' : 'Manager'}</span>

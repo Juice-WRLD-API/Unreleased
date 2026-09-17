@@ -1096,6 +1096,77 @@ Authorization: Token <token>`}</Pre>
         </p>
       </Section>
 
+      <Section title="Now Playing">
+        <p className="text-sm text-text-secondary">
+          Opt-in public broadcast of what a user is currently listening to. The client pushes playback state
+          while a track is playing; anyone can read it from a dedicated public endpoint, no auth required.
+        </p>
+        <div className="space-y-4 mt-3">
+          <div>
+            <MethodPath method="PATCH" path={`/accounts/account/me/`} />
+            <p className="text-xs text-text-muted mb-2">
+              Toggle visibility and/or push playback state, same pattern as <Code>public_play_history</Code> and{' '}
+              <Code>public_playlists</Code>. Partial update — send only the fields you&apos;re changing.
+            </p>
+            <Pre>{`{ "public_now_playing": true }`}</Pre>
+            <Pre>{`{
+  "now_playing": {
+    "song": 94080,
+    "path": "Compilation/2. Unreleased Discography/1. JUICED UP THE EP (Sessions)/Lucid Dreams.mp3",
+    "position": 12.5
+  }
+}`}</Pre>
+            <Table
+              headers={['Field', 'Required', 'Rules']}
+              rows={[
+                [<Code>song</Code>, 'yes', 'Positive integer (internal song id, same as tracker / listening_plays.song)'],
+                [<Code>path</Code>, 'no', <>String, max 1024 chars; empty string if unknown</>],
+                [<Code>position</Code>, 'no', <>Float &gt;= 0; defaults to <Code>0</Code></>],
+              ]}
+            />
+            <p className="text-xs text-text-muted mt-2">
+              Clear it by sending <Code>{'{ "now_playing": {} }'}</Code> or <Code>{'{ "now_playing": null }'}</Code> —
+              do this on pause/stop/logout or when the user disables the feature.
+            </p>
+            <p className="text-xs text-text-muted font-semibold mt-2">400:</p>
+            <Pre>{`{ "now_playing": ["A valid song id is required."] }`}</Pre>
+            <p className="text-xs text-text-muted mt-2">
+              The server stamps <Code>updated_at</Code> on every successful PATCH — don&apos;t send it yourself.
+              While a track is actively playing, re-PATCH every 15–30s (on seek/track-change too) so the
+              5-minute staleness window below stays fresh.
+            </p>
+          </div>
+          <div>
+            <MethodPath method="GET" path={`/accounts/profile/{user_id}/np/`} />
+            <p className="text-xs text-text-muted mb-2">No auth required.</p>
+            <Pre>{`{
+  "now_playing": {
+    "song": 94080,
+    "path": "Compilation/2. Unreleased Discography/1. JUICED UP THE EP (Sessions)/Lucid Dreams.mp3",
+    "position": 12.5,
+    "updated_at": "2026-09-17T19:00:00.123456+00:00"
+  }
+}`}</Pre>
+            <p className="text-xs text-text-muted font-semibold mt-2">Hidden / stale / empty (always 200, never 404):</p>
+            <Pre>{`{ "now_playing": null }`}</Pre>
+            <p className="text-xs text-text-muted font-semibold mt-2">Returned null when:</p>
+            <ul className="text-xs text-text-muted list-disc pl-4 space-y-0.5">
+              <li>User id doesn't exist or account is inactive</li>
+              <li><Code>public_now_playing</Code> is false</li>
+              <li>No <Code>now_playing</Code> data stored</li>
+              <li>Last update was more than 5 minutes ago</li>
+            </ul>
+          </div>
+        </div>
+        <p className="text-xs text-text-muted mt-3">
+          <Code>public_now_playing</Code> also appears on <Code>{'GET /accounts/profile/{user_id}/'}</Code> (see
+          Public User Profile above) so you can show a &quot;listening&quot; indicator without fetching playback
+          data on every profile load — the live <Code>now_playing</Code> payload itself is only on the{' '}
+          <Code>/np/</Code> endpoint. Defaults to <Code>false</Code> for all users; disabling it makes{' '}
+          <Code>/np/</Code> always return <Code>null</Code> even if stale data remains stored.
+        </p>
+      </Section>
+
       <Section title="Per-Song Preferences: Custom Titles, Covers, Playcounts">
         <p className="text-sm text-text-secondary leading-relaxed">
           <Code>user_preferences</Code> is a per-user, per-song override list carried on the profile: a personal

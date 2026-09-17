@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Track, ViewType } from '../types'
 import { JWAPI_BASE, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
@@ -24,6 +25,8 @@ export interface AccountUser {
   bio?: string
   public_play_history?: boolean
   public_playlists?: boolean
+  public_now_playing?: boolean
+  now_playing?: NowPlayingState | Record<string, never>
   is_editor: boolean
   is_contributor: boolean
   // Optional: the API only started returning this with the manager role, so
@@ -43,6 +46,13 @@ export interface AccountUser {
   // Channel ids the user follows for news notifications (see lib/newsNotifications).
   news_subscriptions?: string[]
   memberships?: ChannelMembership[]
+}
+
+export interface NowPlayingState {
+  song: number
+  path: string
+  position: number
+  updated_at: string
 }
 
 export interface ChannelMembership {
@@ -163,8 +173,13 @@ export interface PublicProfile {
   is_contributor: boolean
   public_play_history: boolean
   public_playlists: boolean
+  public_now_playing: boolean
   play_history?: ListeningPlayEvent[]
   playlists?: PlaylistSummary[]
+}
+
+export interface NowPlayingResponse {
+  now_playing: NowPlayingState | null
 }
 
 export function getToken(): string | null {
@@ -344,6 +359,7 @@ export async function updateBio(bio: string): Promise<AccountUser> {
 export async function updatePrivacySettings(payload: {
   public_play_history?: boolean
   public_playlists?: boolean
+  public_now_playing?: boolean
 }): Promise<AccountUser> {
   const url = `${ACCOUNT_BASE}/account/me/`
   const result = await request<AccountUser>(url, {
@@ -354,9 +370,54 @@ export async function updatePrivacySettings(payload: {
   return result
 }
 
+export async function updateNowPlaying(
+  nowPlaying: { song: number; path?: string; position?: number } | null,
+): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ now_playing: nowPlaying ?? {} }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
 export async function getPublicProfile(userId: number): Promise<PublicProfile> {
   const url = `${ACCOUNT_BASE}/profile/${userId}/`
   return request(url, { method: 'GET' }, false, url)
+}
+
+export async function getNowPlaying(userId: number): Promise<NowPlayingResponse> {
+  const url = `${ACCOUNT_BASE}/profile/${userId}/np/`
+  return request(url, { method: 'GET' }, false)
+}
+
+// There's no bulk "now playing for these users" endpoint yet (unlike chat
+// presence, which is one /presence/ call + socket events) - this polls
+// /np/ per id instead. Keep `ids` scoped to what's actually visible (a
+// people picker's filtered list, an online-members section) rather than an
+// entire directory, since every id here is its own request on every tick.
+const NOW_PLAYING_LIST_POLL_MS = 25_000
+
+export function useNowPlayingByIds(ids: number[]): Record<number, NowPlayingState | null> {
+  const key = [...new Set(ids)].sort((a, b) => a - b).join(',')
+  const [map, setMap] = useState<Record<number, NowPlayingState | null>>({})
+
+  useEffect(() => {
+    const list = key ? key.split(',').map(Number) : []
+    if (list.length === 0) { setMap({}); return }
+    let cancelled = false
+    const poll = (): void => {
+      Promise.all(list.map((id) =>
+        getNowPlaying(id).then((r) => [id, r.now_playing] as const).catch(() => [id, null] as const)
+      )).then((entries) => { if (!cancelled) setMap(Object.fromEntries(entries)) })
+    }
+    poll()
+    const timer = setInterval(poll, NOW_PLAYING_LIST_POLL_MS)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [key])
+
+  return map
 }
 
 export async function getFavorites(): Promise<FavoriteEntry[]> {

@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
@@ -537,6 +537,19 @@ export default function Settings(): JSX.Element {
       useStore.setState({ account: updated })
     } catch {
       useStore.setState({ account: { ...account, public_playlists: !next } })
+      setPrivacyError('Could not update. Try again.')
+    }
+  }
+  const togglePublicNowPlaying = async (): Promise<void> => {
+    if (!account) return
+    const next = !account.public_now_playing
+    useStore.setState({ account: { ...account, public_now_playing: next } })
+    setPrivacyError(null)
+    try {
+      const updated = await updatePrivacySettings({ public_now_playing: next })
+      useStore.setState({ account: updated })
+    } catch {
+      useStore.setState({ account: { ...account, public_now_playing: !next } })
       setPrivacyError('Could not update. Try again.')
     }
   }
@@ -1095,6 +1108,14 @@ export default function Settings(): JSX.Element {
                         sub="List your playlists that are already marked public on your profile"
                       >
                         <Toggle on={!!account.public_playlists} onClick={() => void togglePublicPlaylists()} />
+                      </Row>
+                      <Row
+                        icon={Radio}
+                        iconColor="#0f766e"
+                        label="Share what you're listening to"
+                        sub="Shows the track you're currently playing on your profile"
+                      >
+                        <Toggle on={!!account.public_now_playing} onClick={() => void togglePublicNowPlaying()} />
                       </Row>
                       {privacyError && <p className="text-red-400 text-xs pb-2">{privacyError}</p>}
                     </SettingsCard>

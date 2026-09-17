@@ -6,6 +6,7 @@ import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { splitReplyRef } from '../../lib/chatReplyRef'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
 import { useStorePick } from '../../store/useStore'
+import { useNowPlayingByIds, type NowPlayingState } from '../../lib/userApi'
 import { useOpenModal } from './modalHost'
 import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp, useChatToast, useDismiss } from './ui'
 import { MenuItem } from './SidePanels'
@@ -590,7 +591,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   )
 }
 
-function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDragging, isDropTarget, onDragStart, onDragEnd, onDragOver, onDrop }: {
+function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDragging, isDropTarget, onDragStart, onDragEnd, onDragOver, onDrop, nowPlaying }: {
   conv: Conversation
   pinned: boolean
   muted: boolean
@@ -603,6 +604,8 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
   onDragEnd?: () => void
   onDragOver?: (e: React.DragEvent) => void
   onDrop?: (e: React.DragEvent) => void
+  // Only meaningful for 1:1 DMs - see DmList's useNowPlayingByIds call.
+  nowPlaying?: Record<number, NowPlayingState | null>
 }): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const active = useChatStore((s) => s.active)
@@ -641,7 +644,7 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
           ))}
         </span>
       ) : (
-        <ChatAvatar user={others[0].user} size={40} presence />
+        <ChatAvatar user={others[0].user} size={40} presence listening={!!nowPlaying?.[others[0].user.id]} />
       )}
       <span className="flex-1 min-w-0">
         <span className="flex items-baseline gap-2">
@@ -699,6 +702,16 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
       })
   }, [conversations, lastMessage, query, meId, pinnedConversations, conversationOrder])
   const pinnedCount = sorted.filter((c) => pinnedConversations.includes(c.id)).length
+
+  // Only 1:1 conversations get a listening badge - a group's stacked-avatar
+  // pair has no single spot for it, and would need one id per member anyway.
+  const oneToOneOtherIds = useMemo(() => sorted.reduce<number[]>((acc, c) => {
+    if (c.is_group) return acc
+    const others = c.participants.filter((p) => p.user.id !== meId)
+    if (others.length === 1) acc.push(others[0].user.id)
+    return acc
+  }, []), [sorted, meId])
+  const nowPlaying = useNowPlayingByIds(oneToOneOtherIds)
 
   // Mirrors ServerRail's dropServer: reorder within the same pinned/unpinned
   // partition only, inserting the dragged chat just before the hovered one
@@ -769,6 +782,7 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
               onDragEnd={() => { setDragConvId(null); setDropConvTarget(null) }}
               onDragOver={(e) => { if (dragConvId == null || dragConvId === c.id) return; e.preventDefault(); setDropConvTarget(c.id) }}
               onDrop={(e) => { if (dragConvId == null) return; e.preventDefault(); dropConversation() }}
+              nowPlaying={nowPlaying}
             />
           </div>
         ))}

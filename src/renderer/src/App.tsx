@@ -61,6 +61,7 @@ import ApiTrackerView from './components/ApiTrackerView'
 import RadioFmPlayer from './components/RadioFmPlayer'
 import RadioVotePopup from './components/RadioVotePopup'
 import LastfmScrobbler from './components/LastfmScrobbler'
+import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import UserAuthModal from './components/UserAuthModal'
@@ -335,6 +336,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><RadioFmPlayer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioVotePopup /></ErrorBoundary>
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>

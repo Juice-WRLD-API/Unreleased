@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, CheckCircle2, Hash, Lock, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Hash, Lock, Music2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import type { ChatServer, ChatUserBrief } from '../../lib/chatApi'
 import { displayName, useChatStore } from '../../store/chatStore'
@@ -56,10 +56,15 @@ function hueFor(seed: number | string): number {
   return HUES[Math.abs(h) % HUES.length]
 }
 
-export function ChatAvatar({ user, size = 36, presence, className = '', onClick }: {
+export function ChatAvatar({ user, size = 36, presence, listening, className = '', onClick }: {
   user: Pick<ChatUserBrief, 'id' | 'avatar' | 'display_name' | 'username'>
   size?: number
   presence?: boolean
+  // Someone has public_now_playing on and an active (non-stale) now_playing -
+  // see lib/userApi's useNowPlayingByIds. A separate badge from the presence
+  // dot so both can show at once (listening implies online, but online
+  // doesn't imply listening).
+  listening?: boolean
   className?: string
   onClick?: () => void
 }): JSX.Element {
@@ -94,6 +99,15 @@ export function ChatAvatar({ user, size = 36, presence, className = '', onClick 
           style={{ width: dot, height: dot, right: -1, bottom: -1 }}
           title={online ? 'Online' : 'Offline'}
         />
+      )}
+      {listening && (
+        <span
+          className="absolute rounded-full bg-accent flex items-center justify-center border-2 border-[var(--chat-ring,var(--surface))]"
+          style={{ width: dot, height: dot, left: -1, top: -1 }}
+          title="Listening to music"
+        >
+          <Music2 size={Math.max(7, dot - 6)} className="text-black" />
+        </span>
       )}
     </span>
   )

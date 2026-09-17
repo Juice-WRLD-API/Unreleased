@@ -4,6 +4,7 @@ import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
 import { displayName, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
+import { useNowPlayingByIds } from '../../lib/userApi'
 import Composer from './Composer'
 import MessageBody from './MessageBody'
 import MessageItem, { ConfirmDialog } from './MessageItem'
@@ -112,12 +113,13 @@ export function PinsPanel({ room, onClose }: { room: RoomRef; onClose: () => voi
   )
 }
 
-function MemberRow({ member, serverId, canManage, ownerId, onMessage }: {
+function MemberRow({ member, serverId, canManage, ownerId, onMessage, listening }: {
   member: ChatMember
   serverId: number
   canManage: boolean
   ownerId: number
   onMessage: (userId: number) => void
+  listening?: boolean
 }): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const loadMembers = useChatStore((s) => s.loadMembers)
@@ -138,7 +140,7 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage }: {
 
   return (
     <div ref={ref} className="group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
-      <ChatAvatar user={member.user} size={32} presence onClick={openProfile} />
+      <ChatAvatar user={member.user} size={32} presence listening={listening} onClick={openProfile} />
       <div className="flex-1 min-w-0 cursor-pointer" onClick={openProfile}>
         <p className={`text-sm truncate flex items-center gap-1 hover:underline ${member.muted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
           {displayName(member.user)}
@@ -212,6 +214,9 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
   const onlineList = filtered.filter((m) => online[m.user.id])
   const offlineList = filtered.filter((m) => !online[m.user.id])
   const byName = (a: ChatMember, b: ChatMember) => displayName(a.user).localeCompare(displayName(b.user))
+  // Offline members can't have a live now_playing (see docs/content.tsx's
+  // 5-minute staleness window), so only the online section is worth polling.
+  const nowPlaying = useNowPlayingByIds(onlineList.map((m) => m.user.id))
 
   const message = (userId: number): void => {
     startDm([userId]).catch((err) => toast(errorText(err, 'Could not open conversation')))
@@ -237,7 +242,7 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
           <>
             {onlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Online — {onlineList.length}</p>}
             {onlineList.sort(byName).map((m) => (
-              <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} ownerId={server?.owner ?? -1} onMessage={message} />
+              <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} ownerId={server?.owner ?? -1} onMessage={message} listening={!!nowPlaying[m.user.id]} />
             ))}
             {offlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Offline — {offlineList.length}</p>}
             <div className="opacity-60">
@@ -258,13 +263,14 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
   const openPublicProfile = useStore((s) => s.openPublicProfile)
   const toast = useChatToast()
   const [confirm, setConfirm] = useState<number | null>(null)
+  const nowPlaying = useNowPlayingByIds(conv?.participants.map((p) => p.user.id) ?? [])
   if (!conv) return <PanelShell title="Details" onClose={onClose}><div /></PanelShell>
   return (
     <PanelShell title={conv.is_group ? 'Group members' : 'Details'} subtitle={`${conv.participants.length} people · encrypted`} onClose={onClose}>
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto p-2">
         {conv.participants.map((p) => (
           <div key={p.id} className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
-            <ChatAvatar user={p.user} size={32} presence onClick={() => openPublicProfile(p.user.id)} />
+            <ChatAvatar user={p.user} size={32} presence listening={!!nowPlaying[p.user.id]} onClick={() => openPublicProfile(p.user.id)} />
             <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openPublicProfile(p.user.id)}>
               <p className="text-sm text-text-primary truncate hover:underline">{displayName(p.user)}{p.user.id === meId && <span className="text-text-muted"> (you)</span>}</p>
               <p className="text-[11px] text-text-muted truncate">Joined {relativeTime(p.joined_at)}</p>
