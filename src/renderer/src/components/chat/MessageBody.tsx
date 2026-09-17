@@ -5,6 +5,7 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
 import { linkMentions } from './people'
 import SongShareCard from './SongShareCard'
 
@@ -13,20 +14,26 @@ function urlTransform(url: string): string {
 }
 
 function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBrief[]; meId: number | null }): JSX.Element {
+  const openPublicProfile = useStore((s) => s.openPublicProfile)
   const components = useMemo<Components>(() => ({
     a: ({ href, children }) => {
       if (href?.startsWith('mention:')) {
-        const self = Number(href.slice(8)) === meId
+        const userId = Number(href.slice(8))
+        const self = userId === meId
         return (
-          <span className={`inline-block rounded-md px-1 font-semibold ${self ? 'bg-amber-400/20 text-amber-300' : 'bg-accent/15 text-accent'}`}>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); openPublicProfile(userId) }}
+            className={`inline-block rounded-md px-1 font-semibold hover:underline ${self ? 'bg-amber-400/20 text-amber-300' : 'bg-accent/15 text-accent'}`}
+          >
             {children}
-          </span>
+          </button>
         )
       }
       return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     },
     img: ({ src, alt }) => <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>,
-  }), [meId])
+  }), [meId, openPublicProfile])
   const source = useMemo(() => linkMentions(text, people), [text, people])
   return (
     <div className="chat-md text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
