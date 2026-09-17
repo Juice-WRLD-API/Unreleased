@@ -202,11 +202,8 @@ interface ChatState {
 
 let socket: ChatSocket | null = null
 let typingTimer: number | null = null
-let pollTimer: number | null = null
 let listPollTimer: number | null = null
-const pollCursor = new Map<string, number>()
 const seenNew = new Set<number>()
-const ACTIVE_POLL_MS = 4000
 const LIST_POLL_MS = 30_000
 let initPromise: Promise<void> | null = null
 const rerunResolve = new Set<number>()
@@ -552,29 +549,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     for (const m of page.results) applyMessage(m, false)
   }
 
-  // The chat socket fails most handshakes server-side (502 on the majority of
-  // attempts), so live events can't be relied on. Poll the open room over REST
-  // as a floor; applyMessage dedupes against anything the socket also delivered.
-  const pollActive = async (): Promise<void> => {
-    const active = get().active
-    const meId = get().meId
-    if (!active || !meId || document.visibilityState !== 'visible') return
-    const key = roomKey(active)
-    const room = get().rooms[key]
-    if (!room?.loaded || room.loading) return
-    const newest = room.items.filter((m) => m.id > 0).slice(-1)[0]?.id ?? 0
-    const after = Math.max(newest, pollCursor.get(key) ?? 0)
-    const opts = after ? { after, limit: 100 } : { limit: PAGE }
-    const page = active.kind === 'channel'
-      ? await api.listChannelMessages(active.id, opts)
-      : await api.listDmMessages(active.id, opts)
-    if (get().active !== active) return
-    for (const m of page.results) {
-      pollCursor.set(key, Math.max(pollCursor.get(key) ?? 0, m.id))
-      applyMessage(m, true)
-    }
-  }
-
   // Re-derives key state for every conversation and, for ones we already hold
   // the key on, re-shares it to any currently-online participant. Covers gaps
   // left by the one-shot device.added/envelope.available push: a device that
@@ -701,7 +675,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         if (changed) set({ typing: next })
       }, 1500)
-      pollTimer = window.setInterval(() => { void pollActive().catch(() => undefined) }, ACTIVE_POLL_MS)
       // Same socket gap for everything not on screen: new DMs, unread badges,
       // last-message previews. Slower, since it touches every room.
       listPollTimer = window.setInterval(() => {
@@ -743,11 +716,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       if (typingTimer !== null) window.clearInterval(typingTimer)
       typingTimer = null
-      if (pollTimer !== null) window.clearInterval(pollTimer)
-      pollTimer = null
       if (listPollTimer !== null) window.clearInterval(listPollTimer)
       listPollTimer = null
-      pollCursor.clear()
       seenNew.clear()
       initPromise = null
       rerunResolve.clear()

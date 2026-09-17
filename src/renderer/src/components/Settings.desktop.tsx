@@ -1618,17 +1618,36 @@ export default function Settings(): JSX.Element {
                     </button>
                   </div>
                 </Row>
-                <Row icon={Bell} iconColor="#f59e0b" label="Notification sound" sub="Plays when a chat message or news post notification fires">
-                  <select
-                    value={notificationSound}
-                    onChange={(e) => chooseNotificationSound(e.target.value)}
-                    className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                  >
-                    {NOTIFICATION_SOUNDS.map((s) => (
-                      <option key={s.id} value={s.id}>{s.label}</option>
-                    ))}
-                  </select>
-                </Row>
+                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#f59e0b' }}>
+                      <Bell size={13} className="text-white" strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-text-primary text-sm">Notification sound</span>
+                      <p className="text-text-muted text-[11px]">Plays when a chat message or news post notification fires - click one to preview it</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap pl-[34px]">
+                    {NOTIFICATION_SOUNDS.map((s) => {
+                      const active = notificationSound === s.id
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => chooseNotificationSound(s.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
+                            active
+                              ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                          }`}
+                        >
+                          {s.notes.length > 0 ? <Volume2 size={11} /> : <BellOff size={11} />}
+                          {s.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
                 <Row
                   icon={CloudUpload}
                   iconColor="#d51007"

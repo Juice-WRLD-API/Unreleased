@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
@@ -1633,17 +1633,26 @@ export default function Settings(): JSX.Element {
                     icon={Bell}
                     iconColor="#f59e0b"
                     label="Notification sound"
-                    sub="Plays when a chat message or news post notification fires"
+                    sub="Plays when a chat message or news post notification fires - tap one to preview it"
                   >
-                    <select
-                      value={notificationSound}
-                      onChange={(e) => chooseNotificationSound(e.target.value)}
-                      className="w-full h-11 rounded-xl bg-[var(--surface-highest)] text-text-primary text-sm px-3"
-                    >
-                      {NOTIFICATION_SOUNDS.map((s) => (
-                        <option key={s.id} value={s.id}>{s.label}</option>
-                      ))}
-                    </select>
+                    <div className="flex flex-wrap gap-1.5">
+                      {NOTIFICATION_SOUNDS.map((s) => {
+                        const active = notificationSound === s.id
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => chooseNotificationSound(s.id)}
+                            aria-pressed={active}
+                            className={`flex items-center gap-1.5 px-3 h-9 rounded-full text-[13px] font-medium transition-colors ${
+                              active ? 'bg-accent text-white' : 'bg-[var(--surface-highest)] text-text-secondary active:bg-[var(--surface-overlay)]'
+                            }`}
+                          >
+                            {s.notes.length > 0 ? <Volume2 size={13} /> : <BellOff size={13} />}
+                            {s.label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </Block>
                   <Block
                     icon={CloudUpload}

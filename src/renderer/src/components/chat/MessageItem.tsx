@@ -238,6 +238,16 @@ function MessageItem({
   // participant list so the picture doesn't stay stuck on the old one.
   const liveAuthor = people.find((p) => p.id === message.author.id) ?? message.author
 
+  const reactorNames = (userIds: number[]): string => {
+    const names = userIds.map((id) => {
+      if (id === meId) return 'You'
+      const person = people.find((p) => p.id === id)
+      return person ? displayName(person) : `#${id}`
+    })
+    if (names.length <= 2) return names.join(' and ')
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
+  }
+
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [sheet, setSheet] = useState(false)
@@ -377,7 +387,7 @@ function MessageItem({
               <button
                 key={r.emoji}
                 onClick={() => react(r.emoji)}
-                title={`:${r.emoji}:`}
+                title={`${reactorNames(r.user_ids)} reacted with :${r.emoji}:`}
                 className={`chat-pop h-7 pl-1.5 pr-2 rounded-full border text-xs flex items-center gap-1 transition-colors ${
                   r.me
                     ? 'border-accent/60 bg-accent/15 text-text-primary'
