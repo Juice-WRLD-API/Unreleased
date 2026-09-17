@@ -16,7 +16,7 @@ import { hasChatAccess } from '../store/chatStore'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateBio, updatePrivacySettings, updateDisplayName, updateAvatar, removeAvatar, compressImageFile } from '../lib/userApi'
-import { APP_VERSION, COMMIT_HASH, useCommitFreshness } from '../lib/appVersion'
+import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
 } from '../lib/lastfm'
@@ -236,13 +236,29 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Elem
 // if the check fails (offline, rate-limited) - a wrong-looking indicator is
 // worse than no indicator.
 function CommitFreshnessBulb(): JSX.Element | null {
-  const freshness = useCommitFreshness()
-  if (freshness === 'checking' || freshness === 'unknown') return null
-  const latest = freshness === 'latest'
+  const [status, refresh] = useCommitStatus()
+  if (status === 'unknown') return null
+  const checking = status === 'checking'
+  const color = checking ? 'bg-gray-400' : {
+    latest: 'bg-green-500',
+    'refresh-needed': 'bg-yellow-500',
+    outdated: 'bg-red-500',
+    error: 'bg-blue-500',
+  }[status]
+  const label = checking ? 'Checking for updates…' : {
+    latest: 'Running the latest commit',
+    'refresh-needed': 'On the latest commit, but a newer version loaded in the background - refresh to run it',
+    outdated: 'A newer commit has been deployed',
+    error: "Couldn't check for updates (rate-limited or offline)",
+  }[status]
   return (
-    <span
-      className={`inline-block w-2 h-2 rounded-full shrink-0 ${latest ? 'bg-green-500' : 'bg-red-500'}`}
-      title={latest ? 'Running the latest commit' : 'A newer commit has been deployed'}
+    <button
+      type="button"
+      onClick={refresh}
+      disabled={checking}
+      aria-label={`${label} - click to re-check`}
+      title={`${label} - click to re-check`}
+      className={`inline-block w-2 h-2 rounded-full shrink-0 border-0 p-0 ${color} ${checking ? 'cursor-default' : 'cursor-pointer'}`}
     />
   )
 }
