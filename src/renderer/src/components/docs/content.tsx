@@ -348,20 +348,29 @@ function SongsTab() {
       <Section title="Albums">
         <p className="text-sm text-text-secondary">Album metadata, distinct from the <Code>album</Code> string on the song shape. Each album links back to its Artist.</p>
         <MethodPath method="GET" path={`/albums/`} className="mt-2" />
-        <p className="text-xs text-text-muted mb-2">Returns a plain array of Album objects, no pagination envelope.</p>
-        <Pre>{`[
-  {
-    "id": 1,
-    "title": "Goodbye & Good Riddance",
-    "type": "album",
-    "artist": { "id": 1, "name": "Juice WRLD", "bio": "..." },
-    "release_date": "2018-05-23",
-    "description": "...",
-    "play_count": 0
-  }
-]`}</Pre>
+        <p className="text-xs text-text-muted mb-2">Paginated: standard DRF <Code>{'{count, next, previous, results}'}</Code> envelope, not a bare array.</p>
+        <Pre>{`{
+  "count": 18,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 1,
+      "title": "Goodbye & Good Riddance",
+      "type": "album",
+      "artist": { "id": 1, "name": "Juice WRLD", "bio": "..." },
+      "release_date": "2018-05-23",
+      "description": "...",
+      "cover_url": "",
+      "play_count": 0
+    }
+  ]
+}`}</Pre>
         <p className="text-xs text-text-muted">
           <Code>artist_id</Code> can also show up on write payloads; the read shape nests the full <Code>artist</Code> object instead.
+        </p>
+        <p className="text-xs text-text-muted">
+          <Code>cover_url</Code>: string, cover art for the album. Empty string when unset (not null).
         </p>
         <MethodPath method="GET" path={`/albums/{id}/`} className="mt-3" />
         <p className="text-xs text-text-muted">Single Album object by <Code>id</Code>.</p>
@@ -1711,6 +1720,7 @@ function AdminTab() {
   "release_date": "2019-03-08",      // required, YYYY-MM-DD
   "type": "Album",                   // optional, e.g. "Album" | "EP" | "Single"
   "description": "",                 // optional
+  "cover_url": "",                    // optional, cover art URL
   "play_count": 0,                    // optional, defaults to 0
   "songs": [                          // optional, ordered tracklist
     { "order": 1, "path": "Released/DRFL/Empty.flac" },

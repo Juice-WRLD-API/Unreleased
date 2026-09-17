@@ -22,6 +22,7 @@ export interface Album {
   artist: Artist
   release_date: string
   description?: string
+  cover_url: string
   play_count: number
   songs: AlbumSongEntry[]
 }
@@ -67,6 +68,7 @@ export interface AlbumWritePayload {
   release_date: string
   type?: string
   description?: string
+  cover_url?: string
   play_count?: number
   songs?: AlbumSongEntry[]
 }
