@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   AlertCircle, Copy, CornerDownRight, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
 } from 'lucide-react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { displayName, useChatStore, type UiMessage } from '../../store/chatStore'
 import AttachmentList from './AttachmentView'
@@ -22,7 +23,6 @@ export interface MessageItemProps {
   onStartEdit: (id: number | null) => void
   onOpenThread?: (id: number) => void
   highlight?: boolean
-  compactMobile?: boolean
 }
 
 function RoleTag({ role }: { role: string }): JSX.Element | null {
@@ -110,8 +110,9 @@ function SheetRow({ icon, label, onClick, danger }: { icon: JSX.Element; label: 
 }
 
 function MessageItem({
-  message, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, highlight, compactMobile,
+  message, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, highlight,
 }: MessageItemProps): JSX.Element {
+  const isMobile = useIsMobile()
   const meId = useChatStore((s) => s.meId)
   const toggleReaction = useChatStore((s) => s.toggleReaction)
   const togglePin = useChatStore((s) => s.togglePin)
@@ -177,7 +178,7 @@ function MessageItem({
       onTouchStart={onTouchStart}
       onTouchEnd={cancelPress}
       onTouchMove={cancelPress}
-      onContextMenu={(e) => { if (compactMobile) e.preventDefault() }}
+      onContextMenu={(e) => { if (isMobile) e.preventDefault() }}
       className={`group relative flex gap-3 px-4 md:px-5 transition-colors ${
         grouped ? 'pt-0.5 pb-0.5' : 'pt-3 pb-0.5'
       } ${highlight ? 'chat-flash' : ''} ${editing || activeThread ? 'bg-accent/[0.04]' : 'hover:bg-surface-raised/40'} ${
@@ -283,7 +284,7 @@ function MessageItem({
         )}
       </div>
 
-      {!pending && !deleted && !editing && !compactMobile && (
+      {!pending && !deleted && !editing && !isMobile && (
         <div className="absolute -top-3 right-4 z-10 hidden group-hover:flex items-center gap-0.5 rounded-xl border border-[var(--border)] bg-surface shadow-lg p-0.5">
           {QUICK_REACTIONS.slice(0, 3).map((name) => (
             <button key={name} onClick={() => react(name)} title={`:${name}:`} className="w-8 h-8 rounded-lg text-base hover:bg-surface-overlay hover:scale-110 transition">
