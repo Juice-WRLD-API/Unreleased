@@ -134,6 +134,53 @@ export function decodePlaylistShare(content: string): SharedPlaylistPayload | nu
   }
 }
 
+// Same "prefix + JSON in plain chat text" scheme as song/playlist shares, and
+// the same untrusted-input rules apply on decode - any chat member could
+// hand-craft this text, so postId/title/summary/imageUrl are all re-validated
+// independent of whatever encodeNewsShare puts in.
+export const NEWS_SHARE_PREFIX = 'unreleased:news:'
+
+export interface SharedNewsPayload {
+  postId: number
+  title: string
+  summary?: string
+  imageUrl?: string
+}
+
+export function encodeNewsShare(item: { id: number; title: string; summary?: string | null; image_url?: string | null }): string {
+  const payload: SharedNewsPayload = {
+    postId: item.id,
+    title: item.title,
+    summary: item.summary || undefined,
+    imageUrl: item.image_url || undefined,
+  }
+  return `${NEWS_SHARE_PREFIX}${JSON.stringify(payload)}`
+}
+
+export function decodeNewsShare(content: string): SharedNewsPayload | null {
+  if (!content.startsWith(NEWS_SHARE_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(content.slice(NEWS_SHARE_PREFIX.length))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+
+  if (!Number.isInteger(p.postId) || (p.postId as number) <= 0) return null
+  if (!isSafeText(p.title)) return null
+  if (p.summary !== undefined && !isSafeText(p.summary)) return null
+  if (p.imageUrl !== undefined && !isSafeImageUrl(p.imageUrl)) return null
+
+  return {
+    postId: p.postId as number,
+    title: p.title as string,
+    summary: p.summary as string | undefined,
+    imageUrl: p.imageUrl as string | undefined,
+  }
+}
+
 export function songShareToTrack(payload: SharedSongPayload): Track {
   return {
     id: `jw-${payload.songId}`,

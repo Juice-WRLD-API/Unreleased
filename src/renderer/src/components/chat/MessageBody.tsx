@@ -6,11 +6,12 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodePlaylistShare, decodeSongShare } from '../../lib/chatShare'
+import { decodeNewsShare, decodePlaylistShare, decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import rehypeChatEmoji from './emojiRehype'
 import { linkMentions } from './people'
+import NewsShareCard from './NewsShareCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongShareCard from './SongShareCard'
 
@@ -75,7 +76,9 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     const song = decodeSongShare(body)
     if (song) return <SongShareCard song={song} />
     const playlist = decodePlaylistShare(body)
-    return playlist ? <PlaylistShareCard playlist={playlist} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (playlist) return <PlaylistShareCard playlist={playlist} />
+    const news = decodeNewsShare(body)
+    return news ? <NewsShareCard news={news} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -101,5 +104,7 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   const decryptedSong = decodeSongShare(decryptedBody)
   if (decryptedSong) return <SongShareCard song={decryptedSong} />
   const decryptedPlaylist = decodePlaylistShare(decryptedBody)
-  return decryptedPlaylist ? <PlaylistShareCard playlist={decryptedPlaylist} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
+  if (decryptedPlaylist) return <PlaylistShareCard playlist={decryptedPlaylist} />
+  const decryptedNews = decodeNewsShare(decryptedBody)
+  return decryptedNews ? <NewsShareCard news={decryptedNews} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }
