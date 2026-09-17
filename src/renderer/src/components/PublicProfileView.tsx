@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
@@ -130,8 +130,10 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 export default function PublicProfileView(): JSX.Element {
   const {
     playTrack, playCollection, playNext, addToQueue, setActiveView, account, playlistFolders, setPendingPlaylistId,
+    mutedUserIds, toggleMuteUser,
   } = useStorePick(
     'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'account', 'playlistFolders', 'setPendingPlaylistId',
+    'mutedUserIds', 'toggleMuteUser',
   )
   const canEdit = useCanEdit()
   const startDm = useChatStore((s) => s.startDm)
@@ -159,6 +161,7 @@ export default function PublicProfileView(): JSX.Element {
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistMenuState | null>(null)
 
   const isOwnProfile = !!account && !!profile && account.id === profile.id
+  const isMuted = !!profile && mutedUserIds.includes(profile.id)
 
   useEffect(() => {
     if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
@@ -435,14 +438,28 @@ export default function PublicProfileView(): JSX.Element {
           )}
         </div>
         {!isOwnProfile && (
-          <button
-            onClick={() => void messageUser()}
-            disabled={messaging}
-            className="flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform disabled:opacity-60 disabled:pointer-events-none"
-          >
-            {messaging ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
-            Message
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => toggleMuteUser(profile.id)}
+              title={isMuted ? 'Unmute this user' : 'Mute this user'}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
+                isMuted
+                  ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
+                  : 'bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+              }`}
+            >
+              {isMuted ? <BellOff size={15} /> : <Bell size={15} />}
+              {isMuted ? 'Muted' : 'Mute'}
+            </button>
+            <button
+              onClick={() => void messageUser()}
+              disabled={messaging}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform disabled:opacity-60 disabled:pointer-events-none"
+            >
+              {messaging ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+              Message
+            </button>
+          </div>
         )}
       </div>
 

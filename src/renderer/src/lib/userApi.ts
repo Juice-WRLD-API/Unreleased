@@ -46,6 +46,21 @@ export interface AccountUser {
   // Channel ids the user follows for news notifications (see lib/newsNotifications).
   news_subscriptions?: string[]
   memberships?: ChannelMembership[]
+  // Free-form JSON settings blob, PATCHable whole-object through this same
+  // route (see updateUserSettings). Distinct from `user_preferences` above,
+  // which is the per-song overrides array - this one holds account-level
+  // settings that should follow the user across devices.
+  user_settings?: UserSettings
+}
+
+/** Account-level settings synced through the `user_settings` blob. Extend
+ *  this as more settings need to follow the user across devices - it's
+ *  stored whole-object, so a new field just needs a default on read. */
+export interface UserSettings {
+  /** Account ids of users whose messages this user has muted in chat. */
+  muted_user_ids?: number[]
+  /** Active theme/skin id. */
+  theme?: string
 }
 
 export interface NowPlayingState {
@@ -365,6 +380,20 @@ export async function updatePrivacySettings(payload: {
   const result = await request<AccountUser>(url, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+// Whole-object PATCH, same mechanics as user_preferences/playlist_folders -
+// callers merge their change into the current blob (see useStore's
+// muteUser/unmuteUser/setTheme) before calling this, since a partial payload
+// here would overwrite the rest of the blob rather than merge server-side.
+export async function updateUserSettings(settings: UserSettings): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ user_settings: settings }),
   })
   cacheSet(url, result)
   return result

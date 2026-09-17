@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, Loader2, RefreshCw } from 'lucide-react'
 import { roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import MessageItem from './MessageItem'
 import { ChatAvatar, Skeleton, dayKey, dayLabel } from './ui'
@@ -64,6 +65,19 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
   const lastReadNow = useChatStore((s) => s.lastRead[key])
 
   const items = state?.items ?? EMPTY_ITEMS
+  const mutedUserIds = useStore((s) => s.mutedUserIds)
+  // Muting a person hides their messages in shared channels/servers - a DM is
+  // something you'd mute (silences notifications) or just not open instead,
+  // so a muted person's own DM to you still shows normally here.
+  // Day dividers/grouping/read-receipt logic below all run against this
+  // filtered list too, so a muted user's messages don't leave gaps or affect
+  // grouping. Own messages never filter out even if self-muting were
+  // somehow possible.
+  const visibleItems = useMemo(() => (
+    room.kind === 'conversation' || mutedUserIds.length === 0
+      ? items
+      : items.filter((m) => m.author.id === meId || !mutedUserIds.includes(m.author.id))
+  ), [items, mutedUserIds, meId, room.kind])
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const sentinel = useRef<HTMLDivElement>(null)
@@ -237,8 +251,8 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
           ) : (
             intro
           )}
-          {items.map((m, i) => {
-            const prev = items[i - 1]
+          {visibleItems.map((m, i) => {
+            const prev = visibleItems[i - 1]
             const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at)
             const showNew = !divided && dividerAfter.current != null && m.id > dividerAfter.current && m.author.id !== meId && !!prev
             if (showNew) divided = true

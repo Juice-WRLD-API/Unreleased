@@ -4,7 +4,7 @@ import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist,
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
-import type { AccountUser, PlaylistSummary } from '../lib/userApi'
+import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels } from '../lib/juicewrldApi'
@@ -369,6 +369,11 @@ interface AppState {
   // Liked songs
   likedTrackIds: string[]
 
+  // Account ids of users whose chat messages are hidden from this account.
+  // Local-first like likedTrackIds, synced to the server's `user_settings`
+  // blob (see lib/userApi's UserSettings) on login and on every change.
+  mutedUserIds: number[]
+
   // Per-song user overrides (custom name, custom cover, preferred version,
   // playcount), keyed by numeric API song id. Local-first like likedTrackIds:
   // usable logged out, merged up to the server on login. Every write goes
@@ -653,6 +658,18 @@ interface AppActions {
   /** Credits one play. Called by the Player once a track passes the listened
    *  threshold - not on every start. */
   bumpSongPlaycount: (songId: number) => void
+  /** Mutes/unmutes a chat user's messages for this account, persisting the
+   *  change locally and (if signed in) to the server's `user_settings` blob. */
+  muteUser: (userId: number) => void
+  unmuteUser: (userId: number) => void
+  toggleMuteUser: (userId: number) => void
+  /** Merges the profile's `user_settings` blob (from getMe) with local state -
+   *  muted users union, server's theme wins if set - then pushes the merged
+   *  result back up. Runs on login. */
+  syncUserSettings: (serverSettings?: UserSettings) => Promise<void>
+  /** Internal - pushes the current muted-users list + theme to the server's
+   *  `user_settings` blob. No-op when signed out. */
+  _pushUserSettings: () => void
   /** Merges the profile's `user_preferences` blob (from getMe) with local
    *  state - profile wins per song except playcount, which takes the max -
    *  then pushes the merged array back up. Runs on login. */
@@ -1264,7 +1281,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setPlayerCollapsed: (playerCollapsed) => { set({ playerCollapsed }); ls.set('playerCollapsed', playerCollapsed) },
   setWrldFullscreen: (wrldFullscreen) => set({ wrldFullscreen }),
   setHeroBleedTop: (heroBleedTop) => set({ heroBleedTop }),
-  setTheme: (theme) => { set({ theme }); ls.set('theme', theme) },
+  setTheme: (theme) => { set({ theme }); ls.set('theme', theme); get()._pushUserSettings() },
   saveCustomSkin: (skin) => {
     const list = get().customSkins
     const idx = list.findIndex((s) => s.id === skin.id)
@@ -1505,6 +1522,56 @@ export const useStore = create<AppStore>((set, get, store) => ({
         })
       }
     }
+  },
+
+  // ── Muted users ───────────────────────────────────────────────────────────
+  mutedUserIds: ls.get<number[]>('mutedUserIds') ?? [],
+
+  muteUser: (userId) => {
+    const { mutedUserIds } = get()
+    if (mutedUserIds.includes(userId)) return
+    const next = [...mutedUserIds, userId]
+    set({ mutedUserIds: next })
+    ls.set('mutedUserIds', next)
+    get()._pushUserSettings()
+  },
+  unmuteUser: (userId) => {
+    const { mutedUserIds } = get()
+    if (!mutedUserIds.includes(userId)) return
+    const next = mutedUserIds.filter((id) => id !== userId)
+    set({ mutedUserIds: next })
+    ls.set('mutedUserIds', next)
+    get()._pushUserSettings()
+  },
+  toggleMuteUser: (userId) => {
+    const { mutedUserIds, muteUser, unmuteUser } = get()
+    if (mutedUserIds.includes(userId)) unmuteUser(userId)
+    else muteUser(userId)
+  },
+  // Best-effort - a failed push just means the next mute/theme change or the
+  // next login's syncUserSettings retries it, same as the other profile blobs.
+  _pushUserSettings: () => {
+    const { account, mutedUserIds, theme } = get()
+    if (!account) return
+    userApi.updateUserSettings({ muted_user_ids: mutedUserIds, theme }).catch(() => {})
+  },
+  syncUserSettings: async (serverSettings) => {
+    const local = get().mutedUserIds
+    const serverMuted = serverSettings?.muted_user_ids ?? []
+    const mergedMuted = Array.from(new Set([...serverMuted, ...local]))
+    if (mergedMuted.length !== local.length || mergedMuted.some((id) => !local.includes(id))) {
+      set({ mutedUserIds: mergedMuted })
+      ls.set('mutedUserIds', mergedMuted)
+    }
+    // The server's theme (if it has one) follows the account across devices;
+    // a device that's never set one keeps whatever's local instead of being
+    // reset to a default.
+    if (serverSettings?.theme && serverSettings.theme !== get().theme) {
+      get().setTheme(getSkin(serverSettings.theme).id)
+    }
+    const account = get().account
+    if (!account) return
+    userApi.updateUserSettings({ muted_user_ids: mergedMuted, theme: get().theme }).catch(() => {})
   },
 
   // ── Song preferences ──────────────────────────────────────────────────────
@@ -1924,6 +1991,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // The preference/folder blobs ride on the getMe() response - merge them
       // with local state and push the result back, no extra requests needed.
       const profile = get().account
+      await get().syncUserSettings(profile?.user_settings)
       await get().syncSongPrefs(profile?.user_preferences)
       get().syncListeningPlays(profile?.listening_plays)
       get().syncFolders(profile?.playlist_folders)

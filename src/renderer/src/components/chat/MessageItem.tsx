@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertCircle, CornerDownRight, CornerUpLeft, Copy, Forward, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
+  AlertCircle, Bell, BellOff, CornerDownRight, CornerUpLeft, Copy, Forward, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
@@ -234,6 +234,8 @@ function MessageItem({
   })
   const toast = useChatToast()
   const openPublicProfile = useStore((s) => s.openPublicProfile)
+  const mutedUserIds = useStore((s) => s.mutedUserIds)
+  const toggleMuteUser = useStore((s) => s.toggleMuteUser)
   const openProfile = (): void => openPublicProfile(message.author.id)
   // message.author is a snapshot from send time - if that person has since
   // changed their avatar, prefer the live record from the room's member/
@@ -258,6 +260,11 @@ function MessageItem({
   const pressTimer = useRef<number | null>(null)
 
   const mine = message.author.id === meId
+  // Muting only applies to shared channels/servers - a DM is something you'd
+  // mute the conversation for instead, not hide the other person's own
+  // messages to you (see PublicProfileView's mute button for the same rule).
+  const canMute = !mine && message.conversation == null
+  const muted = mutedUserIds.includes(message.author.id)
   const deleted = !!message.deleted_at
   const pending = message.id < 0
   const { ref: replyRef, body: bodyText } = deleted ? { ref: null, body: plainText } : splitReplyRef(plainText)
@@ -511,6 +518,9 @@ function MessageItem({
           onForward={() => setForwarding(true)}
           canDelete={canDelete}
           onDelete={() => setConfirmDelete(true)}
+          canMute={canMute}
+          muted={muted}
+          onToggleMute={() => toggleMuteUser(message.author.id)}
         />
       )}
 
@@ -530,6 +540,13 @@ function MessageItem({
           {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }} />}
           {canCopyImage && <SheetRow icon={<ImageIcon size={18} />} label="Copy image" onClick={() => { setSheet(false); run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image') }} />}
           {canForward && <SheetRow icon={<Forward size={18} />} label="Forward message" onClick={() => { setSheet(false); setForwarding(true) }} />}
+          {canMute && (
+            <SheetRow
+              icon={muted ? <Bell size={18} /> : <BellOff size={18} />}
+              label={muted ? 'Unmute user' : 'Mute user'}
+              onClick={() => { setSheet(false); toggleMuteUser(message.author.id) }}
+            />
+          )}
           {canDelete && <SheetRow icon={<Trash2 size={18} />} label="Delete message" danger onClick={() => { setSheet(false); setConfirmDelete(true) }} />}
         </ActionSheet>
       )}

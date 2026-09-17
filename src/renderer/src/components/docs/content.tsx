@@ -97,7 +97,7 @@ function OverviewTab() {
           <Endpoint method="GET" path="/cover/{name}" description="Static cover art image by filename" />
           <Endpoint method="GET" path="/media/{path}" description="Static media file (news covers, attachments, etc.)" />
           <Endpoint method="GET" path="/accounts/account/me/" description="Current user info (public-facing), incl. per-song preferences + playlist folders" />
-          <Endpoint method="PATCH" path="/accounts/account/me/" description="Update display_name, user_preferences (custom titles, covers, default version, playcounts), and/or playlist_folders" />
+          <Endpoint method="PATCH" path="/accounts/account/me/" description="Update display_name, user_preferences (custom titles, covers, default version, playcounts), user_settings (muted users, theme), and/or playlist_folders" />
           <Endpoint method="GET" path="/accounts/me/" description="Current user with role, for editor/admin dashboards" />
           <Endpoint method="POST" path="/feedback/" description="Submit API feedback (no auth)" />
           <Endpoint method="GET" path="/feedback/" description="List submitted feedback (requires auth)" />
@@ -1213,6 +1213,27 @@ Authorization: Token <token>`}</Pre>
         </ul>
       </Section>
 
+
+      <Section title="User Settings">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          <Code>user_settings</Code> is a free-form JSON object carried on the profile for account-level settings
+          that should follow the user across devices - currently their muted-users list and active theme. Unlike{' '}
+          <Code>user_preferences</Code>, this isn&apos;t per-song, and unlike <Code>playlist_folders</Code> it&apos;s
+          not an array - it&apos;s a single object, PATCHed whole (same rule: sending a partial object overwrites the
+          rest of the blob, so merge client-side first).
+        </p>
+        <Pre>{`{
+  "muted_user_ids": [412, 88],
+  "theme": "dark"
+}`}</Pre>
+        <Table
+          headers={['Field', 'Type', 'Meaning']}
+          rows={[
+            [<Code>muted_user_ids</Code>, 'number[]', 'Account ids whose channel/server messages this user has hidden. Doesn\'t affect DMs.'],
+            [<Code>theme</Code>, 'string', 'Active skin/theme id.'],
+          ]}
+        />
+      </Section>
 
       <Section title="Playlist Folders">
         <p className="text-sm text-text-secondary">
