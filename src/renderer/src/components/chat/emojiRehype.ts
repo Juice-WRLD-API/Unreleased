@@ -5,13 +5,17 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-const EMOJI_RE = new RegExp(`(${GLYPHS_BY_LENGTH_DESC.map(escapeRegExp).join('|')})`, 'g')
+// Shortcodes (":sob:") take the glyph's own name, since that's how EMOJI_IMG
+// is keyed - so ":sob:" and its glyph both resolve to the same image.
+const SHORTCODE_RE = '(?::[a-z0-9_]+:)'
+const EMOJI_RE = new RegExp(`(${GLYPHS_BY_LENGTH_DESC.map(escapeRegExp).join('|')}|${SHORTCODE_RE})`, 'g')
 
 function splitText(node: Text): ElementContent[] {
   const parts = node.value.split(EMOJI_RE)
   if (parts.length === 1) return [node]
   return parts.filter((part) => part !== '').map((part) => {
-    const name = NAME_BY_GLYPH[part]
+    const isShortcode = part.startsWith(':') && part.endsWith(':')
+    const name = isShortcode ? part.slice(1, -1) : NAME_BY_GLYPH[part]
     const src = name ? EMOJI_IMG[name] : undefined
     if (!src) return { type: 'text', value: part }
     const img: Element = {

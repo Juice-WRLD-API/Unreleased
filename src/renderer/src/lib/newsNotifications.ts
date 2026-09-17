@@ -14,7 +14,7 @@ import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
 import { apiRequest } from './apiClient'
 import { fetchNews, NEWS_ENABLED, type NewsItem } from './newsApi'
-import { notificationsSupported, notificationPermission, ensureNotifyPermission, focusAppWindow } from './notifications'
+import { notificationsSupported, notificationPermission, ensureNotifyPermission, focusAppWindow, playNotificationSound } from './notifications'
 
 export { notificationsSupported, notificationPermission, ensureNotifyPermission }
 
@@ -101,6 +101,7 @@ export function setNotificationsEnabled(on: boolean): void {
 // Electron) and routes to News via the callback.
 export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) => void): void {
   if (!notificationsSupported() || Notification.permission !== 'granted') return
+  playNotificationSound()
   try {
     const body = item.summary?.trim() || item.body?.trim().slice(0, 140) || ''
     const n = new Notification(item.title, {

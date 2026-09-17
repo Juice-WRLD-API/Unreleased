@@ -3,7 +3,7 @@
 // event-driven off the chat socket (see chatStore's bumpUnread) rather than
 // polled, since chat already pushes messages in real time.
 
-import { notificationsSupported, focusAppWindow } from './notifications'
+import { notificationsSupported, focusAppWindow, playNotificationSound } from './notifications'
 
 export { notificationsSupported, notificationPermission, ensureNotifyPermission } from './notifications'
 
@@ -36,6 +36,7 @@ export interface ChatNotificationPayload {
 // the app (in Electron) and routes to the room via the callback.
 export function fireChatNotification(payload: ChatNotificationPayload): void {
   if (!chatNotificationsEnabled() || !notificationsSupported() || Notification.permission !== 'granted') return
+  playNotificationSound()
   try {
     const n = new Notification(payload.title, {
       body: payload.body,

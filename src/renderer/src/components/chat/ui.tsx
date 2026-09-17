@@ -65,6 +65,10 @@ export function ChatAvatar({ user, size = 36, presence, className = '', onClick 
 }): JSX.Element {
   const online = useChatStore((s) => !!s.online[user.id])
   const [broken, setBroken] = useState(false)
+  // Reset after a load failure so a stale/transient miss (e.g. a slow CDN
+  // fetch on first paint) doesn't permanently hide the picture for the rest
+  // of the session once the store gives us this user's avatar again.
+  useEffect(() => setBroken(false), [user.avatar])
   const name = displayName(user)
   const dot = Math.max(8, Math.round(size * 0.3))
   const hue = hueFor(user.id)

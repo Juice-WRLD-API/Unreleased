@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlertCircle, CornerDownRight, CornerUpLeft, Copy, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
@@ -76,9 +76,16 @@ function RoleTag({ role }: { role: string }): JSX.Element | null {
   )
 }
 
-function InlineEditor({ initial, onSave, onCancel }: { initial: string; onSave: (text: string) => Promise<void>; onCancel: () => void }): JSX.Element {
+function InlineEditor({ initial, people, meId, onSave, onCancel }: {
+  initial: string
+  people: ChatUserBrief[]
+  meId: number | null
+  onSave: (text: string) => Promise<void>
+  onCancel: () => void
+}): JSX.Element {
   const [value, setValue] = useState(initial)
   const [saving, setSaving] = useState(false)
+  const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null)
   const ref = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
     const el = ref.current
@@ -93,6 +100,37 @@ function InlineEditor({ initial, onSave, onCancel }: { initial: string; onSave: 
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`
   }, [value])
 
+  const candidates = useMemo(() => {
+    if (!mention) return []
+    const q = mention.query.toLowerCase()
+    return people
+      .filter((p) => p.id !== meId)
+      .filter((p) => !q || p.username.toLowerCase().includes(q) || p.display_name.toLowerCase().includes(q))
+      .slice(0, 6)
+  }, [mention, people, meId])
+
+  const updateMention = (val: string, caret: number): void => {
+    const upto = val.slice(0, caret)
+    const match = /(^|\s)@([\w.-]{0,32})$/.exec(upto)
+    if (match) setMention({ start: caret - match[2].length - 1, query: match[2], index: 0 })
+    else setMention(null)
+  }
+
+  const applyMention = (user: ChatUserBrief): void => {
+    if (!mention) return
+    const el = ref.current
+    const caret = el?.selectionStart ?? value.length
+    const insert = `@${user.username} `
+    const next = value.slice(0, mention.start) + insert + value.slice(caret)
+    setValue(next)
+    setMention(null)
+    requestAnimationFrame(() => {
+      const pos = mention.start + insert.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
   const save = async (): Promise<void> => {
     const text = value.trim()
     if (!text || text === initial.trim()) { onCancel(); return }
@@ -101,13 +139,42 @@ function InlineEditor({ initial, onSave, onCancel }: { initial: string; onSave: 
   }
 
   return (
-    <div className="mt-1">
+    <div className="mt-1 relative">
+      {mention && candidates.length > 0 && (
+        <div className="chat-pop absolute left-0 right-0 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Members</p>
+          {candidates.map((p, i) => (
+            <button
+              key={p.id}
+              onMouseDown={(e) => { e.preventDefault(); applyMention(p) }}
+              onMouseEnter={() => setMention({ ...mention, index: i })}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === mention.index ? 'bg-surface-overlay' : ''}`}
+            >
+              <ChatAvatar user={p} size={24} presence />
+              <span className="text-sm text-text-primary truncate">{p.display_name || p.username}</span>
+              <span className="text-xs text-text-muted truncate">@{p.username}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <textarea
         ref={ref}
         value={value}
         disabled={saving}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => { setValue(e.target.value); updateMention(e.target.value, e.target.selectionStart) }}
+        onClick={(e) => updateMention(value, e.currentTarget.selectionStart)}
+        onBlur={() => { window.setTimeout(() => setMention(null), 120) }}
         onKeyDown={(e) => {
+          if (mention && candidates.length > 0) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              const dir = e.key === 'ArrowDown' ? 1 : -1
+              setMention({ ...mention, index: (mention.index + dir + candidates.length) % candidates.length })
+              return
+            }
+            if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyMention(candidates[mention.index]); return }
+            if (e.key === 'Escape') { e.preventDefault(); setMention(null); return }
+          }
           if (e.key === 'Escape') { e.preventDefault(); onCancel() }
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save() }
         }}
@@ -166,6 +233,10 @@ function MessageItem({
   const toast = useChatToast()
   const openPublicProfile = useStore((s) => s.openPublicProfile)
   const openProfile = (): void => openPublicProfile(message.author.id)
+  // message.author is a snapshot from send time - if that person has since
+  // changed their avatar, prefer the live record from the room's member/
+  // participant list so the picture doesn't stay stuck on the old one.
+  const liveAuthor = people.find((p) => p.id === message.author.id) ?? message.author
 
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -241,7 +312,7 @@ function MessageItem({
             {clockTime(message.created_at).replace(/\s?[AP]M$/i, '')}
           </span>
         ) : (
-          <ChatAvatar user={message.author} size={36} className="mt-0.5" onClick={openProfile} />
+          <ChatAvatar user={liveAuthor} size={36} className="mt-0.5" onClick={openProfile} />
         )}
       </div>
 
@@ -262,9 +333,9 @@ function MessageItem({
               className="text-sm font-semibold text-text-primary truncate cursor-pointer hover:underline"
               onClick={openProfile}
             >
-              {displayName(message.author)}
+              {displayName(liveAuthor)}
             </span>
-            <RoleTag role={message.author.role} />
+            <RoleTag role={liveAuthor.role} />
             <span className="text-[11px] text-text-muted shrink-0" title={fullStamp(message.created_at)}>{clockTime(message.created_at)}</span>
             {message.pinned && !inThread && <Pin size={11} className="text-amber-400 shrink-0 self-center" />}
           </div>
@@ -273,6 +344,8 @@ function MessageItem({
         {editing ? (
           <InlineEditor
             initial={bodyText}
+            people={people}
+            meId={meId}
             onCancel={() => onStartEdit(null)}
             onSave={async (text) => {
               try {
