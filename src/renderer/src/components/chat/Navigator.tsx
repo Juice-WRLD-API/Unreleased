@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, UserPlus, WifiOff } from 'lucide-react'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
+import { useStorePick } from '../../store/useStore'
 import { useOpenModal } from './modalHost'
 import { ChannelIcon, ChatAvatar, CountBadge, ServerGlyph, shortStamp, useDismiss } from './ui'
 import { MenuItem } from './SidePanels'
@@ -170,16 +171,61 @@ function StatusBar(): JSX.Element | null {
   )
 }
 
+// Own-profile popout, in the same spirit as Discord's account panel: click your
+// avatar/name in the footer and a small card floats above it with your avatar,
+// name and role, plus a way into the full profile editor in Settings.
+function MyProfileCard({ onEditProfile, onClose }: { onEditProfile: () => void; onClose: () => void }): JSX.Element | null {
+  const me = useChatStore((s) => s.me)
+  const ref = useRef<HTMLDivElement>(null)
+  useDismiss(true, onClose, ref)
+  if (!me) return null
+  return createPortal(
+    <div className="fixed inset-0 z-[140]">
+      <div
+        ref={ref}
+        className="chat-pop absolute left-2 bottom-[60px] w-[280px] rounded-2xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden"
+      >
+        <div className="h-14 bg-gradient-to-br from-accent/40 to-accent/10" />
+        <div className="px-4 pb-4">
+          <ChatAvatar user={me} size={64} className="-mt-8 ring-4 ring-[var(--surface)]" />
+          <p className="mt-2 text-base font-bold text-text-primary truncate">{displayName(me)}</p>
+          <p className="text-xs text-text-muted truncate">@{me.username}</p>
+          <span className={`mt-2 inline-flex items-center px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider ${
+            me.role === 'administrator' ? 'bg-red-500/15 text-red-400' : 'bg-sky-500/15 text-sky-400'
+          }`}>
+            {me.role === 'administrator' ? 'Administrator' : 'Manager'}
+          </span>
+          <button
+            onClick={() => { onEditProfile(); onClose() }}
+            className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-surface-raised hover:bg-surface-overlay px-3 py-2 text-sm font-semibold text-text-primary transition-colors"
+          >
+            <Pencil size={13} />Edit Profile
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function MeFooter(): JSX.Element | null {
   const me = useChatStore((s) => s.me)
+  const { setActiveView } = useStorePick('setActiveView')
+  const [open, setOpen] = useState(false)
   if (!me) return null
   return (
-    <div className="shrink-0 border-t border-[var(--border)] px-2 py-2 flex items-center gap-2.5 bg-[var(--chat-rail)]/40">
-      <ChatAvatar user={me} size={32} presence />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-text-primary truncate">{displayName(me)}</p>
-        <p className="text-[11px] text-text-muted truncate">{me.role === 'administrator' ? 'Administrator' : 'Manager'}</p>
-      </div>
+    <div className="relative shrink-0 border-t border-[var(--border)] bg-[var(--chat-rail)]/40">
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full px-2 py-2 flex items-center gap-2.5 text-left hover:bg-surface-overlay/50 transition-colors"
+      >
+        <ChatAvatar user={me} size={32} presence />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-text-primary truncate">{displayName(me)}</p>
+          <p className="text-[11px] text-text-muted truncate">{me.role === 'administrator' ? 'Administrator' : 'Manager'}</p>
+        </div>
+      </button>
+      {open && <MyProfileCard onEditProfile={() => setActiveView('settings')} onClose={() => setOpen(false)} />}
     </div>
   )
 }
