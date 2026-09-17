@@ -15,6 +15,7 @@ import { capListeningPlays } from './listeningPlays'
 import type { ListeningPlayEvent } from './listeningPlays'
 import { toServerFolders } from './playlistFolders'
 import type { PlaylistFolder } from './playlistFolders'
+import type { UserSettings } from './userApi'
 
 const ME_URL = `${JWAPI_BASE}/accounts/account/me/`
 
@@ -22,9 +23,14 @@ export interface ProfilePushPatch {
   songPrefs?: SongPreference[]
   listeningPlays?: ListeningPlayEvent[]
   folders?: PlaylistFolder[]
+  // Whole-object, same as the other three - the caller (useStore's
+  // buildUserSettings) is responsible for assembling every known field, not
+  // just the one that changed, since a partial object here would read as
+  // "cleared" for whichever fields are missing.
+  userSettings?: UserSettings
 }
 
-/** Single PATCH carrying whichever of the three profile-blob fields are
+/** Single PATCH carrying whichever of the four profile-blob fields are
  *  dirty. No-op when signed out or when nothing is actually dirty. */
 export async function pushProfile(patch: ProfilePushPatch): Promise<void> {
   const token = getToken()
@@ -33,6 +39,7 @@ export async function pushProfile(patch: ProfilePushPatch): Promise<void> {
   if (patch.songPrefs) body.user_preferences = capSongPrefs(patch.songPrefs)
   if (patch.listeningPlays) body.listening_plays = capListeningPlays(patch.listeningPlays)
   if (patch.folders) body.playlist_folders = toServerFolders(patch.folders)
+  if (patch.userSettings) body.user_settings = patch.userSettings
   if (Object.keys(body).length === 0) return
   await apiRequest<unknown>(ME_URL, {
     method: 'PATCH',

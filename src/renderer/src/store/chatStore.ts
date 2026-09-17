@@ -641,12 +641,28 @@ export const useChatStore = create<ChatState>((set, get) => {
       })
       const pinned = loadPinned(account.id)
       const order = loadOrder(account.id)
-      const muted = loadMuted(account.id)
+      const localMuted = loadMuted(account.id)
+      // Union with the server's copy (in user_settings, synced from any other
+      // device) rather than "server wins" - muting a server/conversation
+      // should stick regardless of which device did it. Same reasoning as
+      // useStore's mutedUserIds/syncUserSettings, but done here since this
+      // store owns the local per-account copy.
+      const settings = account.user_settings
+      const muted: MutedIds = settings
+        ? {
+            servers: Array.from(new Set([...(settings.muted_servers ?? []), ...localMuted.servers])),
+            conversations: Array.from(new Set([...(settings.muted_conversations ?? []), ...localMuted.conversations])),
+          }
+        : localMuted
+      if (muted.servers.length !== localMuted.servers.length || muted.conversations.length !== localMuted.conversations.length) {
+        saveMuted(account.id, muted)
+      }
       set({
         pinnedServers: pinned.servers, pinnedConversations: pinned.conversations,
         serverOrder: order.servers, conversationOrder: order.conversations,
         mutedServers: muted.servers, mutedConversations: muted.conversations,
       })
+      useStore.getState()._syncChatMutes(muted.servers, muted.conversations)
       socket = new ChatSocket(
         (ev) => {
           if (ev.type === 'connected') set({ meId: ev.user_id })
@@ -793,6 +809,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       set((s) => {
         const mutedServers = s.mutedServers.includes(id) ? s.mutedServers.filter((x) => x !== id) : [...s.mutedServers, id]
         saveMuted(meId, { servers: mutedServers, conversations: s.mutedConversations })
+        useStore.getState()._syncChatMutes(mutedServers, s.mutedConversations)
         return { mutedServers }
       })
     },
@@ -803,6 +820,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       set((s) => {
         const mutedConversations = s.mutedConversations.includes(id) ? s.mutedConversations.filter((x) => x !== id) : [...s.mutedConversations, id]
         saveMuted(meId, { servers: s.mutedServers, conversations: mutedConversations })
+        useStore.getState()._syncChatMutes(s.mutedServers, mutedConversations)
         return { mutedConversations }
       })
     },

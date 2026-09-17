@@ -1217,22 +1217,84 @@ Authorization: Token <token>`}</Pre>
       <Section title="User Settings">
         <p className="text-sm text-text-secondary leading-relaxed">
           <Code>user_settings</Code> is a free-form JSON object carried on the profile for account-level settings
-          that should follow the user across devices - currently their muted-users list and active theme. Unlike{' '}
-          <Code>user_preferences</Code>, this isn&apos;t per-song, and unlike <Code>playlist_folders</Code> it&apos;s
-          not an array - it&apos;s a single object, PATCHed whole (same rule: sending a partial object overwrites the
-          rest of the blob, so merge client-side first).
+          that should follow the user across devices - appearance, navigation layout, playback/EQ preferences,
+          hotkeys, and chat mutes. Unlike <Code>user_preferences</Code>, this isn&apos;t per-song, and unlike{' '}
+          <Code>playlist_folders</Code> it&apos;s not an array - it&apos;s a single object, PATCHed whole (same rule:
+          sending a partial object overwrites the rest of the blob, so merge client-side first, same as{' '}
+          <Code>muted_user_ids</Code> below).
         </p>
         <Pre>{`{
   "muted_user_ids": [412, 88],
-  "theme": "dark"
+  "theme": "dark",
+
+  "custom_skins": [ /* Skin objects - see the in-app skin editor */ ],
+  "accent_color": "#1db954",
+  "app_text_scale": 1,
+  "app_font": "system",
+  "lyrics_font": "system",
+  "lyrics_scale": 1,
+  "lyrics_align": "left",
+  "lyrics_blur": true,
+  "lyrics_blur_amount": 1,
+  "lyrics_color_active": null,
+  "lyrics_color_inactive": null,
+  "lyrics_override": false,
+  "full_era_names": false,
+  "gradients_enabled": true,
+  "surface_gradients_enabled": false,
+  "wrld_theme_background": false,
+  "playlist_hero_enabled_dark": true,
+  "playlist_hero_enabled_light": false,
+  "sidebar_position": "left",
+
+  "nav_order": ["home", "wrld", "..."],
+  "nav_visibility": { "wrld": true },
+  "nav_control_order": ["queue", "..."],
+  "nav_control_visibility": { "queue": true },
+  "home_section_visibility": { "recentlyPlayed": true },
+
+  "playback_speed": 1,
+  "crossfade_enabled": false,
+  "crossfade_duration": 5,
+  "pause_fade_enabled": false,
+  "prefer_og_version": false,
+  "rotate_suggested_covers": false,
+  "media_overlay_enabled": true,
+  "lastfm_enabled": true,
+  "auto_report_errors": true,
+  "eq_enabled": false,
+  "eq_gains": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  "eq_preset": "flat",
+  "eq_balance": 0,
+  "eq_mono": false,
+  "eq_boost": 1,
+  "skip_silence": false,
+  "reverb_enabled": false,
+  "reverb_mix": 0.4,
+  "reverb_decay": 3,
+  "pitch_shift": false,
+
+  "hotkey_bindings": { "playPause": "Space" },
+  "hotkey_seek_seconds": 10,
+  "global_hotkeys_enabled": false,
+
+  "muted_servers": [3],
+  "muted_conversations": [17]
 }`}</Pre>
         <Table
           headers={['Field', 'Type', 'Meaning']}
           rows={[
             [<Code>muted_user_ids</Code>, 'number[]', 'Account ids whose channel/server messages this user has hidden. Doesn\'t affect DMs.'],
             [<Code>theme</Code>, 'string', 'Active skin/theme id.'],
+            [<Code>custom_skins</Code>, 'object[]', 'User-created skins from the in-app skin editor.'],
+            [<><Code>muted_servers</Code> / <Code>muted_conversations</Code></>, 'number[]', 'Chat server/conversation ids with notifications muted - distinct from muted_user_ids, which hides message content.'],
+            ['everything else', 'varies', 'Appearance, navigation layout, playback/EQ, and hotkey preferences - one field per Settings page toggle, named to match.'],
           ]}
         />
+        <p className="text-xs text-text-muted mt-2">
+          Every field is optional. On login, the client merges the server&apos;s copy into local state (muted lists
+          union, everything else adopts the server&apos;s value if present) and pushes the merged whole object back.
+        </p>
       </Section>
 
       <Section title="Playlist Folders">

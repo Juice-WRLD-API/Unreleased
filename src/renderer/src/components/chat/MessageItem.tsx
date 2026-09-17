@@ -5,8 +5,9 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { ChatUserBrief } from '../../lib/chatApi'
-import { chatAttachmentUrl } from '../../lib/chatApi'
+import { chatAttachmentUrl, getMessage } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
+import { encodeForwardRef, splitForwardRef } from '../../lib/chatForwardRef'
 import { displayName, useChatStore, useMessageById, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import AttachmentList, { kindOf } from './AttachmentView'
@@ -50,6 +51,57 @@ function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }:
       )}
       <span className="min-w-0 truncate">{preview || '…'}</span>
     </button>
+  )
+}
+
+function ForwardBar({ forwardToId, name, snippet, hasAttachment, sourceLabel }: {
+  forwardToId: number
+  name: string
+  snippet: string
+  hasAttachment: boolean
+  sourceLabel: string
+}): JSX.Element {
+  // As with ReplyBar: name/snippet ride in the message body, so any sender
+  // can forge them to make a forward card look like it quotes someone else.
+  // Only a live copy of the original message - checked in whatever rooms are
+  // already loaded, then fetched from the server (which enforces the
+  // viewer's own access to that channel/DM) - can confirm who actually said
+  // what. Never attribute unverified text to a specific person.
+  const live = useMessageById(forwardToId)
+  const [fetched, setFetched] = useState<{ author: ChatUserBrief; deleted: boolean } | 'denied' | null>(null)
+  useEffect(() => {
+    if (live) return
+    let cancelled = false
+    getMessage(forwardToId).then((m) => {
+      if (!cancelled) setFetched({ author: m.author, deleted: !!m.deleted_at })
+    }).catch(() => { if (!cancelled) setFetched('denied') })
+    return () => { cancelled = true }
+  }, [live, forwardToId])
+
+  const author = live?.author ?? (fetched && fetched !== 'denied' ? fetched.author : undefined)
+  const deleted = live ? !!live.deleted_at : fetched && fetched !== 'denied' ? fetched.deleted : false
+  const verified = !!author
+  return (
+    <div className="mb-1.5 flex items-start gap-2 rounded-lg border border-[var(--border)] bg-surface-raised/50 px-3 py-2 max-w-full">
+      <Forward size={14} className="shrink-0 mt-0.5 opacity-70 text-text-muted" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="font-semibold text-text-muted">Forwarded</span>
+          {sourceLabel && <span className="text-text-muted opacity-70 truncate">from {sourceLabel}</span>}
+        </div>
+        <div className="mt-0.5 flex items-center gap-1.5 min-w-0">
+          {verified && !deleted && author && <ChatAvatar user={author} size={16} />}
+          {verified && (
+            <span className={`shrink-0 text-xs font-semibold ${deleted ? 'italic text-text-muted' : 'text-text-secondary'}`}>
+              {deleted ? 'Unknown' : displayName(author ?? { id: 0, username: name, display_name: name, avatar: '', role: '' })}
+            </span>
+          )}
+          <span className="min-w-0 truncate text-sm text-text-primary">
+            {deleted ? 'Original message was deleted' : (snippet || (hasAttachment ? 'Attachment' : '') || '…')}
+          </span>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -267,8 +319,9 @@ function MessageItem({
   const muted = mutedUserIds.includes(message.author.id)
   const deleted = !!message.deleted_at
   const pending = message.id < 0
-  const { ref: replyRef, body: bodyText } = deleted ? { ref: null, body: plainText } : splitReplyRef(plainText)
-  const effectiveGrouped = grouped && !replyRef
+  const { ref: replyRef, body: afterReply } = deleted ? { ref: null, body: plainText } : splitReplyRef(plainText)
+  const { ref: forwardRef, body: bodyText } = deleted || replyRef ? { ref: null, body: afterReply } : splitForwardRef(afterReply)
+  const effectiveGrouped = grouped && !replyRef && !forwardRef
   const canEdit = mine && !deleted && !pending && (!message.is_encrypted || !!plainText)
   const canDelete = !pending && !deleted && (mine || canModerate)
   const canPin = !pending && !deleted && (mine || canModerate)
@@ -377,6 +430,15 @@ function MessageItem({
             people={people}
           />
         )}
+        {forwardRef && (
+          <ForwardBar
+            forwardToId={forwardRef.id}
+            name={forwardRef.name}
+            snippet={forwardRef.snippet}
+            hasAttachment={forwardRef.hasAttachment}
+            sourceLabel={forwardRef.sourceLabel}
+          />
+        )}
         {!effectiveGrouped && (
           <div className="flex items-baseline gap-2 min-w-0">
             <span
@@ -399,7 +461,7 @@ function MessageItem({
             onCancel={() => onStartEdit(null)}
             onSave={async (text) => {
               try {
-                await edit(message, replyRef ? `${encodeReplyRef(replyRef)}${text}` : text)
+                await edit(message, replyRef ? `${encodeReplyRef(replyRef)}${text}` : forwardRef ? `${encodeForwardRef(forwardRef)}${text}` : text)
                 onStartEdit(null)
               } catch (err) {
                 toast(errorText(err, 'Could not save edit'))

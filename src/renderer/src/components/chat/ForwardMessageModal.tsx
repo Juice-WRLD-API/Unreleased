@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { Check, Hash, Loader2, MessagesSquare, Search, X } from 'lucide-react'
 import type { ChatChannel, ChatServer } from '../../lib/chatApi'
 import { chatAttachmentUrl } from '../../lib/chatApi'
-import { conversationTitle, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { encodeForwardRef } from '../../lib/chatForwardRef'
+import { conversationTitle, displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { ChatAvatar, ServerGlyph } from './ui'
 
 interface Props {
@@ -73,6 +74,24 @@ export default function ForwardMessageModal({ message, bodyText, onClose }: Prop
     [conversations, meId, q],
   )
 
+  // "Forwarded from" label for the card MessageItem renders - resolved once
+  // from whatever room this message actually lives in, not the room it's
+  // being forwarded into.
+  const sourceLabel = useMemo(() => {
+    if (message.channel != null) {
+      for (const s of servers) {
+        const c = s.channels.find((ch) => ch.id === message.channel)
+        if (c) return `#${c.name}`
+      }
+      return ''
+    }
+    if (message.conversation != null) {
+      const conv = conversations.find((c) => c.id === message.conversation)
+      return conv ? conversationTitle(conv, meId) : ''
+    }
+    return ''
+  }, [message.channel, message.conversation, servers, conversations, meId])
+
   const resolveFiles = async (): Promise<File[]> => {
     if (filesCache.current) return filesCache.current
     const files: File[] = []
@@ -103,7 +122,15 @@ export default function ForwardMessageModal({ message, bodyText, onClose }: Prop
     setError(null)
     try {
       const files = await resolveFiles()
-      await send(room, { text: bodyText, files })
+      const body = `${encodeForwardRef({
+        id: message.id,
+        authorId: message.author.id,
+        name: displayName(message.author),
+        snippet: bodyText.split('\n')[0].slice(0, 140),
+        hasAttachment: message.attachments.length > 0,
+        sourceLabel,
+      })}${bodyText}`
+      await send(room, { text: body, files })
       setSentTo((prev) => new Set(prev).add(key))
     } catch (err) {
       setError((err as Error).message || 'Could not forward')

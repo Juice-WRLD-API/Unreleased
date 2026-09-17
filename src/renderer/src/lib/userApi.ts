@@ -10,6 +10,7 @@ import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
+import type { Skin } from './skins'
 
 const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
 const LIBRARY_BASE = `${JWAPI_BASE}/library`
@@ -55,12 +56,73 @@ export interface AccountUser {
 
 /** Account-level settings synced through the `user_settings` blob. Extend
  *  this as more settings need to follow the user across devices - it's
- *  stored whole-object, so a new field just needs a default on read. */
+ *  stored whole-object (see updateUserSettings), so every push has to carry
+ *  every field the caller knows about, not just the one that changed, or an
+ *  omitted field reads to the account as "cleared" on the next device. */
 export interface UserSettings {
   /** Account ids of users whose messages this user has muted in chat. */
   muted_user_ids?: number[]
   /** Active theme/skin id. */
   theme?: string
+
+  // ── Appearance ──────────────────────────────────────────────────────────
+  custom_skins?: Skin[]
+  accent_color?: string
+  app_text_scale?: number
+  app_font?: string
+  lyrics_font?: string
+  lyrics_scale?: number
+  lyrics_align?: 'left' | 'center'
+  lyrics_blur?: boolean
+  lyrics_blur_amount?: number
+  lyrics_color_active?: string | null
+  lyrics_color_inactive?: string | null
+  lyrics_override?: boolean
+  full_era_names?: boolean
+  gradients_enabled?: boolean
+  surface_gradients_enabled?: boolean
+  wrld_theme_background?: boolean
+  playlist_hero_enabled_dark?: boolean
+  playlist_hero_enabled_light?: boolean
+  sidebar_position?: string
+
+  // ── Navigation/layout ───────────────────────────────────────────────────
+  nav_order?: ViewType[]
+  nav_visibility?: Record<string, boolean>
+  nav_control_order?: string[]
+  nav_control_visibility?: Record<string, boolean>
+  home_section_visibility?: Record<string, boolean>
+
+  // ── Playback preferences ───────────────────────────────────────────────
+  playback_speed?: number
+  crossfade_enabled?: boolean
+  crossfade_duration?: number
+  pause_fade_enabled?: boolean
+  prefer_og_version?: boolean
+  rotate_suggested_covers?: boolean
+  media_overlay_enabled?: boolean
+  lastfm_enabled?: boolean
+  auto_report_errors?: boolean
+  eq_enabled?: boolean
+  eq_gains?: number[]
+  eq_preset?: string
+  eq_balance?: number
+  eq_mono?: boolean
+  eq_boost?: number
+  skip_silence?: boolean
+  reverb_enabled?: boolean
+  reverb_mix?: number
+  reverb_decay?: number
+  pitch_shift?: boolean
+
+  // ── Hotkeys ─────────────────────────────────────────────────────────────
+  hotkey_bindings?: Record<string, string>
+  hotkey_seek_seconds?: number
+  global_hotkeys_enabled?: boolean
+
+  // ── Chat mutes (servers/conversations - distinct from muted_user_ids) ──
+  muted_servers?: number[]
+  muted_conversations?: number[]
 }
 
 export interface NowPlayingState {

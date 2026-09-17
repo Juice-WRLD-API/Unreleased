@@ -373,6 +373,11 @@ interface AppState {
   // Local-first like likedTrackIds, synced to the server's `user_settings`
   // blob (see lib/userApi's UserSettings) on login and on every change.
   mutedUserIds: number[]
+  // Mirror of chatStore's mutedServers/mutedConversations (that store owns
+  // them; this is just a copy so buildUserSettings can include them in the
+  // synced `user_settings` push - see _syncChatMutes).
+  chatMutedServers: number[]
+  chatMutedConversations: number[]
 
   // Per-song user overrides (custom name, custom cover, preferred version,
   // playcount), keyed by numeric API song id. Local-first like likedTrackIds:
@@ -664,12 +669,17 @@ interface AppActions {
   unmuteUser: (userId: number) => void
   toggleMuteUser: (userId: number) => void
   /** Merges the profile's `user_settings` blob (from getMe) with local state -
-   *  muted users union, server's theme wins if set - then pushes the merged
-   *  result back up. Runs on login. */
+   *  muted users union, everything else adopts the server's value if it has
+   *  one (a field the server has never seen keeps the local value instead of
+   *  resetting to a default) - then pushes the merged result back up. Runs
+   *  on login. */
   syncUserSettings: (serverSettings?: UserSettings) => Promise<void>
-  /** Internal - pushes the current muted-users list + theme to the server's
-   *  `user_settings` blob. No-op when signed out. */
-  _pushUserSettings: () => void
+  /** Mirrors chatStore's mutedServers/mutedConversations (per-account, local
+   *  in chatStore) into this store so buildUserSettings can include them in
+   *  the synced blob, and schedules the push. Called from chatStore, which
+   *  already imports useStore (this store can't import chatStore back
+   *  without a cycle). */
+  _syncChatMutes: (mutedServers: number[], mutedConversations: number[]) => void
   /** Merges the profile's `user_preferences` blob (from getMe) with local
    *  state - profile wins per song except playcount, which takes the max -
    *  then pushes the merged array back up. Runs on login. */
@@ -731,7 +741,7 @@ interface AppActions {
   /** Internal - marks the given profile-blob field(s) dirty and (re)schedules
    *  the single shared debounced PATCH that pushes all dirty fields together
    *  in one request, whole-array, rather than one PATCH per field. */
-  _scheduleProfilePush: (fields: ('songPrefs' | 'listeningPlays' | 'folders')[]) => void
+  _scheduleProfilePush: (fields: ('songPrefs' | 'listeningPlays' | 'folders' | 'userSettings')[]) => void
 
   setApiTrackerCategory: (cat: string) => void
   setApiTrackerEra: (era: string) => void
@@ -941,16 +951,75 @@ let _reportsFlushing = false
 
 // ─── Profile-blob push debounce ───────────────────────────────────────────────
 
-// Preferences, listening plays, and folders each live as one JSON field on
-// /account/me/, PATCHed whole. A single shared timer/dirty-set collapses a
-// burst of edits across ANY of the three fields (typing a rename, a run of
-// playcount bumps, a song skip that touches both prefs and listening plays)
-// into one combined PATCH instead of one request per field. Failures are
-// swallowed: state is local-first, and the next push - or the next login's
-// merge - re-sends everything anyway.
+// Preferences, listening plays, folders, and settings each live as one JSON
+// field on /account/me/, PATCHed whole. A single shared timer/dirty-set
+// collapses a burst of edits across ANY of the four fields (typing a
+// rename, a run of playcount bumps, a song skip that touches both prefs and
+// listening plays) into one combined PATCH instead of one request per field.
+// Failures are swallowed: state is local-first, and the next push - or the
+// next login's merge - re-sends everything anyway.
 const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
-let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false }
+let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
+
+// Assembles the *entire* `user_settings` object from current state - every
+// push has to carry every known field (see UserSettings' doc comment: it's a
+// whole-object PATCH, so an omitted field reads as cleared on other devices).
+function buildUserSettings(s: AppStore): UserSettings {
+  return {
+    muted_user_ids: s.mutedUserIds,
+    theme: s.theme,
+    custom_skins: s.customSkins,
+    accent_color: s.accentColor,
+    app_text_scale: s.appTextScale,
+    app_font: s.appFont,
+    lyrics_font: s.lyricsFont,
+    lyrics_scale: s.lyricsScale,
+    lyrics_align: s.lyricsAlign,
+    lyrics_blur: s.lyricsBlur,
+    lyrics_blur_amount: s.lyricsBlurAmount,
+    lyrics_color_active: s.lyricsColorActive,
+    lyrics_color_inactive: s.lyricsColorInactive,
+    lyrics_override: s.lyricsOverride,
+    full_era_names: s.fullEraNames,
+    gradients_enabled: s.gradientsEnabled,
+    surface_gradients_enabled: s.surfaceGradientsEnabled,
+    wrld_theme_background: s.wrldThemeBackground,
+    playlist_hero_enabled_dark: s.playlistHeroEnabledDark,
+    playlist_hero_enabled_light: s.playlistHeroEnabledLight,
+    sidebar_position: s.sidebarPosition,
+    nav_order: s.navOrder,
+    nav_visibility: s.navVisibility,
+    nav_control_order: s.navControlOrder,
+    nav_control_visibility: s.navControlVisibility,
+    home_section_visibility: s.homeSectionVisibility,
+    playback_speed: s.playbackSpeed,
+    crossfade_enabled: s.crossfadeEnabled,
+    crossfade_duration: s.crossfadeDuration,
+    pause_fade_enabled: s.pauseFadeEnabled,
+    prefer_og_version: s.preferOgVersion,
+    rotate_suggested_covers: s.rotateSuggestedCovers,
+    media_overlay_enabled: s.mediaOverlayEnabled,
+    lastfm_enabled: s.lastfmEnabled,
+    auto_report_errors: s.autoReportErrors,
+    eq_enabled: s.eqEnabled,
+    eq_gains: s.eqGains,
+    eq_preset: s.eqPreset,
+    eq_balance: s.eqBalance,
+    eq_mono: s.eqMono,
+    eq_boost: s.eqBoost,
+    skip_silence: s.skipSilence,
+    reverb_enabled: s.reverbEnabled,
+    reverb_mix: s.reverbMix,
+    reverb_decay: s.reverbDecay,
+    pitch_shift: s.pitchShift,
+    hotkey_bindings: s.hotkeyBindings,
+    hotkey_seek_seconds: s.hotkeySeekSeconds,
+    global_hotkeys_enabled: s.globalHotkeysEnabled,
+    muted_servers: s.chatMutedServers,
+    muted_conversations: s.chatMutedConversations,
+  }
+}
 
 // ── M3U import helpers (shared by the file-picker and drag-drop paths) ──────
 // Match parsed .m3u entries against scanned library tracks by file path.
@@ -1019,7 +1088,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
   },
   setVolume: (volume) => { set({ volume }); ls.set('volume', volume) },
-  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed) },
+  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
   setLyricsOffset: (offset) => { set({ lyricsOffset: offset }); ls.set('lyricsOffset', offset) },
 
   // ── Equalizer / audio effects ─────────────────────────────────────────────
@@ -1036,12 +1105,13 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // 1 = 100% (unity, off) .. EQ_BOOST_MAX = 200%.
   eqBoost: ls.get<number>('eqBoost') ?? 1,
   skipSilence: ls.get<boolean>('skipSilence') ?? false,
-  setEqEnabled: (eqEnabled) => { set({ eqEnabled }); ls.set('eqEnabled', eqEnabled) },
+  setEqEnabled: (eqEnabled) => { set({ eqEnabled }); ls.set('eqEnabled', eqEnabled); get()._scheduleProfilePush(['userSettings']) },
   setEqBand: (index, gain) => {
     const eqGains = [...get().eqGains]
     eqGains[index] = gain
     set({ eqGains, eqPreset: 'custom' })
     ls.set('eqGains', eqGains); ls.set('eqPreset', 'custom')
+    get()._scheduleProfilePush(['userSettings'])
   },
   setEqPreset: (id) => {
     const preset = EQ_PRESETS.find((p) => p.id === id)
@@ -1049,21 +1119,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const eqGains = [...preset.gains]
     set({ eqGains, eqPreset: id })
     ls.set('eqGains', eqGains); ls.set('eqPreset', id)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance) },
-  setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono) },
-  setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost) },
-  setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence) },
+  setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance); get()._scheduleProfilePush(['userSettings']) },
+  setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono); get()._scheduleProfilePush(['userSettings']) },
+  setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost); get()._scheduleProfilePush(['userSettings']) },
+  setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence); get()._scheduleProfilePush(['userSettings']) },
   // 'slowedReverb' is the feature's short-lived bundled-toggle predecessor -
   // carry an existing on-state over so it doesn't silently switch off.
   reverbEnabled: ls.get<boolean>('reverbEnabled') ?? ls.get<boolean>('slowedReverb') ?? false,
   reverbMix: ls.get<number>('reverbMix') ?? 0.4,
   reverbDecay: ls.get<number>('reverbDecay') ?? 3,
   pitchShift: ls.get<boolean>('pitchShift') ?? ls.get<boolean>('slowedReverb') ?? false,
-  setReverbEnabled: (reverbEnabled) => { set({ reverbEnabled }); ls.set('reverbEnabled', reverbEnabled) },
-  setReverbMix: (reverbMix) => { set({ reverbMix }); ls.set('reverbMix', reverbMix) },
-  setReverbDecay: (reverbDecay) => { set({ reverbDecay }); ls.set('reverbDecay', reverbDecay) },
-  setPitchShift: (pitchShift) => { set({ pitchShift }); ls.set('pitchShift', pitchShift) },
+  setReverbEnabled: (reverbEnabled) => { set({ reverbEnabled }); ls.set('reverbEnabled', reverbEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setReverbMix: (reverbMix) => { set({ reverbMix }); ls.set('reverbMix', reverbMix); get()._scheduleProfilePush(['userSettings']) },
+  setReverbDecay: (reverbDecay) => { set({ reverbDecay }); ls.set('reverbDecay', reverbDecay); get()._scheduleProfilePush(['userSettings']) },
+  setPitchShift: (pitchShift) => { set({ pitchShift }); ls.set('pitchShift', pitchShift); get()._scheduleProfilePush(['userSettings']) },
   abLoopStart: null,
   abLoopEnd: null,
   setAbLoopPoint: () => {
@@ -1281,7 +1352,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setPlayerCollapsed: (playerCollapsed) => { set({ playerCollapsed }); ls.set('playerCollapsed', playerCollapsed) },
   setWrldFullscreen: (wrldFullscreen) => set({ wrldFullscreen }),
   setHeroBleedTop: (heroBleedTop) => set({ heroBleedTop }),
-  setTheme: (theme) => { set({ theme }); ls.set('theme', theme); get()._pushUserSettings() },
+  setTheme: (theme) => { set({ theme }); ls.set('theme', theme); get()._scheduleProfilePush(['userSettings']) },
   saveCustomSkin: (skin) => {
     const list = get().customSkins
     const idx = list.findIndex((s) => s.id === skin.id)
@@ -1292,6 +1363,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // on this state change and repaints from the cache (live preview when the
     // edited skin is the active one).
     setCustomSkinsCache(next)
+    get()._scheduleProfilePush(['userSettings'])
   },
   deleteCustomSkin: (id) => {
     const next = get().customSkins.filter((s) => s.id !== id)
@@ -1299,24 +1371,28 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('customSkins', next)
     setCustomSkinsCache(next)
     if (get().theme === id) get().setTheme('dark')
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition) },
-  setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder) },
+  setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
+  setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder); get()._scheduleProfilePush(['userSettings']) },
   setNavItemVisible: (view, visible) => {
     const navVisibility = { ...get().navVisibility, [view]: visible }
     set({ navVisibility })
     ls.set('navVisibility', navVisibility)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setNavControlOrder: (navControlOrder) => { set({ navControlOrder }); ls.set('navControlOrder', navControlOrder) },
+  setNavControlOrder: (navControlOrder) => { set({ navControlOrder }); ls.set('navControlOrder', navControlOrder); get()._scheduleProfilePush(['userSettings']) },
   setNavControlVisible: (id, visible) => {
     const navControlVisibility = { ...get().navControlVisibility, [id]: visible }
     set({ navControlVisibility })
     ls.set('navControlVisibility', navControlVisibility)
+    get()._scheduleProfilePush(['userSettings'])
   },
   setHomeSectionVisible: (id, visible) => {
     const homeSectionVisibility = { ...get().homeSectionVisibility, [id]: visible }
     set({ homeSectionVisibility })
     ls.set('homeSectionVisibility', homeSectionVisibility)
+    get()._scheduleProfilePush(['userSettings'])
   },
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -1358,15 +1434,17 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ crossfadeEnabled: enabled, crossfadeDuration: duration })
     ls.set('crossfadeEnabled', enabled)
     ls.set('crossfadeDuration', duration)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setPauseFade: (enabled) => { set({ pauseFadeEnabled: enabled }); ls.set('pauseFadeEnabled', enabled) },
+  setPauseFade: (enabled) => { set({ pauseFadeEnabled: enabled }); ls.set('pauseFadeEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setSleepTimer: (sleepTimerEnd) => set({ sleepTimerEnd }),
   setAudioOutput: (deviceId) => { set({ audioOutput: deviceId }); ls.set('audioOutput', deviceId) },
-  setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled) },
+  setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled); get()._scheduleProfilePush(['userSettings']) },
 
   setRotateSuggestedCovers: (enabled) => {
     set({ rotateSuggestedCovers: enabled })
     ls.set('rotateSuggestedCovers', enabled)
+    get()._scheduleProfilePush(['userSettings'])
     if (enabled) return
     // Turning it off has to forget the chosen covers, or every song stays
     // frozen on whichever suggestion it happened to land on. Re-derive the
@@ -1430,30 +1508,31 @@ export const useStore = create<AppStore>((set, get, store) => ({
       .then((url) => { if (url) get()._reapplySongPref(songId) })
       .catch(() => {})
   },
-  setMediaOverlayEnabled: (enabled) => { set({ mediaOverlayEnabled: enabled }); ls.set('mediaOverlayEnabled', enabled) },
+  setMediaOverlayEnabled: (enabled) => { set({ mediaOverlayEnabled: enabled }); ls.set('mediaOverlayEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setLastfmUser: (lastfmUser) => set({ lastfmUser }),
-  setLastfmEnabled: (enabled) => { set({ lastfmEnabled: enabled }); ls.set('lastfmEnabled', enabled) },
-  setAccentColor: (color) => { set({ accentColor: color }); ls.set('accentColor', color) },
-  setAppTextScale: (appTextScale) => { set({ appTextScale }); ls.set('appTextScale', appTextScale) },
-  setAppFont: (appFont) => { set({ appFont }); ls.set('appFont', appFont) },
-  setLyricsFont: (lyricsFont) => { set({ lyricsFont }); ls.set('lyricsFont', lyricsFont) },
-  setLyricsScale: (lyricsScale) => { set({ lyricsScale }); ls.set('lyricsScale', lyricsScale) },
-  setLyricsAlign: (lyricsAlign) => { set({ lyricsAlign }); ls.set('lyricsAlign', lyricsAlign) },
-  setLyricsBlur: (lyricsBlur) => { set({ lyricsBlur }); ls.set('lyricsBlur', lyricsBlur) },
-  setLyricsOverride: (lyricsOverride) => { set({ lyricsOverride }); ls.set('lyricsOverride', lyricsOverride) },
-  setFullEraNames: (fullEraNames) => { set({ fullEraNames }); ls.set('fullEraNames', fullEraNames) },
-  setLyricsBlurAmount: (lyricsBlurAmount) => { set({ lyricsBlurAmount }); ls.set('lyricsBlurAmount', lyricsBlurAmount) },
-  setLyricsColorActive: (lyricsColorActive) => { set({ lyricsColorActive }); ls.set('lyricsColorActive', lyricsColorActive) },
-  setLyricsColorInactive: (lyricsColorInactive) => { set({ lyricsColorInactive }); ls.set('lyricsColorInactive', lyricsColorInactive) },
-  setGradientsEnabled: (gradientsEnabled) => { set({ gradientsEnabled }); ls.set('gradientsEnabled', gradientsEnabled) },
-  setSurfaceGradientsEnabled: (surfaceGradientsEnabled) => { set({ surfaceGradientsEnabled }); ls.set('surfaceGradientsEnabled', surfaceGradientsEnabled) },
-  setWrldThemeBackground: (wrldThemeBackground) => { set({ wrldThemeBackground }); ls.set('wrldThemeBackground', wrldThemeBackground) },
+  setLastfmEnabled: (enabled) => { set({ lastfmEnabled: enabled }); ls.set('lastfmEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
+  setAccentColor: (color) => { set({ accentColor: color }); ls.set('accentColor', color); get()._scheduleProfilePush(['userSettings']) },
+  setAppTextScale: (appTextScale) => { set({ appTextScale }); ls.set('appTextScale', appTextScale); get()._scheduleProfilePush(['userSettings']) },
+  setAppFont: (appFont) => { set({ appFont }); ls.set('appFont', appFont); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsFont: (lyricsFont) => { set({ lyricsFont }); ls.set('lyricsFont', lyricsFont); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsScale: (lyricsScale) => { set({ lyricsScale }); ls.set('lyricsScale', lyricsScale); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsAlign: (lyricsAlign) => { set({ lyricsAlign }); ls.set('lyricsAlign', lyricsAlign); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsBlur: (lyricsBlur) => { set({ lyricsBlur }); ls.set('lyricsBlur', lyricsBlur); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsOverride: (lyricsOverride) => { set({ lyricsOverride }); ls.set('lyricsOverride', lyricsOverride); get()._scheduleProfilePush(['userSettings']) },
+  setFullEraNames: (fullEraNames) => { set({ fullEraNames }); ls.set('fullEraNames', fullEraNames); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsBlurAmount: (lyricsBlurAmount) => { set({ lyricsBlurAmount }); ls.set('lyricsBlurAmount', lyricsBlurAmount); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsColorActive: (lyricsColorActive) => { set({ lyricsColorActive }); ls.set('lyricsColorActive', lyricsColorActive); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsColorInactive: (lyricsColorInactive) => { set({ lyricsColorInactive }); ls.set('lyricsColorInactive', lyricsColorInactive); get()._scheduleProfilePush(['userSettings']) },
+  setGradientsEnabled: (gradientsEnabled) => { set({ gradientsEnabled }); ls.set('gradientsEnabled', gradientsEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setSurfaceGradientsEnabled: (surfaceGradientsEnabled) => { set({ surfaceGradientsEnabled }); ls.set('surfaceGradientsEnabled', surfaceGradientsEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setWrldThemeBackground: (wrldThemeBackground) => { set({ wrldThemeBackground }); ls.set('wrldThemeBackground', wrldThemeBackground); get()._scheduleProfilePush(['userSettings']) },
   setPlaylistHeroEnabled: (enabled) => {
     if (getSkin(get().theme).dark) {
       set({ playlistHeroEnabledDark: enabled }); ls.set('playlistHeroEnabledDark', enabled)
     } else {
       set({ playlistHeroEnabledLight: enabled }); ls.set('playlistHeroEnabledLight', enabled)
     }
+    get()._scheduleProfilePush(['userSettings'])
   },
 
   setHotkeyBinding: (actionId, combo) => {
@@ -1474,11 +1553,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
     else next[actionId] = combo
     set({ hotkeyBindings: next })
     ls.set('hotkeyBindings', next)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  resetHotkeyBindings: () => { set({ hotkeyBindings: {} }); ls.set('hotkeyBindings', {}) },
+  resetHotkeyBindings: () => { set({ hotkeyBindings: {} }); ls.set('hotkeyBindings', {}); get()._scheduleProfilePush(['userSettings']) },
   resetGlobalHotkeyBindings: () => { set({ globalHotkeyBindings: {} }); ls.set('globalHotkeyBindings', {}) },
-  setHotkeySeekSeconds: (seconds) => { set({ hotkeySeekSeconds: seconds }); ls.set('hotkeySeekSeconds', seconds) },
-  setGlobalHotkeysEnabled: (enabled) => { set({ globalHotkeysEnabled: enabled }); ls.set('globalHotkeysEnabled', enabled) },
+  setHotkeySeekSeconds: (seconds) => { set({ hotkeySeekSeconds: seconds }); ls.set('hotkeySeekSeconds', seconds); get()._scheduleProfilePush(['userSettings']) },
+  setGlobalHotkeysEnabled: (enabled) => { set({ globalHotkeysEnabled: enabled }); ls.set('globalHotkeysEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setGlobalHotkeyBinding: (actionId, combo) => {
     const current = get().globalHotkeyBindings
     const next = { ...current }
@@ -1526,6 +1606,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
 
   // ── Muted users ───────────────────────────────────────────────────────────
   mutedUserIds: ls.get<number[]>('mutedUserIds') ?? [],
+  // Mirrors chatStore's own local mutedServers/mutedConversations (that
+  // store owns them; see chatStore's loadMuted/saveMuted) so they can ride
+  // along in the same user_settings push. Empty until chatStore's account
+  // hydrate calls _syncChatMutes.
+  chatMutedServers: [],
+  chatMutedConversations: [],
 
   muteUser: (userId) => {
     const { mutedUserIds } = get()
@@ -1533,7 +1619,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const next = [...mutedUserIds, userId]
     set({ mutedUserIds: next })
     ls.set('mutedUserIds', next)
-    get()._pushUserSettings()
+    get()._scheduleProfilePush(['userSettings'])
   },
   unmuteUser: (userId) => {
     const { mutedUserIds } = get()
@@ -1541,37 +1627,109 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const next = mutedUserIds.filter((id) => id !== userId)
     set({ mutedUserIds: next })
     ls.set('mutedUserIds', next)
-    get()._pushUserSettings()
+    get()._scheduleProfilePush(['userSettings'])
   },
   toggleMuteUser: (userId) => {
     const { mutedUserIds, muteUser, unmuteUser } = get()
     if (mutedUserIds.includes(userId)) unmuteUser(userId)
     else muteUser(userId)
   },
-  // Best-effort - a failed push just means the next mute/theme change or the
-  // next login's syncUserSettings retries it, same as the other profile blobs.
-  _pushUserSettings: () => {
-    const { account, mutedUserIds, theme } = get()
-    if (!account) return
-    userApi.updateUserSettings({ muted_user_ids: mutedUserIds, theme }).catch(() => {})
+  _syncChatMutes: (mutedServers, mutedConversations) => {
+    const s = get()
+    if (mutedServers.length === s.chatMutedServers.length && mutedServers.every((id) => s.chatMutedServers.includes(id))
+      && mutedConversations.length === s.chatMutedConversations.length && mutedConversations.every((id) => s.chatMutedConversations.includes(id))) return
+    set({ chatMutedServers: mutedServers, chatMutedConversations: mutedConversations })
+    get()._scheduleProfilePush(['userSettings'])
   },
+  // Merges every field of the server's `user_settings` blob into local state,
+  // then schedules a push so the merge (and anything local-only that's never
+  // reached the server yet) makes it back up. Runs on login.
+  //
+  // muted_user_ids is unioned rather than "server wins" - muting someone
+  // should stick regardless of which device did it. Everything else adopts
+  // the server's value only when it differs from local: these are personal
+  // settings that follow the account, and the server only changes when some
+  // device just pushed a real edit, so treating that as authoritative is
+  // simpler (and less surprising) than trying to reconcile two device-local
+  // histories. A field the server has never set (undefined - a brand new
+  // field, or an account that's never synced) leaves the local value alone.
   syncUserSettings: async (serverSettings) => {
-    const local = get().mutedUserIds
-    const serverMuted = serverSettings?.muted_user_ids ?? []
-    const mergedMuted = Array.from(new Set([...serverMuted, ...local]))
-    if (mergedMuted.length !== local.length || mergedMuted.some((id) => !local.includes(id))) {
-      set({ mutedUserIds: mergedMuted })
-      ls.set('mutedUserIds', mergedMuted)
+    const s = get()
+    if (!serverSettings) { get()._scheduleProfilePush(['userSettings']); return }
+
+    const mergedMuted = Array.from(new Set([...(serverSettings.muted_user_ids ?? []), ...s.mutedUserIds]))
+    if (mergedMuted.length !== s.mutedUserIds.length) { set({ mutedUserIds: mergedMuted }); ls.set('mutedUserIds', mergedMuted) }
+
+    if (serverSettings.theme && serverSettings.theme !== s.theme) s.setTheme(getSkin(serverSettings.theme).id)
+    if (serverSettings.custom_skins && JSON.stringify(serverSettings.custom_skins) !== JSON.stringify(s.customSkins)) {
+      set({ customSkins: serverSettings.custom_skins })
+      ls.set('customSkins', serverSettings.custom_skins)
+      setCustomSkinsCache(serverSettings.custom_skins)
     }
-    // The server's theme (if it has one) follows the account across devices;
-    // a device that's never set one keeps whatever's local instead of being
-    // reset to a default.
-    if (serverSettings?.theme && serverSettings.theme !== get().theme) {
-      get().setTheme(getSkin(serverSettings.theme).id)
+    if (serverSettings.accent_color !== undefined && serverSettings.accent_color !== s.accentColor) s.setAccentColor(serverSettings.accent_color)
+    if (serverSettings.app_text_scale !== undefined && serverSettings.app_text_scale !== s.appTextScale) s.setAppTextScale(serverSettings.app_text_scale)
+    if (serverSettings.app_font && serverSettings.app_font !== s.appFont) s.setAppFont(getFont(serverSettings.app_font).id)
+    if (serverSettings.lyrics_font && serverSettings.lyrics_font !== s.lyricsFont) s.setLyricsFont(getFont(serverSettings.lyrics_font).id)
+    if (serverSettings.lyrics_scale !== undefined && serverSettings.lyrics_scale !== s.lyricsScale) s.setLyricsScale(serverSettings.lyrics_scale)
+    if (serverSettings.lyrics_align && serverSettings.lyrics_align !== s.lyricsAlign) s.setLyricsAlign(serverSettings.lyrics_align)
+    if (serverSettings.lyrics_blur !== undefined && serverSettings.lyrics_blur !== s.lyricsBlur) s.setLyricsBlur(serverSettings.lyrics_blur)
+    if (serverSettings.lyrics_blur_amount !== undefined && serverSettings.lyrics_blur_amount !== s.lyricsBlurAmount) s.setLyricsBlurAmount(serverSettings.lyrics_blur_amount)
+    if (serverSettings.lyrics_color_active !== undefined && serverSettings.lyrics_color_active !== s.lyricsColorActive) s.setLyricsColorActive(serverSettings.lyrics_color_active)
+    if (serverSettings.lyrics_color_inactive !== undefined && serverSettings.lyrics_color_inactive !== s.lyricsColorInactive) s.setLyricsColorInactive(serverSettings.lyrics_color_inactive)
+    if (serverSettings.lyrics_override !== undefined && serverSettings.lyrics_override !== s.lyricsOverride) s.setLyricsOverride(serverSettings.lyrics_override)
+    if (serverSettings.full_era_names !== undefined && serverSettings.full_era_names !== s.fullEraNames) s.setFullEraNames(serverSettings.full_era_names)
+    if (serverSettings.gradients_enabled !== undefined && serverSettings.gradients_enabled !== s.gradientsEnabled) s.setGradientsEnabled(serverSettings.gradients_enabled)
+    if (serverSettings.surface_gradients_enabled !== undefined && serverSettings.surface_gradients_enabled !== s.surfaceGradientsEnabled) s.setSurfaceGradientsEnabled(serverSettings.surface_gradients_enabled)
+    if (serverSettings.wrld_theme_background !== undefined && serverSettings.wrld_theme_background !== s.wrldThemeBackground) s.setWrldThemeBackground(serverSettings.wrld_theme_background)
+    if (serverSettings.playlist_hero_enabled_dark !== undefined && serverSettings.playlist_hero_enabled_dark !== s.playlistHeroEnabledDark) {
+      set({ playlistHeroEnabledDark: serverSettings.playlist_hero_enabled_dark }); ls.set('playlistHeroEnabledDark', serverSettings.playlist_hero_enabled_dark)
     }
-    const account = get().account
-    if (!account) return
-    userApi.updateUserSettings({ muted_user_ids: mergedMuted, theme: get().theme }).catch(() => {})
+    if (serverSettings.playlist_hero_enabled_light !== undefined && serverSettings.playlist_hero_enabled_light !== s.playlistHeroEnabledLight) {
+      set({ playlistHeroEnabledLight: serverSettings.playlist_hero_enabled_light }); ls.set('playlistHeroEnabledLight', serverSettings.playlist_hero_enabled_light)
+    }
+    if (serverSettings.sidebar_position && serverSettings.sidebar_position !== s.sidebarPosition) s.setSidebarPosition(serverSettings.sidebar_position as SidebarPosition)
+    if (serverSettings.nav_order && JSON.stringify(serverSettings.nav_order) !== JSON.stringify(s.navOrder)) s.setNavOrder(serverSettings.nav_order)
+    if (serverSettings.nav_visibility) { set({ navVisibility: { ...s.navVisibility, ...serverSettings.nav_visibility } }); ls.set('navVisibility', get().navVisibility) }
+    if (serverSettings.nav_control_order && JSON.stringify(serverSettings.nav_control_order) !== JSON.stringify(s.navControlOrder)) s.setNavControlOrder(serverSettings.nav_control_order)
+    if (serverSettings.nav_control_visibility) { set({ navControlVisibility: { ...s.navControlVisibility, ...serverSettings.nav_control_visibility } }); ls.set('navControlVisibility', get().navControlVisibility) }
+    if (serverSettings.home_section_visibility) { set({ homeSectionVisibility: { ...s.homeSectionVisibility, ...serverSettings.home_section_visibility } }); ls.set('homeSectionVisibility', get().homeSectionVisibility) }
+    if (serverSettings.playback_speed !== undefined && serverSettings.playback_speed !== s.playbackSpeed) s.setPlaybackSpeed(serverSettings.playback_speed)
+    if (serverSettings.crossfade_enabled !== undefined && (serverSettings.crossfade_enabled !== s.crossfadeEnabled || serverSettings.crossfade_duration !== s.crossfadeDuration)) {
+      s.setCrossfade(serverSettings.crossfade_enabled, serverSettings.crossfade_duration ?? s.crossfadeDuration)
+    }
+    if (serverSettings.pause_fade_enabled !== undefined && serverSettings.pause_fade_enabled !== s.pauseFadeEnabled) s.setPauseFade(serverSettings.pause_fade_enabled)
+    if (serverSettings.prefer_og_version !== undefined && serverSettings.prefer_og_version !== s.preferOgVersion) s.setPreferOgVersion(serverSettings.prefer_og_version)
+    if (serverSettings.rotate_suggested_covers !== undefined && serverSettings.rotate_suggested_covers !== s.rotateSuggestedCovers) s.setRotateSuggestedCovers(serverSettings.rotate_suggested_covers)
+    if (serverSettings.media_overlay_enabled !== undefined && serverSettings.media_overlay_enabled !== s.mediaOverlayEnabled) s.setMediaOverlayEnabled(serverSettings.media_overlay_enabled)
+    if (serverSettings.lastfm_enabled !== undefined && serverSettings.lastfm_enabled !== s.lastfmEnabled) s.setLastfmEnabled(serverSettings.lastfm_enabled)
+    if (serverSettings.auto_report_errors !== undefined && serverSettings.auto_report_errors !== s.autoReportErrors) s.setAutoReportErrors(serverSettings.auto_report_errors)
+    if (serverSettings.eq_enabled !== undefined && serverSettings.eq_enabled !== s.eqEnabled) s.setEqEnabled(serverSettings.eq_enabled)
+    if (serverSettings.eq_gains && serverSettings.eq_gains.length === EQ_BANDS.length && JSON.stringify(serverSettings.eq_gains) !== JSON.stringify(s.eqGains)) {
+      set({ eqGains: serverSettings.eq_gains, eqPreset: serverSettings.eq_preset ?? 'custom' })
+      ls.set('eqGains', serverSettings.eq_gains); ls.set('eqPreset', serverSettings.eq_preset ?? 'custom')
+    }
+    if (serverSettings.eq_balance !== undefined && serverSettings.eq_balance !== s.eqBalance) s.setEqBalance(serverSettings.eq_balance)
+    if (serverSettings.eq_mono !== undefined && serverSettings.eq_mono !== s.eqMono) s.setEqMono(serverSettings.eq_mono)
+    if (serverSettings.eq_boost !== undefined && serverSettings.eq_boost !== s.eqBoost) s.setEqBoost(serverSettings.eq_boost)
+    if (serverSettings.skip_silence !== undefined && serverSettings.skip_silence !== s.skipSilence) s.setSkipSilence(serverSettings.skip_silence)
+    if (serverSettings.reverb_enabled !== undefined && serverSettings.reverb_enabled !== s.reverbEnabled) s.setReverbEnabled(serverSettings.reverb_enabled)
+    if (serverSettings.reverb_mix !== undefined && serverSettings.reverb_mix !== s.reverbMix) s.setReverbMix(serverSettings.reverb_mix)
+    if (serverSettings.reverb_decay !== undefined && serverSettings.reverb_decay !== s.reverbDecay) s.setReverbDecay(serverSettings.reverb_decay)
+    if (serverSettings.pitch_shift !== undefined && serverSettings.pitch_shift !== s.pitchShift) s.setPitchShift(serverSettings.pitch_shift)
+    if (serverSettings.hotkey_bindings && JSON.stringify(serverSettings.hotkey_bindings) !== JSON.stringify(s.hotkeyBindings)) {
+      set({ hotkeyBindings: serverSettings.hotkey_bindings }); ls.set('hotkeyBindings', serverSettings.hotkey_bindings)
+    }
+    if (serverSettings.hotkey_seek_seconds !== undefined && serverSettings.hotkey_seek_seconds !== s.hotkeySeekSeconds) s.setHotkeySeekSeconds(serverSettings.hotkey_seek_seconds)
+    if (serverSettings.global_hotkeys_enabled !== undefined && serverSettings.global_hotkeys_enabled !== s.globalHotkeysEnabled) s.setGlobalHotkeysEnabled(serverSettings.global_hotkeys_enabled)
+
+    // muted_servers/muted_conversations aren't merged here - chatStore owns
+    // that local per-account data and already imports this store, so it
+    // reads serverSettings itself (via account.user_settings) and calls
+    // _syncChatMutes once it's merged, on the same account-hydrate pass that
+    // loads its local copy. See chatStore's account effect.
+
+    if (!get().account) return
+    get()._scheduleProfilePush(['userSettings'])
   },
 
   // ── Song preferences ──────────────────────────────────────────────────────
@@ -1611,18 +1769,20 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   _scheduleProfilePush: (fields) => {
-    if (!get().account || !preferencesApi.preferencesApiEnabled) return
+    if (!get().account) return
+    if (fields.some((f) => f !== 'userSettings') && !preferencesApi.preferencesApiEnabled) return
     for (const f of fields) _profilePushDirty[f] = true
     if (_profilePushTimer) clearTimeout(_profilePushTimer)
     _profilePushTimer = setTimeout(() => {
       _profilePushTimer = null
       const dirty = _profilePushDirty
-      _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false }
+      _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
       const state = get()
       profilePushApi.pushProfile({
         songPrefs: dirty.songPrefs ? Object.values(state.songPrefs) : undefined,
         listeningPlays: dirty.listeningPlays ? state.listeningPlays : undefined,
         folders: dirty.folders ? state.playlistFolders : undefined,
+        userSettings: dirty.userSettings ? buildUserSettings(state) : undefined,
       }).catch(() => {})
     }, PROFILE_PUSH_DEBOUNCE_MS)
   },
@@ -1710,7 +1870,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   pendingReports: ls.get<PendingReport[]>('pendingReports') ?? [],
   reportModal: null,
   autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
-  setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors) },
+  setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
 
   openReport: (target) => set({ reportModal: target }),
   closeReport: () => set({ reportModal: null }),
