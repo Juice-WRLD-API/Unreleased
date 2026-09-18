@@ -181,6 +181,19 @@ export function decodeNewsShare(content: string): SharedNewsPayload | null {
   }
 }
 
+// Plain-text summary for surfaces that can't render the rich card (notification
+// banners, OS notifications) - falls through the three share types before
+// treating the content as a regular message.
+export function shareSummaryText(content: string): string | null {
+  const song = decodeSongShare(content)
+  if (song) return `Shared a song: ${song.title} - ${song.artist}`
+  const playlist = decodePlaylistShare(content)
+  if (playlist) return `Shared a playlist: ${playlist.name}`
+  const news = decodeNewsShare(content)
+  if (news) return `Shared a news post: ${news.title}`
+  return null
+}
+
 export function songShareToTrack(payload: SharedSongPayload): Track {
   return {
     id: `jw-${payload.songId}`,
