@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Hash, ImagePlus, Loader2, Lock, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Check, Globe, Hash, ImagePlus, Loader2, Lock, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import { CHAT_PERMISSIONS, type ChannelOverride, type ChatChannel, type ChatMember, type ChatPermissionName, type ChatUserBrief, type PublicServerSummary, type ServerRoleDef } from '../../lib/chatApi'
 import { adminListUsers, compressImageFile, useNowPlayingByIds } from '../../lib/userApi'
@@ -309,12 +309,16 @@ export function ServerSettingsModal({ serverId, onClose, onAddMembers, onRoles }
   const [name, setName] = useState(server?.name ?? '')
   const [description, setDescription] = useState(server?.description ?? '')
   const [icon, setIcon] = useState<string | null>(server?.icon_url ?? null)
+  const [isPublic, setIsPublic] = useState(server?.is_public ?? false)
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   if (!server) return null
 
   const canDelete = server.my_role === 'owner' || me?.role === 'administrator'
-  const dirty = name.trim() !== server.name || description !== server.description || icon !== server.icon_url
+  // Only platform admins may toggle is_public - PATCH /servers/{id}/ 403s for
+  // anyone else, owner or not.
+  const canTogglePublic = me?.role === 'administrator'
+  const dirty = name.trim() !== server.name || description !== server.description || icon !== server.icon_url || isPublic !== server.is_public
 
   const save = async (): Promise<void> => {
     setBusy(true)
@@ -323,6 +327,7 @@ export function ServerSettingsModal({ serverId, onClose, onAddMembers, onRoles }
         name: name.trim(),
         description,
         ...(icon !== server.icon_url ? { icon: icon ?? '' } : {}),
+        ...(canTogglePublic && isPublic !== server.is_public ? { is_public: isPublic } : {}),
       })
       await refreshLists()
       toast('Server updated', 'ok')
@@ -347,6 +352,15 @@ export function ServerSettingsModal({ serverId, onClose, onAddMembers, onRoles }
       <Field label="Description">
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={`${inputCls} resize-none`} />
       </Field>
+      {canTogglePublic && (
+        <Toggle
+          checked={isPublic}
+          onChange={setIsPublic}
+          icon={<Globe size={17} />}
+          label="Public server"
+          description="Anyone can discover and join it from Discover servers."
+        />
+      )}
       <button onClick={onAddMembers} className="w-full mb-2.5 rounded-xl border border-[var(--border)] px-3 py-3 text-left hover:bg-surface-raised/50 transition-colors">
         <span className="block text-sm font-semibold text-text-primary">Add members</span>
         <span className="block text-xs text-text-muted">{server.member_count} {server.member_count === 1 ? 'member' : 'members'} today</span>

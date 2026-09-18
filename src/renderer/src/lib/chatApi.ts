@@ -246,7 +246,7 @@ export const listServers = () => request<Results<ChatServer>>('/servers/').then(
 export const getServer = (id: number) => request<ChatServer>(`/servers/${id}/`)
 export const createServer = (body: { name: string; description?: string; icon?: string }) =>
   request<ChatServer>('/servers/', json('POST', body))
-export const updateServer = (id: number, body: { name?: string; description?: string; icon?: string }) =>
+export const updateServer = (id: number, body: { name?: string; description?: string; icon?: string; is_public?: boolean }) =>
   request<ChatServer>(`/servers/${id}/`, json('PATCH', body))
 export const deleteServer = (id: number) => request<void>(`/servers/${id}/`, json('DELETE'))
 
