@@ -6,13 +6,14 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeNewsShare, decodePlaylistShare, decodeSongShare } from '../../lib/chatShare'
+import { decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import rehypeChatEmoji from './emojiRehype'
 import { linkMentions } from './people'
 import NewsShareCard from './NewsShareCard'
 import PlaylistShareCard from './PlaylistShareCard'
+import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
 
 function urlTransform(url: string): string {
@@ -78,7 +79,9 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     const playlist = decodePlaylistShare(body)
     if (playlist) return <PlaylistShareCard playlist={playlist} />
     const news = decodeNewsShare(body)
-    return news ? <NewsShareCard news={news} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (news) return <NewsShareCard news={news} />
+    const info = decodeSongInfoShare(body)
+    return info ? <SongInfoCard info={info} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -106,5 +109,7 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   const decryptedPlaylist = decodePlaylistShare(decryptedBody)
   if (decryptedPlaylist) return <PlaylistShareCard playlist={decryptedPlaylist} />
   const decryptedNews = decodeNewsShare(decryptedBody)
-  return decryptedNews ? <NewsShareCard news={decryptedNews} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
+  if (decryptedNews) return <NewsShareCard news={decryptedNews} />
+  const decryptedInfo = decodeSongInfoShare(decryptedBody)
+  return decryptedInfo ? <SongInfoCard info={decryptedInfo} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

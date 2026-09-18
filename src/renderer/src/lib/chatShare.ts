@@ -181,6 +181,84 @@ export function decodeNewsShare(content: string): SharedNewsPayload | null {
   }
 }
 
+// Same "prefix + JSON in plain chat text" scheme as the other shares above -
+// this one backs /info's card. It deliberately carries no streamUrl: unlike
+// /song, this card is read-only metadata, not something that plays audio, so
+// it doesn't need the stream-origin pinning that makes SongShareCard safe to
+// auto-wire into an <audio> element.
+export const SONG_INFO_PREFIX = 'unreleased:info:'
+
+const CATEGORY_KEYS = new Set(['released', 'unreleased', 'unsurfaced', 'recording_session'])
+
+export interface SharedSongInfoPayload {
+  title: string
+  category: string
+  length: string
+  era?: string
+  artists?: string
+  producers?: string
+  releaseDate?: string
+  leakedDate?: string
+  imageUrl?: string
+}
+
+export function encodeSongInfoShare(song: {
+  name: string
+  era?: { name: string } | null
+  category: string
+  length: string
+  credited_artists?: string | null
+  producers?: string | null
+  release_date?: string | null
+  date_leaked?: string | null
+}, imageUrl?: string): string {
+  const payload: SharedSongInfoPayload = {
+    title: song.name,
+    category: song.category,
+    length: song.length,
+    era: song.era?.name || undefined,
+    artists: song.credited_artists || undefined,
+    producers: song.producers || undefined,
+    releaseDate: song.release_date || undefined,
+    leakedDate: song.date_leaked || undefined,
+    imageUrl,
+  }
+  return `${SONG_INFO_PREFIX}${JSON.stringify(payload)}`
+}
+
+export function decodeSongInfoShare(content: string): SharedSongInfoPayload | null {
+  if (!content.startsWith(SONG_INFO_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(content.slice(SONG_INFO_PREFIX.length))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+
+  if (!isSafeText(p.title) || !isSafeText(p.length)) return null
+  if (typeof p.category !== 'string' || !CATEGORY_KEYS.has(p.category)) return null
+  if (p.era !== undefined && !isSafeText(p.era)) return null
+  if (p.artists !== undefined && !isSafeText(p.artists)) return null
+  if (p.producers !== undefined && !isSafeText(p.producers)) return null
+  if (p.releaseDate !== undefined && !isSafeText(p.releaseDate)) return null
+  if (p.leakedDate !== undefined && !isSafeText(p.leakedDate)) return null
+  if (p.imageUrl !== undefined && !isSafeImageUrl(p.imageUrl)) return null
+
+  return {
+    title: p.title as string,
+    category: p.category as string,
+    length: p.length as string,
+    era: p.era as string | undefined,
+    artists: p.artists as string | undefined,
+    producers: p.producers as string | undefined,
+    releaseDate: p.releaseDate as string | undefined,
+    leakedDate: p.leakedDate as string | undefined,
+    imageUrl: p.imageUrl as string | undefined,
+  }
+}
+
 // Plain-text summary for surfaces that can't render the rich card (notification
 // banners, OS notifications) - falls through the three share types before
 // treating the content as a regular message.
@@ -191,6 +269,8 @@ export function shareSummaryText(content: string): string | null {
   if (playlist) return `Shared a playlist: ${playlist.name}`
   const news = decodeNewsShare(content)
   if (news) return `Shared a news post: ${news.title}`
+  const info = decodeSongInfoShare(content)
+  if (info) return `Song info: ${info.title}`
   return null
 }
 

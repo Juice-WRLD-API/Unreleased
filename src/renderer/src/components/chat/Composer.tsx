@@ -5,8 +5,8 @@ import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
-import { encodeSongShare } from '../../lib/chatShare'
-import { CATEGORY_LABELS, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
+import { encodeSongInfoShare, encodeSongShare } from '../../lib/chatShare'
+import { buildImageUrl, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
 import { allSkins } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
@@ -177,8 +177,15 @@ const Composer = forwardRef<ComposerHandle, {
     // Raw (untrimmed) text after the command word, so a trailing space the
     // user just typed still counts toward moving on to the next param.
     const rawArgs = /^\/\w+(?:\s([\s\S]*))?$/.exec(text)?.[1] ?? ''
-    return { info, paramIndex: currentParamIndex(info.params, rawArgs) }
+    return { info, paramIndex: currentParamIndex(info.params, rawArgs), argsEmpty: parsed.args === '' }
   }, [text, replyTo, files])
+
+  // Discord shows the parameter you're about to fill as a placeholder chip
+  // right inside the input, not just in a popup above it - it disappears the
+  // moment you start typing. We only have a slot to show once (every command
+  // takes at most one param today), so this is just "nothing typed yet".
+  const showInlineParamChip = !!activeCommand && activeCommand.info.params.length > 0 && activeCommand.argsEmpty
+    && !(slashQuery && slashCandidates.length > 0)
 
   const updateSlashQuery = (value: string, caret: number): void => {
     const match = /^\/(\w*)$/.exec(value.slice(0, caret))
@@ -309,14 +316,7 @@ const Composer = forwardRef<ComposerHandle, {
     if (!args) { toast('Usage: /info <title>'); return }
     const song = await resolveTitleToSong(args)
     if (!song) { toast(`No song found for "${args}"`); return }
-    const lines = [
-      `**${song.name}**`,
-      `${song.era?.name ?? 'Unknown era'} · ${CATEGORY_LABELS[song.category] ?? song.category} · ${song.length}`,
-      song.credited_artists ? `Artists: ${song.credited_artists}` : null,
-      song.producers ? `Producers: ${song.producers}` : null,
-      song.release_date ? `Released: ${song.release_date}` : (song.date_leaked ? `Leaked: ${song.date_leaked}` : null),
-    ].filter((l): l is string => !!l)
-    await send(room, { text: lines.join('\n'), files: [] })
+    await send(room, { text: encodeSongInfoShare(song, buildImageUrl(song.image_url)), files: [] })
   }
 
   const runPromoteCommand = async (args: string): Promise<void> => {
@@ -710,36 +710,46 @@ const Composer = forwardRef<ComposerHandle, {
               e.target.value = ''
             }}
           />
-          <textarea
-            ref={textarea}
-            value={text}
-            rows={1}
-            disabled={!!disabledReason}
-            placeholder={disabledReason ?? placeholder}
-            onChange={(e) => {
-              setText(e.target.value)
-              updateMention(e.target.value, e.target.selectionStart)
-              updateEmojiQuery(e.target.value, e.target.selectionStart)
-              updateSlashQuery(e.target.value, e.target.selectionStart)
-              if (e.target.value) noteTyping()
-              else stopTyping()
-            }}
-            onKeyDown={onKeyDown}
-            onClick={(e) => {
-              updateMention(text, e.currentTarget.selectionStart)
-              updateEmojiQuery(text, e.currentTarget.selectionStart)
-              updateSlashQuery(text, e.currentTarget.selectionStart)
-            }}
-            onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null); setSearchPick(null); setSlashQuery(null) }, 120) }}
-            onPaste={(e) => {
-              const pasted = Array.from(e.clipboardData.files)
-              if (pasted.length) {
-                e.preventDefault()
-                addFiles(pasted)
-              }
-            }}
-            className="flex-1 min-w-0 resize-none bg-transparent px-1.5 py-2 text-[0.9rem] leading-relaxed text-text-primary placeholder:text-text-muted focus:outline-none disabled:cursor-not-allowed"
-          />
+          <div className="relative flex-1 min-w-0">
+            <textarea
+              ref={textarea}
+              value={text}
+              rows={1}
+              disabled={!!disabledReason}
+              placeholder={disabledReason ?? placeholder}
+              onChange={(e) => {
+                setText(e.target.value)
+                updateMention(e.target.value, e.target.selectionStart)
+                updateEmojiQuery(e.target.value, e.target.selectionStart)
+                updateSlashQuery(e.target.value, e.target.selectionStart)
+                if (e.target.value) noteTyping()
+                else stopTyping()
+              }}
+              onKeyDown={onKeyDown}
+              onClick={(e) => {
+                updateMention(text, e.currentTarget.selectionStart)
+                updateEmojiQuery(text, e.currentTarget.selectionStart)
+                updateSlashQuery(text, e.currentTarget.selectionStart)
+              }}
+              onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null); setSearchPick(null); setSlashQuery(null) }, 120) }}
+              onPaste={(e) => {
+                const pasted = Array.from(e.clipboardData.files)
+                if (pasted.length) {
+                  e.preventDefault()
+                  addFiles(pasted)
+                }
+              }}
+              className="w-full resize-none bg-transparent px-1.5 py-2 text-[0.9rem] leading-relaxed text-text-primary placeholder:text-text-muted focus:outline-none disabled:cursor-not-allowed"
+            />
+            {showInlineParamChip && activeCommand && (
+              <div aria-hidden className="absolute inset-0 px-1.5 py-2 text-[0.9rem] leading-relaxed whitespace-pre-wrap break-words pointer-events-none overflow-hidden">
+                <span className="invisible">{text}</span>
+                <span className="inline-block rounded border border-accent/40 bg-accent/15 px-1 text-accent text-[0.8em] font-medium align-baseline">
+                  {activeCommand.info.params[activeCommand.paramIndex]}
+                </span>
+              </div>
+            )}
+          </div>
           {!compact && (
             <button
               type="button"
