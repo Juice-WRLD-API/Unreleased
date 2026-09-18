@@ -2,10 +2,11 @@ import { useHighlight, useHighlightNodes } from './searchContext'
 
 // ─── Small reusable primitives (identical on desktop and mobile) ─────────────
 
-export function Badge({ children, color = 'default' }: { children: string; color?: 'get' | 'post' | 'delete' | 'patch' | 'default' }) {
+export function Badge({ children, color = 'default' }: { children: string; color?: 'get' | 'post' | 'put' | 'delete' | 'patch' | 'default' }) {
   const styles: Record<string, string> = {
     get:     'bg-emerald-500/15 text-emerald-500 border border-emerald-500/25',
     post:    'bg-blue-500/15 text-blue-400 border border-blue-500/25',
+    put:     'bg-violet-500/15 text-violet-400 border border-violet-500/25',
     delete:  'bg-red-500/15 text-red-400 border border-red-500/25',
     patch:   'bg-amber-500/15 text-amber-400 border border-amber-500/25',
     default: 'bg-[var(--surface-raised)] text-text-muted border border-[var(--border)]',

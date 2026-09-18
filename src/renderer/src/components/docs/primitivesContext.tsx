@@ -7,8 +7,8 @@ import { createContext, useContext } from 'react'
 export interface DocsPrimitives {
   Code: (props: { children: string }) => JSX.Element
   Section: (props: { title: string; children: React.ReactNode; defaultOpen?: boolean }) => JSX.Element
-  Endpoint: (props: { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; description: string }) => JSX.Element
-  MethodPath: (props: { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; className?: string }) => JSX.Element
+  Endpoint: (props: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; description: string }) => JSX.Element
+  MethodPath: (props: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; className?: string }) => JSX.Element
 }
 
 const DocsPrimitivesContext = createContext<DocsPrimitives | null>(null)

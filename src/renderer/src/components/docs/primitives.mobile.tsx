@@ -46,11 +46,11 @@ export function Section({ title, children, defaultOpen = true }: { title: string
   )
 }
 
-export function Endpoint({ method, path, description }: { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; description: string }) {
+export function Endpoint({ method, path, description }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; description: string }) {
   const hl = useHighlight()
   return (
     <div className="flex items-start gap-3 py-2">
-      <Badge color={method.toLowerCase() as 'get' | 'post' | 'delete' | 'patch'}>{method}</Badge>
+      <Badge color={method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch'}>{method}</Badge>
       <div className="min-w-0 flex-1">
         <code className="text-[12px] font-mono text-text-primary break-all">{hl(path)}</code>
         <p className="text-xs text-text-muted mt-0.5">{hl(description)}</p>
@@ -62,10 +62,10 @@ export function Endpoint({ method, path, description }: { method: 'GET' | 'POST'
 // Inline "METHOD /path/" header used ad hoc inside a Section body (ZIP
 // operations, Who Am I, Feedback, etc.) - same visual language as Endpoint
 // above but without its description line.
-export function MethodPath({ method, path, className = '' }: { method: 'GET' | 'POST' | 'DELETE' | 'PATCH'; path: string; className?: string }) {
+export function MethodPath({ method, path, className = '' }: { method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; className?: string }) {
   return (
     <div className={`flex items-center gap-2 mb-1 ${className}`}>
-      <Badge color={method.toLowerCase() as 'get' | 'post' | 'delete' | 'patch'}>{method}</Badge>
+      <Badge color={method.toLowerCase() as 'get' | 'post' | 'put' | 'delete' | 'patch'}>{method}</Badge>
       <code className="text-xs font-mono text-text-primary break-all">{path}</code>
     </div>
   )
