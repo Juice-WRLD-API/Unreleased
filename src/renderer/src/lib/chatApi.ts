@@ -118,8 +118,41 @@ export interface ChatMember {
   server_role: ServerRole
   roles: MemberRoleRef[]
   muted: boolean
+  // ISO-8601 while the member is timed out, null otherwise. The server lets
+  // them post again the moment it passes - no call is needed to clear it.
+  timeout_until: string | null
   joined_at: string
 }
+
+export const isTimedOut = (member: Pick<ChatMember, 'timeout_until'>): boolean =>
+  !!member.timeout_until && new Date(member.timeout_until).getTime() > Date.now()
+
+export interface ServerBan {
+  id: number
+  server: number
+  user: ChatUserBrief
+  reason: string
+  banned_by: ChatUserBrief | null
+  created_at: string
+}
+
+export type SiteModerationAction = 'ban' | 'mute' | 'timeout'
+
+export interface SiteModeration {
+  id: number
+  user: ChatUserBrief
+  action: SiteModerationAction
+  reason: string
+  moderator: ChatUserBrief | null
+  expires_at: string | null
+  is_active: boolean
+  created_at: string
+}
+
+// Server timeouts cap at 28 days, site-wide ones at a year (both in minutes) -
+// the API rejects anything outside these with a 400 naming the same numbers.
+export const MAX_SERVER_TIMEOUT_MINUTES = 40320
+export const MAX_SITE_TIMEOUT_MINUTES = 525600
 
 export interface ChatAttachment {
   id: number
@@ -252,6 +285,34 @@ export const updateMember = (serverId: number, userId: number, body: { server_ro
   request<ChatMember>(`/servers/${serverId}/members/${userId}/`, json('PATCH', body))
 export const removeMember = (serverId: number, userId: number) =>
   request<void>(`/servers/${serverId}/members/${userId}/`, json('DELETE'))
+
+// Moderation. Mute is the `muted` flag on updateMember above; the rest live
+// here. Timeout/kick need kick_members (or manage_server), bans need
+// ban_members (or manage_server) - see useChatPermissions.
+export const timeoutMember = (serverId: number, userId: number, minutes: number) =>
+  request<ChatMember>(`/servers/${serverId}/members/${userId}/timeout/`, json('POST', { duration: minutes }))
+export const clearMemberTimeout = (serverId: number, userId: number) =>
+  request<void>(`/servers/${serverId}/members/${userId}/timeout/`, json('DELETE'))
+
+export const listBans = (serverId: number) =>
+  request<Results<ServerBan>>(`/servers/${serverId}/bans/`).then((r) => r.results)
+export const banUser = (serverId: number, userId: number, reason?: string) =>
+  request<ServerBan>(`/servers/${serverId}/bans/`, json('POST', { user_id: userId, ...(reason ? { reason } : {}) }))
+export const unbanUser = (serverId: number, userId: number) =>
+  request<void>(`/servers/${serverId}/bans/${userId}/`, json('DELETE'))
+
+// Site-wide moderation - platform administrators only, applies across every
+// server and DM. `active=true` filters out revoked/expired records.
+export const listSiteModeration = (opts: { activeOnly?: boolean } = {}) =>
+  request<Results<SiteModeration>>(`/site-moderation/${opts.activeOnly ? '?active=true' : ''}`).then((r) => r.results)
+export const applySiteModeration = (body: {
+  user_id: number
+  action: SiteModerationAction
+  reason?: string
+  duration?: number
+}) => request<SiteModeration>('/site-moderation/', json('POST', body))
+export const revokeSiteModeration = (id: number) =>
+  request<void>(`/site-moderation/${id}/`, json('DELETE'))
 
 // Public servers
 export const discoverServers = () =>

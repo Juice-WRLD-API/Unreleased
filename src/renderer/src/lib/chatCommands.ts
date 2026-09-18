@@ -2,7 +2,9 @@
 // by Composer before send - they never reach the room as literal text.
 // Anything else starting with "/" (a URL, an unrecognized word, etc.) is left
 // alone and sent as normal text, same as before this feature existed.
-export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick' | 'feedback' | 'help'
+export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick'
+  | 'timeout' | 'untimeout' | 'ban' | 'unban' | 'bans' | 'siteban' | 'sitemute' | 'siteunban'
+  | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -12,13 +14,19 @@ export interface ParsedChatCommand {
   args: string
 }
 
-const KNOWN_COMMANDS = new Set<string>(['song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick', 'feedback', 'help'])
+const KNOWN_COMMANDS = new Set<string>([
+  'song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick',
+  'timeout', 'untimeout', 'ban', 'unban', 'bans', 'siteban', 'sitemute', 'siteunban',
+  'feedback', 'help',
+])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
 // Composer only ever sees the canonical name, so adding an alias here never
 // requires touching the switch that runs each command.
 const ALIASES: Record<string, ChatCommandName> = {
   nowplaying: 'np',
+  to: 'timeout',
+  unto: 'untimeout',
 }
 
 // Drives the Composer's slash-command autocomplete popup - purely
@@ -45,7 +53,15 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'mute', usage: '/mute @user', description: 'Hide a user’s messages for you', params: ['user'] },
   { name: 'unmute', usage: '/unmute @user', description: 'Unhide a previously muted user', params: ['user'] },
   { name: 'promote', usage: '/promote @user', description: 'Promote a member to server admin', params: ['user'] },
-  { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server', params: ['user'] },
+  { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server (they can rejoin)', params: ['user'] },
+  { name: 'timeout', usage: '/timeout @user <minutes>', description: 'Temporarily stop a member from posting', aliases: ['to'], params: ['user', 'minutes'] },
+  { name: 'untimeout', usage: '/untimeout @user', description: 'Lift a member’s timeout early', aliases: ['unto'], params: ['user'] },
+  { name: 'ban', usage: '/ban @user [reason]', description: 'Ban a user from this server', params: ['user', 'reason'] },
+  { name: 'unban', usage: '/unban @user', description: 'Lift a server ban so they can rejoin', params: ['user'] },
+  { name: 'bans', usage: '/bans', description: 'List everyone banned from this server', params: [] },
+  { name: 'siteban', usage: '/siteban @user [reason]', description: 'Admins: ban a user from all chat and DMs', params: ['user', 'reason'] },
+  { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
+  { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke a user’s site-wide actions', params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help', description: 'List available commands', params: [] },
 ]

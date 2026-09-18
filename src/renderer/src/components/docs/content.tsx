@@ -3021,6 +3021,9 @@ function ChatTab() {
             ['Editing a message', 'Author only'],
             ['Deleting / pinning a message', 'Author, users with manage_messages, server owner, or platform administrator'],
             ['Managing roles/overrides', 'Requires manage_roles / manage_channels on the resolved permission set, or owner/platform admin'],
+            ['Kicking / timing out a member', 'Requires kick_members or manage_server. Never allowed against the owner'],
+            ['Banning / unbanning', 'Requires ban_members or manage_server. Never allowed against the owner or a platform administrator'],
+            ['Site-wide moderation', 'Platform administrators only (is_administrator or superuser)'],
           ]}
         />
       </Section>
@@ -3097,7 +3100,12 @@ function ChatTab() {
             ['GET', '/servers/{id}/members/', 'List members'],
             ['POST', '/servers/{id}/members/', 'Add a member: { user_id, server_role } (owner/admin, 409 if already a member, 400 if target not staff)'],
             ['PATCH', '/servers/{id}/members/{user_id}/', 'Update server_role and/or muted (owner/admin)'],
-            ['DELETE', '/servers/{id}/members/{user_id}/', 'Remove a member; you may remove yourself, owner cannot be removed'],
+            ['DELETE', '/servers/{id}/members/{user_id}/', 'Kick a member (kick_members or manage_server); you may always remove yourself, owner cannot be removed'],
+            ['POST', '/servers/{id}/members/{user_id}/timeout/', 'Time a member out: { duration } in minutes (kick_members or manage_server)'],
+            ['DELETE', '/servers/{id}/members/{user_id}/timeout/', 'Lift a timeout early'],
+            ['GET', '/servers/{id}/bans/', 'List server bans (ban_members or manage_server)'],
+            ['POST', '/servers/{id}/bans/', 'Ban a user: { user_id, reason? }'],
+            ['DELETE', '/servers/{id}/bans/{user_id}/', 'Unban a user'],
             ['POST', '/servers/{id}/channels/', 'Create a channel: { name, topic?, category?, is_private?, allowed_members? } (owner/admin)'],
             ['GET', '/channels/{id}/', 'Channel detail'],
             ['PATCH', '/channels/{id}/', 'Update name/topic/category/position/is_private/allowed_members (owner/admin)'],
@@ -3261,8 +3269,14 @@ function ChatTab() {
     { "id": 12, "name": "Moderator", "color": "#FF5733", "position": 50 }
   ],
   "muted": false,
+  "timeout_until": null,
   "joined_at": "2026-09-17T20:00:00Z"
 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>timeout_until</Code> is an ISO-8601 datetime while the member is timed out and{' '}
+          <Code>null</Code> otherwise. Once it passes, posting is allowed again on its own — no call is
+          needed to clear it. See Moderation below.
+        </p>
         <p className="text-xs text-text-muted"><Code>{'GET /servers/{id}/members/'}</Code> now includes each member&apos;s <Code>roles</Code> array too.</p>
       </Section>
 
@@ -3317,6 +3331,186 @@ function ChatTab() {
           Member overrides beat role overrides; role overrides beat the base. <Code>my_permissions</Code> on
           the server object is the result of steps 1-4 (server-level, no channel).
         </p>
+      </Section>
+
+      <Section title="Moderation">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Four server-level actions — mute, timeout, kick, ban — plus a site-wide tier for platform
+          administrators. Enforcement is server-side: a restricted user is rejected at send time, so the
+          client only needs to mirror the state to pre-disable its UI.
+        </p>
+        <Table
+          headers={['Action', 'Scope', 'Endpoint', 'Permission']}
+          rows={[
+            ['Mute', 'Server', 'PATCH /servers/{id}/members/{user_id}/', <Code>manage_server</Code>],
+            ['Timeout', 'Server', 'POST / DELETE /servers/{id}/members/{user_id}/timeout/', <Code>kick_members</Code>],
+            ['Kick', 'Server', 'DELETE /servers/{id}/members/{user_id}/', <Code>kick_members</Code>],
+            ['Ban', 'Server', 'POST / DELETE /servers/{id}/bans/', <Code>ban_members</Code>],
+            ['Ban / mute / timeout', 'Site-wide', 'POST / DELETE /site-moderation/', 'Platform admin'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          <Code>manage_server</Code> (16) is accepted in place of <Code>kick_members</Code> (64) or{' '}
+          <Code>ban_members</Code> (128) everywhere above. Server owners and platform administrators always
+          pass. Mute is the exception: it needs <Code>manage_server</Code> specifically.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Mute — indefinite, server-scoped</p>
+        <MethodPath method="PATCH" path="/servers/{id}/members/{user_id}/" />
+        <Pre>{`{ "muted": true }`}</Pre>
+        <p className="text-xs text-text-muted">
+          They stay a member and keep reading; they just can&apos;t post in any channel on that server.
+          Broadcasts <Code>member.updated</Code>. The owner cannot be muted.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Timeout — a mute with an expiry</p>
+        <MethodPath method="POST" path="/servers/{id}/members/{user_id}/timeout/" />
+        <Pre>{`{ "duration": 60 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>duration</Code> is required, in <span className="font-semibold text-text-primary">minutes</span>,
+          1–40320 (28 days). Sets <Code>timeout_until</Code> on the member and broadcasts{' '}
+          <Code>member.timeout</Code>. The owner cannot be timed out.
+        </p>
+        <MethodPath method="DELETE" path="/servers/{id}/members/{user_id}/timeout/" className="mt-2" />
+        <p className="text-xs text-text-muted">
+          Clears it early. Broadcasts <Code>member.updated</Code> with <Code>timeout_until: null</Code>.
+          Letting it lapse instead needs no call at all.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Kick — removal without a ban</p>
+        <MethodPath method="DELETE" path="/servers/{id}/members/{user_id}/" />
+        <p className="text-xs text-text-muted">
+          Broadcasts <Code>member.left</Code>. A kicked user can rejoin immediately if the server is public
+          (or be re-added by a moderator) — ban them instead to keep them out. Self-removal is always
+          allowed; the owner can never be removed.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Ban — removal that survives a rejoin</p>
+        <MethodPath method="GET" path="/servers/{id}/bans/" />
+        <p className="text-xs text-text-muted mb-2">→ <Code>{'{ results: [ban, ...] }'}</Code></p>
+        <Pre>{`{
+  "id": 7,
+  "server": 3,
+  "user": { "id": 15, "username": "jdoe", "display_name": "J Doe", "avatar": "", "role": "editor" },
+  "reason": "Spam",
+  "banned_by": { "id": 12, "username": "admin", "display_name": "Admin", "avatar": "", "role": "administrator" },
+  "created_at": "2026-09-10T17:00:00Z"
+}`}</Pre>
+        <MethodPath method="POST" path="/servers/{id}/bans/" className="mt-2" />
+        <Pre>{`{ "user_id": 15, "reason": "Spam" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Creates or updates the ban record, removes the user from the server if they were a member, and
+          broadcasts <Code>member.left</Code> followed by <Code>member.banned</Code>. A banned user who tries
+          to join gets <Code>403 &quot;You are banned from this server.&quot;</Code> The server owner and
+          platform administrators cannot be banned.
+        </p>
+        <MethodPath method="DELETE" path="/servers/{id}/bans/{user_id}/" className="mt-2" />
+        <p className="text-xs text-text-muted">
+          Broadcasts <Code>member.unbanned</Code>; they can rejoin afterwards. <Code>404</Code> if that user
+          isn&apos;t banned.
+        </p>
+      </Section>
+
+      <Section title="Site-wide Moderation" defaultOpen={false}>
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Platform administrators only (<Code>UserProfile.is_administrator</Code> or a Django superuser).
+          These apply across every chat server <span className="font-semibold text-text-primary">and</span>{' '}
+          DMs, independent of any server&apos;s own roles. Non-admins get{' '}
+          <Code>403 &quot;Administrator access required.&quot;</Code>
+        </p>
+        <MethodPath method="GET" path="/site-moderation/?active=true" className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">
+          Without <Code>active=true</Code> you get every record, including revoked and expired ones.
+        </p>
+        <Pre>{`{
+  "results": [
+    {
+      "id": 1,
+      "user": { "id": 15, "username": "jdoe", "display_name": "J Doe", "avatar": "", "role": "editor" },
+      "action": "ban",
+      "reason": "Repeated harassment",
+      "moderator": { "id": 12, "username": "admin", "display_name": "Admin", "avatar": "", "role": "administrator" },
+      "expires_at": null,
+      "is_active": true,
+      "created_at": "2026-09-10T17:00:00Z"
+    }
+  ]
+}`}</Pre>
+        <MethodPath method="POST" path="/site-moderation/" className="mt-3" />
+        <Pre>{`{
+  "user_id": 15,
+  "action": "ban",
+  "reason": "Repeated harassment",
+  "duration": 1440
+}`}</Pre>
+        <Table
+          headers={['Field', 'Required', 'Notes']}
+          rows={[
+            [<Code>user_id</Code>, 'yes', 'Target user'],
+            [<Code>action</Code>, 'yes', 'ban, mute, or timeout'],
+            [<Code>reason</Code>, 'no', 'Max 500 characters'],
+            [<Code>duration</Code>, 'no', 'Minutes, max 525600 (1 year). Omit for "until revoked"'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          A new action of the same type for the same user deactivates the previous one. Platform
+          administrators cannot be moderated.
+        </p>
+        <MethodPath method="DELETE" path="/site-moderation/{id}/" className="mt-3" />
+        <p className="text-xs text-text-muted">Sets <Code>is_active: false</Code>. <Code>204</Code>.</p>
+        <p className="text-xs text-text-muted font-semibold mt-4">What each action does</p>
+        <Table
+          headers={['Action', 'Blocks posting', 'Blocks chat access', 'Blocks DMs', 'Auto-expires']}
+          rows={[
+            [<Code>ban</Code>, 'yes', 'yes', 'yes', 'only with duration'],
+            [<Code>mute</Code>, 'yes', 'no (can still read)', 'yes', 'only with duration'],
+            [<Code>timeout</Code>, 'yes', 'no (can still read)', 'yes', 'only with duration'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          Site-banned users lose chat access entirely (<Code>has_chat_access</Code> returns false) and should
+          be dropped from server views on the next <Code>resync</Code>.
+        </p>
+      </Section>
+
+      <Section title="Moderation Enforcement" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          What the API refuses, and with which message. There is no endpoint that reports your own
+          restrictions, so a client can pre-disable its composer from the member fields it can already see
+          (<Code>muted</Code>, <Code>timeout_until</Code>) and must treat the site-wide cases as a{' '}
+          <Code>403</Code> on send.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Posting in a channel — blocked when any of:</p>
+        <Pre>{`1. An active site-wide ban, mute, or timeout on the user
+2. ServerMember.muted is true
+3. ServerMember.timeout_until is in the future
+4. The user lacks send_messages on that channel
+
+-> 403 { "detail": "You cannot post in this channel." }`}</Pre>
+        <p className="text-xs text-text-muted font-semibold mt-3">Posting in a DM</p>
+        <Pre>{`Active site-wide ban / mute / timeout
+-> 403 { "detail": "You are restricted from sending messages." }`}</Pre>
+        <p className="text-xs text-text-muted font-semibold mt-3">Joining a server</p>
+        <Pre>{`Active site-wide ban, or a ServerBan for that server
+-> 403 { "detail": "You are banned from this server." }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Platform administrators bypass member-level mute/timeout checks when posting, and cannot be banned.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Moderation errors</p>
+        <Table
+          headers={['Status', 'detail', 'Cause']}
+          rows={[
+            ['400', 'A duration in minutes is required.', 'Timeout POST without duration'],
+            ['400', 'Duration must be between 1 and 40320 minutes.', 'Server timeout out of range'],
+            ['400', 'Duration must be between 1 and 525600 minutes.', 'Site timeout out of range'],
+            ['400', 'Invalid action.', 'Site moderation action not ban/mute/timeout'],
+            ['400', 'The owner cannot be banned. / ...timed out. / ...removed.', 'Target is the server owner'],
+            ['400', 'Administrators cannot be banned. / ...moderated.', 'Target is a platform admin'],
+            ['403', 'You cannot ban members.', 'Missing ban_members and manage_server'],
+            ['403', 'You cannot remove members.', 'Missing kick_members and manage_server'],
+            ['404', 'Ban not found.', 'Unban on a user who is not banned'],
+          ]}
+        />
       </Section>
 
       <Section title="Channel Messages (plaintext)">
@@ -3495,6 +3689,10 @@ function ChatTab() {
             [<Code>typing</Code>, 'user_id, active, kind, id'],
             [<Code>presence.update</Code>, 'user_id, online'],
             [<Code>member.joined</Code> + ' / ' + <Code>member.updated</Code> + ' / ' + <Code>member.left</Code>, 'server, member or user_id (member.updated also fires on role assignment)'],
+            [<Code>member.timeout</Code>, 'server, member (member.timeout_until is now set)'],
+            [<Code>member.banned</Code>, 'server, ban — fires right after the member.left for the same user'],
+            [<Code>member.unbanned</Code>, 'server, user_id'],
+            [<Code>resync</Code>, '(no payload) — sent to a user whose own access changed; re-fetch servers and memberships'],
             [<Code>server.updated</Code>, 'server'],
             [<Code>channel.created</Code> + ' / ' + <Code>channel.updated</Code>, 'server, channel'],
             [<Code>channel.deleted</Code>, 'server, channel_id'],

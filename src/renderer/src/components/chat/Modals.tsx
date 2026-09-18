@@ -47,7 +47,7 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
   )
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="block mb-4">
       <span className="block text-[11px] font-bold uppercase tracking-wider text-text-muted mb-1.5">{label}</span>
@@ -57,9 +57,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-const inputCls = 'w-full rounded-xl bg-surface-raised border border-[var(--border)] px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 transition-colors'
+export const inputCls = 'w-full rounded-xl bg-surface-raised border border-[var(--border)] px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/60 transition-colors'
 
-function PrimaryButton({ children, disabled, busy, onClick, danger }: { children: React.ReactNode; disabled?: boolean; busy?: boolean; onClick: () => void; danger?: boolean }): JSX.Element {
+export function PrimaryButton({ children, disabled, busy, onClick, danger }: { children: React.ReactNode; disabled?: boolean; busy?: boolean; onClick: () => void; danger?: boolean }): JSX.Element {
   return (
     <button
       onClick={onClick}
@@ -72,7 +72,7 @@ function PrimaryButton({ children, disabled, busy, onClick, danger }: { children
   )
 }
 
-function GhostButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
+export function GhostButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }): JSX.Element {
   return <button onClick={onClick} className="px-4 py-2 rounded-xl text-sm font-semibold text-text-secondary hover:bg-surface-overlay transition-colors">{children}</button>
 }
 
@@ -131,7 +131,7 @@ function usePickablePeople(): { people: ChatUserBrief[]; loading: boolean } {
   return { people, loading }
 }
 
-function PeoplePicker({ selected, onChange, exclude, max }: {
+export function PeoplePicker({ selected, onChange, exclude, max }: {
   selected: ChatUserBrief[]
   onChange: (next: ChatUserBrief[]) => void
   exclude?: Set<number>
@@ -487,6 +487,9 @@ export function DiscoverServersModal({ onClose }: { onClose: () => void }): JSX.
   const toast = useChatToast()
   const [servers, setServers] = useState<PublicServerSummary[] | null>(null)
   const [joiningId, setJoiningId] = useState<number | null>(null)
+  // Servers the join attempt came back 403-banned from. There's no field on
+  // the discover payload saying so, so the row only learns it by trying.
+  const [bannedFrom, setBannedFrom] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -504,7 +507,9 @@ export function DiscoverServersModal({ onClose }: { onClose: () => void }): JSX.
       selectServer(joined.id)
       onClose()
     } catch (err) {
-      toast(errorText(err, 'Could not join server'))
+      const message = errorText(err, 'Could not join server')
+      if (/banned/i.test(message)) setBannedFrom((prev) => new Set(prev).add(server.id))
+      toast(message)
       setJoiningId(null)
     }
   }
@@ -522,6 +527,8 @@ export function DiscoverServersModal({ onClose }: { onClose: () => void }): JSX.
           </div>
           {server.is_member ? (
             <span className="shrink-0 text-xs font-semibold text-text-muted px-3 py-1.5">Joined</span>
+          ) : bannedFrom.has(server.id) ? (
+            <span className="shrink-0 text-xs font-semibold text-red-400 px-3 py-1.5">Banned</span>
           ) : (
             <PrimaryButton onClick={() => void join(server)} busy={joiningId === server.id}>Join</PrimaryButton>
           )}

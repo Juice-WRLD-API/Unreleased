@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { create } from 'zustand'
 import * as api from '../lib/chatApi'
-import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerRoleDef } from '../lib/chatApi'
+import { isTimedOut } from '../lib/chatApi'
+import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerBan, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
 import { shareSummaryText } from '../lib/chatShare'
@@ -158,6 +159,9 @@ interface ChatState {
   servers: ChatServer[]
   members: Record<number, ChatMember[]>
   roles: Record<number, ServerRoleDef[]>
+  // Per-server ban lists, only fetched when the bans panel is opened (needs
+  // ban_members) - kept live afterwards by member.banned/member.unbanned.
+  bans: Record<number, ServerBan[]>
   conversations: Conversation[]
   pinnedServers: number[]
   pinnedConversations: number[]
@@ -225,6 +229,7 @@ interface ChatState {
 
   loadMembers: (serverId: number, force?: boolean) => Promise<ChatMember[]>
   loadRoles: (serverId: number, force?: boolean) => Promise<ServerRoleDef[]>
+  loadBans: (serverId: number, force?: boolean) => Promise<ServerBan[]>
   startDm: (userIds: number[], name?: string) => Promise<Conversation>
   resolveKey: (conversationId: number) => Promise<void>
   decryptRoom: (conversationId: number) => Promise<void>
@@ -512,6 +517,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       case 'member.joined':
       case 'member.updated':
+      case 'member.timeout':
         set((st) => {
           const list = st.members[ev.server]
           if (!list) return {}
@@ -532,6 +538,27 @@ export const useChatStore = create<ChatState>((set, get) => {
         set((st) => st.members[ev.server]
           ? { members: { ...st.members, [ev.server]: st.members[ev.server].filter((m) => m.user.id !== ev.user_id) } }
           : {})
+        return
+      // A ban always arrives after its own member.left, so the member list is
+      // already correct here - this only maintains the bans panel's cache.
+      case 'member.banned':
+        set((st) => st.bans[ev.server]
+          ? { bans: { ...st.bans, [ev.server]: [ev.ban, ...st.bans[ev.server].filter((b) => b.user.id !== ev.ban.user.id)] } }
+          : {})
+        return
+      case 'member.unbanned':
+        set((st) => st.bans[ev.server]
+          ? { bans: { ...st.bans, [ev.server]: st.bans[ev.server].filter((b) => b.user.id !== ev.user_id) } }
+          : {})
+        return
+      // Our own access changed (moderation, override edits): re-fetch the
+      // server list so channels we just lost or regained appear correctly.
+      // Members are refreshed too so our own muted/timeout_until - which gates
+      // the composer - reflects the action that triggered this.
+      case 'resync':
+        void get().refreshLists().then(() => {
+          for (const id of Object.keys(get().members)) void get().loadMembers(Number(id), true)
+        }).catch(() => undefined)
         return
       case 'server.updated':
         set((st) => ({ servers: st.servers.map((x) => x.id === ev.server.id ? { ...x, ...ev.server } : x) }))
@@ -681,6 +708,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     servers: [],
     members: {},
     roles: {},
+    bans: {},
     conversations: [],
     pinnedServers: [],
     pinnedConversations: [],
@@ -821,7 +849,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       nowPlayingRequested.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
-        servers: [], members: {}, roles: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
+        servers: [], members: {}, roles: {}, bans: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, nowPlaying: {}, keyState: {}, plain: {},
       })
@@ -1177,6 +1205,14 @@ export const useChatStore = create<ChatState>((set, get) => {
       return list
     },
 
+    loadBans: async (serverId, force = false) => {
+      const cached = get().bans[serverId]
+      if (cached && !force) return cached
+      const list = await api.listBans(serverId)
+      set((s) => ({ bans: { ...s.bans, [serverId]: list } }))
+      return list
+    },
+
     startDm: async (userIds, name) => {
       const conv = await api.createConversation({
         participant_ids: userIds,
@@ -1284,6 +1320,49 @@ export function useMessageById(id: number | null): UiMessage | undefined {
     }
     return undefined
   })
+}
+
+// Re-renders once the given instant passes, so a timeout countdown/banner
+// clears itself without waiting for an unrelated event to come through.
+// Nothing scheduled when the instant is absent or already behind us.
+export function useExpiryTick(at: string | null | undefined): void {
+  const [, force] = useState(0)
+  const ms = at ? new Date(at).getTime() - Date.now() : -1
+  useEffect(() => {
+    if (ms <= 0) return
+    // setTimeout saturates past ~24.8 days; re-arm in chunks below that so a
+    // long (up to 28-day) timeout doesn't fire immediately instead.
+    const wait = Math.min(ms + 500, 60_000 * 60 * 12)
+    const id = window.setTimeout(() => force((n) => n + 1), wait)
+    return () => window.clearTimeout(id)
+  }, [ms])
+}
+
+// Why the composer should be locked for this room, or null if it shouldn't.
+// Mirrors the server-side "Posting in a channel" rules we can see from here:
+// our own ServerMember.muted and timeout_until. Site-wide restrictions aren't
+// readable by the client, so those still surface as a 403 on send.
+export function useMyPostingRestriction(room: RoomRef | null): string | null {
+  const meId = useChatStore((s) => s.meId)
+  const loadMembers = useChatStore((s) => s.loadMembers)
+  const serverId = useChatStore((s) => (room && room.kind === 'channel'
+    ? s.servers.find((x) => x.channels.some((c) => c.id === room.id))?.id ?? null
+    : null))
+  const member = useChatStore((s) => (serverId != null && s.meId
+    ? s.members[serverId]?.find((m) => m.user.id === s.meId)
+    : undefined))
+  // The member list is what carries our own muted/timeout_until, and nothing
+  // else guarantees it has been fetched for this server yet (the members panel
+  // may never have been opened). loadMembers caches, so this is one request per
+  // server; the resync handler re-fetches it after any moderation action.
+  useEffect(() => {
+    if (serverId != null) void loadMembers(serverId).catch(() => undefined)
+  }, [serverId, loadMembers])
+  useExpiryTick(member?.timeout_until)
+  if (!meId || !member) return null
+  if (member.muted) return 'You’re muted in this server'
+  if (isTimedOut(member)) return `You’re timed out until ${new Date(member.timeout_until!).toLocaleString()}`
+  return null
 }
 
 export function conversationTitle(conv: Conversation, meId: number | null): string {

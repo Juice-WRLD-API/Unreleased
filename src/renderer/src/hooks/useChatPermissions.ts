@@ -11,6 +11,11 @@ export interface ChatPermissions {
   canManageMessages: boolean
   canKickMembers: boolean
   canBanMembers: boolean
+  // Moderation gates as the API actually enforces them: kick/timeout accept
+  // kick_members *or* manage_server, ban/unban/ban-list ban_members *or*
+  // manage_server. Mute (PATCH member) still needs manage_server on its own.
+  canKickOrTimeout: boolean
+  canBanOrUnban: boolean
 }
 
 // Resolves a server's my_permissions bitmask (from ChatServer, already
@@ -31,5 +36,7 @@ export function useChatPermissions(serverId: number | null | undefined): ChatPer
     canManageMessages: has(CHAT_PERMISSIONS.manage_messages),
     canKickMembers: has(CHAT_PERMISSIONS.kick_members),
     canBanMembers: has(CHAT_PERMISSIONS.ban_members),
+    canKickOrTimeout: has(CHAT_PERMISSIONS.kick_members) || has(CHAT_PERMISSIONS.manage_server),
+    canBanOrUnban: has(CHAT_PERMISSIONS.ban_members) || has(CHAT_PERMISSIONS.manage_server),
   }
 }

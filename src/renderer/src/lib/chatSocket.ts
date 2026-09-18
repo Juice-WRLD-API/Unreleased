@@ -1,7 +1,7 @@
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
 import type { NowPlayingState } from './userApi'
-import type { ChannelOverride, ChatChannel, ChatMember, ChatMessage, ChatServer, Conversation, ServerRoleDef } from './chatApi'
+import type { ChannelOverride, ChatChannel, ChatMember, ChatMessage, ChatServer, Conversation, ServerBan, ServerRoleDef } from './chatApi'
 
 export type RoomKind = 'channel' | 'conversation'
 
@@ -19,6 +19,13 @@ export type ChatEvent =
   | { type: 'now_playing.updated'; user_id: number; now_playing: NowPlayingState | null }
   | { type: 'member.joined' | 'member.updated'; server: number; member: ChatMember }
   | { type: 'member.left'; server: number; user_id: number }
+  | { type: 'member.timeout'; server: number; member: ChatMember }
+  | { type: 'member.banned'; server: number; ban: ServerBan }
+  | { type: 'member.unbanned'; server: number; user_id: number }
+  // Pushed to a user whose access changed (moderation, override edits) - the
+  // client re-fetches its server list and memberships. Distinct from
+  // 'resynced', which is only the ack for a client-sent resync.
+  | { type: 'resync' }
   | { type: 'server.updated'; server: ChatServer }
   | { type: 'channel.created' | 'channel.updated'; server: number; channel: ChatChannel }
   | { type: 'channel.deleted'; server: number; channel_id: number }

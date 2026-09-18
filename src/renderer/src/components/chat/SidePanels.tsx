@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Crown, Loader2, MessageSquare, MoreHorizontal, Pin, Shield, UserCog, UserMinus, X } from 'lucide-react'
+import { Crown, Gavel, Loader2, MessageSquare, MicOff, MoreHorizontal, Pin, Shield, ShieldBan, Timer, UserCog, UserMinus, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
-import { displayName, roomKey, useChatStore, useNowPlayingByIds, type RoomRef } from '../../store/chatStore'
+import { isTimedOut } from '../../lib/chatApi'
+import { displayName, roomKey, useChatStore, useExpiryTick, useMyPostingRestriction, useNowPlayingByIds, type RoomRef } from '../../store/chatStore'
 import { useChatPermissions } from '../../hooks/useChatPermissions'
 import Composer from './Composer'
 import MessageBody from './MessageBody'
 import MessageItem, { ConfirmDialog } from './MessageItem'
 import { useOpenModal } from './modalHost'
+import { TimeoutBadge } from './Moderation'
 import { useRoomPeople } from './people'
 import { relativeTime } from '../adminShared'
 import { useRoomInfo } from './RoomPane'
@@ -34,6 +36,7 @@ export function ThreadPanel({ room, rootId, onClose }: { room: RoomRef; rootId: 
   const thread = useChatStore((s) => s.threads[rootId])
   const people = useRoomPeople(room)
   const info = useRoomInfo(room)
+  const restriction = useMyPostingRestriction(room)
   const [editingId, setEditingId] = useState<number | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const count = thread?.items.length ?? 0
@@ -71,7 +74,7 @@ export function ThreadPanel({ room, rootId, onClose }: { room: RoomRef; rootId: 
           })
         )}
       </div>
-      <Composer room={room} people={people} parent={rootId} placeholder="Reply to thread" compact encrypted={info.encrypted} />
+      <Composer room={room} people={people} parent={rootId} placeholder="Reply to thread" compact encrypted={info.encrypted} disabledReason={restriction} />
     </PanelShell>
   )
 }
@@ -114,11 +117,13 @@ export function PinsPanel({ room, onClose }: { room: RoomRef; onClose: () => voi
   )
 }
 
-function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMessage, listening }: {
+function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBan, ownerId, onMessage, listening }: {
   member: ChatMember
   serverId: number
   canManage: boolean
   canManageRoles: boolean
+  canKick: boolean
+  canBan: boolean
   ownerId: number
   onMessage: (userId: number) => void
   listening?: boolean
@@ -134,6 +139,14 @@ function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMes
   useDismiss(menu, () => setMenu(false), ref)
   const isOwner = member.user.id === ownerId
   const isMe = member.user.id === meId
+  // The API refuses every moderation action against the owner and against
+  // platform administrators, so those rows only ever get the roles entry.
+  const isProtected = isOwner || member.user.role === 'administrator'
+  const hasMenu = canManageRoles || canManage || ((canKick || canBan) && !isProtected)
+  // Keeps the row's timeout chip and its menu entry ("Remove timeout" vs
+  // "Time out") in step with the clock while a timeout runs out.
+  useExpiryTick(member.timeout_until)
+  const timedOut = isTimedOut(member)
   const openProfile = (e: React.MouseEvent): void => openUserCard(member.user, e)
 
   const act = (fn: () => Promise<unknown>, ok: string): void => {
@@ -149,6 +162,8 @@ function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMes
           {displayName(member.user)}
           {isOwner && <Crown size={12} className="text-amber-400 shrink-0" />}
           {!isOwner && member.server_role === 'admin' && <Shield size={12} className="text-sky-400 shrink-0" />}
+          {member.muted && <MicOff size={12} className="text-text-muted shrink-0" aria-label="Muted" />}
+          {timedOut && member.timeout_until && <TimeoutBadge until={member.timeout_until} />}
         </p>
         <p className="text-[11px] text-text-muted truncate flex items-center gap-1">
           <span>@{member.user.username}</span>
@@ -165,12 +180,12 @@ function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMes
           <MessageSquare size={14} />
         </button>
       )}
-      {(canManage || canManageRoles) && !isOwner && (
+      {hasMenu && !isOwner && (
         <button onClick={() => setMenu((v) => !v)} title="Manage" className="w-7 h-7 rounded-lg flex md:hidden md:group-hover:flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay">
           <MoreHorizontal size={15} />
         </button>
       )}
-      {!canManage && !canManageRoles && isMe && !isOwner && (
+      {!hasMenu && isMe && !isOwner && (
         <button onClick={() => setConfirm(true)} title="Leave server" className="w-7 h-7 rounded-lg hidden group-hover:flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10">
           <UserMinus size={14} />
         </button>
@@ -187,26 +202,46 @@ function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMes
               {member.server_role === 'admin' ? 'Remove admin' : 'Make admin'}
             </MenuItem>
           )}
-          {canManage && (
+          {canManage && !isProtected && (
             <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted')}>
               {member.muted ? 'Unmute' : 'Mute'}
             </MenuItem>
           )}
-          {canManage && (
-            <MenuItem danger onClick={() => { setMenu(false); setConfirm(true) }}>{isMe ? 'Leave server' : 'Remove from server'}</MenuItem>
+          {canKick && !isProtected && !isMe && (
+            timedOut
+              ? (
+                <MenuItem onClick={() => act(() => api.clearMemberTimeout(serverId, member.user.id), 'Timeout removed')}>
+                  <span className="inline-flex items-center gap-2"><Timer size={14} />Remove timeout</span>
+                </MenuItem>
+              )
+              : (
+                <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'timeout-member', serverId, member }) }}>
+                  <span className="inline-flex items-center gap-2"><Timer size={14} />Time out…</span>
+                </MenuItem>
+              )
+          )}
+          {(canManage || canKick) && (isMe || !isProtected) && (
+            <MenuItem danger onClick={() => { setMenu(false); setConfirm(true) }}>{isMe ? 'Leave server' : 'Kick from server'}</MenuItem>
+          )}
+          {canBan && !isProtected && !isMe && (
+            <MenuItem danger onClick={() => { setMenu(false); openModal({ kind: 'ban-member', serverId, user: member.user }) }}>
+              <span className="inline-flex items-center gap-2"><Gavel size={14} />Ban…</span>
+            </MenuItem>
           )}
         </div>
       )}
       {confirm && (
         <ConfirmDialog
-          title={isMe ? 'Leave this server?' : `Remove ${displayName(member.user)}?`}
-          body={isMe ? 'You’ll need an owner or admin to add you back.' : 'They’ll lose access to every channel in this server.'}
-          confirmLabel={isMe ? 'Leave' : 'Remove'}
+          title={isMe ? 'Leave this server?' : `Kick ${displayName(member.user)}?`}
+          body={isMe
+            ? 'You’ll need an owner or admin to add you back.'
+            : 'They lose access to every channel here, but can rejoin if the server is public. Ban them instead to keep them out.'}
+          confirmLabel={isMe ? 'Leave' : 'Kick'}
           onCancel={() => setConfirm(false)}
           onConfirm={() => {
             setConfirm(false)
             if (isMe) act(() => api.leaveServer(serverId), 'Left server')
-            else act(() => api.removeMember(serverId, member.user.id), 'Member removed')
+            else act(() => api.removeMember(serverId, member.user.id), 'Member kicked')
           }}
         />
       )}
@@ -223,6 +258,7 @@ export function MenuItem({ onClick, children, danger }: { onClick: () => void; c
 }
 
 export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: number; onClose: () => void; onAddMembers: () => void }): JSX.Element {
+  const openModal = useOpenModal()
   const server = useChatStore((s) => s.servers.find((x) => x.id === serverId))
   const members = useChatStore((s) => s.members[serverId])
   const online = useChatStore((s) => s.online)
@@ -235,7 +271,10 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
   useEffect(() => { void loadMembers(serverId) }, [serverId, loadMembers])
 
   const canManage = me?.role === 'administrator' || server?.my_role === 'owner' || server?.my_role === 'admin'
-  const canManageRoles = useChatPermissions(serverId).canManageRoles
+  const perms = useChatPermissions(serverId)
+  const canManageRoles = perms.canManageRoles
+  const canKick = canManage || perms.canKickOrTimeout
+  const canBan = canManage || perms.canBanOrUnban
   const q = query.trim().toLowerCase()
   const filtered = (members ?? []).filter((m) => !q || m.user.username.toLowerCase().includes(q) || m.user.display_name.toLowerCase().includes(q))
   const onlineList = filtered.filter((m) => online[m.user.id])
@@ -262,6 +301,26 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
           <button onClick={onAddMembers} className="shrink-0 px-3 rounded-lg bg-accent text-white text-xs font-bold hover:brightness-110">Add</button>
         )}
       </div>
+      {(canBan || me?.role === 'administrator') && (
+        <div className="px-3 pt-2 flex gap-2">
+          {canBan && (
+            <button
+              onClick={() => openModal({ kind: 'server-bans', serverId })}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] py-1.5 text-[11px] font-semibold text-text-secondary hover:text-text-primary hover:bg-surface-raised/60"
+            >
+              <ShieldBan size={13} />Banned users
+            </button>
+          )}
+          {me?.role === 'administrator' && (
+            <button
+              onClick={() => openModal({ kind: 'site-moderation' })}
+              className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] py-1.5 text-[11px] font-semibold text-text-secondary hover:text-text-primary hover:bg-surface-raised/60"
+            >
+              <Gavel size={13} />Site-wide
+            </button>
+          )}
+        </div>
+      )}
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-2 pb-3">
         {!members ? (
           <div className="flex justify-center py-6"><Loader2 size={18} className="animate-spin text-text-muted" /></div>
@@ -269,12 +328,12 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
           <>
             {onlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Online — {onlineList.length}</p>}
             {onlineList.sort(byName).map((m) => (
-              <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} ownerId={server?.owner ?? -1} onMessage={message} listening={!!nowPlaying[m.user.id]} />
+              <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} canKick={canKick} canBan={canBan} ownerId={server?.owner ?? -1} onMessage={message} listening={!!nowPlaying[m.user.id]} />
             ))}
             {offlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Offline — {offlineList.length}</p>}
             <div className="opacity-60">
               {offlineList.sort(byName).map((m) => (
-                <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} ownerId={server?.owner ?? -1} onMessage={message} />
+                <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} canKick={canKick} canBan={canBan} ownerId={server?.owner ?? -1} onMessage={message} />
               ))}
             </div>
           </>

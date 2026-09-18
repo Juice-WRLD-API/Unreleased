@@ -275,11 +275,10 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Theme set to ${match.name}`, 'ok')
   }
 
+  // Lists exactly what the autocomplete offers, minus /help itself, so the two
+  // can't drift as commands are added.
   const runHelpCommand = (): void => {
-    toast(
-      'Commands: /song <title>, /search <title>, /info <title>, /np (or /nowplaying), /theme <name>, /sharetheme, /mute @user, /unmute @user, /promote @user, /kick @user, /feedback <message>',
-      'ok',
-    )
+    toast(`Commands: ${CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => c.usage).join(', ')}`, 'ok')
   }
 
   const runMuteCommand = (args: string, usage: '/mute' | '/unmute'): void => {
@@ -330,47 +329,166 @@ const Composer = forwardRef<ComposerHandle, {
     await send(room, { text: encodeSongInfoShare(song, buildImageUrl(song.image_url)), files: [] })
   }
 
-  const runPromoteCommand = async (args: string): Promise<void> => {
+  // Every server-moderation command needs the same three things: the server
+  // behind this room, the member being acted on, and a permission check. They
+  // throw a plain Error whose message is shown by runCommand's catch, so each
+  // command below reads as just the action it performs.
+  const moderationTarget = (args: string, usage: string, need: 'manage' | 'kick' | 'ban'): {
+    server: chatApi.ChatServer
+    target: ChatUserBrief
+    member?: chatApi.ChatMember
+  } => {
     const uname = args.replace(/^@/, '').trim()
-    if (!uname) { toast('Usage: /promote @username'); return }
-    if (room.kind !== 'channel') { toast('/promote only works in a server channel'); return }
+    if (!uname) throw new Error(`Usage: ${usage}`)
+    if (room.kind !== 'channel') throw new Error('That only works in a server channel')
     const cs = useChatStore.getState()
     const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
-    if (!server) { toast("Could not find this channel's server"); return }
-    const canManage = cs.me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
-    if (!canManage) { toast("You don't have permission to promote members here"); return }
+    if (!server) throw new Error("Could not find this channel's server")
+    const elevated = cs.me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
+    const perms = server.my_permissions
+    const extra = need === 'kick' ? chatApi.CHAT_PERMISSIONS.kick_members
+      : need === 'ban' ? chatApi.CHAT_PERMISSIONS.ban_members
+      : chatApi.CHAT_PERMISSIONS.manage_server
+    const allowed = elevated
+      || chatApi.hasPermission(perms, chatApi.CHAT_PERMISSIONS.manage_server)
+      || chatApi.hasPermission(perms, extra)
+    if (!allowed) throw new Error("You don't have permission to do that here")
     const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
-    if (!target) { toast(`No one named "${uname}" here`); return }
-    if (target.id === server.owner) { toast("Can't change the owner's role"); return }
-    const member = cs.members[server.id]?.find((m) => m.user.id === target.id)
+    if (!target) throw new Error(`No one named "${uname}" here`)
+    if (target.id === meId) throw new Error("You can't do that to yourself")
+    if (target.id === server.owner) throw new Error("The owner can't be moderated")
+    if (need !== 'manage' && target.role === 'administrator') throw new Error("Platform administrators can't be moderated")
+    return { server, target, member: cs.members[server.id]?.find((m) => m.user.id === target.id) }
+  }
+
+  // Splits "@user 10" / "@user being a nuisance" into the handle and whatever
+  // follows it - the trailing part is a duration for some commands and a
+  // free-text reason for others, so it comes back raw.
+  const splitTarget = (args: string): { first: string; rest: string } => {
+    const trimmed = args.trim()
+    const space = trimmed.search(/\s/)
+    return space === -1
+      ? { first: trimmed, rest: '' }
+      : { first: trimmed.slice(0, space), rest: trimmed.slice(space + 1).trim() }
+  }
+
+  const refreshMembers = (serverId: number): Promise<unknown> => useChatStore.getState().loadMembers(serverId, true)
+
+  const runPromoteCommand = async (args: string): Promise<void> => {
+    const { server, target, member } = moderationTarget(args, '/promote @username', 'manage')
     if (member?.server_role === 'admin') { toast(`${displayName(target)} is already an admin`); return }
     await chatApi.updateMember(server.id, target.id, { server_role: 'admin' })
-    await cs.loadMembers(server.id, true)
+    await refreshMembers(server.id)
     toast(`Promoted ${displayName(target)} to admin`, 'ok')
   }
 
   const runKickCommand = async (args: string): Promise<void> => {
-    const uname = args.replace(/^@/, '').trim()
-    if (!uname) { toast('Usage: /kick @username'); return }
-    if (room.kind !== 'channel') { toast('/kick only works in a server channel'); return }
-    const cs = useChatStore.getState()
-    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
-    if (!server) { toast("Could not find this channel's server"); return }
-    const canManage = cs.me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
-    if (!canManage) { toast("You don't have permission to kick members here"); return }
-    const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
-    if (!target) { toast(`No one named "${uname}" here`); return }
-    if (target.id === meId) { toast("You can't kick yourself - use Leave server instead"); return }
-    if (target.id === server.owner) { toast("Can't kick the owner"); return }
+    const { server, target } = moderationTarget(args, '/kick @username', 'kick')
     await chatApi.removeMember(server.id, target.id)
-    await cs.loadMembers(server.id, true)
-    toast(`Kicked ${displayName(target)} from the server`, 'ok')
+    await refreshMembers(server.id)
+    toast(`Kicked ${displayName(target)} - they can rejoin if this server is public`, 'ok')
   }
 
-  // "/song <query>", "/search <query>", "/info <query>", "/mute @user",
-  // "/unmute @user", "/theme <name>", "/sharetheme", "/np", "/promote @user",
-  // "/kick @user", "/feedback <message>" and "/help" are recognized only when
-  // they are the entire message
+  const runTimeoutCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    const { server, target } = moderationTarget(first, '/timeout @username <minutes>', 'kick')
+    const minutes = Math.floor(Number(rest))
+    if (!rest || !Number.isFinite(minutes) || minutes < 1 || minutes > chatApi.MAX_SERVER_TIMEOUT_MINUTES) {
+      throw new Error(`Give a duration in minutes, 1-${chatApi.MAX_SERVER_TIMEOUT_MINUTES}`)
+    }
+    await chatApi.timeoutMember(server.id, target.id, minutes)
+    await refreshMembers(server.id)
+    toast(`${displayName(target)} timed out for ${minutes} minute${minutes === 1 ? '' : 's'}`, 'ok')
+  }
+
+  const runUntimeoutCommand = async (args: string): Promise<void> => {
+    const { server, target, member } = moderationTarget(args, '/untimeout @username', 'kick')
+    if (member && !chatApi.isTimedOut(member)) { toast(`${displayName(target)} isn't timed out`); return }
+    await chatApi.clearMemberTimeout(server.id, target.id)
+    await refreshMembers(server.id)
+    toast(`Timeout lifted for ${displayName(target)}`, 'ok')
+  }
+
+  const runBanCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    const { server, target } = moderationTarget(first, '/ban @username [reason]', 'ban')
+    await chatApi.banUser(server.id, target.id, rest || undefined)
+    await refreshMembers(server.id)
+    await useChatStore.getState().loadBans(server.id, true).catch(() => [])
+    toast(`Banned ${displayName(target)}${rest ? ` - ${rest}` : ''}`, 'ok')
+  }
+
+  // Unban resolves through the ban list rather than `people`, since a banned
+  // user is no longer a member and so no longer appears in the room roster.
+  const runUnbanCommand = async (args: string): Promise<void> => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) throw new Error('Usage: /unban @username')
+    if (room.kind !== 'channel') throw new Error('That only works in a server channel')
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) throw new Error("Could not find this channel's server")
+    const bans = await cs.loadBans(server.id, true)
+    const ban = bans.find((b) => b.user.username.toLowerCase() === uname.toLowerCase())
+    if (!ban) { toast(`"${uname}" isn't banned from this server`); return }
+    await chatApi.unbanUser(server.id, ban.user.id)
+    await cs.loadBans(server.id, true)
+    toast(`Unbanned ${displayName(ban.user)}`, 'ok')
+  }
+
+  const runBansCommand = async (): Promise<void> => {
+    if (room.kind !== 'channel') throw new Error('That only works in a server channel')
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) throw new Error("Could not find this channel's server")
+    const bans = await cs.loadBans(server.id, true)
+    toast(bans.length === 0 ? 'No one is banned from this server' : `Banned: ${bans.map((b) => displayName(b.user)).join(', ')}`, 'ok')
+  }
+
+  // Site-wide variants. The target doesn't have to be in this room (or in any
+  // server), so these resolve against the room roster first and fall back to a
+  // numeric user id, and they're gated purely on platform-admin.
+  const siteTarget = (handle: string): { id: number; label: string } => {
+    const uname = handle.replace(/^@/, '').trim()
+    if (!uname) throw new Error('Name a user')
+    if (useChatStore.getState().me?.role !== 'administrator') throw new Error('Site-wide moderation is administrators only')
+    const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (match) return { id: match.id, label: displayName(match) }
+    if (/^\d+$/.test(uname)) return { id: Number(uname), label: `user #${uname}` }
+    throw new Error(`No one named "${uname}" here - use their numeric user id instead`)
+  }
+
+  const runSiteBanCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    if (!first) throw new Error('Usage: /siteban @username [reason]')
+    const { id, label } = siteTarget(first)
+    await chatApi.applySiteModeration({ user_id: id, action: 'ban', ...(rest ? { reason: rest } : {}) })
+    toast(`${label} banned from all chat`, 'ok')
+  }
+
+  const runSiteMuteCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    if (!first) throw new Error('Usage: /sitemute @username [minutes]')
+    const { id, label } = siteTarget(first)
+    const minutes = rest ? Math.floor(Number(rest)) : 0
+    if (rest && (!Number.isFinite(minutes) || minutes < 1 || minutes > chatApi.MAX_SITE_TIMEOUT_MINUTES)) {
+      throw new Error(`Duration must be 1-${chatApi.MAX_SITE_TIMEOUT_MINUTES} minutes`)
+    }
+    await chatApi.applySiteModeration({ user_id: id, action: 'mute', ...(minutes ? { duration: minutes } : {}) })
+    toast(minutes ? `${label} muted everywhere for ${minutes} minutes` : `${label} muted everywhere until revoked`, 'ok')
+  }
+
+  const runSiteUnbanCommand = async (args: string): Promise<void> => {
+    if (!args.trim()) throw new Error('Usage: /siteunban @username')
+    const { id, label } = siteTarget(args)
+    const active = await chatApi.listSiteModeration({ activeOnly: true })
+    const mine = active.filter((r) => r.user.id === id)
+    if (mine.length === 0) { toast(`${label} has no active site-wide actions`); return }
+    for (const record of mine) await chatApi.revokeSiteModeration(record.id)
+    toast(`Revoked ${mine.length} site-wide action${mine.length === 1 ? '' : 's'} for ${label}`, 'ok')
+  }
+
+  // Every command in CHAT_COMMANDS (sharing, /theme, the moderation set, and
+  // so on) is recognized only when it is the entire message
   // (no reply-in-progress, no attachments) - anything else starting with "/"
   // (a URL, a stray command someone typed) falls through and sends as a
   // normal text message, same as before this feature existed.
@@ -415,6 +533,22 @@ const Composer = forwardRef<ComposerHandle, {
         await runPromoteCommand(cmd.args)
       } else if (cmd.command === 'kick') {
         await runKickCommand(cmd.args)
+      } else if (cmd.command === 'timeout') {
+        await runTimeoutCommand(cmd.args)
+      } else if (cmd.command === 'untimeout') {
+        await runUntimeoutCommand(cmd.args)
+      } else if (cmd.command === 'ban') {
+        await runBanCommand(cmd.args)
+      } else if (cmd.command === 'unban') {
+        await runUnbanCommand(cmd.args)
+      } else if (cmd.command === 'bans') {
+        await runBansCommand()
+      } else if (cmd.command === 'siteban') {
+        await runSiteBanCommand(cmd.args)
+      } else if (cmd.command === 'sitemute') {
+        await runSiteMuteCommand(cmd.args)
+      } else if (cmd.command === 'siteunban') {
+        await runSiteUnbanCommand(cmd.args)
       } else if (cmd.command === 'feedback') {
         await runFeedbackCommand(cmd.args)
       }

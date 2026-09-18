@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AtSign, Hash, KeyRound, Loader2, Lock, ShieldCheck, Upload } from 'lucide-react'
-import { conversationTitle, displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { AtSign, Hash, KeyRound, Loader2, Lock, MicOff, ShieldCheck, Upload } from 'lucide-react'
+import { conversationTitle, displayName, roomKey, useChatStore, useMyPostingRestriction, type RoomRef, type UiMessage } from '../../store/chatStore'
 import Composer, { type ComposerHandle } from './Composer'
 import MessageList from './MessageList'
 import { useRoomPeople } from './people'
@@ -124,6 +124,9 @@ export default function RoomPane({ room, header, enterSends = true }: {
   const keyState = useChatStore((s) => (room.kind === 'conversation' ? s.keyState[room.id] : undefined))
   const resolveKey = useChatStore((s) => s.resolveKey)
   const meId = useChatStore((s) => s.meId)
+  // Server-side mute/timeout on our own membership - the API would 403 the
+  // send anyway, so lock the composer instead of letting it fail.
+  const restriction = useMyPostingRestriction(room)
   const composer = useRef<ComposerHandle>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [replyTo, setReplyTo] = useState<UiMessage | null>(null)
@@ -164,9 +167,9 @@ export default function RoomPane({ room, header, enterSends = true }: {
     composer.current?.focus()
   }, [])
 
-  const disabledReason = room.kind === 'conversation' && keyState === 'waiting'
+  const disabledReason = restriction ?? (room.kind === 'conversation' && keyState === 'waiting'
     ? 'Waiting for a participant to share the encryption key…'
-    : null
+    : null)
 
   return (
     <div
@@ -191,6 +194,12 @@ export default function RoomPane({ room, header, enterSends = true }: {
     >
       {header}
 
+      {restriction && (
+        <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-200">
+          <MicOff size={16} className="shrink-0 text-red-400" />
+          <span className="flex-1">{restriction}. You can still read this channel.</span>
+        </div>
+      )}
       {room.kind === 'conversation' && (keyState === 'waiting' || keyState === 'error') && (
         <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
           <KeyRound size={16} className="shrink-0 text-amber-400" />
