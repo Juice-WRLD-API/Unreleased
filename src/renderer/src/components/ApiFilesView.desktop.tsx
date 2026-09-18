@@ -1,9 +1,9 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
-  X, Pencil, PackageOpen, CheckSquare2, Square, Globe, Search,
+  X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
   FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload,
 } from 'lucide-react'
@@ -14,20 +14,25 @@ import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { placeFlyout } from '../lib/menuFlyout'
 import {
   apiFetch,
-  apiPeek,
   buildStreamUrl,
   buildCoverArtUrl,
   smallCoverUrl,
   apiFileTrackId,
-  apiFilePathToTrack,
-  parseBrowseEntries as parseEntries,
   JWApiFileEntry,
-  JWApiBrowseResponse,
   JWApiPaginatedResponse,
-  JWAPI_BASE,
   ZIP_OPERATIONS_ENABLED,
 } from '../lib/juicewrldApi'
 import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
+import {
+  breadcrumbs, parentFolder, fileToTrack, sortEntries, fileEntryLinkUrl, findSongByFilename, triggerDownload,
+  type ViewMode, type SortBy, type SortDir,
+} from '../lib/apiFilesShared'
+import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
+import { useApiFilesZip } from '../hooks/useApiFilesZip'
+import { useTrackerMatches } from '../hooks/useTrackerMatches'
+import { useAddFileToPlaylist } from '../hooks/useAddFileToPlaylist'
+import { usePlayFileEntry } from '../hooks/usePlayFileEntry'
+import { useFileLightbox } from '../hooks/useFileLightbox'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
 import { basename } from '../lib/compStagedChanges'
@@ -36,13 +41,9 @@ import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } fro
 import { ClampedMenu } from './ClampedMenu'
 import { Track } from '../types'
 import { ProgressiveCover } from './ProgressiveCover'
-import MediaLightbox, { LightboxItem } from './MediaLightbox'
+import MediaLightbox from './MediaLightbox'
 import TextFileViewer, { TextFileSource } from './TextFileViewer'
 
-type ViewMode = 'list' | 'grid'
-type SortBy = 'name' | 'type' | 'size'
-type SortDir = 'asc' | 'desc'
-type ZipStatus = 'idle' | 'starting' | 'zipping' | 'done' | 'error'
 type MediaFilter = 'all' | 'audio' | 'image' | 'video' | 'text'
 
 // Mirrors the main process's read-text-file cap, so an API file and a local
@@ -61,21 +62,6 @@ const MEDIA_FILTERS: { key: MediaFilter; label: string; icon: typeof Filter }[] 
   { key: 'video', label: 'Videos', icon: Video },
   { key: 'text', label: 'Text', icon: FileText },
 ]
-
-function breadcrumbs(path: string): { label: string; path: string }[] {
-  if (!path) return []
-  const parts = path.split('/').filter(Boolean)
-  return parts.map((label, i) => ({ label, path: parts.slice(0, i + 1).join('/') }))
-}
-
-function parentFolder(path: string): string {
-  const i = path.lastIndexOf('/')
-  return i > 0 ? path.slice(0, i) : ''
-}
-
-function fileToTrack(entry: JWApiFileEntry, channel?: string): Track {
-  return apiFilePathToTrack(entry.path, entry.name, channel)
-}
 
 function localFileToTrack(entry: { name: string; path: string; size: number | null }): Track {
   const title = entry.name.replace(/\.[^.]+$/, '')
@@ -142,37 +128,6 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   )
 }
 
-function sortEntries(entries: JWApiFileEntry[], by: SortBy, dir: SortDir): JWApiFileEntry[] {
-  return [...entries].sort((a, b) => {
-    // Dirs always first
-    const aDir = a.type === 'directory'
-    const bDir = b.type === 'directory'
-    if (aDir !== bDir) return aDir ? -1 : 1
-
-    let cmp = 0
-    if (by === 'name') {
-      cmp = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-    } else if (by === 'type') {
-      const aExt = getFileExt(a.name)
-      const bExt = getFileExt(b.name)
-      cmp = aExt.localeCompare(bExt) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-    } else if (by === 'size') {
-      cmp = (a.size ?? 0) - (b.size ?? 0)
-    }
-    return dir === 'asc' ? cmp : -cmp
-  })
-}
-
-function pathToUrl(folderPath: string): string {
-  if (!folderPath) return '/files'
-  return '/files/' + folderPath.split('/').map(encodeURIComponent).join('/')
-}
-
-function urlToPath(pathname: string): string {
-  if (!pathname.startsWith('/files/')) return ''
-  return decodeURIComponent(pathname.slice('/files/'.length))
-}
-
 export default function ApiFilesView(): JSX.Element {
   const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, stagedFileChanges, stageFileChanges, setShowUploadManager } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'stagedFileChanges', 'stageFileChanges', 'setShowUploadManager')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
@@ -182,22 +137,11 @@ export default function ApiFilesView(): JSX.Element {
   // listing O(rows × likes).
   const likedSet = useMemo(() => new Set(likedTrackIds), [likedTrackIds])
 
-  const [currentPath, setCurrentPath] = useState('')
-  const [entries, setEntries] = useState<JWApiFileEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [history, setHistory] = useState<string[]>([])
-  const [playing, setPlaying] = useState<string | null>(null)
-  const [downloading, setDownloading] = useState<string | null>(null)
   const [textFile, setTextFile] = useState<TextFileSource | null>(null)
-  const [lightboxItems, setLightboxItems] = useState<LightboxItem[]>([])
-  const [lightboxIndex, setLightboxIndex] = useState(-1)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
   // "Add to playlist" flyout, opened from the context menu.
   const [playlistsOpen, setPlaylistsOpen] = useState(false)
-  const [playlistBusyId, setPlaylistBusyId] = useState<number | null>(null)
-  const [playlistDoneId, setPlaylistDoneId] = useState<number | null>(null)
   const playlistItemRef = useRef<HTMLButtonElement>(null)
   const playlistFlyoutRef = useRef<HTMLDivElement>(null)
   const [playlistFlyoutPos, setPlaylistFlyoutPos] = useState({ top: 0, left: 0 })
@@ -205,23 +149,37 @@ export default function ApiFilesView(): JSX.Element {
   // Right-click on empty listing space, rather than a specific entry.
   const [bgCtxMenu, setBgCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [newFolderPrompt, setNewFolderPrompt] = useState<string | null>(null)
-  // Whether a right-clicked audio file actually has a matching song in the
-  // Tracker - resolved lazily per path on menu-open (not for every row up
-  // front) so "Find in Tracker" can be hidden for files with no match instead
-  // of opening the info modal on nothing. undefined = not looked up yet,
-  // null = looked up, no match.
-  const [trackerMatches, setTrackerMatches] = useState<Map<string, number | null>>(new Map())
   // Position clamping is handled by the shared <ClampedMenu> at render time -
   // this ref is kept only so the playlist flyout below can measure it.
   const ctxMenuRef = useRef<HTMLDivElement>(null)
   const [ctxMenuPos, setCtxMenuPos] = useState({ left: 0, top: 0 })
 
+  // Data layer (browse/history/search/channel-switch) - shared with the
+  // mobile build, see useApiFilesBrowse.
+  const {
+    currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
+    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
+  } = useApiFilesBrowse({
+    activeChannel, setActiveChannel, channels, loadChannels,
+    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
+  })
+
+  // Whether a right-clicked audio file actually has a matching song in the
+  // Tracker - resolved lazily per path on menu-open (not for every row up
+  // front) so "Find in Tracker" can be hidden for files with no match instead
+  // of opening the info modal on nothing. undefined = not looked up yet,
+  // null = looked up, no match.
+  const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
+  const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playing, handlePlay } = usePlayFileEntry(entries, activeChannel, playTrack)
+  const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
+
   // Closing/reopening the menu resets the playlist flyout so it never
   // re-opens against a different entry than the one it was populated for.
   useEffect(() => {
     setPlaylistsOpen(false)
-    setPlaylistDoneId(null)
-  }, [ctxMenu])
+    resetPlaylistDone()
+  }, [ctxMenu]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Flyout sits beside the menu, flipping left when it'd run off the edge -
   // same placement helper the song context menu's submenus use.
@@ -233,21 +191,9 @@ export default function ApiFilesView(): JSX.Element {
     setPlaylistFlyoutPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
   }, [playlistsOpen, ctxMenuPos, playlists.length])
 
-  // Search - recursive across the whole file tree via /files/browse/'s
-  // `search` param (same endpoint findSessionZips uses), not scoped to the
-  // current folder. Results replace the browsed folder's entries while
-  // active rather than living in a separate list, so sorting/select-mode/
-  // context menus all keep working on it unchanged.
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [searchResults, setSearchResults] = useState<JWApiFileEntry[]>([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const isSearching = debouncedSearch.trim().length > 0
-
   // Multi-select state - see the useMultiSelect() call further down (needs
   // filteredEntries, which isn't defined yet here) for
   // selectMode/selectedPaths/enterSelectMode/toggleSelect/exitSelectMode.
-  const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Persisted view settings
@@ -278,123 +224,6 @@ export default function ApiFilesView(): JSX.Element {
     }
   }
 
-  const navigateRequestId = useRef(0)
-
-  const browseParams = useCallback((path: string): Record<string, string> => {
-    const p: Record<string, string> = {}
-    if (path) p.path = path
-    if (activeChannel) p.channel = activeChannel
-    return p
-  }, [activeChannel])
-
-  const navigate = useCallback(async (path: string, pushHistory = true) => {
-    // Navigating to a folder (including clicking a directory result while
-    // searching) always exits search mode and lands in normal browsing.
-    setSearch(''); setDebouncedSearch('')
-    // Guard against a slower in-flight request (e.g. for a channel or folder
-    // the user has since navigated away from) landing after a newer one and
-    // clobbering the view with stale/wrong-channel data.
-    const requestId = ++navigateRequestId.current
-    // Stale-while-revalidate: if this folder is already in the offline cache,
-    // paint it instantly (no spinner) and refresh silently in the background.
-    // Only show the loading state when there's nothing cached to fall back on.
-    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
-    if (cached) {
-      setEntries(parseEntries(cached))
-      setCurrentPath(path)
-      setError(null)
-      setLoading(false)
-    } else {
-      setLoading(true)
-      setError(null)
-    }
-    try {
-      const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', browseParams(path))
-      if (requestId !== navigateRequestId.current) return
-      const items = parseEntries(data)
-      if (pushHistory) {
-        setHistory((h) => [...h, currentPath])
-        window.history.pushState({ view: 'api-files', folderPath: path }, '', pathToUrl(path))
-      }
-      setCurrentPath(path)
-      setEntries(items)
-    } catch (err) {
-      if (requestId !== navigateRequestId.current) return
-      // Keep the cached listing visible on a network failure - only surface the
-      // error when we had nothing to show in the first place.
-      if (!cached) setError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
-      if (requestId === navigateRequestId.current) setLoading(false)
-    }
-  }, [currentPath, browseParams])
-
-  // Keep a ref to navigate so popstate listener always has the latest version
-  const navigateRef = useRef(navigate)
-  useEffect(() => { navigateRef.current = navigate }, [navigate])
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300)
-    return () => clearTimeout(t)
-  }, [search])
-
-  useEffect(() => {
-    if (!isSearching) { setSearchResults([]); return }
-    let cancelled = false
-    setSearchLoading(true)
-    const params: Record<string, string> = { search: debouncedSearch.trim() }
-    if (activeChannel) params.channel = activeChannel
-    apiFetch<JWApiBrowseResponse>('/files/browse/', params)
-      .then(data => { if (!cancelled) setSearchResults(parseEntries(data)) })
-      .catch(() => { if (!cancelled) setSearchResults([]) })
-      .finally(() => { if (!cancelled) setSearchLoading(false) })
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, isSearching, activeChannel])
-
-  // Remember the browsed folder in the store so switching to another tab and
-  // back restores it - the component unmounts on tab switch, so local state
-  // alone doesn't survive that round trip.
-  useEffect(() => {
-    setApiFilesLastPath(currentPath)
-  }, [currentPath]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // On mount: read path from URL, or an explicit deep-link (apiFilesPath), or
-  // fall back to wherever the user last browsed to (apiFilesLastPath).
-  useEffect(() => {
-    const urlPath = urlToPath(window.location.pathname)
-    const initialPath = apiFilesPath || urlPath || apiFilesLastPath
-    if (apiFilesPath) setApiFilesPath('')  // consume it
-    navigateRef.current(initialPath, false)
-
-    const handlePopstate = (): void => {
-      const p = window.location.pathname
-      if (p.startsWith('/files')) {
-        const fp = urlToPath(p)
-        setHistory([])
-        navigateRef.current(fp, false)
-      }
-    }
-    window.addEventListener('popstate', handlePopstate)
-    return () => window.removeEventListener('popstate', handlePopstate)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (channels.length === 0) loadChannels().catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onChannelChange = (slug: string): void => {
-    if (slug === activeChannel) return
-    setActiveChannel(slug)
-    setHistory([])
-    setSearch(''); setDebouncedSearch('')
-    setCurrentPath('')
-    window.history.pushState({ view: 'api-files', folderPath: '' }, '', pathToUrl(''))
-  }
-
-  useEffect(() => {
-    navigateRef.current('', false)
-  }, [activeChannel]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ESC closes an open context menu, like a native one. Registered separately
   // from the select-mode handler so it works whether or not that's active.
   useEffect(() => {
@@ -417,40 +246,11 @@ export default function ApiFilesView(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [bgCtxMenu])
 
-  const goBack = (): void => {
-    if (history.length > 0) {
-      const prev = history[history.length - 1]
-      setHistory((h) => h.slice(0, -1))
-      navigate(prev, false)
-    } else if (currentPath) {
-      navigate(parentFolder(currentPath), false)
-    }
-  }
-
-  const goHome = (): void => { setHistory([]); navigate('', true) }
-
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
-    const title = entry.name.replace(/\.[^.]+$/, '')
-    try {
-      const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 5 })
-      const match = data.results[0] ?? null
-      // Global infoSongId (not local state) so the info panel survives
-      // switching to another tab, which unmounts this view.
-      if (match) useStore.getState().setInfoSongId(match.id)
-    } catch { /* no match - leave whatever's already open (if anything) alone */ }
-  }
-
-  // Resolves (and caches) whether an audio file has a matching Tracker entry,
-  // so the context menu can hide "Find in Tracker" when there isn't one.
-  const resolveTrackerMatch = (entry: JWApiFileEntry): void => {
-    if (getMediaType(entry.name) !== 'audio' || trackerMatches.has(entry.path)) return
-    const title = entry.name.replace(/\.[^.]+$/, '')
-    apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
-      .then((data) => {
-        const id = data.results[0]?.id ?? null
-        setTrackerMatches((prev) => new Map(prev).set(entry.path, id))
-      })
-      .catch(() => setTrackerMatches((prev) => new Map(prev).set(entry.path, null)))
+    const match = await findSongByFilename(entry.name)
+    // Global infoSongId (not local state) so the info panel survives
+    // switching to another tab, which unmounts this view.
+    if (match) useStore.getState().setInfoSongId(match.id)
   }
 
   const openContextMenu = (entry: JWApiFileEntry, x: number, y: number): void => {
@@ -470,74 +270,13 @@ export default function ApiFilesView(): JSX.Element {
   const copyToClipboard = (entry: JWApiFileEntry, text: string, what: 'link' | 'path'): void =>
     copyTextToClipboard(text, what, entry.path)
 
-  const copyLink = (entry: JWApiFileEntry): void => {
-    const url = entry.type === 'file'
-      ? buildStreamUrl(entry.path, activeChannel)
-      : window.location.origin + pathToUrl(entry.path)
-    copyToClipboard(entry, url, 'link')
-  }
+  const copyLink = (entry: JWApiFileEntry): void => copyToClipboard(entry, fileEntryLinkUrl(entry, activeChannel), 'link')
 
   // The API-relative path ("Compilation/Folder/song.mp3") - what every
   // /files/* endpoint takes as its `path` param, unlike Copy link's full URL.
   const copyPath = (entry: JWApiFileEntry): void => copyToClipboard(entry, entry.path, 'path')
 
-  // ── Add to playlist ────────────────────────────────────────────────────────
-  // Server playlists are keyed by numeric Tracker song id, so this only works
-  // for audio files that resolved to a Tracker match (same lookup that gates
-  // "Find in Tracker") - the item stays hidden otherwise.
-  const addToPlaylist = async (playlistId: number, songId: number): Promise<void> => {
-    setPlaylistBusyId(playlistId)
-    try {
-      await userApi.addToPlaylist(playlistId, songId)
-      setPlaylistDoneId(playlistId)
-      await refreshPlaylists()
-    } catch {} finally { setPlaylistBusyId(null) }
-  }
-
-  const handlePlay = async (entry: JWApiFileEntry): Promise<void> => {
-    if (playing === entry.path) return
-    setPlaying(entry.path)
-    try {
-      const track = fileToTrack(entry, activeChannel)
-      const queue = entries
-        .filter((e) => e.type === 'file' && getMediaType(e.name) === 'audio')
-        .map((e) => fileToTrack(e, activeChannel))
-      playTrack(track, queue.length > 0 ? queue : [track])
-    } finally {
-      setPlaying(null)
-    }
-  }
-
-  const handleDownload = (entry: JWApiFileEntry): void => {
-    const url = buildStreamUrl(entry.path, activeChannel)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = entry.name
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
-
-  const openLightbox = (entry: JWApiFileEntry): void => {
-    // While searching, the clicked entry can live in a folder other than the
-    // one currently browsed - `entries` (the current folder's listing) won't
-    // contain it, so the gallery has to be built from the search results
-    // themselves instead.
-    const mediaEntries = (isSearching ? searchResults : entries).filter((e) => {
-      const mt = getMediaType(e.name)
-      return e.type === 'file' && (mt === 'image' || mt === 'video')
-    })
-    const items: LightboxItem[] = mediaEntries.map((e) => ({
-      url: buildStreamUrl(e.path, activeChannel),
-      type: getMediaType(e.name) as 'image' | 'video',
-      name: e.name,
-    }))
-    const idx = mediaEntries.findIndex((e) => e.path === entry.path)
-    setLightboxItems(items)
-    setLightboxIndex(idx >= 0 ? idx : 0)
-  }
+  const handleDownload = (entry: JWApiFileEntry): void => triggerDownload(buildStreamUrl(entry.path, activeChannel), entry.name)
 
   // Text viewer - API files come over HTTP from the same stream URL the
   // player uses, capped client-side to match the local reader's 2 MB limit.
@@ -571,51 +310,6 @@ export default function ApiFilesView(): JSX.Element {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
   }
 
-  // Backend zips a folder path recursively with its subfolder structure
-  // intact (see /files/zip-selection/'s `{ "paths": ["Compilation/Folder"] }`
-  // shape in the docs), so a single directory path is enough - no need to
-  // walk and flatten the tree client-side.
-  const startZip = async (paths: string[], filename: string): Promise<void> => {
-    if (paths.length === 0) return
-    setZipStatus('starting')
-    try {
-      const res = await fetch(`${JWAPI_BASE}/start-zip-job/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(activeChannel ? { paths, channel: activeChannel } : { paths }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { job_id } = await res.json() as { job_id: string }
-      setZipStatus('zipping')
-      const poll = async (): Promise<void> => {
-        const st = await apiFetch<{ status: string; download_url?: string; error?: string }>(`/zip-job-status/${job_id}/`)
-        if (st.status === 'completed' && st.download_url) {
-          const a = document.createElement('a')
-          a.href = st.download_url
-          a.download = filename
-          a.target = '_blank'
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          setZipStatus('done')
-          setTimeout(() => setZipStatus('idle'), 3000)
-        } else if (st.status === 'failed') {
-          throw new Error(st.error || 'ZIP job failed')
-        } else {
-          setTimeout(() => { poll().catch(() => { setZipStatus('error'); setTimeout(() => setZipStatus('idle'), 3000) }) }, 1500)
-        }
-      }
-      await poll()
-    } catch {
-      setZipStatus('error')
-      setTimeout(() => setZipStatus('idle'), 3000)
-    }
-  }
-
-  const downloadZip = (): Promise<void> => startZip([...selectedPaths.keys()], 'selection.zip')
-
-  const downloadFolder = (entry: JWApiFileEntry): Promise<void> => startZip([entry.path], `${entry.name}.zip`)
-
   // ── Sorted entries ─────────────────────────────────────────────────────────
 
   const sortedEntries = useMemo(
@@ -641,7 +335,7 @@ export default function ApiFilesView(): JSX.Element {
     selectMode, selected: selectedPaths, selectMany: selectManyPaths, toggle,
     exitSelectMode, selectAll: selectAllEntries, clear: clearSelection,
   } = useMultiSelect<string>({
-    onExit: () => setZipStatus('idle'),
+    onExit: () => resetZip(),
     ctrlA: {
       getAll: () => new Map(filteredEntries.map(e => [e.path, e.path])),
     },
@@ -654,6 +348,11 @@ export default function ApiFilesView(): JSX.Element {
   // Mouse press-and-hold - the desktop equivalent of the touch long-press
   // above, as a second way into select mode alongside Ctrl/Cmd+click.
   const mouseLongPress = useLongPress()
+
+  const { zipStatus, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
+    activeChannel,
+    getSelectedPaths: () => [...selectedPaths.keys()],
+  })
 
   // ── Drag-and-drop reorganizing ─────────────────────────────────────────────
   // Contributors can drag entries onto a folder to move them in, or onto a
