@@ -730,16 +730,19 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         if (changed) set({ typing: next })
       }, 1500)
-      // Same socket gap for everything not on screen: new DMs, unread badges,
-      // last-message previews. Slower, since it touches every room.
+      // Rooms we already know about stay current via the socket (message.created
+      // updates lastMessage/unread directly); a real gap after a drop is handled
+      // by catchUp/reconcileKeys on reconnect. This timer only has to pick up
+      // rooms the socket never told us about yet: new DMs/channels from refreshLists.
       listPollTimer = window.setInterval(() => {
         if (!get().initialized || document.visibilityState !== 'visible') return
         void get().refreshLists().then(() => {
           const active = get().active
+          const known = get().lastMessage
           const keys = [
             ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
             ...get().conversations.map((c) => `d:${c.id}`),
-          ].filter((k) => !active || k !== roomKey(active))
+          ].filter((k) => (!active || k !== roomKey(active)) && !(k in known))
           return pool(keys, 4, primeRoom)
         }).catch(() => undefined)
       }, LIST_POLL_MS)
