@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
 import { Loader2, CheckCircle, RotateCcw, Hash, Calendar, MessageSquare, Music2, ChevronLeft } from 'lucide-react'
 import * as reportsApi from '../lib/reportsApi'
 import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
-import { apiFetch, buildImageUrl } from '../lib/juicewrldApi'
-import type { JWApiSong } from '../lib/juicewrldApi'
-import { StatusChip, Empty, AppSection, relativeTime, shortDate, STATUS_STYLE } from './adminShared'
+import { buildImageUrl } from '../lib/juicewrldApi'
+import { StatusChip, Empty, shortDate, relativeTime, AppSection, STATUS_STYLE } from './adminShared'
 import { useBackToClose } from '../hooks/useBackToClose'
+import { useReportsTabState, REPORT_FILTERS } from '../hooks/useReportsTabState'
 
 // User-submitted song issue reports (wrong/missing info or lyrics). The app's
 // own submit path folds the issue checkboxes into the message text, so the
@@ -19,44 +18,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
   setStatus: (s: SongReportStatus | '') => void
   onChanged: () => void
 }): JSX.Element {
-  const [actionId, setActionId] = useState<number | null>(null)
-  const [notes,    setNotes]    = useState<Record<number, string>>({})
-  const [selected, setSelected] = useState<SongReportRow | null>(null)
-
-  useEffect(() => { setSelected(reports[0] ?? null) }, [reports])
-
-  // Song names for rows that only carry an id - one bulk catalog fetch (the
-  // same ?all=true mode compact view uses) instead of a request per report.
-  const [songsById, setSongsById] = useState<Map<number, JWApiSong>>(new Map())
-  useEffect(() => {
-    apiFetch<JWApiSong[]>('/songs/', { all: 'true' })
-      .then(songs => setSongsById(new Map(songs.map(s => [s.id, s]))))
-      .catch(() => {})
-  }, [])
-
-  const songLabel = (r: SongReportRow): string => {
-    if (r.song_name) return r.song_name
-    const id = reportsApi.reportSongId(r)
-    if (id == null) return r.public_id != null ? `Song #${r.public_id}` : 'Unknown song'
-    return songsById.get(id)?.name ?? `Song id ${id}`
-  }
-
-  const doReview = async (r: SongReportRow, newStatus: SongReportStatus) => {
-    setActionId(r.id)
-    try {
-      await reportsApi.reviewSongReport(r.id, { status: newStatus, review_notes: notes[r.id] ?? r.review_notes ?? '' })
-      onChanged()
-    } catch {} finally { setActionId(null) }
-  }
-
-  const FILTERS: { id: SongReportStatus | ''; label: string }[] = [
-    { id: 'pending',  label: 'Pending'  },
-    { id: 'resolved', label: 'Resolved' },
-    { id: '',         label: 'All'      },
-  ]
-
-  const r = selected
-  const rSong = r ? (reportsApi.reportSongId(r) != null ? songsById.get(reportsApi.reportSongId(r)!) : undefined) : undefined
+  const { actionId, notes, setNotes, setSelected, songLabel, doReview, r, rSong } = useReportsTabState(reports, onChanged)
 
   useBackToClose(() => setSelected(null), r != null)
 
@@ -128,7 +90,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <div className="shrink-0 flex gap-2 overflow-x-auto scrollbar-none px-3 py-2.5 border-b border-[var(--border)]">
-        {FILTERS.map(f => (
+        {REPORT_FILTERS.map(f => (
           <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
               status === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted bg-surface-overlay active:text-text-primary'

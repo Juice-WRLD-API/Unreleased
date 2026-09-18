@@ -7,24 +7,11 @@ import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
 import { hasChatAccess } from '../store/chatStore'
 import HomeChatCard from './chat/HomeChatCard'
+import { PlaylistCoverThumb } from '../lib/homeViewShared'
 
 // The mobile landing screen. All of its data comes from useHomeData, which the
 // desktop shell shares - this file is layout only: a stack of horizontally
 // scrolling rails sized for a phone.
-
-// A playlist with no cover of its own falls back to a 2×2 mosaic of its first
-// four tracks' art - same fallback PlaylistsView uses - before the plain icon.
-function PlaylistCoverThumb({ cover, mosaic, alt }: { cover: string | null; mosaic: string[] | null; alt: string }): JSX.Element {
-  if (cover) return <ProgressiveCover src={cover} alt={alt} className="w-full h-full object-cover" />
-  if (mosaic && mosaic.length >= 4) {
-    return (
-      <div className="grid grid-cols-2 w-full h-full" style={{ overflow: 'hidden' }}>
-        {mosaic.slice(0, 4).map((url, i) => <ProgressiveCover key={i} src={url} alt="" className="w-full h-full object-cover" />)}
-      </div>
-    )
-  }
-  return <ListMusic size={26} className="text-text-muted" />
-}
 
 function Section({ title, icon, action, children }: {
   title: string

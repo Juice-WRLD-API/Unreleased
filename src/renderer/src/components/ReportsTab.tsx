@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react'
 import { Loader2, CheckCircle, RotateCcw, Hash, Calendar, MessageSquare, Music2, ChevronLeft } from 'lucide-react'
 import * as reportsApi from '../lib/reportsApi'
 import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
-import { apiFetch, buildImageUrl } from '../lib/juicewrldApi'
-import type { JWApiSong } from '../lib/juicewrldApi'
+import { buildImageUrl } from '../lib/juicewrldApi'
 import { StatusChip, Empty, AppSection, relativeTime, shortDate, STATUS_STYLE } from './adminShared'
+import { useReportsTabState, REPORT_FILTERS } from '../hooks/useReportsTabState'
 
 // User-submitted song issue reports (wrong/missing info or lyrics). The app's
 // own submit path folds the issue checkboxes into the message text, so the
@@ -24,44 +23,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
    *  inside a tile rather than a full AdminPage panel. */
   compact?: boolean
 }): JSX.Element {
-  const [actionId, setActionId] = useState<number | null>(null)
-  const [notes,    setNotes]    = useState<Record<number, string>>({})
-  const [selected, setSelected] = useState<SongReportRow | null>(null)
-
-  useEffect(() => { setSelected(reports[0] ?? null) }, [reports])
-
-  // Song names for rows that only carry an id - one bulk catalog fetch (the
-  // same ?all=true mode compact view uses) instead of a request per report.
-  const [songsById, setSongsById] = useState<Map<number, JWApiSong>>(new Map())
-  useEffect(() => {
-    apiFetch<JWApiSong[]>('/songs/', { all: 'true' })
-      .then(songs => setSongsById(new Map(songs.map(s => [s.id, s]))))
-      .catch(() => {})
-  }, [])
-
-  const songLabel = (r: SongReportRow): string => {
-    if (r.song_name) return r.song_name
-    const id = reportsApi.reportSongId(r)
-    if (id == null) return r.public_id != null ? `Song #${r.public_id}` : 'Unknown song'
-    return songsById.get(id)?.name ?? `Song id ${id}`
-  }
-
-  const doReview = async (r: SongReportRow, newStatus: SongReportStatus) => {
-    setActionId(r.id)
-    try {
-      await reportsApi.reviewSongReport(r.id, { status: newStatus, review_notes: notes[r.id] ?? r.review_notes ?? '' })
-      onChanged()
-    } catch {} finally { setActionId(null) }
-  }
-
-  const FILTERS: { id: SongReportStatus | ''; label: string }[] = [
-    { id: 'pending',  label: 'Pending'  },
-    { id: 'resolved', label: 'Resolved' },
-    { id: '',         label: 'All'      },
-  ]
-
-  const r = selected
-  const rSong = r ? (reportsApi.reportSongId(r) != null ? songsById.get(reportsApi.reportSongId(r)!) : undefined) : undefined
+  const { actionId, notes, setNotes, setSelected, songLabel, doReview, r, rSong } = useReportsTabState(reports, onChanged)
 
   if (compact) {
     if (r) return (
@@ -113,7 +75,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <div className="shrink-0 flex gap-1 flex-wrap mb-2">
-          {FILTERS.map(f => (
+          {REPORT_FILTERS.map(f => (
             <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
               className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                 status === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
@@ -146,7 +108,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
       {/* Left: list */}
       <div className="w-80 shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
         <div className="shrink-0 flex gap-1 flex-wrap px-3 py-2.5 border-b border-[var(--border)] bg-surface-raised">
-          {FILTERS.map(f => (
+          {REPORT_FILTERS.map(f => (
             <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
               className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
                 status === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
@@ -160,7 +122,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
           {reports.map(item => (
             <button key={item.id} onClick={() => setSelected(item)}
               className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors ${
-                selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
+                r?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               } ${item.status !== 'pending' ? 'opacity-60' : ''}`}>
               <p className="text-text-primary text-xs font-semibold truncate">{songLabel(item)}</p>
               <p className="text-text-muted text-[10px] truncate mt-0.5">{item.message}</p>

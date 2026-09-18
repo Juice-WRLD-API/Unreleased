@@ -4,23 +4,19 @@
 // row it belongs in. Unlike Heardle/Wordle there's no daily puzzle or score:
 // it's a personal ranking, persisted locally (see lib/tierlist) with no
 // server round-trip.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Check,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
-import { loadPools, POOL_LABELS } from '../lib/heardle'
+import { POOL_LABELS } from '../lib/heardle'
 import type { HeardleSong, PoolId } from '../lib/heardle'
 import { smallCoverUrl } from '../lib/juicewrldApi'
-import {
-  loadTierlistState, saveTierlistState, resetTierlistState, newTierId,
-  unsortedSongs, songsInTier, TIER_COLOR_PRESETS,
-} from '../lib/tierlist'
-import type { Tier, TierlistState } from '../lib/tierlist'
+import { TIER_COLOR_PRESETS } from '../lib/tierlist'
+import type { Tier } from '../lib/tierlist'
 import { Sheet } from './mobile/Sheet'
 import { GameSwitcher, GameBackdrop } from './gameShell'
-
-const DEFAULT_CATEGORIES: PoolId[] = ['released', 'unreleased']
+import { useTierlistData } from '../hooks/useTierlistData'
 
 // Drop-zone id used for the "Unranked" pool, since tier ids are already
 // unique strings and null can't be stuffed into a DOM dataset attribute.
@@ -190,15 +186,12 @@ export default function TierlistView(): JSX.Element {
     return () => setHeroBleedTop(false)
   }, [setHeroBleedTop])
 
-  const [state, setState] = useState<TierlistState>(() => loadTierlistState())
-  const [categories, setCategories] = useState<PoolId[]>(DEFAULT_CATEGORIES)
-  const [pool, setPool] = useState<HeardleSong[]>([])
-  const [poolLoading, setPoolLoading] = useState(true)
-  const [poolError, setPoolError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [selectedSongId, setSelectedSongId] = useState<number | null>(null)
-  const [editingTier, setEditingTier] = useState<Tier | null>(null)
-  const [showFilters, setShowFilters] = useState(false)
+  const {
+    tiers, categories, poolLoading, poolError, search, setSearch,
+    selectedSongId, setSelectedSongId, editingTier, setEditingTier, showFilters, setShowFilters,
+    visiblePool, songsInTier, assignSong, clickRow, moveTier, addTier, updateTier, deleteTier,
+    toggleCategory, handleReset,
+  } = useTierlistData()
 
   // Touch drag: a floating copy of the chip follows the pointer while
   // `drag` is set; `dropTarget` mirrors whichever `[data-drop-zone]` is
@@ -210,49 +203,6 @@ export default function TierlistView(): JSX.Element {
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const pointerState = useRef<{ song: HeardleSong; startX: number; startY: number; dragging: boolean } | null>(null)
   const suppressClickRef = useRef(false)
-
-  useEffect(() => {
-    let cancelled = false
-    setPoolLoading(true)
-    setPoolError(null)
-    loadPools(categories)
-      .then((songs) => { if (!cancelled) setPool(songs) })
-      .catch((err) => { if (!cancelled) setPoolError(err instanceof Error ? err.message : 'Failed to load songs') })
-      .finally(() => { if (!cancelled) setPoolLoading(false) })
-    return () => { cancelled = true }
-  }, [categories])
-
-  useEffect(() => { saveTierlistState(state) }, [state])
-
-  const { tiers, assignments } = state
-
-  const visiblePool = useMemo(() => {
-    const unsorted = unsortedSongs(pool, assignments)
-    const q = search.trim().toLowerCase()
-    if (!q) return unsorted
-    return unsorted.filter((s) => s.titles.some((t) => t.toLowerCase().includes(q)))
-  }, [pool, assignments, search])
-
-  // Selecting the tier a song currently belongs to (or the pool, for
-  // unassigning) is meant as a no-op, not a nudge to re-render - keeping the
-  // state identity-equal skips the save effect that would otherwise fire.
-  // useCallback with no deps: the pointer-drag handlers below chain off this
-  // identity, and need it stable across renders (see their comment).
-  const assignSong = useCallback((songId: number, tierId: string | null): void => {
-    setState((prev) => {
-      const current = prev.assignments[songId] ?? null
-      if (current === tierId) return prev
-      const next = { ...prev.assignments }
-      if (tierId) next[songId] = tierId
-      else delete next[songId]
-      return { ...prev, assignments: next }
-    })
-    setSelectedSongId(null)
-  }, [])
-
-  const clickRow = (tierId: string | null) => (): void => {
-    if (selectedSongId !== null) assignSong(selectedSongId, tierId)
-  }
 
   // Chip selection is routed through here (rather than straight to
   // setSelectedSongId) so a drag's trailing click - fired by the browser
@@ -315,55 +265,6 @@ export default function TierlistView(): JSX.Element {
     window.removeEventListener('pointerup', handleSongPointerUp)
     window.removeEventListener('pointercancel', handleSongPointerUp)
   }, [handleSongPointerMove, handleSongPointerUp])
-
-  const moveTier = (index: number, dir: -1 | 1): void => {
-    setState((prev) => {
-      const next = [...prev.tiers]
-      const target = index + dir
-      if (target < 0 || target >= next.length) return prev
-      ;[next[index], next[target]] = [next[target], next[index]]
-      return { ...prev, tiers: next }
-    })
-  }
-
-  const addTier = (): void => {
-    setState((prev) => ({
-      ...prev,
-      tiers: [
-        ...prev.tiers,
-        { id: newTierId(), label: 'New', color: TIER_COLOR_PRESETS[prev.tiers.length % TIER_COLOR_PRESETS.length] },
-      ],
-    }))
-  }
-
-  const updateTier = (tier: Tier): void => {
-    setState((prev) => ({ ...prev, tiers: prev.tiers.map((t) => (t.id === tier.id ? tier : t)) }))
-    setEditingTier(tier)
-  }
-
-  const deleteTier = (tierId: string): void => {
-    setState((prev) => {
-      const nextAssignments = { ...prev.assignments }
-      for (const [songId, tid] of Object.entries(nextAssignments)) {
-        if (tid === tierId) delete nextAssignments[Number(songId)]
-      }
-      return { tiers: prev.tiers.filter((t) => t.id !== tierId), assignments: nextAssignments }
-    })
-    setEditingTier(null)
-  }
-
-  const toggleCategory = (cat: PoolId): void => {
-    setCategories((prev) => {
-      const next = prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
-      return next.length > 0 ? next : prev // never leave nothing to draw from
-    })
-  }
-
-  const handleReset = (): void => {
-    if (!window.confirm('Clear the whole tier list? This removes every ranking and custom tier.')) return
-    setState(resetTierlistState())
-    setSelectedSongId(null)
-  }
 
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
@@ -438,7 +339,7 @@ export default function TierlistView(): JSX.Element {
               <TierRow
                 key={tier.id}
                 tier={tier}
-                songs={songsInTier(pool, assignments, tier.id)}
+                songs={songsInTier(tier.id)}
                 isFirst={i === 0}
                 isLast={i === tiers.length - 1}
                 selectedSongId={selectedSongId}

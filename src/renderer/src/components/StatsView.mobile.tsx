@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { BarChart3, Play, Loader2, MoreHorizontal, Music2, Clock, ListMusic, Disc3, CalendarDays, Info } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { apiFetch, JWApiSong } from '../lib/juicewrldApi'
-import {
-  joinPlayedSongs, buildListeningStats, formatListeningTime,
-  prefsForPeriod, eventsForPeriod, periodCoverage, type RankedEntry, type ListeningPeriod,
-} from '../lib/listeningStats'
-import { resolveStatsSongs, statsSongToTrack, type StatsSong, type ResolveProgress } from '../lib/statsCatalog'
-import { sortListeningPlays } from '../lib/listeningPlays'
+import { formatListeningTime, type RankedEntry } from '../lib/listeningStats'
+import { statsSongToTrack } from '../lib/statsCatalog'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import SongInfoModal from './SongInfoModal'
-import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
-import { relativeTime, shortDate } from './adminShared'
+import SongContextMenu from './SongContextMenu'
+import { relativeTime } from './adminShared'
+import { useStatsViewData, PERIOD_OPTIONS, PLAY_TOP_N, TOP_SONGS_COLLAPSED, TIMELINE_LIMIT } from '../hooks/useStatsViewData'
 
 // "Your Wrapped" - a listening summary built entirely from lib/listeningPlays'
 // timestamped events, rolled back up into playcounts for each period
@@ -29,22 +26,6 @@ import { relativeTime, shortDate } from './adminShared'
 // {song id, played_at} - so ids have to be resolved to songs before anything
 // can be ranked. lib/statsCatalog owns that and picks the cheap route (a few
 // per-id fetches, or one cached catalogue crawl); this file just renders.
-
-// Rows shown before "Show all" - a heavy listener can have hundreds.
-const TOP_SONGS_COLLAPSED = 25
-
-// How many songs the header's Play button queues up.
-const PLAY_TOP_N = 50
-
-// Rows in the recent-plays timeline. Also bounds how many extra song ids the
-// timeline alone can drag into the metadata fetch (see idsKey).
-const TIMELINE_LIMIT = 40
-
-const PERIOD_OPTIONS: { id: ListeningPeriod; label: string }[] = [
-  { id: 'all', label: 'All time' },
-  { id: '30', label: '30 days' },
-  { id: '7', label: '7 days' },
-]
 
 function StatCard({ icon, value, label }: { icon: JSX.Element; value: string; label: string }): JSX.Element {
   return (
@@ -92,84 +73,20 @@ function BarList({ title, entries, empty }: { title: string; entries: RankedEntr
 }
 
 export default function StatsView(): JSX.Element {
-  const { listeningPlays, account, playTrack, playCollection, playNext, setActiveView, setPendingEditorSongId } = useStorePick(
-    'listeningPlays', 'account', 'playTrack', 'playCollection', 'playNext', 'setActiveView', 'setPendingEditorSongId')
+  const { setActiveView, setPendingEditorSongId } = useStorePick('setActiveView', 'setPendingEditorSongId')
+  const {
+    account, playTrack, playCollection, playNext,
+    period, setPeriod, songs, loading, progress, expanded, setExpanded,
+    ctxMenu, setCtxMenu, prefs, periodEvents, periodLabel,
+    stats, topTracks, visible, topPlays, nothingEverPlayed,
+  } = useStatsViewData()
   const canEdit = useCanEdit()
-
-  const [period, setPeriod] = useState<ListeningPeriod>('all')
-  const [songs, setSongs] = useState<Map<number, StatsSong>>(new Map())
-  const [loading, setLoading] = useState(true)
-  const [progress, setProgress] = useState<ResolveProgress | null>(null)
-  const [expanded, setExpanded] = useState(false)
-  const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
   const [infoSong, setInfoSong] = useState<JWApiSong | null>(null)
-
-  const prefs = useMemo(() => prefsForPeriod(listeningPlays, period), [listeningPlays, period])
-  const periodEvents = useMemo(() => sortListeningPlays(eventsForPeriod(listeningPlays, period)), [listeningPlays, period])
-  const coverage = useMemo(
-    () => periodCoverage(listeningPlays, period),
-    [listeningPlays, period],
-  )
-  const optionLabel = PERIOD_OPTIONS.find((p) => p.id === period)?.label ?? 'All time'
-  // A window the log can't fill is named for what it actually holds.
-  const periodLabel = coverage.complete || coverage.start === null
-    ? optionLabel
-    : `Since ${shortDate(new Date(coverage.start).toISOString())}`
-
-  // Only the *set* of played ids drives fetching. Crediting a play while this
-  // page is open bumps a count (and the numbers below re-derive from it), but
-  // it must not re-run a few hundred requests - the metadata didn't change.
-  const idsKey = useMemo(() => {
-    const ids = new Set<number>()
-    for (const p of prefs) ids.add(p.song)
-    for (const e of periodEvents.slice(0, TIMELINE_LIMIT)) ids.add(e.song)
-    return [...ids].sort((a, b) => a - b).join(',')
-  }, [prefs, periodEvents])
-
-  useEffect(() => {
-    const ids = idsKey ? idsKey.split(',').map(Number) : []
-    if (ids.length === 0) { setSongs(new Map()); setLoading(false); return }
-
-    let cancelled = false
-    setLoading(true)
-    setProgress(null)
-
-    resolveStatsSongs(
-      ids,
-      (p) => { if (!cancelled) setProgress(p) },
-      () => cancelled,
-    ).then((resolved) => {
-      if (cancelled) return
-      // One state update at the end rather than per response - incremental
-      // ones would re-rank and re-render the whole page hundreds of times.
-      setSongs(resolved)
-      setLoading(false)
-    }).catch(() => {
-      if (!cancelled) setLoading(false)
-    })
-
-    return () => { cancelled = true }
-  }, [idsKey])
-
-  const stats = useMemo(() => buildListeningStats(joinPlayedSongs(prefs, songs)), [prefs, songs])
-
-  // Tracks are rebuilt from the API songs so personal name/cover overrides and
-  // the correct stream URL come along (songToTrack applies both).
-  const topTracks = useMemo(() => stats.played.map((p) => statsSongToTrack(p.song)), [stats.played])
-
-  const visible = expanded ? stats.played : stats.played.slice(0, TOP_SONGS_COLLAPSED)
-  const topPlays = stats.played[0]?.playcount ?? 0
 
   const openSongInfo = async (songId: number): Promise<void> => {
     try { setInfoSong(await apiFetch<JWApiSong>(`/songs/${songId}/`)) } catch {}
   }
 
-  // Bail to the empty screen only when the user has never played anything.
-  // A *period* with no plays still renders the full page (the period switcher
-  // included) - otherwise picking "7 days" on a quiet week, or right after
-  // upgrading to a build that has a play log at all, strands the user on a
-  // dead-end screen with no way back to All time.
-  const nothingEverPlayed = listeningPlays.length === 0
   if (nothingEverPlayed) {
     return (
       <div className="flex-1 flex flex-col min-h-0">

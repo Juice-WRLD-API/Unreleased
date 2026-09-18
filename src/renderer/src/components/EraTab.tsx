@@ -1,29 +1,10 @@
-import { useState, useCallback, useEffect } from 'react'
-import { useStrictModeSafeEffect } from '../hooks/useStrictModeSafeEffect'
 import { Loader2, Plus, Check, AlertCircle, Clock, Trash2 } from 'lucide-react'
-import * as erasApi from '../lib/erasApi'
 import type { Era } from '../lib/erasApi'
 import { Empty } from './adminShared'
+import { useEraList, useCreateEra, useEditEra, sortByName } from '../hooks/useErasAdmin'
 
 function CreatePanel({ onCreated }: { onCreated: (era: Era) => void }): JSX.Element {
-  const [name, setName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const submit = async (): Promise<void> => {
-    if (!name.trim() || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const era = await erasApi.adminCreateEra({ name: name.trim() })
-      setName('')
-      onCreated(era)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the era')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { name, setName, busy, error, submit } = useCreateEra(onCreated)
 
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-surface-raised/50 p-4 space-y-3">
@@ -49,58 +30,10 @@ function CreatePanel({ onCreated }: { onCreated: (era: Era) => void }): JSX.Elem
 }
 
 function EditPanel({ era, onSaved, onDeleted }: { era: Era; onSaved: (era: Era) => void; onDeleted: () => void }): JSX.Element {
-  const [name, setName] = useState(era.name)
-  const [description, setDescription] = useState(era.description ?? '')
-  const [timeFrame, setTimeFrame] = useState(era.time_frame ?? '')
-  const [playCount, setPlayCount] = useState(String(era.play_count ?? 0))
-  const [busy, setBusy] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  // Reset the working fields whenever a different era is selected - without
-  // this the form would keep showing the previously selected era's edits.
-  useEffect(() => {
-    setName(era.name)
-    setDescription(era.description ?? '')
-    setTimeFrame(era.time_frame ?? '')
-    setPlayCount(String(era.play_count ?? 0))
-    setError(null)
-  }, [era])
-
-  const dirty = name !== era.name || description !== (era.description ?? '')
-    || timeFrame !== (era.time_frame ?? '') || playCount !== String(era.play_count ?? 0)
-
-  const save = async (): Promise<void> => {
-    if (!name.trim() || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const updated = await erasApi.adminUpdateEra(era.id, {
-        name: name.trim(),
-        description,
-        time_frame: timeFrame,
-        play_count: Number(playCount) || 0,
-      })
-      onSaved(updated)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (): Promise<void> => {
-    if (!confirm(`Delete "${era.name}"? This can't be undone.`)) return
-    setDeleting(true)
-    setError(null)
-    try {
-      await erasApi.adminDeleteEra(era.id)
-      onDeleted()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete this era')
-      setDeleting(false)
-    }
-  }
+  const {
+    name, setName, description, setDescription, timeFrame, setTimeFrame, playCount, setPlayCount,
+    busy, deleting, error, dirty, save, remove,
+  } = useEditEra(era, onSaved, onDeleted)
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -174,26 +107,7 @@ function EditPanel({ era, onSaved, onDeleted }: { era: Era; onSaved: (era: Era) 
 }
 
 export default function EraTab(): JSX.Element {
-  const [eras, setEras] = useState<Era[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
-
-  const reload = useCallback(() => {
-    setLoading(true)
-    setError(null)
-    erasApi.fetchEraList()
-      .then((list) => {
-        setEras(list)
-        setSelectedId((prev) => (prev != null && list.some((e) => e.id === prev) ? prev : null))
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load eras'))
-      .finally(() => setLoading(false))
-  }, [])
-
-  useStrictModeSafeEffect(() => { reload() }, [reload])
-
-  const selected = eras.find((e) => e.id === selectedId) ?? null
+  const { eras, setEras, loading, error, selectedId, setSelectedId, selected } = useEraList()
 
   if (loading) return <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
 
@@ -225,7 +139,7 @@ export default function EraTab(): JSX.Element {
           ))}
         </div>
         <div className="shrink-0 p-3 border-t border-[var(--border)]">
-          <CreatePanel onCreated={(era) => { setEras((prev) => [...prev, era].sort((a, b) => a.name.localeCompare(b.name))); setSelectedId(era.id) }} />
+          <CreatePanel onCreated={(era) => { setEras((prev) => sortByName([...prev, era])); setSelectedId(era.id) }} />
         </div>
       </div>
 
@@ -236,7 +150,7 @@ export default function EraTab(): JSX.Element {
           <EditPanel
             key={selected.id}
             era={selected}
-            onSaved={(updated) => setEras((prev) => prev.map((e) => e.id === updated.id ? updated : e).sort((a, b) => a.name.localeCompare(b.name)))}
+            onSaved={(updated) => setEras((prev) => sortByName(prev.map((e) => e.id === updated.id ? updated : e)))}
             onDeleted={() => { setEras((prev) => prev.filter((e) => e.id !== selected.id)); setSelectedId(null) }}
           />
         )}

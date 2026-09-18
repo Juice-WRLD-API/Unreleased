@@ -3,44 +3,14 @@ import {
   Loader2, CheckCircle, XCircle, RotateCcw, Download, Calendar, Hash, AlertCircle, ImageOff,
 } from 'lucide-react'
 import * as userApi from '../lib/userApi'
-import type { CompFileProposal, ProposalStatus } from '../lib/userApi'
-import { getToken } from '../lib/userApi'
+import type { CompFileProposal } from '../lib/userApi'
 import { relativeTime, shortDate, StatusChip, Empty, QueueSearch, buildHaystack, matchesHaystack, CopyButton } from './adminShared'
 import { buildStreamUrl } from '../lib/juicewrldApi'
 import { useStore } from '../store/useStore'
 import { getMediaType } from '../lib/fileTypes'
 import { formatBytes, formatDuration } from '../lib/format'
-
-/** Loads a comp-admin route's bytes into an object URL - the staging file
- *  isn't public like a live comp/ path, so it needs the same authed fetch
- *  downloadStaging already uses, just kept in memory instead of saved to
- *  disk. Torn down (URL revoked) on unmount or when the source URL changes,
- *  since a leaked object URL pins the blob in memory for the page's life. */
-function useAuthedBlobUrl(url: string | null): { src: string | null; loading: boolean; error: boolean; bytes: number | null } {
-  const [state, setState] = useState<{ src: string | null; loading: boolean; error: boolean; bytes: number | null }>(
-    { src: null, loading: !!url, error: false, bytes: null },
-  )
-  useEffect(() => {
-    if (!url) { setState({ src: null, loading: false, error: false, bytes: null }); return }
-    let cancelled = false
-    let objectUrl: string | null = null
-    setState({ src: null, loading: true, error: false, bytes: null })
-    const token = getToken()
-    fetch(url, { headers: token ? { Authorization: `Token ${token}` } : {} })
-      .then((r) => { if (!r.ok) throw new Error(); return r.blob() })
-      .then((blob) => {
-        if (cancelled) return
-        objectUrl = URL.createObjectURL(blob)
-        setState({ src: objectUrl, loading: false, error: false, bytes: blob.size })
-      })
-      .catch(() => { if (!cancelled) setState({ src: null, loading: false, error: true, bytes: null }) })
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
-  }, [url])
-  return state
-}
+import { useAuthedBlobUrl, useCompProposalsQueue } from '../hooks/useCompProposalsQueue'
+import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason } from '../lib/compProposalShared'
 
 /** One preview slot - a live comp/ path (plain <img>/<audio>/<video> against
  *  the public download URL, same as FilePickerModal's thumbnails) or an
@@ -111,24 +81,14 @@ function MediaPreview({ label, name, src, loading, error, bytes }: {
   )
 }
 
-const FOLDER_LEVEL_TYPES = new Set(['create_folder', 'rename_folder', 'move_folder', 'delete_folder'])
-const DESTINATION_TYPES = new Set(['move', 'rename_folder', 'move_folder'])
-
 export default function CompProposalsTab({ embedded = false, onChanged }: { embedded?: boolean; onChanged?: () => void }): JSX.Element {
   const activeChannel = useStore((s) => s.activeChannel)
   const account = useStore((s) => s.account)
-  const [status, setStatus] = useState<ProposalStatus | ''>('pending')
-  const [proposals, setProposals] = useState<CompFileProposal[]>([])
-  const [selected, setSelected] = useState<CompFileProposal | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [actionId, setActionId] = useState<number | null>(null)
-  const [reviewNotes, setReviewNotes] = useState('')
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  // Separate from `error` (review/reverse action failures, shown in the detail
-  // pane) - this covers the list fetch itself and has to stay visible even
-  // with nothing selected, since a channel-access failure clears the list.
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const {
+    status, setStatus, proposals, selected, setSelected, loading, actionId,
+    reviewNotes, setReviewNotes, error, setError, loadError,
+    doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
+  } = useCompProposalsQueue(activeChannel, onChanged, true)
   const [query, setQuery] = useState('')
 
   // Searchable: both sides of a move, who filed it, the staged file's name,
@@ -155,106 +115,16 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
       : proposals
   ), [proposals, haystacks, deferredQuery])
 
-  useEffect(() => {
-    setLoading(true)
-    setLoadError(null)
-    userApi.adminListCompProposals(status || undefined, activeChannel)
-      .then(rows => {
-        setProposals(rows)
-        // Reviewing a proposal reloads the list and moves the selection, so
-        // the notes box has to reset with it - otherwise the text typed for
-        // the proposal just approved rides along into the next Approve.
-        setSelected(rows[0] ?? null)
-        setReviewNotes('')
-      })
-      .catch((e) => {
-        setLoadError(e instanceof Error ? e.message : 'Could not load comp proposals')
-        // Don't leave the previous channel's list on screen underneath the
-        // error - its approve/reject actions would still be live against the
-        // wrong channel context.
-        setProposals([])
-        setSelected(null)
-      })
-      .finally(() => setLoading(false))
-  }, [status, refreshKey, activeChannel])
-
   // Searching can filter the selected proposal out from under the detail pane,
   // which would otherwise leave Approve/Reject pointed at a row no longer in
   // the list. Fall through to the first match, resetting the notes box with it
-  // for the same reason the fetch above does.
+  // for the same reason the queue's own fetch does.
   useEffect(() => {
     if (selected && visible.some(v => v.id === selected.id)) return
     setSelected(visible[0] ?? null)
     setReviewNotes('')
     setError(null)
   }, [visible, selected])
-
-  const reload = (): void => {
-    setRefreshKey(k => k + 1)
-    onChanged?.()
-  }
-
-  // The review/reverse endpoints hand back the updated row, so the list can
-  // reflect it immediately instead of waiting on the reload() round-trip
-  // below - that fetch still runs (for the row's neighbors and to reconcile
-  // final ordering), it just no longer gates how long the acted-on row keeps
-  // showing as pending. Dropped from view outright when it no longer matches
-  // the current status filter, same as the server-side list would show.
-  const applyReviewResult = (updated: CompFileProposal): void => {
-    setProposals(prev => {
-      const next = prev.map(p => p.id === updated.id ? updated : p)
-      return status && updated.status !== status ? next.filter(p => p.id !== updated.id) : next
-    })
-  }
-
-  const doReview = async (id: number, action: 'approve' | 'reject'): Promise<void> => {
-    setActionId(id)
-    setError(null)
-    try {
-      const updated = await userApi.adminReviewCompProposal(id, { action, review_notes: reviewNotes, channel: activeChannel })
-      applyReviewResult(updated)
-      reload()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : `Could not ${action} this proposal`)
-    } finally {
-      setActionId(null)
-    }
-  }
-
-  const doReverse = async (id: number): Promise<void> => {
-    setActionId(id)
-    setError(null)
-    try {
-      const updated = await userApi.adminReverseCompProposal(id, activeChannel)
-      applyReviewResult(updated)
-      reload()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not reverse this proposal')
-    } finally {
-      setActionId(null)
-    }
-  }
-
-  const downloadStaging = (p: CompFileProposal): void => {
-    const token = getToken()
-    const url = userApi.adminCompProposalStagingUrl(p.id, activeChannel)
-    fetch(url, { headers: token ? { Authorization: `Token ${token}` } : {} })
-      .then(r => r.blob())
-      .then(blob => {
-        const href = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = href
-        a.download = p.staging_filename || 'staged-file'
-        // Anchor has to be in the document for the click to count in some
-        // browsers, and the object URL has to outlive the click - revoking it
-        // on the same tick cancels the download before it starts.
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
-        setTimeout(() => URL.revokeObjectURL(href), 60_000)
-      })
-      .catch(() => {})
-  }
 
   // The proposed file only exists in staging while the proposal is pending
   // (approval moves it into comp/, rejection discards it) - matches the same
@@ -265,20 +135,22 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const staged = useAuthedBlobUrl(stagingUrl)
 
   const p = selected
+  const approveBlockedReason = compApproveBlockedReason(p, account)
 
-  // delete_folder is gated beyond the normal per-tab role check the rest of
-  // this queue relies on (any editor/manager who can see the tab can approve
-  // everything else): only a full administrator may approve it, and never
-  // the admin who filed it. Wording matches the backend's 403 `detail`
-  // strings verbatim so the client-side gate and the defense-in-depth server
-  // error read as the same restriction.
-  const approveBlockedReason = p && p.change_type === 'delete_folder'
-    ? (!account?.is_administrator
-        ? 'Folder deletions require administrator approval'
-        : account?.id === p.contributor_id
-          ? 'Folder deletions must be approved by a different administrator'
-          : null)
-    : null
+  // Every other pending proposal from the same contributor, minus anything
+  // this reviewer isn't allowed to approve (delete_folder gating) - scoped
+  // to the current status/search-independent `proposals` list so the count
+  // matches what "Accept all" would actually act on.
+  const pendingFromContributor = p
+    ? proposals.filter(x => x.contributor_username === p.contributor_username && x.status === 'pending' && !compApproveBlockedReason(x, account))
+    : []
+
+  const doAcceptAllForContributor = (): void => {
+    const ids = pendingFromContributor.map(x => x.id)
+    if (ids.length === 0) return
+    if (!confirm(`Approve all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
+    doAcceptAll(ids)
+  }
 
   return (
     <div className={`flex-1 min-w-0 h-full flex flex-col overflow-hidden ${embedded ? '' : 'bg-[var(--surface)]'}`}>
@@ -364,7 +236,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                     </button>
                   )}
                   {p.status === 'pending' && (
-                    actionId === p.id ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
+                    actionId === p.id || bulkApproving ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
                       <>
                         <button onClick={() => doReview(p.id, 'reject')} className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-semibold flex items-center gap-1.5">
                           <XCircle size={13} /> Reject
@@ -372,6 +244,11 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                         {!approveBlockedReason && (
                           <button onClick={() => doReview(p.id, 'approve')} className="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
                             <CheckCircle size={13} /> Approve
+                          </button>
+                        )}
+                        {pendingFromContributor.length > 1 && (
+                          <button onClick={doAcceptAllForContributor} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
+                            <CheckCircle size={13} /> Accept all ({pendingFromContributor.length})
                           </button>
                         )}
                       </>
