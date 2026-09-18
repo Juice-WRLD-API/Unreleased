@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useMemo, useState, memo, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
 import ShareLyricsModal from './ShareLyricsModal'
@@ -6,7 +6,7 @@ import { ModalOverlay, LockToggle } from './Modal'
 import CoverEditor from './CoverEditor'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
+import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
 import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource, loadAllSongs } from '../lib/juicewrldApi'
@@ -14,9 +14,7 @@ import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album as WrldAlbum } from '../lib/albumsApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
-import { searchRadioLibrary } from '../lib/radioLibrary'
-import type { RadioLibraryTrack } from '../lib/radioLibrary'
-import { resumeEffectsContext, EFFECTS_SUPPORTED } from '../lib/audioEffects'
+import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
 import { getVersionGroup } from '../lib/versionsApi'
 import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -24,6 +22,10 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
+import {
+  useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
+  usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
+} from '../hooks/useWrldCore'
 
 export default function WrldView(): JSX.Element {
   const {
@@ -88,17 +90,17 @@ export default function WrldView(): JSX.Element {
 
   const containerRef = useRef<HTMLDivElement>(null)
   const activeRef    = useRef<HTMLDivElement>(null)
-  const [artError, setArtError] = useState(false)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
+
+  const { artSrc, artError, setArtError, coverSongId } = useWrldArt(
+    radioFmActive, radioFmMatchedSong, radioFmNowPlaying, currentTrackFull, currentTrack,
+  )
 
   // Right-click the cover for the same "Change cover" picker the mobile
   // long-press opens (see WrldView.mobile.tsx) - reached directly instead of
   // via Song info, so a plain local modal rather than the global infoSongId
   // host, which would pull in the rest of Song info around it.
-  const coverSongId = radioFmActive
-    ? (radioFmNowPlaying?.song_id ?? radioFmMatchedSong?.songId ?? null)
-    : (currentTrack ? userApi.trackIdToSongId(currentTrack.id) : null)
   const [coverPickerSong, setCoverPickerSong] = useState<JWApiSong | null>(null)
   const [showCoverPicker, setShowCoverPicker] = useState(false)
   const openCoverPicker = (e: React.MouseEvent): void => {
@@ -193,18 +195,15 @@ export default function WrldView(): JSX.Element {
     return () => setWrldFullscreen(false)
   }, [fullscreen, setWrldFullscreen])
 
-  const [suggestQuery, setSuggestQuery]     = useState('')
-  const [suggestResults, setSuggestResults] = useState<RadioLibraryTrack[]>([])
-  const [suggestLoading, setSuggestLoading] = useState(false)
-  const [myVote, setMyVote]                 = useState<'yes' | 'no' | null>(null)
-  const [voteError, setVoteError]           = useState(false)
-  const [localSecondsLeft, setLocalSecondsLeft] = useState<number | null>(null)
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [proposed, setProposed]             = useState<string | null>(null)
-  const [proposeError, setProposeError]     = useState<string | null>(null)
-  const [textIsDark, setTextIsDark]          = useState(false)
-  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const proposeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const {
+    suggestQuery, setSuggestQuery, suggestResults, suggestLoading,
+    proposed, proposeError, handlePropose, dismissProposed,
+  } = useRadioSuggest('Tune in to 999 FM first - proposals only count from listeners')
+  const [voteError, setVoteError] = useState(false)
+  const { myVote, setMyVote, localSecondsLeft } = useRadioVoteCountdown(
+    radioFmVote?.active, radioFmVote?.seconds_left, () => setVoteError(false),
+  )
+  const textIsDark = useArtTextContrast(artSrc, artError, isDarkSkin, radioFmActive, wrldThemeBackground ? !isDarkSkin : null)
 
   // ── Albums state ─────────────────────────────────────────────────────────────
   // Album objects carry track paths, not full song metadata, so a
@@ -232,47 +231,6 @@ export default function WrldView(): JSX.Element {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (suggestTimer.current) clearTimeout(suggestTimer.current)
-    if (!suggestQuery.trim()) { setSuggestResults([]); setSuggestLoading(false); return }
-    setSuggestLoading(true)
-    suggestTimer.current = setTimeout(async () => {
-      // Search the DJ's published library, not /songs/ - only these ids can be
-      // resolved back to a playable file by propose_queue.
-      try {
-        setSuggestResults(await searchRadioLibrary(suggestQuery, 5))
-      } catch { setSuggestResults([]) }
-      setSuggestLoading(false)
-    }, 400)
-    return () => { if (suggestTimer.current) clearTimeout(suggestTimer.current) }
-  }, [suggestQuery])
-
-  const handlePropose = (track: RadioLibraryTrack) => {
-    // Only confirm if the proposal actually went out over the socket - a
-    // closed/absent connection used to still flash "Proposed" while nothing
-    // was ever sent.
-    const sent = getActiveRadioClient()?.proposeQueue(track.id) ?? false
-    const name = track.title
-    setSuggestQuery('')
-    setSuggestResults([])
-    if (proposeTimer.current) clearTimeout(proposeTimer.current)
-    if (sent) {
-      setProposeError(null)
-      setProposed(name)
-      proposeTimer.current = setTimeout(() => setProposed(null), 4000)
-    } else {
-      setProposed(null)
-      setProposeError('Tune in to 999 FM first - proposals only count from listeners')
-      proposeTimer.current = setTimeout(() => setProposeError(null), 4000)
-    }
-  }
-
-  const artSrc = radioFmActive
-    ? (radioFmMatchedSong?.imageUrl ?? buildImageUrl(radioFmNowPlaying?.image_url) ?? null)
-    : (buildImageUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl ?? null) ?? null)
-
-  useEffect(() => { setArtError(false) }, [artSrc])
 
   // Sibling versions of the currently playing song (v1/v2/TV Mix/etc, linked
   // via juicewrldapi's /versions/ table - see versionsApi.ts), shown as
@@ -336,48 +294,11 @@ export default function WrldView(): JSX.Element {
     return () => window.removeEventListener('resize', place)
   }, [songVersionMenuOpen, songVersions])
 
-  const handlePlayVersion = async (songId: number): Promise<void> => {
-    try {
-      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
-      playTrack(songToTrack(song))
-    } catch {}
-  }
+  const handlePlayVersion = usePlayVersion(playTrack)
 
-  useEffect(() => {
-    // On the theme background there's no art to read a contrast from - the tab
-    // is sitting on --surface, so the skin's own polarity is the answer.
-    if (wrldThemeBackground) { setTextIsDark(!isDarkSkin); return }
-    if (!artSrc || artError) {
-      setTextIsDark(!isDarkSkin && !radioFmActive)
-      return
-    }
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = 50; canvas.height = 50
-        const ctx = canvas.getContext('2d')
-        if (!ctx) { setTextIsDark(false); return }
-        ctx.drawImage(img, 0, 0, 50, 50)
-        const data = ctx.getImageData(0, 0, 50, 50).data
-        let sum = 0
-        for (let i = 0; i < data.length; i += 4)
-          sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-        const avg = sum / (data.length / 4)
-        const factor = isDarkSkin ? 0.22 : 0.45
-        setTextIsDark(avg * factor > 90)
-      } catch { setTextIsDark(false) }
-    }
-    img.onerror = () => setTextIsDark(false)
-    img.src = artSrc
-  }, [artSrc, artError, isDarkSkin, radioFmActive, wrldThemeBackground])
-
-  const rawLyrics = radioFmActive
-    ? (radioFmMatchedSong?.syncedLyrics || radioFmMatchedSong?.lyrics || null)
-    : (currentTrackFull?.syncedLyrics || currentTrackFull?.lyrics || null)
-  const isSynced  = rawLyrics ? isLrcFormat(rawLyrics) : false
-  const isEditor  = account?.is_editor || account?.is_administrator
+  const { rawLyrics, isSynced, isEditor, syncedLines } = useWrldLyricsSource(
+    radioFmActive, radioFmMatchedSong, currentTrackFull, account,
+  )
   // FM's Radio/Lyrics tabs stand on their own regardless of lyrics
   // availability, so the manual override only applies to normal playback -
   // same scope as the auto-collapse behavior it's overriding.
@@ -407,11 +328,6 @@ export default function WrldView(): JSX.Element {
     } catch { /* silent */ }
   }
 
-  const syncedLines = useMemo(() => {
-    if (rawLyrics && isSynced) return parseLrc(rawLyrics)
-    return []
-  }, [rawLyrics, isSynced])
-
   type NotchCategory = 'albums' | 'mixtapes' | 'unreleased' | 'playlists'
   const [notchCategory, setNotchCategory] = useState<NotchCategory>('albums')
   const [notchDropdownOpen, setNotchDropdownOpen] = useState(false)
@@ -422,22 +338,6 @@ export default function WrldView(): JSX.Element {
     { value: 'unreleased', label: 'Unreleased' },
     { value: 'playlists', label: 'Playlists' },
   ]
-  // A "new vote" is detected by active rising edge (false/absent -> true),
-  // NOT by track/kind equality - those can stay identical across repeated
-  // metadata broadcasts for the SAME ongoing vote, but using them as the
-  // reset trigger also means a stale/unrelated broadcast can spuriously
-  // reset your vote selection (un-highlighting Yes/No) and a brand new vote
-  // on the same track right after the last one never reopens the dismissed
-  // popup. Rising edge of `active` is the only reliable "vote just started" signal.
-  const wasVoteActiveRef = useRef(false)
-  useEffect(() => {
-    const isActive = !!radioFmVote?.active
-    if (isActive && !wasVoteActiveRef.current) {
-      setMyVote(null)
-      setVoteError(false)
-    }
-    wasVoteActiveRef.current = isActive
-  }, [radioFmVote?.active])
 
   // Time the warning out like the propose error below it. The rising-edge reset
   // above only fires when a brand new ballot arrives, which can be a long way
@@ -456,43 +356,15 @@ export default function WrldView(): JSX.Element {
     const sent = getActiveRadioClient()?.castVote(value) ?? false
     setMyVote(sent ? value : null)
     setVoteError(!sent)
-  }, [])
-
-  // Locally tick the countdown once per second, independent of how often
-  // server metadata broadcasts arrive. The interval is created once per vote
-  // and only re-synced (not torn down/recreated) on each server update -
-  // recreating it on every broadcast meant it could be cleared before ever
-  // reaching its own 1000ms tick if broadcasts arrived more often than that,
-  // making the displayed countdown look static.
-  useEffect(() => {
-    if (!radioFmVote?.active || radioFmVote.seconds_left == null) {
-      if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null }
-      setLocalSecondsLeft(null)
-      return
-    }
-    setLocalSecondsLeft(radioFmVote.seconds_left)
-    if (!countdownRef.current) {
-      countdownRef.current = setInterval(() => {
-        setLocalSecondsLeft(s => (s != null && s > 0) ? s - 1 : 0)
-      }, 1000)
-    }
-  }, [radioFmVote?.active, radioFmVote?.seconds_left])
-
-  // Unmount-only cleanup for the countdown interval
-  useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current) }, [])
+  }, [setMyVote])
 
   const fmLabel    = radioFmActive
     ? (radioFmIsLive ? '999 FM · LIVE' : '999 FM · OFF')
     : radioFmIsLive === false ? '999 FM · OFF' : '999 FM'
-  const fmDisabled = radioFmIsLive === false && !radioFmActive
 
-  const displayTitle  = radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title  : currentTrack?.title
-  const displayArtist = radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist
-  const displayAlbum  = radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.album  : currentTrack?.album
-
-  // Nothing to control - gray out and disable the transport so it doesn't
-  // look interactive when there's no track loaded (and FM isn't filling in).
-  const noTrack = !radioFmActive && !currentTrack
+  const { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm } = useWrldNowPlaying(
+    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack, setRadioFmActive, setIsPlaying,
+  )
 
   // ArtBox / FmRadioPanel / AlbumsGrid / AlbumDetail are rendered via plain
   // function calls, NOT <JSX/> element syntax: they're (re)defined on every
@@ -606,7 +478,7 @@ export default function WrldView(): JSX.Element {
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse" />
               Proposed: <span className="text-green-300 font-medium">{proposed}</span>
             </div>
-            <button onClick={() => { setProposed(null); if (proposeTimer.current) clearTimeout(proposeTimer.current) }}
+            <button onClick={dismissProposed}
               className="text-green-500/50 hover:text-green-400 transition-colors ml-2 shrink-0">
               <X size={13} />
             </button>
@@ -813,17 +685,7 @@ export default function WrldView(): JSX.Element {
           living in its own corner. */}
       <div className="absolute z-30 flex items-center gap-2 top-3 right-3 md:top-4 md:left-4 md:right-auto">
         <button
-          onClick={() => {
-            const next = !radioFmActive
-            if (next) {
-              setIsPlaying(false)
-              resumeEffectsContext()
-              void getActiveRadioClient()?.startListening()?.catch(() => setRadioFmActive(false))
-            } else {
-              getActiveRadioClient()?.stopListening()
-            }
-            setRadioFmActive(next)
-          }}
+          onClick={toggleFm}
           disabled={fmDisabled}
           className={`flex items-center gap-2 text-xs font-medium rounded-full px-3 py-1.5 transition-all disabled:opacity-40
             ${radioFmActive && radioFmIsLive
