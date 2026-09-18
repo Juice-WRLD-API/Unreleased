@@ -2970,10 +2970,23 @@ function ChatTab() {
     <div className="space-y-6">
       <Section title="Overview">
         <p className="text-sm text-text-secondary leading-relaxed">
-          Staff-only chat platform: Discord-like servers with text channels, 1:1 and group DMs, real-time
-          delivery over WebSocket, attachments, reactions, read receipts, message pinning, and threads. Direct
+          Discord-like servers with text channels, roles/permissions, 1:1 and group DMs, real-time delivery
+          over WebSocket, attachments, reactions, read receipts, message pinning, and threads. Direct
           messages are end-to-end encrypted; server channels are plaintext (server-readable).
         </p>
+        <p className="text-sm text-text-secondary leading-relaxed mt-2">
+          Access is no longer staff-only for servers/channels: admins can flag a server as{' '}
+          <Code>is_public</Code>, and any authenticated user can discover, join, and use it. DMs remain
+          staff-only.
+        </p>
+        <Table
+          headers={['User', 'Access']}
+          rows={[
+            ['Staff (manager/admin)', 'Full access, DMs, can create servers'],
+            ['Non-staff, member of a server', "That server's channels only, no DMs"],
+            ['Non-staff, not a member', 'Can only discover + join public servers'],
+          ]}
+        />
         <div className="flex items-center gap-2 mt-2">
           <span className="text-xs text-text-muted">Base path</span>
           <Code>/juicewrld/chat/</Code>
@@ -2992,18 +3005,22 @@ function ChatTab() {
 
       <Section title="Access Control">
         <p className="text-sm text-text-secondary">
-          Only staff with the <Code>administrator</Code> or <Code>manager</Code> role (or a Django superuser)
-          can use any endpoint here. Every request needs a token; a non-staff or unauthenticated caller gets{' '}
-          <Code>401</Code> or <Code>403</Code>. The same token authenticates the WebSocket via a query param.
+          Every request needs a token. DMs still require staff (<Code>administrator</Code> or{' '}
+          <Code>manager</Code> role, or a Django superuser). Server/channel access is now permission-driven:
+          staff get full access everywhere, and any authenticated user can join public servers and use their
+          channels per that server's roles. An unauthenticated caller gets <Code>401</Code>; an authenticated
+          caller without the required permission gets <Code>403</Code>. The same token authenticates the
+          WebSocket via a query param.
         </p>
         <Pre>{`Authorization: Token YOUR_TOKEN_HERE`}</Pre>
         <Table
           headers={['Object', 'Rule']}
           rows={[
-            ['Server channels', 'Caller must be a server member. Private channels additionally require the channel allow-list, server owner/admin, or platform admin'],
-            ['DMs', 'Caller must be a participant of the conversation'],
+            ['Server channels', "Caller must be a server member with view_channels resolved for that channel (see Permission Resolution below). Staff/owner/platform admin bypass"],
+            ['DMs', 'Caller must be staff and a participant of the conversation'],
             ['Editing a message', 'Author only'],
-            ['Deleting / pinning a message', 'Author, server owner/admin, or platform administrator'],
+            ['Deleting / pinning a message', 'Author, users with manage_messages, server owner, or platform administrator'],
+            ['Managing roles/overrides', 'Requires manage_roles / manage_channels on the resolved permission set, or owner/platform admin'],
           ]}
         />
       </Section>
@@ -3088,6 +3105,218 @@ function ChatTab() {
           ]}
         />
         <p className="text-xs text-text-muted mt-2"><Code>server_role</Code> is <Code>admin</Code> or <Code>member</Code> (owner can&apos;t be assigned). <Code>allowed_members</Code> only applies when <Code>is_private</Code> is true.</p>
+        <p className="text-xs text-text-muted mt-2">
+          <Code>Channel.is_private</Code>/<Code>allowed_members</Code> still exist and are returned, but no
+          longer gate access — that&apos;s driven entirely by permissions + channel overrides now (see below).
+          Migrate any private-channel UI to overrides: deny <Code>view_channels</Code> on the{' '}
+          <Code>@everyone</Code> role override for that channel, then allow it on the roles/members who
+          should see it.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Server object, new fields:</p>
+        <Table
+          headers={['Field', 'Type', 'Description']}
+          rows={[
+            [<Code>is_public</Code>, 'boolean', 'Whether the server is publicly discoverable/joinable'],
+            [<Code>my_permissions</Code>, 'number', "The current user's resolved server-level permission bitmask"],
+            [<Code>roles</Code>, 'array', 'All roles in the server (see Roles below)'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-1">
+          Existing fields unchanged: <Code>id</Code>, <Code>name</Code>, <Code>slug</Code>,{' '}
+          <Code>description</Code>, <Code>icon_url</Code>, <Code>owner</Code>, <Code>member_count</Code>,{' '}
+          <Code>my_role</Code>, <Code>channels</Code>, <Code>created_at</Code>. <Code>my_role</Code>{' '}
+          (<Code>owner</Code>/<Code>admin</Code>/<Code>member</Code>) is kept for backward compatibility —
+          prefer <Code>my_permissions</Code> for gating UI.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          Only platform admins can toggle <Code>is_public</Code>, via <Code>{'PATCH /servers/{id}/'}</Code>{' '}
+          with <Code>{'{ is_public: true }'}</Code> (<Code>403</Code> otherwise). Also accepted on{' '}
+          <Code>POST /servers/</Code> (ignored for non-admins).
+        </p>
+      </Section>
+
+      <Section title="Public Servers: Discover, Join, Leave">
+        <MethodPath method="GET" path="/servers/discover/" />
+        <p className="text-xs text-text-muted mb-2">Any authenticated user.</p>
+        <Pre>{`{
+  "results": [
+    {
+      "id": 3,
+      "name": "Community Hub",
+      "slug": "community-hub",
+      "description": "Talk about everything 999",
+      "icon_url": "https://...",
+      "member_count": 128,
+      "is_member": false,
+      "created_at": "2026-09-17T20:00:00Z"
+    }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">Use <Code>is_member</Code> to decide whether to show a Join or an Open button.</p>
+        <MethodPath method="POST" path="/servers/{id}/join/" className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">
+          Any authenticated user for public servers; staff for private. Returns the full server object (
+          <Code>201</Code>). <Code>409</Code> if already a member. <Code>403</Code> if the server is not
+          public and you are not staff.
+        </p>
+        <MethodPath method="DELETE" path="/servers/{id}/join/" />
+        <p className="text-xs text-text-muted">
+          Leave a server. <Code>204</Code> on success. <Code>400</Code> if you are the owner (owners cannot
+          leave). <Code>404</Code> if not a member.
+        </p>
+      </Section>
+
+      <Section title="Roles">
+        <p className="text-sm text-text-secondary">
+          Each server has named roles with colors, an ordered hierarchy, and a permission bitmask. Channels
+          can override permissions per role or per member, exactly like Discord.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Permission bitmask — fetch the canonical map:</p>
+        <MethodPath method="GET" path="/permissions/" className="mt-2" />
+        <Pre>{`{
+  "permissions": {
+    "view_channels": 1,
+    "send_messages": 2,
+    "manage_messages": 4,
+    "manage_channels": 8,
+    "manage_server": 16,
+    "manage_roles": 32,
+    "kick_members": 64,
+    "ban_members": 128,
+    "mention_everyone": 256,
+    "attach_files": 512,
+    "add_reactions": 1024,
+    "manage_threads": 2048,
+    "administrator": 4096
+  }
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>administrator</Code> (4096) grants every permission and bypasses channel overrides. Check
+          client-side with <Code>{'(perms & bit) !== 0'}</Code>.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Role shape:</p>
+        <Pre>{`{
+  "id": 12,
+  "server": 3,
+  "name": "Moderator",
+  "color": "#FF5733",
+  "position": 50,
+  "permissions": 1543,
+  "permission_names": ["view_channels", "send_messages", "manage_messages", "attach_files", "add_reactions"],
+  "is_default": false,
+  "created_at": "2026-09-17T20:10:00Z"
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>position</Code>: higher = more authority. The default <Code>@everyone</Code> role is{' '}
+          <Code>position 0</Code>. <Code>is_default</Code>: the <Code>@everyone</Code> role, cannot be
+          renamed, repositioned, or deleted — every member implicitly has it. <Code>permission_names</Code>{' '}
+          is a read-only convenience list derived from the bitmask.
+        </p>
+        <p className="text-xs text-text-muted">
+          Every server is created with two roles: <Code>@everyone</Code> (basic view/send/react/attach) and{' '}
+          <Code>Admin</Code> (administrator). The creator gets the <Code>Admin</Code> role.
+        </p>
+        <MethodPath method="GET" path="/servers/{id}/roles/" className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">Any member. → <Code>{'{ results: [role, ...] }'}</Code>, ordered by position desc.</p>
+        <MethodPath method="POST" path="/servers/{id}/roles/" />
+        <p className="text-xs text-text-muted mb-2">Requires <Code>manage_roles</Code>.</p>
+        <Pre>{`{
+  "name": "Moderator",
+  "color": "#FF5733",
+  "position": 50,
+  "permissions": 1607
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          You cannot create a role at or above your own highest role position (unless owner or platform
+          admin) — the position is clamped below yours. <Code>201</Code> with the role object. <Code>409</Code>{' '}
+          if the name is taken.
+        </p>
+        <MethodPath method="PATCH" path="/servers/{id}/roles/{role_id}/" className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">Requires <Code>manage_roles</Code>. All fields optional.</p>
+        <Pre>{`{ "name": "Senior Mod", "color": "#00AAFF", "permissions": 1671, "position": 60 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          The <Code>@everyone</Code> role rejects <Code>name</Code>/<Code>position</Code> changes
+          (permissions/color still editable). You cannot edit a role at or above your highest role.{' '}
+          <Code>position</Code> is clamped below your highest role.
+        </p>
+        <MethodPath method="DELETE" path="/servers/{id}/roles/{role_id}/" className="mt-3" />
+        <p className="text-xs text-text-muted">
+          Requires <Code>manage_roles</Code>. <Code>204</Code>. <Code>400</Code> for the <Code>@everyone</Code>{' '}
+          role. <Code>403</Code> for a role at or above your highest role.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-4">Assign roles to a member:</p>
+        <MethodPath method="PUT" path="/servers/{id}/members/{user_id}/roles/" />
+        <p className="text-xs text-text-muted mb-2">Requires <Code>manage_roles</Code>.</p>
+        <Pre>{`{ "role_ids": [12, 15] }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Replaces the member&apos;s role set (<Code>@everyone</Code> is always implicit, cannot be assigned/
+          removed). You cannot assign a role at or above your own highest role. Returns the updated member
+          object:
+        </p>
+        <Pre>{`{
+  "id": 44,
+  "user": { "id": 1450, "username": "saint", "display_name": "saint", "avatar": "...", "role": "editor" },
+  "server_role": "member",
+  "roles": [
+    { "id": 12, "name": "Moderator", "color": "#FF5733", "position": 50 }
+  ],
+  "muted": false,
+  "joined_at": "2026-09-17T20:00:00Z"
+}`}</Pre>
+        <p className="text-xs text-text-muted"><Code>{'GET /servers/{id}/members/'}</Code> now includes each member&apos;s <Code>roles</Code> array too.</p>
+      </Section>
+
+      <Section title="Channel Permission Overrides">
+        <p className="text-sm text-text-secondary">
+          Overrides let a channel grant or revoke specific permissions for a role or a single member. This
+          replaces the old <Code>is_private</Code>/<Code>allowed_members</Code> mechanism as the source of
+          truth for channel access.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Override shape:</p>
+        <Pre>{`{
+  "id": 7,
+  "channel": 2,
+  "role": 12,
+  "member": null,
+  "allow": 1,
+  "deny": 0
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Exactly one of <Code>role</Code> or <Code>member</Code> is set. <Code>member</Code> is the{' '}
+          <span className="font-semibold text-text-primary">ServerMember id</span> (the <Code>id</Code> field
+          from the members list), not the user id.
+        </p>
+        <MethodPath method="GET" path="/channels/{id}/overrides/" className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">Any member who can view the channel. → <Code>{'{ results: [override, ...] }'}</Code></p>
+        <MethodPath method="PUT" path="/channels/{id}/overrides/" />
+        <p className="text-xs text-text-muted mb-2">Requires <Code>manage_channels</Code>. Upserts (one override per role, one per member, per channel).</p>
+        <p className="text-xs text-text-muted font-semibold mt-2">For a role:</p>
+        <Pre>{`{ "role": 12, "allow": 8, "deny": 0 }`}</Pre>
+        <p className="text-xs text-text-muted font-semibold mt-2">For a member:</p>
+        <Pre>{`{ "member": 44, "allow": 0, "deny": 2 }`}</Pre>
+        <p className="text-xs text-text-muted">Provide exactly one of <Code>role</Code>/<Code>member</Code> or you get <Code>400</Code>.</p>
+        <MethodPath method="DELETE" path="/channels/{id}/overrides/{override_id}/" className="mt-3" />
+        <p className="text-xs text-text-muted">Requires <Code>manage_channels</Code>. <Code>204</Code>.</p>
+      </Section>
+
+      <Section title="Permission Resolution">
+        <p className="text-sm text-text-secondary">
+          Mirror this client-side to pre-disable UI. The server is authoritative.
+        </p>
+        <Pre>{`1. If user is the server owner or a platform admin -> ALL permissions.
+2. base = @everyone.permissions
+3. base |= each of the member's assigned role permissions
+4. If base has administrator -> ALL permissions.
+5. If evaluating a channel:
+   a. perms = base
+   b. Apply @everyone channel override:  perms = (perms & ~deny) | allow
+   c. Apply combined role overrides:      perms = (perms & ~deny) | allow
+   d. Apply member channel override:      perms = (perms & ~deny) | allow
+6. If perms has administrator -> ALL permissions.`}</Pre>
+        <p className="text-xs text-text-muted">
+          Member overrides beat role overrides; role overrides beat the base. <Code>my_permissions</Code> on
+          the server object is the result of steps 1-4 (server-level, no channel).
+        </p>
       </Section>
 
       <Section title="Channel Messages (plaintext)">
@@ -3265,7 +3494,7 @@ function ChatTab() {
             [<Code>read.receipt</Code>, 'user_id, last_read_message_id, channel or conversation'],
             [<Code>typing</Code>, 'user_id, active, kind, id'],
             [<Code>presence.update</Code>, 'user_id, online'],
-            [<Code>member.joined</Code> + ' / ' + <Code>member.updated</Code> + ' / ' + <Code>member.left</Code>, 'server, member or user_id'],
+            [<Code>member.joined</Code> + ' / ' + <Code>member.updated</Code> + ' / ' + <Code>member.left</Code>, 'server, member or user_id (member.updated also fires on role assignment)'],
             [<Code>server.updated</Code>, 'server'],
             [<Code>channel.created</Code> + ' / ' + <Code>channel.updated</Code>, 'server, channel'],
             [<Code>channel.deleted</Code>, 'server, channel_id'],
@@ -3273,12 +3502,20 @@ function ChatTab() {
             [<Code>key.rotated</Code>, 'conversation, key_version'],
             [<Code>device.added</Code>, 'conversation, user_id'],
             [<Code>envelope.available</Code>, 'conversation, key_version'],
+            [<Code>role.created</Code> + ' / ' + <Code>role.updated</Code>, 'server, role'],
+            [<Code>role.deleted</Code>, 'server, role_id'],
+            [<Code>channel.override.updated</Code>, 'server, channel, override'],
+            [<Code>channel.override.deleted</Code>, 'server, channel, override_id'],
           ]}
         />
         <p className="text-xs text-text-muted mt-2">
           Recommended pattern: render optimistic UI from your own REST responses, reconcile/append via these
           events for other users&apos; activity. On <Code>key.rotated</Code>, <Code>device.added</Code>, or{' '}
           <Code>envelope.available</Code>, refetch envelopes for that conversation.
+        </p>
+        <p className="text-xs text-text-muted">
+          Override changes also trigger a <Code>resync</Code> to affected members so their channel list
+          refreshes. Non-staff members of public servers can now connect to the WebSocket.
         </p>
       </Section>
 
@@ -3361,6 +3598,13 @@ GET /dms/{id}/envelopes/?key_version=1`}</Pre>
           Run <Code>pip install -r requirements.txt</Code> and <Code>python manage.py migrate</Code> after
           deploying, and serve via the ASGI app so WebSockets work.
         </p>
+        <Table
+          headers={['Migration', 'What it does']}
+          rows={[
+            [<Code>chat.0002_server_roles_and_public</Code>, <>Adds <Code>is_public</Code>, <Code>ServerRole</Code>, <Code>ChannelPermissionOverride</Code>, member <Code>roles</Code> M2M</>],
+            [<Code>chat.0003_backfill_default_roles</Code>, <>Creates <Code>@everyone</Code> + <Code>Admin</Code> roles for existing servers and assigns <Code>Admin</Code> to existing owners/admins</>],
+          ]}
+        />
       </Section>
     </div>
   )
