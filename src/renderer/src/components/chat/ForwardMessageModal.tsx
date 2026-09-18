@@ -122,14 +122,19 @@ export default function ForwardMessageModal({ message, bodyText, onClose }: Prop
     setError(null)
     try {
       const files = await resolveFiles()
-      const body = `${encodeForwardRef({
+      // Only the ref's snippet (truncated preview, rendered inside ForwardBar's
+      // card) carries the original text - the sent message's own body must
+      // stay empty. Appending the full bodyText here used to make MessageBody
+      // render that same text a second time, full-length, right underneath
+      // the card as if the forwarder had typed it themselves.
+      const body = encodeForwardRef({
         id: message.id,
         authorId: message.author.id,
         name: displayName(message.author),
         snippet: bodyText.split('\n')[0].slice(0, 140),
         hasAttachment: message.attachments.length > 0,
         sourceLabel,
-      })}${bodyText}`
+      })
       await send(room, { text: body, files })
       setSentTo((prev) => new Set(prev).add(key))
     } catch (err) {
