@@ -2,7 +2,7 @@
 // by Composer before send - they never reach the room as literal text.
 // Anything else starting with "/" (a URL, an unrecognized word, etc.) is left
 // alone and sent as normal text, same as before this feature existed.
-export type ChatCommandName = 'song' | 'search' | 'mute' | 'theme' | 'np' | 'promote'
+export type ChatCommandName = 'song' | 'search' | 'mute' | 'unmute' | 'theme' | 'np' | 'promote' | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -12,7 +12,7 @@ export interface ParsedChatCommand {
   args: string
 }
 
-const KNOWN_COMMANDS = new Set<string>(['song', 'search', 'mute', 'theme', 'np', 'promote'])
+const KNOWN_COMMANDS = new Set<string>(['song', 'search', 'mute', 'unmute', 'theme', 'np', 'promote', 'feedback', 'help'])
 
 const COMMAND_RE = /^\/(\w+)(?:\s+([\s\S]+))?$/
 

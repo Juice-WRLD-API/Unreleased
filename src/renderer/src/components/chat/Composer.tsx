@@ -220,13 +220,21 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Theme set to ${match.name}`, 'ok')
   }
 
-  const runMuteCommand = (args: string): void => {
+  const runHelpCommand = (): void => {
+    toast(
+      'Commands: /song <title>, /search <title>, /np, /theme <name>, /mute @user, /unmute @user, /promote @user, /feedback <message>',
+      'ok',
+    )
+  }
+
+  const runMuteCommand = (args: string, usage: '/mute' | '/unmute'): void => {
     const uname = args.replace(/^@/, '').trim()
-    if (!uname) { toast('Usage: /mute @username'); return }
+    if (!uname) { toast(`Usage: ${usage} @username`); return }
     const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
     if (!target) { toast(`No one named "${uname}" here`); return }
     if (target.id === meId) { toast("You can't mute yourself"); return }
     const wasMuted = useStore.getState().mutedUserIds.includes(target.id)
+    if (usage === '/unmute' && !wasMuted) { toast(`${displayName(target)} isn't muted`); return }
     useStore.getState().toggleMuteUser(target.id)
     toast(wasMuted ? `Unmuted ${displayName(target)}` : `Muted ${displayName(target)} - their channel/server messages are hidden for you`, 'ok')
   }
@@ -241,6 +249,15 @@ const Composer = forwardRef<ComposerHandle, {
     const match = track.id.match(/^jw-(\d+)$/)
     if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
     await send(room, { text: encodeSongShare(track, Number(match[1])), files: [] })
+  }
+
+  // Routes through the same outbox as the Settings feedback form (see
+  // useStore's submitFeedback/pendingReports) - it's queued locally first, so
+  // this resolves even if delivery hasn't happened yet.
+  const runFeedbackCommand = async (args: string): Promise<void> => {
+    if (!args) { toast('Usage: /feedback <message>'); return }
+    await useStore.getState().submitFeedback('other', args)
+    toast('Feedback sent - thanks!', 'ok')
   }
 
   const runPromoteCommand = async (args: string): Promise<void> => {
@@ -262,8 +279,9 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Promoted ${displayName(target)} to admin`, 'ok')
   }
 
-  // "/song <query>", "/search <query>", "/mute @user", "/theme <name>", "/np"
-  // and "/promote @user" are recognized only when they are the entire message
+  // "/song <query>", "/search <query>", "/mute @user", "/unmute @user",
+  // "/theme <name>", "/np", "/promote @user", "/feedback <message>" and
+  // "/help" are recognized only when they are the entire message
   // (no reply-in-progress, no attachments) - anything else starting with "/"
   // (a URL, a stray command someone typed) falls through and sends as a
   // normal text message, same as before this feature existed.
@@ -277,7 +295,9 @@ const Composer = forwardRef<ComposerHandle, {
     stopTyping()
 
     if (cmd.command === 'theme') { applyThemeCommand(cmd.args); return }
-    if (cmd.command === 'mute') { runMuteCommand(cmd.args); return }
+    if (cmd.command === 'mute') { runMuteCommand(cmd.args, '/mute'); return }
+    if (cmd.command === 'unmute') { runMuteCommand(cmd.args, '/unmute'); return }
+    if (cmd.command === 'help') { runHelpCommand(); return }
 
     setCommandBusy(cmd.command)
     try {
@@ -299,6 +319,8 @@ const Composer = forwardRef<ComposerHandle, {
         await shareNowPlayingCommand()
       } else if (cmd.command === 'promote') {
         await runPromoteCommand(cmd.args)
+      } else if (cmd.command === 'feedback') {
+        await runFeedbackCommand(cmd.args)
       }
     } catch (err) {
       toast(errorText(err, 'Command failed'))
