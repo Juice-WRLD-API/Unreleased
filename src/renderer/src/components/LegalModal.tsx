@@ -4,7 +4,7 @@ import { ModalOverlay, LockToggle } from './Modal'
 
 export type LegalDoc = 'terms' | 'privacy'
 
-const LAST_UPDATED = 'July 24, 2026'
+const LAST_UPDATED = 'September 18, 2026'
 
 // ─── Small prose primitives ───────────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ function PrivacyContent(): JSX.Element {
       </P>
       <List
         items={[
-          'Settings and preferences (theme, playback options, menu layout, equalizer, etc.).',
+          'Settings and preferences (theme, playback options, menu layout, equalizer, etc.) - if you are not signed in, this is the only place they live; if you are signed in, this is a local cache and the source of truth is your account (see section 5).',
           'Your local music library folders and tracks (desktop app only).',
           'Playback state, recently played, and cached artwork/metadata for speed.',
           'Your login token, if you sign in - kept locally to authenticate requests.',
@@ -213,7 +213,8 @@ function PrivacyContent(): JSX.Element {
       <List
         items={[
           'Your Discord username, ID, and avatar, used to identify your account.',
-          'Your playlists, favorites, and per-song preferences, synced so they follow you across devices.',
+          'Your playlists, favorites, folders, and per-song preferences, synced so they follow you across devices.',
+          'Your app settings (theme, layout, playback, equalizer, hotkeys, muted users/servers, etc.), synced the same way so they follow you across devices.',
           'Editor-related submissions (applications, edit proposals, reports) if you use those features.',
         ]}
       />
@@ -229,6 +230,11 @@ function PrivacyContent(): JSX.Element {
           <>
             <strong className="text-text-primary font-medium">Discord status</strong> - the desktop app can show what
             you&apos;re listening to as your Discord activity. This runs locally with Discord and can be turned off.
+          </>,
+          <>
+            <strong className="text-text-primary font-medium">GIF search in chat</strong> - if you use the GIF
+            picker, what you type is sent to a third-party GIF provider (Tenor or Giphy) to fetch matching results,
+            under that provider&apos;s own privacy policy.
           </>,
           <>
             <strong className="text-text-primary font-medium">Feedback &amp; reports</strong> - anything you submit
