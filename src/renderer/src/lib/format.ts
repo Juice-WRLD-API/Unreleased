@@ -33,3 +33,25 @@ export function cleanDate(raw: string | null | undefined): string {
   if (!raw) return ''
   return raw.replace(/^[A-Za-z][a-z]+\s+(?=[A-Z]|\d)/g, '').trim().replace(/\.$/, '').trim()
 }
+
+/**
+ * Full-account display name: display_name, then discord_username, then the
+ * login-handle username (blank for Discord signups, set for username/password
+ * ones - see AccountUser.username). Falls back to a caller-supplied default.
+ */
+export function accountDisplayName(
+  u: { display_name?: string; discord_username?: string; username?: string } | null | undefined,
+  fallback = ''
+): string {
+  return u?.display_name || u?.discord_username || u?.username || fallback
+}
+
+/** Discord handle if set, else the login-handle username - for admin/staff lists that show a handle, not a display name. */
+export function discordHandle(u: { discord_username?: string; username?: string } | null | undefined): string {
+  return u?.discord_username || u?.username || ''
+}
+
+/** First character of a name, uppercased, for avatar-fallback initials. */
+export function initial(name: string | null | undefined): string {
+  return (name || '?').charAt(0).toUpperCase()
+}

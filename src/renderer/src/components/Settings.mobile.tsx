@@ -22,7 +22,7 @@ import {
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, setNotificationSoundId, playNotificationSound } from '../lib/notifications'
 import { IS_IOS } from '../lib/platform'
-import { formatBytes } from '../lib/format'
+import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { Sheet } from './mobile/Sheet'
@@ -720,7 +720,7 @@ export default function Settings(): JSX.Element {
   // `sub` shows under the label in the category list; `color` is the badge
   // tint, matching the iOS-Settings idiom the Row primitive already uses.
   const tabs: { id: Tab; label: string; icon: ElementType; color: string; sub: string }[] = [
-    { id: 'account', label: 'Account', icon: User, color: '#1d4ed8', sub: account ? (account.display_name || account.discord_username) : 'Not signed in' },
+    { id: 'account', label: 'Account', icon: User, color: '#1d4ed8', sub: account ? accountDisplayName(account) : 'Not signed in' },
     { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, layout' },
     { id: 'playback', label: 'Playback', icon: Volume2, color: '#2563eb', sub: 'Output, crossfade, lyrics' },
     { id: 'feedback', label: 'Feedback', icon: MessageCircle, color: '#db2777', sub: 'Report a problem or idea' },
@@ -986,13 +986,13 @@ export default function Settings(): JSX.Element {
                 : (
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${account ? 'bg-accent/20 text-accent text-lg font-semibold' : 'bg-[var(--surface-raised)] text-text-muted'}`}>
                     {account
-                      ? (account.display_name || account.discord_username || '?').charAt(0).toUpperCase()
+                      ? initial(accountDisplayName(account))
                       : <User size={22} />}
                   </div>
                 )}
               <div className="min-w-0 flex-1">
                 <p className="text-text-primary text-base font-semibold truncate">
-                  {account ? (account.display_name || account.discord_username) : 'Not signed in'}
+                  {account ? accountDisplayName(account) : 'Not signed in'}
                 </p>
                 <p className="text-text-muted text-xs truncate">
                   {account ? 'Account, token, sign out' : 'Sign in to sync likes and playlists'}
@@ -1059,12 +1059,12 @@ export default function Settings(): JSX.Element {
                       >
                         {account.avatar
                           ? <img src={account.avatar} alt="" className="w-20 h-20 rounded-full object-cover" />
-                          : <div className="w-20 h-20 rounded-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+                          : <div className="w-20 h-20 rounded-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{initial(accountDisplayName(account))}</div>}
                         <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface">
                           {avatarUploading ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
                         </span>
                       </button>
-                      <p className="mt-3 text-text-primary text-lg font-semibold truncate max-w-full">{account.display_name || account.discord_username}</p>
+                      <p className="mt-3 text-text-primary text-lg font-semibold truncate max-w-full">{accountDisplayName(account)}</p>
                       <p className="text-text-muted text-xs">{account.discord_id ? 'Signed in with Discord' : 'Signed in'}</p>
                       {avatarError && <p className="text-red-400 text-xs mt-1">{avatarError}</p>}
                       {account.avatar && !avatarUploading && (

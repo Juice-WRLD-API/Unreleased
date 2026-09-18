@@ -1,44 +1,18 @@
-import { useState, useCallback } from 'react'
-import { useStrictModeSafeEffect } from '../hooks/useStrictModeSafeEffect'
+import { useState } from 'react'
 import {
   Loader2, Plus, Check, AlertCircle, Radio, Users, X as XIcon, Pencil, Power,
 } from 'lucide-react'
-import * as channelApi from '../lib/channelApi'
-import type { Channel, ChannelMembershipRow } from '../lib/channelApi'
-import * as userApi from '../lib/userApi'
+import type { Channel } from '../lib/channelApi'
 import type { AdminUser } from '../lib/userApi'
-import { useStore } from '../store/useStore'
+import { discordHandle } from '../lib/format'
 import { Empty } from './adminShared'
-
-const MEMBER_FLAGS: { key: keyof ChannelMembershipRow; label: string }[] = [
-  { key: 'editor_enabled', label: 'Editor' },
-  { key: 'contributor_enabled', label: 'Contributor' },
-  { key: 'manager_enabled', label: 'Manager' },
-  { key: 'auto_approve_proposals', label: 'Auto-approve edits' },
-  { key: 'auto_approve_comp_proposals', label: 'Auto-approve comp' },
-]
+import {
+  MEMBER_FLAGS, useChannelList, useToggleChannelActive, useChannelMembers,
+  useCreateChannel, useEditChannel,
+} from '../hooks/useChannelsAdmin'
 
 function CreatePanel({ onCreated }: { onCreated: () => void }): JSX.Element {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const submit = async (): Promise<void> => {
-    if (!name.trim() || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      await channelApi.adminCreateChannel({ name: name.trim(), description: description.trim() })
-      setName('')
-      setDescription('')
-      onCreated()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the channel')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { name, setName, description, setDescription, busy, error, submit } = useCreateChannel(onCreated)
 
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-surface-raised/50 p-4 space-y-3">
@@ -72,54 +46,15 @@ function CreatePanel({ onCreated }: { onCreated: () => void }): JSX.Element {
 }
 
 function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[] }): JSX.Element {
-  const [members, setMembers] = useState<ChannelMembershipRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busyUser, setBusyUser] = useState<number | null>(null)
   const [addUserId, setAddUserId] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const { members, loading, busyUser, error, setFlag, addable, addMember } = useChannelMembers(channel.id, users)
 
-  const reload = useCallback(() => {
-    setLoading(true)
-    channelApi.adminListChannelMembers(channel.id)
-      .then(setMembers)
-      .catch(() => setMembers([]))
-      .finally(() => setLoading(false))
-  }, [channel.id])
-
-  useStrictModeSafeEffect(() => { reload() }, [reload])
-
-  const setFlag = async (userId: number, patch: Partial<ChannelMembershipRow>): Promise<void> => {
-    setBusyUser(userId)
-    setError(null)
-    try {
-      const row = await channelApi.adminSetChannelMember(channel.id, { user_id: userId, ...patch } as {
-        user_id: number
-        editor_enabled?: boolean
-        contributor_enabled?: boolean
-        manager_enabled?: boolean
-        auto_approve_proposals?: boolean
-        auto_approve_comp_proposals?: boolean
-      })
-      setMembers((prev) => {
-        const rest = prev.filter((m) => m.user_id !== userId)
-        return [...rest, row].sort((a, b) => a.username.localeCompare(b.username))
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update membership')
-    } finally {
-      setBusyUser(null)
-    }
-  }
-
-  const addMember = async (): Promise<void> => {
+  const onAdd = async (): Promise<void> => {
     const id = Number(addUserId)
     if (!id) return
-    await setFlag(id, { editor_enabled: false })
+    await addMember(id)
     setAddUserId('')
   }
-
-  const memberIds = new Set(members.map((m) => m.user_id))
-  const addable = users.filter((u) => !memberIds.has(u.user_id))
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -135,11 +70,11 @@ function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[]
           >
             <option value="">Add a user…</option>
             {addable.map((u) => (
-              <option key={u.user_id} value={u.user_id}>{u.discord_username || u.username}</option>
+              <option key={u.user_id} value={u.user_id}>{discordHandle(u)}</option>
             ))}
           </select>
           <button
-            onClick={addMember}
+            onClick={onAdd}
             disabled={!addUserId}
             className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-semibold disabled:opacity-40 flex items-center gap-1.5"
           >
@@ -167,7 +102,7 @@ function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[]
                   return (
                     <button
                       key={key as string}
-                      onClick={() => setFlag(m.user_id, { [key]: !on } as Partial<ChannelMembershipRow>)}
+                      onClick={() => setFlag(m.user_id, { [key]: !on })}
                       disabled={busyUser === m.user_id}
                       className={`px-2.5 py-1 rounded-md text-[10px] font-semibold border transition-colors flex items-center gap-1 ${
                         on
@@ -189,23 +124,7 @@ function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[]
 }
 
 function EditPanel({ channel, onSaved, onClose }: { channel: Channel; onSaved: () => void; onClose: () => void }): JSX.Element {
-  const [name, setName] = useState(channel.name)
-  const [description, setDescription] = useState(channel.description ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const save = async (): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      await channelApi.adminUpdateChannel(channel.id, { name: name.trim(), description: description.trim() })
-      onSaved()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes')
-    } finally {
-      setBusy(false)
-    }
-  }
+  const { name, setName, description, setDescription, busy, error, save } = useEditChannel(channel, onSaved)
 
   return (
     <div className="rounded-2xl border border-accent/30 bg-surface-raised/50 p-4 space-y-3">
@@ -239,39 +158,12 @@ function EditPanel({ channel, onSaved, onClose }: { channel: Channel; onSaved: (
 }
 
 export default function ChannelsTab(): JSX.Element {
-  const loadChannels = useStore((s) => s.loadChannels)
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [loading, setLoading] = useState(true)
+  const { channels, users, loading, reload } = useChannelList()
   const [selected, setSelected] = useState<Channel | null>(null)
   const [editing, setEditing] = useState(false)
-  const [busyId, setBusyId] = useState<number | null>(null)
+  const { busyId, toggleActive } = useToggleChannelActive(reload)
 
-  const reload = useCallback(() => {
-    setLoading(true)
-    Promise.all([
-      channelApi.fetchChannelList().catch(() => [] as Channel[]),
-      userApi.adminListUsers().catch(() => [] as AdminUser[]),
-    ]).then(([chs, us]) => {
-      setChannels(chs)
-      setUsers(us)
-      setSelected((prev) => (prev ? chs.find((c) => c.id === prev.id) ?? chs[0] ?? null : chs[0] ?? null))
-    }).finally(() => setLoading(false))
-    loadChannels().catch(() => {})
-  }, [loadChannels])
-
-  useStrictModeSafeEffect(() => { reload() }, [reload])
-
-  const toggleActive = async (channel: Channel): Promise<void> => {
-    setBusyId(channel.id)
-    try {
-      if (channel.is_active) await channelApi.adminDeactivateChannel(channel.id)
-      else await channelApi.adminUpdateChannel(channel.id, { is_active: true })
-      reload()
-    } finally {
-      setBusyId(null)
-    }
-  }
+  const current = selected ? channels.find((c) => c.id === selected.id) ?? channels[0] ?? null : channels[0] ?? null
 
   if (loading) return <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
 
@@ -285,7 +177,7 @@ export default function ChannelsTab(): JSX.Element {
               key={c.id}
               onClick={() => { setSelected(c); setEditing(false) }}
               className={`w-full text-left px-4 py-3 border-b border-[var(--border)] transition-colors ${
-                selected?.id === c.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
+                current?.id === c.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -304,16 +196,16 @@ export default function ChannelsTab(): JSX.Element {
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        {!selected ? (
+        {!current ? (
           <Empty label="Select a channel" />
         ) : (
           <>
             <div className="shrink-0 px-4 py-3 border-b border-[var(--border)] bg-surface-raised flex items-center gap-2">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-text-primary truncate">{selected.name}</p>
-                <p className="text-[10px] text-text-muted">{selected.slug}{selected.description ? ` · ${selected.description}` : ''}</p>
+                <p className="text-sm font-bold text-text-primary truncate">{current.name}</p>
+                <p className="text-[10px] text-text-muted">{current.slug}{current.description ? ` · ${current.description}` : ''}</p>
               </div>
-              {!selected.is_primary && (
+              {!current.is_primary && (
                 <>
                   <button
                     onClick={() => setEditing((e) => !e)}
@@ -322,28 +214,28 @@ export default function ChannelsTab(): JSX.Element {
                     <Pencil size={13} /> Edit
                   </button>
                   <button
-                    onClick={() => toggleActive(selected)}
-                    disabled={busyId === selected.id}
+                    onClick={() => toggleActive(current)}
+                    disabled={busyId === current.id}
                     className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-colors ${
-                      selected.is_active
+                      current.is_active
                         ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
                         : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
                     }`}
                   >
-                    {busyId === selected.id ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
-                    {selected.is_active ? 'Deactivate' : 'Reactivate'}
+                    {busyId === current.id ? <Loader2 size={13} className="animate-spin" /> : <Power size={13} />}
+                    {current.is_active ? 'Deactivate' : 'Reactivate'}
                   </button>
                 </>
               )}
             </div>
 
-            {editing && !selected.is_primary && (
+            {editing && !current.is_primary && (
               <div className="p-4">
-                <EditPanel channel={selected} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload() }} />
+                <EditPanel channel={current} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); reload() }} />
               </div>
             )}
 
-            <MembersPanel key={selected.id} channel={selected} users={users} />
+            <MembersPanel key={current.id} channel={current} users={users} />
           </>
         )}
       </div>

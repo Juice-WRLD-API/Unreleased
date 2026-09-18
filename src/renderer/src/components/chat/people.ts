@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { ChatUserBrief } from '../../lib/chatApi'
-import { useChatStore, type RoomRef } from '../../store/chatStore'
+import { displayName, useChatStore, type RoomRef } from '../../store/chatStore'
 
 const EMPTY: ChatUserBrief[] = []
 
@@ -33,7 +33,7 @@ export function useStaffDirectory(): ChatUserBrief[] {
     for (const list of Object.values(members)) for (const m of list) byId.set(m.user.id, m.user)
     for (const c of conversations) for (const p of c.participants) byId.set(p.user.id, p.user)
     if (meId) byId.delete(meId)
-    return [...byId.values()].sort((a, b) => (a.display_name || a.username).localeCompare(b.display_name || b.username))
+    return [...byId.values()].sort((a, b) => displayName(a).localeCompare(displayName(b)))
   }, [members, conversations, meId])
 }
 
@@ -83,6 +83,6 @@ export function linkMentions(text: string, people: ChatUserBrief[]): string {
   return text.replace(re, (whole, lead: string, handle: string) => {
     if (handle.toLowerCase() === EVERYONE_HANDLE) return `${lead}[@everyone](mention:everyone)`
     const user = people.find((p) => p.username.toLowerCase() === handle.toLowerCase())
-    return user ? `${lead}[@${user.display_name || user.username}](mention:${user.id})` : whole
+    return user ? `${lead}[@${displayName(user)}](mention:${user.id})` : whole
   })
 }

@@ -15,7 +15,7 @@ export default function NewsShareCard({ news }: { news: SharedNewsPayload }): JS
   return (
     <button
       onClick={open}
-      className="group flex items-center gap-3 w-full max-w-sm rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5 text-left hover:bg-surface-raised transition-colors"
+      className="group flex items-center gap-3 w-full max-w-sm mt-1 rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5 text-left hover:bg-surface-raised transition-colors"
     >
       <span className="relative w-11 h-11 rounded-lg overflow-hidden bg-surface-highest shrink-0 flex items-center justify-center">
         {news.imageUrl ? <img src={news.imageUrl} alt="" className="w-full h-full object-cover" /> : <Newspaper size={18} className="text-text-muted" />}

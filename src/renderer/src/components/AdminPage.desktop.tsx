@@ -1,4 +1,4 @@
-import { useState, useMemo, useDeferredValue, memo, useEffect } from 'react'
+import { useState, memo, useEffect } from 'react'
 import {
   ChevronLeft, Users, Clock, CheckCircle, XCircle, ShieldCheck, BarChart2,
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
@@ -9,10 +9,11 @@ import {
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { useStore, useStorePick } from '../store/useStore'
+import { displayName } from '../store/chatStore'
+import { discordHandle } from '../lib/format'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
-import { invalidateLyricsCache } from './Player'
-import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, buildHaystack, matchesHaystack, ProposalDiff } from './adminShared'
+import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, ProposalDiff } from './adminShared'
 import ReportsTab from './ReportsTab'
 import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
@@ -20,6 +21,12 @@ import EraTab from './EraTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
+import { useVisitedTabs } from '../hooks/useVisitedTabs'
+import { useReviseProposalForm } from '../hooks/useReviseProposalForm'
+import { useProposalsTabData } from '../hooks/useProposalsTabData'
+import { useAdminUsersList } from '../hooks/useAdminUsersList'
+import { useAdminStats } from '../hooks/useAdminStats'
+import { TEXTAREA_FIELDS, ALL_SONG_FIELDS, PROPOSAL_FILTERS, PROPOSAL_SORTS, PROPOSAL_PAGE } from '../lib/proposalRevise'
 import RoleBadges from './RoleBadges'
 
 type Tab = AdminTab
@@ -95,8 +102,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // unmount/remount was re-triggering every <img> in the tab (avatars, song
   // art) on every single switch, which for a list of any size fired hundreds
   // of redundant image requests for data that hadn't changed.
-  const [visited, setVisited] = useState<Set<AdminTab>>(() => new Set([tab]))
-  useEffect(() => { setVisited(prev => prev.has(tab) ? prev : new Set(prev).add(tab)) }, [tab])
+  const visited = useVisitedTabs(tab)
 
   if (!canAccessStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
@@ -258,75 +264,16 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
 
 // ── Revise Panel ──────────────────────────────────────────────────────────────
 
-const TEXTAREA_FIELDS = new Set(['lyrics', 'synced_lyrics', 'notes', 'additional_information', 'description'])
-const ALL_SONG_FIELDS = [
-  'name','track_titles','credited_artists','producers','engineers',
-  'recording_locations','record_dates','length','bitrate','additional_information',
-  'file_names','instrumentals','instrumental_names','preview_date','release_date',
-  'dates','session_titles','session_tracking','lyrics','synced_lyrics',
-  'album','date_leaked','leak_type',
-]
-
 function RevisePanel({ proposal, onClose, onDone, channel }: {
   proposal: SongEditProposal
   onClose: () => void
   onDone:  () => void
   channel?: string
 }): JSX.Element {
-  const [fields,  setFields]  = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {}
-    Object.entries(proposal.proposed_data || {}).forEach(([k, v]) => {
-      init[k] = Array.isArray(v) ? v.join('\n') : (typeof v === 'string' ? v : JSON.stringify(v))
-    })
-    return init
-  })
-  const [reviewNote, setReviewNote] = useState('')
-  const [addKey,     setAddKey]     = useState('')
-  const [saving,     setSaving]     = useState(false)
-  const [err,        setErr]        = useState<string | null>(null)
-
-  // Fields that are available to add (in snapshot but not already in the working set)
-  const snap = proposal.original_snapshot || {}
-  const available = ALL_SONG_FIELDS.filter(k => !(k in fields))
-
-  const addField = (key: string) => {
-    if (!key) return
-    const snapVal = snap[key]
-    const init = Array.isArray(snapVal) ? (snapVal as string[]).join('\n')
-                : typeof snapVal === 'string' ? snapVal : ''
-    setFields(f => ({ ...f, [key]: init }))
-    setAddKey('')
-  }
-
-  const removeField = (key: string) => {
-    setFields(f => { const n = { ...f }; delete n[key]; return n })
-  }
-
-  const submit = async () => {
-    setSaving(true); setErr(null)
-    try {
-      // Convert back - track_titles is array
-      const revised_data: Record<string, unknown> = {}
-      Object.entries(fields).forEach(([k, v]) => {
-        if (k === 'track_titles') {
-          revised_data[k] = v.split('\n').map(s => s.trim()).filter(Boolean)
-        } else {
-          revised_data[k] = v
-        }
-      })
-      await userApi.adminReviewProposal(proposal.id, {
-        action: 'revise',
-        review_notes: reviewNote,
-        revised_data,
-        channel,
-      })
-      onDone()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to revise')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const {
+    fields, reviewNote, setReviewNote, addKey, setAddKey, saving, err,
+    snap, available, addField, removeField, setFieldValue, submit,
+  } = useReviseProposalForm(proposal, channel, onDone)
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden border-l-2 border-accent/30 bg-[var(--surface)]">
@@ -352,7 +299,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
             {TEXTAREA_FIELDS.has(key) ? (
               <textarea
                 value={val}
-                onChange={e => setFields(f => ({ ...f, [key]: e.target.value }))}
+                onChange={e => setFieldValue(key, e.target.value)}
                 rows={key === 'lyrics' || key === 'synced_lyrics' ? 10 : 4}
                 className="w-full bg-[var(--surface)] text-text-primary text-xs font-mono px-3 py-2.5 resize-none focus:outline-none focus:bg-[var(--surface-raised)] transition-colors"
               />
@@ -360,7 +307,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
               <input
                 type="text"
                 value={val}
-                onChange={e => setFields(f => ({ ...f, [key]: e.target.value }))}
+                onChange={e => setFieldValue(key, e.target.value)}
                 className="w-full bg-[var(--surface)] text-text-primary text-xs px-3 py-2.5 focus:outline-none focus:bg-[var(--surface-raised)] transition-colors"
               />
             )}
@@ -440,20 +387,6 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
 // ── Proposals (master-detail) ─────────────────────────────────────────────────
 
-type ProposalSort = 'date' | 'user'
-
-function sortProposals(rows: SongEditProposal[], sortBy: ProposalSort): SongEditProposal[] {
-  if (sortBy === 'date') return rows
-  return [...rows].sort((a, b) => {
-    const byUser = a.editor_username.localeCompare(b.editor_username, undefined, { sensitivity: 'base' })
-    if (byUser !== 0) return byUser
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  })
-}
-
-/** How many proposal rows to mount at once (see `shown` in ProposalsTab). */
-const PROPOSAL_PAGE = 400
-
 // Memoized because the list isn't windowed: with the status filter on "All"
 // it holds the whole proposal archive, and without this every keystroke in the
 // search box re-rendered every row that survived the filter. `onSelect` is
@@ -511,47 +444,35 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
   const [notes,       setNotes]       = useState<Record<number, string>>({})
   const [selected,    setSelected]    = useState<SongEditProposal | null>(null)
   const [revising,    setRevising]    = useState(false)
-  const [sortBy,      setSortBy]      = useState<ProposalSort>('date')
-  const [query,       setQuery]       = useState('')
+
+  const {
+    sortBy, setSortBy, query, setQuery, sortedProposals, pageOf, remaining, setShown,
+    dropCache, setArchive, archive, archiveLoading, archiveError,
+    historyOpen, openHistory, expandedPast, setExpandedPast,
+    history, pastCount, loadingSongId, setLoadingSongId, playError, setPlayError,
+  } = useProposalsTabData(proposals, channel, selected)
   const { playTrack } = useStorePick('playTrack')
 
-  // Every proposal ever filed, fetched once and only when the history panel is
-  // first opened - /admin/proposals/ has no per-song filter, so "what else has
-  // been proposed for this song" means holding the whole archive and grouping
-  // client-side. Nulled after a review so the next open reflects it.
-  const [archive,        setArchive]        = useState<SongEditProposal[] | null>(null)
-  const [archiveLoading, setArchiveLoading] = useState(false)
-  const [archiveError,   setArchiveError]   = useState(false)
-  const [historyOpen,    setHistoryOpen]    = useState(false)
-  const [expandedPast,   setExpandedPast]   = useState<number | null>(null)
-
-  const [loadingSongId, setLoadingSongId] = useState<number | null>(null)
-  const [playError,     setPlayError]     = useState<string | null>(null)
-
-  // Searchable: the song title, who filed it, the change type, and both ids -
-  // the public song id is what reports and Discord threads cite, so pasting
-  // one should land on its proposal. Built once per fetch: under the "All"
-  // filter this list is the entire archive, and doing it inline in the filter
-  // meant re-flattening every row on every keystroke.
-  const haystacks = useMemo(() => {
-    const m = new Map<number, string>()
-    for (const p of proposals) {
-      m.set(p.id, buildHaystack(p.title, p.editor_username, p.change_type, p.song_public_id, p.id))
+  // Plays the song a proposal targets, so a reviewer can hear what they're
+  // approving without leaving the queue. Fetched per click rather than per
+  // selection - flipping through the list would otherwise fire a request for
+  // every row passed over.
+  const playProposalSong = async (songId: number): Promise<void> => {
+    setPlayError(null)
+    setLoadingSongId(songId)
+    try {
+      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+      const track = songToTrack(song)
+      // An unsurfaced song is a real catalog entry with no file behind it -
+      // the proposal is still reviewable, there's just nothing to play.
+      if (!track.path) { setPlayError('No file on this song to play'); return }
+      playTrack(track, [track])
+    } catch {
+      setPlayError('Could not load this song')
+    } finally {
+      setLoadingSongId(null)
     }
-    return m
-  }, [proposals])
-
-  // The filter runs against a deferred copy of the query, so a keystroke
-  // repaints the input immediately and React re-runs the list at a lower
-  // priority - typing stays smooth even when the match set is huge.
-  const deferredQuery = useDeferredValue(query)
-
-  const sortedProposals = useMemo(() => sortProposals(
-    deferredQuery.trim()
-      ? proposals.filter(p => matchesHaystack(deferredQuery, haystacks.get(p.id)))
-      : proposals,
-    sortBy,
-  ), [proposals, haystacks, sortBy, deferredQuery])
+  }
 
   // Auto-select first item, and keep the selection inside the visible list -
   // searching can otherwise filter out the proposal the detail pane's
@@ -567,13 +488,6 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
   // longer lines up with what's on screen. Typing in the search box must not
   // trip this - that's why it keys off the raw list, not the filtered one.
   useEffect(() => { setRevising(false) }, [proposals])
-
-  // Approving/reversing a proposal changes a song's live data - drop its
-  // cached lyrics so the next play reflects it.
-  const dropCache = (id: number) => {
-    const songId = proposals.find(p => p.id === id)?.song
-    if (songId != null) invalidateLyricsCache(songId)
-  }
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
@@ -602,76 +516,10 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     catch {} finally { setActionId(null) }
   }
 
-  const openHistory = () => {
-    const next = !historyOpen
-    setHistoryOpen(next)
-    if (!next || archive || archiveLoading) return
-    setArchiveLoading(true)
-    setArchiveError(false)
-    userApi.adminListProposals(undefined, channel)
-      .then(setArchive)
-      .catch(() => setArchiveError(true))
-      .finally(() => setArchiveLoading(false))
-  }
-
-  // Plays the song a proposal targets, so a reviewer can hear what they're
-  // approving without leaving the queue. Fetched per click rather than per
-  // selection - flipping through the list would otherwise fire a request for
-  // every row passed over.
-  const playProposalSong = async (songId: number) => {
-    setPlayError(null)
-    setLoadingSongId(songId)
-    try {
-      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
-      const track = songToTrack(song)
-      // An unsurfaced song is a real catalog entry with no file behind it -
-      // the proposal is still reviewable, there's just nothing to play.
-      if (!track.path) { setPlayError('No file on this song to play'); return }
-      playTrack(track, [track])
-    } catch {
-      setPlayError('Could not load this song')
-    } finally {
-      setLoadingSongId(null)
-    }
-  }
-
-  const FILTERS: { id: ProposalStatus | ''; label: string }[] = [
-    { id: 'pending',  label: 'Pending'  },
-    { id: 'approved', label: 'Approved' },
-    { id: 'rejected', label: 'Rejected' },
-    { id: 'reversed', label: 'Reversed' },
-    { id: '',         label: 'All'      },
-  ]
-
-  const SORTS: { id: ProposalSort; label: string }[] = [
-    { id: 'date', label: 'Newest' },
-    { id: 'user', label: 'User' },
-  ]
+  const FILTERS = PROPOSAL_FILTERS
+  const SORTS = PROPOSAL_SORTS
 
   const p = selected
-
-  // Newest first, and it deliberately includes the proposal being viewed - the
-  // point is to read this one in the context of the run, so dropping it leaves
-  // a hole in the timeline. It's marked "viewing" instead.
-  const history = useMemo(() => {
-    if (!p?.song || !archive) return []
-    return archive
-      .filter(r => r.song === p.song)
-      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
-  }, [archive, p?.song])
-  const pastCount = Math.max(history.length - 1, 0)
-
-  // Both are about the proposal on screen, so neither should outlive it.
-  useEffect(() => { setExpandedPast(null); setPlayError(null) }, [p?.id])
-
-  // The list isn't windowed, and "All" can be the entire archive - mounting
-  // every row costs ~8 DOM nodes each before the user has even typed. Render a
-  // page at a time and let them ask for more; searching normally narrows the
-  // set well below the cap anyway.
-  const [shown, setShown] = useState(PROPOSAL_PAGE)
-  useEffect(() => { setShown(PROPOSAL_PAGE) }, [proposals, deferredQuery, sortBy])
-  const pageOf = sortedProposals.slice(0, shown)
-  const remaining = sortedProposals.length - pageOf.length
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -961,9 +809,9 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
             <button key={item.id} onClick={() => setSelected(item)}
               className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 border-l-amber-500/60 transition-colors text-text-primary ${selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-2.5">
-                <Avatar src={item.discord_avatar} name={item.display_name || item.username} size={8} />
+                <Avatar src={item.discord_avatar} name={displayName(item)} size={8} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-text-primary text-xs font-semibold truncate">{item.display_name || item.username}</p>
+                  <p className="text-text-primary text-xs font-semibold truncate">{displayName(item)}</p>
                   <p className="text-text-muted text-[10px] truncate">{item.application_type} · {item.discord_username} · {relativeTime(item.created_at)}</p>
                 </div>
               </div>
@@ -979,9 +827,9 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
             <button key={item.id} onClick={() => setSelected(item)}
               className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors text-text-primary opacity-60 ${selected?.id === item.id ? 'bg-accent/10 opacity-100' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-2.5">
-                <Avatar src={item.discord_avatar} name={item.display_name || item.username} size={7} />
+                <Avatar src={item.discord_avatar} name={displayName(item)} size={7} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-text-primary text-xs font-medium truncate">{item.display_name || item.username}</p>
+                  <p className="text-text-primary text-xs font-medium truncate">{displayName(item)}</p>
                   <p className="text-text-muted text-[10px]">{item.status} · {shortDate(item.reviewed_at)}</p>
                 </div>
               </div>
@@ -996,10 +844,10 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {/* User info */}
             <div className="flex items-start gap-4">
-              <Avatar src={a.discord_avatar} name={a.display_name || a.username} size={14} />
+              <Avatar src={a.discord_avatar} name={displayName(a)} size={14} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 flex-wrap mb-1">
-                  <h2 className="text-text-primary text-lg font-bold">{a.display_name || a.username}</h2>
+                  <h2 className="text-text-primary text-lg font-bold">{displayName(a)}</h2>
                   <StatusChip status={a.status} />
                 </div>
                 <div className="flex items-center gap-4 text-xs text-text-muted flex-wrap">
@@ -1060,57 +908,12 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onChanged: () => void; currentUserId?: number }): JSX.Element {
-  const [actionId, setActionId] = useState<number | null>(null)
-  const [filter,   setFilter]   = useState<'all' | 'admins' | 'editors' | 'contributors' | 'managers' | 'applicants'>('all')
-  const [search,   setSearch]   = useState('')
+  const { actionId, filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, currentUserId, onChanged)
   // Master/detail instead of one wide row per user - a click on the roster
   // rail (left) drives which user's full stat/badge/action surface shows on
   // the right, rather than every user's actions competing for space in a
   // single dense line.
   const [selectedId, setSelectedId] = useState<number | null>(null)
-
-  const doUpdate = async (uid: number, payload: Parameters<typeof userApi.adminUpdateUser>[1]) => {
-    setActionId(uid)
-    try { await userApi.adminUpdateUser(uid, payload); onChanged() }
-    catch {} finally { setActionId(null) }
-  }
-
-  const FILTERS = [
-    { id: 'all' as const,        label: 'All',        count: users.length },
-    { id: 'admins' as const,     label: 'Admins',     count: users.filter(u => u.role === 'administrator').length },
-    { id: 'editors' as const,    label: 'Editors',    count: users.filter(u => u.role === 'editor').length },
-    // Contributors cuts across the role buckets rather than being one of them
-    // - contributor_enabled is a flag on top of a role, so a contributor is
-    // still counted under whichever of Admins/Editors/Applicants they are.
-    { id: 'contributors' as const, label: 'Contributors', count: users.filter(u => u.contributor_enabled).length },
-    { id: 'managers' as const, label: 'Managers', count: users.filter(u => !!u.manager_enabled).length },
-    { id: 'applicants' as const, label: 'Applicants', count: users.filter(u => u.role === 'applicant').length },
-  ]
-
-  // One haystack per user, built once per users-array change rather than
-  // per keystroke (see buildHaystack's own doc comment) - also widens search
-  // to match role/contributor/manager keywords, not just the display name
-  // like the old plain substring match did.
-  const haystack = useMemo(() => new Map(users.map(u => [u.user_id,
-    buildHaystack(u.discord_username, u.username, u.role,
-      u.contributor_enabled ? 'contributor' : undefined,
-      u.manager_enabled ? 'manager' : undefined),
-  ])), [users])
-
-  const visible = useMemo(() => users.filter(u => {
-    const ok = filter === 'all'
-      ? true
-      : filter === 'admins'
-        ? u.role === 'administrator'
-        : filter === 'editors'
-          ? u.role === 'editor'
-          : filter === 'contributors'
-            ? u.contributor_enabled
-            : filter === 'managers'
-              ? !!u.manager_enabled
-              : u.role === 'applicant'
-    return ok && matchesHaystack(search, haystack.get(u.user_id))
-  }), [users, filter, search, haystack])
 
   // Keep a valid selection as filter/search narrows the roster - falls back
   // to the first visible row, or nothing once the list is empty.
@@ -1120,7 +923,6 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
   }, [visible, selectedId])
 
   const selected = visible.find(u => u.user_id === selectedId) ?? null
-  const canAct = (u: AdminUser): boolean => u.user_id !== currentUserId && u.role !== 'administrator'
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -1147,10 +949,10 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
               className={`w-full flex items-center gap-2.5 px-3 py-2.5 border-b border-[var(--border)] text-left transition-colors ${
                 selectedId === u.user_id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               }`}>
-              <Avatar src={u.discord_avatar} name={u.discord_username || u.username} size={8} />
+              <Avatar src={u.discord_avatar} name={discordHandle(u)} size={8} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-text-primary truncate flex items-center gap-1.5">
-                  {u.discord_username || u.username}
+                  {discordHandle(u)}
                   {!u.is_active && <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />}
                 </p>
                 <div className="flex gap-1 flex-wrap mt-0.5">
@@ -1171,10 +973,10 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
         {!selected ? <Empty label="Select a user" /> : (
           <div className="max-w-2xl space-y-5">
             <div className="flex items-center gap-4">
-              <Avatar src={selected.discord_avatar} name={selected.discord_username || selected.username} size={16} />
+              <Avatar src={selected.discord_avatar} name={discordHandle(selected)} size={16} />
               <div className="min-w-0">
                 <h2 className="text-text-primary text-lg font-bold truncate flex items-center gap-2">
-                  {selected.discord_username || selected.username}
+                  {discordHandle(selected)}
                   {!selected.is_active && <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded text-red-400 bg-red-500/15">disabled</span>}
                   {selected.user_id === currentUserId && <span className="text-xs text-text-muted italic font-normal">you</span>}
                 </h2>
@@ -1288,23 +1090,18 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
 function StatsTab({ applications, proposals, users }: {
   applications: EditorApplication[]; proposals: SongEditProposal[]; users: AdminUser[]
 }): JSX.Element {
-  const approved    = proposals.filter(p => p.status === 'approved').length
-  const reviewed    = proposals.filter(p => p.status !== 'pending').length
-  const approvalPct = reviewed > 0 ? Math.round(approved / reviewed * 100) : 0
-  const editors     = users.filter(u => u.role === 'editor')
-  const managers    = users.filter(u => !!u.manager_enabled)
-  const topEditors  = [...editors].sort((a, b) => b.approved_count - a.approved_count).slice(0, 8)
+  const { approved, approvalPct, editors, managers, topEditors, pendingProposals, pendingApplications, applicants } = useAdminStats(applications, proposals, users)
 
   const metrics = [
-    { label: 'Total users',       value: users.length,                                             color: 'text-accent',        icon: <Users size={16} /> },
-    { label: 'Editors',           value: editors.length,                                           color: 'text-emerald-400',   icon: <UserCheck size={16} /> },
-    { label: 'Managers',          value: managers.length,                                          color: 'text-amber-400',     icon: <Shield size={16} /> },
-    { label: 'Total proposals',   value: proposals.length,                                         color: 'text-blue-400',      icon: <FileEdit size={16} /> },
-    { label: 'Approved',          value: approved,                                                  color: 'text-emerald-400',   icon: <FileCheck size={16} /> },
-    { label: 'Pending proposals', value: proposals.filter(p => p.status === 'pending').length,     color: 'text-amber-400',     icon: <Clock size={16} /> },
-    { label: 'Pending apps',      value: applications.filter(a => a.status === 'pending').length,  color: 'text-amber-400',     icon: <Clock size={16} /> },
-    { label: 'Approval rate',     value: `${approvalPct}%`,                                        color: 'text-purple-400',    icon: <Activity size={16} /> },
-    { label: 'Applicants',        value: users.filter(u => u.role === 'applicant').length,          color: 'text-text-muted', icon: <Users size={16} /> },
+    { label: 'Total users',       value: users.length,        color: 'text-accent',        icon: <Users size={16} /> },
+    { label: 'Editors',           value: editors.length,      color: 'text-emerald-400',   icon: <UserCheck size={16} /> },
+    { label: 'Managers',          value: managers.length,     color: 'text-amber-400',     icon: <Shield size={16} /> },
+    { label: 'Total proposals',   value: proposals.length,    color: 'text-blue-400',      icon: <FileEdit size={16} /> },
+    { label: 'Approved',          value: approved,            color: 'text-emerald-400',   icon: <FileCheck size={16} /> },
+    { label: 'Pending proposals', value: pendingProposals,    color: 'text-amber-400',     icon: <Clock size={16} /> },
+    { label: 'Pending apps',      value: pendingApplications, color: 'text-amber-400',     icon: <Clock size={16} /> },
+    { label: 'Approval rate',     value: `${approvalPct}%`,   color: 'text-purple-400',    icon: <Activity size={16} /> },
+    { label: 'Applicants',        value: applicants,          color: 'text-text-muted',    icon: <Users size={16} /> },
   ]
 
   return (
@@ -1328,9 +1125,9 @@ function StatsTab({ applications, proposals, users }: {
                 <span className={`text-sm font-black w-6 text-center shrink-0 ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-700' : 'text-text-muted'}`}>
                   {i + 1}
                 </span>
-                <Avatar src={u.discord_avatar} name={u.discord_username || u.username} size={8} />
+                <Avatar src={u.discord_avatar} name={discordHandle(u)} size={8} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-text-primary text-xs font-semibold truncate">{u.discord_username || u.username}</p>
+                  <p className="text-text-primary text-xs font-semibold truncate">{discordHandle(u)}</p>
                   <p className="text-text-muted text-[10px]">{u.proposal_count} total</p>
                 </div>
                 <div className="text-right">

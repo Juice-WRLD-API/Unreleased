@@ -205,7 +205,7 @@ function InlineEditor({ initial, people, meId, onSave, onCancel }: {
               className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === mention.index ? 'bg-surface-overlay' : ''}`}
             >
               <ChatAvatar user={p} size={24} presence />
-              <span className="text-sm text-text-primary truncate">{p.display_name || p.username}</span>
+              <span className="text-sm text-text-primary truncate">{displayName(p)}</span>
               <span className="text-xs text-text-muted truncate">@{p.username}</span>
             </button>
           ))}

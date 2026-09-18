@@ -18,7 +18,7 @@ import {
 import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
-import { cleanDate } from '../lib/format'
+import { cleanDate, accountDisplayName } from '../lib/format'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -1181,7 +1181,7 @@ export default function EditorPage({ initialSongId = null }: {
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${isAdmin ? 'bg-accent/20 text-accent' : 'bg-emerald-500/20 text-emerald-400'}`}>
           {isAdmin ? 'admin' : 'editor'}
         </span>
-        <span className="text-text-muted opacity-75 text-xs truncate max-w-[140px]">{account.display_name || account.discord_username}</span>
+        <span className="text-text-muted opacity-75 text-xs truncate max-w-[140px]">{accountDisplayName(account)}</span>
         <button onClick={() => logoutAccount()} className="text-text-muted opacity-65 hover:opacity-100 text-xs transition-colors">Sign out</button>
       </div>
 

@@ -1,51 +1,29 @@
-import { useState, useCallback } from 'react'
-import { useStrictModeSafeEffect } from '../hooks/useStrictModeSafeEffect'
+import { useState } from 'react'
 import {
   Loader2, Plus, Check, AlertCircle, Radio, Users, ChevronLeft, Pencil, Power, X,
 } from 'lucide-react'
-import * as channelApi from '../lib/channelApi'
-import type { Channel, ChannelMembershipRow } from '../lib/channelApi'
-import * as userApi from '../lib/userApi'
+import type { Channel } from '../lib/channelApi'
 import type { AdminUser } from '../lib/userApi'
-import { useStore } from '../store/useStore'
+import { discordHandle } from '../lib/format'
 import { Empty } from './adminShared'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { Sheet, SheetItem } from './mobile/Sheet'
+import {
+  MEMBER_FLAGS, useChannelList, useToggleChannelActive, useChannelMembers,
+  useCreateChannel, useEditChannel,
+} from '../hooks/useChannelsAdmin'
 
 // Admin-only tab for managing Comp Channels - mirrors the master/detail
 // pattern the rest of AdminPage's mobile tabs use (a list that swaps for a
 // full-screen detail on tap, back button undoes it) rather than the desktop
 // build's permanent two-column split, which doesn't fit a phone width.
 
-const MEMBER_FLAGS: { key: keyof ChannelMembershipRow; label: string }[] = [
-  { key: 'editor_enabled', label: 'Editor' },
-  { key: 'contributor_enabled', label: 'Contributor' },
-  { key: 'manager_enabled', label: 'Manager' },
-  { key: 'auto_approve_proposals', label: 'Auto-approve edits' },
-  { key: 'auto_approve_comp_proposals', label: 'Auto-approve comp' },
-]
-
 function CreatePanel({ onCreated, onClose }: { onCreated: () => void; onClose: () => void }): JSX.Element {
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { name, setName, description, setDescription, busy, error, submit } = useCreateChannel(onCreated)
 
-  const submit = async (): Promise<void> => {
-    if (!name.trim() || busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      await channelApi.adminCreateChannel({ name: name.trim(), description: description.trim() })
-      setName('')
-      setDescription('')
-      onCreated()
-      onClose()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the channel')
-    } finally {
-      setBusy(false)
-    }
+  const onSubmit = async (): Promise<void> => {
+    await submit()
+    onClose()
   }
 
   return (
@@ -68,7 +46,7 @@ function CreatePanel({ onCreated, onClose }: { onCreated: () => void; onClose: (
       />
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       <button
-        onClick={submit}
+        onClick={onSubmit}
         disabled={busy || !name.trim()}
         className="px-3 py-2 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 flex items-center gap-1.5"
       >
@@ -83,23 +61,11 @@ function CreatePanel({ onCreated, onClose }: { onCreated: () => void; onClose: (
 }
 
 function EditPanel({ channel, onSaved, onClose }: { channel: Channel; onSaved: () => void; onClose: () => void }): JSX.Element {
-  const [name, setName] = useState(channel.name)
-  const [description, setDescription] = useState(channel.description ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { name, setName, description, setDescription, busy, error, save } = useEditChannel(channel, onSaved)
 
-  const save = async (): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      await channelApi.adminUpdateChannel(channel.id, { name: name.trim(), description: description.trim() })
-      onSaved()
-      onClose()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes')
-    } finally {
-      setBusy(false)
-    }
+  const onSave = async (): Promise<void> => {
+    await save()
+    onClose()
   }
 
   return (
@@ -122,7 +88,7 @@ function EditPanel({ channel, onSaved, onClose }: { channel: Channel; onSaved: (
       />
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       <button
-        onClick={save}
+        onClick={onSave}
         disabled={busy || !name.trim()}
         className="px-3 py-2 rounded-xl bg-accent text-white text-xs font-semibold disabled:opacity-40 flex items-center gap-1.5"
       >
@@ -141,66 +107,16 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
   onBack: () => void
   onChanged: () => void
 }): JSX.Element {
-  const [members, setMembers] = useState<ChannelMembershipRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [busyUser, setBusyUser] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [addSheetOpen, setAddSheetOpen] = useState(false)
-  const [busyToggle, setBusyToggle] = useState(false)
+  const { members, loading, busyUser, error, setFlag, addable, addMember } = useChannelMembers(channel.id, users)
+  const { busyId: busyToggle, toggleActive } = useToggleChannelActive(onChanged)
 
   useBackToClose(onBack, !editing && !addSheetOpen)
 
-  const reload = useCallback(() => {
-    setLoading(true)
-    channelApi.adminListChannelMembers(channel.id)
-      .then(setMembers)
-      .catch(() => setMembers([]))
-      .finally(() => setLoading(false))
-  }, [channel.id])
-
-  useStrictModeSafeEffect(() => { reload() }, [reload])
-
-  const setFlag = async (userId: number, patch: Partial<ChannelMembershipRow>): Promise<void> => {
-    setBusyUser(userId)
-    setError(null)
-    try {
-      const row = await channelApi.adminSetChannelMember(channel.id, { user_id: userId, ...patch } as {
-        user_id: number
-        editor_enabled?: boolean
-        contributor_enabled?: boolean
-        manager_enabled?: boolean
-        auto_approve_proposals?: boolean
-        auto_approve_comp_proposals?: boolean
-      })
-      setMembers((prev) => {
-        const rest = prev.filter((m) => m.user_id !== userId)
-        return [...rest, row].sort((a, b) => a.username.localeCompare(b.username))
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update membership')
-    } finally {
-      setBusyUser(null)
-    }
-  }
-
-  const memberIds = new Set(members.map((m) => m.user_id))
-  const addable = users.filter((u) => !memberIds.has(u.user_id))
-
-  const addMember = async (userId: number): Promise<void> => {
+  const onAdd = async (userId: number): Promise<void> => {
     setAddSheetOpen(false)
-    await setFlag(userId, { editor_enabled: false })
-  }
-
-  const toggleActive = async (): Promise<void> => {
-    setBusyToggle(true)
-    try {
-      if (channel.is_active) await channelApi.adminDeactivateChannel(channel.id)
-      else await channelApi.adminUpdateChannel(channel.id, { is_active: true })
-      onChanged()
-    } finally {
-      setBusyToggle(false)
-    }
+    await addMember(userId)
   }
 
   return (
@@ -221,13 +137,13 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
               aria-label="Edit channel"
             ><Pencil size={15} /></button>
             <button
-              onClick={toggleActive}
-              disabled={busyToggle}
+              onClick={() => toggleActive(channel)}
+              disabled={busyToggle === channel.id}
               className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
                 channel.is_active ? 'text-red-400 active:bg-red-500/10' : 'text-emerald-400 active:bg-emerald-500/10'
               }`}
               aria-label={channel.is_active ? 'Deactivate channel' : 'Reactivate channel'}
-            >{busyToggle ? <Loader2 size={15} className="animate-spin" /> : <Power size={15} />}</button>
+            >{busyToggle === channel.id ? <Loader2 size={15} className="animate-spin" /> : <Power size={15} />}</button>
           </>
         )}
       </div>
@@ -273,7 +189,7 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
                   return (
                     <button
                       key={key as string}
-                      onClick={() => setFlag(m.user_id, { [key]: !on } as Partial<ChannelMembershipRow>)}
+                      onClick={() => setFlag(m.user_id, { [key]: !on })}
                       disabled={busyUser === m.user_id}
                       className={`px-2.5 py-1 rounded-md text-[10px] font-semibold border transition-colors flex items-center gap-1 ${
                         on
@@ -300,8 +216,8 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
               <SheetItem
                 key={u.user_id}
                 icon={Users}
-                label={u.discord_username || u.username}
-                onClick={() => addMember(u.user_id)}
+                label={discordHandle(u)}
+                onClick={() => onAdd(u.user_id)}
               />
             ))
           )}
@@ -314,26 +230,9 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
 // ── List ─────────────────────────────────────────────────────────────────────
 
 export default function ChannelsTab(): JSX.Element {
-  const loadChannels = useStore((s) => s.loadChannels)
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const [loading, setLoading] = useState(true)
+  const { channels, users, loading, reload } = useChannelList()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [creating, setCreating] = useState(false)
-
-  const reload = useCallback(() => {
-    setLoading(true)
-    Promise.all([
-      channelApi.fetchChannelList().catch(() => [] as Channel[]),
-      userApi.adminListUsers().catch(() => [] as AdminUser[]),
-    ]).then(([chs, us]) => {
-      setChannels(chs)
-      setUsers(us)
-    }).finally(() => setLoading(false))
-    loadChannels().catch(() => {})
-  }, [loadChannels])
-
-  useStrictModeSafeEffect(() => { reload() }, [reload])
 
   const selected = channels.find((c) => c.id === selectedId) ?? null
 

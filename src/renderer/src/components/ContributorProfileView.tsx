@@ -7,6 +7,7 @@ import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useMyCompProposals } from '../hooks/useMyCompProposals'
 import CompProposalList, { CompFilterBar, filterCompProposals } from './CompProposalList'
 import { updateDisplayName } from '../lib/userApi'
+import { accountDisplayName, initial } from '../lib/format'
 
 // A contributor-only account's home. Reviewing other people's proposals is
 // deliberately NOT here - that queue lives in exactly one place, the Admin
@@ -32,7 +33,7 @@ export default function ContributorProfileView(): JSX.Element {
   const [nameError, setNameError] = useState<string | null>(null)
 
   function startEditName(): void {
-    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameInput(accountDisplayName(account))
     setNameError(null)
     setEditingName(true)
   }
@@ -99,7 +100,7 @@ export default function ContributorProfileView(): JSX.Element {
                 <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
               ) : (
                 <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold shrink-0">
-                  {(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}
+                  {initial(accountDisplayName(account))}
                 </div>
               )}
               <div className="min-w-0">
@@ -136,7 +137,7 @@ export default function ContributorProfileView(): JSX.Element {
                   </div>
                 ) : (
                   <h2 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
-                    {account.display_name || account.discord_username}
+                    {accountDisplayName(account)}
                     <button
                       onClick={startEditName}
                       className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"

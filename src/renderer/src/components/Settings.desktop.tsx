@@ -22,7 +22,7 @@ import {
 } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, setNotificationSoundId, playNotificationSound } from '../lib/notifications'
-import { formatBytes } from '../lib/format'
+import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import type { ViewType } from '../types'
 import ReportForm from './ReportForm'
 import LegalModal, { type LegalDoc } from './LegalModal'
@@ -354,7 +354,7 @@ export default function Settings(): JSX.Element {
   }
 
   function startEditName(): void {
-    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameInput(accountDisplayName(account))
     setNameError(null)
     setEditingName(true)
   }
@@ -812,7 +812,7 @@ export default function Settings(): JSX.Element {
                           <img src={account.avatar} alt="" className="w-16 h-16 rounded-full object-cover ring-2 ring-[var(--border)]" />
                         ) : (
                           <div className="w-16 h-16 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xl font-bold">
-                            {(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}
+                            {initial(accountDisplayName(account))}
                           </div>
                         )}
                         <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface opacity-0 group-hover:opacity-100 transition-opacity">
@@ -844,7 +844,7 @@ export default function Settings(): JSX.Element {
                           </div>
                         ) : (
                           <button onClick={startEditName} className="flex items-center gap-1.5 group/name">
-                            <span className="text-text-primary text-base font-bold truncate">{account.display_name || account.discord_username}</span>
+                            <span className="text-text-primary text-base font-bold truncate">{accountDisplayName(account)}</span>
                             <Pencil size={11} className="text-text-muted opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />
                           </button>
                         )}

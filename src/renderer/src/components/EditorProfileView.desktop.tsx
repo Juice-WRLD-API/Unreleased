@@ -1,26 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
+import { useRef } from 'react'
 import {
   Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
-  Users, Shield, Pencil, Check,
+  Pencil, Check,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers, updateDisplayName, updateAvatar, compressImageFile } from '../lib/userApi'
-import * as reportsApi from '../lib/reportsApi'
-import { fetchEraList } from '../lib/erasApi'
+import { accountDisplayName, initial } from '../lib/format'
 import ReportsTab from './ReportsTab'
-import type { AdminTab } from '../hooks/useAdminQueue'
-import CompProposalList, { CompFilterBar, filterCompProposals, compProposalSearchText, type CompFilterTab } from './CompProposalList'
+import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
 import ProposalListItem from './ProposalListItem'
 import AddSongModal from './AddSongModal.desktop'
-import { useStaffRoles } from '../hooks/useStaffRoles'
-import { useMyProposals } from '../hooks/useMyProposals'
 import { useLeaderboard } from '../hooks/useLeaderboard'
-import { useMyCompProposals } from '../hooks/useMyCompProposals'
-import { useReportsQueue } from '../hooks/useReportsQueue'
-import { RANK_STYLES, type ProposalFilterTab } from '../lib/proposalSearch'
+import { useEditorProfileView, PROPOSAL_FILTER_TABS } from '../hooks/useEditorProfileView'
+import { RANK_STYLES } from '../lib/proposalSearch'
 
 // Bento tile grid - replaces the v1 header+tabs+single-panel layout (see
 // "Visual Redesign v2 - Bento Dashboard Pivot" in the rewrite plan). Reuses
@@ -29,6 +22,9 @@ import { RANK_STYLES, type ProposalFilterTab } from '../lib/proposalSearch'
 // while staying consistent with where the rest of the app is heading.
 // Everything below is height-bound (h-full inside App's fixed-height
 // <main>), not page-scrolling - individual tiles scroll internally.
+//
+// All data/state lives in useEditorProfileView (shared with the mobile
+// variant) - this file is just the desktop bento layout on top of it.
 
 function AdminStatBox({ label, value, highlight, onClick }: {
   label: string
@@ -102,227 +98,24 @@ function LeaderboardRows({ entries, myUsername }: {
 }
 
 export default function EditorProfileView(): JSX.Element {
-  const { account, setActiveView, setActiveAdminTab, setPendingEditorSongId, setPendingEditProposal, activeChannel, channels, setActiveChannel, loadChannels } = useStore(useShallow(s => ({
-    account: s.account,
-    setActiveView: s.setActiveView,
-    setActiveAdminTab: s.setActiveAdminTab,
-    setPendingEditorSongId: s.setPendingEditorSongId,
-    setPendingEditProposal: s.setPendingEditProposal,
-    activeChannel: s.activeChannel,
-    channels: s.channels,
-    setActiveChannel: s.setActiveChannel,
-    loadChannels: s.loadChannels,
-  })))
+  const {
+    account, setActiveView, activeChannel, channels, setActiveChannel,
+    editingName, nameInput, setNameInput, savingName, nameError, startEditName, saveDisplayName, cancelEditName,
+    avatarUploading, avatarError, handleAvatarFile,
+    refreshKey, setRefreshKey, showAddSong, setShowAddSong, openAdmin,
+    proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
+    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff,
+    loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
+    filteredProposals, handleDelete, handleResubmit, tabCount, proposals,
+    leaderboard, loadingLeaderboard, myEntry,
+    loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
+    compTabCount, filteredCompProposals,
+    reports, reportStatus, setReportStatus, loadingReports,
+    adminPreview, otpLocked, handleEdit,
+  } = useEditorProfileView()
   const go = setActiveView
 
-  const [editingName, setEditingName] = useState(false)
-  const [nameInput, setNameInput] = useState('')
-  const [savingName, setSavingName] = useState(false)
-  const [nameError, setNameError] = useState<string | null>(null)
-
   const avatarInputRef = useRef<HTMLInputElement>(null)
-  const [avatarUploading, setAvatarUploading] = useState(false)
-  const [avatarError, setAvatarError] = useState<string | null>(null)
-
-  const handleAvatarFile = async (file: File): Promise<void> => {
-    setAvatarError(null)
-    setAvatarUploading(true)
-    try {
-      const base64 = await compressImageFile(file, 256, 200)
-      const updated = await updateAvatar(base64)
-      useStore.setState({ account: updated })
-    } catch {
-      setAvatarError('Could not update photo.')
-    }
-    setAvatarUploading(false)
-  }
-
-  function startEditName(): void {
-    setNameInput(account?.display_name || account?.discord_username || '')
-    setNameError(null)
-    setEditingName(true)
-  }
-
-  async function saveDisplayName(): Promise<void> {
-    const trimmed = nameInput.trim()
-    if (!trimmed || trimmed === account?.display_name) { setEditingName(false); return }
-    setSavingName(true)
-    setNameError(null)
-    try {
-      const updated = await updateDisplayName(trimmed)
-      useStore.setState({ account: updated })
-      setEditingName(false)
-    } catch {
-      setNameError('Could not save. Try again.')
-    } finally {
-      setSavingName(false)
-    }
-  }
-  // Every list on this page - my proposals, my comp proposals, the Admin
-  // tile's review queues - is already scoped to activeChannel (see the
-  // effects below and AdminPage). ApiFilesView is the only other place that
-  // lets a user change it; without a switcher here too, reviewing a second
-  // channel meant leaving the profile to flip it in Files first.
-  useEffect(() => { if (channels.length === 0) loadChannels().catch(() => {}) }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Read live in the admin-preview effect below without being a dependency
-  // of it - channels.length changes once loadChannels() resolves just after
-  // mount, and that used to re-run the whole admin fetch (a second /users
-  // request etc.) purely to update a count nothing else in that fetch needs.
-  const channelsRef = useRef(channels)
-  useEffect(() => { channelsRef.current = channels }, [channels])
-
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [showAddSong, setShowAddSong] = useState(false)
-  // A click on the Admin tile's own stat boxes used to expand an embedded
-  // AdminPage in place on this page - that read as a cramped "tile" for a
-  // wide layout like the Users master/detail view, so this now leaves the
-  // page entirely for the real standalone console at its own deep link
-  // (e.g. /users), same as typing the URL would.
-  const openAdmin = (tab: AdminTab): void => {
-    setActiveAdminTab(tab)
-    setActiveView('admin')
-  }
-  // Which content the merged Proposals/Comp tile shows - only contributors
-  // ever see the toggle (non-contributors have no comp proposals to switch
-  // to), so this stays 'songs' for everyone else.
-  const [proposalsView, setProposalsView] = useState<'songs' | 'comp'>('songs')
-  // Which "My Proposals" row (if any) has its data expanded - accordion-style,
-  // so opening one closes whatever was already open instead of stacking diffs.
-  const [expandedProposalId, setExpandedProposalId] = useState<number | null>(null)
-  const [compSearch, setCompSearch] = useState('')
-
-  // Not `|| is_administrator`: this tile lists proposals *you* submitted, and
-  // an admin who never contributed has none. Their review queue is the Admin
-  // tile's "Comp files" - the one place proposals are reviewed. Managers
-  // review the same two queues admins do, so they get the same embedded
-  // panel here. Scoped to the active channel - a manager grant on one
-  // channel shouldn't leave this tile visible (and then erroring) on a
-  // channel they don't actually manage.
-  const { isContributor, isAdmin, isManager, canReviewReports, canReviewStaff } = useStaffRoles(account, activeChannel, channels)
-
-  const {
-    proposals, loading: loadingProposals, refreshing,
-    filter, setFilter, search, setSearch, deletingId, resubmittingId,
-    filteredProposals, handleDelete, handleResubmit, tabCount,
-  } = useMyProposals(activeChannel, refreshKey)
-
-  const { leaderboard, loading: loadingLeaderboard, myEntry } = useLeaderboard(refreshKey, activeChannel, account?.discord_username)
-
-  // Grid mode has no "active tab" gating a tile's own fetch - every visible
-  // tile is live at once - so this is gated on the role condition alone
-  // (still exactly the role-gating logic from before, just not additionally
-  // gated on tab selection).
-  const {
-    compProposals, loading: loadingComp, filter: compFilter, setFilter: setCompFilter,
-    withdrawingId: withdrawingCompId, handleWithdraw: handleWithdrawComp,
-  } = useMyCompProposals(isContributor, activeChannel, refreshKey, () => setRefreshKey(k => k + 1))
-
-  const compTabCount = (tab: CompFilterTab): number => filterCompProposals(compProposals, tab).length
-
-  const filteredCompProposals = useMemo(() => {
-    const byStatus = filterCompProposals(compProposals, compFilter)
-    const q = compSearch.trim().toLowerCase()
-    if (!q) return byStatus
-    return byStatus.filter(p => compProposalSearchText(p).includes(q))
-  }, [compProposals, compFilter, compSearch])
-
-  const {
-    reports, status: reportStatus, setStatus: setReportStatus, loading: loadingReports,
-  } = useReportsQueue(canReviewReports, refreshKey)
-
-  // Preview stats for the Admin/Manager tile - one per section of the queues
-  // it opens into. Deliberately its own fetch rather than reusing
-  // useAdminQueue: that hook only ever loads whichever tab is active inside
-  // AdminPage, so pulling eight counts out of it here would mean cycling
-  // through every tab just to populate a tile preview. Managers only ever see
-  // Song edits + Comp files in their own nav (see useAdminQueue's
-  // managerNavIds), so the admin-only sections (applications/users) are
-  // skipped for them rather than fetched against endpoints that would 403.
-  const [adminPreview, setAdminPreview] = useState<{
-    pendingProposals: number
-    pendingComp: number
-    pendingApplications: number | null
-    pendingReports: number | null
-    totalUsers: number | null
-    totalChannels: number
-    totalEras: number | null
-    totalPending: number
-    otpEnabled: boolean | null
-    totalProposals: number | null
-    approvedProposals: number | null
-    approvalPct: number | null
-    editors: number | null
-    managers: number | null
-    applicants: number | null
-  } | null>(null)
-  useEffect(() => {
-    if (!canReviewStaff) { setAdminPreview(null); return }
-    let cancelled = false
-    // Deferred by one microtask so React StrictMode's dev-only synchronous
-    // double-invoke (mount → cleanup → remount) skips firing the actual
-    // network requests on the first, soon-to-be-cleaned-up pass - cleanup
-    // sets `cancelled` before this queued callback runs, so only the second
-    // (real) invocation's requests go out. Same "guard the redundant re-run"
-    // idea as Player.tsx's StrictMode comment, applied to a fetch instead of
-    // an audio-src assignment.
-    Promise.resolve().then(() => {
-      if (cancelled) return
-      Promise.all([
-        adminProposalCounts(activeChannel),
-        adminCompProposalCounts(activeChannel),
-        isAdmin ? adminListApplications('pending') : Promise.resolve(null),
-        isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
-        isAdmin ? adminListUsers() : Promise.resolve(null),
-        isAdmin ? fetchEraList() : Promise.resolve(null),
-      ]).then(([propCounts, compCounts, apps, reps, users, eras]) => {
-        if (cancelled) return
-        const pendingApplications = apps?.length ?? null
-        const pendingReports = reps?.length ?? null
-        const reviewed = propCounts.total - propCounts.pending
-        setAdminPreview({
-          pendingProposals: propCounts.pending,
-          pendingComp: compCounts.pending,
-          pendingApplications,
-          pendingReports,
-          totalUsers: users?.length ?? null,
-          totalChannels: channelsRef.current.length,
-          totalEras: eras?.length ?? null,
-          totalPending: propCounts.pending + compCounts.pending + (pendingApplications ?? 0) + (pendingReports ?? 0),
-          otpEnabled: isAdmin ? !!account?.otp_enabled : null,
-          totalProposals: isAdmin ? propCounts.total : null,
-          approvedProposals: isAdmin ? propCounts.approved : null,
-          approvalPct: isAdmin ? (reviewed > 0 ? Math.round(propCounts.approved / reviewed * 100) : 0) : null,
-          editors: users ? users.filter(u => u.role === 'editor').length : null,
-          managers: users ? users.filter(u => !!u.manager_enabled).length : null,
-          applicants: users ? users.filter(u => u.role === 'applicant').length : null,
-        })
-      }).catch(() => { if (!cancelled) setAdminPreview(null) })
-    })
-    return () => { cancelled = true }
-    // channels.length deliberately excluded - see channelsRef comment above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canReviewStaff, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
-
-  // Admins without 2FA get everything in the Admin tile hidden except the
-  // Security box itself, so a compromised (password-only) admin account
-  // can't be used to browse or act on admin-only data from this dashboard.
-  const otpLocked = isAdmin && adminPreview?.otpEnabled === false
-
-  const handleEdit = (p: SongEditProposal): void => {
-    // p.song is null for 'create' proposals (new song, no backing record yet) -
-    // EditorPage handles that case, so don't block it here.
-    setPendingEditProposal({ id: p.id, songId: p.song, proposedData: p.proposed_data, editorNotes: p.editor_notes || '' })
-    setPendingEditorSongId(p.song)
-    go('editor')
-  }
-
-  const FILTER_TABS: { key: ProposalFilterTab; label: string }[] = [
-    { key: 'all',      label: 'All' },
-    { key: 'pending',  label: 'Pending' },
-    { key: 'approved', label: 'Approved' },
-    { key: 'rejected', label: 'Rejected' },
-  ]
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -392,7 +185,7 @@ export default function EditorProfileView(): JSX.Element {
                           <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--border)]" />
                         ) : (
                           <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold">
-                            {(account?.display_name || account?.discord_username || '?').charAt(0).toUpperCase()}
+                            {initial(accountDisplayName(account))}
                           </div>
                         )}
                         <span className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface opacity-0 group-hover:opacity-100 transition-opacity">
@@ -409,7 +202,7 @@ export default function EditorProfileView(): JSX.Element {
                               onChange={(e) => setNameInput(e.target.value)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') saveDisplayName()
-                                if (e.key === 'Escape') setEditingName(false)
+                                if (e.key === 'Escape') cancelEditName()
                               }}
                               maxLength={50}
                               disabled={savingName}
@@ -424,7 +217,7 @@ export default function EditorProfileView(): JSX.Element {
                               {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
                             </button>
                             <button
-                              onClick={() => setEditingName(false)}
+                              onClick={cancelEditName}
                               disabled={savingName}
                               className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
                               title="Cancel"
@@ -434,7 +227,7 @@ export default function EditorProfileView(): JSX.Element {
                           </div>
                         ) : (
                           <h1 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
-                            {account?.display_name || account?.discord_username || 'My Profile'}
+                            {accountDisplayName(account, 'My Profile')}
                             <button
                               onClick={startEditName}
                               className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
@@ -547,7 +340,7 @@ export default function EditorProfileView(): JSX.Element {
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {FILTER_TABS.map(({ key, label }) => {
+                      {PROPOSAL_FILTER_TABS.map(({ key, label }) => {
                         const count = tabCount(key)
                         const active = filter === key
                         return (

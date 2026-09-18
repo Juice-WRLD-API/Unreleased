@@ -4,7 +4,7 @@ import { X, Info } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { cacheStats } from '../lib/apiCache'
 import type { Track } from '../types'
-import { formatBytes } from '../lib/format'
+import { formatBytes, accountDisplayName } from '../lib/format'
 import { APP_VERSION } from '../lib/appVersion'
 
 function localStorageBytes(): number {
@@ -176,7 +176,7 @@ export default function DiagnosticsModal(): JSX.Element {
 
           <Section title="Account">
             <R label="Logged in" value={account ? 'yes' : 'no'} />
-            {account && <R label="User" value={account.display_name || account.discord_username} />}
+            {account && <R label="User" value={accountDisplayName(account)} />}
             {account && <R label="Role" value={account.is_administrator ? 'administrator' : account.is_manager ? 'manager' : account.is_editor ? 'editor' : account.is_contributor ? 'contributor' : 'standard'} />}
             <R label="Playlists" value={String(playlists.length)} />
             <R label="Liked songs" value={String(likedTrackIds.length)} />

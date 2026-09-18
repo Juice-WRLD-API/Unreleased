@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, Loader2, RefreshCw } from 'lucide-react'
-import { roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import MessageItem from './MessageItem'
@@ -35,7 +35,7 @@ function SeenBy({ users }: { users: ChatUserBrief[] }): JSX.Element {
   // style per-sender, so this indents to line up under the message text
   // instead of floating on the opposite side of the room.
   return (
-    <div className="flex gap-3 px-4 md:px-5 pt-1" title={`Seen by ${users.map((u) => u.display_name || u.username).join(', ')}`}>
+    <div className="flex gap-3 px-4 md:px-5 pt-1" title={`Seen by ${users.map(displayName).join(', ')}`}>
       <span className="w-9 shrink-0" />
       <div className="flex items-center gap-1">
         {users.slice(0, 5).map((u) => <ChatAvatar key={u.id} user={u} size={14} />)}

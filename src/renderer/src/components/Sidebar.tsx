@@ -9,6 +9,7 @@ import { orderedNavItems, isNavItemVisible, orderedNavControls, isNavControlVisi
 import { preloadView } from '../lib/lazyViews'
 import { hasChatAccess } from '../store/chatStore'
 import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { accountDisplayName, initial } from '../lib/format'
 
 const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
@@ -189,14 +190,14 @@ export default function Sidebar(): JSX.Element {
       case 'profile':
         if (!account || !showStaffProfile(account)) return null
         return (
-          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={collapsed ? (account.display_name || account.discord_username) : undefined} className={rowCls}>
+          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={collapsed ? accountDisplayName(account) : undefined} className={rowCls}>
             <span className={`${iconWrap} relative`}>
               {account.avatar
                 ? <img src={account.avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
-                : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+                : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{initial(accountDisplayName(account))}</div>}
               {tokenCopied && <span className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Check size={12} className="text-emerald-400" /></span>}
             </span>
-            <span aria-hidden={collapsed} className={labelCls}>{tokenCopied ? 'Token copied!' : (account.display_name || account.discord_username)}</span>
+            <span aria-hidden={collapsed} className={labelCls}>{tokenCopied ? 'Token copied!' : accountDisplayName(account)}</span>
           </button>
         )
       case 'uploads':
@@ -244,10 +245,10 @@ export default function Sidebar(): JSX.Element {
       case 'profile':
         if (!account || !showStaffProfile(account)) return null
         return (
-          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={tokenCopied ? 'Token copied!' : (account.display_name || account.discord_username)} className={`${barIconBtn} hover:bg-transparent hover:opacity-80 relative`}>
+          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={tokenCopied ? 'Token copied!' : accountDisplayName(account)} className={`${barIconBtn} hover:bg-transparent hover:opacity-80 relative`}>
             {account.avatar
               ? <img src={account.avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
-              : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+              : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{initial(accountDisplayName(account))}</div>}
             {tokenCopied && <span className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Check size={12} className="text-emerald-400" /></span>}
           </button>
         )
