@@ -1,12 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { AtSign, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { parseChatCommand, type ParsedChatCommand } from '../../lib/chatCommands'
+import { CHAT_COMMANDS, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeSongShare } from '../../lib/chatShare'
-import { resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
+import { CATEGORY_LABELS, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
 import { allSkins } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
@@ -66,6 +66,7 @@ const Composer = forwardRef<ComposerHandle, {
   const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
   const [commandBusy, setCommandBusy] = useState<string | null>(null)
   const [searchPick, setSearchPick] = useState<{ query: string; results: JWApiSong[]; index: number } | null>(null)
+  const [slashQuery, setSlashQuery] = useState<{ query: string; index: number } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const typingSentAt = useRef(0)
@@ -154,6 +155,34 @@ const Composer = forwardRef<ComposerHandle, {
     else setMention(null)
   }
 
+  // Only offers to autocomplete while the caret is still inside the command
+  // word itself (no space typed yet) at the very start of the message - once
+  // args start, or if this isn't the whole message, it gets out of the way.
+  const slashCandidates = useMemo(() => {
+    if (!slashQuery) return []
+    const q = slashQuery.query.toLowerCase()
+    return CHAT_COMMANDS.filter((c) => c.name.startsWith(q))
+  }, [slashQuery])
+
+  const updateSlashQuery = (value: string, caret: number): void => {
+    const match = /^\/(\w*)$/.exec(value.slice(0, caret))
+    if (match && caret === value.length && !replyTo && files.length === 0) {
+      setSlashQuery({ query: match[1].toLowerCase(), index: 0 })
+    } else {
+      setSlashQuery(null)
+    }
+  }
+
+  const applySlashCommand = (info: ChatCommandInfo): void => {
+    const insert = `/${info.name} `
+    setText(insert)
+    setSlashQuery(null)
+    requestAnimationFrame(() => {
+      textarea.current?.focus()
+      textarea.current?.setSelectionRange(insert.length, insert.length)
+    })
+  }
+
   const emojiCandidates = useMemo(() => {
     if (!emojiQuery) return []
     const q = emojiQuery.query.toLowerCase()
@@ -222,7 +251,7 @@ const Composer = forwardRef<ComposerHandle, {
 
   const runHelpCommand = (): void => {
     toast(
-      'Commands: /song <title>, /search <title>, /np, /theme <name>, /mute @user, /unmute @user, /promote @user, /feedback <message>',
+      'Commands: /song <title>, /search <title>, /info <title>, /np, /theme <name>, /mute @user, /unmute @user, /promote @user, /kick @user, /feedback <message>',
       'ok',
     )
   }
@@ -260,6 +289,20 @@ const Composer = forwardRef<ComposerHandle, {
     toast('Feedback sent - thanks!', 'ok')
   }
 
+  const runInfoCommand = async (args: string): Promise<void> => {
+    if (!args) { toast('Usage: /info <title>'); return }
+    const song = await resolveTitleToSong(args)
+    if (!song) { toast(`No song found for "${args}"`); return }
+    const lines = [
+      `**${song.name}**`,
+      `${song.era?.name ?? 'Unknown era'} · ${CATEGORY_LABELS[song.category] ?? song.category} · ${song.length}`,
+      song.credited_artists ? `Artists: ${song.credited_artists}` : null,
+      song.producers ? `Producers: ${song.producers}` : null,
+      song.release_date ? `Released: ${song.release_date}` : (song.date_leaked ? `Leaked: ${song.date_leaked}` : null),
+    ].filter((l): l is string => !!l)
+    await send(room, { text: lines.join('\n'), files: [] })
+  }
+
   const runPromoteCommand = async (args: string): Promise<void> => {
     const uname = args.replace(/^@/, '').trim()
     if (!uname) { toast('Usage: /promote @username'); return }
@@ -279,9 +322,28 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Promoted ${displayName(target)} to admin`, 'ok')
   }
 
-  // "/song <query>", "/search <query>", "/mute @user", "/unmute @user",
-  // "/theme <name>", "/np", "/promote @user", "/feedback <message>" and
-  // "/help" are recognized only when they are the entire message
+  const runKickCommand = async (args: string): Promise<void> => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) { toast('Usage: /kick @username'); return }
+    if (room.kind !== 'channel') { toast('/kick only works in a server channel'); return }
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) { toast("Could not find this channel's server"); return }
+    const canManage = cs.me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
+    if (!canManage) { toast("You don't have permission to kick members here"); return }
+    const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!target) { toast(`No one named "${uname}" here`); return }
+    if (target.id === meId) { toast("You can't kick yourself - use Leave server instead"); return }
+    if (target.id === server.owner) { toast("Can't kick the owner"); return }
+    await chatApi.removeMember(server.id, target.id)
+    await cs.loadMembers(server.id, true)
+    toast(`Kicked ${displayName(target)} from the server`, 'ok')
+  }
+
+  // "/song <query>", "/search <query>", "/info <query>", "/mute @user",
+  // "/unmute @user", "/theme <name>", "/np", "/promote @user", "/kick @user",
+  // "/feedback <message>" and "/help" are recognized only when they are the
+  // entire message
   // (no reply-in-progress, no attachments) - anything else starting with "/"
   // (a URL, a stray command someone typed) falls through and sends as a
   // normal text message, same as before this feature existed.
@@ -291,6 +353,7 @@ const Composer = forwardRef<ComposerHandle, {
     setMention(null)
     setEmojiQuery(null)
     setSearchPick(null)
+    setSlashQuery(null)
     drafts.delete(draftKey)
     stopTyping()
 
@@ -315,10 +378,14 @@ const Composer = forwardRef<ComposerHandle, {
           return
         }
         setSearchPick({ query: cmd.args, results, index: 0 })
+      } else if (cmd.command === 'info') {
+        await runInfoCommand(cmd.args)
       } else if (cmd.command === 'np') {
         await shareNowPlayingCommand()
       } else if (cmd.command === 'promote') {
         await runPromoteCommand(cmd.args)
+      } else if (cmd.command === 'kick') {
+        await runKickCommand(cmd.args)
       } else if (cmd.command === 'feedback') {
         await runFeedbackCommand(cmd.args)
       }
@@ -370,6 +437,20 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (slashQuery && slashCandidates.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setSlashQuery({ ...slashQuery, index: (slashQuery.index + dir + slashCandidates.length) % slashCandidates.length })
+        return
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        applySlashCommand(slashCandidates[slashQuery.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setSlashQuery(null); return }
+    }
     if (searchPick && searchPick.results.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -427,6 +508,28 @@ const Composer = forwardRef<ComposerHandle, {
 
   return (
     <div className={`relative ${compact ? 'px-3 pb-3' : 'px-4 md:px-5 pb-4'}`}>
+      {slashQuery && slashCandidates.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Commands</p>
+          <div className="max-h-64 overflow-y-auto chat-scroll">
+            {slashCandidates.map((c, i) => (
+              <button
+                key={c.name}
+                onMouseDown={(e) => { e.preventDefault(); applySlashCommand(c) }}
+                onMouseEnter={() => setSlashQuery({ ...slashQuery, index: i })}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === slashQuery.index ? 'bg-surface-overlay' : ''}`}
+              >
+                <Command size={14} className="shrink-0 text-text-muted" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-text-primary truncate">{c.usage}</span>
+                  <span className="block text-xs text-text-muted truncate">{c.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {searchPick && searchPick.results.length > 0 && (
         <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
           <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Results for "{searchPick.query}"</p>
@@ -575,12 +678,17 @@ const Composer = forwardRef<ComposerHandle, {
               setText(e.target.value)
               updateMention(e.target.value, e.target.selectionStart)
               updateEmojiQuery(e.target.value, e.target.selectionStart)
+              updateSlashQuery(e.target.value, e.target.selectionStart)
               if (e.target.value) noteTyping()
               else stopTyping()
             }}
             onKeyDown={onKeyDown}
-            onClick={(e) => { updateMention(text, e.currentTarget.selectionStart); updateEmojiQuery(text, e.currentTarget.selectionStart) }}
-            onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null); setSearchPick(null) }, 120) }}
+            onClick={(e) => {
+              updateMention(text, e.currentTarget.selectionStart)
+              updateEmojiQuery(text, e.currentTarget.selectionStart)
+              updateSlashQuery(text, e.currentTarget.selectionStart)
+            }}
+            onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null); setSearchPick(null); setSlashQuery(null) }, 120) }}
             onPaste={(e) => {
               const pasted = Array.from(e.clipboardData.files)
               if (pasted.length) {
