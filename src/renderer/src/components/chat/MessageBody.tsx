@@ -9,6 +9,7 @@ import { splitReplyRef } from '../../lib/chatReplyRef'
 import { decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
+import { EMOJI_IMG } from './emoji'
 import rehypeChatEmoji from './emojiRehype'
 import { linkMentions } from './people'
 import { useOpenUserCard } from './UserCard'
@@ -53,7 +54,9 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
     img: ({ src, alt, title, ...rest }) => {
       const emojiName = (rest as Record<string, unknown>)['data-emoji']
       if (typeof emojiName === 'string') {
-        return <img src={typeof src === 'string' ? src : undefined} alt={alt} title={title} draggable={false} className="inline-block h-[1.5em] w-[1.5em] align-[-0.3em] object-contain" />
+        // Re-resolve from our own table: urlTransform blanks the data: URLs
+        // Vite inlines the smaller PNGs as.
+        return <img src={EMOJI_IMG[emojiName]} alt={alt} title={title} draggable={false} className="inline-block h-[1.5em] w-[1.5em] align-[-0.3em] object-contain" />
       }
       return <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>
     },
