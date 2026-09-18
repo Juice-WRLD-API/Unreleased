@@ -1,6 +1,7 @@
 import { useStore, StagedSongChange } from '../store/useStore'
 import * as userApi from './userApi'
 import { invalidateLyricsCache } from '../components/Player'
+import { errorMessage } from './format'
 
 // Submits the song edit/delete proposals the Tracker's editors staged (see
 // the store's stagedSongChanges). Mirrors compStagedChanges.ts's file-change
@@ -40,7 +41,7 @@ export async function proposeStagedSongChanges(): Promise<{ proposed: number; fa
       }
       proposed++
     } catch (e) {
-      updateStagedSongChange(change.id, { error: e instanceof Error ? e.message : 'Could not propose this change' })
+      updateStagedSongChange(change.id, { error: errorMessage(e, 'Could not propose this change') })
       failed++
     }
   }

@@ -7,6 +7,7 @@ import {
   createNewsItem, updateNewsItem, uploadAttachment, isImageAttachment, MAX_ATTACHMENT_BYTES,
   type NewsItem, type NewsChannel, type NewsAttachment,
 } from '../lib/newsApi'
+import { errorMessage } from '../lib/format'
 
 // An attachment row in the composer: either one already hosted on the post
 // (kept as-is) or a freshly-picked local file (uploaded on publish).
@@ -105,7 +106,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
         : await createNewsItem(payload)
       onSaved(saved)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
+      setError(errorMessage(err, 'Failed to save'))
       setSaving(false)
     }
   }

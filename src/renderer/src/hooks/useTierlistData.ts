@@ -12,6 +12,7 @@ import {
   unsortedSongs, songsInTier, TIER_COLOR_PRESETS,
 } from '../lib/tierlist'
 import type { Tier, TierlistState } from '../lib/tierlist'
+import { errorMessage } from '../lib/format'
 
 const DEFAULT_CATEGORIES: PoolId[] = ['released', 'unreleased']
 
@@ -58,7 +59,7 @@ export function useTierlistData(): {
     setPoolError(null)
     loadPools(categories)
       .then((songs) => { if (!cancelled) setPool(songs) })
-      .catch((err) => { if (!cancelled) setPoolError(err instanceof Error ? err.message : 'Failed to load songs') })
+      .catch((err) => { if (!cancelled) setPoolError(errorMessage(err, 'Failed to load songs')) })
       .finally(() => { if (!cancelled) setPoolLoading(false) })
     return () => { cancelled = true }
   }, [categories])

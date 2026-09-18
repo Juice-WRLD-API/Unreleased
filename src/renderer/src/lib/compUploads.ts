@@ -1,6 +1,7 @@
 import { useStore } from '../store/useStore'
 import { createCompProposalUpload } from './userApi'
 import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from './compChunkedUpload'
+import { errorMessage } from './format'
 
 // Comp file proposals carry the actual file body - routinely a few hundred
 // megabytes - and used to be awaited inside the Contributor page's submit
@@ -122,7 +123,7 @@ async function runOne(job: QueuedJob): Promise<void> {
     useStore.getState().updateUpload(job.id, { state: 'done', percent: 100, speedBps: undefined })
     window.dispatchEvent(new CustomEvent(COMP_UPLOADS_CHANGED))
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Upload failed'
+    const msg = errorMessage(e, 'Upload failed')
     useStore.getState().updateUpload(job.id, msg === 'cancelled'
       ? { state: 'cancelled', speedBps: undefined }
       : { state: 'error', error: msg, speedBps: undefined })

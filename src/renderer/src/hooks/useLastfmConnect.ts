@@ -6,6 +6,7 @@
 // through shell.openExternal.
 import { useEffect, useRef, useState } from 'react'
 import { lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect } from '../lib/lastfm'
+import { errorMessage } from '../lib/format'
 
 export function useLastfmConnect(setLastfmUser: (name: string | null) => void): {
   lastfmBusy: boolean
@@ -46,11 +47,11 @@ export function useLastfmConnect(setLastfmUser: (name: string | null) => void): 
           if (session) { stopLastfmPoll(); setLastfmUser(session.name) }
         }).catch((e: unknown) => {
           stopLastfmPoll()
-          setLastfmError(e instanceof Error ? e.message : 'Connection failed')
+          setLastfmError(errorMessage(e, 'Connection failed'))
         })
       }, 5000)
     } catch (e) {
-      setLastfmError(e instanceof Error ? e.message : 'Connection failed')
+      setLastfmError(errorMessage(e, 'Connection failed'))
     } finally {
       setLastfmBusy(false)
     }

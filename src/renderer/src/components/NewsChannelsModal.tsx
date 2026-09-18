@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Plus, Check, Trash2, Pencil, Hash } from 'lucide-react'
 import { createChannel, updateChannel, deleteChannel, type NewsChannel } from '../lib/newsApi'
+import { errorMessage } from '../lib/format'
 
 interface Props {
   channels: NewsChannel[]
@@ -26,7 +27,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
       await fn()
       onChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setError(errorMessage(err, 'Something went wrong'))
     } finally {
       setBusy(false)
     }

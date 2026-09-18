@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import * as erasApi from '../lib/erasApi'
 import type { Era } from '../lib/erasApi'
+import { errorMessage } from '../lib/format'
 
 export function useEraList(): {
   eras: Era[]
@@ -28,7 +29,7 @@ export function useEraList(): {
         setEras(list)
         setSelectedId((prev) => (prev != null && list.some((e) => e.id === prev) ? prev : null))
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load eras'))
+      .catch((e) => setError(errorMessage(e, 'Failed to load eras')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -59,7 +60,7 @@ export function useCreateEra(onCreated: (era: Era) => void): {
       setName('')
       onCreated(era)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the era')
+      setError(errorMessage(e, 'Could not create the era'))
     } finally {
       setBusy(false)
     }
@@ -118,7 +119,7 @@ export function useEditEra(era: Era, onSaved: (era: Era) => void, onDeleted: () 
       })
       onSaved(updated)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes')
+      setError(errorMessage(e, 'Could not save changes'))
     } finally {
       setBusy(false)
     }
@@ -132,7 +133,7 @@ export function useEditEra(era: Era, onSaved: (era: Era) => void, onDeleted: () 
       await erasApi.adminDeleteEra(era.id)
       onDeleted()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete this era')
+      setError(errorMessage(e, 'Could not delete this era'))
       setDeleting(false)
     }
   }, [era.id, era.name, onDeleted])

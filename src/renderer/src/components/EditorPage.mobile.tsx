@@ -17,7 +17,7 @@ import {
 import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
-import { cleanDate, accountDisplayName } from '../lib/format'
+import { cleanDate, accountDisplayName, errorMessage } from '../lib/format'
 import { useEditorPageState } from '../hooks/useEditorPageState'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
@@ -981,7 +981,7 @@ const ApplicationView = memo(function ApplicationView({ application, loading, on
     if (motivation.trim().length < 20) { setError('Motivation must be at least 20 characters.'); return }
     setSubmitting(true)
     try { onSubmitted(await userApi.submitApplication({ display_name: displayName, contact, experience, motivation, areas, channel })) }
-    catch (e) { setError(e instanceof Error ? e.message : 'Submission failed') }
+    catch (e) { setError(errorMessage(e, 'Submission failed')) }
     finally { setSubmitting(false) }
   }
 

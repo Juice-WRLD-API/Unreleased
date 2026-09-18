@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getOtpSetup, confirmOtpSetup } from '../lib/userApi'
 import type { OtpSetupPayload } from '../lib/userApi'
+import { errorMessage } from '../lib/format'
 
 // State machine behind AdminPage's OtpSetupPanel (desktop + mobile render
 // slightly different JSX around this, so the JSX itself stays in each
@@ -15,7 +16,7 @@ export function useOtpGate(onEnabled: () => Promise<void>) {
   useEffect(() => {
     getOtpSetup()
       .then(setSetup)
-      .catch(e => setError(e instanceof Error ? e.message : 'Could not load'))
+      .catch(e => setError(errorMessage(e, 'Could not load')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -32,7 +33,7 @@ export function useOtpGate(onEnabled: () => Promise<void>) {
       await confirmOtpSetup(code)
       await onEnabled()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Verification failed')
+      setError(errorMessage(e, 'Verification failed'))
     } finally {
       setConfirming(false)
     }

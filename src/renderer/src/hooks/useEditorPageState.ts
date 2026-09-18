@@ -13,7 +13,7 @@ import {
 } from '../lib/versionsApi'
 import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
-import { cleanDate } from '../lib/format'
+import { cleanDate, errorMessage } from '../lib/format'
 import { diff, isGeniusUrl, extractGeniusLyrics } from '../lib/editorPageShared'
 
 export type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
@@ -242,7 +242,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
       setSong(s)
       populate(s)
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'Failed to load song')
+      setLoadError(errorMessage(e, 'Failed to load song'))
     } finally {
       setLoading(false)
       // Once a load completes (success or failure), `song` (if set) already
@@ -306,7 +306,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
       invalidateCompactGroupsCache()
       setVersionSaveStatus('saved')
     } catch (e) {
-      setLinkError(e instanceof Error ? e.message : 'Failed to save version info')
+      setLinkError(errorMessage(e, 'Failed to save version info'))
       setVersionSaveStatus('error')
     }
     setTimeout(() => setVersionSaveStatus('idle'), 2500)
@@ -333,7 +333,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
       getVersionGroup(song.id).then(g => setLinkedCount(g.length))
       setVersionSaveStatus('saved')
     } catch (e) {
-      setLinkError(e instanceof Error ? e.message : 'Failed to join version group')
+      setLinkError(errorMessage(e, 'Failed to join version group'))
       setVersionSaveStatus('error')
     }
     setTimeout(() => setVersionSaveStatus('idle'), 2500)
@@ -533,7 +533,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
       setTimeout(() => setSubmitState('idle'), 3000)
     } catch (e) {
       setSubmitState('error')
-      setSubmitError(e instanceof Error ? e.message : 'Submission failed')
+      setSubmitError(errorMessage(e, 'Submission failed'))
       setTimeout(() => setSubmitState('idle'), 4000)
     }
   }
@@ -553,7 +553,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
       setTimeout(() => setDeleteState('idle'), 3000)
     } catch (e) {
       setDeleteState('error')
-      setDeleteError(e instanceof Error ? e.message : 'Submission failed')
+      setDeleteError(errorMessage(e, 'Submission failed'))
       setTimeout(() => setDeleteState('idle'), 4000)
     }
   }

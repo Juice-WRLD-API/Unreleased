@@ -13,6 +13,7 @@ import {
   type NewsItem, type NewsChannel, type NewsAttachment, type NewsSort,
 } from '../lib/newsApi'
 import { isSubscribed, setSubscribed, ensureNotifyPermission } from '../lib/newsNotifications'
+import { errorMessage } from '../lib/format'
 import { hasChatAccess } from '../store/chatStore'
 import NewsComposeModal from './NewsComposeModal'
 import NewsChannelsModal from './NewsChannelsModal'
@@ -403,7 +404,7 @@ export default function NewsView(): JSX.Element {
       const res = await fetchNews({ channel, sort })
       setItems(res.results)
     } catch (err) {
-      if (!cached) setError(err instanceof Error ? err.message : 'Failed to load news')
+      if (!cached) setError(errorMessage(err, 'Failed to load news'))
     } finally {
       setLoading(false)
     }
@@ -502,7 +503,7 @@ export default function NewsView(): JSX.Element {
       setItems((prev) => prev.filter((i) => i.id !== item.id))
       if (selected?.id === item.id) closeArticle()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
+      setError(errorMessage(err, 'Failed to delete'))
     }
   }
 

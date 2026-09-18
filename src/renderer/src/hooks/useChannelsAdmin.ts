@@ -7,6 +7,7 @@ import type { Channel, ChannelMembershipRow } from '../lib/channelApi'
 import * as userApi from '../lib/userApi'
 import type { AdminUser } from '../lib/userApi'
 import { useStore } from '../store/useStore'
+import { errorMessage } from '../lib/format'
 
 export const MEMBER_FLAGS: { key: keyof ChannelMembershipRow; label: string }[] = [
   { key: 'editor_enabled', label: 'Editor' },
@@ -105,7 +106,7 @@ export function useChannelMembers(channelId: number, users: AdminUser[]): {
         return [...rest, row].sort((a, b) => a.username.localeCompare(b.username))
       })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update membership')
+      setError(errorMessage(e, 'Could not update membership'))
     } finally {
       setBusyUser(null)
     }
@@ -145,7 +146,7 @@ export function useCreateChannel(onCreated: () => void): {
       setDescription('')
       onCreated()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the channel')
+      setError(errorMessage(e, 'Could not create the channel'))
     } finally {
       setBusy(false)
     }
@@ -175,7 +176,7 @@ export function useEditChannel(channel: Channel, onSaved: () => void): {
       await channelApi.adminUpdateChannel(channel.id, { name: name.trim(), description: description.trim() })
       onSaved()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes')
+      setError(errorMessage(e, 'Could not save changes'))
     } finally {
       setBusy(false)
     }

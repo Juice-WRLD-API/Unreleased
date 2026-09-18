@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { CompFileProposal, ProposalStatus } from '../lib/userApi'
 import { getToken } from '../lib/userApi'
+import { errorMessage } from '../lib/format'
 
 /** Loads a comp-admin route's bytes into an object URL - the staging file
  *  isn't public like a live comp/ path, so it needs the same authed fetch
@@ -92,7 +93,7 @@ export function useCompProposalsQueue(
         setReviewNotes('')
       })
       .catch((e) => {
-        setLoadError(e instanceof Error ? e.message : 'Could not load comp proposals')
+        setLoadError(errorMessage(e, 'Could not load comp proposals'))
         // Don't leave the previous channel's list on screen underneath the
         // error - its approve/reject actions would still be live against the
         // wrong channel context.
@@ -128,7 +129,7 @@ export function useCompProposalsQueue(
       if (applyOptimistic) applyReviewResult(updated)
       reload()
     } catch (e) {
-      setError(e instanceof Error ? e.message : `Could not ${action} this proposal`)
+      setError(errorMessage(e, `Could not ${action} this proposal`))
     } finally {
       setActionId(null)
     }
@@ -166,7 +167,7 @@ export function useCompProposalsQueue(
       if (applyOptimistic) applyReviewResult(updated)
       reload()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not reverse this proposal')
+      setError(errorMessage(e, 'Could not reverse this proposal'))
     } finally {
       setActionId(null)
     }

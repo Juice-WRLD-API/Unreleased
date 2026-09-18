@@ -7,6 +7,7 @@ import {
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
 import { useStore } from '../store/useStore'
+import { errorMessage } from '../lib/format'
 
 function breadcrumbs(path: string): { label: string; path: string }[] {
   if (!path) return []
@@ -151,7 +152,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
       setCurrentPath(path)
       setEntries(parseBrowseEntries(data))
     } catch (err) {
-      if (!cached && resetSearch) setError(err instanceof Error ? err.message : 'Failed to load')
+      if (!cached && resetSearch) setError(errorMessage(err, 'Failed to load'))
     } finally {
       if (resetSearch) setLoading(false)
     }

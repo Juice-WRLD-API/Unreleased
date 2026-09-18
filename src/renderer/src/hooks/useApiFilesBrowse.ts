@@ -7,6 +7,7 @@ import {
 } from '../lib/juicewrldApi'
 import { parentFolder, pathToUrl, urlToPath } from '../lib/apiFilesShared'
 import type { JWApiChannel } from '../lib/juicewrldApi'
+import { errorMessage } from '../lib/format'
 
 export function useApiFilesBrowse(opts: {
   activeChannel: string
@@ -98,7 +99,7 @@ export function useApiFilesBrowse(opts: {
       if (requestId !== navigateRequestId.current) return
       // Keep the cached listing visible on a network failure - only surface the
       // error when we had nothing to show in the first place.
-      if (!cached) setError(err instanceof Error ? err.message : 'Failed to load')
+      if (!cached) setError(errorMessage(err, 'Failed to load'))
     } finally {
       if (requestId === navigateRequestId.current) setLoading(false)
     }

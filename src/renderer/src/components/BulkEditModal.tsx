@@ -11,7 +11,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { getVersionMetaForSongs, getOwnVersionMeta, setOwnVersionTitle, linkSongVersion, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
-import { cleanDate } from '../lib/format'
+import { cleanDate, errorMessage } from '../lib/format'
 
 // Bulk editor - one dialog, two sources:
 //
@@ -501,7 +501,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
         await spec.commit(target.item, target.patch, note)
       } catch (e) {
         failures.push(target)
-        lastError = e instanceof Error ? e.message : 'Failed'
+        lastError = errorMessage(e, 'Failed')
         setFailed(failures.length)
       } finally {
         setProgress(p => p + 1)
@@ -555,7 +555,7 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
       setCustomActionStatus(prev => ({ ...prev, [f.key]: 'done' }))
     } catch (e) {
       setCustomActionStatus(prev => ({ ...prev, [f.key]: 'error' }))
-      setCustomActionError(prev => ({ ...prev, [f.key]: e instanceof Error ? e.message : 'Failed' }))
+      setCustomActionError(prev => ({ ...prev, [f.key]: errorMessage(e, 'Failed') }))
     }
   }
 

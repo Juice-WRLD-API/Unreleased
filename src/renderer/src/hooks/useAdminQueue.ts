@@ -23,6 +23,7 @@ import type { AdminUser, EditorApplication, ProposalStatus, SongEditProposal } f
 import * as reportsApi from '../lib/reportsApi'
 import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
+import { errorMessage } from '../lib/format'
 
 export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'security' | 'channels' | 'eras'
 
@@ -140,7 +141,7 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load')
+      setError(errorMessage(e, 'Failed to load'))
       // Don't leave the previous channel's/tab's data on screen underneath the
       // error - it's stale and its action buttons (approve/reject etc.) would
       // still be live against the wrong channel context.

@@ -10,7 +10,7 @@ import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import type { CompFileProposal, CompProposalChangeType, EditorApplication } from '../lib/userApi'
 import type { ViewType } from '../types'
-import { formatBytes } from '../lib/format'
+import { formatBytes, errorMessage } from '../lib/format'
 import CompProposalList, { CompFilterBar, filterCompProposals, type CompFilterTab } from './CompProposalList'
 import FilePickerModal from './FilePickerModal'
 import { queueCompUploads, cancelCompUpload, COMP_UPLOADS_CHANGED } from '../lib/compUploads'
@@ -71,7 +71,7 @@ function ApplyPanel({ onSubmitted, rejection, channel }: { onSubmitted: () => vo
       setTimeout(onSubmitted, 1200)
     } catch (e) {
       setState('error')
-      setError(e instanceof Error ? e.message : 'Application failed')
+      setError(errorMessage(e, 'Application failed'))
       setTimeout(() => setState('idle'), 4000)
     }
   }
@@ -306,7 +306,7 @@ export default function ContributorPage(): JSX.Element {
         // Without this the latch never clears and the submit button stays dead
         // for the life of the page.
         setSubmitState('error')
-        setSubmitError(e instanceof Error ? e.message : 'Could not queue the upload')
+        setSubmitError(errorMessage(e, 'Could not queue the upload'))
         setTimeout(() => { setSubmitState('idle'); submitLatch.current = false }, 4000)
         return
       }
@@ -362,7 +362,7 @@ export default function ContributorPage(): JSX.Element {
       setTimeout(() => { setSubmitState('idle'); submitLatch.current = false }, 2000)
     } catch (e) {
       setSubmitState('error')
-      setSubmitError(e instanceof Error ? e.message : 'Submission failed')
+      setSubmitError(errorMessage(e, 'Submission failed'))
       setTimeout(() => { setSubmitState('idle'); submitLatch.current = false }, 4000)
     }
   }
@@ -374,7 +374,7 @@ export default function ContributorPage(): JSX.Element {
       await userApi.withdrawCompProposal(id)
       setProposals(prev => prev.filter(p => p.id !== id))
     } catch (e) {
-      setSubmitError(e instanceof Error ? e.message : 'Could not withdraw that proposal')
+      setSubmitError(errorMessage(e, 'Could not withdraw that proposal'))
     } finally {
       setWithdrawingId(null)
     }

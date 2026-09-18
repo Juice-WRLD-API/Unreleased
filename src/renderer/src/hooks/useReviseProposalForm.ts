@@ -4,6 +4,7 @@ import { useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { SongEditProposal } from '../lib/userApi'
 import { ALL_SONG_FIELDS } from '../lib/proposalRevise'
+import { errorMessage } from '../lib/format'
 
 export function useReviseProposalForm(proposal: SongEditProposal, channel: string | undefined, onDone: () => void): {
   fields: Record<string, string>
@@ -72,7 +73,7 @@ export function useReviseProposalForm(proposal: SongEditProposal, channel: strin
       })
       onDone()
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to revise')
+      setErr(errorMessage(e, 'Failed to revise'))
     } finally {
       setSaving(false)
     }

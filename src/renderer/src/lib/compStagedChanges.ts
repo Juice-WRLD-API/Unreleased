@@ -1,6 +1,7 @@
 import { useStore, StagedFileChange } from '../store/useStore'
 import * as userApi from './userApi'
 import { COMP_UPLOADS_CHANGED } from './compUploads'
+import { errorMessage } from './format'
 
 // Submits the file changes the Files tab staged by drag-and-drop (see the
 // store's stagedFileChanges). These carry no file body - a move is two paths -
@@ -49,7 +50,7 @@ export async function proposeStagedChanges(): Promise<{ proposed: number; failed
       unstageFileChange(change.id)
       proposed++
     } catch (e) {
-      updateStagedFileChange(change.id, { error: e instanceof Error ? e.message : 'Could not propose this change' })
+      updateStagedFileChange(change.id, { error: errorMessage(e, 'Could not propose this change') })
       failed++
     }
   }

@@ -8,6 +8,7 @@ import {
   fetchTrackerChanges, fetchCompChanges,
   type TrackerChange, type CompChange,
 } from '../lib/changesApi'
+import { errorMessage } from '../lib/format'
 
 type FeedTab = 'tracker' | 'comp'
 type ChangeRow = (TrackerChange | CompChange) & { timestamp: string | null }
@@ -193,7 +194,7 @@ export default function ChangesFeedPanel(): JSX.Element {
       if (which === 'tracker') setTracker(await fetchTrackerChanges())
       else setComp(await fetchCompChanges())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load changes')
+      setError(errorMessage(err, 'Failed to load changes'))
     } finally {
       setLoading(false)
     }

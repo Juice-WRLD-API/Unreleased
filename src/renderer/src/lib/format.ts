@@ -55,3 +55,8 @@ export function discordHandle(u: { discord_username?: string; username?: string 
 export function initial(name: string | null | undefined): string {
   return (name || '?').charAt(0).toUpperCase()
 }
+
+/** Unwraps a caught value's message, falling back for non-Error throws (e.g. a rejected string/object). */
+export function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}

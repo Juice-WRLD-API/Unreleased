@@ -8,6 +8,7 @@ import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album, Artist, AlbumSongEntry } from '../lib/albumsApi'
 import { useStorePick } from '../store/useStore'
+import { errorMessage } from '../lib/format'
 
 // Admin UI for the real Album catalog (GET/POST/PATCH/DELETE
 // /accounts/admin/albums/), replacing the old client-side wrlddata.json
@@ -174,7 +175,7 @@ function CreatePanel({ artists, onCreated }: { artists: Artist[]; onCreated: (a:
       setReleaseDate('')
       onCreated(album)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the album')
+      setError(errorMessage(e, 'Could not create the album'))
     } finally {
       setBusy(false)
     }
@@ -289,7 +290,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
       })
       onSaved(updated)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save changes')
+      setError(errorMessage(e, 'Could not save changes'))
     } finally {
       setBusy(false)
     }
@@ -303,7 +304,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
       await albumsApi.adminDeleteAlbum(album.id)
       onDeleted()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not delete this album')
+      setError(errorMessage(e, 'Could not delete this album'))
       setDeleting(false)
     }
   }
@@ -451,7 +452,7 @@ export default function AlbumsAdminView(): JSX.Element {
         setArtists(ar)
         setSelectedId(prev => (prev != null && al.some(a => a.id === prev) ? prev : null))
       })
-      .catch(e => setError(e instanceof Error ? e.message : 'Failed to load albums'))
+      .catch(e => setError(errorMessage(e, 'Failed to load albums')))
       .finally(() => setLoading(false))
   }, [isAdmin, otpEnabled])
 
@@ -526,7 +527,7 @@ export default function AlbumsAdminView(): JSX.Element {
                     await albumsApi.adminDeleteAlbum(album.id)
                     setAlbums(prev => prev.filter(a => a.id !== album.id))
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : 'Could not delete this album')
+                    setError(errorMessage(e, 'Could not delete this album'))
                   }
                 }}
               />

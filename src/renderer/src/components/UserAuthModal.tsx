@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { ModalOverlay } from './Modal'
 import { X, Loader2, AlertCircle, Heart, ListMusic } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
+import { errorMessage } from '../lib/format'
 
 interface Props {
   onClose: () => void
@@ -26,7 +27,7 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       await loginWithDiscord()
       onClose()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start Discord login')
+      setError(errorMessage(e, 'Could not start Discord login'))
     } finally {
       setLoading(false)
     }
@@ -49,7 +50,7 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       }
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.')
+      setError(errorMessage(err, 'Something went wrong. Try again.'))
     } finally {
       setLoading(false)
     }
