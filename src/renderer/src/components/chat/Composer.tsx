@@ -293,7 +293,7 @@ const Composer = forwardRef<ComposerHandle, {
               ) : (
                 <>
                   <ChatAvatar user={p} size={24} presence />
-                  <span className="text-sm text-text-primary truncate">{p.display_name || p.username}</span>
+                  <span className="text-sm text-text-primary truncate">{displayName(p)}</span>
                   <span className="text-xs text-text-muted truncate">@{p.username}</span>
                 </>
               )}
