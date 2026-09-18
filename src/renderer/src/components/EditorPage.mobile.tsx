@@ -18,6 +18,7 @@ import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
 import { cleanDate, accountDisplayName } from '../lib/format'
+import { useEditorPageState } from '../hooks/useEditorPageState'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
