@@ -9,25 +9,26 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
-import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
+import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { hasChatAccess } from '../store/chatStore'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
-import { getToken, CONTRIBUTOR_ENABLED, updateBio, updatePrivacySettings, updateDisplayName, updateAvatar, removeAvatar, compressImageFile } from '../lib/userApi'
+import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
-import {
-  lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
-} from '../lib/lastfm'
+import { lastfmConfigured } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
-import { NOTIFICATION_SOUNDS, getNotificationSoundId, setNotificationSoundId, playNotificationSound } from '../lib/notifications'
+import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import type { ViewType } from '../types'
 import ReportForm from './ReportForm'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import { useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import { useSettingsAccount } from '../hooks/useSettingsAccount'
+import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
+import { useLastfmConnect } from '../hooks/useLastfmConnect'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -268,11 +269,12 @@ function CommitFreshnessBulb(): JSX.Element | null {
 export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
-  const [bioSaving, setBioSaving] = useState(false)
-  const [privacyError, setPrivacyError] = useState<string | null>(null)
   const avatarInputRef = useRef<HTMLInputElement>(null)
-  const [avatarUploading, setAvatarUploading] = useState(false)
-  const [avatarError, setAvatarError] = useState<string | null>(null)
+  const {
+    avatarUploading, avatarError, handleAvatarFile, handleAvatarRemove,
+    bioDraft, setBioDraft, bioSaving, saveBio,
+    privacyError, togglePublicPlayHistory, togglePublicPlaylists, togglePublicNowPlaying,
+  } = useSettingsAccount()
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [savingName, setSavingName] = useState(false)
@@ -326,33 +328,6 @@ export default function Settings(): JSX.Element {
     uploads,
   } = useStorePick('setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'uploads')
 
-  const handleAvatarFile = async (file: File): Promise<void> => {
-    setAvatarError(null)
-    setAvatarUploading(true)
-    try {
-      const base64 = await compressImageFile(file, 256, 200)
-      const updated = await updateAvatar(base64)
-      useStore.setState({ account: updated })
-    } catch {
-      setAvatarError('Could not update photo. Try again.')
-    } finally {
-      setAvatarUploading(false)
-    }
-  }
-
-  const handleAvatarRemove = async (): Promise<void> => {
-    setAvatarError(null)
-    setAvatarUploading(true)
-    try {
-      const updated = await removeAvatar()
-      useStore.setState({ account: updated })
-    } catch {
-      setAvatarError('Could not remove photo. Try again.')
-    } finally {
-      setAvatarUploading(false)
-    }
-  }
-
   function startEditName(): void {
     setNameInput(accountDisplayName(account))
     setNameError(null)
@@ -375,65 +350,14 @@ export default function Settings(): JSX.Element {
     }
   }
 
-  // Bio - free text, saved on blur rather than per-keystroke.
-  const [bioDraft, setBioDraft] = useState(account?.bio ?? '')
-  useEffect(() => { setBioDraft(account?.bio ?? '') }, [account?.bio])
-  const saveBio = async (): Promise<void> => {
-    if (bioDraft === (account?.bio ?? '')) return
-    setBioSaving(true)
-    try {
-      const updated = await updateBio(bioDraft)
-      useStore.setState({ account: updated })
-    } catch {
-      setBioDraft(account?.bio ?? '')
-    } finally {
-      setBioSaving(false)
-    }
-  }
-
-  // Public profile toggles - optimistic, reverted on failure.
-  const togglePublicPlayHistory = async (): Promise<void> => {
-    if (!account) return
-    const next = !account.public_play_history
-    useStore.setState({ account: { ...account, public_play_history: next } })
-    setPrivacyError(null)
-    try {
-      const updated = await updatePrivacySettings({ public_play_history: next })
-      useStore.setState({ account: updated })
-    } catch {
-      useStore.setState({ account: { ...account, public_play_history: !next } })
-      setPrivacyError('Could not update. Try again.')
-    }
-  }
-  const togglePublicPlaylists = async (): Promise<void> => {
-    if (!account) return
-    const next = !account.public_playlists
-    useStore.setState({ account: { ...account, public_playlists: next } })
-    setPrivacyError(null)
-    try {
-      const updated = await updatePrivacySettings({ public_playlists: next })
-      useStore.setState({ account: updated })
-    } catch {
-      useStore.setState({ account: { ...account, public_playlists: !next } })
-      setPrivacyError('Could not update. Try again.')
-    }
-  }
-  const togglePublicNowPlaying = async (): Promise<void> => {
-    if (!account) return
-    const next = !account.public_now_playing
-    useStore.setState({ account: { ...account, public_now_playing: next } })
-    setPrivacyError(null)
-    try {
-      const updated = await updatePrivacySettings({ public_now_playing: next })
-      useStore.setState({ account: updated })
-    } catch {
-      useStore.setState({ account: { ...account, public_now_playing: !next } })
-      setPrivacyError('Could not update. Try again.')
-    }
-  }
-
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
-  const [customAccent, setCustomAccent] = useState(accentColor)
+  const {
+    customAccent, setCustomAccent, setAccentDebounced,
+    editingSkinId, setEditingSkinId, skinImportRef, skinImportError, createSkin, importSkinFile,
+    navRows, navIsDefault, resetNav, homeIsDefault, resetHome, moveNavItem,
+    notificationSound, chooseNotificationSound,
+    sleepMinutes, setSleepMinutes,
+    devices,
+  } = useSettingsAppearance()
   // Drag-to-reorder state for the "Menu order" list - indices into the visible
   // nav list (see shownNav below). null = nothing being dragged / hovered.
   const [navDragIdx, setNavDragIdx] = useState<number | null>(null)
@@ -441,79 +365,6 @@ export default function Settings(): JSX.Element {
   // Same, for the separate "Menu controls" list below.
   const [ctrlDragIdx, setCtrlDragIdx] = useState<number | null>(null)
   const [ctrlOverIdx, setCtrlOverIdx] = useState<number | null>(null)
-  const [sleepMinutes, setSleepMinutes] = useState(30)
-  const [notificationSound, setNotificationSoundState] = useState(getNotificationSoundId())
-  const chooseNotificationSound = (id: string): void => {
-    setNotificationSoundId(id)
-    setNotificationSoundState(id)
-    playNotificationSound(id)
-  }
-  const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Custom skins - which one the editor modal is open on (null = closed), the
-  // hidden file input for Import, and a transient "that file wasn't a skin"
-  // message shown under the section.
-  const [editingSkinId, setEditingSkinId] = useState<string | null>(null)
-  const skinImportRef = useRef<HTMLInputElement>(null)
-  const [skinImportError, setSkinImportError] = useState<string | null>(null)
-
-  // Clone the current look into a new editable skin, make it active (so the
-  // editor previews live), and open the editor on it.
-  const createSkin = (): void => {
-    const skin = createCustomSkin(getSkin(theme), 'My skin')
-    saveCustomSkin(skin)
-    setTheme(skin.id)
-    if (skin.accent) setCustomAccent(skin.accent)
-    setEditingSkinId(skin.id)
-  }
-
-  const importSkinFile = async (file: File): Promise<void> => {
-    setSkinImportError(null)
-    const skin = parseSkinFile(await file.text())
-    if (!skin) { setSkinImportError('That file isn’t a valid skin.'); return }
-    saveCustomSkin(skin)
-    setTheme(skin.id)
-    if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
-    setEditingSkinId(skin.id)
-  }
-  // ── Menu items (Appearance) ──────────────────────────────────────────────
-  // Every nav item in saved order - visible ones and the toggled-off extras
-  // alike - so the list is where you both reorder and show/hide.
-  // Pinned items (alwaysVisible) are listed too - they reorder like any other
-  // row - but they render without an eye, since isNavItemVisible short-circuits
-  // on them and a toggle there would silently do nothing.
-  const navRows = orderedNavItems(navOrder, hasChatAccess(account))
-  const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
-  const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
-  const navIsDefault = navOrderIsDefault && navVisIsDefault
-  const resetNav = (): void => {
-    setNavOrder(DEFAULT_NAV_ORDER)
-    for (const item of navRows) {
-      const def = DEFAULT_NAV_VISIBILITY[item.view] ?? true
-      if ((navVisibility[item.view] ?? true) !== def) setNavItemVisible(item.view, def)
-    }
-  }
-  const homeIsDefault = HOME_SECTIONS.every((s) => isHomeSectionVisible(s.id, homeSectionVisibility) === (DEFAULT_HOME_SECTION_VISIBILITY[s.id] ?? true))
-  const resetHome = (): void => {
-    for (const s of HOME_SECTIONS) {
-      const def = DEFAULT_HOME_SECTION_VISIBILITY[s.id] ?? true
-      if (isHomeSectionVisible(s.id, homeSectionVisibility) !== def) setHomeSectionVisible(s.id, def)
-    }
-  }
-  // Move a row to sit adjacent to a target row. Reordering happens on the FULL
-  // order (including any web-hidden items) so their relative spots are preserved
-  // even when a web user rearranges the visible ones.
-  const moveNavItem = (fromRow: number, toRow: number): void => {
-    if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder, true).map((i) => i.view)
-    const dragView = navRows[fromRow].view
-    const targetView = navRows[toRow].view
-    const from = full.indexOf(dragView)
-    const next = [...full]
-    next.splice(from, 1)
-    const targetIdx = next.indexOf(targetView)
-    next.splice(toRow > fromRow ? targetIdx + 1 : targetIdx, 0, dragView)
-    setNavOrder(next)
-  }
 
   // ── Menu controls - the foot-of-menu buttons (Profile, Uploads, Diagnostics,
   // Download, Settings). Same reorder/hide model, filtered to the controls
@@ -549,56 +400,9 @@ export default function Settings(): JSX.Element {
   // entry from one.
   const openMainView = (view: ViewType): void => setActiveView(view)
 
-  // ── Last.fm connect flow (desktop token auth): fetch a token, send the user
-  // to last.fm to approve it, then poll getSession until approval lands (it
-  // returns null while the token is still unapproved). window.open reaches the
-  // system browser in every context - the Electron windows' window-open
-  // handlers route it through shell.openExternal.
-  const [lastfmBusy, setLastfmBusy] = useState(false)
-  const [lastfmWaiting, setLastfmWaiting] = useState(false)
-  const [lastfmError, setLastfmError] = useState<string | null>(null)
-  const lastfmPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const stopLastfmPoll = (): void => {
-    if (lastfmPollRef.current) clearInterval(lastfmPollRef.current)
-    lastfmPollRef.current = null
-    setLastfmWaiting(false)
-  }
-  useEffect(() => () => { if (lastfmPollRef.current) clearInterval(lastfmPollRef.current) }, [])
-
-  const connectLastfm = async (): Promise<void> => {
-    setLastfmError(null)
-    setLastfmBusy(true)
-    try {
-      const token = await lastfmGetAuthToken()
-      window.open(lastfmAuthUrl(token), '_blank', 'noopener')
-      setLastfmWaiting(true)
-      const startedAt = Date.now()
-      lastfmPollRef.current = setInterval(() => {
-        // Tokens live ~60 minutes but nobody waits that long - give up well before.
-        if (Date.now() - startedAt > 5 * 60_000) {
-          stopLastfmPoll()
-          setLastfmError('Authorization timed out - try again.')
-          return
-        }
-        lastfmTryGetSession(token).then((session) => {
-          if (session) { stopLastfmPoll(); setLastfmUser(session.name) }
-        }).catch((e: unknown) => {
-          stopLastfmPoll()
-          setLastfmError(e instanceof Error ? e.message : 'Connection failed')
-        })
-      }, 5000)
-    } catch (e) {
-      setLastfmError(e instanceof Error ? e.message : 'Connection failed')
-    } finally {
-      setLastfmBusy(false)
-    }
-  }
-
-  const disconnectLastfm = (): void => {
-    lastfmDisconnect()
-    setLastfmUser(null)
-  }
+  const {
+    lastfmBusy, lastfmWaiting, lastfmError, connectLastfm, disconnectLastfm, stopLastfmPoll,
+  } = useLastfmConnect(setLastfmUser)
 
   // Which shortcut cell is currently "listening" for a key combo (null = none).
   const [recording, setRecording] = useState<{ id: string } | null>(null)
@@ -662,12 +466,6 @@ export default function Settings(): JSX.Element {
     setTab(settingsTab as Tab)
     setSettingsTab(null)
   }, [settingsTab, setSettingsTab])
-
-  useEffect(() => {
-    navigator.mediaDevices?.enumerateDevices().then((devs) => {
-      setDevices(devs.filter((d) => d.kind === 'audiooutput'))
-    }).catch(() => {})
-  }, [])
 
   const toggleSleepTimer = (): void => {
     if (sleepTimerEnd) setSleepTimer(null)
@@ -1057,8 +855,7 @@ export default function Settings(): JSX.Element {
                       value={customAccent}
                       onChange={(e) => {
                         setCustomAccent(e.target.value)
-                        if (accentDebounceRef.current) clearTimeout(accentDebounceRef.current)
-                        accentDebounceRef.current = setTimeout(() => setAccentColor(e.target.value), 80)
+                        setAccentDebounced(e.target.value)
                       }}
                       className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 bg-transparent"
                       title="Custom color"
