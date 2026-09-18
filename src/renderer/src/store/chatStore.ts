@@ -3,6 +3,7 @@ import * as api from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
+import { shareSummaryText } from '../lib/chatShare'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
 import type { AccountUser } from '../lib/userApi'
 import { chatNotificationsEnabled, fireChatNotification } from '../lib/chatNotifications'
@@ -267,9 +268,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       const conv = get().conversations.find((c) => c.id === room.id)
       title = conv?.is_group ? `${displayName(msg.author)} in ${conv.name || 'Group chat'}` : displayName(msg.author)
     }
+    const plainBody = splitForwardRef(splitReplyRef(msg.content ?? '').body).body.trim()
     const body = msg.is_encrypted
       ? 'Sent a new message'
-      : splitForwardRef(splitReplyRef(msg.content ?? '').body).body.trim() || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
+      : (shareSummaryText(plainBody) ?? plainBody) || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
     fireChatNotification({
       id: msg.id,
       title,
