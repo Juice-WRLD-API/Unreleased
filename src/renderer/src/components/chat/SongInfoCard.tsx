@@ -1,6 +1,7 @@
 import { Music } from 'lucide-react'
 import type { SharedSongInfoPayload } from '../../lib/chatShare'
 import { CATEGORY_COLORS, CATEGORY_LABELS } from '../../lib/juicewrldApi'
+import { useStore } from '../../store/useStore'
 
 export default function SongInfoCard({ info }: { info: SharedSongInfoPayload }): JSX.Element {
   const categoryLabel = CATEGORY_LABELS[info.category] ?? info.category
@@ -11,7 +12,10 @@ export default function SongInfoCard({ info }: { info: SharedSongInfoPayload }):
     ...(info.releaseDate ? [['Released', info.releaseDate] as [string, string]] : (info.leakedDate ? [['Leaked', info.leakedDate] as [string, string]] : [])),
   ]
   return (
-    <div className="flex gap-3 w-full max-w-sm rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5">
+    <div
+      onClick={() => useStore.getState().setInfoSongId(info.songId)}
+      className="flex gap-3 w-full max-w-sm rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5 cursor-pointer hover:border-text-muted transition-colors"
+    >
       <span className="relative w-14 h-14 rounded-lg overflow-hidden bg-surface-highest shrink-0 flex items-center justify-center">
         {info.imageUrl ? <img src={info.imageUrl} alt="" className="w-full h-full object-cover" /> : <Music size={18} className="text-text-muted" />}
       </span>

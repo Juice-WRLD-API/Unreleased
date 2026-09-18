@@ -191,6 +191,7 @@ export const SONG_INFO_PREFIX = 'unreleased:info:'
 const CATEGORY_KEYS = new Set(['released', 'unreleased', 'unsurfaced', 'recording_session'])
 
 export interface SharedSongInfoPayload {
+  songId: number
   title: string
   category: string
   length: string
@@ -203,6 +204,7 @@ export interface SharedSongInfoPayload {
 }
 
 export function encodeSongInfoShare(song: {
+  id: number
   name: string
   era?: { name: string } | null
   category: string
@@ -213,6 +215,7 @@ export function encodeSongInfoShare(song: {
   date_leaked?: string | null
 }, imageUrl?: string): string {
   const payload: SharedSongInfoPayload = {
+    songId: song.id,
     title: song.name,
     category: song.category,
     length: song.length,
@@ -237,6 +240,7 @@ export function decodeSongInfoShare(content: string): SharedSongInfoPayload | nu
   if (!raw || typeof raw !== 'object') return null
   const p = raw as Record<string, unknown>
 
+  if (!Number.isInteger(p.songId) || (p.songId as number) <= 0) return null
   if (!isSafeText(p.title) || !isSafeText(p.length)) return null
   if (typeof p.category !== 'string' || !CATEGORY_KEYS.has(p.category)) return null
   if (p.era !== undefined && !isSafeText(p.era)) return null
@@ -247,6 +251,7 @@ export function decodeSongInfoShare(content: string): SharedSongInfoPayload | nu
   if (p.imageUrl !== undefined && !isSafeImageUrl(p.imageUrl)) return null
 
   return {
+    songId: p.songId as number,
     title: p.title as string,
     category: p.category as string,
     length: p.length as string,

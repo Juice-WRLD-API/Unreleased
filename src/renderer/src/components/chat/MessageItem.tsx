@@ -469,7 +469,7 @@ function MessageItem({
             }}
           />
         ) : (
-          <div className="flex items-end gap-1.5 flex-wrap">
+          <div className="mt-0.5 flex items-end gap-1.5 flex-wrap">
             <div className="min-w-0 max-w-full">
               <MessageBody message={message} people={people} />
             </div>
