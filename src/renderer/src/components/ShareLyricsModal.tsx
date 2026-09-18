@@ -214,10 +214,14 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   // resolves, so export quality degrades gracefully instead of the whole
   // preview going blank.
   const [artDataUrl, setArtDataUrl] = useState<string | null>(null)
+  // Export handlers await this to avoid a race where clicking Save/Copy/Share
+  // before the fetch below resolves would rasterize the card with no cover
+  // at all (see `withExportMode`), even though the preview shows one fine.
+  const artFetchRef = useRef<Promise<string | null>>(Promise.resolve(null))
   useEffect(() => {
     let cancelled = false
     setArtDataUrl(null)
-    if (!imageUrl) return
+    if (!imageUrl) { artFetchRef.current = Promise.resolve(null); return }
     // A cover that's already a data:/blob: URL (an era/personal override
     // picked from a local file, rather than a curated API image) is already
     // export-safe as-is - it was never cross-origin, so there's nothing for
@@ -227,9 +231,13 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     // silently fails and export loses a cover the preview shows just fine.
     if (imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
       setArtDataUrl(imageUrl)
+      artFetchRef.current = Promise.resolve(imageUrl)
       return
     }
-    fetchImageDataUrl(imageUrl).then(url => { if (!cancelled) setArtDataUrl(url) }).catch(() => {})
+    const fetched = fetchImageDataUrl(imageUrl)
+      .then(url => { if (!cancelled) setArtDataUrl(url); return url })
+      .catch(() => null)
+    artFetchRef.current = fetched
     return () => { cancelled = true }
   }, [imageUrl])
   const previewArtSrc = artDataUrl ?? imageUrl ?? undefined
@@ -238,7 +246,8 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   // non-CORS image fine on screen, but html-to-image reading that same pixel
   // data back out for the PNG throws instead of just skipping it. Export
   // falls back to no cover at all rather than the unsafe URL if the fetch
-  // hasn't resolved (or failed) by the time the user clicks a button.
+  // has failed (or there was never a cover) by the time the user clicks a
+  // button - `withExportMode` waits out a fetch still in flight first.
   const [exporting, setExporting] = useState(false)
   const safeArtSrc = exporting ? (artDataUrl ?? undefined) : previewArtSrc
 
@@ -282,6 +291,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   // toPng/toBlob reads it, since React would otherwise defer that render to
   // the next microtask/paint.
   const withExportMode = async <T,>(capture: () => Promise<T>): Promise<T> => {
+    await artFetchRef.current
     flushSync(() => setExporting(true))
     try {
       return await capture()

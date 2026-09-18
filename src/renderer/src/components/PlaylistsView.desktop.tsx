@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
+import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
@@ -841,6 +842,8 @@ export default function PlaylistsView(): JSX.Element {
     setIsSharedView(false)
     setPendingPlaylistId(null)
   }, [pendingPlaylistId, setPendingPlaylistId])
+
+  useEffect(() => { if (selectedId != null) rememberRecentPlaylist(selectedId) }, [selectedId])
 
   // Close menus on outside click
   useEffect(() => {

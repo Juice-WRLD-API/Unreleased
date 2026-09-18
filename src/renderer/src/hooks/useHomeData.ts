@@ -4,6 +4,7 @@ import { loadRecentTracks } from '../lib/recentTracks'
 import { filterListeningPlaysByDays } from '../lib/listeningPlays'
 import { playlistCoverUrl, apiFetch, apiPeek, buildImageUrl, loadAllSongs, songToTrack, type JWApiStats, type JWApiSong } from '../lib/juicewrldApi'
 import { peekPlaylistCover } from '../lib/userApi'
+import { loadRecentPlaylistIds } from '../lib/recentPlaylists'
 import { loadStats as loadHeardleStats, todayKey as heardleToday } from '../lib/heardle'
 import { loadStats as loadWordleStats, todayKey as wordleToday } from '../lib/wordle'
 import { loadTierlistState } from '../lib/tierlist'
@@ -209,7 +210,18 @@ export function useHomeData() {
         open: () => setActiveView('playlists'),
       }
     }),
-  ].slice(0, 10)
+  ]
+  // Recently opened first (Array.sort is stable, so never-opened playlists
+  // keep their existing order after them). Guest playlists have no numeric id
+  // in the recents list and stay at the end.
+  const recentIds = loadRecentPlaylistIds()
+  const recencyRank = (c: HomePlaylistCard): number => {
+    if (c.key.startsWith('g')) return recentIds.length
+    const i = recentIds.indexOf(Number(c.key.slice(1)))
+    return i < 0 ? recentIds.length : i
+  }
+  playlistRow.sort((a, b) => recencyRank(a) - recencyRank(b))
+  playlistRow.splice(10)
 
   const openTrack = (track: Track): void => { playTrack(track) }
 
