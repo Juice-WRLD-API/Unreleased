@@ -1,9 +1,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { AtSign, CornerUpLeft, FileText, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import { AtSign, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
+import { parseChatCommand, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
+import { encodeSongShare } from '../../lib/chatShare'
+import { resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
+import { allSkins } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
 import ReactionPicker from './ReactionPicker'
 import { emojiGlyph, EMOJI_IMG } from './emoji'
 import { EVERYONE_HANDLE, mentionIdsIn } from './people'
@@ -58,6 +64,8 @@ const Composer = forwardRef<ComposerHandle, {
   const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null)
   const [emojiQuery, setEmojiQuery] = useState<{ start: number; query: string; index: number } | null>(null)
   const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
+  const [commandBusy, setCommandBusy] = useState<string | null>(null)
+  const [searchPick, setSearchPick] = useState<{ query: string; results: JWApiSong[]; index: number } | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const typingSentAt = useRef(0)
@@ -200,10 +208,119 @@ const Composer = forwardRef<ComposerHandle, {
     })
   }
 
+  // Local, synchronous commands - no network round-trip, so they never touch
+  // commandBusy/toast('ok') the way the async ones below do.
+  const applyThemeCommand = (args: string): void => {
+    if (!args) { toast('Usage: /theme <name> - e.g. light, dark, midnight, ocean, ember, mocha, forest, blossom'); return }
+    const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
+    const wanted = norm(args)
+    const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
+    if (!match) { toast(`Unknown theme "${args}"`); return }
+    useStore.getState().setTheme(match.id)
+    toast(`Theme set to ${match.name}`, 'ok')
+  }
+
+  const runMuteCommand = (args: string): void => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) { toast('Usage: /mute @username'); return }
+    const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!target) { toast(`No one named "${uname}" here`); return }
+    if (target.id === meId) { toast("You can't mute yourself"); return }
+    const wasMuted = useStore.getState().mutedUserIds.includes(target.id)
+    useStore.getState().toggleMuteUser(target.id)
+    toast(wasMuted ? `Unmuted ${displayName(target)}` : `Muted ${displayName(target)} - their channel/server messages are hidden for you`, 'ok')
+  }
+
+  // "Now playing" card shares the exact Track the player has queued, so it
+  // only works for API-sourced tracks (id "jw-<n>") - a local file has
+  // nothing a recipient's client could stream from, and encodeSongShare's
+  // decode side would reject it anyway (streamUrl isn't a JWAPI_BASE URL).
+  const shareNowPlayingCommand = async (): Promise<void> => {
+    const track = useStore.getState().currentTrack
+    if (!track) { toast('Nothing is playing right now'); return }
+    const match = track.id.match(/^jw-(\d+)$/)
+    if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
+    await send(room, { text: encodeSongShare(track, Number(match[1])), files: [] })
+  }
+
+  const runPromoteCommand = async (args: string): Promise<void> => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) { toast('Usage: /promote @username'); return }
+    if (room.kind !== 'channel') { toast('/promote only works in a server channel'); return }
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) { toast("Could not find this channel's server"); return }
+    const canManage = cs.me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
+    if (!canManage) { toast("You don't have permission to promote members here"); return }
+    const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!target) { toast(`No one named "${uname}" here`); return }
+    if (target.id === server.owner) { toast("Can't change the owner's role"); return }
+    const member = cs.members[server.id]?.find((m) => m.user.id === target.id)
+    if (member?.server_role === 'admin') { toast(`${displayName(target)} is already an admin`); return }
+    await chatApi.updateMember(server.id, target.id, { server_role: 'admin' })
+    await cs.loadMembers(server.id, true)
+    toast(`Promoted ${displayName(target)} to admin`, 'ok')
+  }
+
+  // "/song <query>", "/search <query>", "/mute @user", "/theme <name>", "/np"
+  // and "/promote @user" are recognized only when they are the entire message
+  // (no reply-in-progress, no attachments) - anything else starting with "/"
+  // (a URL, a stray command someone typed) falls through and sends as a
+  // normal text message, same as before this feature existed.
+  const runCommand = async (cmd: ParsedChatCommand): Promise<void> => {
+    setText('')
+    setFiles([])
+    setMention(null)
+    setEmojiQuery(null)
+    setSearchPick(null)
+    drafts.delete(draftKey)
+    stopTyping()
+
+    if (cmd.command === 'theme') { applyThemeCommand(cmd.args); return }
+    if (cmd.command === 'mute') { runMuteCommand(cmd.args); return }
+
+    setCommandBusy(cmd.command)
+    try {
+      if (cmd.command === 'song') {
+        if (!cmd.args) { toast('Usage: /song <title>'); return }
+        const song = await resolveTitleToSong(cmd.args)
+        if (!song) { toast(`No song found for "${cmd.args}"`); return }
+        await send(room, { text: encodeSongShare(songToTrack(song), song.id), files: [] })
+      } else if (cmd.command === 'search') {
+        if (!cmd.args) { toast('Usage: /search <title>'); return }
+        const results = await searchSongs(cmd.args)
+        if (results.length === 0) { toast(`No songs found for "${cmd.args}"`); return }
+        if (results.length === 1) {
+          await send(room, { text: encodeSongShare(songToTrack(results[0]), results[0].id), files: [] })
+          return
+        }
+        setSearchPick({ query: cmd.args, results, index: 0 })
+      } else if (cmd.command === 'np') {
+        await shareNowPlayingCommand()
+      } else if (cmd.command === 'promote') {
+        await runPromoteCommand(cmd.args)
+      }
+    } catch (err) {
+      toast(errorText(err, 'Command failed'))
+    } finally {
+      setCommandBusy(null)
+    }
+  }
+
+  const pickSearchResult = (song: JWApiSong): void => {
+    setSearchPick(null)
+    send(room, { text: encodeSongShare(songToTrack(song), song.id), files: [] })
+      .catch((err) => toast(errorText(err, 'Message failed to send')))
+  }
+
   const submit = (): void => {
-    if (disabledReason) return
+    if (disabledReason || commandBusy) return
     let body = text.trim()
     if (!body && files.length === 0) return
+    if (!replyTo && files.length === 0) {
+      const cmd = parseChatCommand(body)
+      if (cmd) { void runCommand(cmd); return }
+    }
     // Plain "Reply" (as opposed to replying inside a thread, which never sets
     // `replyTo`) posts a normal message in the room - it isn't threaded, so
     // the link back to the original message rides along as a small envelope
@@ -231,6 +348,20 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (searchPick && searchPick.results.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setSearchPick({ ...searchPick, index: (searchPick.index + dir + searchPick.results.length) % searchPick.results.length })
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        pickSearchResult(searchPick.results[searchPick.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setSearchPick(null); return }
+    }
     if (emojiQuery && emojiCandidates.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
@@ -274,6 +405,28 @@ const Composer = forwardRef<ComposerHandle, {
 
   return (
     <div className={`relative ${compact ? 'px-3 pb-3' : 'px-4 md:px-5 pb-4'}`}>
+      {searchPick && searchPick.results.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Results for "{searchPick.query}"</p>
+          <div className="max-h-64 overflow-y-auto chat-scroll">
+            {searchPick.results.map((song, i) => (
+              <button
+                key={song.id}
+                onMouseDown={(e) => { e.preventDefault(); pickSearchResult(song) }}
+                onMouseEnter={() => setSearchPick({ ...searchPick, index: i })}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === searchPick.index ? 'bg-surface-overlay' : ''}`}
+              >
+                <Music size={14} className="shrink-0 text-text-muted" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-text-primary truncate">{song.name}</span>
+                  <span className="block text-xs text-text-muted truncate">{song.era?.name ?? song.category}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {mention && candidates.length > 0 && (
         <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
           <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Members</p>
@@ -316,6 +469,13 @@ const Composer = forwardRef<ComposerHandle, {
               <span className="text-sm text-text-primary truncate">:{name}:</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {commandBusy && (
+        <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-surface-raised/70 px-2.5 py-1.5 text-xs text-text-muted">
+          <Loader2 size={13} className="shrink-0 animate-spin" />
+          <span>Running /{commandBusy}...</span>
         </div>
       )}
 
@@ -398,7 +558,7 @@ const Composer = forwardRef<ComposerHandle, {
             }}
             onKeyDown={onKeyDown}
             onClick={(e) => { updateMention(text, e.currentTarget.selectionStart); updateEmojiQuery(text, e.currentTarget.selectionStart) }}
-            onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null) }, 120) }}
+            onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null); setSearchPick(null) }, 120) }}
             onPaste={(e) => {
               const pasted = Array.from(e.clipboardData.files)
               if (pasted.length) {

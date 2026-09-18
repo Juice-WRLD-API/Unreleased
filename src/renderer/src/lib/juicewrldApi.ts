@@ -612,6 +612,23 @@ export async function resolveTitleToSong(title: string): Promise<JWApiSong | nul
   }
 }
 
+/** Free-text song search for the chat `/search` command: unlike
+ *  resolveTitleToSong this doesn't require an exact (or loose-exact) name
+ *  match - it returns the API's own loose-substring results as-is (same
+ *  unsurfaced/recording_session exclusion), so the caller can present a
+ *  handful of candidates for a person to pick from. */
+export async function searchSongs(title: string, limit = 8): Promise<JWApiSong[]> {
+  const raw = (title ?? '').trim()
+  if (!raw) return []
+  const search = cleanTitleForSearch(stripFileTitleCruft(raw)) || raw
+  try {
+    const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search, page_size: limit })
+    return (data.results ?? []).filter((s) => !['unsurfaced', 'recording_session'].includes(s.category)).slice(0, limit)
+  } catch {
+    return []
+  }
+}
+
 /** Picks the best cover URL from a playlist summary or detail object.
  *  cover_image may contain a base64 data URI; cover_image_url may be a relative path. */
 export function playlistCoverUrl(p: { cover_image_url?: string | null; cover_image?: string | null }): string | undefined {
