@@ -40,7 +40,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'search', usage: '/search <title>', description: 'Search the library and pick a result', params: ['title'] },
   { name: 'info', usage: '/info <title>', description: 'Show a song’s era, category, length and credits', params: ['title'] },
   { name: 'np', usage: '/np', description: 'Share what you’re currently playing', aliases: ['nowplaying'], params: [] },
-  { name: 'theme', usage: '/theme <name>', description: 'Change your app theme', params: ['name'] },
+  { name: 'theme', usage: '/theme <name>', description: 'Change your app theme, or list them with no name', params: ['name'] },
   { name: 'mute', usage: '/mute @user', description: 'Hide a user’s messages for you', params: ['user'] },
   { name: 'unmute', usage: '/unmute @user', description: 'Unhide a previously muted user', params: ['user'] },
   { name: 'promote', usage: '/promote @user', description: 'Promote a member to server admin', params: ['user'] },

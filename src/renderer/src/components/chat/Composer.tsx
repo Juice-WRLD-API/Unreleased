@@ -263,7 +263,7 @@ const Composer = forwardRef<ComposerHandle, {
   // Local, synchronous commands - no network round-trip, so they never touch
   // commandBusy/toast('ok') the way the async ones below do.
   const applyThemeCommand = (args: string): void => {
-    if (!args) { toast('Usage: /theme <name> - e.g. light, dark, midnight, ocean, ember, mocha, forest, blossom'); return }
+    if (!args) { toast(`Themes: ${allSkins().map((s) => s.name).join(', ')}`, 'ok'); return }
     const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
     const wanted = norm(args)
     const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
