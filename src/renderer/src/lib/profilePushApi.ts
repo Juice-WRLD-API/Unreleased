@@ -8,7 +8,7 @@
 // the store's one shared debounce timer calls into instead.
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authHeaders } from './apiClient'
 import { capSongPrefs } from './songPrefs'
 import type { SongPreference } from './songPrefs'
 import { capListeningPlays } from './listeningPlays'
@@ -43,7 +43,7 @@ export async function pushProfile(patch: ProfilePushPatch): Promise<void> {
   if (Object.keys(body).length === 0) return
   await apiRequest<unknown>(ME_URL, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify(body),
   })
 }

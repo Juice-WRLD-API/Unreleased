@@ -17,6 +17,7 @@
 // merges/title changes touching multiple rows send one request per
 // affected song.
 import { JWAPI_BASE, apiFetch } from './juicewrldApi'
+import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
 /** Always true now that this is core juicewrldapi functionality rather than
@@ -94,7 +95,7 @@ async function writeVersions<T>(path: string, method: 'POST' | 'PATCH', body: Re
   if (!token) throw new Error('Not logged in')
   const res = await fetch(`${JWAPI_BASE}/versions${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify(body),
   })
   if (!res.ok) {

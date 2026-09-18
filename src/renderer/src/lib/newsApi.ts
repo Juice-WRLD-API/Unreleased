@@ -2,7 +2,7 @@
 // kept as a kill switch (reads fall back to an empty state and mutations
 // throw a clear "not available" error) rather than removed outright.
 import { JWAPI_BASE } from './juicewrldApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { cacheGet } from './apiCache'
 import { getToken } from './userApi'
 import { getMediaType } from './fileTypes'
@@ -21,10 +21,7 @@ function assertEnabled(): void {
 // `request` helper (Token scheme) so news writes carry the same credentials as
 // the rest of the app.
 function authed<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getToken()
-  if (token) headers['Authorization'] = `Token ${token}`
-  return apiRequest<T>(url, { ...options, headers: { ...headers, ...(options.headers as Record<string, string>) } })
+  return authedRequest<T>(url, options, getToken())
 }
 
 // ─── Channels ─────────────────────────────────────────────────────────────────
@@ -138,13 +135,12 @@ export async function uploadAttachment(file: File): Promise<NewsAttachment> {
   if (file.size > MAX_ATTACHMENT_BYTES) {
     throw new Error(`"${file.name}" is larger than ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB`)
   }
-  const token = getToken()
   const form = new FormData()
   form.append('file', file)
   // Note: no Content-Type header - the browser sets the multipart boundary.
   return apiRequest<NewsAttachment>(`${NEWS_BASE}/uploads/`, {
     method: 'POST',
-    headers: token ? { Authorization: `Token ${token}` } : undefined,
+    headers: authHeaders(getToken()),
     body: form,
   })
 }

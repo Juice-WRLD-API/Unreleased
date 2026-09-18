@@ -17,7 +17,7 @@
 // the round the server graded is the record, and a POST to /results/ that
 // disagrees with it should be rejected there, not trusted here.
 import { JWAPI_BASE } from './juicewrldApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
 import type { DailyMode, Guess, GameStatus, HeardleSong } from './heardle'
 
@@ -91,10 +91,7 @@ export interface ResultSubmission {
 }
 
 function authed<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getToken()
-  if (token) headers['Authorization'] = `Token ${token}`
-  return apiRequest<T>(url, { ...options, headers: { ...headers, ...(options.headers as Record<string, string>) } })
+  return authedRequest<T>(url, options, getToken())
 }
 
 export function absoluteClipUrl(relative: string): string {
@@ -232,8 +229,5 @@ export async function fetchLeaderboard(
   url.searchParams.set('board', board)
   if (board !== 'versus') url.searchParams.set('mode', mode)
   if (day) url.searchParams.set('day', day)
-  const token = getToken()
-  const headers: Record<string, string> = {}
-  if (token) headers['Authorization'] = `Token ${token}`
-  return apiRequest<LeaderboardResponse>(url.toString(), { headers })
+  return apiRequest<LeaderboardResponse>(url.toString(), { headers: authHeaders(getToken()) })
 }

@@ -1,5 +1,5 @@
 import { JWAPI_BASE } from './juicewrldApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
 export const CHAT_BASE = `${JWAPI_BASE}/chat`
@@ -218,13 +218,7 @@ export interface MessagePage {
 interface Results<T> { results: T[] }
 
 function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getToken()
-  if (token) headers['Authorization'] = `Token ${token}`
-  return apiRequest<T>(`${CHAT_BASE}${path}`, {
-    ...options,
-    headers: { ...headers, ...(options.headers as Record<string, string>) },
-  })
+  return authedRequest<T>(`${CHAT_BASE}${path}`, options, getToken())
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({
@@ -376,12 +370,11 @@ export async function uploadChatFile(file: Blob, name: string): Promise<Uploaded
   if (file.size > MAX_CHAT_UPLOAD_BYTES) {
     throw new Error(`"${name}" is larger than 25 MB`)
   }
-  const token = getToken()
   const form = new FormData()
   form.append('file', file, name)
   return apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/`, {
     method: 'POST',
-    headers: token ? { Authorization: `Token ${token}` } : undefined,
+    headers: authHeaders(getToken()),
     body: form,
   })
 }
@@ -395,9 +388,8 @@ export function chatAttachmentUrl(id: number, opts: { download?: boolean } = {})
 }
 
 export async function fetchAttachmentBytes(id: number): Promise<Uint8Array> {
-  const token = getToken()
   const res = await fetch(`${CHAT_BASE}/attachments/${id}/stream/`, {
-    headers: token ? { Authorization: `Token ${token}` } : undefined,
+    headers: authHeaders(getToken()),
   })
   if (!res.ok) throw new Error(`Attachment failed (${res.status})`)
   return new Uint8Array(await res.arrayBuffer())

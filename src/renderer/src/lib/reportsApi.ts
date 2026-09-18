@@ -18,7 +18,7 @@
 // double-send every queued report otherwise).
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authHeaders } from './apiClient'
 import { FEEDBACK_CATEGORY_LABELS, SONG_ISSUE_LABELS } from './reports'
 import type { PendingFeedback, PendingSongReport } from './reports'
 
@@ -56,7 +56,7 @@ export async function listFeedback(automated?: boolean): Promise<FeedbackRow[]> 
   if (automated !== undefined) url.searchParams.set('automated', automated ? 'true' : 'false')
   const data = await apiRequest<FeedbackRow[] | { results?: FeedbackRow[] }>(url.toString(), {
     method: 'GET',
-    headers: authHeaders(),
+    headers: authHeaders(getToken()),
   })
   return Array.isArray(data) ? data : (data?.results ?? [])
 }
@@ -93,17 +93,12 @@ export function reportSongId(r: SongReportRow): number | null {
   return r.song ?? r.song_id ?? null
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getToken()
-  return token ? { Authorization: `Token ${token}` } : {}
-}
-
 export async function listSongReports(status?: SongReportStatus): Promise<SongReportRow[]> {
   const url = new URL(SONG_REPORTS_URL)
   if (status) url.searchParams.set('status', status)
   const data = await apiRequest<SongReportRow[] | { results?: SongReportRow[] }>(url.toString(), {
     method: 'GET',
-    headers: authHeaders(),
+    headers: authHeaders(getToken()),
   })
   // Tolerate either a bare array or DRF-style pagination.
   return Array.isArray(data) ? data : (data?.results ?? [])
@@ -115,7 +110,7 @@ export async function reviewSongReport(
 ): Promise<void> {
   await apiRequest<unknown>(`${SONG_REPORTS_URL}${id}/`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
     body: JSON.stringify(patch),
   })
 }

@@ -1,6 +1,6 @@
 import { getToken } from './userApi'
 import { JWAPI_BASE } from './juicewrldApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authHeaders } from './apiClient'
 import type { Guess, GameStatus, HeardleSong } from './heardle'
 import { absoluteClipUrl, type PuzzleResponse } from './heardleApi'
 
@@ -267,7 +267,7 @@ export async function pollMatchQueue(): Promise<MatchQueuePollResult> {
     MATCH_QUEUE_URL,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     },
   )
   return {
@@ -287,7 +287,7 @@ export async function leaveMatchQueueRest(): Promise<void> {
   try {
     await apiRequest(MATCH_QUEUE_URL, {
       method: 'DELETE',
-      headers: { Authorization: `Token ${token}` },
+      headers: authHeaders(token),
     })
   } catch {
     // A queue entry that was never created 404s; nothing to recover from.

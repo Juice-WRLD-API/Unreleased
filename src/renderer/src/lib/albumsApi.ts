@@ -1,5 +1,5 @@
 import { JWAPI_BASE, apiFetch } from './juicewrldApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authedRequest } from './apiClient'
 import { getToken } from './userApi'
 
 const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
@@ -27,14 +27,8 @@ export interface Album {
   songs: AlbumSongEntry[]
 }
 
-async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getToken()
-  if (token) headers['Authorization'] = `Token ${token}`
-  return apiRequest<T>(url, {
-    ...options,
-    headers: { ...headers, ...(options.headers as Record<string, string>) },
-  })
+function request<T>(url: string, options: RequestInit = {}): Promise<T> {
+  return authedRequest<T>(url, options, getToken())
 }
 
 // The docs for these list endpoints promise a bare array, but the live API

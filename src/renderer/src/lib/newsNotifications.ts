@@ -12,7 +12,7 @@
 // prepared frontend.
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authHeaders } from './apiClient'
 import { fetchNews, NEWS_ENABLED, type NewsItem } from './newsApi'
 import { notificationsSupported, notificationPermission, ensureNotifyPermission, focusAppWindow, playNotificationSound } from './notifications'
 
@@ -70,7 +70,7 @@ export async function pushSubscriptions(): Promise<void> {
   try {
     await apiRequest<unknown>(ME_URL, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
       body: JSON.stringify({ news_subscriptions: getSubscriptions() }),
     })
   } catch {

@@ -7,7 +7,7 @@ import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
-import { apiRequest, cacheDelete } from './apiClient'
+import { apiRequest, authedRequest, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
@@ -293,17 +293,8 @@ export function clearToken(): void {
 // for idempotent reads whose staleness is acceptable (playlists, favorites,
 // profile). Mutations don't pass one, so they always hit the network and
 // fail loudly if offline rather than silently no-op against stale data.
-async function request<T>(url: string, options: RequestInit = {}, auth = true, cacheKey?: string): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (auth) {
-    const token = getToken()
-    if (token) headers['Authorization'] = `Token ${token}`
-  }
-  return apiRequest<T>(url, {
-    ...options,
-    headers: { ...headers, ...(options.headers as Record<string, string>) },
-    cacheKey,
-  })
+function request<T>(url: string, options: RequestInit = {}, auth = true, cacheKey?: string): Promise<T> {
+  return authedRequest<T>(url, { ...options, cacheKey }, auth ? getToken() : null)
 }
 
 // Applies per-song overrides for the same reason songToTrack does - a track
