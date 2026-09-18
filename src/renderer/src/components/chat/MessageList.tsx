@@ -82,7 +82,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
   const content = useRef<HTMLDivElement>(null)
   const sentinel = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
-  const anchor = useRef<{ height: number; top: number } | null>(null)
+  const anchor = useRef<{ height: number; top: number; stickToBottom: boolean } | null>(null)
   const [showJump, setShowJump] = useState(false)
   const [unseen, setUnseen] = useState(0)
   const [flashId, setFlashId] = useState<number | null>(null)
@@ -108,7 +108,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
   const requestOlder = useCallback(() => {
     const el = scroller.current
     if (!el || !state?.hasMore || state.loading || !state.loaded) return
-    anchor.current = { height: el.scrollHeight, top: el.scrollTop }
+    anchor.current = { height: el.scrollHeight, top: el.scrollTop, stickToBottom: atBottom.current }
     void loadOlder(room)
   }, [state?.hasMore, state?.loading, state?.loaded, loadOlder, room])
 
@@ -132,7 +132,13 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
     const el = scroller.current
     if (!el) return
     if (anchor.current) {
-      el.scrollTop = anchor.current.top + (el.scrollHeight - anchor.current.height)
+      // If the user was pinned to the bottom before this older batch loaded,
+      // snap straight to the (possibly still-growing, e.g. avatars/song-card
+      // art not yet loaded) bottom instead of the height/offset delta below -
+      // that delta is computed from a scrollHeight that can undercount images
+      // still in flight, which would otherwise strand the view above the
+      // latest message and read as "atBottom" no longer being true.
+      el.scrollTop = anchor.current.stickToBottom ? el.scrollHeight : anchor.current.top + (el.scrollHeight - anchor.current.height)
       anchor.current = null
     }
   }, [firstId])
