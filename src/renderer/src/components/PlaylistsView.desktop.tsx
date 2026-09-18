@@ -14,7 +14,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { buildImageUrl, buildStreamUrl, JWAPI_BASE, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { buildImageUrl, buildStreamUrl, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { fisherYates, groupExcludedVersions, isExcludedVersion } from '../store/queueSlice'
@@ -37,6 +37,11 @@ import { ClampedMenu } from './ClampedMenu'
 import { placeFlyout } from '../lib/menuFlyout'
 import { loadEraFullNames, eraLabel } from '../lib/eras'
 import { getSkin } from '../lib/skins'
+import { usePlaylistDetailData, usePlaylistCoverEditing } from '../hooks/usePlaylistDetailData'
+import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
+import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
+import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
+import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
 
 // ── PlaylistMosaic ────────────────────────────────────────────────────────────
 
@@ -442,8 +447,6 @@ export default function PlaylistsView(): JSX.Element {
   const playlistHeroEnabled = isDarkSkin ? playlistHeroEnabledDark : playlistHeroEnabledLight
 
   const [showLiked, setShowLiked] = useState(false)
-  const [detail, setDetail] = useState<PlaylistDetail | null>(null)
-  const [loadingDetail, setLoadingDetail] = useState(false)
 
   // Inline "quick view" expansion - clicking a card in the grid expands a
   // panel below its row (Apple Music-style) instead of navigating away.
@@ -571,26 +574,25 @@ export default function PlaylistsView(): JSX.Element {
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
 
   // Zip / share / bulk-add
-  const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
-  const [shareCopied, setShareCopied] = useState(false)
-  const [togglingPublic, setTogglingPublic] = useState(false)
   const [addingAll, setAddingAll] = useState(false)
   const [isSharedView, setIsSharedView] = useState(false)
   const [importState, setImportState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
 
+  const { detail, setDetail, loadingDetail, coverData, setCoverData, coverLoading, coverImgError, setCoverImgError, loadDetail } =
+    usePlaylistDetailData(selectedId, isSharedView)
+  const { shareCopied, togglingPublic, handleTogglePublic, handleShare } = usePlaylistSharing(selectedId, detail, setDetail)
+  const { zipState, handleZipDownload } = usePlaylistZipDownload()
+
   // Cover upload
   const coverInputRef = useRef<HTMLInputElement>(null)
-  const [coverUploading, setCoverUploading] = useState(false)
-  // Cover is fetched separately so tracks render without waiting for it
-  type CoverData = { cover_image?: string | null; cover_image_url?: string | null }
-  const [coverData, setCoverData] = useState<CoverData | null>(null)
-  const [coverLoading, setCoverLoading] = useState(false)
-  const [coverImgError, setCoverImgError] = useState(false)
 
   // Async cover thumbnails for the grid (keyed by playlist id)
   const [covers, setCovers] = useState<Record<number, string | null>>({})
   const [mosaicImages, setMosaicImages] = useState<Record<number, string[]>>({})
   const coversLoadedRef = useRef<Set<number>>(new Set())
+
+  const { coverUploading, handleCoverUpload, handleRemoveCover } =
+    usePlaylistCoverEditing(selectedId, refreshPlaylists, setCoverData, setCoverImgError, setCovers)
 
   // Description editing
   const [editingDesc, setEditingDesc] = useState(false)
@@ -598,9 +600,6 @@ export default function PlaylistsView(): JSX.Element {
 
   // Playlist membership cache: playlistId → Set<songId>
   const membershipCache = useRef<Map<number, Set<number>>>(new Map())
-
-  // Race-condition guard: each loadDetail call gets a generation ID; stale responses are discarded
-  const loadGen = useRef(0)
 
   // ── Async cover loading for grid ─────────────────────────────────────────
   useEffect(() => {
@@ -852,56 +851,6 @@ export default function PlaylistsView(): JSX.Element {
   }, [trackMenu, cardMenu, showAddAllMenu, plBulkMenu, folderMenu])
 
 
-  const loadDetail = useCallback(async (id: number, shared = false) => {
-    const gen = ++loadGen.current
-    // A cached cover renders immediately (no null/spinner flash) instead of
-    // waiting on a network round trip for a playlist we've already opened.
-    const cached = userApi.peekPlaylistCover(id)
-    if (cached) {
-      setCoverImgError(false)
-      setCoverData({ cover_image: cached.cover_image, cover_image_url: cached.cover_image_url })
-      setCoverLoading(false)
-    } else {
-      setCoverData(null)
-      setCoverLoading(true)
-    }
-    // A cached detail (tracks + metadata) renders instantly too - then we
-    // still refetch in the background to pick up changes made elsewhere,
-    // swapping in the fresh result without ever showing a loading spinner.
-    const cachedDetail = userApi.peekPlaylistDetail(id)
-    if (cachedDetail) {
-      setDetail(cachedDetail)
-      setLoadingDetail(false)
-    } else {
-      setLoadingDetail(true)
-    }
-    try {
-      const result = shared ? await userApi.getPublicPlaylist(id) : await userApi.getPlaylist(id)
-      if (gen !== loadGen.current) return
-      setDetail(result)
-      setLoadingDetail(false)
-      if (!cached) {
-        // Load cover separately so tracks render immediately
-        const coverFetch = shared ? userApi.getPublicPlaylistCover(id) : userApi.getPlaylistCover(id)
-        coverFetch.then(c => {
-          if (gen !== loadGen.current) return
-          setCoverImgError(false)
-          setCoverData({ cover_image: c.cover_image, cover_image_url: c.cover_image_url })
-          setCoverLoading(false)
-        }).catch(() => { if (gen === loadGen.current) setCoverLoading(false) })
-      }
-    } catch {
-      if (gen === loadGen.current && !cachedDetail) setDetail(null)
-    } finally {
-      if (gen === loadGen.current) setLoadingDetail(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (selectedId != null) loadDetail(selectedId, isSharedView)
-    else setDetail(null)
-  }, [selectedId, loadDetail, isSharedView])
-
   // Keep a followed playlist's cached display fields (the grid card's name/
   // cover/track count) reasonably fresh. The detail view above already
   // re-fetches live on every open - this just makes sure the summary shown
@@ -1055,25 +1004,10 @@ export default function PlaylistsView(): JSX.Element {
   const togglePlaylistSelect = useCallback((key: string) => togglePlKeyRaw(key, key), [togglePlKeyRaw])
   const keyMap = (keys: string[]): Map<string, string> => new Map(keys.map(k => [k, k]))
 
-  const [bulkDeletingPlaylists, setBulkDeletingPlaylists] = useState(false)
-
-  const bulkDeletePlaylists = useCallback(async () => {
-    const keys = [...selectedPlaylistKeys.keys()]
-    if (!keys.length) return
-    setBulkDeletingPlaylists(true)
-    const apiIds = keys.filter(k => k.startsWith('api:')).map(k => Number(k.slice(4)))
-    const localIds = keys.filter(k => k.startsWith('local:')).map(k => k.slice(6))
-    try {
-      await Promise.all(apiIds.map(id => userApi.deletePlaylist(id).catch(() => {})))
-    } finally {
-      localIds.forEach(id => deleteLocalPlaylist(id))
-      if (selectedId != null && apiIds.includes(selectedId)) setSelectedId(null)
-      if (localSelectedId != null && localIds.includes(localSelectedId)) setLocalSelectedId(null)
-      await refreshPlaylists()
-      setBulkDeletingPlaylists(false)
-      exitPlaylistSelectMode()
-    }
-  }, [selectedPlaylistKeys, deleteLocalPlaylist, refreshPlaylists, selectedId, localSelectedId, setSelectedId, setLocalSelectedId, exitPlaylistSelectMode])
+  const { busy: bulkDeletingPlaylists, run: runBulkDeletePlaylists } = usePlaylistBulkDeletePlaylists(
+    refreshPlaylists, deleteLocalPlaylist, selectedId, setSelectedId, localSelectedId, setLocalSelectedId, exitPlaylistSelectMode,
+  )
+  const bulkDeletePlaylists = useCallback(() => runBulkDeletePlaylists([...selectedPlaylistKeys.keys()]), [runBulkDeletePlaylists, selectedPlaylistKeys])
 
   // "Add to playlist" only makes sense when every selected playlist is the
   // same kind, since a synced (api) target can't hold local-only tracks and
@@ -1083,37 +1017,14 @@ export default function PlaylistsView(): JSX.Element {
     return kinds.size === 1 ? ([...kinds][0] as 'api' | 'local') : null
   }, [selectedPlaylistKeys])
 
-  const [bulkAddingPlaylists, setBulkAddingPlaylists] = useState(false)
-
-  const bulkAddPlaylistsTo = useCallback(async (target: { kind: 'api'; id: number } | { kind: 'local'; id: string }) => {
-    const keys = [...selectedPlaylistKeys.keys()]
-    setBulkAddingPlaylists(true)
-    try {
-      if (target.kind === 'api') {
-        const srcIds = keys.filter(k => k.startsWith('api:')).map(k => Number(k.slice(4))).filter(id => id !== target.id)
-        for (const srcId of srcIds) {
-          const srcDetail = await userApi.getPlaylist(srcId).catch(() => null)
-          if (!srcDetail) continue
-          await Promise.all(srcDetail.items.map(item => userApi.addToPlaylist(target.id, item.song.id).catch(() => {})))
-        }
-        await refreshPlaylists()
-      } else {
-        const srcIds = keys.filter(k => k.startsWith('local:')).map(k => k.slice(6)).filter(id => id !== target.id)
-        const targetPl = localPlaylists.find(p => p.id === target.id)
-        const existing = new Set(targetPl?.trackIds ?? [])
-        for (const srcId of srcIds) {
-          const src = localPlaylists.find(p => p.id === srcId)
-          if (!src) continue
-          src.trackIds.filter(id => !existing.has(id)).forEach(id => { existing.add(id); addToLocalPlaylist(target.id, id) })
-        }
-      }
-    } finally {
-      setBulkAddingPlaylists(false)
-      setShowPlBulkAddMenu(false)
-      setPlBulkMenu(null)
-      exitPlaylistSelectMode()
-    }
-  }, [selectedPlaylistKeys, refreshPlaylists, localPlaylists, addToLocalPlaylist, exitPlaylistSelectMode])
+  const { busy: bulkAddingPlaylists, run: runBulkAddPlaylistsTo } = usePlaylistBulkAddPlaylistsTo(
+    refreshPlaylists, localPlaylists, addToLocalPlaylist, exitPlaylistSelectMode,
+    useCallback(() => { setShowPlBulkAddMenu(false); setPlBulkMenu(null) }, []),
+  )
+  const bulkAddPlaylistsTo = useCallback(
+    (target: { kind: 'api'; id: number } | { kind: 'local'; id: string }) => runBulkAddPlaylistsTo([...selectedPlaylistKeys.keys()], target),
+    [runBulkAddPlaylistsTo, selectedPlaylistKeys],
+  )
 
   const handleSort = (field: SortField) => {
     if (sort.field === field) {
@@ -1145,33 +1056,6 @@ export default function PlaylistsView(): JSX.Element {
     useStore.getState().setInfoSongId(songId)
   }, [])
 
-  const handleCoverUpload = useCallback(async (file: File) => {
-    if (!selectedId || coverUploading) return
-    setCoverUploading(true)
-    try {
-      const result = await userApi.uploadPlaylistCover(selectedId, file)
-      setCoverImgError(false)
-      setCoverData({ cover_image: result.cover_image, cover_image_url: result.cover_image_url })
-      setCovers(prev => ({ ...prev, [selectedId]: result.cover_image_url ?? result.cover_image ?? null }))
-      await refreshPlaylists()
-    } catch {}
-    setCoverUploading(false)
-  }, [selectedId, coverUploading, refreshPlaylists])
-
-  const handleRemoveCover = useCallback(async () => {
-    if (!selectedId) return
-    setCoverData(null) // optimistic clear
-    setCovers(prev => ({ ...prev, [selectedId]: null }))
-    try {
-      await userApi.removePlaylistCover(selectedId)
-      await refreshPlaylists()
-    } catch {
-      // restore on failure by re-fetching
-      const c = await userApi.getPlaylistCover(selectedId).catch(() => null)
-      if (c) setCoverData({ cover_image: c.cover_image, cover_image_url: c.cover_image_url })
-    }
-  }, [selectedId, refreshPlaylists])
-
   const saveDescription = useCallback(async () => {
     if (!selectedId) return
     setEditingDesc(false)
@@ -1188,93 +1072,17 @@ export default function PlaylistsView(): JSX.Element {
     return cache.has(songId)
   }
 
-  const handleZipDownload = useCallback(async (trackList: Track[], name: string) => {
-    if (zipState === 'loading') return
-    const paths = trackList.map(t => t.path).filter(Boolean)
-    if (!paths.length) return
-    setZipState('loading')
-    try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `${name}.zip`; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = `${name}.zip`; a.click() }
-      }
-      setZipState('done')
-    } catch { setZipState('error') }
-    setTimeout(() => setZipState('idle'), 3000)
-  }, [zipState])
-
-  const downloadBlob = useCallback((content: string, mime: string, filename: string) => {
-    const blob = new Blob([content], { type: mime })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
-  }, [])
-
   const handleExportJson = useCallback(() => {
     if (!detail) return
     const name = detail.name ?? summary?.name ?? 'playlist'
-    const data = {
-      name: detail.name,
-      description: detail.description,
-      tracks: detail.items.map(i => ({
-        id: i.song.id,
-        title: i.song.name,
-        artist: i.song.credited_artists,
-        album: i.song.album ?? null,
-        era: i.song.era?.name ?? null,
-        path: i.song.path,
-        image_url: i.song.image_url,
-      })),
-    }
-    downloadBlob(JSON.stringify(data, null, 2), 'application/json', `${name}.json`)
-  }, [detail, summary, downloadBlob])
+    downloadBlob(JSON.stringify(playlistJsonPayload(detail), null, 2), 'application/json', `${name}.json`)
+  }, [detail, summary])
 
   const handleExportM3u = useCallback(() => {
     if (!detail) return
     const name = detail.name ?? summary?.name ?? 'playlist'
-    const lines = ['#EXTM3U']
-    for (const t of tracks) {
-      lines.push(`#EXTINF:${Math.round(t.duration)},${t.artist} - ${t.title}`)
-      lines.push(t.streamUrl ?? t.path)
-    }
-    downloadBlob(lines.join('\n'), 'audio/x-mpegurl', `${name}.m3u`)
-  }, [detail, summary, tracks, downloadBlob])
-
-  const handleTogglePublic = useCallback(async () => {
-    if (!selectedId || !detail) return
-    setTogglingPublic(true)
-    try {
-      const updated = await userApi.updatePlaylist(selectedId, { is_public: !detail.is_public })
-      setDetail(updated)
-    } catch (e) { console.error('toggle public failed', e) }
-    finally { setTogglingPublic(false) }
-  }, [selectedId, detail])
-
-  const handleShare = useCallback(async () => {
-    if (!selectedId || !detail) return
-    try {
-      // Ensure playlist is public before sharing
-      if (!detail.is_public) {
-        const updated = await userApi.updatePlaylist(selectedId, { is_public: true })
-        setDetail(updated)
-      }
-      await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${selectedId}&view=shared`)
-      setShareCopied(true)
-      setTimeout(() => setShareCopied(false), 2500)
-    } catch {}
-  }, [selectedId, detail])
+    downloadBlob(playlistM3uContent(tracks), 'audio/x-mpegurl', `${name}.m3u`)
+  }, [detail, summary, tracks])
 
   const handleAddAllTo = useCallback(async (targetId: number, srcDetail: PlaylistDetail) => {
     setAddingAll(true)
