@@ -701,7 +701,7 @@ const Composer = forwardRef<ComposerHandle, {
           </div>
         )}
 
-        <div className="flex items-end gap-1 p-1.5">
+        <div className="flex items-center gap-1 p-1.5">
           <button
             type="button"
             onClick={() => fileInput.current?.click()}
