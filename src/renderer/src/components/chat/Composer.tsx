@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { CHAT_COMMANDS, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
+import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeSongShare } from '../../lib/chatShare'
@@ -161,8 +161,24 @@ const Composer = forwardRef<ComposerHandle, {
   const slashCandidates = useMemo(() => {
     if (!slashQuery) return []
     const q = slashQuery.query.toLowerCase()
-    return CHAT_COMMANDS.filter((c) => c.name.startsWith(q))
+    return CHAT_COMMANDS.filter((c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q)))
   }, [slashQuery])
+
+  // Once the command name itself is fully typed (the slash autocomplete above
+  // hands off here as soon as a space follows it), show a Discord-style
+  // parameter hint: every param the command takes, with whichever one the
+  // user is currently filling in highlighted.
+  const activeCommand = useMemo(() => {
+    if (replyTo || files.length > 0 || !text.startsWith('/')) return null
+    const parsed = parseChatCommand(text)
+    if (!parsed) return null
+    const info = CHAT_COMMANDS.find((c) => c.name === parsed.command)
+    if (!info) return null
+    // Raw (untrimmed) text after the command word, so a trailing space the
+    // user just typed still counts toward moving on to the next param.
+    const rawArgs = /^\/\w+(?:\s([\s\S]*))?$/.exec(text)?.[1] ?? ''
+    return { info, paramIndex: currentParamIndex(info.params, rawArgs) }
+  }, [text, replyTo, files])
 
   const updateSlashQuery = (value: string, caret: number): void => {
     const match = /^\/(\w*)$/.exec(value.slice(0, caret))
@@ -251,7 +267,7 @@ const Composer = forwardRef<ComposerHandle, {
 
   const runHelpCommand = (): void => {
     toast(
-      'Commands: /song <title>, /search <title>, /info <title>, /np, /theme <name>, /mute @user, /unmute @user, /promote @user, /kick @user, /feedback <message>',
+      'Commands: /song <title>, /search <title>, /info <title>, /np (or /nowplaying), /theme <name>, /mute @user, /unmute @user, /promote @user, /kick @user, /feedback <message>',
       'ok',
     )
   }
@@ -521,12 +537,38 @@ const Composer = forwardRef<ComposerHandle, {
               >
                 <Command size={14} className="shrink-0 text-text-muted" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm text-text-primary truncate">{c.usage}</span>
+                  <span className="block text-sm text-text-primary truncate">
+                    {c.usage}
+                    {c.aliases && c.aliases.length > 0 && (
+                      <span className="text-text-muted"> (or /{c.aliases.join(', /')})</span>
+                    )}
+                  </span>
                   <span className="block text-xs text-text-muted truncate">{c.description}</span>
                 </span>
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {!(slashQuery && slashCandidates.length > 0) && activeCommand && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl px-3 py-2">
+          <div className="flex items-center gap-1.5 flex-wrap text-sm font-mono">
+            <span className="text-text-primary">/{activeCommand.info.name}</span>
+            {activeCommand.info.params.length === 0 ? (
+              <span className="text-text-muted text-xs font-sans">takes no parameters</span>
+            ) : (
+              activeCommand.info.params.map((p, i) => (
+                <span
+                  key={p}
+                  className={i === activeCommand.paramIndex ? 'text-accent font-semibold' : 'text-text-muted'}
+                >
+                  {`<${p}>`}
+                </span>
+              ))
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-text-muted">{activeCommand.info.description}</p>
         </div>
       )}
 
