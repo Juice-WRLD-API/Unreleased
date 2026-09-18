@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Hash, ImagePlus, Loader2, Lock, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
-import type { ChatChannel, ChatUserBrief } from '../../lib/chatApi'
+import { CHAT_PERMISSIONS, type ChannelOverride, type ChatChannel, type ChatMember, type ChatPermissionName, type ChatUserBrief, type PublicServerSummary, type ServerRoleDef } from '../../lib/chatApi'
 import { adminListUsers, compressImageFile, useNowPlayingByIds } from '../../lib/userApi'
 import { displayName, useChatStore } from '../../store/chatStore'
+import { useChatPermissions } from '../../hooks/useChatPermissions'
 import { ConfirmDialog } from './MessageItem'
 import { useStaffDirectory } from './people'
-import { ChatAvatar, errorText, useChatToast } from './ui'
+import { ChatAvatar, errorText, ServerGlyph, useChatToast } from './ui'
 
 export function DialogShell({ title, subtitle, onClose, children, footer, width = 'max-w-md' }: {
   title: string
@@ -300,7 +301,7 @@ export function CreateServerModal({ onClose }: { onClose: () => void }): JSX.Ele
   )
 }
 
-export function ServerSettingsModal({ serverId, onClose, onAddMembers }: { serverId: number; onClose: () => void; onAddMembers: () => void }): JSX.Element | null {
+export function ServerSettingsModal({ serverId, onClose, onAddMembers, onRoles }: { serverId: number; onClose: () => void; onAddMembers: () => void; onRoles: () => void }): JSX.Element | null {
   const server = useChatStore((s) => s.servers.find((x) => x.id === serverId))
   const me = useChatStore((s) => s.me)
   const refreshLists = useChatStore((s) => s.refreshLists)
@@ -346,9 +347,13 @@ export function ServerSettingsModal({ serverId, onClose, onAddMembers }: { serve
       <Field label="Description">
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={`${inputCls} resize-none`} />
       </Field>
-      <button onClick={onAddMembers} className="w-full mb-4 rounded-xl border border-[var(--border)] px-3 py-3 text-left hover:bg-surface-raised/50 transition-colors">
+      <button onClick={onAddMembers} className="w-full mb-2.5 rounded-xl border border-[var(--border)] px-3 py-3 text-left hover:bg-surface-raised/50 transition-colors">
         <span className="block text-sm font-semibold text-text-primary">Add members</span>
         <span className="block text-xs text-text-muted">{server.member_count} {server.member_count === 1 ? 'member' : 'members'} today</span>
+      </button>
+      <button onClick={onRoles} className="w-full mb-4 rounded-xl border border-[var(--border)] px-3 py-3 text-left hover:bg-surface-raised/50 transition-colors">
+        <span className="block text-sm font-semibold text-text-primary">Roles</span>
+        <span className="block text-xs text-text-muted">{server.roles.length} role{server.roles.length === 1 ? '' : 's'} · colors, hierarchy, permissions</span>
       </button>
       {canDelete && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3">
@@ -461,6 +466,384 @@ export function RenameCategoryModal({ serverId, category, onClose }: { serverId:
   )
 }
 
+export function DiscoverServersModal({ onClose }: { onClose: () => void }): JSX.Element {
+  const refreshLists = useChatStore((s) => s.refreshLists)
+  const selectServer = useChatStore((s) => s.selectServer)
+  const toast = useChatToast()
+  const [servers, setServers] = useState<PublicServerSummary[] | null>(null)
+  const [joiningId, setJoiningId] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.discoverServers()
+      .then((list) => { if (!cancelled) setServers(list) })
+      .catch((err) => { if (!cancelled) toast(errorText(err, 'Could not load public servers')) })
+    return () => { cancelled = true }
+  }, [toast])
+
+  const join = async (server: PublicServerSummary): Promise<void> => {
+    setJoiningId(server.id)
+    try {
+      const joined = await api.joinServer(server.id)
+      await refreshLists()
+      selectServer(joined.id)
+      onClose()
+    } catch (err) {
+      toast(errorText(err, 'Could not join server'))
+      setJoiningId(null)
+    }
+  }
+
+  return (
+    <DialogShell title="Discover servers" subtitle="Public servers anyone can join" onClose={onClose} footer={<GhostButton onClick={onClose}>Close</GhostButton>}>
+      {!servers && <div className="flex justify-center py-6"><Loader2 size={18} className="animate-spin text-text-muted" /></div>}
+      {servers?.length === 0 && <p className="text-sm text-text-muted text-center py-8">No public servers to join yet.</p>}
+      {servers?.map((server) => (
+        <div key={server.id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] px-3 py-2.5 mb-2">
+          <ServerGlyph server={server} size={40} />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-text-primary truncate">{server.name}</p>
+            <p className="text-xs text-text-muted truncate">{server.description || `${server.member_count} member${server.member_count === 1 ? '' : 's'}`}</p>
+          </div>
+          {server.is_member ? (
+            <span className="shrink-0 text-xs font-semibold text-text-muted px-3 py-1.5">Joined</span>
+          ) : (
+            <PrimaryButton onClick={() => void join(server)} busy={joiningId === server.id}>Join</PrimaryButton>
+          )}
+        </div>
+      ))}
+    </DialogShell>
+  )
+}
+
+// ─── Roles & permissions ───────────────────────────────────────────────────────
+
+const PERMISSION_LABELS: Record<ChatPermissionName, string> = {
+  view_channels: 'View channels',
+  send_messages: 'Send messages',
+  manage_messages: 'Manage messages',
+  manage_channels: 'Manage channels',
+  manage_server: 'Manage server',
+  manage_roles: 'Manage roles',
+  kick_members: 'Kick members',
+  ban_members: 'Ban members',
+  mention_everyone: 'Mention @everyone',
+  attach_files: 'Attach files',
+  add_reactions: 'Add reactions',
+  manage_threads: 'Manage threads',
+  administrator: 'Administrator (all)',
+}
+
+const PERMISSION_KEYS = Object.keys(CHAT_PERMISSIONS) as ChatPermissionName[]
+
+function PermissionCheckboxes({ value, onChange, columns = 2 }: { value: number; onChange: (next: number) => void; columns?: 1 | 2 }): JSX.Element {
+  return (
+    <div className={`grid gap-1 mb-3 ${columns === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+      {PERMISSION_KEYS.map((key) => {
+        const bit = CHAT_PERMISSIONS[key]
+        const on = (value & bit) !== 0
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onChange(on ? value & ~bit : value | bit)}
+            className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${on ? 'bg-accent/10 text-text-primary' : 'text-text-secondary hover:bg-surface-raised/60'}`}
+          >
+            <span className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${on ? 'bg-accent border-accent text-white' : 'border-[var(--border)]'}`}>
+              {on && <Check size={11} strokeWidth={3} />}
+            </span>
+            {PERMISSION_LABELS[key]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function RoleRow({ serverId, role, canManage }: { serverId: number; role: ServerRoleDef; canManage: boolean }): JSX.Element {
+  const loadRoles = useChatStore((s) => s.loadRoles)
+  const toast = useChatToast()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState(role.name)
+  const [color, setColor] = useState(role.color)
+  const [position, setPosition] = useState(role.position)
+  const [permissions, setPermissions] = useState(role.permissions)
+  const [busy, setBusy] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  useEffect(() => {
+    if (open) return
+    setName(role.name)
+    setColor(role.color)
+    setPosition(role.position)
+    setPermissions(role.permissions)
+  }, [role, open])
+
+  const dirty = name !== role.name || color !== role.color || position !== role.position || permissions !== role.permissions
+
+  const save = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const body: Partial<api.RoleInput> = { color, permissions }
+      if (!role.is_default) { body.name = name.trim(); body.position = position }
+      await api.updateRole(serverId, role.id, body)
+      await loadRoles(serverId, true)
+      setOpen(false)
+    } catch (err) {
+      toast(errorText(err, 'Could not save role'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] mb-2 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => canManage && setOpen((v) => !v)}
+        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left ${canManage ? 'hover:bg-surface-raised/50' : ''}`}
+      >
+        <span className="w-3 h-3 rounded-full shrink-0" style={{ background: role.color || '#8a8f98' }} />
+        <span className="flex-1 min-w-0 text-sm font-semibold text-text-primary truncate">{role.name}</span>
+        <span className="text-[11px] text-text-muted">{role.permission_names.length} perm{role.permission_names.length === 1 ? '' : 's'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 border-t border-[var(--border)] pt-3">
+          <div className="flex items-center gap-2 mb-3">
+            <input type="color" value={color || '#8a8f98'} onChange={(e) => setColor(e.target.value)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-transparent cursor-pointer" />
+            {!role.is_default ? (
+              <input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} flex-1`} />
+            ) : (
+              <span className="flex-1 text-sm text-text-muted italic">@everyone — implicit for every member</span>
+            )}
+          </div>
+          {!role.is_default && (
+            <Field label="Position" hint="Higher = more authority">
+              <input type="number" value={position} onChange={(e) => setPosition(Number(e.target.value))} className={inputCls} />
+            </Field>
+          )}
+          <PermissionCheckboxes value={permissions} onChange={setPermissions} />
+          <div className="flex items-center justify-between">
+            {!role.is_default ? (
+              <button onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:underline">
+                <Trash2 size={13} />Delete role
+              </button>
+            ) : <span />}
+            <div className="flex gap-2">
+              <GhostButton onClick={() => setOpen(false)}>Cancel</GhostButton>
+              <PrimaryButton onClick={save} busy={busy} disabled={!dirty || (!role.is_default && !name.trim())}>Save</PrimaryButton>
+            </div>
+          </div>
+          {confirmDelete && (
+            <ConfirmDialog
+              title={`Delete ${role.name}?`}
+              body="Members who only hold this role immediately lose its permissions. This can't be undone."
+              confirmLabel="Delete role"
+              onCancel={() => setConfirmDelete(false)}
+              onConfirm={() => {
+                setConfirmDelete(false)
+                api.deleteRole(serverId, role.id)
+                  .then(() => loadRoles(serverId, true))
+                  .catch((err) => toast(errorText(err, 'Could not delete role')))
+              }}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NewRoleRow({ serverId, onDone }: { serverId: number; onDone: () => void }): JSX.Element {
+  const loadRoles = useChatStore((s) => s.loadRoles)
+  const toast = useChatToast()
+  const [name, setName] = useState('New Role')
+  const [color, setColor] = useState('#5865F2')
+  const [permissions, setPermissions] = useState<number>(CHAT_PERMISSIONS.view_channels | CHAT_PERMISSIONS.send_messages)
+  const [busy, setBusy] = useState(false)
+
+  const create = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await api.createRole(serverId, { name: name.trim(), color, position: 1, permissions })
+      await loadRoles(serverId, true)
+      onDone()
+    } catch (err) {
+      toast(errorText(err, 'Could not create role'))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-accent/40 bg-accent/5 p-3 mb-2">
+      <div className="flex items-center gap-2 mb-3">
+        <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-transparent cursor-pointer" />
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} flex-1`} />
+      </div>
+      <PermissionCheckboxes value={permissions} onChange={setPermissions} />
+      <div className="flex justify-end gap-2">
+        <GhostButton onClick={onDone}>Cancel</GhostButton>
+        <PrimaryButton onClick={create} busy={busy} disabled={!name.trim()}>Create role</PrimaryButton>
+      </div>
+    </div>
+  )
+}
+
+export function RolesModal({ serverId, onClose }: { serverId: number; onClose: () => void }): JSX.Element {
+  const roles = useChatStore((s) => s.roles[serverId])
+  const loadRoles = useChatStore((s) => s.loadRoles)
+  const perms = useChatPermissions(serverId)
+  const [creating, setCreating] = useState(false)
+
+  useEffect(() => { void loadRoles(serverId) }, [serverId, loadRoles])
+
+  const sorted = useMemo(() => (roles ?? []).slice().sort((a, b) => b.position - a.position), [roles])
+
+  return (
+    <DialogShell title="Roles" subtitle="Colors, hierarchy and permissions for this server" onClose={onClose} footer={<GhostButton onClick={onClose}>Close</GhostButton>} width="max-w-lg">
+      {!roles && <div className="flex justify-center py-6"><Loader2 size={18} className="animate-spin text-text-muted" /></div>}
+      {roles && sorted.map((role) => <RoleRow key={role.id} serverId={serverId} role={role} canManage={perms.canManageRoles} />)}
+      {perms.canManageRoles && (
+        creating
+          ? <NewRoleRow serverId={serverId} onDone={() => setCreating(false)} />
+          : <button onClick={() => setCreating(true)} className="w-full rounded-xl border border-dashed border-[var(--border)] py-2.5 text-xs font-semibold text-text-muted hover:text-text-primary hover:border-text-muted transition-colors">+ New role</button>
+      )}
+    </DialogShell>
+  )
+}
+
+export function MemberRolesModal({ serverId, member, onClose }: { serverId: number; member: ChatMember; onClose: () => void }): JSX.Element {
+  const roles = useChatStore((s) => s.roles[serverId])
+  const loadRoles = useChatStore((s) => s.loadRoles)
+  const loadMembers = useChatStore((s) => s.loadMembers)
+  const toast = useChatToast()
+  const [selected, setSelected] = useState<Set<number>>(new Set(member.roles.map((r) => r.id)))
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { void loadRoles(serverId) }, [serverId, loadRoles])
+
+  const assignable = useMemo(() => (roles ?? []).filter((r) => !r.is_default).slice().sort((a, b) => b.position - a.position), [roles])
+
+  const save = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      await api.setMemberRoles(serverId, member.user.id, [...selected])
+      await loadMembers(serverId, true)
+      onClose()
+    } catch (err) {
+      toast(errorText(err, 'Could not update roles'))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <DialogShell
+      title="Manage roles"
+      subtitle={displayName(member.user)}
+      onClose={onClose}
+      footer={<><GhostButton onClick={onClose}>Cancel</GhostButton><PrimaryButton onClick={save} busy={busy}>Save</PrimaryButton></>}
+    >
+      {!roles && <div className="flex justify-center py-6"><Loader2 size={18} className="animate-spin text-text-muted" /></div>}
+      {roles && assignable.length === 0 && <p className="text-xs text-text-muted py-4 text-center">No assignable roles yet — create one from Server settings → Roles first.</p>}
+      {assignable.map((role) => {
+        const on = selected.has(role.id)
+        return (
+          <button
+            key={role.id}
+            type="button"
+            onClick={() => setSelected((prev) => {
+              const next = new Set(prev)
+              if (on) next.delete(role.id)
+              else next.add(role.id)
+              return next
+            })}
+            className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 mb-1.5 text-left transition-colors ${on ? 'bg-accent/10' : 'hover:bg-surface-raised/60'}`}
+          >
+            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: role.color || '#8a8f98' }} />
+            <span className="flex-1 text-sm text-text-primary truncate">{role.name}</span>
+            <span className={`w-5 h-5 rounded-md border flex items-center justify-center ${on ? 'bg-accent border-accent text-white' : 'border-[var(--border)]'}`}>{on && <Check size={13} strokeWidth={3} />}</span>
+          </button>
+        )
+      })}
+    </DialogShell>
+  )
+}
+
+// Compact override list + add row, scoped to a single channel. Only role-based
+// overrides are exposed here (not per-member) - the full Discord-style editor
+// (member overrides, per-permission inherit/allow/deny tri-state, drag
+// hierarchy) is deliberately out of scope; the API supports member overrides
+// via api.upsertOverride({ member, ... }) for a future pass.
+function ChannelOverridesSection({ channelId, serverId }: { channelId: number; serverId: number }): JSX.Element {
+  const roles = useChatStore((s) => s.servers.find((x) => x.id === serverId)?.roles ?? [])
+  const toast = useChatToast()
+  const [overrides, setOverrides] = useState<ChannelOverride[] | null>(null)
+  const [roleId, setRoleId] = useState<number | ''>('')
+  const [allow, setAllow] = useState(0)
+  const [deny, setDeny] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  const load = (): void => {
+    api.listOverrides(channelId).then(setOverrides).catch((err) => toast(errorText(err, 'Could not load overrides')))
+  }
+  useEffect(() => { load() }, [channelId])
+
+  const roleName = (id: number | null): string => roles.find((r) => r.id === id)?.name ?? `Role #${id}`
+
+  const add = async (): Promise<void> => {
+    if (!roleId) return
+    setBusy(true)
+    try {
+      await api.upsertOverride(channelId, { role: roleId, allow, deny })
+      setAllow(0)
+      setDeny(0)
+      setRoleId('')
+      load()
+    } catch (err) {
+      toast(errorText(err, 'Could not save override'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = (overrideId: number): void => {
+    api.deleteOverride(channelId, overrideId).then(load).catch((err) => toast(errorText(err, 'Could not remove override')))
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--border)] p-3 mb-4">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2">Permission overrides</p>
+      {overrides === null && <div className="flex justify-center py-3"><Loader2 size={15} className="animate-spin text-text-muted" /></div>}
+      {overrides?.length === 0 && <p className="text-xs text-text-muted mb-2">No overrides yet — this channel follows each role's server-wide permissions.</p>}
+      {overrides?.map((o) => (
+        <div key={o.id} className="flex items-center gap-2 py-1.5 text-xs border-b border-[var(--border)] last:border-0">
+          <span className="flex-1 text-text-primary truncate">{o.role != null ? roleName(o.role) : `Member #${o.member}`}</span>
+          {o.allow > 0 && <span className="text-emerald-400">allow {o.allow}</span>}
+          {o.deny > 0 && <span className="text-red-400">deny {o.deny}</span>}
+          <button onClick={() => remove(o.id)} className="text-text-muted hover:text-red-400"><Trash2 size={13} /></button>
+        </div>
+      ))}
+      <select value={roleId} onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : '')} className={`${inputCls} mt-2 mb-2`}>
+        <option value="">Add an override for a role…</option>
+        {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+      </select>
+      {roleId !== '' && (
+        <div className="grid grid-cols-2 gap-3 mb-2">
+          <div>
+            <p className="text-[10px] font-bold uppercase text-emerald-400 mb-1">Allow</p>
+            <PermissionCheckboxes value={allow} onChange={setAllow} columns={1} />
+          </div>
+          <div>
+            <p className="text-[10px] font-bold uppercase text-red-400 mb-1">Deny</p>
+            <PermissionCheckboxes value={deny} onChange={setDeny} columns={1} />
+          </div>
+        </div>
+      )}
+      <PrimaryButton onClick={add} busy={busy} disabled={!roleId || (!allow && !deny)}>Add override</PrimaryButton>
+    </div>
+  )
+}
+
 // ─── Channels ────────────────────────────────────────────────────────────────
 
 function slugPreview(name: string): string {
@@ -555,6 +938,7 @@ export function ChannelModal({ serverId, channel, onClose }: { serverId: number;
           })}
         </div>
       )}
+      {channel && <ChannelOverridesSection channelId={channel.id} serverId={serverId} />}
       {channel && (
         <button onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:underline">
           <Trash2 size={13} />Delete channel

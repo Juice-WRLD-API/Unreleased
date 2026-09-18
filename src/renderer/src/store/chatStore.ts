@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import * as api from '../lib/chatApi'
-import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation } from '../lib/chatApi'
+import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
@@ -143,6 +143,7 @@ interface ChatState {
 
   servers: ChatServer[]
   members: Record<number, ChatMember[]>
+  roles: Record<number, ServerRoleDef[]>
   conversations: Conversation[]
   pinnedServers: number[]
   pinnedConversations: number[]
@@ -200,6 +201,7 @@ interface ChatState {
   sendTyping: (room: RoomRef, active: boolean) => void
 
   loadMembers: (serverId: number, force?: boolean) => Promise<ChatMember[]>
+  loadRoles: (serverId: number, force?: boolean) => Promise<ServerRoleDef[]>
   startDm: (userIds: number[], name?: string) => Promise<Conversation>
   resolveKey: (conversationId: number) => Promise<void>
   decryptRoom: (conversationId: number) => Promise<void>
@@ -538,6 +540,32 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
+      case 'role.created':
+      case 'role.updated':
+        set((st) => {
+          const list = st.roles[ev.server]
+          if (!list) return {}
+          return { roles: { ...st.roles, [ev.server]: [...list.filter((r) => r.id !== ev.role.id), ev.role] } }
+        })
+        return
+      case 'role.deleted':
+        set((st) => {
+          const list = st.roles[ev.server]
+          if (!list) return {}
+          return {
+            roles: { ...st.roles, [ev.server]: list.filter((r) => r.id !== ev.role_id) },
+            members: st.members[ev.server]
+              ? { ...st.members, [ev.server]: st.members[ev.server].map((m) => ({ ...m, roles: m.roles.filter((r) => r.id !== ev.role_id) })) }
+              : st.members,
+          }
+        })
+        return
+      // Channel overrides aren't cached in the store - the channel-edit modal
+      // that manages them fetches on open, and a live edit while that modal is
+      // closed has nothing else to invalidate.
+      case 'channel.override.updated':
+      case 'channel.override.deleted':
+        return
       default:
         return
     }
@@ -615,6 +643,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     loadError: null,
     servers: [],
     members: {},
+    roles: {},
     conversations: [],
     pinnedServers: [],
     pinnedConversations: [],
@@ -748,7 +777,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       lastRoomBySpace.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
-        servers: [], members: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
+        servers: [], members: {}, roles: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, keyState: {}, plain: {},
       })
@@ -1075,6 +1104,14 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (cached && !force) return cached
       const list = await api.listMembers(serverId)
       set((s) => ({ members: { ...s.members, [serverId]: list } }))
+      return list
+    },
+
+    loadRoles: async (serverId, force = false) => {
+      const cached = get().roles[serverId]
+      if (cached && !force) return cached
+      const list = await api.listRoles(serverId)
+      set((s) => ({ roles: { ...s.roles, [serverId]: list } }))
       return list
     },
 

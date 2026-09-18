@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BellOff, BellRing, ChevronDown, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
+import { BellOff, BellRing, ChevronDown, Compass, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatChannel, Conversation } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
@@ -280,6 +280,11 @@ export function ServerRail(): JSX.Element {
       <RailButton label="Create a server" active={false} onClick={() => openModal({ kind: 'create-server' })}>
         <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-accent group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-all duration-200">
           <Plus size={22} />
+        </span>
+      </RailButton>
+      <RailButton label="Discover servers" active={false} onClick={() => openModal({ kind: 'discover-servers' })}>
+        <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-text-secondary group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-all duration-200">
+          <Compass size={20} />
         </span>
       </RailButton>
       {ctxMenu && (() => {

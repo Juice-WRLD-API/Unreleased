@@ -1,6 +1,6 @@
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
-import type { ChatChannel, ChatMember, ChatMessage, ChatServer, Conversation } from './chatApi'
+import type { ChannelOverride, ChatChannel, ChatMember, ChatMessage, ChatServer, Conversation, ServerRoleDef } from './chatApi'
 
 export type RoomKind = 'channel' | 'conversation'
 
@@ -24,6 +24,10 @@ export type ChatEvent =
   | { type: 'key.rotated'; conversation: number; key_version: number }
   | { type: 'device.added'; conversation: number; user_id: number }
   | { type: 'envelope.available'; conversation: number; key_version: number }
+  | { type: 'role.created' | 'role.updated'; server: number; role: ServerRoleDef }
+  | { type: 'role.deleted'; server: number; role_id: number }
+  | { type: 'channel.override.updated'; server: number; channel: number; override: ChannelOverride }
+  | { type: 'channel.override.deleted'; server: number; channel: number; override_id: number }
 
 export type SocketStatus = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'unauthorized'
 

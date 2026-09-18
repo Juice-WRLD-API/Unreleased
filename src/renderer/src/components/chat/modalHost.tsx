@@ -1,11 +1,14 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
-import type { ChatChannel } from '../../lib/chatApi'
-import { AddMembersModal, ChannelModal, CreateServerModal, NewDmModal, RenameCategoryModal, ServerSettingsModal } from './Modals'
+import type { ChatChannel, ChatMember } from '../../lib/chatApi'
+import { AddMembersModal, ChannelModal, CreateServerModal, DiscoverServersModal, MemberRolesModal, NewDmModal, RenameCategoryModal, RolesModal, ServerSettingsModal } from './Modals'
 
 export type ChatModal =
   | { kind: 'create-server' }
+  | { kind: 'discover-servers' }
   | { kind: 'server-settings'; serverId: number }
   | { kind: 'add-members'; serverId: number }
+  | { kind: 'roles'; serverId: number }
+  | { kind: 'member-roles'; serverId: number; member: ChatMember }
   | { kind: 'channel'; serverId: number; channel?: ChatChannel }
   | { kind: 'rename-category'; serverId: number; category: string }
   | { kind: 'new-dm' }
@@ -24,10 +27,18 @@ export function ModalHost({ children }: { children: ReactNode }): JSX.Element {
     <ModalContext.Provider value={setModal}>
       {children}
       {modal?.kind === 'create-server' && <CreateServerModal onClose={close} />}
+      {modal?.kind === 'discover-servers' && <DiscoverServersModal onClose={close} />}
       {modal?.kind === 'server-settings' && (
-        <ServerSettingsModal serverId={modal.serverId} onClose={close} onAddMembers={() => setModal({ kind: 'add-members', serverId: modal.serverId })} />
+        <ServerSettingsModal
+          serverId={modal.serverId}
+          onClose={close}
+          onAddMembers={() => setModal({ kind: 'add-members', serverId: modal.serverId })}
+          onRoles={() => setModal({ kind: 'roles', serverId: modal.serverId })}
+        />
       )}
       {modal?.kind === 'add-members' && <AddMembersModal serverId={modal.serverId} onClose={close} />}
+      {modal?.kind === 'roles' && <RolesModal serverId={modal.serverId} onClose={close} />}
+      {modal?.kind === 'member-roles' && <MemberRolesModal serverId={modal.serverId} member={modal.member} onClose={close} />}
       {modal?.kind === 'channel' && <ChannelModal serverId={modal.serverId} channel={modal.channel} onClose={close} />}
       {modal?.kind === 'rename-category' && <RenameCategoryModal serverId={modal.serverId} category={modal.category} onClose={close} />}
       {modal?.kind === 'new-dm' && <NewDmModal onClose={close} />}

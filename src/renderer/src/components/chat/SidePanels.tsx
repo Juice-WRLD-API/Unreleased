@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Crown, Loader2, MessageSquare, MoreHorizontal, Pin, Shield, UserMinus, X } from 'lucide-react'
+import { Crown, Loader2, MessageSquare, MoreHorizontal, Pin, Shield, UserCog, UserMinus, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
 import { displayName, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { useNowPlayingByIds } from '../../lib/userApi'
+import { useChatPermissions } from '../../hooks/useChatPermissions'
 import Composer from './Composer'
 import MessageBody from './MessageBody'
 import MessageItem, { ConfirmDialog } from './MessageItem'
+import { useOpenModal } from './modalHost'
 import { useRoomPeople } from './people'
 import { relativeTime } from '../adminShared'
 import { useRoomInfo } from './RoomPane'
@@ -113,10 +115,11 @@ export function PinsPanel({ room, onClose }: { room: RoomRef; onClose: () => voi
   )
 }
 
-function MemberRow({ member, serverId, canManage, ownerId, onMessage, listening }: {
+function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMessage, listening }: {
   member: ChatMember
   serverId: number
   canManage: boolean
+  canManageRoles: boolean
   ownerId: number
   onMessage: (userId: number) => void
   listening?: boolean
@@ -124,6 +127,7 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage, listening 
   const meId = useChatStore((s) => s.meId)
   const loadMembers = useChatStore((s) => s.loadMembers)
   const openPublicProfile = useStore((s) => s.openPublicProfile)
+  const openModal = useOpenModal()
   const toast = useChatToast()
   const [menu, setMenu] = useState(false)
   const [confirm, setConfirm] = useState(false)
@@ -147,32 +151,51 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage, listening 
           {isOwner && <Crown size={12} className="text-amber-400 shrink-0" />}
           {!isOwner && member.server_role === 'admin' && <Shield size={12} className="text-sky-400 shrink-0" />}
         </p>
-        <p className="text-[11px] text-text-muted truncate">@{member.user.username}</p>
+        <p className="text-[11px] text-text-muted truncate flex items-center gap-1">
+          <span>@{member.user.username}</span>
+          {member.roles.map((r) => (
+            <span key={r.id} className="inline-flex items-center gap-1 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: r.color || '#8a8f98' }} />
+              {r.name}
+            </span>
+          ))}
+        </p>
       </div>
       {!isMe && (
         <button onClick={() => onMessage(member.user.id)} title="Message" className="w-7 h-7 rounded-lg hidden group-hover:flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay">
           <MessageSquare size={14} />
         </button>
       )}
-      {canManage && !isOwner && (
+      {(canManage || canManageRoles) && !isOwner && (
         <button onClick={() => setMenu((v) => !v)} title="Manage" className="w-7 h-7 rounded-lg flex md:hidden md:group-hover:flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay">
           <MoreHorizontal size={15} />
         </button>
       )}
-      {!canManage && isMe && !isOwner && (
+      {!canManage && !canManageRoles && isMe && !isOwner && (
         <button onClick={() => setConfirm(true)} title="Leave server" className="w-7 h-7 rounded-lg hidden group-hover:flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10">
           <UserMinus size={14} />
         </button>
       )}
       {menu && (
         <div className="chat-pop absolute right-2 top-full z-20 mt-1 w-48 rounded-xl border border-[var(--border)] bg-surface shadow-2xl py-1">
-          <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { server_role: member.server_role === 'admin' ? 'member' : 'admin' }), 'Role updated')}>
-            {member.server_role === 'admin' ? 'Remove admin' : 'Make admin'}
-          </MenuItem>
-          <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted')}>
-            {member.muted ? 'Unmute' : 'Mute'}
-          </MenuItem>
-          <MenuItem danger onClick={() => { setMenu(false); setConfirm(true) }}>{isMe ? 'Leave server' : 'Remove from server'}</MenuItem>
+          {canManageRoles && (
+            <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'member-roles', serverId, member }) }}>
+              <span className="inline-flex items-center gap-2"><UserCog size={14} />Manage roles</span>
+            </MenuItem>
+          )}
+          {canManage && (
+            <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { server_role: member.server_role === 'admin' ? 'member' : 'admin' }), 'Role updated')}>
+              {member.server_role === 'admin' ? 'Remove admin' : 'Make admin'}
+            </MenuItem>
+          )}
+          {canManage && (
+            <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted')}>
+              {member.muted ? 'Unmute' : 'Mute'}
+            </MenuItem>
+          )}
+          {canManage && (
+            <MenuItem danger onClick={() => { setMenu(false); setConfirm(true) }}>{isMe ? 'Leave server' : 'Remove from server'}</MenuItem>
+          )}
         </div>
       )}
       {confirm && (
@@ -181,7 +204,11 @@ function MemberRow({ member, serverId, canManage, ownerId, onMessage, listening 
           body={isMe ? 'You’ll need an owner or admin to add you back.' : 'They’ll lose access to every channel in this server.'}
           confirmLabel={isMe ? 'Leave' : 'Remove'}
           onCancel={() => setConfirm(false)}
-          onConfirm={() => { setConfirm(false); act(() => api.removeMember(serverId, member.user.id), isMe ? 'Left server' : 'Member removed') }}
+          onConfirm={() => {
+            setConfirm(false)
+            if (isMe) act(() => api.leaveServer(serverId), 'Left server')
+            else act(() => api.removeMember(serverId, member.user.id), 'Member removed')
+          }}
         />
       )}
     </div>
@@ -209,6 +236,7 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
   useEffect(() => { void loadMembers(serverId) }, [serverId, loadMembers])
 
   const canManage = me?.role === 'administrator' || server?.my_role === 'owner' || server?.my_role === 'admin'
+  const canManageRoles = useChatPermissions(serverId).canManageRoles
   const q = query.trim().toLowerCase()
   const filtered = (members ?? []).filter((m) => !q || m.user.username.toLowerCase().includes(q) || m.user.display_name.toLowerCase().includes(q))
   const onlineList = filtered.filter((m) => online[m.user.id])
@@ -242,12 +270,12 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
           <>
             {onlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Online — {onlineList.length}</p>}
             {onlineList.sort(byName).map((m) => (
-              <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} ownerId={server?.owner ?? -1} onMessage={message} listening={!!nowPlaying[m.user.id]} />
+              <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} ownerId={server?.owner ?? -1} onMessage={message} listening={!!nowPlaying[m.user.id]} />
             ))}
             {offlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Offline — {offlineList.length}</p>}
             <div className="opacity-60">
               {offlineList.sort(byName).map((m) => (
-                <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} ownerId={server?.owner ?? -1} onMessage={message} />
+                <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} ownerId={server?.owner ?? -1} onMessage={message} />
               ))}
             </div>
           </>

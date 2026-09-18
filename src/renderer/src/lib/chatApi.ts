@@ -30,15 +30,84 @@ export interface ChatChannel {
 
 export type ServerRole = 'owner' | 'admin' | 'member'
 
+// Bitmask permission constants for the roles/permissions system. Mirrors
+// GET /permissions/, the canonical source of truth - this const exists so
+// callers don't need a round trip just to reference e.g. manage_roles.
+export const CHAT_PERMISSIONS = {
+  view_channels: 1,
+  send_messages: 2,
+  manage_messages: 4,
+  manage_channels: 8,
+  manage_server: 16,
+  manage_roles: 32,
+  kick_members: 64,
+  ban_members: 128,
+  mention_everyone: 256,
+  attach_files: 512,
+  add_reactions: 1024,
+  manage_threads: 2048,
+  administrator: 4096,
+} as const
+
+export type ChatPermissionName = keyof typeof CHAT_PERMISSIONS
+
+export const hasPermission = (mask: number, bit: number): boolean =>
+  (mask & CHAT_PERMISSIONS.administrator) !== 0 || (mask & bit) !== 0
+
+// A named, colored role with a permission bitmask - distinct from the
+// ServerRole string union above (owner/admin/member), which is the legacy
+// per-member flag kept for backward compatibility.
+export interface ServerRoleDef {
+  id: number
+  server: number
+  name: string
+  color: string
+  position: number
+  permissions: number
+  permission_names: ChatPermissionName[]
+  is_default: boolean
+  created_at: string
+}
+
+export interface MemberRoleRef {
+  id: number
+  name: string
+  color: string
+  position: number
+}
+
+export interface ChannelOverride {
+  id: number
+  channel: number
+  role: number | null
+  member: number | null
+  allow: number
+  deny: number
+}
+
+export interface PublicServerSummary {
+  id: number
+  name: string
+  slug: string
+  description: string
+  icon_url: string | null
+  member_count: number
+  is_member: boolean
+  created_at: string
+}
+
 export interface ChatServer {
   id: number
   name: string
   slug: string
   description: string
   icon_url: string | null
+  is_public: boolean
   owner: number
   member_count: number
   my_role: ServerRole
+  my_permissions: number
+  roles: ServerRoleDef[]
   channels: ChatChannel[]
   created_at: string
 }
@@ -47,6 +116,7 @@ export interface ChatMember {
   id: number
   user: ChatUserBrief
   server_role: ServerRole
+  roles: MemberRoleRef[]
   muted: boolean
   joined_at: string
 }
@@ -188,6 +258,35 @@ export const updateMember = (serverId: number, userId: number, body: { server_ro
   request<ChatMember>(`/servers/${serverId}/members/${userId}/`, json('PATCH', body))
 export const removeMember = (serverId: number, userId: number) =>
   request<void>(`/servers/${serverId}/members/${userId}/`, json('DELETE'))
+
+// Public servers
+export const discoverServers = () =>
+  request<Results<PublicServerSummary>>('/servers/discover/').then((r) => r.results)
+export const joinServer = (id: number) => request<ChatServer>(`/servers/${id}/join/`, json('POST'))
+export const leaveServer = (id: number) => request<void>(`/servers/${id}/join/`, json('DELETE'))
+
+// Roles & permissions
+export const fetchPermissionMap = () =>
+  request<{ permissions: Record<ChatPermissionName, number> }>('/permissions/').then((r) => r.permissions)
+export const listRoles = (serverId: number) =>
+  request<Results<ServerRoleDef>>(`/servers/${serverId}/roles/`).then((r) => r.results)
+export interface RoleInput { name: string; color: string; position: number; permissions: number }
+export const createRole = (serverId: number, body: RoleInput) =>
+  request<ServerRoleDef>(`/servers/${serverId}/roles/`, json('POST', body))
+export const updateRole = (serverId: number, roleId: number, body: Partial<RoleInput>) =>
+  request<ServerRoleDef>(`/servers/${serverId}/roles/${roleId}/`, json('PATCH', body))
+export const deleteRole = (serverId: number, roleId: number) =>
+  request<void>(`/servers/${serverId}/roles/${roleId}/`, json('DELETE'))
+export const setMemberRoles = (serverId: number, userId: number, roleIds: number[]) =>
+  request<ChatMember>(`/servers/${serverId}/members/${userId}/roles/`, json('PUT', { role_ids: roleIds }))
+
+// Channel permission overrides
+export const listOverrides = (channelId: number) =>
+  request<Results<ChannelOverride>>(`/channels/${channelId}/overrides/`).then((r) => r.results)
+export const upsertOverride = (channelId: number, body: { role?: number; member?: number; allow: number; deny: number }) =>
+  request<ChannelOverride>(`/channels/${channelId}/overrides/`, json('PUT', body))
+export const deleteOverride = (channelId: number, overrideId: number) =>
+  request<void>(`/channels/${channelId}/overrides/${overrideId}/`, json('DELETE'))
 
 // Channels
 export interface ChannelInput {
