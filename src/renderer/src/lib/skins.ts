@@ -304,7 +304,7 @@ export function newSkinId(): string {
 // Accepts the CSS color forms the palettes actually use - hex, rgb/rgba,
 // hsl/hsla, and bare keywords - while rejecting anything long or structural, so
 // an imported file can't smuggle arbitrary text into a style property.
-function isColor(value: unknown): value is string {
+export function isColor(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&

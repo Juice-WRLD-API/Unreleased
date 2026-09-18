@@ -1,4 +1,5 @@
 import { JWAPI_BASE } from './juicewrldApi'
+import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
 import type { Track } from '../types'
 
 // A song share rides in a chat message's plain `content` (or, for DMs, the
@@ -264,6 +265,69 @@ export function decodeSongInfoShare(content: string): SharedSongInfoPayload | nu
   }
 }
 
+// Same "prefix + JSON in plain chat text" scheme as the other shares above -
+// this one backs /sharetheme's card. It carries the full palette (not just an
+// id) because a shared skin may be one the recipient has never seen - a
+// built-in id could just be looked up, but a custom skin only exists in the
+// sender's local store, so the whole vars object rides along and the card
+// applies it as a brand-new custom skin on the recipient's side. Every color
+// is re-validated with the same isColor check the skin-file importer uses,
+// so a forged payload can't smuggle anything but a plausible CSS color into
+// an inline style.
+export const THEME_SHARE_PREFIX = 'unreleased:theme:'
+
+export interface SharedThemePayload {
+  name: string
+  dark: boolean
+  accent?: string
+  vars: SkinVars
+}
+
+export function encodeThemeShare(skin: Skin): string {
+  const payload: SharedThemePayload = {
+    name: skin.name,
+    dark: skin.dark,
+    accent: skin.accent,
+    vars: skin.vars,
+  }
+  return `${THEME_SHARE_PREFIX}${JSON.stringify(payload)}`
+}
+
+export function decodeThemeShare(content: string): SharedThemePayload | null {
+  if (!content.startsWith(THEME_SHARE_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(content.slice(THEME_SHARE_PREFIX.length))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+
+  if (!isSafeText(p.name)) return null
+  if (typeof p.dark !== 'boolean') return null
+  if (p.accent !== undefined && !isColor(p.accent)) return null
+  if (!p.vars || typeof p.vars !== 'object') return null
+  const rawVars = p.vars as Record<string, unknown>
+  const vars = {} as SkinVars
+  for (const { key } of SKIN_VAR_META) {
+    const v = rawVars[key]
+    if (!isColor(v)) return null
+    vars[key] = v
+  }
+  for (const key of SKIN_OPTIONAL_VAR_KEYS) {
+    const v = rawVars[key]
+    if (isColor(v)) vars[key] = v
+  }
+
+  return {
+    name: p.name as string,
+    dark: p.dark,
+    accent: p.accent as string | undefined,
+    vars,
+  }
+}
+
 // Plain-text summary for surfaces that can't render the rich card (notification
 // banners, OS notifications) - falls through the three share types before
 // treating the content as a regular message.
@@ -276,6 +340,8 @@ export function shareSummaryText(content: string): string | null {
   if (news) return `Shared a news post: ${news.title}`
   const info = decodeSongInfoShare(content)
   if (info) return `Song info: ${info.title}`
+  const theme = decodeThemeShare(content)
+  if (theme) return `Shared a theme: ${theme.name}`
   return null
 }
 

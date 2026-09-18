@@ -5,10 +5,10 @@ import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
-import { encodeSongInfoShare, encodeSongShare } from '../../lib/chatShare'
+import { encodeSongInfoShare, encodeSongShare, encodeThemeShare } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { buildImageUrl, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
-import { allSkins } from '../../lib/skins'
+import { allSkins, getSkin } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import GifPicker from './GifPicker'
@@ -277,7 +277,7 @@ const Composer = forwardRef<ComposerHandle, {
 
   const runHelpCommand = (): void => {
     toast(
-      'Commands: /song <title>, /search <title>, /info <title>, /np (or /nowplaying), /theme <name>, /mute @user, /unmute @user, /promote @user, /kick @user, /feedback <message>',
+      'Commands: /song <title>, /search <title>, /info <title>, /np (or /nowplaying), /theme <name>, /sharetheme, /mute @user, /unmute @user, /promote @user, /kick @user, /feedback <message>',
       'ok',
     )
   }
@@ -304,6 +304,14 @@ const Composer = forwardRef<ComposerHandle, {
     const match = track.id.match(/^jw-(\d+)$/)
     if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
     await send(room, { text: encodeSongShare(track, Number(match[1])), files: [] })
+  }
+
+  // Shares whatever skin is currently active (built-in or custom) - the card
+  // carries the full palette, not just an id, so a custom skin the recipient
+  // has never seen still applies correctly (see chatShare.ts).
+  const runShareThemeCommand = async (): Promise<void> => {
+    const skin = getSkin(useStore.getState().theme)
+    await send(room, { text: encodeThemeShare(skin), files: [] })
   }
 
   // Routes through the same outbox as the Settings feedback form (see
@@ -360,9 +368,9 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   // "/song <query>", "/search <query>", "/info <query>", "/mute @user",
-  // "/unmute @user", "/theme <name>", "/np", "/promote @user", "/kick @user",
-  // "/feedback <message>" and "/help" are recognized only when they are the
-  // entire message
+  // "/unmute @user", "/theme <name>", "/sharetheme", "/np", "/promote @user",
+  // "/kick @user", "/feedback <message>" and "/help" are recognized only when
+  // they are the entire message
   // (no reply-in-progress, no attachments) - anything else starting with "/"
   // (a URL, a stray command someone typed) falls through and sends as a
   // normal text message, same as before this feature existed.
@@ -401,6 +409,8 @@ const Composer = forwardRef<ComposerHandle, {
         await runInfoCommand(cmd.args)
       } else if (cmd.command === 'np') {
         await shareNowPlayingCommand()
+      } else if (cmd.command === 'sharetheme') {
+        await runShareThemeCommand()
       } else if (cmd.command === 'promote') {
         await runPromoteCommand(cmd.args)
       } else if (cmd.command === 'kick') {

@@ -119,7 +119,7 @@ export function ServerGlyph({ server, size = 44, active }: { server: Pick<ChatSe
   const initials = server.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('')
   return (
     <span
-      className={`flex items-center justify-center overflow-hidden transition-all duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}
+      className={`flex items-center justify-center overflow-hidden transition-[border-radius] duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}
       style={{ width: size, height: size, background: server.icon_url ? undefined : `hsl(${hue} 45% 40% / ${active ? 0.5 : 0.28})` }}
     >
       {server.icon_url

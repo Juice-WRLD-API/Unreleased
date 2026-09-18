@@ -6,7 +6,7 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare } from '../../lib/chatShare'
+import { decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
 import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import rehypeChatEmoji from './emojiRehype'
@@ -16,6 +16,7 @@ import NewsShareCard from './NewsShareCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
+import ThemeShareCard from './ThemeShareCard'
 
 function urlTransform(url: string): string {
   return url.startsWith('mention:') ? url : defaultUrlTransform(url)
@@ -88,7 +89,9 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     const news = decodeNewsShare(body)
     if (news) return <NewsShareCard news={news} />
     const info = decodeSongInfoShare(body)
-    return info ? <SongInfoCard info={info} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (info) return <SongInfoCard info={info} />
+    const theme = decodeThemeShare(body)
+    return theme ? <ThemeShareCard theme={theme} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -118,5 +121,7 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   const decryptedNews = decodeNewsShare(decryptedBody)
   if (decryptedNews) return <NewsShareCard news={decryptedNews} />
   const decryptedInfo = decodeSongInfoShare(decryptedBody)
-  return decryptedInfo ? <SongInfoCard info={decryptedInfo} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
+  if (decryptedInfo) return <SongInfoCard info={decryptedInfo} />
+  const decryptedTheme = decodeThemeShare(decryptedBody)
+  return decryptedTheme ? <ThemeShareCard theme={decryptedTheme} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

@@ -2,7 +2,7 @@
 // by Composer before send - they never reach the room as literal text.
 // Anything else starting with "/" (a URL, an unrecognized word, etc.) is left
 // alone and sent as normal text, same as before this feature existed.
-export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'np' | 'promote' | 'kick' | 'feedback' | 'help'
+export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick' | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -12,7 +12,7 @@ export interface ParsedChatCommand {
   args: string
 }
 
-const KNOWN_COMMANDS = new Set<string>(['song', 'search', 'info', 'mute', 'unmute', 'theme', 'np', 'promote', 'kick', 'feedback', 'help'])
+const KNOWN_COMMANDS = new Set<string>(['song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick', 'feedback', 'help'])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
 // Composer only ever sees the canonical name, so adding an alias here never
@@ -41,6 +41,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'info', usage: '/info <title>', description: 'Show a song’s era, category, length and credits', params: ['title'] },
   { name: 'np', usage: '/np', description: 'Share what you’re currently playing', aliases: ['nowplaying'], params: [] },
   { name: 'theme', usage: '/theme <name>', description: 'Change your app theme, or list them with no name', params: ['name'] },
+  { name: 'sharetheme', usage: '/sharetheme', description: 'Share your current theme so others can apply it', params: [] },
   { name: 'mute', usage: '/mute @user', description: 'Hide a user’s messages for you', params: ['user'] },
   { name: 'unmute', usage: '/unmute @user', description: 'Unhide a previously muted user', params: ['user'] },
   { name: 'promote', usage: '/promote @user', description: 'Promote a member to server admin', params: ['user'] },

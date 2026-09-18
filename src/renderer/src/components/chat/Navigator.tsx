@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BellOff, BellRing, ChevronDown, Compass, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
-import type { ChatChannel, Conversation } from '../../lib/chatApi'
+import type { ChatChannel, ChatServer, Conversation } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
 import { conversationTitle, displayName, roomKey, useChatStore, useNowPlayingByIds } from '../../store/chatStore'
@@ -87,7 +87,7 @@ function RailButton({ label, active, unread, mentions, pinned, onClick, onContex
   return (
     <div className="group relative flex justify-center w-full">
       <span
-        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-text-primary transition-all duration-200 ${
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-full bg-text-primary transition-[height,width] duration-200 ${
           active ? 'h-10' : unread ? 'h-2 group-hover:h-5' : 'h-0 group-hover:h-5'
         }`}
       />
@@ -135,15 +135,64 @@ function RecentDmButton({ conv, active, onClick, onContextMenu }: {
   return (
     <RailButton label={title} active={active} unread={count > 0} mentions={mention} onClick={onClick} onContextMenu={onContextMenu}>
       {others[0] ? (
-        <ChatAvatar user={others[0].user} size={44} presence className={`transition-all duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`} />
+        <ChatAvatar user={others[0].user} size={44} presence className={`transition-[border-radius] duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`} />
       ) : (
-        <span className={`w-11 h-11 flex items-center justify-center bg-surface-raised text-text-secondary transition-all duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}>
+        <span className={`w-11 h-11 flex items-center justify-center bg-surface-raised text-text-secondary transition-[border-radius,background-color,color] duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}>
           <MessagesSquare size={18} />
         </span>
       )}
     </RailButton>
   )
 }
+
+// One draggable server icon. Memoised, and fed only primitives plus handlers
+// that stay referentially stable for the life of the rail, so sweeping the
+// cursor across the rail mid-drag re-renders the two icons whose highlight
+// actually changed instead of every icon (and every recent-DM avatar) on the
+// rail. The transitions are listed explicitly rather than `transition-all`:
+// the drag only changes opacity and the drop ring, and `all` also animates
+// the inherited registered colour custom properties declared in index.css.
+const ServerRailRow = memo(function ServerRailRow({
+  server, active, hasUnread, mentionCount, pinned, isDragging, isDropTarget,
+  onSelect, onMenu, onDragStart, onDragEnd, onDragOver, onDrop,
+}: {
+  server: ChatServer
+  active: boolean
+  hasUnread: boolean
+  mentionCount: number
+  pinned: boolean
+  isDragging: boolean
+  isDropTarget: boolean
+  onSelect: (id: number) => void
+  onMenu: (id: number, e: React.MouseEvent) => void
+  onDragStart: (id: number, e: React.DragEvent) => void
+  onDragEnd: () => void
+  onDragOver: (id: number, e: React.DragEvent) => void
+  onDrop: (e: React.DragEvent) => void
+}): JSX.Element {
+  return (
+    <div
+      className={`w-full flex justify-center rounded-2xl transition-[opacity,box-shadow] duration-150 ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+      draggable
+      onDragStart={(e) => onDragStart(server.id, e)}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => onDragOver(server.id, e)}
+      onDrop={onDrop}
+    >
+      <RailButton
+        label={server.name}
+        active={active}
+        unread={hasUnread}
+        mentions={mentionCount}
+        pinned={pinned}
+        onClick={() => onSelect(server.id)}
+        onContextMenu={(e) => onMenu(server.id, e)}
+      >
+        <ServerGlyph server={server} active={active} />
+      </RailButton>
+    </div>
+  )
+})
 
 export function ServerRail(): JSX.Element {
   const servers = useChatStore((s) => s.servers)
@@ -187,13 +236,21 @@ export function ServerRail(): JSX.Element {
     })
   }, [servers, pinnedServers, serverOrder])
 
+  // Mirrors of the values dropServer needs, so the drag handlers below can
+  // stay referentially stable (and keep ServerRailRow's memo intact) instead
+  // of being rebuilt every time a store slice or the hovered target changes.
+  const dragStateRef = useRef({ id: null as number | null, target: null as number | null })
+  const dropDepsRef = useRef({ orderedServers, pinnedServers, serverOrder })
+  dropDepsRef.current = { orderedServers, pinnedServers, serverOrder }
+
   // Drag a server icon onto another to reorder it. Reordering only happens
   // within the same pinned/unpinned partition (pinned icons always sort
   // first); dropping inserts the dragged server just before the hovered one,
   // or at the end of its partition when dropped on the trailing gap.
-  const dropServer = (): void => {
-    const id = dragServerId
-    const targetId = dropServerTarget
+  const dropServer = useCallback((): void => {
+    const { id, target: targetId } = dragStateRef.current
+    const { orderedServers, pinnedServers, serverOrder } = dropDepsRef.current
+    dragStateRef.current = { id: null, target: null }
     setDragServerId(null)
     setDropServerTarget(null)
     if (id == null || id === targetId) return
@@ -208,7 +265,42 @@ export function ServerRail(): JSX.Element {
     if (nextPartition.every((s, i) => s.id === partition[i]?.id)) return
     const otherIds = serverOrder.filter((oid) => !partition.some((s) => s.id === oid))
     setServerOrder([...otherIds, ...nextPartition.map((s) => s.id)])
-  }
+  }, [setServerOrder])
+
+  const startServerDrag = useCallback((id: number, e: React.DragEvent): void => {
+    e.dataTransfer.effectAllowed = 'move'
+    dragStateRef.current = { id, target: null }
+    setDragServerId(id)
+  }, [])
+  const endServerDrag = useCallback((): void => {
+    dragStateRef.current = { id: null, target: null }
+    setDragServerId(null)
+    setDropServerTarget(null)
+  }, [])
+  // Chrome fires dragover continuously while the pointer sits still, so only
+  // touch state when the hovered target actually changes.
+  const setDropTargetTo = useCallback((target: number | null): void => {
+    if (dragStateRef.current.target === target) return
+    dragStateRef.current.target = target
+    setDropServerTarget(target)
+  }, [])
+  const overServer = useCallback((id: number, e: React.DragEvent): void => {
+    const dragged = dragStateRef.current.id
+    if (dragged == null || dragged === id) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropTargetTo(id)
+  }, [setDropTargetTo])
+  const onServerDrop = useCallback((e: React.DragEvent): void => {
+    if (dragStateRef.current.id == null) return
+    e.preventDefault()
+    dropServer()
+  }, [dropServer])
+  const selectServerById = useCallback((id: number) => selectServer(id), [selectServer])
+  const openServerMenu = useCallback((id: number, e: React.MouseEvent): void => {
+    e.preventDefault()
+    setCtxMenu({ kind: 'server', id, x: e.clientX, y: e.clientY })
+  }, [])
   // Like Discord's DM rail: quick access to your most recently active
   // conversations right alongside the servers, without needing to switch
   // into the DM space first.
@@ -226,7 +318,7 @@ export function ServerRail(): JSX.Element {
   return (
     <nav className="w-[72px] shrink-0 flex flex-col items-center gap-2 py-3 bg-[var(--chat-rail)] border-r border-[var(--border)] overflow-y-auto no-scrollbar" style={{ ['--chat-ring' as string]: 'var(--chat-rail)' }}>
       <RailButton label="Direct messages" active={activeServerId === null} mentions={dmUnread} onClick={() => selectServer(null)}>
-        <span className={`w-11 h-11 flex items-center justify-center transition-all duration-200 ${
+        <span className={`w-11 h-11 flex items-center justify-center transition-[border-radius,background-color,color] duration-200 ${
           activeServerId === null ? 'rounded-[14px] bg-accent text-white' : 'rounded-[22px] bg-surface-raised text-text-secondary group-hover:rounded-[14px] group-hover:bg-accent group-hover:text-white'
         }`}>
           <MessagesSquare size={20} />
@@ -246,45 +338,39 @@ export function ServerRail(): JSX.Element {
         const keys = server.channels.map((c) => `c:${c.id}`)
         const hasUnread = keys.some((k) => (unread[k] ?? 0) > 0)
         const mentionCount = keys.reduce((n, k) => n + (mentions[k] ?? 0), 0)
-        const isDropTarget = dragServerId != null && dragServerId !== server.id && dropServerTarget === server.id
         return (
-          <div
+          <ServerRailRow
             key={server.id}
-            className={`w-full flex justify-center rounded-2xl transition-all ${dragServerId === server.id ? 'opacity-40' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
-            draggable
-            onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; setDragServerId(server.id) }}
-            onDragEnd={() => { setDragServerId(null); setDropServerTarget(null) }}
-            onDragOver={(e) => { if (dragServerId == null || dragServerId === server.id) return; e.preventDefault(); setDropServerTarget(server.id) }}
-            onDrop={(e) => { if (dragServerId == null) return; e.preventDefault(); dropServer() }}
-          >
-            <RailButton
-              label={server.name}
-              active={activeServerId === server.id}
-              unread={hasUnread}
-              mentions={mentionCount}
-              pinned={pinnedServers.includes(server.id)}
-              onClick={() => selectServer(server.id)}
-              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ kind: 'server', id: server.id, x: e.clientX, y: e.clientY }) }}
-            >
-              <ServerGlyph server={server} active={activeServerId === server.id} />
-            </RailButton>
-          </div>
+            server={server}
+            active={activeServerId === server.id}
+            hasUnread={hasUnread}
+            mentionCount={mentionCount}
+            pinned={pinnedServers.includes(server.id)}
+            isDragging={dragServerId === server.id}
+            isDropTarget={dragServerId != null && dragServerId !== server.id && dropServerTarget === server.id}
+            onSelect={selectServerById}
+            onMenu={openServerMenu}
+            onDragStart={startServerDrag}
+            onDragEnd={endServerDrag}
+            onDragOver={overServer}
+            onDrop={onServerDrop}
+          />
         )
       })}
       {dragServerId != null && (
         <div
           className="w-8 h-3 -my-1.5"
-          onDragOver={(e) => { e.preventDefault(); setDropServerTarget(null) }}
+          onDragOver={(e) => { e.preventDefault(); setDropTargetTo(null) }}
           onDrop={(e) => { e.preventDefault(); dropServer() }}
         />
       )}
       <RailButton label="Create a server" active={false} onClick={() => openModal({ kind: 'create-server' })}>
-        <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-accent group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-all duration-200">
+        <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-accent group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-[border-radius,background-color,color] duration-200">
           <Plus size={22} />
         </span>
       </RailButton>
       <RailButton label="Discover servers" active={false} onClick={() => openModal({ kind: 'discover-servers' })}>
-        <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-text-secondary group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-all duration-200">
+        <span className="w-11 h-11 rounded-[22px] group-hover:rounded-[14px] bg-surface-raised text-text-secondary group-hover:bg-accent group-hover:text-white flex items-center justify-center transition-[border-radius,background-color,color] duration-200">
           <Compass size={20} />
         </span>
       </RailButton>

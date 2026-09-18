@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useShallow } from 'zustand/react/shallow'
 import { Check, Globe, Hash, ImagePlus, Loader2, Lock, Search, ShieldCheck, Trash2, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import { CHAT_PERMISSIONS, type ChannelOverride, type ChatChannel, type ChatMember, type ChatPermissionName, type ChatUserBrief, type PublicServerSummary, type ServerRoleDef } from '../../lib/chatApi'
@@ -442,7 +443,7 @@ export function AddMembersModal({ serverId, onClose }: { serverId: number; onClo
 }
 
 export function RenameCategoryModal({ serverId, category, onClose }: { serverId: number; category: string; onClose: () => void }): JSX.Element {
-  const channels = useChatStore((s) => s.servers.find((x) => x.id === serverId)?.channels.filter((c) => c.category === category) ?? [])
+  const channels = useChatStore(useShallow((s) => s.servers.find((x) => x.id === serverId)?.channels.filter((c) => c.category === category) ?? []))
   const toast = useChatToast()
   const [name, setName] = useState(category)
   const [busy, setBusy] = useState(false)
