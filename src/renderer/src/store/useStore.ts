@@ -88,12 +88,6 @@ export interface StagedFileChange {
   /** Channel slug the change belongs to, since the Files tab can switch
    *  channels with changes still queued and each proposal carries its own. */
   channel: string
-  /** Destination folder this move needs before it can be proposed at all -
-   *  set when the drop bundled files into a folder that doesn't exist yet.
-   *  The API rejects a move into a path that isn't there, and a queued
-   *  create_folder only becomes a real folder once an admin approves it, so
-   *  these are held back until that lands (see lib/compStagedChanges). */
-  awaitingFolder?: string
   /** Set when a propose attempt failed, so the row can show why and stay
    *  queued for a retry. Cleared on the next attempt. */
   error?: string

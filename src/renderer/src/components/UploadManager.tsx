@@ -96,11 +96,6 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
   const [proposing, setProposing] = useState(false)
 
   const total = fileChanges.length + songChanges.length
-  // Only a file change that isn't waiting on a queued folder can go out now.
-  // The count is a floor, not a promise: a folder proposed earlier may have
-  // been approved since, which only the propose run itself can find out.
-  const readyNow = fileChanges.filter((c) => !c.awaitingFolder).length + songChanges.length
-
   const discardAll = (): void => { clearStagedFileChanges(); clearStagedSongChanges() }
 
   const propose = async (): Promise<void> => {
@@ -108,7 +103,7 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
     setProposing(true)
     onResult(null)
     const [fileResult, songResult] = await Promise.all([
-      fileChanges.length ? proposeStagedChanges() : Promise.resolve({ proposed: 0, failed: 0, held: 0 }),
+      fileChanges.length ? proposeStagedChanges() : Promise.resolve({ proposed: 0, failed: 0 }),
       songChanges.length ? proposeStagedSongChanges() : Promise.resolve({ proposed: 0, failed: 0 }),
     ])
     setProposing(false)
@@ -116,7 +111,6 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
     const failed = fileResult.failed + songResult.failed
     const parts = [`Proposed ${proposed}`]
     if (failed > 0) parts.push(`${failed} failed`)
-    if (fileResult.held > 0) parts.push(`${fileResult.held} waiting on a folder that isn't approved yet`)
     onResult(parts.join(' · '))
   }
 
@@ -145,13 +139,6 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
               <p className="text-[var(--text-muted)] text-[10px] truncate" title={change.destination ?? change.path}>
                 {change.destination ? `→ ${change.destination}` : change.path}
               </p>
-              {change.awaitingFolder && (
-                <p className="text-[var(--text-muted)] text-[10px] mt-0.5 truncate italic">
-                  {fileChanges.some((c) => c.changeType === 'create_folder' && c.path === change.awaitingFolder)
-                    ? 'Goes out once the new folder is approved'
-                    : 'Waiting on the new folder’s approval'}
-                </p>
-              )}
               {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
             </div>
             <button onClick={() => unstageFileChange(change.id)} disabled={proposing} title="Remove from queue"
@@ -190,11 +177,7 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity">
           {proposing
             ? <><Loader2 size={12} className="animate-spin" /> Proposing…</>
-            : readyNow === 0
-              // Everything left is waiting on a folder - the useful action now
-              // is re-checking whether that folder has been approved.
-              ? <><Send size={12} /> Check for approval</>
-              : <><Send size={12} /> Propose {readyNow} change{readyNow === 1 ? '' : 's'}</>}
+            : <><Send size={12} /> Propose {total} change{total === 1 ? '' : 's'}</>}
         </button>
       </div>
     </div>
