@@ -380,7 +380,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 // the search box re-rendered every row that survived the filter. `onSelect`
 // is setSelected straight from useState, so its identity is stable and the
 // memo actually holds.
-const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCount, accepting, onSelect, onAcceptAll }: {
+const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCount, accepting, onSelect, onAcceptAll, onRejectAll }: {
   item: SongEditProposal
   showUserHeader: boolean
   /** Pending proposals by this user, across the whole list - drives whether
@@ -388,7 +388,8 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
   pendingCount: number
   accepting: boolean
   onSelect: (p: SongEditProposal) => void
-  onAcceptAll: (username: string) => void
+  onAcceptAll: (editorId: number) => void
+  onRejectAll: (editorId: number) => void
 }): JSX.Element {
   const ss = STATUS_STYLE[item.status] ?? { border: 'border-l-transparent', text: 'text-text-muted', bg: '', dot: '' }
   return (
@@ -399,11 +400,18 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
             {item.editor_username}
           </span>
           {pendingCount > 1 && (
-            <button onClick={(e) => { e.stopPropagation(); onAcceptAll(item.editor_username) }} disabled={accepting}
+            <>
+            <button onClick={(e) => { e.stopPropagation(); onAcceptAll(item.editor_id) }} disabled={accepting}
               className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/20 transition-colors disabled:opacity-40">
               {accepting ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
               Accept all ({pendingCount})
             </button>
+            <button onClick={(e) => { e.stopPropagation(); onRejectAll(item.editor_id) }} disabled={accepting}
+              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-red-400 bg-red-500/10 active:bg-red-500/20 transition-colors disabled:opacity-40">
+              <XCircle size={10} />
+              Deny all ({pendingCount})
+            </button>
+            </>
           )}
         </div>
       )}
@@ -442,7 +450,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   const [notes,       setNotes]       = useState<Record<number, string>>({})
   const [selected,    setSelected]    = useState<SongEditProposal | null>(null)
   const [revising,    setRevising]    = useState(false)
-  const [acceptingAllUser, setAcceptingAllUser] = useState<string | null>(null)
+  const [acceptingAllUser, setAcceptingAllUser] = useState<number | null>(null)
   const { playTrack } = useStorePick('playTrack')
 
   const {
@@ -468,9 +476,9 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   // Keyed off the full list so the group header's count and "Accept all"
   // button reflect what's actually pending.
   const pendingByUser = useMemo(() => {
-    const m = new Map<string, number>()
+    const m = new Map<number, number>()
     for (const x of proposals) {
-      if (x.status === 'pending') m.set(x.editor_username, (m.get(x.editor_username) ?? 0) + 1)
+      if (x.status === 'pending') m.set(x.editor_id, (m.get(x.editor_id) ?? 0) + 1)
     }
     return m
   }, [proposals])
@@ -480,14 +488,14 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   // swallowed so one bad row doesn't stop the rest of the batch). Fired from
   // the list view, so there's no detail selection to reconcile afterward -
   // just a single refetch once the batch settles.
-  const doAcceptAllForUser = async (username: string) => {
-    const pending = proposals.filter(x => x.editor_username === username && x.status === 'pending')
+  const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
+    const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
-    if (!confirm(`Approve all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${username}?`)) return
-    setAcceptingAllUser(username)
+    if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
+    setAcceptingAllUser(editorId)
     try {
       for (const item of pending) {
-        try { await userApi.adminReviewProposal(item.id, { action: 'approve', channel }); dropCache(item.id) }
+        try { await userApi.adminReviewProposal(item.id, { action, channel }); dropCache(item.id) }
         catch {}
       }
       setArchive(null)
@@ -737,11 +745,12 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
           <ProposalRow
             key={item.id}
             item={item}
-            showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_username !== item.editor_username)}
-            pendingCount={pendingByUser.get(item.editor_username) ?? 0}
-            accepting={acceptingAllUser === item.editor_username}
+            showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_id !== item.editor_id)}
+            pendingCount={pendingByUser.get(item.editor_id) ?? 0}
+            accepting={acceptingAllUser === item.editor_id}
             onSelect={setSelected}
-            onAcceptAll={doAcceptAllForUser}
+            onAcceptAll={(id) => doReviewAllForUser(id, 'approve')}
+            onRejectAll={(id) => doReviewAllForUser(id, 'reject')}
           />
         ))}
         {remaining > 0 && (

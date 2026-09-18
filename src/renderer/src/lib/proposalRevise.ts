@@ -17,6 +17,7 @@ export function sortProposals(rows: SongEditProposal[], sortBy: ProposalSort): S
   if (sortBy === 'date') return rows
   return [...rows].sort((a, b) => {
     const byUser = a.editor_username.localeCompare(b.editor_username, undefined, { sensitivity: 'base' })
+    if (byUser === 0 && a.editor_id !== b.editor_id) return a.editor_id - b.editor_id
     if (byUser !== 0) return byUser
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
