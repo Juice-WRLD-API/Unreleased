@@ -14,9 +14,10 @@ import { useExpandedGroups } from './CompactGroupRow'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useLongPress } from './mobile/useLongPress'
 import {
-  apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, JWAPI_BASE,
-  JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra, ZIP_OPERATIONS_ENABLED,
+  apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, buildStreamUrl,
+  JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
 } from '../lib/juicewrldApi'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -1354,6 +1355,9 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
+  // Backend ZIP jobs are disabled - downloads every selected song's file
+  // individually instead, spaced out so the browser doesn't treat them as a
+  // popup flood.
   const bulkDownloadZip = async (): Promise<void> => {
     const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
     const skipped = selectedSongs.length - paths.length
@@ -1365,21 +1369,9 @@ export default function ApiTrackerView(): JSX.Element {
     }
     setBulkZipStatus('zipping')
     try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = 'songs.zip'; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = 'songs.zip'; a.click() }
+      for (const path of paths) {
+        triggerDownload(buildStreamUrl(path), path.split('/').pop() || path)
+        await new Promise((r) => setTimeout(r, 350))
       }
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
@@ -1890,26 +1882,26 @@ export default function ApiTrackerView(): JSX.Element {
               className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
             >Select all</button>
           </div>
-          {ZIP_OPERATIONS_ENABLED && (bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
+          {(bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
             <div className="px-4 py-2 flex items-start gap-2 bg-amber-500/10 text-amber-500 text-xs font-medium">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
               {bulkZipStatus === 'none'
                 ? "None of the selected songs have a file available yet."
-                : `${bulkZipSkipped} of ${selected.size} song${selected.size === 1 ? '' : 's'} had no file and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the ZIP.`}
+                : `${bulkZipSkipped} of ${selected.size} song${selected.size === 1 ? '' : 's'} had no file and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the download.`}
             </div>
           )}
           <div className="flex items-stretch px-2 py-1.5">
             {([
               { key: 'queue', icon: ListPlus, label: 'Queue', disabled: !canBulkAddToQueue, onClick: bulkAddToQueue },
               { key: 'playlist', icon: Plus, label: 'Playlist', disabled: !canBulkAddToPlaylist, onClick: () => { setBulkSheetPage('playlists'); setSheet('bulk') } },
-              ...(ZIP_OPERATIONS_ENABLED ? [{
+              {
                 key: 'zip',
                 icon: bulkZipStatus === 'zipping' ? Loader2 : bulkZipStatus === 'done' ? Check : PackageOpen,
-                label: bulkZipStatus === 'zipping' ? 'Zipping' : bulkZipStatus === 'done' ? 'Done' : 'ZIP',
+                label: bulkZipStatus === 'zipping' ? 'Downloading' : bulkZipStatus === 'done' ? 'Done' : 'Download',
                 disabled: bulkZipStatus === 'zipping',
                 onClick: bulkDownloadZip,
                 spin: bulkZipStatus === 'zipping',
-              }] as const : []),
+              },
               { key: 'more', icon: MoreVertical, label: 'More', disabled: false, onClick: () => { setBulkSheetPage('main'); setSheet('bulk') } },
             ] as const).map((action) => (
               <button
@@ -2105,14 +2097,12 @@ export default function ApiTrackerView(): JSX.Element {
                 trailing={<ChevronRight size={16} className="text-text-muted shrink-0" />}
                 onClick={() => setBulkSheetPage('playlists')}
               />
-              {ZIP_OPERATIONS_ENABLED && (
-                <SheetItem
-                  icon={bulkZipStatus === 'zipping' ? Loader2 : PackageOpen}
-                  label={bulkZipStatus === 'zipping' ? 'Zipping…' : 'Download ZIP'}
-                  disabled={bulkZipStatus === 'zipping'}
-                  onClick={() => { bulkDownloadZip(); closeSheet() }}
-                />
-              )}
+              <SheetItem
+                icon={bulkZipStatus === 'zipping' ? Loader2 : PackageOpen}
+                label={bulkZipStatus === 'zipping' ? 'Downloading…' : 'Download'}
+                disabled={bulkZipStatus === 'zipping'}
+                onClick={() => { bulkDownloadZip(); closeSheet() }}
+              />
               {canEdit && (
                 <>
                   <SheetDivider />

@@ -13,10 +13,11 @@ import SongContextMenu from './SongContextMenu'
 import FilePickerModal from './FilePickerModal'
 import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
 import {
-  apiFetch, apiPeek, songToTrack, parseDuration, buildStreamUrl, CATEGORY_LABELS, CATEGORY_COLORS, JWAPI_BASE,
+  apiFetch, apiPeek, songToTrack, parseDuration, buildStreamUrl, CATEGORY_LABELS, CATEGORY_COLORS,
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
-  parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource, ZIP_OPERATIONS_ENABLED,
+  parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
@@ -463,12 +464,8 @@ function BulkContextMenu({
           {canBulkEdit && (
             <MenuItem icon={<Pencil size={14} />} label="Edit" onClick={onBulkEdit} />
           )}
-          {ZIP_OPERATIONS_ENABLED && (
-            <>
-              <div className="my-1 border-t border-[var(--border)]" />
-              <MenuItem icon={<PackageOpen size={14} />} label="Download ZIP" onClick={onDownloadZip} />
-            </>
-          )}
+          <div className="my-1 border-t border-[var(--border)]" />
+          <MenuItem icon={<PackageOpen size={14} />} label="Download" onClick={onDownloadZip} />
         </>
       )}
     </div>
@@ -2627,6 +2624,9 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - downloads
+  // every selected song's file individually instead, spaced out so the
+  // browser doesn't treat them as a popup flood.
   const bulkDownloadZip = async (): Promise<void> => {
     const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
     const skipped = selectedSongs.length - paths.length
@@ -2638,21 +2638,9 @@ export default function ApiTrackerView(): JSX.Element {
     }
     setBulkZipStatus('zipping')
     try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths, channel: activeChannel || undefined }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = 'songs.zip'; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = 'songs.zip'; a.click() }
+      for (const path of paths) {
+        triggerDownload(buildStreamUrl(path, activeChannel || undefined), path.split('/').pop() || path)
+        await new Promise((r) => setTimeout(r, 350))
       }
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
@@ -3471,12 +3459,12 @@ export default function ApiTrackerView(): JSX.Element {
       {/* Bulk selection action bar */}
       {selectMode && (
         <div className="shrink-0 border-t border-[var(--border)] bg-surface relative">
-          {ZIP_OPERATIONS_ENABLED && (bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
+          {(bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
             <div className="px-4 py-2 flex items-center gap-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-500 text-xs font-medium">
               <AlertTriangle size={14} className="shrink-0" />
               {bulkZipStatus === 'none'
                 ? "Couldn't download - none of the selected songs have a file available yet."
-                : `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} ${bulkZipSkipped === 1 ? "wasn't" : "weren't"} available and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the ZIP.`}
+                : `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} ${bulkZipSkipped === 1 ? "wasn't" : "weren't"} available and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the download.`}
             </div>
           )}
           <div className="px-4 py-2.5 flex items-center gap-2">
@@ -3584,36 +3572,34 @@ export default function ApiTrackerView(): JSX.Element {
               )}
             </button>
           )}
-          {ZIP_OPERATIONS_ENABLED && (
-            <button
-              onClick={bulkDownloadZip}
-              disabled={selected.size === 0 || bulkZipStatus === 'zipping'}
-              title={
-                bulkZipStatus === 'partial'
-                  ? `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} couldn't be included (no file available)`
-                  : bulkZipStatus === 'none'
-                  ? 'None of the selected songs have a downloadable file'
-                  : undefined
-              }
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90 ${
-                bulkZipStatus === 'partial' || bulkZipStatus === 'none' ? 'bg-amber-500 text-white' : 'bg-accent text-white'
-              }`}
-            >
-              {bulkZipStatus === 'zipping' ? (
-                <><Loader2 size={13} className="animate-spin" /> Zipping…</>
-              ) : bulkZipStatus === 'done' ? (
-                <><Check size={13} /> Done</>
-              ) : bulkZipStatus === 'partial' ? (
-                <><AlertTriangle size={13} /> {bulkZipSkipped} skipped</>
-              ) : bulkZipStatus === 'none' ? (
-                <><AlertTriangle size={13} /> No files available</>
-              ) : bulkZipStatus === 'error' ? (
-                <><X size={13} /> Error</>
-              ) : (
-                <><PackageOpen size={13} /> Download ZIP</>
-              )}
-            </button>
-          )}
+          <button
+            onClick={bulkDownloadZip}
+            disabled={selected.size === 0 || bulkZipStatus === 'zipping'}
+            title={
+              bulkZipStatus === 'partial'
+                ? `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} couldn't be included (no file available)`
+                : bulkZipStatus === 'none'
+                ? 'None of the selected songs have a downloadable file'
+                : undefined
+            }
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90 ${
+              bulkZipStatus === 'partial' || bulkZipStatus === 'none' ? 'bg-amber-500 text-white' : 'bg-accent text-white'
+            }`}
+          >
+            {bulkZipStatus === 'zipping' ? (
+              <><Loader2 size={13} className="animate-spin" /> Downloading…</>
+            ) : bulkZipStatus === 'done' ? (
+              <><Check size={13} /> Done</>
+            ) : bulkZipStatus === 'partial' ? (
+              <><AlertTriangle size={13} /> {bulkZipSkipped} skipped</>
+            ) : bulkZipStatus === 'none' ? (
+              <><AlertTriangle size={13} /> No files available</>
+            ) : bulkZipStatus === 'error' ? (
+              <><X size={13} /> Error</>
+            ) : (
+              <><PackageOpen size={13} /> Download</>
+            )}
+          </button>
           <button
             onClick={exitSelectMode}
             className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"

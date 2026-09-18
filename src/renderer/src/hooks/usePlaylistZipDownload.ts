@@ -1,6 +1,11 @@
-// Shared "download selection as .zip" flow for PlaylistsView desktop/mobile.
+// Shared "download all" flow for PlaylistsView desktop/mobile.
+//
+// Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED in
+// juicewrldApi.ts) - downloads every track's file individually instead,
+// spaced out so the browser doesn't treat them as a popup flood.
 import { useCallback, useState } from 'react'
-import { JWAPI_BASE } from '../lib/juicewrldApi'
+import { triggerDownload } from '../lib/apiFilesShared'
+import { buildStreamUrl } from '../lib/juicewrldApi'
 import type { Track } from '../types'
 
 export function usePlaylistZipDownload(): {
@@ -11,25 +16,13 @@ export function usePlaylistZipDownload(): {
 
   const handleZipDownload = useCallback(async (trackList: Track[], name: string) => {
     if (zipState === 'loading') return
-    const paths = trackList.map(t => t.path).filter(Boolean)
-    if (!paths.length) return
+    const tracks = trackList.filter(t => t.path)
+    if (!tracks.length) return
     setZipState('loading')
     try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `${name}.zip`; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = `${name}.zip`; a.click() }
+      for (const t of tracks) {
+        triggerDownload(t.streamUrl ?? buildStreamUrl(t.path), t.path.split('/').pop() || t.title)
+        await new Promise((r) => setTimeout(r, 350))
       }
       setZipState('done')
     } catch { setZipState('error') }

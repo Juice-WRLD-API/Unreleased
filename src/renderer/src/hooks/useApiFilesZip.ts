@@ -1,59 +1,57 @@
 // ZIP-job state shared by ApiFilesView.desktop.tsx and .mobile.tsx - starting
 // a job, polling it, and triggering the download were byte-identical between
-// the two views. Selection is read through `getSelectedPaths` rather than a
+// the two views. Selection is read through `getSelectedEntries` rather than a
 // shared type, since desktop (useMultiSelect Map) and mobile (a plain Set)
 // use different selection models.
+//
+// Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED in juicewrldApi.ts),
+// so this downloads every file individually instead: directories are expanded
+// recursively via listFilesRecursive, then each file is downloaded one at a
+// time through the browser's normal download mechanism.
 import { useState } from 'react'
-import { apiFetch, JWAPI_BASE } from '../lib/juicewrldApi'
+import { buildStreamUrl, JWApiFileEntry, listFilesRecursive } from '../lib/juicewrldApi'
 import { triggerDownload, ZipStatus } from '../lib/apiFilesShared'
 
-export function useApiFilesZip(opts: { activeChannel: string; getSelectedPaths: () => string[] }): {
+// Spacing consecutive downloads out - firing them all in the same tick makes
+// Chrome silently block everything past the first few as a popup/download flood.
+const DOWNLOAD_SPACING_MS = 350
+
+export function useApiFilesZip(opts: { activeChannel: string; getSelectedEntries: () => JWApiFileEntry[] }): {
   zipStatus: ZipStatus
   resetZip: () => void
   downloadZip: () => Promise<void>
   downloadFolder: (entry: { path: string; name: string }) => Promise<void>
 } {
-  const { activeChannel, getSelectedPaths } = opts
+  const { activeChannel, getSelectedEntries } = opts
   const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
 
-  // Backend zips a folder path recursively with its subfolder structure
-  // intact (see /files/zip-selection/'s `{ "paths": ["Compilation/Folder"] }`
-  // shape in the docs), so a single directory path is enough - no need to
-  // walk and flatten the tree client-side.
-  const startZip = async (paths: string[], filename: string): Promise<void> => {
-    if (paths.length === 0) return
+  const downloadEntries = async (entries: JWApiFileEntry[]): Promise<void> => {
+    if (entries.length === 0) return
     setZipStatus('starting')
     try {
-      const res = await fetch(`${JWAPI_BASE}/start-zip-job/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(activeChannel ? { paths, channel: activeChannel } : { paths }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { job_id } = await res.json() as { job_id: string }
-      setZipStatus('zipping')
-      const poll = async (): Promise<void> => {
-        const st = await apiFetch<{ status: string; download_url?: string; error?: string }>(`/zip-job-status/${job_id}/`)
-        if (st.status === 'completed' && st.download_url) {
-          triggerDownload(st.download_url, filename)
-          setZipStatus('done')
-          setTimeout(() => setZipStatus('idle'), 3000)
-        } else if (st.status === 'failed') {
-          throw new Error(st.error || 'ZIP job failed')
-        } else {
-          setTimeout(() => { poll().catch(() => { setZipStatus('error'); setTimeout(() => setZipStatus('idle'), 3000) }) }, 1500)
-        }
+      const files: JWApiFileEntry[] = []
+      for (const entry of entries) {
+        if (entry.type === 'file') files.push(entry)
+        else files.push(...await listFilesRecursive(entry.path, activeChannel))
       }
-      await poll()
+      if (files.length === 0) { setZipStatus('idle'); return }
+      setZipStatus('zipping')
+      for (const file of files) {
+        triggerDownload(buildStreamUrl(file.path, activeChannel), file.name)
+        await new Promise((r) => setTimeout(r, DOWNLOAD_SPACING_MS))
+      }
+      setZipStatus('done')
+      setTimeout(() => setZipStatus('idle'), 3000)
     } catch {
       setZipStatus('error')
       setTimeout(() => setZipStatus('idle'), 3000)
     }
   }
 
-  const downloadZip = (): Promise<void> => startZip(getSelectedPaths(), 'selection.zip')
+  const downloadZip = (): Promise<void> => downloadEntries(getSelectedEntries())
 
-  const downloadFolder = (entry: { path: string; name: string }): Promise<void> => startZip([entry.path], `${entry.name}.zip`)
+  const downloadFolder = (entry: { path: string; name: string }): Promise<void> =>
+    downloadEntries([{ ...entry, type: 'directory' }])
 
   return { zipStatus, resetZip: () => setZipStatus('idle'), downloadZip, downloadFolder }
 }

@@ -156,6 +156,25 @@ export function parseBrowseEntries(data: JWApiBrowseResponse): JWApiFileEntry[] 
   return []
 }
 
+/** Recursively walks a folder via repeated /files/browse/ calls and returns
+ *  every file (not directory) entry underneath it, subfolders included. Used
+ *  to expand a folder into an individual-file download list now that backend
+ *  ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the API has no
+ *  recursive-listing endpoint of its own. */
+export async function listFilesRecursive(path: string, channel?: string): Promise<JWApiFileEntry[]> {
+  const params: Record<string, string> = {}
+  if (path) params.path = path
+  if (channel) params.channel = channel
+  const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', params)
+  const entries = parseBrowseEntries(data)
+  const files: JWApiFileEntry[] = []
+  for (const entry of entries) {
+    if (entry.type === 'file') files.push(entry)
+    else files.push(...await listFilesRecursive(entry.path, channel))
+  }
+  return files
+}
+
 /** Strips trailing qualifiers ("(feat. X)", "[Prod. Y]") from a song title so
  *  a /files/browse/ search hits the file tree's naming - folders/images are
  *  rarely filed under the full bracketed title. Same idea as

@@ -7,8 +7,9 @@ import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import type { PlaylistSummary } from '../lib/userApi'
-import { JWAPI_BASE, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { buildStreamUrl } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
 import { hasChatAccess } from '../store/chatStore'
@@ -100,26 +101,19 @@ export default function PlaylistContextMenu({ state, onClose }: {
     onClose()
   }
 
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - downloads
+  // every track's file individually instead, spaced out so the browser
+  // doesn't treat them as a popup flood.
   const downloadZip = async (): Promise<void> => {
     if (zipState === 'loading') return
     setZipState('loading')
     try {
       const d = await userApi.getPlaylist(playlist.id)
-      const paths = d.items.map(i => userApi.liteSongToTrack(i.song)).map((t: Track) => t.path).filter(Boolean)
-      if (!paths.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `${playlist.name}.zip`; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = `${playlist.name}.zip`; a.click() }
+      const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
+      if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
+      for (const t of tracks) {
+        triggerDownload(t.streamUrl ?? buildStreamUrl(t.path), t.path.split('/').pop() || t.title)
+        await new Promise((r) => setTimeout(r, 350))
       }
       setZipState('done')
     } catch { setZipState('error') }
@@ -343,14 +337,12 @@ export default function PlaylistContextMenu({ state, onClose }: {
             <MenuItem icon={Play} label="Open" onClick={open} />
             <MenuItem icon={Shuffle} label="Play all" onClick={playAll} />
             <MenuItem icon={ListEnd} label="Add all to queue" onClick={queueAll} />
-            {ZIP_OPERATIONS_ENABLED && (
-              <MenuItem
-                icon={zipState === 'loading' ? Loader2 : Archive}
-                label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
-                disabled={zipState === 'loading'}
-                onClick={downloadZip}
-              />
-            )}
+            <MenuItem
+              icon={zipState === 'loading' ? Loader2 : Archive}
+              label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all'}
+              disabled={zipState === 'loading'}
+              onClick={downloadZip}
+            />
             <MenuItem
               innerRef={exportItemRef}
               icon={Download}

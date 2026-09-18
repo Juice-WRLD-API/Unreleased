@@ -15,7 +15,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { buildImageUrl, buildStreamUrl, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { buildImageUrl, buildStreamUrl, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { fisherYates, groupExcludedVersions, isExcludedVersion } from '../store/queueSlice'
@@ -1316,18 +1316,16 @@ export default function PlaylistsView(): JSX.Element {
               setCardMenu(null)
             }}
           />
-          {ZIP_OPERATIONS_ENABLED && (
-            <MenuItem
-              icon={Archive}
-              label="Download as ZIP"
-              onClick={async () => {
-                const name = cardMenu.playlist.name
-                const d = await userApi.getPlaylist(cardMenu.playlist.id)
-                setCardMenu(null)
-                handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), name)
-              }}
-            />
-          )}
+          <MenuItem
+            icon={Archive}
+            label="Download all"
+            onClick={async () => {
+              const name = cardMenu.playlist.name
+              const d = await userApi.getPlaylist(cardMenu.playlist.id)
+              setCardMenu(null)
+              handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), name)
+            }}
+          />
           <div className="border-t border-[var(--border)] my-1" />
           <MenuItem
             icon={Link}
@@ -2382,14 +2380,12 @@ export default function PlaylistsView(): JSX.Element {
                                   setShowHeroExportMenu(heroExportItemRef.current?.contains(t) ?? false)
                                 }}
                               >
-                              {ZIP_OPERATIONS_ENABLED && (
-                                <MenuItem
-                                  icon={zipState === 'loading' ? Loader2 : Archive}
-                                  label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
-                                  disabled={zipState === 'loading' || tracks.length === 0}
-                                  onClick={() => { handleZipDownload(tracks, detail.name ?? summary?.name ?? 'playlist') }}
-                                />
-                              )}
+                              <MenuItem
+                                icon={zipState === 'loading' ? Loader2 : Archive}
+                                label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all'}
+                                disabled={zipState === 'loading' || tracks.length === 0}
+                                onClick={() => { handleZipDownload(tracks, detail.name ?? summary?.name ?? 'playlist') }}
+                              />
                               <MenuItem
                                 innerRef={heroExportItemRef}
                                 icon={Download}
