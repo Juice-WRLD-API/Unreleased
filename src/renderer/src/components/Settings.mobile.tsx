@@ -12,7 +12,7 @@ import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
-import { hasChatAccess } from '../store/chatStore'
+import { hasChatAccess, useChatStore } from '../store/chatStore'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
@@ -454,6 +454,10 @@ export default function Settings(): JSX.Element {
     bioDraft, setBioDraft, bioSaving, saveBio,
     privacyError, togglePublicPlayHistory, togglePublicPlaylists, togglePublicNowPlaying,
   } = useSettingsAccount()
+  const chatPresenceEnabled = useChatStore((s) => s.presenceEnabled)
+  const chatReadEnabled = useChatStore((s) => s.readEnabled)
+  const setChatPresenceEnabled = useChatStore((s) => s.setPresenceEnabled)
+  const setChatReadEnabled = useChatStore((s) => s.setReadEnabled)
 
   // ── Menu items (Appearance) ──────────────────────────────────────────────
   // Games ('heardle' - see NAV_ITEMS) and Playlists are dropped from the
@@ -922,6 +926,27 @@ export default function Settings(): JSX.Element {
                       </Row>
                       {privacyError && <p className="text-red-400 text-xs pb-2">{privacyError}</p>}
                     </SettingsCard>
+
+                    {hasChatAccess(account) && (
+                      <SettingsCard title="Chat privacy">
+                        <Row
+                          icon={Radio}
+                          iconColor="#0f766e"
+                          label="Online status"
+                          sub="Turn off to stop requesting and showing who's online"
+                        >
+                          <Toggle on={chatPresenceEnabled} onClick={() => setChatPresenceEnabled(!chatPresenceEnabled)} />
+                        </Row>
+                        <Row
+                          icon={Check}
+                          iconColor="#0f766e"
+                          label="Read receipts"
+                          sub="Turn off to stop sending read marks to the server"
+                        >
+                          <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
+                        </Row>
+                      </SettingsCard>
+                    )}
 
                     {showStaffProfile(account) && (
                       <SettingsCard>

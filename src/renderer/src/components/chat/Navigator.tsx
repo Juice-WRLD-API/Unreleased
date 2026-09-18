@@ -10,6 +10,7 @@ import { useStorePick } from '../../store/useStore'
 import type { NowPlayingState } from '../../lib/userApi'
 import { useOpenModal } from './modalHost'
 import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp, useChatToast, useDismiss } from './ui'
+import { UserCardBody } from './UserCard'
 import { MenuItem } from './SidePanels'
 import { ConfirmDialog } from './MessageItem'
 
@@ -347,6 +348,7 @@ function StatusBar(): JSX.Element | null {
 // name and role, plus a way into the full profile editor in Settings.
 function MyProfileCard({ onEditProfile, onClose }: { onEditProfile: () => void; onClose: () => void }): JSX.Element | null {
   const me = useChatStore((s) => s.me)
+  const { account } = useStorePick('account')
   const ref = useRef<HTMLDivElement>(null)
   useDismiss(true, onClose, ref)
   if (!me) return null
@@ -357,22 +359,14 @@ function MyProfileCard({ onEditProfile, onClose }: { onEditProfile: () => void; 
         className="chat-pop absolute left-2 bottom-[60px] w-[280px] rounded-2xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden"
       >
         <div className="h-14 bg-gradient-to-br from-accent/40 to-accent/10" />
-        <div className="px-4 pb-4">
-          <ChatAvatar user={me} size={64} className="-mt-8 ring-4 ring-[var(--surface)]" />
-          <p className="mt-2 text-base font-bold text-text-primary truncate">{displayName(me)}</p>
-          <p className="text-xs text-text-muted truncate">@{me.username}</p>
-          <span className={`mt-2 inline-flex items-center px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider ${
-            me.role === 'administrator' ? 'bg-red-500/15 text-red-400' : 'bg-sky-500/15 text-sky-400'
-          }`}>
-            {me.role === 'administrator' ? 'Administrator' : 'Manager'}
-          </span>
+        <UserCardBody user={me} bio={account?.bio}>
           <button
             onClick={() => { onEditProfile(); onClose() }}
             className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-surface-raised hover:bg-surface-overlay px-3 py-2 text-sm font-semibold text-text-primary transition-colors"
           >
             <Pencil size={13} />Edit Profile
           </button>
-        </div>
+        </UserCardBody>
       </div>
     </div>,
     document.body,

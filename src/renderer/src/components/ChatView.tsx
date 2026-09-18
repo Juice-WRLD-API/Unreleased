@@ -6,6 +6,7 @@ import { hasChatAccess, useChatStore, type RoomRef } from '../store/chatStore'
 import ChatViewDesktop from './chat/ChatView.desktop'
 import ChatViewMobile from './chat/ChatView.mobile'
 import { ModalHost } from './chat/modalHost'
+import { UserCardHost } from './chat/UserCard'
 import { ToastHost } from './chat/ui'
 import './chat/chat.css'
 
@@ -103,7 +104,9 @@ export default function ChatView(): JSX.Element {
   return (
     <ToastHost>
       <ModalHost>
-        {isMobile ? <ChatViewMobile /> : <ChatViewDesktop />}
+        <UserCardHost>
+          {isMobile ? <ChatViewMobile /> : <ChatViewDesktop />}
+        </UserCardHost>
       </ModalHost>
     </ToastHost>
   )

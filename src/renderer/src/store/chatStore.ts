@@ -103,6 +103,17 @@ function saveMuted(userId: number, muted: MutedIds): void {
   try { localStorage.setItem(`unreleased:chat:muted:${userId}`, JSON.stringify(muted)) } catch {}
 }
 
+const PRESENCE_KEY = 'unreleased:chatPresenceEnabled'
+const READ_KEY = 'unreleased:chatReadEnabled'
+
+function loadFlag(key: string): boolean {
+  try { return localStorage.getItem(key) !== 'false' } catch { return true }
+}
+
+function saveFlag(key: string, on: boolean): void {
+  try { localStorage.setItem(key, String(on)) } catch {}
+}
+
 interface OrderIds { servers: number[]; conversations: number[] }
 
 function loadOrder(userId: number): OrderIds {
@@ -179,6 +190,10 @@ interface ChatState {
   // below) and kept current after that purely by the socket's
   // now_playing.updated push - no polling.
   nowPlaying: Record<number, NowPlayingState | null>
+  // Client-side opt-outs. Presence off: never request/track/show online state.
+  // Read off: unread still clears locally, but no read mark is sent to the server.
+  presenceEnabled: boolean
+  readEnabled: boolean
 
   keyState: Record<number, KeyState>
   plain: Record<number, Decrypted>
@@ -214,6 +229,8 @@ interface ChatState {
   resolveKey: (conversationId: number) => Promise<void>
   decryptRoom: (conversationId: number) => Promise<void>
   ensureNowPlaying: (userIds: number[]) => void
+  setPresenceEnabled: (on: boolean) => void
+  setReadEnabled: (on: boolean) => void
 
   totalUnread: () => number
 }
@@ -383,9 +400,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     const s = get()
     switch (ev.type) {
       case 'presence.snapshot':
+        if (!s.presenceEnabled) return
         set({ online: Object.fromEntries(ev.online.map((id) => [id, true as const])) })
         return
       case 'presence.update': {
+        if (!s.presenceEnabled) return
         const cameOnline = ev.online && !s.online[ev.user_id]
         set((st) => {
           const online = { ...st.online }
@@ -684,6 +703,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     typing: {},
     online: {},
     nowPlaying: {},
+    presenceEnabled: loadFlag(PRESENCE_KEY),
+    readEnabled: loadFlag(READ_KEY),
     keyState: {},
     plain: {},
 
@@ -810,7 +831,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const [servers, conversations, online] = await Promise.all([
         api.listServers(),
         api.listConversations(),
-        api.getPresence().catch(() => null),
+        get().presenceEnabled ? api.getPresence().catch(() => null) : Promise.resolve(null),
       ])
       conversations.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       set((s) => ({
@@ -1114,8 +1135,26 @@ export const useChatStore = create<ChatState>((set, get) => {
       const lastRead = { ...s.lastRead, [key]: latest }
       saveLastRead(s.meId, lastRead)
       set({ lastRead, unread: { ...s.unread, [key]: 0 }, mentions: { ...s.mentions, [key]: 0 } })
+      if (!s.readEnabled) return
+      const sent = socket?.send(room.kind === 'channel'
+        ? { type: 'read', channel: room.id, message_id: latest }
+        : { type: 'read', conversation: room.id, message_id: latest })
+      if (sent) return
       const call = room.kind === 'channel' ? api.markChannelRead(room.id, latest) : api.markDmRead(room.id, latest)
       call.catch(() => undefined)
+    },
+
+    setPresenceEnabled: (on) => {
+      saveFlag(PRESENCE_KEY, on)
+      set({ presenceEnabled: on, ...(on ? {} : { online: {} }) })
+      if (on && !socket?.send({ type: 'presence' })) void api.getPresence().then((ids) => {
+        set({ online: Object.fromEntries(ids.map((id) => [id, true as const])) })
+      }).catch(() => undefined)
+    },
+
+    setReadEnabled: (on) => {
+      saveFlag(READ_KEY, on)
+      set({ readEnabled: on })
     },
 
     sendTyping: (room, active) => {

@@ -5,6 +5,7 @@ import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
 import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
+import type { GifResult } from '../lib/gifApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels } from '../lib/juicewrldApi'
@@ -379,6 +380,11 @@ interface AppState {
   chatMutedServers: number[]
   chatMutedConversations: number[]
 
+  // GIFs favorited from the chat GIF picker. Local-first like likedTrackIds,
+  // synced to the server's `user_settings` blob (favorite_gifs) so favorites
+  // follow the account across devices.
+  favoriteGifs: GifResult[]
+
   // Per-song user overrides (custom name, custom cover, preferred version,
   // playcount), keyed by numeric API song id. Local-first like likedTrackIds:
   // usable logged out, merged up to the server on login. Every write goes
@@ -668,6 +674,9 @@ interface AppActions {
   muteUser: (userId: number) => void
   unmuteUser: (userId: number) => void
   toggleMuteUser: (userId: number) => void
+  /** Favorites/unfavorites a GIF from the chat GIF picker, persisting the
+   *  change locally and (if signed in) to the server's `user_settings` blob. */
+  toggleFavoriteGif: (gif: GifResult) => void
   /** Merges the profile's `user_settings` blob (from getMe) with local state -
    *  muted users union, everything else adopts the server's value if it has
    *  one (a field the server has never seen keeps the local value instead of
@@ -1018,6 +1027,7 @@ function buildUserSettings(s: AppStore): UserSettings {
     global_hotkeys_enabled: s.globalHotkeysEnabled,
     muted_servers: s.chatMutedServers,
     muted_conversations: s.chatMutedConversations,
+    favorite_gifs: s.favoriteGifs,
   }
 }
 
@@ -1613,6 +1623,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
   chatMutedServers: [],
   chatMutedConversations: [],
 
+  // ── Favorite GIFs ─────────────────────────────────────────────────────────
+  favoriteGifs: ls.get<GifResult[]>('favoriteGifs') ?? [],
+
+  toggleFavoriteGif: (gif) => {
+    const { favoriteGifs } = get()
+    const next = favoriteGifs.some((g) => g.id === gif.id)
+      ? favoriteGifs.filter((g) => g.id !== gif.id)
+      : [gif, ...favoriteGifs]
+    set({ favoriteGifs: next })
+    ls.set('favoriteGifs', next)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+
   muteUser: (userId) => {
     const { mutedUserIds } = get()
     if (mutedUserIds.includes(userId)) return
@@ -1659,6 +1682,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
 
     const mergedMuted = Array.from(new Set([...(serverSettings.muted_user_ids ?? []), ...s.mutedUserIds]))
     if (mergedMuted.length !== s.mutedUserIds.length) { set({ mutedUserIds: mergedMuted }); ls.set('mutedUserIds', mergedMuted) }
+
+    // Favorite GIFs union like muted_user_ids - favoriting on one device
+    // shouldn't be erasable by a stale sync from another.
+    const serverFavGifs = serverSettings.favorite_gifs ?? []
+    const mergedFavGifs = [...s.favoriteGifs, ...serverFavGifs.filter((g) => !s.favoriteGifs.some((f) => f.id === g.id))]
+    if (mergedFavGifs.length !== s.favoriteGifs.length) { set({ favoriteGifs: mergedFavGifs }); ls.set('favoriteGifs', mergedFavGifs) }
 
     if (serverSettings.theme && serverSettings.theme !== s.theme) s.setTheme(getSkin(serverSettings.theme).id)
     if (serverSettings.custom_skins && JSON.stringify(serverSettings.custom_skins) !== JSON.stringify(s.customSkins)) {

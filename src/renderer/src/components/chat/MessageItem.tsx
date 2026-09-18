@@ -18,6 +18,7 @@ import ReactionPicker from './ReactionPicker'
 import EmojiImg from './EmojiImg'
 import { QUICK_REACTIONS, quickReactions, rememberEmoji } from './emoji'
 import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
+import { useOpenUserCard } from './UserCard'
 
 function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }: {
   replyToId: number
@@ -285,14 +286,14 @@ function MessageItem({
     return p && 'text' in p ? p.text : ''
   })
   const toast = useChatToast()
-  const openPublicProfile = useStore((s) => s.openPublicProfile)
   const mutedUserIds = useStore((s) => s.mutedUserIds)
   const toggleMuteUser = useStore((s) => s.toggleMuteUser)
-  const openProfile = (): void => openPublicProfile(message.author.id)
+  const openUserCard = useOpenUserCard()
   // message.author is a snapshot from send time - if that person has since
   // changed their avatar, prefer the live record from the room's member/
   // participant list so the picture doesn't stay stuck on the old one.
   const liveAuthor = people.find((p) => p.id === message.author.id) ?? message.author
+  const openProfile = (e: React.MouseEvent): void => openUserCard(liveAuthor, e)
 
   const reactorNames = (userIds: number[]): string => {
     const names = userIds.map((id) => {

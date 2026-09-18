@@ -12,7 +12,7 @@ import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, event
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
-import { hasChatAccess } from '../store/chatStore'
+import { hasChatAccess, useChatStore } from '../store/chatStore'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
@@ -275,6 +275,10 @@ export default function Settings(): JSX.Element {
     bioDraft, setBioDraft, bioSaving, saveBio,
     privacyError, togglePublicPlayHistory, togglePublicPlaylists, togglePublicNowPlaying,
   } = useSettingsAccount()
+  const chatPresenceEnabled = useChatStore((s) => s.presenceEnabled)
+  const chatReadEnabled = useChatStore((s) => s.readEnabled)
+  const setChatPresenceEnabled = useChatStore((s) => s.setPresenceEnabled)
+  const setChatReadEnabled = useChatStore((s) => s.setReadEnabled)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [savingName, setSavingName] = useState(false)
@@ -675,6 +679,18 @@ export default function Settings(): JSX.Element {
                       <Toggle on={!!account.public_now_playing} onClick={() => void togglePublicNowPlaying()} />
                     </Row>
                     {privacyError && <p className="text-red-400 text-[11px] mt-1">{privacyError}</p>}
+
+                    {hasChatAccess(account) && (
+                      <>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Chat privacy</p>
+                        <Row icon={Radio} iconColor="#0f766e" label="Online status" sub="Turn off to stop requesting and showing who's online">
+                          <Toggle on={chatPresenceEnabled} onClick={() => setChatPresenceEnabled(!chatPresenceEnabled)} />
+                        </Row>
+                        <Row icon={Check} iconColor="#0f766e" label="Read receipts" sub="Turn off to stop sending read marks to the server">
+                          <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
+                        </Row>
+                      </>
+                    )}
 
                     <div className="mt-4 rounded-xl border border-[var(--border)] overflow-hidden">
                       <button

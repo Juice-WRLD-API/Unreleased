@@ -11,6 +11,7 @@ import { useChatStore, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import rehypeChatEmoji from './emojiRehype'
 import { linkMentions } from './people'
+import { useOpenUserCard } from './UserCard'
 import NewsShareCard from './NewsShareCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
@@ -22,6 +23,7 @@ function urlTransform(url: string): string {
 
 function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBrief[]; meId: number | null }): JSX.Element {
   const openPublicProfile = useStore((s) => s.openPublicProfile)
+  const openUserCard = useOpenUserCard()
   const components = useMemo<Components>(() => ({
     a: ({ href, children }) => {
       if (href === 'mention:everyone') {
@@ -30,10 +32,15 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
       if (href?.startsWith('mention:')) {
         const userId = Number(href.slice(8))
         const self = userId === meId
+        const mentioned = people.find((p) => p.id === userId)
         return (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); openPublicProfile(userId) }}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (mentioned) openUserCard(mentioned, e)
+              else openPublicProfile(userId)
+            }}
             className={`inline-block rounded-md px-1 font-semibold hover:underline ${self ? 'bg-amber-400/20 text-amber-300' : 'bg-accent/15 text-accent'}`}
           >
             {children}
@@ -49,7 +56,7 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
       }
       return <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>
     },
-  }), [meId, openPublicProfile])
+  }), [meId, openPublicProfile, openUserCard, people])
   const source = useMemo(() => linkMentions(text, people), [text, people])
   return (
     <div className="chat-md select-text text-[0.9rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">

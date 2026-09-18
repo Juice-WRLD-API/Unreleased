@@ -10,6 +10,7 @@ import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
 import type { Skin } from './skins'
+import type { GifResult } from './gifApi'
 
 const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
 const LIBRARY_BASE = `${JWAPI_BASE}/library`
@@ -127,6 +128,11 @@ export interface UserSettings {
   // ── Chat mutes (servers/conversations - distinct from muted_user_ids) ──
   muted_servers?: number[]
   muted_conversations?: number[]
+
+  // GIFs favorited from the chat GIF picker (see components/chat/GifPicker
+  // and lib/gifApi) - stored whole so the picker's Favorites tab never has
+  // to re-hit Tenor/Giphy just to redisplay them.
+  favorite_gifs?: GifResult[]
 }
 
 export interface NowPlayingState {

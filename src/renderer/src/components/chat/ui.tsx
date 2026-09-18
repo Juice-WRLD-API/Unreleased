@@ -66,9 +66,10 @@ export function ChatAvatar({ user, size = 36, presence, listening, className = '
   // doesn't imply listening).
   listening?: boolean
   className?: string
-  onClick?: () => void
+  onClick?: (e: React.MouseEvent) => void
 }): JSX.Element {
   const online = useChatStore((s) => !!s.online[user.id])
+  const presenceEnabled = useChatStore((s) => s.presenceEnabled)
   const [broken, setBroken] = useState(false)
   // Reset after a load failure so a stale/transient miss (e.g. a slow CDN
   // fetch on first paint) doesn't permanently hide the picture for the rest
@@ -93,7 +94,7 @@ export function ChatAvatar({ user, size = 36, presence, listening, className = '
           {name.charAt(0).toUpperCase()}
         </span>
       )}
-      {presence && (
+      {presence && presenceEnabled && (
         <span
           className={`absolute rounded-full border-2 border-[var(--chat-ring,var(--surface))] transition-colors ${online ? 'bg-emerald-500' : 'bg-zinc-500'}`}
           style={{ width: dot, height: dot, right: -1, bottom: -1 }}

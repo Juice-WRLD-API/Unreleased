@@ -3,7 +3,6 @@ import { Crown, Loader2, MessageSquare, MoreHorizontal, Pin, Shield, UserCog, Us
 import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
 import { displayName, roomKey, useChatStore, useNowPlayingByIds, type RoomRef } from '../../store/chatStore'
-import { useStore } from '../../store/useStore'
 import { useChatPermissions } from '../../hooks/useChatPermissions'
 import Composer from './Composer'
 import MessageBody from './MessageBody'
@@ -13,6 +12,7 @@ import { useRoomPeople } from './people'
 import { relativeTime } from '../adminShared'
 import { useRoomInfo } from './RoomPane'
 import { ChatAvatar, IconButton, errorText, shortStamp, useChatToast, useDismiss } from './ui'
+import { useOpenUserCard } from './UserCard'
 
 function PanelShell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
   return (
@@ -125,7 +125,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMes
 }): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const loadMembers = useChatStore((s) => s.loadMembers)
-  const openPublicProfile = useStore((s) => s.openPublicProfile)
+  const openUserCard = useOpenUserCard()
   const openModal = useOpenModal()
   const toast = useChatToast()
   const [menu, setMenu] = useState(false)
@@ -134,7 +134,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, ownerId, onMes
   useDismiss(menu, () => setMenu(false), ref)
   const isOwner = member.user.id === ownerId
   const isMe = member.user.id === meId
-  const openProfile = (): void => openPublicProfile(member.user.id)
+  const openProfile = (e: React.MouseEvent): void => openUserCard(member.user, e)
 
   const act = (fn: () => Promise<unknown>, ok: string): void => {
     setMenu(false)
@@ -287,7 +287,7 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
 export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversationId: number; onClose: () => void; onAddPeople: () => void }): JSX.Element {
   const conv = useChatStore((s) => s.conversations.find((c) => c.id === conversationId))
   const meId = useChatStore((s) => s.meId)
-  const openPublicProfile = useStore((s) => s.openPublicProfile)
+  const openUserCard = useOpenUserCard()
   const toast = useChatToast()
   const [confirm, setConfirm] = useState<number | null>(null)
   const nowPlaying = useNowPlayingByIds(conv?.participants.map((p) => p.user.id) ?? [])
@@ -297,8 +297,8 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto p-2">
         {conv.participants.map((p) => (
           <div key={p.id} className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
-            <ChatAvatar user={p.user} size={32} presence listening={!!nowPlaying[p.user.id]} onClick={() => openPublicProfile(p.user.id)} />
-            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openPublicProfile(p.user.id)}>
+            <ChatAvatar user={p.user} size={32} presence listening={!!nowPlaying[p.user.id]} onClick={(e) => openUserCard(p.user, e)} />
+            <div className="flex-1 min-w-0 cursor-pointer" onClick={(e) => openUserCard(p.user, e)}>
               <p className="text-sm text-text-primary truncate hover:underline">{displayName(p.user)}{p.user.id === meId && <span className="text-text-muted"> (you)</span>}</p>
               <p className="text-[11px] text-text-muted truncate">Joined {relativeTime(p.joined_at)}</p>
             </div>
