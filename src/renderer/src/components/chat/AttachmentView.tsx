@@ -1,21 +1,36 @@
-import { useEffect, useState } from 'react'
-import { Download, FileText, Loader2, Lock, ShieldAlert } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { ChevronDown, ChevronUp, Download, FileText, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { chatAttachmentUrl, type ChatAttachment } from '../../lib/chatApi'
 import { useChatStore } from '../../store/chatStore'
 import MediaLightbox, { type LightboxItem } from '../MediaLightbox'
 import { formatBytes } from './ui'
 
-export type Kind = 'image' | 'video' | 'audio' | 'file'
+export type Kind = 'image' | 'video' | 'audio' | 'text' | 'file'
+
+const TEXT_EXTS = ['txt', 'md', 'markdown', 'log', 'csv', 'json', 'yml', 'yaml', 'toml', 'ini', 'xml', 'srt', 'lrc']
+const MARKDOWN_EXTS = ['md', 'markdown']
+// Big text files stay plain download cards: nobody reads a 2 MB log in a bubble.
+const MAX_PREVIEW_BYTES = 256 * 1024
+const MAX_PREVIEW_CHARS = 20000
+
+function extOf(name: string): string {
+  return name.split('.').pop()?.toLowerCase() ?? ''
+}
 
 export function kindOf(mime: string, name: string): Kind {
   const m = mime.toLowerCase()
   if (m.startsWith('image/')) return 'image'
   if (m.startsWith('video/')) return 'video'
   if (m.startsWith('audio/')) return 'audio'
-  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  const ext = extOf(name)
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'].includes(ext)) return 'image'
   if (['mp4', 'webm', 'mov', 'm4v'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'flac', 'm4a', 'ogg', 'opus', 'aac'].includes(ext)) return 'audio'
+  if (TEXT_EXTS.includes(ext)) return 'text'
+  // text/html and friends are safer left as downloads.
+  if (m === 'text/plain' || m === 'text/markdown') return 'text'
   return 'file'
 }
 
@@ -99,6 +114,84 @@ function FileCard({ name, size, href, encrypted, busy, error }: {
   )
 }
 
+const MD_COMPONENTS: Components = {
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+  img: ({ src, alt }) => <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>,
+}
+
+function TextPreview({ data, size, encrypted }: { data: Resolved; size: number; encrypted: boolean }): JSX.Element {
+  const [text, setText] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const tooBig = size > MAX_PREVIEW_BYTES
+
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (el) setOverflowing(el.scrollHeight > el.clientHeight + 1)
+  }, [text])
+
+  useEffect(() => {
+    if (tooBig) return
+    let cancelled = false
+    fetch(data.url)
+      .then((res) => (res.ok ? res.text() : Promise.reject(new Error(String(res.status)))))
+      .then((body) => {
+        if (!cancelled) setText(body)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [data.url, tooBig])
+
+  if (tooBig || failed) return <FileCard name={data.name} size={size} href={data.downloadUrl} encrypted={encrypted} />
+  if (text === null) return <FileCard name={data.name} size={size} encrypted={encrypted} busy />
+
+  const truncated = text.length > MAX_PREVIEW_CHARS
+  const body = truncated ? `${text.slice(0, MAX_PREVIEW_CHARS)}\n…` : text
+  const isMarkdown = MARKDOWN_EXTS.includes(extOf(data.name)) || data.mime.toLowerCase() === 'text/markdown'
+
+  return (
+    <div className="w-full max-w-[min(520px,100%)] rounded-xl border border-[var(--border)] bg-surface-raised overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
+        <FileText size={15} className="text-accent shrink-0" />
+        <span className="flex items-center gap-1 min-w-0 flex-1 text-sm text-text-primary">
+          {encrypted && <Lock size={11} className="text-text-muted shrink-0" />}
+          <span className="truncate">{data.name}</span>
+        </span>
+        <span className="text-[11px] text-text-muted shrink-0">{formatBytes(size)}</span>
+        <a href={data.downloadUrl} download={data.name} target="_blank" rel="noopener noreferrer" title="Download" className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0">
+          <Download size={15} />
+        </a>
+      </div>
+      <div ref={bodyRef} className={`relative px-3 py-2 ${expanded ? 'max-h-[32rem] overflow-auto' : 'max-h-64 overflow-hidden'}`}>
+        {isMarkdown ? (
+          <div className="chat-md select-text text-[0.85rem] leading-relaxed text-text-primary break-words [overflow-wrap:anywhere]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>{body}</ReactMarkdown>
+          </div>
+        ) : (
+          <pre className="select-text whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[0.78rem] leading-relaxed text-text-primary">{body}</pre>
+        )}
+        {overflowing && !expanded && <span className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[var(--surface-raised)] to-transparent" />}
+      </div>
+      {overflowing && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full flex items-center justify-center gap-1 px-3 py-1.5 border-t border-[var(--border)] text-[11px] text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+        >
+          {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {expanded ? 'Show less' : truncated ? 'Show more (preview truncated)' : 'Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function Attachment({ att, conversationId, encrypted, onOpenMedia }: {
   att: ChatAttachment
   conversationId: number | null
@@ -135,6 +228,9 @@ function Attachment({ att, conversationId, encrypted, onOpenMedia }: {
         <audio src={data.url} controls preload="none" className="w-full h-9" />
       </div>
     )
+  }
+  if (data.kind === 'text') {
+    return <TextPreview data={data} size={att.size} encrypted={encrypted} />
   }
   return <FileCard name={data.name} size={att.size} href={data.downloadUrl} encrypted={encrypted} />
 }
