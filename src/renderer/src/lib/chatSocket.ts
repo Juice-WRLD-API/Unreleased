@@ -1,5 +1,6 @@
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
+import type { NowPlayingState } from './userApi'
 import type { ChannelOverride, ChatChannel, ChatMember, ChatMessage, ChatServer, Conversation, ServerRoleDef } from './chatApi'
 
 export type RoomKind = 'channel' | 'conversation'
@@ -15,6 +16,7 @@ export type ChatEvent =
   | { type: 'read.receipt'; user_id: number; last_read_message_id: number | null; channel?: number; conversation?: number }
   | { type: 'typing'; user_id: number; active: boolean; kind: RoomKind; id: number }
   | { type: 'presence.update'; user_id: number; online: boolean }
+  | { type: 'now_playing.updated'; user_id: number; now_playing: NowPlayingState | null }
   | { type: 'member.joined' | 'member.updated'; server: number; member: ChatMember }
   | { type: 'member.left'; server: number; user_id: number }
   | { type: 'server.updated'; server: ChatServer }

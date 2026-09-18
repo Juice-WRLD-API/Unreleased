@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { create } from 'zustand'
 import * as api from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerRoleDef } from '../lib/chatApi'
@@ -5,7 +6,8 @@ import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
 import { shareSummaryText } from '../lib/chatShare'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
-import type { AccountUser } from '../lib/userApi'
+import type { AccountUser, NowPlayingState } from '../lib/userApi'
+import { getNowPlaying } from '../lib/userApi'
 import { chatNotificationsEnabled, fireChatNotification } from '../lib/chatNotifications'
 import { ensureNotifyPermission } from '../lib/notifications'
 import { useStore } from './useStore'
@@ -172,6 +174,11 @@ interface ChatState {
   receipts: Record<string, Record<number, number>>
   typing: Record<string, Record<number, number>>
   online: Record<number, true>
+  // Live "listening to" state per user, keyed by id. Filled lazily (one REST
+  // fetch per id the first time anyone asks, deduped via nowPlayingRequested
+  // below) and kept current after that purely by the socket's
+  // now_playing.updated push - no polling.
+  nowPlaying: Record<number, NowPlayingState | null>
 
   keyState: Record<number, KeyState>
   plain: Record<number, Decrypted>
@@ -206,6 +213,7 @@ interface ChatState {
   startDm: (userIds: number[], name?: string) => Promise<Conversation>
   resolveKey: (conversationId: number) => Promise<void>
   decryptRoom: (conversationId: number) => Promise<void>
+  ensureNowPlaying: (userIds: number[]) => void
 
   totalUnread: () => number
 }
@@ -214,6 +222,11 @@ let socket: ChatSocket | null = null
 let typingTimer: number | null = null
 let listPollTimer: number | null = null
 const seenNew = new Set<number>()
+// Ids already fetched or in flight for ensureNowPlaying - keyed globally
+// (not per-store-instance) so every caller (DM list, online members panel,
+// admin picker, etc.) asking about the same user shares one request instead
+// of each firing its own.
+const nowPlayingRequested = new Set<number>()
 const LIST_POLL_MS = 30_000
 let initPromise: Promise<void> | null = null
 const rerunResolve = new Set<number>()
@@ -395,6 +408,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
+      case 'now_playing.updated':
+        set((st) => ({ nowPlaying: { ...st.nowPlaying, [ev.user_id]: ev.now_playing } }))
+        return
       case 'message.created': {
         // The socket has no "conversation created" push - a brand-new DM only
         // ever surfaces as a message event, so a first-time recipient has no
@@ -667,6 +683,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     receipts: {},
     typing: {},
     online: {},
+    nowPlaying: {},
     keyState: {},
     plain: {},
 
@@ -780,11 +797,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       initPromise = null
       rerunResolve.clear()
       lastRoomBySpace.clear()
+      nowPlayingRequested.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
         servers: [], members: {}, roles: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
-        mentions: {}, receipts: {}, typing: {}, online: {}, keyState: {}, plain: {},
+        mentions: {}, receipts: {}, typing: {}, online: {}, nowPlaying: {}, keyState: {}, plain: {},
       })
     },
 
@@ -1175,12 +1193,40 @@ export const useChatStore = create<ChatState>((set, get) => {
       await pool(targets, 8, decryptOne)
     },
 
+    ensureNowPlaying: (userIds) => {
+      const known = get().nowPlaying
+      const ids = userIds.filter((id) => !(id in known) && !nowPlayingRequested.has(id))
+      if (ids.length === 0) return
+      for (const id of ids) nowPlayingRequested.add(id)
+      void pool(ids, 6, async (id) => {
+        const { now_playing } = await getNowPlaying(id)
+        set((st) => ({ nowPlaying: { ...st.nowPlaying, [id]: now_playing } }))
+      })
+    },
+
     totalUnread: () => Object.values(get().unread).reduce((a, b) => a + b, 0),
   }
 })
 
 export function displayName(user: Pick<ChatUserBrief, 'display_name' | 'username'>): string {
   return user.display_name || user.username || 'Unknown'
+}
+
+// Live "now playing" for a set of users. Backed by the store's nowPlaying
+// map, which is filled once per id (ensureNowPlaying dedupes across every
+// caller) and kept fresh after that by the socket's now_playing.updated
+// push - no per-caller polling interval.
+export function useNowPlayingByIds(ids: number[]): Record<number, NowPlayingState | null> {
+  const key = [...new Set(ids)].sort((a, b) => a - b).join(',')
+  const ensureNowPlaying = useChatStore((s) => s.ensureNowPlaying)
+  const nowPlaying = useChatStore((s) => s.nowPlaying)
+
+  useEffect(() => {
+    if (key) ensureNowPlaying(key.split(',').map(Number))
+  }, [key, ensureNowPlaying])
+
+  const list = key ? key.split(',').map(Number) : []
+  return Object.fromEntries(list.map((id) => [id, nowPlaying[id] ?? null]))
 }
 
 // Looks up a message by id across whichever room/thread lists are currently

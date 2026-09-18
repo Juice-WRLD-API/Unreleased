@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Track, ViewType } from '../types'
 import { JWAPI_BASE, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
@@ -488,33 +487,10 @@ export async function getNowPlaying(userId: number): Promise<NowPlayingResponse>
   return request(url, { method: 'GET' }, false)
 }
 
-// There's no bulk "now playing for these users" endpoint yet (unlike chat
-// presence, which is one /presence/ call + socket events) - this polls
-// /np/ per id instead. Keep `ids` scoped to what's actually visible (a
-// people picker's filtered list, an online-members section) rather than an
-// entire directory, since every id here is its own request on every tick.
-const NOW_PLAYING_LIST_POLL_MS = 25_000
-
-export function useNowPlayingByIds(ids: number[]): Record<number, NowPlayingState | null> {
-  const key = [...new Set(ids)].sort((a, b) => a - b).join(',')
-  const [map, setMap] = useState<Record<number, NowPlayingState | null>>({})
-
-  useEffect(() => {
-    const list = key ? key.split(',').map(Number) : []
-    if (list.length === 0) { setMap({}); return }
-    let cancelled = false
-    const poll = (): void => {
-      Promise.all(list.map((id) =>
-        getNowPlaying(id).then((r) => [id, r.now_playing] as const).catch(() => [id, null] as const)
-      )).then((entries) => { if (!cancelled) setMap(Object.fromEntries(entries)) })
-    }
-    poll()
-    const timer = setInterval(poll, NOW_PLAYING_LIST_POLL_MS)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [key])
-
-  return map
-}
+// useNowPlayingByIds lives in store/chatStore.ts now - it needs the chat
+// socket's now_playing.updated push to stay current, and this file can't
+// import that store without creating a cycle (chatStore already imports
+// getNowPlaying/NowPlayingState from here).
 
 export async function getFavorites(): Promise<FavoriteEntry[]> {
   const url = `${LIBRARY_BASE}/favorites/`
