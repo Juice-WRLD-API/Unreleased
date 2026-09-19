@@ -227,6 +227,107 @@ export function decodeThemeShare(content: string): SharedThemePayload | null {
   }
 }
 
+// Moderation notice, posted into the channel by whoever took the action so the
+// room can see what happened. Same "prefix + JSON in plain chat text" scheme as
+// the shares above, which means the same caveat applies with more force: this
+// is an ordinary message anyone could hand-craft, not a server-issued system
+// event. The card is deliberately rendered inside the normal message frame,
+// author and all, so it always reads as "<author> says this happened" rather
+// than as something the server is vouching for.
+export const MODERATION_PREFIX = 'unreleased:mod:'
+
+export type ModerationNoticeAction = 'mute' | 'unmute' | 'timeout' | 'untimeout' | 'kick' | 'ban' | 'unban'
+
+const MODERATION_ACTIONS: ModerationNoticeAction[] = ['mute', 'unmute', 'timeout', 'untimeout', 'kick', 'ban', 'unban']
+
+export interface ModerationNoticePayload {
+  action: ModerationNoticeAction
+  userId: number
+  // Target's display name as it read when the action was taken - the card
+  // shows this rather than re-resolving, since a kicked or banned user is no
+  // longer in the member list to look up.
+  name: string
+  // Minutes, for a timeout or a temporary site-wide action.
+  minutes?: number
+  reason?: string
+  // The site-wide variant of the same action, which covers every server and DMs.
+  site?: boolean
+}
+
+export function encodeModerationNotice(payload: ModerationNoticePayload): string {
+  return `${MODERATION_PREFIX}${JSON.stringify({
+    action: payload.action,
+    userId: payload.userId,
+    name: payload.name.slice(0, MAX_TEXT_FIELD_LENGTH),
+    minutes: payload.minutes,
+    reason: payload.reason ? payload.reason.slice(0, MAX_TEXT_FIELD_LENGTH) : undefined,
+    site: payload.site || undefined,
+  })}`
+}
+
+export function decodeModerationNotice(content: string): ModerationNoticePayload | null {
+  if (!content.startsWith(MODERATION_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(content.slice(MODERATION_PREFIX.length))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+
+  if (!MODERATION_ACTIONS.includes(p.action as ModerationNoticeAction)) return null
+  if (!Number.isInteger(p.userId) || (p.userId as number) <= 0) return null
+  if (!isSafeText(p.name)) return null
+  if (p.minutes !== undefined && (!Number.isInteger(p.minutes) || (p.minutes as number) <= 0)) return null
+  if (p.reason !== undefined && !isSafeText(p.reason)) return null
+  if (p.site !== undefined && typeof p.site !== 'boolean') return null
+
+  return {
+    action: p.action as ModerationNoticeAction,
+    userId: p.userId as number,
+    name: p.name as string,
+    minutes: p.minutes as number | undefined,
+    reason: p.reason as string | undefined,
+    site: p.site as boolean | undefined,
+  }
+}
+
+// "Timed out for 10 minutes" / "Banned" - the verb phrase both the card and the
+// plain-text summary below build their sentence from.
+export function moderationNoticeVerb(payload: ModerationNoticePayload): string {
+  const scope = payload.site ? ' site-wide' : ''
+  switch (payload.action) {
+    case 'mute': return `was muted${scope}`
+    case 'unmute': return `was unmuted${scope}`
+    case 'timeout': return payload.minutes
+      ? `was timed out${scope} for ${formatMinutes(payload.minutes)}`
+      : `was timed out${scope}`
+    case 'untimeout': return `had their timeout lifted${scope}`
+    case 'kick': return 'was kicked from the server'
+    case 'ban': return payload.minutes
+      ? `was banned${scope} for ${formatMinutes(payload.minutes)}`
+      : `was banned${scope}`
+    case 'unban': return `was unbanned${scope}`
+  }
+}
+
+export function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`
+  if (minutes < 1440) {
+    const h = Math.round((minutes / 60) * 10) / 10
+    return `${h} hour${h === 1 ? '' : 's'}`
+  }
+  const d = Math.round((minutes / 1440) * 10) / 10
+  return `${d} day${d === 1 ? '' : 's'}`
+}
+
+// Marker for /help's command list card. Unlike the shares above this never
+// rides in an actual chat message's content - it only ever lives in a
+// client-side UiMessage (see chatStore's postLocalNotice), so there's no
+// encode/decode round trip through the server or other clients to guard.
+export const LOCAL_HELP_MARKER = 'unreleased:localhelp'
+
 // Plain-text summary for surfaces that can't render the rich card (notification
 // banners, OS notifications) - falls through the three share types before
 // treating the content as a regular message.
@@ -239,5 +340,7 @@ export function shareSummaryText(content: string): string | null {
   if (decodeSongInfoShare(content)) return 'Shared song info'
   const theme = decodeThemeShare(content)
   if (theme) return `Shared a theme: ${theme.name}`
+  const moderation = decodeModerationNotice(content)
+  if (moderation) return `${moderation.name} ${moderationNoticeVerb(moderation)}`
   return null
 }

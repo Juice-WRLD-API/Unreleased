@@ -5,7 +5,7 @@ import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
-import { encodeSongInfoShare, encodeSongShare, encodeThemeShare } from '../../lib/chatShare'
+import { encodeSongInfoShare, encodeSongShare, encodeThemeShare, LOCAL_HELP_MARKER } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
 import { allSkins, getSkin } from '../../lib/skins'
@@ -47,6 +47,7 @@ const Composer = forwardRef<ComposerHandle, {
   enterSends?: boolean
 }>(function Composer({ room, people, placeholder, parent = null, replyTo, onCancelReply, disabledReason, encrypted, onEditLast, compact, enterSends = true }, ref) {
   const send = useChatStore((s) => s.send)
+  const postLocalNotice = useChatStore((s) => s.postLocalNotice)
   const sendTyping = useChatStore((s) => s.sendTyping)
   const meId = useChatStore((s) => s.meId)
   const replyPreview = useChatStore((s) => {
@@ -275,10 +276,13 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Theme set to ${match.name}`, 'ok')
   }
 
-  // Lists exactly what the autocomplete offers, minus /help itself, so the two
-  // can't drift as commands are added.
+  // Posts a card listing every command (HelpCard reads CHAT_COMMANDS itself,
+  // so the two can't drift as commands are added). This never touches the
+  // server - postLocalNotice only ever writes into this device's own room
+  // items - so it's visible only to the person who ran /help, and they can
+  // dismiss it from the card itself.
   const runHelpCommand = (): void => {
-    toast(`Commands: ${CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => c.usage).join(', ')}`, 'ok')
+    postLocalNotice(room, LOCAL_HELP_MARKER)
   }
 
   const runMuteCommand = (args: string, usage: '/mute' | '/unmute'): void => {

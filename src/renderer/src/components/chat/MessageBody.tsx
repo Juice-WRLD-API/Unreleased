@@ -6,17 +6,19 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
-import { useChatStore, type UiMessage } from '../../store/chatStore'
+import { decodeModerationNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare, LOCAL_HELP_MARKER } from '../../lib/chatShare'
+import { useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
 import rehypeChatEmoji from './emojiRehype'
+import HelpCard from './HelpCard'
 import { linkMentions } from './people'
 import { useOpenUserCard } from './UserCard'
 import NewsShareCard from './NewsShareCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
+import ModerationCard from './ModerationCard'
 import ThemeShareCard from './ThemeShareCard'
 
 function urlTransform(url: string): string {
@@ -73,12 +75,16 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
 
 const MemoMarkdown = memo(MarkdownText)
 
-export default function MessageBody({ message, people }: { message: UiMessage; people: ChatUserBrief[] }): JSX.Element | null {
+export default function MessageBody({ message, people, room }: { message: UiMessage; people: ChatUserBrief[]; room?: RoomRef }): JSX.Element | null {
   const meId = useChatStore((s) => s.meId)
   const decrypted = useChatStore((s) => (message.is_encrypted ? s.plain[message.id] : undefined))
 
   if (message.deleted_at) {
     return <p className="text-sm italic text-text-muted">This message was deleted.</p>
+  }
+
+  if (message.local && message.content === LOCAL_HELP_MARKER && room) {
+    return <HelpCard room={room} messageId={message.id} />
   }
 
   if (!message.is_encrypted) {
@@ -94,7 +100,9 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
     const info = decodeSongInfoShare(body)
     if (info) return <SongInfoCard info={info} />
     const theme = decodeThemeShare(body)
-    return theme ? <ThemeShareCard theme={theme} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (theme) return <ThemeShareCard theme={theme} />
+    const moderation = decodeModerationNotice(body)
+    return moderation ? <ModerationCard notice={moderation} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -126,5 +134,7 @@ export default function MessageBody({ message, people }: { message: UiMessage; p
   const decryptedInfo = decodeSongInfoShare(decryptedBody)
   if (decryptedInfo) return <SongInfoCard info={decryptedInfo} />
   const decryptedTheme = decodeThemeShare(decryptedBody)
-  return decryptedTheme ? <ThemeShareCard theme={decryptedTheme} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
+  if (decryptedTheme) return <ThemeShareCard theme={decryptedTheme} />
+  const decryptedModeration = decodeModerationNotice(decryptedBody)
+  return decryptedModeration ? <ModerationCard notice={decryptedModeration} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

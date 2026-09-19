@@ -5,7 +5,7 @@ import { isTimedOut } from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerBan, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
-import { shareSummaryText } from '../lib/chatShare'
+import { encodeModerationNotice, shareSummaryText, type ModerationNoticePayload } from '../lib/chatShare'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
 import type { AccountUser, NowPlayingState } from '../lib/userApi'
 import { getNowPlaying } from '../lib/userApi'
@@ -29,6 +29,10 @@ export interface UiMessage extends ChatMessage {
   localId?: string
   sendState?: SendState
   retry?: () => void
+  // Client-only notices (e.g. /help's command list) never touch the server -
+  // they're pushed straight into this device's room items and can only ever
+  // be seen or dismissed by the person who triggered them.
+  local?: boolean
 }
 
 export interface RoomMessages {
@@ -220,6 +224,9 @@ interface ChatState {
   openThread: (rootId: number | null) => void
 
   send: (room: RoomRef, input: { text: string; files: File[]; parent?: number | null; mentions?: number[] }) => Promise<void>
+  postLocalNotice: (room: RoomRef, content: string) => void
+  announceModeration: (serverId: number | null, payload: ModerationNoticePayload) => void
+  dismissLocalNotice: (room: RoomRef, id: number) => void
   edit: (message: ChatMessage, text: string) => Promise<void>
   remove: (message: ChatMessage) => Promise<void>
   togglePin: (message: ChatMessage) => Promise<void>
@@ -1093,6 +1100,51 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
       }
       await attempt()
+    },
+
+    // Posts the "X was timed out" card into the channel the moderator is
+    // looking at, so the room sees the action rather than only the person who
+    // took it. Falls back to the server's first visible channel when the
+    // action came from somewhere without a channel open (e.g. the bans list
+    // reached from a DM), and gives up quietly if there's nowhere to post -
+    // the moderation itself already succeeded, so a failure here must never
+    // surface as if the action didn't happen.
+    announceModeration: (serverId, payload) => {
+      const s = get()
+      const active = s.active
+      const inServer = (channelId: number): boolean => serverId == null
+        || !!s.servers.find((x) => x.id === serverId)?.channels.some((c) => c.id === channelId)
+      const room: RoomRef | null = active?.kind === 'channel' && inServer(active.id)
+        ? active
+        : (() => {
+            const server = serverId != null ? s.servers.find((x) => x.id === serverId) : undefined
+            const channel = server?.channels.slice().sort((a, b) => a.position - b.position)[0]
+            return channel ? { kind: 'channel' as const, id: channel.id } : null
+          })()
+      if (!room) return
+      void get().send(room, { text: encodeModerationNotice(payload), files: [] }).catch(() => undefined)
+    },
+
+    postLocalNotice: (room, content) => {
+      const me = get().me
+      if (!me) return
+      const key = roomKey(room)
+      const id = -Date.now() - Math.floor(Math.random() * 1000)
+      const notice: UiMessage = {
+        id, local: true,
+        channel: room.kind === 'channel' ? room.id : null,
+        conversation: room.kind === 'conversation' ? room.id : null,
+        author: me, content, is_encrypted: false,
+        ciphertext: '', nonce: '', key_version: null, parent: null, mentions: [],
+        attachments: [], reactions: [], reply_count: 0, pinned: false, pinned_by: null, pinned_at: null,
+        edited_at: null, deleted_at: null, created_at: new Date().toISOString(),
+      }
+      patchRoom(key, (r) => ({ items: r.items.concat(notice) }))
+    },
+
+    dismissLocalNotice: (room, id) => {
+      const key = roomKey(room)
+      patchRoom(key, (r) => ({ items: r.items.filter((m) => m.id !== id) }))
     },
 
     edit: async (message, text) => {

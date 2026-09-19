@@ -8,7 +8,7 @@ import type { ChatUserBrief } from '../../lib/chatApi'
 import { chatAttachmentUrl, getMessage } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeForwardRef, splitForwardRef } from '../../lib/chatForwardRef'
-import { displayName, useChatStore, useMessageById, type UiMessage } from '../../store/chatStore'
+import { displayName, useChatStore, useMessageById, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import AttachmentList, { kindOf } from './AttachmentView'
 import ForwardMessageModal from './ForwardMessageModal'
@@ -108,6 +108,7 @@ function ForwardBar({ forwardToId, name, snippet, hasAttachment, sourceLabel }: 
 
 export interface MessageItemProps {
   message: UiMessage
+  room?: RoomRef
   grouped: boolean
   people: ChatUserBrief[]
   canModerate: boolean
@@ -272,7 +273,7 @@ function SheetRow({ icon, label, onClick, danger }: { icon: JSX.Element; label: 
 }
 
 function MessageItem({
-  message, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, onReply, highlight,
+  message, room, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, onReply, highlight,
 }: MessageItemProps): JSX.Element {
   const isMobile = useIsMobile()
   const meId = useChatStore((s) => s.meId)
@@ -420,7 +421,7 @@ function MessageItem({
         )}
       </div>
 
-      <div className={`flex-1 min-w-0 ${pending && !failed ? 'opacity-60' : ''}`}>
+      <div className={`flex-1 min-w-0 ${pending && !failed && !message.local ? 'opacity-60' : ''}`}>
         {replyRef && (
           <ReplyBar
             replyToId={replyRef.id}
@@ -472,7 +473,7 @@ function MessageItem({
         ) : (
           <div className="mt-0.5 flex items-end gap-1.5 flex-wrap">
             <div className="min-w-0 max-w-full">
-              <MessageBody message={message} people={people} />
+              <MessageBody message={message} people={people} room={room} />
             </div>
             {message.edited_at && !deleted && (
               <span className="text-[10px] text-text-muted mb-0.5" title={`Edited ${fullStamp(message.edited_at)}`}>(edited)</span>

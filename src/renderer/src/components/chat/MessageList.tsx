@@ -274,6 +274,7 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
                 <div className={m.localId && m.sendState ? 'chat-in' : undefined}>
                   <MessageItem
                     message={m}
+                    room={room}
                     grouped={grouped}
                     people={people}
                     canModerate={canModerate}
