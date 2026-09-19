@@ -6,11 +6,12 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeModerationNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare, LOCAL_HELP_MARKER } from '../../lib/chatShare'
+import { decodeLocalNotice, decodeModerationNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
 import { useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
 import rehypeChatEmoji from './emojiRehype'
+import FeedbackSentCard from './FeedbackSentCard'
 import HelpCard from './HelpCard'
 import { linkMentions } from './people'
 import { useOpenUserCard } from './UserCard'
@@ -19,6 +20,7 @@ import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
 import ModerationCard from './ModerationCard'
+import ThemeListCard from './ThemeListCard'
 import ThemeShareCard from './ThemeShareCard'
 
 function urlTransform(url: string): string {
@@ -83,8 +85,12 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     return <p className="text-sm italic text-text-muted">This message was deleted.</p>
   }
 
-  if (message.local && message.content === LOCAL_HELP_MARKER && room) {
-    return <HelpCard room={room} messageId={message.id} />
+  if (message.local && room) {
+    const notice = decodeLocalNotice(message.content)
+    if (notice?.kind === 'help') return <HelpCard room={room} messageId={message.id} />
+    if (notice?.kind === 'themeList') return <ThemeListCard room={room} messageId={message.id} />
+    if (notice?.kind === 'feedbackSent') return <FeedbackSentCard room={room} messageId={message.id} message={notice.message} />
+    return null
   }
 
   if (!message.is_encrypted) {

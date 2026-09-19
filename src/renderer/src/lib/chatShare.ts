@@ -322,11 +322,31 @@ export function formatMinutes(minutes: number): string {
   return `${d} day${d === 1 ? '' : 's'}`
 }
 
-// Marker for /help's command list card. Unlike the shares above this never
-// rides in an actual chat message's content - it only ever lives in a
-// client-side UiMessage (see chatStore's postLocalNotice), so there's no
-// encode/decode round trip through the server or other clients to guard.
-export const LOCAL_HELP_MARKER = 'unreleased:localhelp'
+// Backs /help, /theme (no args) and /feedback's confirmation. Unlike the
+// shares above these never ride in an actual chat message's content - they
+// only ever live in a client-side UiMessage (see chatStore's
+// postLocalNotice), so there's no encode/decode round trip through the
+// server or other clients to guard against: the payload always comes from
+// our own code, never from typed/attacker-editable text.
+export const LOCAL_NOTICE_PREFIX = 'unreleased:localnotice:'
+
+export type LocalNoticePayload =
+  | { kind: 'help' }
+  | { kind: 'themeList' }
+  | { kind: 'feedbackSent'; message: string }
+
+export function encodeLocalNotice(payload: LocalNoticePayload): string {
+  return `${LOCAL_NOTICE_PREFIX}${JSON.stringify(payload)}`
+}
+
+export function decodeLocalNotice(content: string): LocalNoticePayload | null {
+  if (!content.startsWith(LOCAL_NOTICE_PREFIX)) return null
+  try {
+    return JSON.parse(content.slice(LOCAL_NOTICE_PREFIX.length)) as LocalNoticePayload
+  } catch {
+    return null
+  }
+}
 
 // Plain-text summary for surfaces that can't render the rich card (notification
 // banners, OS notifications) - falls through the three share types before

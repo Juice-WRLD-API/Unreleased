@@ -5,7 +5,7 @@ import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
 import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
-import { encodeSongInfoShare, encodeSongShare, encodeThemeShare, LOCAL_HELP_MARKER } from '../../lib/chatShare'
+import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
 import { allSkins, getSkin } from '../../lib/skins'
@@ -48,6 +48,7 @@ const Composer = forwardRef<ComposerHandle, {
 }>(function Composer({ room, people, placeholder, parent = null, replyTo, onCancelReply, disabledReason, encrypted, onEditLast, compact, enterSends = true }, ref) {
   const send = useChatStore((s) => s.send)
   const postLocalNotice = useChatStore((s) => s.postLocalNotice)
+  const announceModeration = useChatStore((s) => s.announceModeration)
   const sendTyping = useChatStore((s) => s.sendTyping)
   const meId = useChatStore((s) => s.meId)
   const replyPreview = useChatStore((s) => {
@@ -265,9 +266,11 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   // Local, synchronous commands - no network round-trip, so they never touch
-  // commandBusy/toast('ok') the way the async ones below do.
+  // commandBusy/toast('ok') the way the async ones below do. The list/help
+  // cases post a local notice (see chatStore's postLocalNotice) instead of a
+  // toast - a nicer, dismissible list that only this device ever sees.
   const applyThemeCommand = (args: string): void => {
-    if (!args) { toast(`Themes: ${allSkins().map((s) => s.name).join(', ')}`, 'ok'); return }
+    if (!args) { postLocalNotice(room, encodeLocalNotice({ kind: 'themeList' })); return }
     const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
     const wanted = norm(args)
     const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
@@ -282,7 +285,7 @@ const Composer = forwardRef<ComposerHandle, {
   // items - so it's visible only to the person who ran /help, and they can
   // dismiss it from the card itself.
   const runHelpCommand = (): void => {
-    postLocalNotice(room, LOCAL_HELP_MARKER)
+    postLocalNotice(room, encodeLocalNotice({ kind: 'help' }))
   }
 
   const runMuteCommand = (args: string, usage: '/mute' | '/unmute'): void => {
@@ -319,11 +322,13 @@ const Composer = forwardRef<ComposerHandle, {
 
   // Routes through the same outbox as the Settings feedback form (see
   // useStore's submitFeedback/pendingReports) - it's queued locally first, so
-  // this resolves even if delivery hasn't happened yet.
+  // this resolves even if delivery hasn't happened yet. Confirmation is a
+  // local notice, not a room message - the feedback goes to the developers,
+  // not the room, so there's nothing for anyone else here to see.
   const runFeedbackCommand = async (args: string): Promise<void> => {
     if (!args) { toast('Usage: /feedback <message>'); return }
     await useStore.getState().submitFeedback('other', args)
-    toast('Feedback sent - thanks!', 'ok')
+    postLocalNotice(room, encodeLocalNotice({ kind: 'feedbackSent', message: args }))
   }
 
   const runInfoCommand = async (args: string): Promise<void> => {
@@ -390,6 +395,7 @@ const Composer = forwardRef<ComposerHandle, {
     const { server, target } = moderationTarget(args, '/kick @username', 'kick')
     await chatApi.removeMember(server.id, target.id)
     await refreshMembers(server.id)
+    announceModeration(server.id, { action: 'kick', userId: target.id, name: displayName(target) })
     toast(`Kicked ${displayName(target)} - they can rejoin if this server is public`, 'ok')
   }
 
@@ -402,6 +408,7 @@ const Composer = forwardRef<ComposerHandle, {
     }
     await chatApi.timeoutMember(server.id, target.id, minutes)
     await refreshMembers(server.id)
+    announceModeration(server.id, { action: 'timeout', userId: target.id, name: displayName(target), minutes })
     toast(`${displayName(target)} timed out for ${minutes} minute${minutes === 1 ? '' : 's'}`, 'ok')
   }
 
@@ -410,6 +417,7 @@ const Composer = forwardRef<ComposerHandle, {
     if (member && !chatApi.isTimedOut(member)) { toast(`${displayName(target)} isn't timed out`); return }
     await chatApi.clearMemberTimeout(server.id, target.id)
     await refreshMembers(server.id)
+    announceModeration(server.id, { action: 'untimeout', userId: target.id, name: displayName(target) })
     toast(`Timeout lifted for ${displayName(target)}`, 'ok')
   }
 
@@ -419,6 +427,7 @@ const Composer = forwardRef<ComposerHandle, {
     await chatApi.banUser(server.id, target.id, rest || undefined)
     await refreshMembers(server.id)
     await useChatStore.getState().loadBans(server.id, true).catch(() => [])
+    announceModeration(server.id, { action: 'ban', userId: target.id, name: displayName(target), reason: rest || undefined })
     toast(`Banned ${displayName(target)}${rest ? ` - ${rest}` : ''}`, 'ok')
   }
 
@@ -436,6 +445,7 @@ const Composer = forwardRef<ComposerHandle, {
     if (!ban) { toast(`"${uname}" isn't banned from this server`); return }
     await chatApi.unbanUser(server.id, ban.user.id)
     await cs.loadBans(server.id, true)
+    announceModeration(server.id, { action: 'unban', userId: ban.user.id, name: displayName(ban.user) })
     toast(`Unbanned ${displayName(ban.user)}`, 'ok')
   }
 
@@ -466,6 +476,7 @@ const Composer = forwardRef<ComposerHandle, {
     if (!first) throw new Error('Usage: /siteban @username [reason]')
     const { id, label } = siteTarget(first)
     await chatApi.applySiteModeration({ user_id: id, action: 'ban', ...(rest ? { reason: rest } : {}) })
+    announceModeration(null, { action: 'ban', userId: id, name: label, reason: rest || undefined, site: true })
     toast(`${label} banned from all chat`, 'ok')
   }
 
@@ -478,6 +489,7 @@ const Composer = forwardRef<ComposerHandle, {
       throw new Error(`Duration must be 1-${chatApi.MAX_SITE_TIMEOUT_MINUTES} minutes`)
     }
     await chatApi.applySiteModeration({ user_id: id, action: 'mute', ...(minutes ? { duration: minutes } : {}) })
+    announceModeration(null, { action: 'mute', userId: id, name: label, minutes: minutes || undefined, site: true })
     toast(minutes ? `${label} muted everywhere for ${minutes} minutes` : `${label} muted everywhere until revoked`, 'ok')
   }
 
@@ -488,6 +500,14 @@ const Composer = forwardRef<ComposerHandle, {
     const mine = active.filter((r) => r.user.id === id)
     if (mine.length === 0) { toast(`${label} has no active site-wide actions`); return }
     for (const record of mine) await chatApi.revokeSiteModeration(record.id)
+    // The revoke can span a ban and a mute at once; the card names the
+    // heaviest of them so it reads as the plain opposite of what was applied.
+    announceModeration(null, {
+      action: mine.some((r) => r.action === 'ban') ? 'unban' : mine.some((r) => r.action === 'mute') ? 'unmute' : 'untimeout',
+      userId: id,
+      name: label,
+      site: true,
+    })
     toast(`Revoked ${mine.length} site-wide action${mine.length === 1 ? '' : 's'} for ${label}`, 'ok')
   }
 

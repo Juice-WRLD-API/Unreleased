@@ -3,6 +3,7 @@ import { Crown, Gavel, Loader2, MessageSquare, MicOff, MoreHorizontal, Pin, Shie
 import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
 import { isTimedOut } from '../../lib/chatApi'
+import type { ModerationNoticeAction } from '../../lib/chatShare'
 import { displayName, roomKey, useChatStore, useExpiryTick, useMyPostingRestriction, useNowPlayingByIds, type RoomRef } from '../../store/chatStore'
 import { useChatPermissions } from '../../hooks/useChatPermissions'
 import Composer from './Composer'
@@ -130,6 +131,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
 }): JSX.Element {
   const meId = useChatStore((s) => s.meId)
   const loadMembers = useChatStore((s) => s.loadMembers)
+  const announceModeration = useChatStore((s) => s.announceModeration)
   const openUserCard = useOpenUserCard()
   const openModal = useOpenModal()
   const toast = useChatToast()
@@ -149,9 +151,18 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
   const timedOut = isTimedOut(member)
   const openProfile = (e: React.MouseEvent): void => openUserCard(member.user, e)
 
-  const act = (fn: () => Promise<unknown>, ok: string): void => {
+  // `notice`, when given, posts the matching card into the channel once the
+  // action has actually succeeded - never optimistically, so a rejected
+  // request doesn't leave a card claiming something that didn't happen.
+  const act = (fn: () => Promise<unknown>, ok: string, notice?: ModerationNoticeAction): void => {
     setMenu(false)
-    fn().then(() => { toast(ok, 'ok'); return loadMembers(serverId, true) }).catch((err) => toast(errorText(err)))
+    fn()
+      .then(() => {
+        toast(ok, 'ok')
+        if (notice) announceModeration(serverId, { action: notice, userId: member.user.id, name: displayName(member.user) })
+        return loadMembers(serverId, true)
+      })
+      .catch((err) => toast(errorText(err)))
   }
 
   return (
@@ -203,14 +214,14 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
             </MenuItem>
           )}
           {canManage && !isProtected && (
-            <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted')}>
+            <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted', member.muted ? 'unmute' : 'mute')}>
               {member.muted ? 'Unmute' : 'Mute'}
             </MenuItem>
           )}
           {canKick && !isProtected && !isMe && (
             timedOut
               ? (
-                <MenuItem onClick={() => act(() => api.clearMemberTimeout(serverId, member.user.id), 'Timeout removed')}>
+                <MenuItem onClick={() => act(() => api.clearMemberTimeout(serverId, member.user.id), 'Timeout removed', 'untimeout')}>
                   <span className="inline-flex items-center gap-2"><Timer size={14} />Remove timeout</span>
                 </MenuItem>
               )
@@ -241,7 +252,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
           onConfirm={() => {
             setConfirm(false)
             if (isMe) act(() => api.leaveServer(serverId), 'Left server')
-            else act(() => api.removeMember(serverId, member.user.id), 'Member kicked')
+            else act(() => api.removeMember(serverId, member.user.id), 'Member kicked', 'kick')
           }}
         />
       )}

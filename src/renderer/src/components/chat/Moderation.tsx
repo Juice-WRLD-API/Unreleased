@@ -96,6 +96,7 @@ export function TimeoutMemberModal({ serverId, member, onClose }: {
   onClose: () => void
 }): JSX.Element {
   const loadMembers = useChatStore((s) => s.loadMembers)
+  const announceModeration = useChatStore((s) => s.announceModeration)
   const isAdmin = usePlatformAdmin()
   const toast = useChatToast()
   const [minutes, setMinutes] = useState(10)
@@ -114,6 +115,14 @@ export function TimeoutMemberModal({ serverId, member, onClose }: {
         await api.timeoutMember(serverId, member.user.id, minutes)
         await loadMembers(serverId, true)
       }
+      announceModeration(serverId, {
+        action: 'timeout',
+        userId: member.user.id,
+        name: displayName(member.user),
+        minutes,
+        reason: siteWide ? reason.trim() || undefined : undefined,
+        site: siteWide,
+      })
       toast(`${displayName(member.user)} timed out for ${formatDuration(minutes)}`, 'ok')
       onClose()
     } catch (err) {
@@ -178,6 +187,7 @@ export function BanMemberModal({ serverId, user, onClose }: {
   onClose: () => void
 }): JSX.Element {
   const loadMembers = useChatStore((s) => s.loadMembers)
+  const announceModeration = useChatStore((s) => s.announceModeration)
   const isAdmin = usePlatformAdmin()
   const toast = useChatToast()
   const [reason, setReason] = useState('')
@@ -201,6 +211,14 @@ export function BanMemberModal({ serverId, user, onClose }: {
         await loadMembers(serverId, true)
         await useChatStore.getState().loadBans(serverId, true).catch(() => [])
       }
+      announceModeration(serverId, {
+        action: 'ban',
+        userId: user.id,
+        name: displayName(user),
+        reason: reason.trim() || undefined,
+        minutes: siteWide && !permanent ? minutes : undefined,
+        site: siteWide,
+      })
       toast(`${displayName(user)} banned`, 'ok')
       onClose()
     } catch (err) {
@@ -283,6 +301,11 @@ export function ServerBansModal({ serverId, onClose }: { serverId: number; onClo
         useChatStore.setState((s) => ({
           bans: { ...s.bans, [serverId]: (s.bans[serverId] ?? []).filter((b) => b.user.id !== ban.user.id) },
         }))
+        useChatStore.getState().announceModeration(serverId, {
+          action: 'unban',
+          userId: ban.user.id,
+          name: displayName(ban.user),
+        })
         toast(`${displayName(ban.user)} unbanned`, 'ok')
       })
       .catch((err) => toast(errorText(err, 'Could not unban')))
@@ -372,6 +395,14 @@ export function SiteModerationModal({ onClose }: { onClose: () => void }): JSX.E
         ...(reason.trim() ? { reason: reason.trim() } : {}),
         ...(minutes === '' ? {} : { duration: minutes }),
       })
+      useChatStore.getState().announceModeration(null, {
+        action: action === 'ban' ? 'ban' : action === 'mute' ? 'mute' : 'timeout',
+        userId: user.id,
+        name: displayName(user),
+        reason: reason.trim() || undefined,
+        minutes: minutes === '' ? undefined : minutes,
+        site: true,
+      })
       toast(`${ACTION_LABEL[action]} applied to ${displayName(user)}`, 'ok')
       setTarget([])
       setReason('')
@@ -387,6 +418,12 @@ export function SiteModerationModal({ onClose }: { onClose: () => void }): JSX.E
   const revoke = (record: SiteModeration): void => {
     api.revokeSiteModeration(record.id)
       .then(() => {
+        useChatStore.getState().announceModeration(null, {
+          action: record.action === 'ban' ? 'unban' : record.action === 'mute' ? 'unmute' : 'untimeout',
+          userId: record.user.id,
+          name: displayName(record.user),
+          site: true,
+        })
         toast('Revoked', 'ok')
         setRecords((prev) => prev
           ? (activeOnly
