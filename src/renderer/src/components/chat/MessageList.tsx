@@ -1,3 +1,4 @@
+import { isModerationNotice } from '../../lib/chatShare'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, Loader2, RefreshCw } from 'lucide-react'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
@@ -262,7 +263,11 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
             const newDay = !prev || dayKey(prev.created_at) !== dayKey(m.created_at)
             const showNew = !divided && dividerAfter.current != null && m.id > dividerAfter.current && m.author.id !== meId && !!prev
             if (showNew) divided = true
+            // A moderation card renders with its own "Server" byline, so it
+            // can neither continue a run nor be continued by one - grouping
+            // across it would drop the avatar off the message that follows.
             const grouped = !!prev && !newDay && !showNew
+              && !isModerationNotice(prev.content) && !isModerationNotice(m.content)
               && prev.author.id === m.author.id
               && !prev.deleted_at
               && new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < GROUP_WINDOW_MS

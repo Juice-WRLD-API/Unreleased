@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { create } from 'zustand'
 import * as api from '../lib/chatApi'
 import { isTimedOut } from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerBan, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
 import { splitReplyRef } from '../lib/chatReplyRef'
-import { encodeModerationNotice, shareSummaryText, type ModerationNoticePayload } from '../lib/chatShare'
+import { decodeModerationNotice, encodeModerationNotice, moderationNoticeSelfText, moderationNoticeVerb, shareSummaryText, type ModerationNoticePayload } from '../lib/chatShare'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
 import type { AccountUser, NowPlayingState } from '../lib/userApi'
 import { getNowPlaying } from '../lib/userApi'
@@ -311,9 +311,17 @@ export const useChatStore = create<ChatState>((set, get) => {
       title = conv?.is_group ? `${displayName(msg.author)} in ${conv.name || 'Group chat'}` : displayName(msg.author)
     }
     const plainBody = splitForwardRef(splitReplyRef(msg.content ?? '').body).body.trim()
+    // A moderation card aimed at us reads in the second person ("You were
+    // timed out"), which beats seeing our own name in the third.
+    const decoded = msg.is_encrypted ? null : decodeModerationNotice(plainBody)
+    // Same gate as the card itself: a forged payload must not get to phrase
+    // someone's notification either.
+    const moderation = decoded && noticeAuthorMayModerate(get(), msg, decoded) ? decoded : null
     const body = msg.is_encrypted
       ? 'Sent a new message'
-      : (shareSummaryText(plainBody) ?? plainBody) || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
+      : moderation
+        ? (moderation.userId === get().meId ? moderationNoticeSelfText(moderation) : `${moderation.name} ${moderationNoticeVerb(moderation)}`)
+        : (shareSummaryText(plainBody) ?? plainBody) || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
     fireChatNotification({
       id: msg.id,
       title,
@@ -1102,27 +1110,36 @@ export const useChatStore = create<ChatState>((set, get) => {
       await attempt()
     },
 
-    // Posts the "X was timed out" card into the channel the moderator is
-    // looking at, so the room sees the action rather than only the person who
-    // took it. Falls back to the server's first visible channel when the
-    // action came from somewhere without a channel open (e.g. the bans list
-    // reached from a DM), and gives up quietly if there's nowhere to post -
-    // the moderation itself already succeeded, so a failure here must never
-    // surface as if the action didn't happen.
+    // Posts the moderation card as a real message into the channel the
+    // moderator is looking at, so it lands in history for everyone and is
+    // still there after a reload. It goes out under the moderator's token -
+    // the API has no way to post as anything else - which is why the row
+    // renders as "Server · via <them>" rather than claiming to be unattributed
+    // (see MessageItem): a card anyone else forges by typing the payload names
+    // whoever typed it. Falls back to the server's first channel when the
+    // action came from somewhere with no channel open, and gives up quietly if
+    // there's nowhere to post - the moderation itself already succeeded.
     announceModeration: (serverId, payload) => {
-      const s = get()
-      const active = s.active
-      const inServer = (channelId: number): boolean => serverId == null
-        || !!s.servers.find((x) => x.id === serverId)?.channels.some((c) => c.id === channelId)
-      const room: RoomRef | null = active?.kind === 'channel' && inServer(active.id)
+      const st = get()
+      const active = st.active
+      const belongs = (channelId: number): boolean => serverId == null
+        || !!st.servers.find((x) => x.id === serverId)?.channels.some((c) => c.id === channelId)
+      const room: RoomRef | null = active?.kind === 'channel' && belongs(active.id)
         ? active
         : (() => {
-            const server = serverId != null ? s.servers.find((x) => x.id === serverId) : undefined
+            const server = serverId != null ? st.servers.find((x) => x.id === serverId) : undefined
             const channel = server?.channels.slice().sort((a, b) => a.position - b.position)[0]
             return channel ? { kind: 'channel' as const, id: channel.id } : null
           })()
       if (!room) return
-      void get().send(room, { text: encodeModerationNotice(payload), files: [] }).catch(() => undefined)
+      // Mentions the target so it reaches them as a mention rather than an
+      // ordinary unread - being muted or timed out is the one thing they most
+      // need to see, and they keep read access for both.
+      void get().send(room, {
+        text: encodeModerationNotice(payload),
+        files: [],
+        mentions: [payload.userId],
+      }).catch(() => undefined)
     },
 
     postLocalNotice: (room, content) => {
@@ -1415,6 +1432,75 @@ export function useMyPostingRestriction(room: RoomRef | null): string | null {
   if (member.muted) return 'You’re muted in this server'
   if (isTimedOut(member)) return `You’re timed out until ${new Date(member.timeout_until!).toLocaleString()}`
   return null
+}
+
+// Which permission a moderation card's author must actually hold for that card
+// to be genuine. Site-wide actions aren't in the bitmask at all - they're
+// platform-administrator only - so they're handled separately below.
+const NOTICE_PERMISSION: Record<ModerationNoticePayload['action'], number> = {
+  mute: api.CHAT_PERMISSIONS.manage_server,
+  unmute: api.CHAT_PERMISSIONS.manage_server,
+  timeout: api.CHAT_PERMISSIONS.kick_members,
+  untimeout: api.CHAT_PERMISSIONS.kick_members,
+  kick: api.CHAT_PERMISSIONS.kick_members,
+  ban: api.CHAT_PERMISSIONS.ban_members,
+  unban: api.CHAT_PERMISSIONS.ban_members,
+}
+
+// Decodes a moderation card only if the account that posted it could actually
+// have performed the action it claims. The API can't post as anything but the
+// caller, so the payload is just text any member could type - this is what
+// stops a copied "X was banned" card from rendering as one. Returns null for
+// anything unverified, which drops the message back to being shown as the
+// plain text it really is.
+//
+// Mirrors the documented Permission Resolution steps 1-4 at server level:
+// owner and platform admin pass outright, otherwise @everyone's permissions
+// OR'd with those of the author's assigned roles. Channel overrides aren't
+// folded in, so a card is never rejected over a channel-scoped grant.
+function noticeAuthorMayModerate(
+  state: ChatState,
+  message: Pick<UiMessage, 'channel' | 'author'>,
+  payload: ModerationNoticePayload,
+): boolean {
+  if (message.author.role === 'administrator') return true
+  // Only a platform administrator can act site-wide.
+  if (payload.site) return false
+  if (message.channel == null) return false
+  const server = state.servers.find((x) => x.channels.some((c) => c.id === message.channel))
+  if (!server) return false
+  if (server.owner === message.author.id) return true
+  const members = state.members[server.id]
+  // Roles haven't been fetched yet: can't judge, so don't accuse.
+  if (!members) return true
+  const member = members.find((m) => m.user.id === message.author.id)
+  if (!member) return false
+  const assigned = new Set(member.roles.map((r) => r.id))
+  const mask = server.roles.reduce(
+    (acc, role) => (role.is_default || assigned.has(role.id) ? acc | role.permissions : acc),
+    0,
+  )
+  return api.hasPermission(mask, NOTICE_PERMISSION[payload.action])
+    || api.hasPermission(mask, api.CHAT_PERMISSIONS.manage_server)
+}
+
+export function useModerationNotice(message: Pick<UiMessage, 'content' | 'channel' | 'author' | 'is_encrypted'>): ModerationNoticePayload | null {
+  const payload = useMemo(
+    () => (message.is_encrypted ? null : decodeModerationNotice(message.content)),
+    [message.content, message.is_encrypted],
+  )
+  const loadMembers = useChatStore((s) => s.loadMembers)
+  const serverId = useChatStore((s) => (message.channel != null
+    ? s.servers.find((x) => x.channels.some((c) => c.id === message.channel))?.id ?? null
+    : null))
+  const allowed = useChatStore((s) => !!payload && noticeAuthorMayModerate(s, message, payload))
+
+  // Verification needs the author's roles, which the member list carries.
+  useEffect(() => {
+    if (payload && serverId != null) void loadMembers(serverId).catch(() => undefined)
+  }, [payload, serverId, loadMembers])
+
+  return payload && allowed ? payload : null
 }
 
 export function conversationTitle(conv: Conversation, meId: number | null): string {

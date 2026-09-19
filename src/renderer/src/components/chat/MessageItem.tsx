@@ -1,14 +1,14 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertCircle, Bell, BellOff, CornerDownRight, CornerUpLeft, Copy, Forward, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, SmilePlus, Trash2,
+  AlertCircle, Bell, BellOff, CornerDownRight, CornerUpLeft, Copy, Forward, Image as ImageIcon, Loader2, MessageSquareReply, Pencil, Pin, PinOff, RotateCcw, ShieldCheck, SmilePlus, Trash2,
 } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import type { ChatUserBrief } from '../../lib/chatApi'
+import type { ChatAttachment, ChatUserBrief } from '../../lib/chatApi'
 import { chatAttachmentUrl, getMessage } from '../../lib/chatApi'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeForwardRef, splitForwardRef } from '../../lib/chatForwardRef'
-import { displayName, useChatStore, useMessageById, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { displayName, useChatStore, useMessageById, useModerationNotice, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import AttachmentList, { kindOf } from './AttachmentView'
 import ForwardMessageModal from './ForwardMessageModal'
@@ -272,6 +272,46 @@ function SheetRow({ icon, label, onClick, danger }: { icon: JSX.Element; label: 
   )
 }
 
+// Encrypted uploads are stored as `attachment.bin` / application/octet-stream,
+// so an image only looks like one once its name has been decrypted. Resolve
+// that in the background; until it lands the image actions stay hidden.
+function useImageAttachment(message: UiMessage, meId: number | null, enabled: boolean): ChatAttachment | undefined {
+  const { attachments, is_encrypted: encrypted, conversation } = message
+  const attachmentIds = attachments.map((a) => a.id).join(',')
+  const [imageId, setImageId] = useState<number | null>(null)
+
+  useEffect(() => {
+    setImageId(null)
+    if (!enabled || !encrypted || !meId || !conversation) return
+    let cancelled = false
+    void (async () => {
+      const { decryptAttachmentMetaCached } = await import('../../lib/chatE2E')
+      for (const att of attachments) {
+        try {
+          const meta = await decryptAttachmentMetaCached(meId, conversation, att)
+          if (cancelled) return
+          if (kindOf(meta.mime, meta.name) === 'image') {
+            setImageId(att.id)
+            return
+          }
+        } catch {
+          // No key yet (or a bad one): leave the image actions off this message.
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // Keyed on attachment identity rather than the array: store updates rebuild
+    // message objects, and re-running on every one would thrash this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachmentIds, conversation, encrypted, enabled, meId])
+
+  if (!enabled) return undefined
+  if (!encrypted) return attachments.find((a) => kindOf(a.mime, a.name) === 'image')
+  return attachments.find((a) => a.id === imageId)
+}
+
 function MessageItem({
   message, room, grouped, people, canModerate, inThread, activeThread, editing, onStartEdit, onOpenThread, onReply, highlight,
 }: MessageItemProps): JSX.Element {
@@ -294,6 +334,9 @@ function MessageItem({
   // changed their avatar, prefer the live record from the room's member/
   // participant list so the picture doesn't stay stuck on the old one.
   const liveAuthor = people.find((p) => p.id === message.author.id) ?? message.author
+  // Only a card whose poster could really have taken the action gets the
+  // "Server" chrome; a forged one stays an ordinary message from whoever sent it.
+  const moderationNotice = useModerationNotice(message)
   const openProfile = (e: React.MouseEvent): void => openUserCard(liveAuthor, e)
 
   const reactorNames = (userIds: number[]): string => {
@@ -328,7 +371,7 @@ function MessageItem({
   const canDelete = !pending && !deleted && (mine || canModerate)
   const canPin = !pending && !deleted && (mine || canModerate)
   const canCopy = !deleted && !!plainText
-  const imageAttachment = !deleted ? message.attachments.find((a) => kindOf(a.mime, a.name) === 'image') : undefined
+  const imageAttachment = useImageAttachment(message, meId, !deleted)
   const canCopyImage = !!imageAttachment
   const canForward = !pending && !deleted && (!!bodyText || message.attachments.length > 0)
 
@@ -393,6 +436,47 @@ function MessageItem({
   }
 
   const failed = message.sendState === 'failed'
+
+  // Moderation cards announce a server action rather than saying something,
+  // so the author slot reads "Server" instead of a person. The account that
+  // actually posted it still rides along as "via <them>": the API can only
+  // post under the caller's token, so anyone could type this payload by hand -
+  // and a forged card names whoever typed it instead of silently passing as
+  // official. The reply/edit/react/pin affordances are dropped as meaningless
+  // on an announcement.
+  if (moderationNotice) {
+    return (
+      <div data-message-id={message.id} className="group relative flex gap-3 px-4 md:px-5 pt-3 pb-0.5 border-l-2 border-transparent">
+        <div className="w-9 shrink-0 flex justify-center">
+          <span className="mt-0.5 w-9 h-9 rounded-full bg-accent/15 text-accent flex items-center justify-center" title="Sent by the server">
+            <ShieldCheck size={19} />
+          </span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-text-primary">Server</span>
+            <span className="shrink-0 rounded px-1 py-px bg-surface-raised text-[9px] font-bold uppercase tracking-wider text-text-muted">
+              System
+            </span>
+            <button
+              type="button"
+              onClick={openProfile}
+              title={`Posted by ${displayName(liveAuthor)}`}
+              className="shrink-0 text-[11px] text-text-muted hover:text-text-primary hover:underline truncate max-w-[10rem]"
+            >
+              via {displayName(liveAuthor)}
+            </button>
+            <span className="text-[10px] text-text-muted tabular-nums" title={fullStamp(message.created_at)}>
+              {clockTime(message.created_at)}
+            </span>
+          </div>
+          <div className="mt-1">
+            <MessageBody message={message} people={people} room={room} />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

@@ -6,8 +6,8 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeLocalNotice, decodeModerationNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
-import { useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { decodeLocalNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
+import { useChatStore, useModerationNotice, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
 import rehypeChatEmoji from './emojiRehype'
@@ -80,6 +80,9 @@ const MemoMarkdown = memo(MarkdownText)
 export default function MessageBody({ message, people, room }: { message: UiMessage; people: ChatUserBrief[]; room?: RoomRef }): JSX.Element | null {
   const meId = useChatStore((s) => s.meId)
   const decrypted = useChatStore((s) => (message.is_encrypted ? s.plain[message.id] : undefined))
+  // Null unless the poster actually had the permission for the action it
+  // claims - a copied payload falls through and renders as the plain text it is.
+  const moderation = useModerationNotice(message)
 
   if (message.deleted_at) {
     return <p className="text-sm italic text-text-muted">This message was deleted.</p>
@@ -107,7 +110,6 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (info) return <SongInfoCard info={info} />
     const theme = decodeThemeShare(body)
     if (theme) return <ThemeShareCard theme={theme} />
-    const moderation = decodeModerationNotice(body)
     return moderation ? <ModerationCard notice={moderation} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
@@ -141,6 +143,5 @@ export default function MessageBody({ message, people, room }: { message: UiMess
   if (decryptedInfo) return <SongInfoCard info={decryptedInfo} />
   const decryptedTheme = decodeThemeShare(decryptedBody)
   if (decryptedTheme) return <ThemeShareCard theme={decryptedTheme} />
-  const decryptedModeration = decodeModerationNotice(decryptedBody)
-  return decryptedModeration ? <ModerationCard notice={decryptedModeration} /> : <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
+  return <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

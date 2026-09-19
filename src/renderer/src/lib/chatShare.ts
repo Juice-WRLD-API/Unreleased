@@ -265,6 +265,13 @@ export function encodeModerationNotice(payload: ModerationNoticePayload): string
   })}`
 }
 
+// Cheap prefix test for callers that only need "is this a moderation card?"
+// on every render (message grouping, row chrome) without paying for the JSON
+// parse and field validation decodeModerationNotice does.
+export function isModerationNotice(content: string): boolean {
+  return content.startsWith(MODERATION_PREFIX)
+}
+
 export function decodeModerationNotice(content: string): ModerationNoticePayload | null {
   if (!content.startsWith(MODERATION_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
   let raw: unknown
@@ -309,6 +316,26 @@ export function moderationNoticeVerb(payload: ModerationNoticePayload): string {
       ? `was banned${scope} for ${formatMinutes(payload.minutes)}`
       : `was banned${scope}`
     case 'unban': return `was unbanned${scope}`
+  }
+}
+
+// Second-person wording for the notification the target themselves gets.
+// Derived separately rather than by patching the third-person verb: "had
+// their timeout lifted" doesn't survive a pronoun swap.
+export function moderationNoticeSelfText(payload: ModerationNoticePayload): string {
+  const scope = payload.site ? ' site-wide' : ''
+  switch (payload.action) {
+    case 'mute': return `You were muted${scope}`
+    case 'unmute': return `You were unmuted${scope}`
+    case 'timeout': return payload.minutes
+      ? `You were timed out${scope} for ${formatMinutes(payload.minutes)}`
+      : `You were timed out${scope}`
+    case 'untimeout': return `Your timeout was lifted${scope}`
+    case 'kick': return 'You were removed from the server'
+    case 'ban': return payload.minutes
+      ? `You were banned${scope} for ${formatMinutes(payload.minutes)}`
+      : `You were banned${scope}`
+    case 'unban': return `You were unbanned${scope}`
   }
 }
 
@@ -360,7 +387,9 @@ export function shareSummaryText(content: string): string | null {
   if (decodeSongInfoShare(content)) return 'Shared song info'
   const theme = decodeThemeShare(content)
   if (theme) return `Shared a theme: ${theme.name}`
-  const moderation = decodeModerationNotice(content)
-  if (moderation) return `${moderation.name} ${moderationNoticeVerb(moderation)}`
+  // Moderation cards deliberately aren't summarized here: phrasing one
+  // requires checking that its author could actually have taken the action,
+  // which needs store state this module doesn't have. chatStore's
+  // notifyNewMessage does that check and formats the text itself.
   return null
 }

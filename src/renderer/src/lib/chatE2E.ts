@@ -206,3 +206,22 @@ export async function decryptAttachment(userId: number, conversationId: number, 
   const plain = await decryptBytes(cipher, att.nonce, key)
   return { ...meta, blob: new Blob([plain as Uint8Array<ArrayBuffer>], { type: meta.mime || 'application/octet-stream' }) }
 }
+
+// Encrypted uploads all land as `attachment.bin` / application/octet-stream,
+// so anything that needs the real name or mime has to decrypt the name first.
+// Several callers want the same answer for the same attachment (the preview,
+// the context menu), so keep the in-flight promise around; failures are
+// dropped so a later retry can pick up a key that has since arrived.
+const metaCache = new Map<number, Promise<{ name: string; mime: string }>>()
+
+export function decryptAttachmentMetaCached(userId: number, conversationId: number, att: ChatAttachment): Promise<{ name: string; mime: string }> {
+  if (att.id < 0) return decryptAttachmentMeta(userId, conversationId, att)
+  const hit = metaCache.get(att.id)
+  if (hit) return hit
+  const pending = decryptAttachmentMeta(userId, conversationId, att).catch((err) => {
+    metaCache.delete(att.id)
+    throw err
+  })
+  metaCache.set(att.id, pending)
+  return pending
+}
