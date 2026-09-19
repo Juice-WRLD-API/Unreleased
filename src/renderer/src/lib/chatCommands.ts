@@ -27,6 +27,12 @@ const ALIASES: Record<string, ChatCommandName> = {
   nowplaying: 'np',
   to: 'timeout',
   unto: 'untimeout',
+  // One revoke covers every site-wide action on a user (ban, mute, timeout
+  // alike), so the obvious spellings all land on the same command rather than
+  // each needing an endpoint that doesn't exist.
+  siteunmute: 'siteunban',
+  siteuntimeout: 'siteunban',
+  unsiteban: 'siteunban',
 }
 
 // Drives the Composer's slash-command autocomplete popup - purely
@@ -61,7 +67,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'bans', usage: '/bans', description: 'List everyone banned from this server', params: [] },
   { name: 'siteban', usage: '/siteban @user [reason]', description: 'Admins: ban a user from all chat and DMs', params: ['user', 'reason'] },
   { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
-  { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke a user’s site-wide actions', params: ['user'] },
+  { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help', description: 'List available commands', params: [] },
 ]
