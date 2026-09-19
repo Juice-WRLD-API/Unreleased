@@ -75,7 +75,7 @@ export default function ShareSongModal({ track, songId, onClose }: Props): JSX.E
     setBusy(key)
     setError(null)
     try {
-      await send(room, { text: encodeSongShare(track, songId), files: [] })
+      await send(room, { text: encodeSongShare(songId), files: [] })
       setSentTo((prev) => new Set(prev).add(key))
     } catch (err) {
       setError((err as Error).message || 'Could not send')

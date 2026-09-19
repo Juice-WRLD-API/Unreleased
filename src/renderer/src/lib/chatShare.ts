@@ -1,55 +1,32 @@
-import { JWAPI_BASE } from './juicewrldApi'
 import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
-import type { Track } from '../types'
 
 // A song share rides in a chat message's plain `content` (or, for DMs, the
 // text that gets E2E-encrypted into it) - there's no separate embed/attachment
 // schema on the backend, so the whole payload is inlined behind this prefix
 // and MessageBody swaps it for a card instead of rendering it as markdown.
 //
-// Because that content is just chat text, ANY chat member can hand-craft a
-// message with this prefix - decodeSongShare is untrusted input, not a value
-// this app produced. A forged payload must not be able to make MessageBody
-// render arbitrary attacker-controlled UI as if it were a real song card, or
-// point playback (an <audio> src, fetched automatically) at an arbitrary
-// origin. So every field is re-validated on decode, independent of whatever
-// encodeSongShare puts in: streamUrl is pinned to JWAPI_BASE (the only origin
-// a real song ever streams from), imageUrl is limited to http(s)/data image
-// URLs, and the text/number fields get type and length bounds.
+// The message carries only the song's id - never its title, art, or stream
+// URL. Those used to ride along in the message text, which meant any chat
+// member could hand-craft a "/song" message with fabricated info (wrong
+// title, a spoofed cover, even a stream URL pointed elsewhere) since chat
+// content is untrusted input, not something only this app produces. Card
+// components look the real song up by id (SongShareCard, SongInfoCard), so
+// what's shown always matches the actual library entry, never whatever text
+// someone typed.
 export const SONG_SHARE_PREFIX = 'unreleased:song:'
 const MAX_SHARE_CONTENT_LENGTH = 4000
 const MAX_TEXT_FIELD_LENGTH = 300
 
 export interface SharedSongPayload {
   songId: number
-  title: string
-  artist: string
-  imageUrl?: string
-  streamUrl: string
-  duration?: number
 }
 
-export function encodeSongShare(track: Track, songId: number): string {
-  const payload: SharedSongPayload = {
-    songId,
-    title: track.apiTitle || track.title,
-    artist: track.artist,
-    imageUrl: track.apiImageUrl || track.imageUrl,
-    streamUrl: track.streamUrl || '',
-    duration: track.duration || undefined,
-  }
-  return `${SONG_SHARE_PREFIX}${JSON.stringify(payload)}`
+export function encodeSongShare(songId: number): string {
+  return `${SONG_SHARE_PREFIX}${songId}`
 }
 
 function isSafeText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_TEXT_FIELD_LENGTH
-}
-
-// Only the API's own file endpoint ever legitimately backs a song stream -
-// anchoring on it keeps a forged share from pointing playback (which fetches
-// automatically once the card renders) at an attacker-controlled origin.
-function isTrustedStreamUrl(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= MAX_TEXT_FIELD_LENGTH && value.startsWith(`${JWAPI_BASE}/`)
 }
 
 // Covers can legitimately come from a wider set of hosts than streams (user
@@ -61,31 +38,16 @@ function isSafeImageUrl(value: unknown): value is string {
   return /^https:\/\//.test(value) || /^http:\/\//.test(value) || /^data:image\//.test(value)
 }
 
+function parseSongId(rest: string): number | null {
+  if (!/^\d+$/.test(rest)) return null
+  const songId = Number(rest)
+  return Number.isInteger(songId) && songId > 0 ? songId : null
+}
+
 export function decodeSongShare(content: string): SharedSongPayload | null {
   if (!content.startsWith(SONG_SHARE_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
-  let raw: unknown
-  try {
-    raw = JSON.parse(content.slice(SONG_SHARE_PREFIX.length))
-  } catch {
-    return null
-  }
-  if (!raw || typeof raw !== 'object') return null
-  const p = raw as Record<string, unknown>
-
-  if (!Number.isInteger(p.songId) || (p.songId as number) <= 0) return null
-  if (!isSafeText(p.title) || !isSafeText(p.artist)) return null
-  if (!isTrustedStreamUrl(p.streamUrl)) return null
-  if (p.imageUrl !== undefined && !isSafeImageUrl(p.imageUrl)) return null
-  if (p.duration !== undefined && (typeof p.duration !== 'number' || !Number.isFinite(p.duration) || p.duration < 0)) return null
-
-  return {
-    songId: p.songId as number,
-    title: p.title as string,
-    artist: p.artist as string,
-    imageUrl: p.imageUrl as string | undefined,
-    streamUrl: p.streamUrl as string,
-    duration: p.duration as number | undefined,
-  }
+  const songId = parseSongId(content.slice(SONG_SHARE_PREFIX.length))
+  return songId === null ? null : { songId }
 }
 
 // Same "prefix + JSON in plain chat text" scheme as song shares, and the same
@@ -182,87 +144,24 @@ export function decodeNewsShare(content: string): SharedNewsPayload | null {
   }
 }
 
-// Same "prefix + JSON in plain chat text" scheme as the other shares above -
-// this one backs /info's card. It deliberately carries no streamUrl: unlike
-// /song, this card is read-only metadata, not something that plays audio, so
-// it doesn't need the stream-origin pinning that makes SongShareCard safe to
-// auto-wire into an <audio> element.
+// Same "id only, looked up fresh" scheme as SONG_SHARE_PREFIX above - this one
+// backs /info's card. It deliberately carries no streamUrl even indirectly:
+// unlike /song, this card is read-only metadata, not something that plays
+// audio.
 export const SONG_INFO_PREFIX = 'unreleased:info:'
-
-const CATEGORY_KEYS = new Set(['released', 'unreleased', 'unsurfaced', 'recording_session'])
 
 export interface SharedSongInfoPayload {
   songId: number
-  title: string
-  category: string
-  length: string
-  era?: string
-  artists?: string
-  producers?: string
-  releaseDate?: string
-  leakedDate?: string
-  imageUrl?: string
 }
 
-export function encodeSongInfoShare(song: {
-  id: number
-  name: string
-  era?: { name: string } | null
-  category: string
-  length: string
-  credited_artists?: string | null
-  producers?: string | null
-  release_date?: string | null
-  date_leaked?: string | null
-}, imageUrl?: string): string {
-  const payload: SharedSongInfoPayload = {
-    songId: song.id,
-    title: song.name,
-    category: song.category,
-    length: song.length,
-    era: song.era?.name || undefined,
-    artists: song.credited_artists || undefined,
-    producers: song.producers || undefined,
-    releaseDate: song.release_date || undefined,
-    leakedDate: song.date_leaked || undefined,
-    imageUrl,
-  }
-  return `${SONG_INFO_PREFIX}${JSON.stringify(payload)}`
+export function encodeSongInfoShare(songId: number): string {
+  return `${SONG_INFO_PREFIX}${songId}`
 }
 
 export function decodeSongInfoShare(content: string): SharedSongInfoPayload | null {
   if (!content.startsWith(SONG_INFO_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
-  let raw: unknown
-  try {
-    raw = JSON.parse(content.slice(SONG_INFO_PREFIX.length))
-  } catch {
-    return null
-  }
-  if (!raw || typeof raw !== 'object') return null
-  const p = raw as Record<string, unknown>
-
-  if (!Number.isInteger(p.songId) || (p.songId as number) <= 0) return null
-  if (!isSafeText(p.title) || !isSafeText(p.length)) return null
-  if (typeof p.category !== 'string' || !CATEGORY_KEYS.has(p.category)) return null
-  if (p.era !== undefined && !isSafeText(p.era)) return null
-  if (p.artists !== undefined && !isSafeText(p.artists)) return null
-  if (p.producers !== undefined && !isSafeText(p.producers)) return null
-  if (p.releaseDate !== undefined && !isSafeText(p.releaseDate)) return null
-  if (p.leakedDate !== undefined && !isSafeText(p.leakedDate)) return null
-  if (p.imageUrl !== undefined && !isSafeImageUrl(p.imageUrl)) return null
-
-  return {
-    songId: p.songId as number,
-    title: p.title as string,
-    category: p.category as string,
-    length: p.length as string,
-    era: p.era as string | undefined,
-    artists: p.artists as string | undefined,
-    producers: p.producers as string | undefined,
-    releaseDate: p.releaseDate as string | undefined,
-    leakedDate: p.leakedDate as string | undefined,
-    imageUrl: p.imageUrl as string | undefined,
-  }
+  const songId = parseSongId(content.slice(SONG_INFO_PREFIX.length))
+  return songId === null ? null : { songId }
 }
 
 // Same "prefix + JSON in plain chat text" scheme as the other shares above -
@@ -332,33 +231,13 @@ export function decodeThemeShare(content: string): SharedThemePayload | null {
 // banners, OS notifications) - falls through the three share types before
 // treating the content as a regular message.
 export function shareSummaryText(content: string): string | null {
-  const song = decodeSongShare(content)
-  if (song) return `Shared a song: ${song.title} - ${song.artist}`
+  if (decodeSongShare(content)) return 'Shared a song'
   const playlist = decodePlaylistShare(content)
   if (playlist) return `Shared a playlist: ${playlist.name}`
   const news = decodeNewsShare(content)
   if (news) return `Shared a news post: ${news.title}`
-  const info = decodeSongInfoShare(content)
-  if (info) return `Song info: ${info.title}`
+  if (decodeSongInfoShare(content)) return 'Shared song info'
   const theme = decodeThemeShare(content)
   if (theme) return `Shared a theme: ${theme.name}`
   return null
-}
-
-export function songShareToTrack(payload: SharedSongPayload): Track {
-  return {
-    id: `jw-${payload.songId}`,
-    path: payload.streamUrl,
-    title: payload.title,
-    artist: payload.artist,
-    album: '',
-    albumArtist: 'Juice WRLD',
-    year: null,
-    trackNumber: null,
-    duration: payload.duration ?? 0,
-    genre: '',
-    hasAlbumArt: !!payload.imageUrl,
-    streamUrl: payload.streamUrl,
-    imageUrl: payload.imageUrl,
-  }
 }

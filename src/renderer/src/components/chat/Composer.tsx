@@ -7,7 +7,7 @@ import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeSongInfoShare, encodeSongShare, encodeThemeShare } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
-import { buildImageUrl, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../../lib/juicewrldApi'
+import { resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
 import { allSkins, getSkin } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
@@ -302,7 +302,7 @@ const Composer = forwardRef<ComposerHandle, {
     if (!track) { toast('Nothing is playing right now'); return }
     const match = track.id.match(/^jw-(\d+)$/)
     if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
-    await send(room, { text: encodeSongShare(track, Number(match[1])), files: [] })
+    await send(room, { text: encodeSongShare(Number(match[1])), files: [] })
   }
 
   // Shares whatever skin is currently active (built-in or custom) - the card
@@ -326,7 +326,7 @@ const Composer = forwardRef<ComposerHandle, {
     if (!args) { toast('Usage: /info <title>'); return }
     const song = await resolveTitleToSong(args)
     if (!song) { toast(`No song found for "${args}"`); return }
-    await send(room, { text: encodeSongInfoShare(song, buildImageUrl(song.image_url)), files: [] })
+    await send(room, { text: encodeSongInfoShare(song.id), files: [] })
   }
 
   // Every server-moderation command needs the same three things: the server
@@ -513,13 +513,13 @@ const Composer = forwardRef<ComposerHandle, {
         if (!cmd.args) { toast('Usage: /song <title>'); return }
         const song = await resolveTitleToSong(cmd.args)
         if (!song) { toast(`No song found for "${cmd.args}"`); return }
-        await send(room, { text: encodeSongShare(songToTrack(song), song.id), files: [] })
+        await send(room, { text: encodeSongShare(song.id), files: [] })
       } else if (cmd.command === 'search') {
         if (!cmd.args) { toast('Usage: /search <title>'); return }
         const results = await searchSongs(cmd.args)
         if (results.length === 0) { toast(`No songs found for "${cmd.args}"`); return }
         if (results.length === 1) {
-          await send(room, { text: encodeSongShare(songToTrack(results[0]), results[0].id), files: [] })
+          await send(room, { text: encodeSongShare(results[0].id), files: [] })
           return
         }
         setSearchPick({ query: cmd.args, results, index: 0 })
@@ -561,7 +561,7 @@ const Composer = forwardRef<ComposerHandle, {
 
   const pickSearchResult = (song: JWApiSong): void => {
     setSearchPick(null)
-    send(room, { text: encodeSongShare(songToTrack(song), song.id), files: [] })
+    send(room, { text: encodeSongShare(song.id), files: [] })
       .catch((err) => toast(errorText(err, 'Message failed to send')))
   }
 
