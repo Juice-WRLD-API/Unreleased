@@ -938,7 +938,7 @@ const Composer = forwardRef<ComposerHandle, {
               }}
               disabled={!!disabledReason}
               title="Emoji"
-              className="hidden md:flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
+              className="flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
             >
               <SmilePlus size={18} />
             </button>
@@ -952,7 +952,7 @@ const Composer = forwardRef<ComposerHandle, {
               }}
               disabled={!!disabledReason}
               title="GIF"
-              className="hidden md:flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-[10px] font-bold text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
+              className="flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-[10px] font-bold text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
             >
               GIF
             </button>

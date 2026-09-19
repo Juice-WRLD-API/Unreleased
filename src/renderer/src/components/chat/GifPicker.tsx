@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { Loader2, Search, Star } from 'lucide-react'
 import { ClampedMenu } from '../ClampedMenu'
 import { useStore } from '../../store/useStore'
@@ -13,6 +14,8 @@ export default function GifPicker({ x, y, onPick, onClose }: {
   onClose: () => void
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  // See ReactionPicker: no autofocus on mobile, or the keyboard buries the panel.
+  const isMobile = useIsMobile()
   const favoriteGifs = useStore((s) => s.favoriteGifs)
   const toggleFavoriteGif = useStore((s) => s.toggleFavoriteGif)
   const [tab, setTab] = useState<'browse' | 'favorites'>('browse')
@@ -53,11 +56,11 @@ export default function GifPicker({ x, y, onPick, onClose }: {
   }
 
   return createPortal(
-    <ClampedMenu ref={ref} x={x} y={y} className="chat-pop w-[320px] !py-0 z-[120]">
+    <ClampedMenu ref={ref} x={x} y={y} className="chat-pop w-[min(320px,calc(100vw-16px))] !py-0 z-[120]">
       <div className="p-2 border-b border-[var(--border)] flex items-center gap-1.5">
         <Search size={14} className="shrink-0 text-text-muted ml-1" />
         <input
-          autoFocus
+          autoFocus={!isMobile}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={tab === 'browse' ? 'Search GIFs' : 'Search favorites'}
@@ -84,7 +87,7 @@ export default function GifPicker({ x, y, onPick, onClose }: {
         ) : shown.length === 0 ? (
           <p className="py-6 text-center text-xs text-text-muted">
             {tab === 'favorites'
-              ? (debounced ? `No favorites match "${debounced}"` : 'No favorites yet - hover a GIF and tap the star')
+              ? (debounced ? `No favorites match "${debounced}"` : 'No favorites yet - tap the star on any GIF')
               : (debounced ? `No GIFs match "${debounced}"` : 'No trending GIFs right now')}
           </p>
         ) : (
@@ -115,7 +118,7 @@ export default function GifPicker({ x, y, onPick, onClose }: {
                     onClick={(e) => { e.stopPropagation(); toggleFavoriteGif(gif) }}
                     title={favorited ? 'Remove from favorites' : 'Add to favorites'}
                     className={`absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center text-white transition-opacity ${
-                      favorited ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      favorited ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'
                     }`}
                   >
                     <Star size={13} className={favorited ? 'fill-yellow-400 text-yellow-400' : ''} />

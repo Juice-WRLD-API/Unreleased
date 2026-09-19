@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { ClampedMenu } from '../ClampedMenu'
 import EmojiImg from './EmojiImg'
 import { PICKER_GROUPS, recentEmoji, rememberEmoji } from './emoji'
@@ -12,6 +13,9 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
   onClose: () => void
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  // Autofocusing the search box on a phone raises the soft keyboard over the
+  // panel, which ClampedMenu can't see (it measures window.innerHeight).
+  const isMobile = useIsMobile()
   const [query, setQuery] = useState('')
   const [hover, setHover] = useState<string | null>(null)
   useDismiss(true, onClose, ref)
@@ -29,10 +33,10 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
   }
 
   return createPortal(
-    <ClampedMenu ref={ref} x={x} y={y} className="chat-pop w-[296px] !py-0 z-[120]">
+    <ClampedMenu ref={ref} x={x} y={y} className="chat-pop w-[min(296px,calc(100vw-16px))] !py-0 z-[120]">
       <div className="p-2 border-b border-[var(--border)]">
         <input
-          autoFocus
+          autoFocus={!isMobile}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
