@@ -265,16 +265,38 @@ function IconPicker({ value, name, onChange }: { value: string | null; name: str
 export function CreateServerModal({ onClose }: { onClose: () => void }): JSX.Element {
   const refreshLists = useChatStore((s) => s.refreshLists)
   const selectServer = useChatStore((s) => s.selectServer)
+  const me = useChatStore((s) => s.me)
   const toast = useChatToast()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [icon, setIcon] = useState<string | null>(null)
+  // Same rule as ServerSettingsModal: only platform admins may publish a
+  // server, so anyone else just doesn't see the choice.
+  const canTogglePublic = me?.role === 'administrator'
+  const [isPublic, setIsPublic] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const create = async (): Promise<void> => {
     setBusy(true)
     try {
-      const server = await api.createServer({ name: name.trim(), description: description.trim() || undefined, icon: icon ?? undefined })
+      const wantPublic = canTogglePublic && isPublic
+      let server = await api.createServer({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        icon: icon ?? undefined,
+        ...(wantPublic ? { is_public: true } : {}),
+      })
+      // POST /servers/ predates is_public and some deployments still drop it,
+      // so publish with a follow-up PATCH when the created server came back
+      // private anyway. A failure there shouldn't lose the server itself - it
+      // is already made, and the toggle is still there in Server settings.
+      if (wantPublic && !server.is_public) {
+        try {
+          server = await api.updateServer(server.id, { is_public: true })
+        } catch (err) {
+          toast(errorText(err, 'Server created, but could not make it public'))
+        }
+      }
       await refreshLists()
       selectServer(server.id)
       onClose()
@@ -298,6 +320,15 @@ export function CreateServerModal({ onClose }: { onClose: () => void }): JSX.Ele
       <Field label="Description" hint="Optional">
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="What's this server for?" className={`${inputCls} resize-none`} />
       </Field>
+      {canTogglePublic && (
+        <Toggle
+          checked={isPublic}
+          onChange={setIsPublic}
+          icon={<Globe size={17} />}
+          label="Public server"
+          description="Anyone can discover and join it from Discover servers. You can change this later."
+        />
+      )}
     </DialogShell>
   )
 }

@@ -3088,8 +3088,14 @@ function ChatTab() {
         <p className="text-xs text-text-muted mb-2">→ <Code>{'{ results: [server, ...] }'}</Code>. <Code>channels</Code> on each server only lists channels you can see.</p>
         <MethodPath method="POST" path="/servers/" className="mt-2" />
         <p className="text-xs text-text-muted mb-2">
-          <Code>{'{ name, description?, icon? }'}</Code> — creates the server, makes you owner, adds a default{' '}
-          <Code>general</Code> channel.
+          <Code>{'{ name, description?, icon?, is_public? }'}</Code> — creates the server, makes you owner,
+          adds a default <Code>general</Code> channel.
+        </p>
+        <p className="text-xs text-text-muted mb-2">
+          <Code>is_public</Code> is honoured only for platform administrators, same as the{' '}
+          <Code>PATCH</Code>. Deployments that predate it ignore the field, so a client that offers the
+          choice at creation should check <Code>is_public</Code> on the response and follow up with{' '}
+          <Code>{'PATCH /servers/{id}/'}</Code> when it came back <Code>false</Code>.
         </p>
         <Table
           headers={['Method', 'Path', 'Description']}

@@ -271,7 +271,10 @@ function pageQuery(opts: { limit?: number; before?: number; after?: number }): s
 // Servers
 export const listServers = () => request<Results<ChatServer>>('/servers/').then((r) => r.results)
 export const getServer = (id: number) => request<ChatServer>(`/servers/${id}/`)
-export const createServer = (body: { name: string; description?: string; icon?: string }) =>
+// is_public is only honoured for platform admins (same rule as the PATCH), and
+// older deployments ignore it on create entirely - createServerWithVisibility
+// in Modals.tsx falls back to a follow-up PATCH when that happens.
+export const createServer = (body: { name: string; description?: string; icon?: string; is_public?: boolean }) =>
   request<ChatServer>('/servers/', json('POST', body))
 export const updateServer = (id: number, body: { name?: string; description?: string; icon?: string; is_public?: boolean }) =>
   request<ChatServer>(`/servers/${id}/`, json('PATCH', body))
