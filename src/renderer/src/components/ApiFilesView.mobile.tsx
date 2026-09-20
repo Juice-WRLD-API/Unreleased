@@ -9,6 +9,7 @@ import {
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { useTrackChannel } from '../hooks/useTrackChannel'
 import {
   apiFetch,
   buildStreamUrl,
@@ -158,6 +159,15 @@ export default function ApiFilesView(): JSX.Element {
     'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'currentTrack', 'isPlaying',
     'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
+  const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
+  // Bails rather than guessing: writing an id built from an unknown channel is
+  // what orphans a like. The affordances below are disabled until the list is
+  // known, so the id written here always matches the one just rendered.
+  const toggleApiFileLike = async (path: string): Promise<void> => {
+    const ch = await resolveTrackChannel()
+    if (ch === null) return
+    toggleLike(apiFileTrackId(path, ch))
+  }
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
   // Set lookup for the per-row liked check - .includes on the array made the
@@ -224,7 +234,7 @@ export default function ApiFilesView(): JSX.Element {
   // undefined = not looked up yet, null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
   const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
-  const { playing, handlePlay } = usePlayFileEntry(entries, activeChannel, playTrack)
+  const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const { zipStatus, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
@@ -387,7 +397,7 @@ export default function ApiFilesView(): JSX.Element {
 
   const sheetTrackerId = sheetEntry ? trackerMatches.get(sheetEntry.path) : undefined
   const sheetIsAudio = !!sheetEntry && getMediaType(sheetEntry.name) === 'audio'
-  const sheetLiked = !!sheetEntry && likedSet.has(apiFileTrackId(sheetEntry.path))
+  const sheetLiked = !!sheetEntry && likedSet.has(apiFileTrackId(sheetEntry.path, trackChannel))
 
   // Back inside the sheet's playlist page returns to the action list rather
   // than closing the whole sheet. Registered after the Sheet's own handler, so
@@ -403,7 +413,7 @@ export default function ApiFilesView(): JSX.Element {
     const isDir = entry.type === 'directory'
     const mt = isDir ? 'folder' : getMediaType(entry.name)
     const isSelected = selectedPaths.has(entry.path)
-    const trackId = apiFileTrackId(entry.path)
+    const trackId = apiFileTrackId(entry.path, trackChannel)
     const isLiked = mt === 'audio' && likedSet.has(trackId)
     const isCurrent = mt === 'audio' && currentTrack?.id === trackId
 
@@ -462,7 +472,7 @@ export default function ApiFilesView(): JSX.Element {
     const isDir = entry.type === 'directory'
     const mt = isDir ? 'folder' : getMediaType(entry.name)
     const isSelected = selectedPaths.has(entry.path)
-    const trackId = apiFileTrackId(entry.path)
+    const trackId = apiFileTrackId(entry.path, trackChannel)
     const isLiked = mt === 'audio' && likedSet.has(trackId)
     const isCurrent = mt === 'audio' && currentTrack?.id === trackId
     const hasArt = mt === 'audio' || mt === 'image'
@@ -924,7 +934,7 @@ export default function ApiFilesView(): JSX.Element {
               {sheetIsAudio && (
                 <>
                   <SheetItem icon={Play} label="Play" onClick={() => { handlePlay(sheetEntry); closeSheet() }} />
-                  <SheetItem icon={ListPlus} label="Add to queue" onClick={() => { addToQueue(fileToTrack(sheetEntry, activeChannel)); closeSheet(); showToast('Added to queue') }} />
+                  <SheetItem icon={ListPlus} label="Add to queue" onClick={async () => { const e = sheetEntry; closeSheet(); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)); showToast('Added to queue') }} />
                   {sheetTrackerId != null && (
                     <SheetItem
                       icon={Plus}
@@ -936,7 +946,8 @@ export default function ApiFilesView(): JSX.Element {
                   <SheetItem
                     icon={Heart}
                     label={sheetLiked ? 'Remove from liked' : 'Like'}
-                    onClick={() => { toggleLike(apiFileTrackId(sheetEntry.path)); closeSheet() }}
+                    disabled={!channelsReady}
+                    onClick={() => { toggleApiFileLike(sheetEntry.path); closeSheet() }}
                   />
                   {sheetTrackerId != null && (
                     <SheetItem icon={Info} label="Find in Tracker" onClick={() => { openSongInfo(sheetEntry); closeSheet() }} />

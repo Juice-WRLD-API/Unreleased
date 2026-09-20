@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { apiFetch, JWApiEra, JWApiSong } from '../lib/juicewrldApi'
 import { useProposalForm, buildProposedData, type ProposalFormState } from '../lib/proposalForm'
+import { loadEraFullNames, listEras } from '../lib/eras'
 
 export function useAddSongModal(onSubmitted: () => void, onClose: () => void, channel?: string): {
   f: ProposalFormState
@@ -39,9 +40,7 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   const [edNotes, setEdNotes] = useState('')
 
   useEffect(() => {
-    apiFetch<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-      .then(d => setEras(Array.isArray(d) ? d : (d as { results: JWApiEra[] }).results ?? []))
-      .catch(() => undefined)
+    loadEraFullNames().catch(() => undefined).finally(() => setEras(listEras()))
   }, [])
 
   // Everything the source song knows, minus the three fields that describe its

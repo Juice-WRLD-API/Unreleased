@@ -301,6 +301,18 @@ input[type='range']::-webkit-slider-runnable-track {
   border-radius: 2px;
   background: var(--surface-overlay);
 }
+/* Firefox draws none of the -webkit- pseudo-elements, so every rule below is
+   mirrored onto its -moz- counterpart. Keep the two in separate blocks: one
+   unrecognized pseudo-element invalidates a whole selector list, so merging
+   them would drop the styling in both engines. */
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-overlay);
+}
+input[type='range']::-moz-focus-outer {
+  border: 0;
+}
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -320,6 +332,21 @@ input[type='range']:hover::-webkit-slider-thumb,
 input[type='range']:active::-webkit-slider-thumb {
   opacity: 1;
 }
+/* Firefox centers the thumb on the track itself, so no margin-top here - and
+   it draws a border on the default thumb that has to be cleared. */
+input[type='range']::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-primary);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+input[type='range']:hover::-moz-range-thumb,
+input[type='range']:active::-moz-range-thumb {
+  opacity: 1;
+}
 /* Touch devices have no :hover at all, so a hover-gated thumb never becomes
    visible except mid-drag (:active) - on a bare slider with no accent fill
    (anything not wrapped in .progress-track/.eq-band, e.g. the crossfade
@@ -330,13 +357,22 @@ input[type='range']:active::-webkit-slider-thumb {
   input[type='range']::-webkit-slider-thumb {
     opacity: 1;
   }
+  input[type='range']::-moz-range-thumb {
+    opacity: 1;
+  }
 }
 
 .progress-track input[type='range']::-webkit-slider-runnable-track {
   background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
 }
+.progress-track input[type='range']::-moz-range-track {
+  background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
+}
 /* Preserve gradient on disabled range (FM live bar) */
 .progress-track input[type='range']:disabled::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
+}
+.progress-track input[type='range']:disabled::-moz-range-track {
   background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
 }
 
@@ -355,6 +391,17 @@ input[type='range']:active::-webkit-slider-thumb {
   );
 }
 .eq-band input[type='range']:disabled::-webkit-slider-thumb { opacity: 0.5; }
+.eq-band input[type='range']::-moz-range-thumb { opacity: 1; }
+.eq-band input[type='range']::-moz-range-track {
+  background: linear-gradient(
+    to right,
+    var(--surface-overlay) var(--lo, 50%),
+    var(--accent) var(--lo, 50%),
+    var(--accent) var(--hi, 50%),
+    var(--surface-overlay) var(--hi, 50%)
+  );
+}
+.eq-band input[type='range']:disabled::-moz-range-thumb { opacity: 0.5; }
 
 /* Synced lyrics */
 .lyric-active { color: var(--text-primary); font-weight: 700; font-size: 1.25rem; }

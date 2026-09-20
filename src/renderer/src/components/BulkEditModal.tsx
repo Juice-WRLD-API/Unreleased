@@ -12,6 +12,7 @@ import { getVersionMetaForSongs, getOwnVersionMeta, setOwnVersionTitle, linkSong
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { cleanDate, errorMessage } from '../lib/format'
+import { loadEraFullNames, listEras } from '../lib/eras'
 
 // Bulk editor - one dialog, two sources:
 //
@@ -303,9 +304,7 @@ export default function BulkEditModal(): JSX.Element | null {
 
   useEffect(() => {
     if (!isApi || eras.length) return
-    apiFetch<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-      .then(d => setEras(Array.isArray(d) ? d : (d as { results: JWApiEra[] }).results ?? []))
-      .catch(() => undefined)
+    loadEraFullNames().catch(() => undefined).finally(() => setEras(listEras()))
   }, [isApi, eras.length])
 
   // Also used to refresh after linkAndTitle changes the server's grouping out

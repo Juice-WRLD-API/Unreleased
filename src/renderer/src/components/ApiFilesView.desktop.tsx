@@ -11,6 +11,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import type { StagedFileChange } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { useTrackChannel } from '../hooks/useTrackChannel'
 import { placeFlyout } from '../lib/menuFlyout'
 import {
   apiFetch,
@@ -130,6 +131,15 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
 export default function ApiFilesView(): JSX.Element {
   const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, stagedFileChanges, stageFileChanges, setShowUploadManager } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'stagedFileChanges', 'stageFileChanges', 'setShowUploadManager')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
+  const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
+  // Bails rather than guessing: writing an id built from an unknown channel is
+  // what orphans a like. The affordances below are disabled until the list is
+  // known, so the id written here always matches the one just rendered.
+  const toggleApiFileLike = async (path: string): Promise<void> => {
+    const ch = await resolveTrackChannel()
+    if (ch === null) return
+    toggleLike(apiFileTrackId(path, ch))
+  }
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
   // Set lookup for the per-row liked check - .includes on the array made the
@@ -170,7 +180,7 @@ export default function ApiFilesView(): JSX.Element {
   // null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
   const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
-  const { playing, handlePlay } = usePlayFileEntry(entries, activeChannel, playTrack)
+  const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
 
   // Closing/reopening the menu resets the playlist flyout so it never
@@ -784,7 +794,7 @@ export default function ApiFilesView(): JSX.Element {
                 const ext = getFileExt(entry.name).slice(1).toUpperCase()
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
-                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path))
+                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
                 const isDropTarget = dropTarget === entry.path
                 const isStaged = stagedMoves.has(entry.path)
                 return (
@@ -860,8 +870,9 @@ export default function ApiFilesView(): JSX.Element {
                     {stagedBadge(entry.path)}
                     {isLiked && (
                       <button
-                        className="shrink-0 p-1 text-accent"
-                        onClick={(e) => { e.stopPropagation(); toggleLike(apiFileTrackId(entry.path)) }}
+                        className="shrink-0 p-1 text-accent disabled:opacity-40"
+                        disabled={!channelsReady}
+                        onClick={(e) => { e.stopPropagation(); toggleApiFileLike(entry.path) }}
                         title="Unlike"
                       >
                         <Heart size={13} fill="currentColor" />
@@ -915,7 +926,7 @@ export default function ApiFilesView(): JSX.Element {
                 const ext = getFileExt(entry.name).slice(1).toUpperCase()
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
-                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path))
+                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
                 const isDropTarget = dropTarget === entry.path
                 const isStaged = stagedMoves.has(entry.path)
                 return (
@@ -1009,8 +1020,9 @@ export default function ApiFilesView(): JSX.Element {
                       {/* Liked indicator */}
                       {isLiked && (
                         <button
-                          className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center"
-                          onClick={(e) => { e.stopPropagation(); toggleLike(apiFileTrackId(entry.path)) }}
+                          className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center disabled:opacity-40"
+                          disabled={!channelsReady}
+                          onClick={(e) => { e.stopPropagation(); toggleApiFileLike(entry.path) }}
                           title="Unlike"
                         >
                           <Heart size={12} fill="currentColor" className="text-accent" />
@@ -1241,7 +1253,7 @@ export default function ApiFilesView(): JSX.Element {
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
                   <Play size={14} className="text-text-muted" /> Play
                 </button>
-                <button onClick={() => { addToQueue(fileToTrack(ctxMenu.entry, activeChannel)); setCtxMenu(null) }}
+                <button onClick={async () => { const e = ctxMenu.entry; setCtxMenu(null); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)) }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
                   <ListPlus size={14} className="text-text-muted" /> Add to queue
                 </button>
@@ -1254,11 +1266,12 @@ export default function ApiFilesView(): JSX.Element {
                     <ChevronRight size={13} className="ml-auto text-text-muted" />
                   </button>
                 )}
-                <button onClick={() => { toggleLike(apiFileTrackId(ctxMenu.entry.path)); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Heart size={14} fill={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path)) ? 'currentColor' : 'none'}
-                    className={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path)) ? 'text-accent' : 'text-text-muted'} />
-                  {likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path)) ? 'Unlike' : 'Like'}
+                <button onClick={() => { toggleApiFileLike(ctxMenu.entry.path); setCtxMenu(null) }}
+                  disabled={!channelsReady}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40">
+                  <Heart size={14} fill={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'currentColor' : 'none'}
+                    className={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'text-accent' : 'text-text-muted'} />
+                  {likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'Unlike' : 'Like'}
                 </button>
                 {trackerMatches.get(ctxMenu.entry.path) != null && (
                   <button onClick={() => { openSongInfo(ctxMenu.entry); setCtxMenu(null) }}

@@ -15,7 +15,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { buildImageUrl, buildStreamUrl, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
+import { buildImageUrl, buildStreamUrl, getSongsByIds, playlistCoverUrl, smallCoverUrl, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToRef, apiFileRefToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { fisherYates, groupExcludedVersions, isExcludedVersion } from '../store/queueSlice'
@@ -786,7 +786,7 @@ export default function PlaylistsView(): JSX.Element {
       const localLiked = new Set(likedTrackIds)
       const localTracks = libraryTracks.filter(t => localLiked.has(t.id)).map(libTrackToTrack)
       const fileTracks = likedTrackIds
-        .map(id => { const path = apiFileIdToPath(id); return path ? apiFilePathToTrack(path) : null })
+        .map(id => { const ref = apiFileIdToRef(id); return ref ? apiFileRefToTrack(ref) : null })
         .filter((t): t is Track => t != null)
       if (!account) { setExpandedTracks([...localTracks, ...fileTracks]); setExpandedLoading(false); return undefined }
       setExpandedLoading(true)

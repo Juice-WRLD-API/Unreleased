@@ -29,7 +29,7 @@ import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
-import { loadEraFullNames, eraLabel } from '../lib/eras'
+import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useBackToClose } from '../hooks/useBackToClose'
 import {
   Category, ViewMode, TrackerTab, TRACKER_TABS, isTrackerTab,
@@ -804,8 +804,7 @@ export default function ApiTrackerView(): JSX.Element {
   const cachedFirstPage = seedRef.current
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   const [eras, setEras] = useState<JWApiEra[]>(() => {
-    const c = apiPeek<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-    return c ? (Array.isArray(c) ? c : c.results ?? []) : []
+    return listEras()
   })
   const [songs, setSongs] = useState<JWApiSong[]>(() => cachedFirstPage?.results ?? [])
   const [count, setCount] = useState(() => cachedFirstPage?.count ?? 0)
@@ -1084,9 +1083,12 @@ export default function ApiTrackerView(): JSX.Element {
 
   useEffect(() => {
     apiFetch<JWApiStats>('/stats/').then(setStats).catch(console.error)
-    apiFetch<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-      .then((data) => setEras(Array.isArray(data) ? data : (data as { results: JWApiEra[] }).results ?? []))
-      .catch(console.error)
+    // /eras/ is paginated (34 across 2 pages) - going through the shared loader
+    // rather than fetching page 1 directly is what makes the back half of the
+    // list (SoundCloud, Vinyl, TTZ...) reachable in the era filter. `finally`,
+    // not `then`: the loader rejects if any page fails but keeps the pages it
+    // already ingested, so a page-2 outage still renders page 1's eras.
+    loadEraFullNames().catch(console.error).finally(() => setEras(listEras()))
   }, [])
 
   useEffect(() => {

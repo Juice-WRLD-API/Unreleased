@@ -385,12 +385,39 @@ export function hasSmallCoverVariant(url: string | null | undefined): boolean {
 // without re-fetching the folder it came from.
 const API_FILE_ID_PREFIX = 'jw-file-'
 
-export function apiFileTrackId(path: string): string {
-  return `${API_FILE_ID_PREFIX}${path}`
+// Each non-primary channel has its own file tree and those trees reuse the same
+// paths ("Session Edits/..." exists in several), so the id has to carry the
+// channel too - rebuilt from the path alone, a Legacy file streams against the
+// primary tree and 404s. "//" can't occur in a browse path (no empty segments,
+// never a leading slash), so it can't be forged by a real path. An id with no
+// channel predates this and means the primary tree, which /files/ serves by
+// default - leaving those untouched keeps likes made before this fix working.
+const API_FILE_CHANNEL_SEP = '//'
+
+/** The file a `jw-file-` track id points at: a path, plus the channel whose
+ *  tree to resolve it against (absent for the primary one). */
+export interface ApiFileRef {
+  path: string
+  channel?: string
 }
 
-export function apiFileIdToPath(trackId: string): string | null {
-  return trackId.startsWith(API_FILE_ID_PREFIX) ? trackId.slice(API_FILE_ID_PREFIX.length) : null
+export function apiFileTrackId(path: string, channel?: string): string {
+  const prefix = channel ? `${channel}${API_FILE_CHANNEL_SEP}` : ''
+  return `${API_FILE_ID_PREFIX}${prefix}${path}`
+}
+
+export function apiFileIdToRef(trackId: string): ApiFileRef | null {
+  if (!trackId.startsWith(API_FILE_ID_PREFIX)) return null
+  const rest = trackId.slice(API_FILE_ID_PREFIX.length)
+  const sep = rest.indexOf(API_FILE_CHANNEL_SEP)
+  if (sep <= 0) return { path: rest }
+  const channel = rest.slice(0, sep)
+  if (!/^[A-Za-z0-9_-]+$/.test(channel)) return { path: rest }
+  return { path: rest.slice(sep + API_FILE_CHANNEL_SEP.length), channel }
+}
+
+export function apiFileRefToTrack(ref: ApiFileRef): Track {
+  return apiFilePathToTrack(ref.path, undefined, ref.channel)
 }
 
 export function apiFilePathToTrack(path: string, name?: string, channel?: string): Track {
@@ -400,7 +427,7 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
   const parent = slashIdx > 0 ? path.slice(0, slashIdx) : ''
   const album = parent.split('/').pop() ?? ''
   return {
-    id: apiFileTrackId(path),
+    id: apiFileTrackId(path, channel),
     path,
     streamUrl: buildStreamUrl(path, channel),
     imageUrl: buildCoverArtUrl(path, false, channel),

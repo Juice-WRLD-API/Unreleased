@@ -79,10 +79,20 @@ for (let page = 1; page <= MAX_PAGES; page++) {
   if (!ingest(apiPeek<ErasResponse>('/eras/', pageParams(page)))) break
 }
 
-/** Fetches all era pages once and fills the lookup. Safe to call repeatedly -
- *  the fetch is shared; a failed one is forgotten so a later call retries. */
+// Concurrent callers within this window share one walk (a modal opening
+// alongside the Tracker shouldn't refetch both pages), but a later mount does
+// refresh - callers that render the era *list* used to refetch per mount, and
+// without a TTL a new era added server-side would never appear until restart.
+const ERAS_TTL = 5 * 60_000
+let loadedAt = 0
+
+/** Fetches all era pages and fills the lookup, at most once per TTL. Safe to
+ *  call repeatedly - the fetch is shared; a failed one is forgotten so a later
+ *  call retries. Rejects only after ingesting whatever pages did succeed, so
+ *  listEras() still returns a partial list when a later page fails. */
 export function loadEraFullNames(): Promise<void> {
-  if (!loadPromise) {
+  if (!loadPromise || Date.now() - loadedAt > ERAS_TTL) {
+    loadedAt = Date.now()
     loadPromise = (async () => {
       for (let page = 1; page <= MAX_PAGES; page++) {
         if (!ingest(await apiFetch<ErasResponse>('/eras/', pageParams(page)))) break

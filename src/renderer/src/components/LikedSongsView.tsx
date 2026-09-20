@@ -6,7 +6,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LibraryTrack } from '../types'
 import { libraryTrackToTrack } from '../lib/fileTypes'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
-import { apiFileIdToPath, apiFilePathToTrack } from '../lib/juicewrldApi'
+import { apiFileIdToRef, apiFileRefToTrack } from '../lib/juicewrldApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { formatDuration } from '../lib/format'
 import { clickable } from '../lib/a11y'
@@ -64,7 +64,7 @@ export default function LikedSongsView(): JSX.Element {
   // instead of pointing at a scanned library entry, so rebuild the track
   // straight from the id rather than needing the folder they came from.
   const likedApiFileTracks = useMemo(() => likedTrackIds
-    .map((id) => { const path = apiFileIdToPath(id); return path ? apiFilePathToTrack(path) : null })
+    .map((id) => { const ref = apiFileIdToRef(id); return ref ? apiFileRefToTrack(ref) : null })
     .filter((t): t is Track => t != null), [likedTrackIds])
 
   const visible = [...apiTracks, ...localLikedTracks, ...likedApiFileTracks]

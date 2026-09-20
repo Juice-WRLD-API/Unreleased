@@ -15,6 +15,7 @@ import type { VersionTitleSuggestion } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { cleanDate, errorMessage } from '../lib/format'
 import { diff, isGeniusUrl, extractGeniusLyrics } from '../lib/editorPageShared'
+import { loadEraFullNames, listEras } from '../lib/eras'
 
 export type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 export type LyricsTab = 'lyrics' | 'synced'
@@ -254,9 +255,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
 
   useEffect(() => {
     if (!canEdit) return
-    apiFetch<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-      .then(d => setEras(Array.isArray(d) ? d : (d as { results: JWApiEra[] }).results ?? []))
-      .catch(() => undefined)
+    loadEraFullNames().catch(() => undefined).finally(() => setEras(listEras()))
   }, [canEdit])
 
   useEffect(() => {

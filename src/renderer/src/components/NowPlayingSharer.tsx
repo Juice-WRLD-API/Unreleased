@@ -17,7 +17,7 @@ export default function NowPlayingSharer(): JSX.Element | null {
     publicNowPlaying: s.account?.public_now_playing ?? false,
   })))
 
-  // Radio and raw file-browser tracks (see apiFileIdToPath elsewhere) have no
+  // Radio and raw file-browser tracks (see apiFileIdToRef elsewhere) have no
   // real song id - trackIdToSongId returns null for both, so they're skipped
   // the same way LastfmScrobbler drops their album metadata.
   const songId = currentTrack ? trackIdToSongId(currentTrack.id) : null

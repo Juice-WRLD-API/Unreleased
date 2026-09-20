@@ -2087,7 +2087,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setApiFilesLastPath: (path) => set({ apiFilesLastPath: path }),
   setApiFilesPath: (path) => set({ apiFilesPath: path }),
 
-  channels: [],
+  // Cached so the file browser's liked/unliked hearts render correctly on the
+  // first paint instead of resolving against an empty list (which reads as
+  // "primary" - see useTrackChannel). Refreshed by loadChannels below.
+  channels: ls.get<JWApiChannel[]>('channels') ?? [],
   activeChannel: ls.get<string>('activeChannel') || '',
   setActiveChannel: (slug) => { set({ activeChannel: slug }); ls.set('activeChannel', slug); setActiveChannelCache(slug) },
   loadChannels: async () => {
@@ -2098,6 +2101,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const primary = list.find((c) => c.is_primary) ?? list[0]
     const next = valid ? current : primary.slug
     set({ channels: list, activeChannel: next })
+    ls.set('channels', list)
     ls.set('activeChannel', next)
     setActiveChannelCache(next)
   },
@@ -2313,6 +2317,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       const targets: Array<[string, Record<string, string | number>]> = [
         ['/stats/', {}],
         ['/eras/', {}],
+        ['/eras/', { page: 2 }],
         ['/songs/', { page: 1, page_size: 50 }],
         ['/files/browse/', {}],
       ]
