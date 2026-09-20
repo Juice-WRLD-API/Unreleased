@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { Lock, Unlock } from 'lucide-react'
 import { ls } from '../lib/persist'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 // Locked panels sit in their own z-index band, comfortably above anything
 // zCounter could reach in a real session - so "locked" always beats
@@ -214,6 +215,7 @@ export function ModalOverlay({
   onClose,
   floating = false,
   standalone = false,
+  closeOnEscape = true,
   zIndexClassName,
   panelClassName,
   minWidth = 360,
@@ -231,6 +233,10 @@ export function ModalOverlay({
    * shouldn't disappear into a dropdown the user can collapse or that other
    * docked panels can stack over. */
   standalone?: boolean
+  /** Opt out when the caller binds Escape itself because plain `onClose` is
+   * the wrong thing to run - BulkEditModal routes it through an
+   * unsaved-changes guard, and also wants the key ignored mid-submit. */
+  closeOnEscape?: boolean
   /** Full Tailwind class, e.g. 'z-50' or 'z-[160]' - kept as one literal so Tailwind's scanner can find it. */
   zIndexClassName: string
   /** Panel's own border/radius/shadow/bg + default (pre-drag/resize) size classes. */
@@ -270,6 +276,14 @@ export function ModalOverlay({
   // whole feature off in Settings - either way it falls back to the plain
   // backdrop below instead of docking into the notch.
   const dockingOff = standalone || !sandboxEnabled
+
+  // Escape dismisses, but only in the plain-backdrop case: that's the one
+  // where this panel is a modal dialog covering the app, so there is an
+  // obvious thing for the key to cancel. Docked in the sandbox it's just one
+  // of several panels sitting alongside the app, and a floating pop-out is a
+  // real OS window - closing either out from under the user on a stray
+  // keypress would be a surprise, not a shortcut.
+  useEscapeToClose(onClose, closeOnEscape && dockingOff && !floating)
 
   // Only the dockingOff branch below paints its own fixed inset-0 bg-black/60
   // backdrop - the docked (sandbox) path has no full-screen scrim of its own,

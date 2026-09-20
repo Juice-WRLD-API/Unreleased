@@ -22,6 +22,8 @@ import {
   prefsFromEvents, joinPlayedSongs, buildListeningStats, formatListeningTime, type ListeningStats,
 } from '../lib/listeningStats'
 import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import { clickable } from '../lib/a11y'
 
 // Recent plays render actual track info, but the profile payload only carries
 // {song, played_at} - resolving every row would mean one fetch per play, so
@@ -67,11 +69,7 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
     setPos((prev) => (prev.top === top && prev.left === left ? prev : { top, left }))
   }, [state.x, state.y])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeToClose(onClose)
 
   const loadTracks = async (): Promise<Track[]> => {
     const d = await getPublicPlaylist(state.playlist.id)
@@ -109,6 +107,7 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
         </button>
         <button
           onClick={copyLink}
+          title="Copy link"
           className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
         >
           <LinkIcon size={14} className="text-text-muted" /> {copied ? 'Link copied!' : 'Copy link'}
@@ -372,7 +371,7 @@ export default function PublicProfileView(): JSX.Element {
       <div key={p.id}>
         <div
           className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
-          onClick={() => toggleExpandPlaylist(p)}
+          {...clickable(() => toggleExpandPlaylist(p))}
           onContextMenu={(e) => { e.preventDefault(); setPlaylistMenu({ playlist: p, x: e.clientX, y: e.clientY }) }}
         >
           <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
@@ -412,7 +411,7 @@ export default function PublicProfileView(): JSX.Element {
                     <div
                       key={`${t.id}-${i}`}
                       className="group flex items-center gap-3 px-2 py-1.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
-                      onClick={() => playTrack(t, expandedTracks)}
+                      {...clickable(() => playTrack(t, expandedTracks))}
                       onContextMenu={(e) => openTrackMenu(e, t)}
                     >
                       <AlbumArtThumbnail track={t} size={28} className="rounded-md" />
@@ -558,7 +557,7 @@ export default function PublicProfileView(): JSX.Element {
       {nowPlaying && nowPlayingTrack && (
         <div
           className="group flex items-center gap-3 mt-4 px-3 py-2.5 rounded-xl border border-accent/30 bg-accent/5 hover:bg-accent/10 cursor-pointer transition-colors"
-          onClick={() => playTrack(nowPlayingTrack)}
+          {...clickable(() => playTrack(nowPlayingTrack))}
           onContextMenu={(e) => openTrackMenu(e, nowPlayingTrack)}
         >
           <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-surface-overlay shrink-0">
@@ -610,7 +609,7 @@ export default function PublicProfileView(): JSX.Element {
                 <div
                   key={`${t.id}-${i}`}
                   className="group flex items-center gap-3 px-3 py-2 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
-                  onClick={() => playTrack(t, recentTracks)}
+                  {...clickable(() => playTrack(t, recentTracks))}
                   onContextMenu={(e) => openTrackMenu(e, t)}
                 >
                   <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
@@ -673,7 +672,7 @@ export default function PublicProfileView(): JSX.Element {
                     <div
                       key={`${played.song.id}-${i}`}
                       className="group flex items-center gap-3 px-2 py-1.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
-                      onClick={() => playTrack(t, wrappedTopTracks)}
+                      {...clickable(() => playTrack(t, wrappedTopTracks))}
                       onContextMenu={(e) => openTrackMenu(e, t)}
                     >
                       <span className="text-text-muted text-xs tabular-nums w-4 text-center shrink-0">{i + 1}</span>

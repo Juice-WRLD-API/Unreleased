@@ -58,8 +58,11 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
     img: ({ src, alt, title, ...rest }) => {
       const emojiName = (rest as Record<string, unknown>)['data-emoji']
       if (typeof emojiName === 'string') {
-        // Re-resolve from our own table: urlTransform blanks the data: URLs
-        // Vite inlines the smaller PNGs as.
+        // rehypeChatEmoji sets src from this same table, but it has to survive
+        // react-markdown's urlTransform to get here - which blanked it outright
+        // back when Vite inlined these PNGs as data: URLs. Re-resolving from
+        // the data-emoji name keeps the image right regardless of how the
+        // asset is emitted.
         return <img src={EMOJI_IMG[emojiName]} alt={alt} title={title} draggable={false} className="inline-block h-[1.5em] w-[1.5em] align-[-0.3em] object-contain" />
       }
       return <a href={typeof src === 'string' ? src : undefined} target="_blank" rel="noopener noreferrer">{alt || src}</a>

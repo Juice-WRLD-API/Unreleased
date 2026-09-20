@@ -74,7 +74,7 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
       <div className="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-[420px] max-h-[70vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
           <span className="text-text-muted text-[10px] font-semibold uppercase tracking-widest">{label}</span>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+          <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
             <X size={16} />
           </button>
         </div>

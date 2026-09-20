@@ -34,7 +34,7 @@ export default function ReportModal(): JSX.Element | null {
           </h2>
           <div className="flex items-center gap-1">
             {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
-            <button onClick={closeReport} className="text-text-muted hover:text-text-primary transition-colors">
+            <button onClick={closeReport} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={18} />
             </button>
           </div>

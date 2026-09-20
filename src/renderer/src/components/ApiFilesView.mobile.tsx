@@ -36,6 +36,7 @@ import { ProgressiveCover } from './ProgressiveCover'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import MediaLightbox from './MediaLightbox'
 import SongInfoModal from './SongInfoModal'
+import { clickable } from '../lib/a11y'
 
 // ─── Files ────────────────────────────────────────────────────────────────────
 // Phone-first file browser over the API's /files/* endpoints. The data layer
@@ -412,7 +413,7 @@ export default function ApiFilesView(): JSX.Element {
         className={`flex items-center gap-3 pl-4 pr-1 py-2 rounded-2xl transition-colors ${
           isSelected ? 'bg-accent/15' : 'active:bg-surface-overlay'
         }`}
-        onClick={() => openEntry(entry)}
+        {...clickable(() => openEntry(entry))}
         {...pressHandlers(entry)}
       >
         {/* Selection state is drawn ON the thumbnail, not inserted before it: a
@@ -472,7 +473,7 @@ export default function ApiFilesView(): JSX.Element {
         className={`relative flex flex-col rounded-2xl overflow-hidden transition-colors ${
           isSelected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-surface-raised active:bg-surface-overlay'
         }`}
-        onClick={() => openEntry(entry)}
+        {...clickable(() => openEntry(entry))}
         {...pressHandlers(entry)}
       >
         <div className="relative w-full aspect-square bg-surface-overlay flex items-center justify-center overflow-hidden">

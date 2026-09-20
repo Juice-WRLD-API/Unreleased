@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { ChevronRight, Check, Circle, MoreVertical } from 'lucide-react'
 import { useLongPress } from './mobile/useLongPress'
+import { clickable } from '../lib/a11y'
 
 // One playlist in the library - as a grid tile or a list row, since the library
 // offers both. Presentational only: the caller owns the cover node and every
@@ -109,7 +110,7 @@ export function FolderRow({ name, count, expanded, icon, onToggle, onMenu }: {
   onMenu: () => void
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl active:bg-surface-overlay transition-colors" onClick={onToggle}>
+    <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl active:bg-surface-overlay transition-colors" {...clickable(onToggle)}>
       <div className="w-14 h-14 shrink-0 rounded-xl bg-surface-overlay flex items-center justify-center text-accent">
         {icon}
       </div>

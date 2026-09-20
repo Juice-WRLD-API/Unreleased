@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Hash, Loader2, MessagesSquare, Search, X } from 'lucide-react'
 import type { ChatChannel, ChatServer, Conversation } from '../../lib/chatApi'
@@ -6,6 +6,7 @@ import { encodePlaylistShare } from '../../lib/chatShare'
 import type { PlaylistSummary } from '../../lib/userApi'
 import { conversationTitle, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
 import { ChatAvatar, ServerGlyph } from './ui'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 interface Props {
   playlist: PlaylistSummary
@@ -50,11 +51,7 @@ export default function SharePlaylistModal({ playlist, onClose }: Props): JSX.El
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeToClose(onClose)
 
   const q = query.trim().toLowerCase()
   const channelMatches = (server: ChatServer, channel: ChatChannel): boolean =>
@@ -96,7 +93,7 @@ export default function SharePlaylistModal({ playlist, onClose }: Props): JSX.El
             <h2 className="text-lg font-bold text-text-primary">Share playlist</h2>
             <p className="text-sm text-text-muted mt-0.5 truncate">{playlist.name}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 -mr-1 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay"><X size={18} /></button>
+          <button onClick={onClose} title="Close" className="w-8 h-8 -mr-1 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay"><X size={18} /></button>
         </header>
 
         <div className="px-5 pb-3">

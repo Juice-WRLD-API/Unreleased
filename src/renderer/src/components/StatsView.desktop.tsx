@@ -7,6 +7,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import SongContextMenu from './SongContextMenu'
 import { relativeTime } from './adminShared'
 import { useStatsViewData, PERIOD_OPTIONS, PLAY_TOP_N, TOP_SONGS_COLLAPSED, TIMELINE_LIMIT } from '../hooks/useStatsViewData'
+import { clickable } from '../lib/a11y'
 
 // "Your Wrapped" - a listening summary built entirely from lib/listeningPlays'
 // timestamped events, rolled back up into playcounts for each period
@@ -204,7 +205,7 @@ export default function StatsView(): JSX.Element {
                       <Play size={16} className="text-white" fill="currentColor" />
                     </span>
                   </button>
-                  <div className="min-w-0 flex-1 cursor-pointer" onClick={() => playTrack(track, topTracks)}>
+                  <div className="min-w-0 flex-1 cursor-pointer" {...clickable(() => playTrack(track, topTracks))}>
                     <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{track.title}</p>
                     <p className="text-text-muted text-xs truncate">
                       {track.artist}{entry.song.era?.name ? ` · ${entry.song.era.name}` : ''}
@@ -270,7 +271,7 @@ export default function StatsView(): JSX.Element {
                       ) : (
                         <div className="w-10 h-10 rounded-md bg-surface-raised shrink-0" />
                       )}
-                      <div className="min-w-0 flex-1 cursor-pointer" onClick={() => track && playTrack(track)}>
+                      <div className="min-w-0 flex-1 cursor-pointer" {...clickable(() => track && playTrack(track))}>
                         <p className="text-text-primary text-sm font-medium truncate" title={title}>{title}</p>
                         <p className="text-text-muted text-xs truncate">
                           {track?.artist ?? ''}{song?.era?.name ? ` · ${song.era.name}` : ''}

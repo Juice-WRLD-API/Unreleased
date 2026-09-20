@@ -255,6 +255,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             )}
             <button
               onClick={onClose}
+              title="Close"
               className="w-7 h-7 flex items-center justify-center rounded-full bg-black/40 text-white/70 hover:text-white transition-colors"
             >
               <X size={15} />

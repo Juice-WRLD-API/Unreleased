@@ -16,6 +16,7 @@ import { relativeTime } from '../adminShared'
 import { useRoomInfo } from './RoomPane'
 import { ChatAvatar, IconButton, errorText, shortStamp, useChatToast, useDismiss } from './ui'
 import { useOpenUserCard } from './UserCard'
+import { anchorOf, clickable } from '../../lib/a11y'
 
 function PanelShell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
   return (
@@ -149,7 +150,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
   // "Time out") in step with the clock while a timeout runs out.
   useExpiryTick(member.timeout_until)
   const timedOut = isTimedOut(member)
-  const openProfile = (e: React.MouseEvent): void => openUserCard(member.user, e)
+  const openProfile = (e: { clientX: number; clientY: number }): void => openUserCard(member.user, e)
 
   // `notice`, when given, posts the matching card into the channel once the
   // action has actually succeeded - never optimistically, so a rejected
@@ -168,7 +169,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
   return (
     <div ref={ref} className="group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
       <ChatAvatar user={member.user} size={32} presence listening={listening} onClick={openProfile} />
-      <div className="flex-1 min-w-0 cursor-pointer" onClick={openProfile}>
+      <div className="flex-1 min-w-0 cursor-pointer" {...clickable((el) => openProfile(anchorOf(el)))}>
         <p className={`text-sm truncate flex items-center gap-1 hover:underline ${member.muted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
           {displayName(member.user)}
           {isOwner && <Crown size={12} className="text-amber-400 shrink-0" />}
@@ -368,7 +369,7 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
         {conv.participants.map((p) => (
           <div key={p.id} className="group flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
             <ChatAvatar user={p.user} size={32} presence listening={!!nowPlaying[p.user.id]} onClick={(e) => openUserCard(p.user, e)} />
-            <div className="flex-1 min-w-0 cursor-pointer" onClick={(e) => openUserCard(p.user, e)}>
+            <div className="flex-1 min-w-0 cursor-pointer" {...clickable((el) => openUserCard(p.user, anchorOf(el)))}>
               <p className="text-sm text-text-primary truncate hover:underline">{displayName(p.user)}{p.user.id === meId && <span className="text-text-muted"> (you)</span>}</p>
               <p className="text-[11px] text-text-muted truncate">Joined {relativeTime(p.joined_at)}</p>
             </div>

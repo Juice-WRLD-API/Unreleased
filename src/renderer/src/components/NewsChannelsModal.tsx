@@ -73,7 +73,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
           </h2>
           <div className="flex items-center gap-1">
             {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
-            <button onClick={onClose} disabled={busy} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+            <button onClick={onClose} title="Close" disabled={busy} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
               <X size={18} />
             </button>
           </div>
@@ -94,7 +94,10 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
                         className={field}
                         value={editLabel}
                         onChange={(e) => setEditLabel(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(c.id); if (e.key === 'Escape') setEditingId(null) }}
+                        // Escape cancels the rename and stops there - without
+                        // stopPropagation it would also reach the modal's own
+                        // Escape handling and close the whole dialog.
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(c.id); if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null) } }}
                         maxLength={40}
                       />
                       <button onClick={() => saveEdit(c.id)} disabled={busy} className={iconBtn} title="Save"><Check size={16} /></button>

@@ -19,6 +19,7 @@ import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
 import { cleanDate, accountDisplayName, errorMessage } from '../lib/format'
 import { useEditorPageState } from '../hooks/useEditorPageState'
+import { clickable } from '../lib/a11y'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -334,7 +335,7 @@ export function BasicSelect({ label, value, original, onChange, options, placeho
     // z-20 while open keeps the popup above the rows that follow it, which are
     // themselves positioned and would otherwise paint on top.
     <div ref={ref} className={`${basicShellClass(changed)} relative cursor-pointer ${open ? 'z-20' : ''}`}
-      onClick={() => setOpen(v => !v)}>
+      {...clickable(() => setOpen(v => !v))} aria-expanded={open}>
       <span className={basicLabelClass}>{label}</span>
       <div className="flex items-center gap-1 pr-0.5">
         <span className={`flex-1 min-w-0 truncate text-[13px] leading-snug ${selected ? 'text-text-primary' : 'text-text-muted opacity-40'}`}>

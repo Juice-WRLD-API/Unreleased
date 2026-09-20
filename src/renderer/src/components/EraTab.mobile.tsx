@@ -22,7 +22,7 @@ function CreatePanel({ onCreated, onClose }: { onCreated: (era: Era) => void; on
     <div className="rounded-2xl border border-[var(--border)] bg-surface-raised/50 p-4 space-y-3 m-3">
       <div className="flex items-center gap-2">
         <p className="text-sm font-bold text-text-primary flex items-center gap-2 flex-1"><Plus size={14} /> New era</p>
-        <button onClick={onClose} className="p-1 rounded text-text-muted active:text-text-primary"><X size={14} /></button>
+        <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted active:text-text-primary"><X size={14} /></button>
       </div>
       <input
         value={name}
@@ -59,7 +59,7 @@ function EraDetail({ era, onBack, onSaved, onDeleted }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
-        <button onClick={onBack} className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
+        <button onClick={onBack} title="Back" className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
           <ChevronLeft size={20} />
         </button>
         <div className="flex-1 min-w-0">

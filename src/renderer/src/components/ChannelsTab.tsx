@@ -131,7 +131,7 @@ function EditPanel({ channel, onSaved, onClose }: { channel: Channel; onSaved: (
       <div className="flex items-center gap-2">
         <Pencil size={13} className="text-accent" />
         <span className="text-sm font-semibold text-text-primary flex-1">Edit {channel.slug}</span>
-        <button onClick={onClose} className="p-1 rounded text-text-muted hover:text-text-primary"><XIcon size={14} /></button>
+        <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted hover:text-text-primary"><XIcon size={14} /></button>
       </div>
       <input
         value={name}

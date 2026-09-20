@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { registerBackHandler } from '../../lib/backHandlers'
 import { useDragToDismiss } from '../../hooks/useDragToDismiss'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../../lib/themeEffects'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 // ─── Bottom sheet ─────────────────────────────────────────────────────────────
 // The mobile stand-in for every pointer-anchored popup the desktop UI used:
@@ -61,6 +62,8 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
     dimThemeColorMeta(0.5)
     return () => syncThemeColorMeta()
   }, [])
+
+  useEscapeToClose(requestClose)
 
   // Swipe the grabber/header down to dismiss - the gesture people already
   // expect from a sheet. Upward drag is rubber-banded rather than blocked so

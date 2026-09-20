@@ -41,6 +41,7 @@ import {
   setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted, EFFECTS_SUPPORTED,
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
+import { clickable } from '../lib/a11y'
 
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   return track.streamUrl ?? toFileUrl(track.path)
@@ -147,6 +148,14 @@ export default function Player(): JSX.Element {
   const { eqEnabled, eqGains, eqBalance, eqMono, eqBoost, skipSilence } = useStorePick('eqEnabled', 'eqGains', 'eqBalance', 'eqMono', 'eqBoost', 'skipSilence')
   const { reverbEnabled, reverbMix, reverbDecay, pitchShift } = useStorePick('reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift')
   const { abLoopStart, abLoopEnd, setAbLoopPoint, clearAbLoop } = useStorePick('abLoopStart', 'abLoopEnd', 'setAbLoopPoint', 'clearAbLoop')
+
+  // Tooltips for the two transport toggles. They state the mode the control is
+  // currently in rather than the one clicking would switch to, matching how the
+  // icons themselves read (accent-tinted = on), and they double as the
+  // accessible name since these buttons are icon-only. The mobile and desktop
+  // transports both render them, so they live here rather than inline twice.
+  const shuffleTitle = shuffle ? 'Shuffle: on' : 'Shuffle: off'
+  const repeatTitle = repeat === 'one' ? 'Repeat: this song' : repeat === 'all' ? 'Repeat: queue' : 'Repeat: off'
 
   // Applies the playback rate to an element, letting the pitch follow the
   // rate while the pitch-shift option is on.
@@ -1628,7 +1637,7 @@ export default function Player(): JSX.Element {
         {/* Track row - whole row opens WRLD, not just the cover; the
             transport buttons stopPropagation so tapping them doesn't also
             navigate. */}
-        <div className="flex items-center px-3 py-2 gap-3 h-14" onClick={() => setActiveView('wrld')}>
+        <div className="flex items-center px-3 py-2 gap-3 h-14" {...clickable(() => setActiveView('wrld'))}>
           <div className="w-10 h-10 rounded bg-surface-overlay shrink-0 overflow-hidden">
             {radioFmActive ? (
               radioFmMatchedSong?.imageUrl
@@ -1664,27 +1673,28 @@ export default function Player(): JSX.Element {
           </div>
           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
             {!radioFmActive && (
-              <button onClick={toggleShuffle} className={`p-1.5 transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
+              <button onClick={toggleShuffle} title={shuffleTitle} className={`p-1.5 transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
                 <Shuffle size={15} />
               </button>
             )}
-            <button onClick={handlePrev} disabled={radioFmActive} className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={handlePrev} disabled={radioFmActive} title="Previous" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipBack size={18} fill="currentColor" />
             </button>
             <button
               onClick={() => setIsPlaying(!isPlaying)}
               disabled={!currentTrack || radioFmActive}
+              title={isPlaying ? 'Pause' : 'Play'}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             >
               {isPlaying
                 ? <Pause size={16} fill="#000" className="text-black" />
                 : <Play  size={16} fill="#000" className="text-black ml-0.5" />}
             </button>
-            <button onClick={handleNext} disabled={radioFmActive} className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={handleNext} disabled={radioFmActive} title="Next" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipForward size={18} fill="currentColor" />
             </button>
             {!radioFmActive && (
-              <button onClick={toggleRepeat} className={`p-1.5 transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
+              <button onClick={toggleRepeat} title={repeatTitle} className={`p-1.5 transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
                 {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
               </button>
             )}
@@ -1849,18 +1859,19 @@ export default function Player(): JSX.Element {
         {/* Center: controls + progress */}
         <div className="flex-1 flex flex-col items-center gap-2">
           <div className="flex items-center gap-5">
-            {!radioFmActive && <button onClick={toggleShuffle}
+            {!radioFmActive && <button onClick={toggleShuffle} title={shuffleTitle}
               className={`transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
               <Shuffle size={18} />
             </button>}
 
-            <button onClick={handlePrev} disabled={radioFmActive} className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={handlePrev} disabled={radioFmActive} title="Previous" className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipBack size={20} fill="currentColor" />
             </button>
 
             <button
               onClick={() => setIsPlaying(!isPlaying)}
               disabled={!currentTrack || radioFmActive}
+              title={isPlaying ? 'Pause' : 'Play'}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             >
               {isPlaying
@@ -1868,11 +1879,11 @@ export default function Player(): JSX.Element {
                 : <Play  size={18} fill="#000" className="text-black ml-0.5" />}
             </button>
 
-            <button onClick={handleNext} disabled={radioFmActive} className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={handleNext} disabled={radioFmActive} title="Next" className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipForward size={20} fill="currentColor" />
             </button>
 
-            {!radioFmActive && <button onClick={toggleRepeat}
+            {!radioFmActive && <button onClick={toggleRepeat} title={repeatTitle}
               className={`transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
               {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
             </button>}
@@ -1942,7 +1953,7 @@ export default function Player(): JSX.Element {
 
           {/* Volume: mute + slider + output picker */}
           <div className="flex items-center gap-1.5">
-            <button onClick={toggleMute} className="text-text-secondary hover:text-text-primary transition-colors" title="Mute">
+            <button onClick={toggleMute} className="text-text-secondary hover:text-text-primary transition-colors" title={volume === 0 ? 'Unmute' : 'Mute'}>
               {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
 

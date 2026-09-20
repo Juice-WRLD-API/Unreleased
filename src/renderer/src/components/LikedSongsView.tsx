@@ -9,6 +9,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { apiFileIdToPath, apiFilePathToTrack } from '../lib/juicewrldApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { formatDuration } from '../lib/format'
+import { clickable } from '../lib/a11y'
 
 export default function LikedSongsView(): JSX.Element {
   const { account, playTrack, playCollection, playNext, toggleLike, setShowUserAuth, setActiveView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
@@ -129,7 +130,7 @@ export default function LikedSongsView(): JSX.Element {
                       <Play size={16} className="text-white" fill="currentColor" />
                     </span>
                   </button>
-                  <div className="min-w-0 flex-1 cursor-pointer" onClick={() => playTrack(track, visible)}>
+                  <div className="min-w-0 flex-1 cursor-pointer" {...clickable(() => playTrack(track, visible))}>
                     <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{track.title}</p>
                     <p className="text-text-muted text-xs truncate">{track.artist}{track.album ? ` · ${track.album}` : ''}</p>
                   </div>

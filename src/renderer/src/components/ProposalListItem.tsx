@@ -2,6 +2,7 @@ import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSqua
 import type { SongEditProposal } from '../lib/userApi'
 import { STATUS_STYLES, formatDate, changeTypeLabel } from '../lib/proposalSearch'
 import { ProposalDiff } from './adminShared'
+import { clickable } from '../lib/a11y'
 
 // "My proposals" row - extracted from the filteredProposals.map(...) block
 // duplicated in EditorProfileView.desktop.tsx/.mobile.tsx. The two were
@@ -56,8 +57,7 @@ export default function ProposalListItem({
       <div className="flex items-stretch gap-0">
         <div className={`w-1 shrink-0 ${s.bar}`} />
         <div
-          role={viewable ? 'button' : undefined}
-          onClick={toggleExpanded}
+          {...(viewable ? clickable(toggleExpanded) : {})}
           className={`flex items-center flex-1 min-w-0 py-3 ${isMobile ? 'gap-2 px-3' : 'gap-3 px-3.5'} ${viewable ? 'cursor-pointer' : ''}`}
         >
           <div className="flex-1 min-w-0">

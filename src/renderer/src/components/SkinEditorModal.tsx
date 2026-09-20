@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Download, Copy, Trash2, Moon, Sun, Check, RotateCcw } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -54,12 +53,6 @@ export default function SkinEditorModal({
   )
   const skin = customSkins.find((s) => s.id === skinId) ?? null
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   // The skin vanished from under us (deleted in another window) - bail out.
   if (!skin) return null
 
@@ -104,7 +97,7 @@ export default function SkinEditorModal({
             value={skin.name}
             onChange={(e) => patch({ name: e.target.value.slice(0, 40) })}
             placeholder="Skin name"
-            className="flex-1 min-w-0 bg-transparent text-text-primary text-base font-semibold outline-none placeholder:text-text-muted"
+            className="flex-1 min-w-0 bg-transparent text-text-primary text-base font-semibold outline-none rounded focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
           />
           {canLock && (
             <LockToggle

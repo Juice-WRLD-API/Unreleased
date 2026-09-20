@@ -2,6 +2,7 @@ import { useState, memo } from 'react'
 import { ChevronUp, ChevronDown, Layers, Play } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { Track } from '../types'
+import { clickable } from '../lib/a11y'
 
 /** Tracks which compact-view groups are expanded - shared so the Tracker and
  *  Playlists don't each carry their own copy of this Set-toggle boilerplate. */
@@ -61,7 +62,7 @@ export const CompactGroupRow = memo(function CompactGroupRow({
   const coverBoxClass = isPlaylists ? 'w-10 h-10' : 'w-10 h-10 md:w-9 md:h-9'
   return (
     <div
-      onClick={onToggle}
+      {...clickable(onToggle)}
       onContextMenu={onContextMenu}
       className="group w-full flex items-center gap-3 px-3 py-2.5 md:py-2 active:bg-surface-overlay md:hover:bg-surface-overlay rounded-lg transition-colors text-left cursor-pointer"
     >

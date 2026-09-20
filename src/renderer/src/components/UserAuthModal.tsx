@@ -72,7 +72,7 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <h2 className="text-text-primary text-sm font-semibold">{mode === 'signup' ? 'Create account' : 'Log in'}</h2>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+          <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
             <X size={18} />
           </button>
         </div>

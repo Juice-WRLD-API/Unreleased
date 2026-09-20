@@ -433,7 +433,7 @@ export default function ContributorPage(): JSX.Element {
         <button onClick={() => setActiveView('api-files')} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-accent bg-accent/10 hover:bg-accent/15 transition-colors flex items-center gap-1.5">
           <FolderOpen size={14} /> Browse files
         </button>
-        <button onClick={reload} className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors">
+        <button onClick={reload} title="Refresh" className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors">
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>

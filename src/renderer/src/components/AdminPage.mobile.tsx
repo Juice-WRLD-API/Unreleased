@@ -136,7 +136,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
       <div className={`shrink-0 ${embedded ? 'px-3 pt-1' : 'px-2 pt-1'}`}>
         <div className="flex items-center gap-1">
           {embedded && onExit ? (
-            <button onClick={onExit}
+            <button onClick={onExit} title="Back"
               className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
               <ChevronLeft size={20} />
             </button>
@@ -267,7 +267,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Panel header */}
       <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
-        <button onClick={onClose} className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
+        <button onClick={onClose} title="Back" className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
           <ChevronLeft size={20} />
         </button>
         <Pencil size={14} className="text-accent shrink-0" />

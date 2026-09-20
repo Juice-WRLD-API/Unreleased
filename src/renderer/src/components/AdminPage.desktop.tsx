@@ -281,7 +281,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
       <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border)] bg-[var(--surface-raised)]">
         <Pencil size={13} className="text-accent" />
         <span className="text-text-primary text-xs font-semibold flex-1">Revise proposal</span>
-        <button onClick={onClose} className="p-1 rounded text-text-muted hover:text-text-primary transition-colors">
+        <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted hover:text-text-primary transition-colors">
           <XIcon size={14} />
         </button>
       </div>

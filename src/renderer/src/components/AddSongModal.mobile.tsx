@@ -4,6 +4,7 @@ import FilePickerModal from './FilePickerModal'
 import { BasicRow, BasicSelect, SyncedLyricsTable } from './EditorPage.desktop'
 import CopyFromSong from './CopyFromSong'
 import { useAddSongModal } from '../hooks/useAddSongModal'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 const CATEGORIES = [
   { value: 'released', label: 'Released' },
@@ -31,6 +32,8 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   } = useAddSongModal(onSubmitted, onClose, channel)
   const overlayRef = useRef<HTMLDivElement>(null)
 
+  useEscapeToClose(onClose)
+
   return (
     <div ref={overlayRef} className="fixed inset-0 z-50 flex items-end justify-center" onClick={e => { if (e.target === overlayRef.current) onClose() }}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
@@ -44,7 +47,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
             <p className="text-text-primary font-bold text-sm">Propose new song</p>
             <p className="text-text-muted text-xs opacity-60 mt-0.5">Admins review and add it to the database</p>
           </div>
-          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-lg text-text-muted active:text-text-primary active:bg-[var(--surface-overlay)] transition-colors shrink-0">
+          <button onClick={onClose} title="Close" className="w-9 h-9 flex items-center justify-center rounded-lg text-text-muted active:text-text-primary active:bg-[var(--surface-overlay)] transition-colors shrink-0">
             <X size={15} />
           </button>
         </div>

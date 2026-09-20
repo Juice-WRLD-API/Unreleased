@@ -19,6 +19,7 @@ import EmojiImg from './EmojiImg'
 import { QUICK_REACTIONS, quickReactions, rememberEmoji } from './emoji'
 import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
 import { useOpenUserCard } from './UserCard'
+import { anchorOf, clickable } from '../../lib/a11y'
 
 function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }: {
   replyToId: number
@@ -337,7 +338,7 @@ function MessageItem({
   // Only a card whose poster could really have taken the action gets the
   // "Server" chrome; a forged one stays an ordinary message from whoever sent it.
   const moderationNotice = useModerationNotice(message)
-  const openProfile = (e: React.MouseEvent): void => openUserCard(liveAuthor, e)
+  const openProfile = (e: { clientX: number; clientY: number }): void => openUserCard(liveAuthor, e)
 
   const reactorNames = (userIds: number[]): string => {
     const names = userIds.map((id) => {
@@ -529,7 +530,7 @@ function MessageItem({
           <div className="flex items-baseline gap-2 min-w-0">
             <span
               className="text-sm font-semibold text-text-primary truncate cursor-pointer hover:underline"
-              onClick={openProfile}
+              {...clickable((el) => openProfile(anchorOf(el)))}
             >
               {displayName(liveAuthor)}
             </span>

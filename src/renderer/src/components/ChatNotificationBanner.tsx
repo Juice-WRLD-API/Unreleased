@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { onChatNotificationBanner, type ChatNotificationPayload } from '../lib/chatNotifications'
+import { clickable } from '../lib/a11y'
 
 interface BannerToast extends ChatNotificationPayload {
   toastId: number
@@ -31,10 +32,7 @@ export default function ChatNotificationBanner(): JSX.Element | null {
       {toasts.map((t) => (
         <div
           key={t.toastId}
-          role="button"
-          tabIndex={0}
-          onClick={() => { t.onOpen(); dismiss(t.toastId) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { t.onOpen(); dismiss(t.toastId) } }}
+          {...clickable(() => { t.onOpen(); dismiss(t.toastId) })}
           className="animate-slide-in-right pointer-events-auto cursor-pointer flex items-start gap-2.5 p-3 rounded-xl border border-[var(--border)] bg-surface shadow-2xl"
         >
           {t.icon ? (

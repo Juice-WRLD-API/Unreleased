@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Hash, Loader2, MessagesSquare, Search, X } from 'lucide-react'
 import type { ChatChannel, ChatServer } from '../../lib/chatApi'
@@ -6,6 +6,7 @@ import { chatAttachmentUrl } from '../../lib/chatApi'
 import { encodeForwardRef } from '../../lib/chatForwardRef'
 import { conversationTitle, displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { ChatAvatar, ServerGlyph } from './ui'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 interface Props {
   message: UiMessage
@@ -55,11 +56,7 @@ export default function ForwardMessageModal({ message, bodyText, onClose }: Prop
   // forwarding to several rooms doesn't re-download/re-decrypt each time.
   const filesCache = useRef<File[] | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeToClose(onClose)
 
   const q = query.trim().toLowerCase()
   const channelMatches = (server: ChatServer, channel: ChatChannel): boolean =>
@@ -159,7 +156,7 @@ export default function ForwardMessageModal({ message, bodyText, onClose }: Prop
             <h2 className="text-lg font-bold text-text-primary">Forward message</h2>
             {preview && <p className="text-sm text-text-muted mt-0.5 truncate">{preview}</p>}
           </div>
-          <button onClick={onClose} className="w-8 h-8 -mr-1 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay"><X size={18} /></button>
+          <button onClick={onClose} title="Close" className="w-8 h-8 -mr-1 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay"><X size={18} /></button>
         </header>
 
         <div className="px-5 pb-3">

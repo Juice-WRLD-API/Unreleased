@@ -380,7 +380,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] shrink-0">
             <h2 className="text-text-primary text-sm font-semibold">Share lyrics</h2>
-            <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+            <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={18} />
             </button>
           </div>
@@ -540,7 +540,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                     onChange={(e) => setCustomFont(e.target.value)}
                     placeholder="Font family name"
                     style={{ fontFamily }}
-                    className="mt-1.5 w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-primary text-[11px] px-2 outline-none placeholder:text-text-muted"
+                    className="mt-1.5 w-full h-7 rounded-md bg-[var(--surface-highest)] text-text-primary text-[11px] px-2 outline-none focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
                   />
                 )}
               </div>

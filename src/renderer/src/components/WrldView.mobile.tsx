@@ -1058,7 +1058,7 @@ function QueueSheet({ onClose }: { onClose: () => void }): JSX.Element {
 
       {queue.length > 0 && (
         <div className="px-5 pt-2 pb-1">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-overlay">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-overlay focus-within:ring-1 focus-within:ring-accent/50 transition-shadow">
             <Search size={13} className="text-text-muted shrink-0" />
             <input
               type="text"

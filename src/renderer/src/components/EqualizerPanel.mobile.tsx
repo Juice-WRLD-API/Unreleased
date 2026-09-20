@@ -136,6 +136,7 @@ function SliderRow({ label, value, formatted, onReset, dirty, children }: {
       <span className="text-xs text-text-muted tabular-nums w-12 text-right">{formatted ?? value}</span>
       <button
         onClick={onReset}
+        title="Reset"
         disabled={!dirty}
         className={`shrink-0 w-6 h-6 flex items-center justify-center rounded-full transition-colors ${dirty ? 'text-text-muted active:text-text-primary active:bg-surface-overlay' : 'opacity-0 pointer-events-none'}`}
       >

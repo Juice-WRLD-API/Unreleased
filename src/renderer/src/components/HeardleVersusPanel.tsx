@@ -424,7 +424,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
       <Swords size={16} className="text-accent" />
       <h2 className="text-text-primary font-bold">1v1 Heardle</h2>
       {!embedded && (
-        <button onClick={onClose} className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary"><X size={16} /></button>
+        <button onClick={onClose} title="Close" className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary"><X size={16} /></button>
       )}
     </div>
   )

@@ -43,6 +43,7 @@ import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
 import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
 import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
 import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
+import { clickable } from '../lib/a11y'
 
 // ── PlaylistMosaic ────────────────────────────────────────────────────────────
 
@@ -334,7 +335,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
                 return (
                   <div
                     key={t.id}
-                    onClick={() => onPlayTrack(t)}
+                    {...clickable(() => onPlayTrack(t))}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onTrackContextMenu(t, e) }}
                     className="flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-surface-overlay text-left group/track transition-colors cursor-pointer"
                   >
@@ -2150,7 +2151,7 @@ export default function PlaylistsView(): JSX.Element {
 
           <div className="relative z-10 flex gap-6 items-end pt-6">
             {/* Cover image - clickable to upload (owner only) */}
-            <div className={`shrink-0 self-start group/cover relative rounded-xl shadow-2xl overflow-hidden ${isSharedView ? "cursor-default" : "cursor-pointer"}`} style={{ width: 180, height: 180 }} onClick={() => !isSharedView && coverInputRef.current?.click()}>
+            <div className={`shrink-0 self-start group/cover relative rounded-xl shadow-2xl overflow-hidden ${isSharedView ? "cursor-default" : "cursor-pointer"}`} style={{ width: 180, height: 180 }} {...(isSharedView ? {} : clickable(() => coverInputRef.current?.click()))}>
               {loadingDetail && tracks.length === 0 ? (
                 <div className="w-full h-full bg-surface-overlay animate-pulse" />
               ) : coverLoading ? (
@@ -2195,7 +2196,7 @@ export default function PlaylistsView(): JSX.Element {
               {renaming ? (
                 <div className="flex items-center gap-2 mb-3">
                   <input value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && renameSelected()} autoFocus className={`rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border border-white/20 text-white' : 'bg-surface-overlay border border-[var(--border)] text-text-primary'}`} />
-                  <button onClick={renameSelected} className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
+                  <button onClick={renameSelected} title="Save name" className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
                   <button onClick={() => setRenaming(false)} className={`p-2 rounded-lg shrink-0 ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={16} /></button>
                 </div>
               ) : (
@@ -2228,7 +2229,7 @@ export default function PlaylistsView(): JSX.Element {
                     className={`flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50 resize-none ${heroLight ? 'bg-black/30 border border-white/20 text-white placeholder:text-white/40' : 'bg-surface-overlay border border-[var(--border)] text-text-primary placeholder:text-text-muted'}`}
                   />
                   <div className="flex flex-col gap-1 shrink-0">
-                    <button onClick={saveDescription} className="p-1.5 rounded-lg bg-accent/15 text-accent"><Check size={14} /></button>
+                    <button onClick={saveDescription} title="Save description" className="p-1.5 rounded-lg bg-accent/15 text-accent"><Check size={14} /></button>
                     <button onClick={() => setEditingDesc(false)} className={`p-1.5 rounded-lg ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={14} /></button>
                   </div>
                 </div>

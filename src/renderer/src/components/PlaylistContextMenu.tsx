@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download, ChevronRight, Share2,
@@ -14,6 +14,7 @@ import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
 import { hasChatAccess } from '../store/chatStore'
 import SharePlaylistModal from './chat/SharePlaylistModal'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 // Self-contained context menu for an API playlist - usable from anywhere
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing
@@ -228,11 +229,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   // Close on Escape.
   const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeToClose(onClose)
 
   useLayoutEffect(() => {
     const el = ref.current

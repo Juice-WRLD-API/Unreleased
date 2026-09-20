@@ -132,7 +132,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
           </h2>
           <div className="flex items-center gap-1">
             {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
-            <button onClick={onClose} disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+            <button onClick={onClose} title="Close" disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
               <X size={18} />
             </button>
           </div>

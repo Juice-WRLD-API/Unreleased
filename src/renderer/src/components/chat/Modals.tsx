@@ -10,6 +10,7 @@ import { useChatPermissions } from '../../hooks/useChatPermissions'
 import { ConfirmDialog } from './MessageItem'
 import { useStaffDirectory } from './people'
 import { ChatAvatar, errorText, ServerGlyph, useChatToast } from './ui'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 export function DialogShell({ title, subtitle, onClose, children, footer, width = 'max-w-md' }: {
   title: string
@@ -19,11 +20,7 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
   footer?: React.ReactNode
   width?: string
 }): JSX.Element {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeToClose(onClose)
   return createPortal(
     <div className="fixed inset-0 z-[140] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
@@ -37,7 +34,7 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
             <h2 className="text-lg font-bold text-text-primary">{title}</h2>
             {subtitle && <p className="text-sm text-text-muted mt-0.5">{subtitle}</p>}
           </div>
-          <button onClick={onClose} className="w-8 h-8 -mr-1 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay"><X size={18} /></button>
+          <button onClick={onClose} title="Close" className="w-8 h-8 -mr-1 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay"><X size={18} /></button>
         </header>
         <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-5 pb-4">{children}</div>
         {footer && <footer className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-[var(--border)] bg-surface-raised/40 md:rounded-b-2xl">{footer}</footer>}

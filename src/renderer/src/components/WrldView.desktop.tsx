@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
 import ShareLyricsModal from './ShareLyricsModal'
 import { ModalOverlay, LockToggle } from './Modal'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import CoverEditor from './CoverEditor'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -478,7 +479,7 @@ export default function WrldView(): JSX.Element {
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse" />
               Proposed: <span className="text-green-300 font-medium">{proposed}</span>
             </div>
-            <button onClick={dismissProposed}
+            <button onClick={dismissProposed} title="Dismiss"
               className="text-green-500/50 hover:text-green-400 transition-colors ml-2 shrink-0">
               <X size={13} />
             </button>
@@ -892,6 +893,7 @@ export default function WrldView(): JSX.Element {
                 )}
                 <button
                   onClick={toggleMute}
+                  title={volume === 0 ? 'Unmute' : 'Mute'}
                   className="shrink-0 transition-opacity hover:opacity-70"
                   style={{ color: txtTer }}
                 >
@@ -1110,6 +1112,7 @@ export default function WrldView(): JSX.Element {
                   )}
                   <button
                     onClick={toggleMute}
+                    title={volume === 0 ? 'Unmute' : 'Mute'}
                     className="shrink-0 transition-opacity hover:opacity-70"
                     style={{ color: txtTer }}
                   >
@@ -1680,7 +1683,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
               <Trash2 size={12} /> Clear
             </button>
           )}
-          <button onClick={onClose} className="text-white/60 hover:text-white/90 transition-colors">
+          <button onClick={onClose} title="Close" className="text-white/60 hover:text-white/90 transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -1688,7 +1691,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
 
       {queue.length > 0 && (
         <div className="relative z-10 px-3 pt-3 shrink-0">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.07]">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.07] focus-within:ring-1 focus-within:ring-accent/50 transition-shadow">
             <Search size={13} className="text-white/50 shrink-0" />
             <input
               type="text"
@@ -2131,12 +2134,9 @@ const LyricsPanel = memo(function LyricsPanel({
   // lyrics (the .lrc file needs the timestamps; plain unsynced text has
   // nothing worth exporting in that format).
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
-  useEffect(() => {
-    if (!menuPos) return
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setMenuPos(null) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menuPos])
+  // Shared stack, so Escape dismisses just this menu when one of the WRLD
+  // panels happens to be open behind it.
+  useEscapeToClose(useCallback(() => setMenuPos(null), []), menuPos !== null)
   const handleContextMenu = (e: React.MouseEvent): void => {
     if (!isSynced || !rawLyrics) return
     e.preventDefault()
@@ -2396,7 +2396,7 @@ function LyricsSettingsModal({ onClose }: { onClose: () => void }): JSX.Element 
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] shrink-0">
             <h2 className="text-text-primary text-sm font-semibold">Customize lyrics</h2>
-            <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+            <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={18} />
             </button>
           </div>

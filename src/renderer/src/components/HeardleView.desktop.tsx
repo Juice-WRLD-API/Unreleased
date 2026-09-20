@@ -71,7 +71,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
           >
             <RotateCcw size={14} />
           </button>
-          <button onClick={onClose} className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+          <button onClick={onClose} title="Close" className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -217,7 +217,7 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 size={16} className="text-accent" />
           <h2 className="text-text-primary font-bold">Statistics</h2>
-          <button onClick={onClose} className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+          <button onClick={onClose} title="Close" className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -312,7 +312,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
         <div className="flex items-center gap-2 mb-4">
           <Trophy size={16} className="text-accent" />
           <h2 className="text-text-primary font-bold">Leaderboard</h2>
-          <button onClick={onClose} className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+          <button onClick={onClose} title="Close" className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -1056,6 +1056,7 @@ export default function HeardleView(): JSX.Element {
                     {isDaily ? (
                       <button
                         onClick={share}
+                        title="Share"
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border border-[var(--border)] text-text-secondary hover:text-text-primary transition-colors"
                       >
                         <Share2 size={15} /> {copied ? 'Copied!' : 'Share'}

@@ -205,11 +205,6 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
 
   const goBack = (): void => {
     if (history.length > 0) {

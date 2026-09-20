@@ -526,3 +526,15 @@ input[type='range']:active::-webkit-slider-thumb {
   .view-skeleton { animation-duration: 0.01ms; }
   .view-skeleton .animate-pulse { animation: none; }
 }
+
+/* ─── Clickable rows ─────────────────────────────────────────────────────────
+   Rows, cards and list items that take a click but can't be a <button>,
+   because they already contain buttons of their own. They opt in through
+   lib/a11y's clickable(), which makes them real tab stops - so they need the
+   focus ring a native control gets for free. Outline rather than a ring
+   utility so it traces whatever corner radius the element already has, and
+   never nudges the layout. */
+[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

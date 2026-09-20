@@ -5,6 +5,7 @@ import { apiFetch, buildStreamUrl, buildCoverArtUrl } from '../lib/juicewrldApi'
 import { liteSongToTrack, ApiSongLite } from '../lib/userApi'
 import { Track } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
+import { clickable } from '../lib/a11y'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObject = Record<string, any>
@@ -178,7 +179,7 @@ export default function SharedPlaylistView(): JSX.Element {
           <div
             key={t.id}
             className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
-            onClick={() => playTrack(t, tracks)}
+            {...clickable(() => playTrack(t, tracks))}
           >
             <span className="text-text-muted text-xs w-6 text-right tabular-nums shrink-0">{i + 1}</span>
             <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">

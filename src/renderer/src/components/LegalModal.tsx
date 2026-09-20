@@ -320,7 +320,7 @@ export default function LegalModal({ initialDoc = 'terms', onClose }: { initialD
             </div>
             <div className="flex items-center gap-1">
               {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
-              <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+              <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
                 <X size={20} />
               </button>
             </div>

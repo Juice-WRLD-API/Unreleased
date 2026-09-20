@@ -128,7 +128,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
       >
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-text-primary font-bold text-sm">Edit tier</h3>
-          <button onClick={onClose} className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+          <button onClick={onClose} title="Close" className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
             <X size={16} />
           </button>
         </div>

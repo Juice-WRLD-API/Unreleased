@@ -1002,6 +1002,7 @@ export default function HeardleView(): JSX.Element {
                     {isDaily ? (
                       <button
                         onClick={share}
+                        title="Share"
                         className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary transition-colors"
                       >
                         <Share2 size={15} /> {copied ? 'Copied!' : 'Share'}

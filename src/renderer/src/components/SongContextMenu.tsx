@@ -105,6 +105,7 @@ function SubSheetHeader({ title, onBack }: { title: string; onBack: () => void }
   return (
     <button
       onClick={onBack}
+      title="Back"
       className="w-full flex items-center gap-1 px-3 pt-3 pb-1 text-text-primary font-semibold text-[15px]"
     >
       <ChevronLeft size={19} className="text-text-muted shrink-0" />

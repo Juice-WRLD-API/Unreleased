@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BellOff, BellRing, ChevronDown, Compass, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
@@ -13,6 +13,7 @@ import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp
 import { UserCardBody } from './UserCard'
 import { MenuItem } from './SidePanels'
 import { ConfirmDialog } from './MessageItem'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 interface RoomMenuItem {
   label: string
@@ -33,11 +34,7 @@ function RoomMenu({ x, y, items, onClose }: {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useEscapeToClose(onClose)
 
   useLayoutEffect(() => {
     const el = ref.current

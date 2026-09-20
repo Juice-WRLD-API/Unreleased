@@ -74,7 +74,7 @@ function SongSearch({ onPick, onClose }: { onPick: (s: JWApiSong) => void; onClo
         />
         {loading
           ? <Loader2 size={13} className="animate-spin text-[var(--text-muted)] shrink-0" />
-          : <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={13} /></button>
+          : <button onClick={onClose} title="Close" className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={13} /></button>
         }
       </div>
 

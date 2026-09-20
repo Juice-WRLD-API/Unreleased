@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import type { SharedSongInfoPayload } from '../../lib/chatShare'
 import { buildImageUrl, CATEGORY_COLORS, CATEGORY_LABELS, getSongById, type JWApiSong } from '../../lib/juicewrldApi'
 import { useStore } from '../../store/useStore'
+import { clickable } from '../../lib/a11y'
 
 // The message only ever carries a songId (see chatShare.ts) - every field
 // shown here comes from a fresh lookup, never from whatever text the
@@ -47,7 +48,7 @@ export default function SongInfoCard({ info }: { info: SharedSongInfoPayload }):
   ]
   return (
     <div
-      onClick={() => useStore.getState().setInfoSongId(song.id)}
+      {...clickable(() => useStore.getState().setInfoSongId(song.id))}
       className="flex gap-3 w-full max-w-sm rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5 cursor-pointer hover:border-text-muted transition-colors"
     >
       <span className="relative w-14 h-14 rounded-lg overflow-hidden bg-surface-highest shrink-0 flex items-center justify-center">

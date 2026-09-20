@@ -3,6 +3,8 @@ import { AlertCircle, CheckCircle2, Hash, Lock, Music2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import type { ChatServer, ChatUserBrief } from '../../lib/chatApi'
 import { displayName, useChatStore } from '../../store/chatStore'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
+import { anchorOf, clickable } from '../../lib/a11y'
 
 // ─── Time ────────────────────────────────────────────────────────────────────
 
@@ -66,7 +68,9 @@ export function ChatAvatar({ user, size = 36, presence, listening, className = '
   // doesn't imply listening).
   listening?: boolean
   className?: string
-  onClick?: (e: React.MouseEvent) => void
+  // Takes an anchor point rather than the event: the avatar is keyboard-
+  // activatable too, and Enter has no cursor to position a popover at.
+  onClick?: (anchor: { clientX: number; clientY: number }) => void
 }): JSX.Element {
   const online = useChatStore((s) => !!s.online[user.id])
   const presenceEnabled = useChatStore((s) => s.presenceEnabled)
@@ -82,7 +86,7 @@ export function ChatAvatar({ user, size = 36, presence, listening, className = '
     <span
       className={`relative inline-flex shrink-0 rounded-full ${onClick ? 'cursor-pointer' : ''} ${className}`}
       style={{ width: size, height: size }}
-      onClick={onClick}
+      {...(onClick ? clickable((el) => onClick(anchorOf(el))) : {})}
     >
       {user.avatar && !broken ? (
         <img src={user.avatar} alt="" onError={() => setBroken(true)} className="w-full h-full rounded-full object-cover bg-surface-raised" />
@@ -237,17 +241,18 @@ export function errorText(err: unknown, fallback = 'Something went wrong'): stri
 // ─── Dismiss helpers ─────────────────────────────────────────────────────────
 
 export function useDismiss(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement>): void {
+  // Escape goes through the shared stack rather than a listener of this
+  // popover's own, so that only the innermost open layer closes: a GIF or
+  // reaction picker opened from inside a dialog takes the key for itself
+  // instead of the two of them collapsing together on one press.
+  useEscapeToClose(onClose, open)
+
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
     const onDown = (e: PointerEvent): void => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
-    window.addEventListener('keydown', onKey)
     window.addEventListener('pointerdown', onDown, true)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onDown, true)
-    }
+    return () => window.removeEventListener('pointerdown', onDown, true)
   }, [open, onClose, ref])
 }
