@@ -132,10 +132,10 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 export default function PublicProfileView(): JSX.Element {
   const {
     playTrack, playCollection, playNext, addToQueue, setActiveView, account, playlistFolders, setPendingPlaylistId,
-    mutedUserIds, toggleMuteUser,
+    mutedUserIds, toggleMuteUser, playlists: ownPlaylists,
   } = useStorePick(
     'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'account', 'playlistFolders', 'setPendingPlaylistId',
-    'mutedUserIds', 'toggleMuteUser',
+    'mutedUserIds', 'toggleMuteUser', 'playlists',
   )
   const canEdit = useCanEdit()
   const startDm = useChatStore((s) => s.startDm)
@@ -171,6 +171,17 @@ export default function PublicProfileView(): JSX.Element {
   const isMuted = !!profile && mutedUserIds.includes(profile.id)
   const isAdmin = !!account?.is_administrator
 
+  // The public profile endpoint is unauthenticated and strips play_history /
+  // playlists whenever the corresponding privacy flag is off, with no
+  // exception for the owner looking at their own page. When it's your own
+  // profile, fall back to data the app already has through authenticated
+  // routes (account.listening_plays, the playlists store) instead of trusting
+  // that stripped-down public payload.
+  const showPlayHistory = isOwnProfile || !!profile?.public_play_history
+  const showPlaylists = isOwnProfile || !!profile?.public_playlists
+  const effectivePlayHistory = isOwnProfile ? account?.listening_plays : profile?.play_history
+  const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists
+
   useEffect(() => {
     if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
     getPublicProfile(userId)
@@ -203,7 +214,7 @@ export default function PublicProfileView(): JSX.Element {
   }
 
   useEffect(() => {
-    const plays = profile?.play_history
+    const plays = effectivePlayHistory
     if (!plays || plays.length === 0) { setRecentTracks([]); return }
     const newest = [...plays]
       .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at))
@@ -217,7 +228,7 @@ export default function PublicProfileView(): JSX.Element {
       })
       .catch(() => setRecentTracks([]))
       .finally(() => setRecentLoading(false))
-  }, [profile])
+  }, [effectivePlayHistory])
 
   // Live "currently listening" indicator - polled independently of the
   // profile fetch since it's the one piece of this page that goes stale
@@ -249,7 +260,7 @@ export default function PublicProfileView(): JSX.Element {
   // payload carries no period info). The full per-period breakdown stays
   // behind StatsView, which only ever reads the *viewer's own* local log.
   useEffect(() => {
-    const plays = profile?.play_history
+    const plays = effectivePlayHistory
     if (!plays || plays.length === 0) { setWrappedStats(null); return }
     const prefs = prefsFromEvents(plays)
     const ids = prefs.map((p) => p.song)
@@ -263,7 +274,7 @@ export default function PublicProfileView(): JSX.Element {
       .catch(() => { if (!cancelled) setWrappedStats(null) })
       .finally(() => { if (!cancelled) setWrappedLoading(false) })
     return () => { cancelled = true }
-  }, [profile])
+  }, [effectivePlayHistory])
 
   function toggleExpandPlaylist(playlist: PlaylistSummary): void {
     if (expandedPlaylistId === playlist.id) { setExpandedPlaylistId(null); setExpandedDetail(null); return }
@@ -304,7 +315,7 @@ export default function PublicProfileView(): JSX.Element {
   // (their own store already holds the same folders that produced this list).
   // For anyone else's profile there's no folder data to show, so it stays flat.
   const folderGroups = useMemo(() => {
-    const playlists = profile?.playlists ?? []
+    const playlists = effectivePlaylists ?? []
     if (!isOwnProfile || playlists.length === 0) return { folders: [], ungrouped: playlists }
     const byId = new Map(playlists.map((p) => [p.id, p]))
     const folders = playlistFolders
@@ -321,7 +332,7 @@ export default function PublicProfileView(): JSX.Element {
     const foldered = allFolderedKeys(playlistFolders)
     const ungrouped = playlists.filter((p) => !foldered.has(playlistKey('api', p.id)))
     return { folders, ungrouped }
-  }, [isOwnProfile, profile?.playlists, playlistFolders])
+  }, [isOwnProfile, effectivePlaylists, playlistFolders])
 
   if (loading) {
     return (
@@ -586,7 +597,7 @@ export default function PublicProfileView(): JSX.Element {
         </div>
       )}
 
-      {!profile.public_play_history && !profile.public_playlists && (
+      {!showPlayHistory && !showPlaylists && (
         <div className="flex flex-col items-center justify-center gap-2 text-text-muted mt-16">
           <Lock size={28} className="opacity-30" />
           <p className="text-sm">This profile is private.</p>
@@ -594,7 +605,7 @@ export default function PublicProfileView(): JSX.Element {
       )}
 
       {/* Recently played */}
-      {profile.public_play_history && (
+      {showPlayHistory && (
         <div className="mt-8">
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3">
             <History size={15} /> Recently played
@@ -634,7 +645,7 @@ export default function PublicProfileView(): JSX.Element {
       )}
 
       {/* Wrapped */}
-      {profile.public_play_history && (
+      {showPlayHistory && (
         <div className="mt-8">
           <div className="flex items-center justify-between mb-3">
             <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide">
@@ -698,12 +709,12 @@ export default function PublicProfileView(): JSX.Element {
       )}
 
       {/* Public playlists */}
-      {profile.public_playlists && (
+      {showPlaylists && (
         <div className="mt-8">
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3">
             <ListMusic size={15} /> Playlists
           </h2>
-          {!profile.playlists || profile.playlists.length === 0 ? (
+          {!effectivePlaylists || effectivePlaylists.length === 0 ? (
             <p className="text-text-muted text-sm">No public playlists.</p>
           ) : (
             <div className="space-y-4">
