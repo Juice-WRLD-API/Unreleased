@@ -478,6 +478,8 @@ function MeFooter(): JSX.Element | null {
   )
 }
 
+const EMPTY_CATEGORIES: string[] = []
+
 export function ChannelList({ serverId, onPicked, showFooter = true }: { serverId: number; onPicked?: () => void; showFooter?: boolean }): JSX.Element | null {
   const server = useChatStore((s) => s.servers.find((x) => x.id === serverId))
   const active = useChatStore((s) => s.active)
@@ -486,7 +488,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   const openRoom = useChatStore((s) => s.openRoom)
   const me = useChatStore((s) => s.me)
   const openModal = useOpenModal()
-  const localCategories = useChatStore((s) => s.localCategories[serverId] ?? [])
+  const localCategories = useChatStore((s) => s.localCategories[serverId] ?? EMPTY_CATEGORIES)
   const removeLocalCategory = useChatStore((s) => s.removeLocalCategory)
   const [menu, setMenu] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})

@@ -12,6 +12,9 @@ import { useStaffDirectory } from './people'
 import { ChatAvatar, errorText, ServerGlyph, useChatToast } from './ui'
 import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
+const EMPTY_CATEGORIES: string[] = []
+const EMPTY_ROLES: ServerRoleDef[] = []
+
 export function DialogShell({ title, subtitle, onClose, children, footer, width = 'max-w-md' }: {
   title: string
   subtitle?: string
@@ -862,7 +865,7 @@ export function MemberRolesModal({ serverId, member, onClose }: { serverId: numb
 // hierarchy) is deliberately out of scope; the API supports member overrides
 // via api.upsertOverride({ member, ... }) for a future pass.
 function ChannelOverridesSection({ channelId, serverId }: { channelId: number; serverId: number }): JSX.Element {
-  const roles = useChatStore((s) => s.servers.find((x) => x.id === serverId)?.roles ?? [])
+  const roles = useChatStore((s) => s.servers.find((x) => x.id === serverId)?.roles ?? EMPTY_ROLES)
   const toast = useChatToast()
   const [overrides, setOverrides] = useState<ChannelOverride[] | null>(null)
   const [roleId, setRoleId] = useState<number | ''>('')
@@ -954,7 +957,7 @@ export function ChannelModal({ serverId, channel, defaultCategory, onClose }: { 
 
   useEffect(() => { void loadMembers(serverId) }, [serverId, loadMembers])
 
-  const localCategories = useChatStore((s) => s.localCategories[serverId] ?? [])
+  const localCategories = useChatStore((s) => s.localCategories[serverId] ?? EMPTY_CATEGORIES)
   const categories = useMemo(() => {
     const server = servers.find((s) => s.id === serverId)
     return [...new Set([...(server?.channels ?? []).map((c) => c.category).filter(Boolean), ...localCategories])]
