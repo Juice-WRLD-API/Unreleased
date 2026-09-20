@@ -206,13 +206,15 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   // Fetched separately from the cover shown on screen: html-to-image needs a
   // same-origin (data:) URL to embed the cover into the exported PNG without
   // tainting the canvas, but that fetch can fail for reasons that have
-  // nothing to do with whether the cover itself is loadable (a CORS gap on
-  // some asset host, a slow/failed request) - and blocking the PREVIEW on it
-  // meant a song whose cover displays fine everywhere else in the app (a
-  // plain <img> needs no CORS) showed no cover here at all. The plain
-  // `imageUrl` is used for display below and only swapped for this once it
-  // resolves, so export quality degrades gracefully instead of the whole
-  // preview going blank.
+  // nothing to do with whether the cover itself is loadable (a slow or failed
+  // request) - and blocking the PREVIEW on it meant a song whose cover
+  // displays fine everywhere else in the app (a plain <img> needs no CORS)
+  // showed no cover here at all. The plain `imageUrl` is used for display
+  // below and only swapped for this once it resolves, so export quality
+  // degrades gracefully instead of the whole preview going blank. The one
+  // CORS gap this used to lose covers to - the API site's own /assets/
+  // images, which is every song without a custom cover - is handled inside
+  // fetchImageDataUrl now; see the notes in coverImage.ts.
   const [artDataUrl, setArtDataUrl] = useState<string | null>(null)
   // Export handlers await this to avoid a race where clicking Save/Copy/Share
   // before the fetch below resolves would rasterize the card with no cover
@@ -291,7 +293,11 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   // toPng/toBlob reads it, since React would otherwise defer that render to
   // the next microtask/paint.
   const withExportMode = async <T,>(capture: () => Promise<T>): Promise<T> => {
-    await artFetchRef.current
+    const art = await artFetchRef.current
+    // A card that has a cover on screen but none in the file is the one
+    // failure worth saying out loud - it's silent otherwise, and looks like
+    // the export simply decided to leave the cover out.
+    if (!art && imageUrl) setError('Cover art could not be embedded - the image has none.')
     flushSync(() => setExporting(true))
     try {
       return await capture()

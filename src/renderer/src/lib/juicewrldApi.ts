@@ -11,6 +11,11 @@ import { peekSessionEditLink } from './sessionEditLinksMirror'
 
 export const JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
 
+/** The one host everything the API serves lives on - its endpoints under
+ *  JWAPI_BASE, and the site's own static cover images under /assets/, which
+ *  a song's `image_url` points at (see buildImageUrl). */
+export const JWAPI_HOST = new URL(JWAPI_BASE).hostname
+
 // Backend zip endpoints are temporarily disabled - flip this back to true to restore
 // the ZIP download UI (playlist/song/file-browser download-as-ZIP buttons and menu items).
 export const ZIP_OPERATIONS_ENABLED = false
@@ -480,7 +485,7 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
   if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
   // Relative path - ensure single leading slash
   const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl
-  return `https://juicewrldapi.com${rel}`
+  return `https://${JWAPI_HOST}${rel}`
 }
 
 /** Resolves a preference's `cover_url` - a user's chosen cover, pointing into

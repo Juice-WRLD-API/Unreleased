@@ -1,8 +1,20 @@
-// Copying and saving cover art. Every cover the app displays is readable from
-// the renderer: the API sends Access-Control-Allow-Origin (same as it does
-// for audio - see the CORS notes in audioEffects.ts), so a plain fetch() gets
-// the bytes for API covers and data:/blob: covers alike. Copy goes through
-// the async Clipboard API; save through an <a download> blob link.
+// Copying and saving cover art. Most covers the app displays are readable
+// from the renderer: the API sends Access-Control-Allow-Origin on its own
+// endpoints (same as it does for audio - see the CORS notes in
+// audioEffects.ts), so a plain fetch() gets the bytes for /files/cover-art/
+// covers and data:/blob: covers alike. Copy goes through the async Clipboard
+// API; save through an <a download> blob link.
+//
+// The exception is a song with no custom cover of its own: its `image_url` is
+// an era/project image under the API *site's* /assets/ ("/assets/jute.png"),
+// which is a static file served by the edge with no CORS header at all. A
+// plain <img> paints those fine - which is why they show up everywhere on
+// screen, share-card preview included - but fetch() and canvas can't read
+// their bytes, so copy/save cover failed and ShareLyricsModal's export
+// silently dropped the cover for exactly those songs. `fetchImageBlob`
+// retries them through an image CORS proxy.
+
+import { JWAPI_HOST } from './juicewrldApi'
 
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -13,12 +25,63 @@ const MIME_EXT: Record<string, string> = {
   'image/bmp': 'bmp',
 }
 
-async function fetchImageBlob(url: string): Promise<Blob> {
-  const res = await fetch(url)
+/** Image proxies to fall back on when a cover's own host refuses the
+ *  cross-origin read, tried in order. images.weserv.nl is image-only and
+ *  always answers with `Access-Control-Allow-Origin: *`; allorigins is the
+ *  same general-purpose proxy EditorPage falls back to for Genius lyrics.
+ *  Both are third parties, so nothing but the cover URL itself is ever handed
+ *  to them, and only after a direct read has already failed. Adding one here
+ *  means adding its host to connect-src in index.html. */
+const CORS_PROXIES: ((url: string) => string)[] = [
+  (url) => `https://images.weserv.nl/?url=${encodeURIComponent(url)}`,
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+]
+
+// A proxy that's down or rate-limiting would otherwise hang whatever is
+// awaiting these bytes - ShareLyricsModal's export buttons block on exactly
+// this fetch (see withExportMode) before they rasterize the card.
+const PROXY_TIMEOUT_MS = 8000
+
+/** Whether `url` may be handed to a third-party proxy. Only the API's own
+ *  https hosts qualify: a user's personal cover is a data:/blob: URL (or a
+ *  local-media: one on desktop) that a proxy could never fetch anyway, and
+ *  sending those out would leak a local file's contents off-device. */
+function isProxyableCoverUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === 'https:' && (hostname === JWAPI_HOST || hostname.endsWith(`.${JWAPI_HOST}`))
+  } catch {
+    return false
+  }
+}
+
+async function requestImageBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`Image request failed (${res.status})`)
   const blob = await res.blob()
   if (!blob.size) throw new Error('Image was empty')
   return blob
+}
+
+async function fetchImageBlob(url: string): Promise<Blob> {
+  try {
+    return await requestImageBlob(url)
+  } catch (err) {
+    if (!isProxyableCoverUrl(url)) throw err
+    for (const proxy of CORS_PROXIES) {
+      try {
+        const blob = await requestImageBlob(proxy(url), AbortSignal.timeout(PROXY_TIMEOUT_MS))
+        // A proxy that's rate-limited or couldn't reach the origin still
+        // answers 200, with its own HTML/JSON error page - that passes both
+        // checks above and would be "copied" as a broken image otherwise.
+        if (blob.type.startsWith('image/')) return blob
+      } catch {
+        // Fall through to the next proxy, then rethrow the direct failure -
+        // that's the one worth reporting, not a proxy's own trouble.
+      }
+    }
+    throw err
+  }
 }
 
 // Chromium's async Clipboard API only takes PNG reliably - it rejects
