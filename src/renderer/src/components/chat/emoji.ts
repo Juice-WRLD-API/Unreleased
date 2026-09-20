@@ -424,7 +424,14 @@ export function emojiGlyph(name: string): string {
 }
 
 // iOS-style PNGs for every glyph above, keyed by the same shortcode name.
-const iosImages = import.meta.glob('../../assets/emoji/apple/*.png', { eager: true, import: 'default' }) as Record<string, string>
+//
+// `?no-inline` is load-bearing: without it Vite base64s every PNG under its
+// 4KB inline threshold straight into the chat bundle, which is nearly all
+// 1900 of them. That put ~2.4MB of data: URLs in the JS - parsed on every
+// chat open, re-downloaded on every deploy, and barely compressible (base64
+// of already-compressed PNGs). As real asset URLs the browser fetches only
+// the handful actually on screen and caches them independently of the app.
+const iosImages = import.meta.glob('../../assets/emoji/apple/*.png', { eager: true, import: 'default', query: '?no-inline' }) as Record<string, string>
 export const EMOJI_IMG: Record<string, string> = {}
 for (const [path, url] of Object.entries(iosImages)) {
   const name = path.slice(path.lastIndexOf('/') + 1, -'.png'.length)
