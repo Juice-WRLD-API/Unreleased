@@ -17,7 +17,7 @@ import {
   apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, buildStreamUrl,
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
 } from '../lib/juicewrldApi'
-import { triggerDownload } from '../lib/apiFilesShared'
+import { downloadFileSmart } from '../lib/cdn'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -1372,7 +1372,8 @@ export default function ApiTrackerView(): JSX.Element {
     setBulkZipStatus('zipping')
     try {
       for (const path of paths) {
-        triggerDownload(buildStreamUrl(path), path.split('/').pop() || path)
+        const name = path.split('/').pop() || path
+        await downloadFileSmart(path, name, buildStreamUrl(path))
         await new Promise((r) => setTimeout(r, 350))
       }
       setBulkZipSkipped(skipped)

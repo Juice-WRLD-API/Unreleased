@@ -27,6 +27,7 @@ import {
   breadcrumbs, parentFolder, fileToTrack, sortEntries, fileEntryLinkUrl, findSongByFilename, triggerDownload,
   type ViewMode, type SortBy, type SortDir,
 } from '../lib/apiFilesShared'
+import { downloadFileSmart } from '../lib/cdn'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { useTrackerMatches } from '../hooks/useTrackerMatches'
@@ -291,7 +292,14 @@ export default function ApiFilesView(): JSX.Element {
   // /files/* endpoint takes as its `path` param, unlike Copy link's full URL.
   const copyPath = (entry: JWApiFileEntry): void => copyToClipboard(entry.path, 'Path')
 
-  const handleDownload = (entry: JWApiFileEntry): void => triggerDownload(buildStreamUrl(entry.path, activeChannel), entry.name)
+  // Tries the P2P CDN first (primary channel only - /cdn/resolve/ has no
+  // channel param, so a non-primary path could collide with a different
+  // file of the same name) and falls back to the direct stream URL.
+  const handleDownload = (entry: JWApiFileEntry): void => {
+    const streamUrl = buildStreamUrl(entry.path, activeChannel)
+    if (activeChannel) { triggerDownload(streamUrl, entry.name); return }
+    downloadFileSmart(entry.path, entry.name, streamUrl)
+  }
 
   // ── Selection ──────────────────────────────────────────────────────────────
 

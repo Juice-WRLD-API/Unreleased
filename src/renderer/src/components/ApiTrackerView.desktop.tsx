@@ -18,6 +18,7 @@ import {
   parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
 import { triggerDownload } from '../lib/apiFilesShared'
+import { downloadFileSmart } from '../lib/cdn'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
@@ -1310,12 +1311,9 @@ const SongCard = memo(function SongCard({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              const a = document.createElement('a')
-              a.href = buildStreamUrl(song.path)
-              a.download = `${title}.mp3`
-              a.target = '_blank'
-              a.rel = 'noopener noreferrer'
-              document.body.appendChild(a); a.click(); document.body.removeChild(a)
+              // Always the primary channel here (no channel arg), so the
+              // P2P CDN is safe to try before falling back to the stream URL.
+              downloadFileSmart(song.path, `${title}.mp3`, buildStreamUrl(song.path))
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"
@@ -2641,7 +2639,11 @@ export default function ApiTrackerView(): JSX.Element {
     setBulkZipStatus('zipping')
     try {
       for (const path of paths) {
-        triggerDownload(buildStreamUrl(path, activeChannel || undefined), path.split('/').pop() || path)
+        const name = path.split('/').pop() || path
+        const streamUrl = buildStreamUrl(path, activeChannel || undefined)
+        // CDN only for the primary channel - see handleDownload's comment above.
+        if (activeChannel) triggerDownload(streamUrl, name)
+        else await downloadFileSmart(path, name, streamUrl)
         await new Promise((r) => setTimeout(r, 350))
       }
       setBulkZipSkipped(skipped)
