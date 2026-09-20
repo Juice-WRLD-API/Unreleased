@@ -12,27 +12,11 @@
 // would need a real delimiter convention this data doesn't consistently have
 // (" & ", ", ", "/" all show up), and whole-field matching is what the
 // version-title suggestions already do, so it stays consistent.
-import { apiFetch, JWApiSong } from './juicewrldApi'
+import { loadAllSongs, JWApiSong } from './juicewrldApi'
 
 export type SuggestField =
   | 'album' | 'credited_artists' | 'producers' | 'engineers'
   | 'recording_locations' | 'leak_type'
-
-const CATALOG_TTL = 5 * 60_000
-let catalogCache: { promise: Promise<JWApiSong[]>; ts: number } | null = null
-
-async function getCatalog(): Promise<JWApiSong[]> {
-  const now = Date.now()
-  if (!catalogCache || now - catalogCache.ts > CATALOG_TTL) {
-    catalogCache = { promise: apiFetch<JWApiSong[]>('/songs/', { all: 'true' }), ts: now }
-  }
-  try {
-    return await catalogCache.promise
-  } catch (e) {
-    catalogCache = null
-    throw e
-  }
-}
 
 // Built once per catalog fetch and reused across every field/query - indexing
 // all six fields costs one pass over ~2500 songs, and repeating that per
@@ -54,7 +38,11 @@ function buildIndex(catalog: JWApiSong[]): Map<SuggestField, Map<string, number>
 }
 
 async function getIndex(): Promise<Map<SuggestField, Map<string, number>>> {
-  const catalogPromise = getCatalog()
+  // juicewrldApi's shared bulk-catalogue cache rather than a private copy -
+  // this module used to keep its own identical 5-minute TTL cache of the same
+  // ?all=true fetch, so opening an edit form after any view that had already
+  // loaded the catalogue paid for it a second time.
+  const catalogPromise = loadAllSongs()
   if (indexCache?.forCatalog !== catalogPromise) {
     indexCache = { forCatalog: catalogPromise, byField: buildIndex(await catalogPromise) }
   }

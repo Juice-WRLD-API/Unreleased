@@ -17,7 +17,7 @@
 // those raw would blow the offline cache out.
 
 import { apiRequest } from './apiClient'
-import { JWAPI_BASE, getSongsByIds, songToTrack } from './juicewrldApi'
+import { JWAPI_BASE, getSongsByIds, songToTrack, loadAllSongs } from './juicewrldApi'
 import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import type { Track } from '../types'
 
@@ -81,6 +81,10 @@ const PAGE_SIZE = 100
 // The catalogue is ~2.5k songs; this is headroom, not a target. It exists so a
 // malformed `next` can't spin the loop forever.
 const MAX_PAGES = 40
+// Pages requested at once. High enough to collapse the ~28-page crawl into a
+// few round trips, low enough not to open a connection per page against an
+// API the rest of the app is also using.
+const PAGE_CONCURRENCY = 6
 
 // Below this many unknown ids, fetching them individually (getSongsByIds -
 // there's no real batch-by-id endpoint any more, see its comment in
@@ -114,21 +118,50 @@ function writeCache(songs: StatsSong[]): void {
   }
 }
 
+async function fetchPage(page: number): Promise<JWApiPaginatedResponse> {
+  return apiRequest<JWApiPaginatedResponse>(
+    `${JWAPI_BASE}/songs/?page=${page}&page_size=${PAGE_SIZE}`,
+  )
+}
+
+/** Pages the catalogue. Page 1 carries `count`, so every remaining page is
+ *  known up front and they go out in parallel (capped at PAGE_CONCURRENCY)
+ *  rather than awaiting one at a time - the serial version spent ~20s of
+ *  wall clock on ~28 round trips that don't depend on each other. */
 async function fetchCatalog(onPage?: (page: number, total: number) => void): Promise<StatsSong[]> {
-  const songs: StatsSong[] = []
-  let totalPages = 0
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const data = await apiRequest<JWApiPaginatedResponse>(
-      `${JWAPI_BASE}/songs/?page=${page}&page_size=${PAGE_SIZE}`,
-    )
-    // `count` is the total row count, so the page total is only known after
-    // the first response - before that the caller shows an indeterminate bar.
-    if (page === 1) totalPages = Math.max(1, Math.ceil((data.count ?? 0) / PAGE_SIZE))
-    for (const song of data.results ?? []) songs.push(slimSong(song))
-    onPage?.(page, totalPages)
-    if (!data.next) break
+  const first = await fetchPage(1)
+  const count = first.count ?? 0
+  // `count` is the total row count, so the page total is only known after
+  // the first response - before that the caller shows an indeterminate bar.
+  const totalPages = Math.min(MAX_PAGES, Math.max(1, Math.ceil(count / PAGE_SIZE)))
+
+  // Indexed by page so out-of-order completions still concatenate in
+  // catalogue order - the stats page ranks by playcount, but a stable order
+  // keeps the cached blob diffable between runs.
+  const pages: StatsSong[][] = [(first.results ?? []).map(slimSong)]
+  let done = 1
+  onPage?.(done, totalPages)
+
+  const rest: number[] = []
+  for (let page = 2; page <= totalPages; page++) rest.push(page)
+
+  let next = 0
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++
+      if (i >= rest.length) return
+      const page = rest[i]
+      const data = await fetchPage(page)
+      pages[page - 1] = (data.results ?? []).map(slimSong)
+      done++
+      onPage?.(done, totalPages)
+    }
   }
-  return songs
+  await Promise.all(
+    Array.from({ length: Math.min(PAGE_CONCURRENCY, rest.length) }, worker),
+  )
+
+  return pages.flat()
 }
 
 /** The whole catalogue keyed by song id - memoised for the session, cached on
@@ -144,7 +177,18 @@ export async function loadCatalog(onPage?: (page: number, total: number) => void
 
   let songs: StatsSong[]
   try {
-    songs = await fetchCatalog(onPage)
+    // Several other views (home, tracker sort mode, field suggestions) pull
+    // the whole catalogue through loadAllSongs. When one of them already has
+    // it in flight or cached, slimming that costs nothing and skips the page
+    // crawl entirely - only fall back to paging when nobody has it, since
+    // *starting* an all=true fetch here would pull the lyrics this page
+    // throws away.
+    // A warm fetch that turns out to have failed falls back to paging rather
+    // than failing this page with it - it belongs to whoever started it.
+    const warm = loadAllSongs.peek()
+    songs = warm
+      ? await warm.then((all) => all.map(slimSong), () => fetchCatalog(onPage))
+      : await fetchCatalog(onPage)
   } catch (err) {
     // A day-old catalogue beats an empty page; song metadata barely moves.
     if (cached) {
