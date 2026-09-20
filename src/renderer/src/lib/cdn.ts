@@ -99,9 +99,17 @@ class CdnService {
   }
 
   /** Walks the ranked node list for `filepath`, trying each over WebRTC
-   *  until one verifies. Returns null if the CDN is disabled, no node hosts
-   *  the file, or every node fails - the caller's job is to fall back to
-   *  the normal API download in that case. */
+   *  until one verifies against the master hash table. Returns null if the
+   *  CDN is disabled, no node hosts the file, the file has no hash in the
+   *  manifest yet, or every node fails - the caller's job is to fall back
+   *  to the normal API download in that case.
+   *
+   *  A P2P node is an untrusted third party, unlike juicewrldapi.com itself
+   *  - every file handed back here was compared byte-for-byte (via BLAKE2b)
+   *  against the hash the API's own master list has on record for it.
+   *  There is no code path that returns an un-verified CDN blob: a file
+   *  with no `expected_hash` yet skips the CDN entirely rather than trust a
+   *  node with nothing to check it against. */
   async tryDownload(
     filepath: string,
     onProgress?: (p: CdnDownloadProgress) => void
@@ -110,23 +118,20 @@ class CdnService {
 
     const resolution = await this.resolve(filepath)
     if (!resolution || resolution.node_count === 0) return null
+    if (!resolution.expected_hash) return null   // nothing to verify against - don't trust a node blind
 
     for (const node of resolution.nodes) {
       try {
         const { blob, bytesReceived } = await downloadViaNode(node, onProgress)
 
-        let verified = false
-        if (resolution.expected_hash) {
-          const hash = await blake2bHexFromBlob(blob)
-          if (hash !== resolution.expected_hash) {
-            this.reportViolation(node.node_id, filepath, hash)
-            continue   // try the next node
-          }
-          verified = true
+        const hash = await blake2bHexFromBlob(blob)
+        if (hash !== resolution.expected_hash) {
+          this.reportViolation(node.node_id, filepath, hash)
+          continue   // tampered or corrupted - try the next node, never hand this blob back
         }
 
         this.logDownload(node.node_id, filepath, bytesReceived)
-        return { blob, node, verified, isDonor: resolution.is_donor }
+        return { blob, node, verified: true, isDonor: resolution.is_donor }
       } catch {
         continue   // this node failed (timeout, NAT, offline, ...) - next one
       }
