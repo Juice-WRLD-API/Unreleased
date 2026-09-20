@@ -2,6 +2,7 @@
 // by dragging them into rows, or by tap-to-select then tap-a-row on touch.
 // Unlike Heardle/Wordle there's no daily puzzle or score: it's a personal
 // ranking, persisted locally (see lib/tierlist) with no server round-trip.
+import { useId } from 'react'
 import {
   ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Check,
 } from 'lucide-react'
@@ -120,6 +121,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
   onDelete: () => void
   onClose: () => void
 }) {
+  const colorLabelId = useId()
   return (
     <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
@@ -132,15 +134,16 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
             <X size={16} />
           </button>
         </div>
-        <label className="text-xs text-text-muted mb-1 block">Label</label>
+        <label className="block"><span className="text-xs text-text-muted mb-1 block">Label</span>
         <input
           value={tier.label}
           maxLength={20}
           onChange={(e) => onChange({ ...tier, label: e.target.value })}
           className="w-full mb-3 px-2.5 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-sm text-text-primary focus:outline-none focus:border-accent/50"
         />
-        <label className="text-xs text-text-muted mb-1 block">Color</label>
-        <div className="flex flex-wrap gap-2 mb-4">
+        </label>
+        <span className="text-xs text-text-muted mb-1 block" id={colorLabelId}>Color</span>
+        <div role="group" aria-labelledby={colorLabelId} className="flex flex-wrap gap-2 mb-4">
           {TIER_COLOR_PRESETS.map((c) => (
             <button
               key={c}

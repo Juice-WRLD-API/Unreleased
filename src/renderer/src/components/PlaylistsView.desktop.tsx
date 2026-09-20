@@ -289,7 +289,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
 
   return (
     <div
-      className="col-span-full rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6 animate-in fade-in slide-in-from-top-1 duration-150"
+      className="col-span-full rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6 animate-fade-in"
       onClick={e => e.stopPropagation()}
     >
       <button

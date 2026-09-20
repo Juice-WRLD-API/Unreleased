@@ -56,8 +56,8 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
         )}
 
         {r.status === 'pending' && (
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</label>
+          <label className="space-y-2 block">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
             <textarea
               value={notes[r.id] || ''}
               onChange={e => setNotes(n => ({ ...n, [r.id]: e.target.value }))}
@@ -65,7 +65,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
               rows={3}
               className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
             />
-          </div>
+          </label>
         )}
       </div>
 

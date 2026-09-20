@@ -164,29 +164,29 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
             )}
           </div>
 
-          <div>
-            <label className={label}>Title</label>
+          <label className="block">
+            <span className={label}>Title</span>
             <input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What's the news?" maxLength={200} />
-          </div>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Channel</label>
+            <label className="block">
+              <span className={label}>Channel</span>
               <select className={field} value={channel} onChange={(e) => setChannel(e.target.value)}>
                 {channels.length === 0 && <option value="">No channels</option>}
                 {channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
-            </div>
-            <div>
-              <label className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></label>
+            </label>
+            <label className="block">
+              <span className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></span>
               <input className={field} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Release" maxLength={40} />
-            </div>
+            </label>
           </div>
 
-          <div>
-            <label className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></label>
+          <label className="block">
+            <span className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></span>
             <textarea className={`${field} resize-none`} rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="One or two lines shown in the feed" maxLength={280} />
-          </div>
+          </label>
 
           <div>
             <div className="flex items-center justify-between mb-1">

@@ -49,3 +49,15 @@
 .chat-md h3 { font-size: 0.95rem; }
 .chat-md table { border-collapse: collapse; margin: 0.35rem 0; font-size: 0.8rem; }
 .chat-md th, .chat-md td { border: 1px solid var(--border); padding: 0.2rem 0.5rem; }
+
+/* Reduced motion. Kept here rather than in index.css so it lands after the
+   shorthand `animation:` declarations above - an animation-duration override
+   from the other file would be reset by them. Entrances collapse to their end
+   state (they use fill-mode `both`); the decorative loops just stop. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-in,
+  .chat-pop,
+  .chat-sheet { animation-duration: 0.01ms; animation-delay: 0ms; }
+  .chat-dot,
+  .chat-flash { animation: none; }
+}

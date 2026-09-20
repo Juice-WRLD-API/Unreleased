@@ -409,6 +409,49 @@ input[type='range']:active::-webkit-slider-thumb {
   animation: scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ─── Bottom sheet ──────────────────────────────────────────────────────────────
+   components/mobile/Sheet - the sheet slides its full height up from the bottom
+   edge while the scrim fades. The entrance class is *removed* once it finishes
+   (see Sheet.tsx): with fill-mode `both` the animation's final transform would
+   outrank the inline one the drag-to-dismiss gesture writes.
+   Sheet.tsx's EXIT_MS is kept in sync with the sheet-out duration below. */
+@keyframes sheet-in {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+@keyframes sheet-out {
+  from { transform: translateY(0); }
+  to   { transform: translateY(100%); }
+}
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-sheet-in  { animation: sheet-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-sheet-out { animation: sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; }
+.animate-scrim-in  { animation: scrim-in 0.2s ease both; }
+.animate-scrim-out { animation: scrim-in 0.18s ease reverse both; }
+
+/* Playing-track equalizer bars - the animated "this row is the one you're
+   hearing" marker used in place of a static icon in file/track lists. */
+@keyframes eq-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.eq-bar {
+  transform-origin: bottom;
+  animation: eq-bar 0.9s ease-in-out infinite;
+}
+
+/* WRLD's mini lyric line under the cover - keyed on the active line index, so
+   this replays as a soft crossfade every time the line changes rather than a
+   hard text swap. */
+@keyframes lyric-line-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-lyric-line-in { animation: lyric-line-in 0.3s ease-out both; }
+
 @keyframes slide-in-right {
   from { transform: translateX(18px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
@@ -499,10 +542,37 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Collapsed rather than removed: these all use fill-mode `both`, so the
+     element's resting appearance is the animation's end state - dropping the
+     animation entirely would leave it stuck at `from` (invisible, offset, or
+     translated off-screen). A near-zero duration lands on `to` immediately. */
   .animate-wrld-queue-in,
   .wrld-q-row,
   .animate-wordle-shake,
-  .animate-menu-pop { animation-duration: 0.01ms; animation-delay: 0ms; }
+  .animate-menu-pop,
+  .animate-fade-in,
+  .animate-slide-in-right,
+  .animate-slide-up,
+  .animate-scale-in,
+  .animate-sheet-in,
+  .animate-sheet-out,
+  .animate-scrim-in,
+  .animate-scrim-out,
+  .animate-lyric-line-in,
+  .track-row,
+  .view-enter { animation-duration: 0.01ms; animation-delay: 0ms; }
+
+  /* Decorative loops with nothing to land on - just stop them. eq-bar keeps a
+     static mid-height so the "now playing" marker still reads as bars.
+     The chat.* classes get the same treatment next to their own definitions
+     in components/chat/chat.css, which loads after this file. */
+  .eq-bar { animation: none; transform: scaleY(0.7); }
+  .art-shimmer { animation: none; }
+
+  /* The palette cross-fade (see html.theme-animate above) is a transition, not
+     an animation, so it needs its own opt-out - a skin swap should land on the
+     new colours at once rather than sweeping every surface through 700ms. */
+  html.theme-animate { transition: none; }
 }
 
 /* Suspense fallback for a lazily-loaded view (components/ViewSkeleton).

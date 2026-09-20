@@ -949,8 +949,8 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
 
             {/* Review notes */}
             {a.status === 'pending' && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</label>
+              <label className="space-y-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
                 <textarea
                   value={notes[a.id] || ''}
                   onChange={e => setNotes(n => ({ ...n, [a.id]: e.target.value }))}
@@ -958,7 +958,7 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
                   rows={3}
                   className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
                 />
-              </div>
+              </label>
             )}
           </div>
         )}
@@ -1248,14 +1248,14 @@ function OtpSetupPanel({ onEnabled }: { onEnabled: () => Promise<void> }): JSX.E
           <code className="block bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-xs font-mono break-all">{setup.otp_secret}</code>
         </div>
       )}
-      <div>
-        <label className="block text-xs font-semibold text-text-muted mb-1.5">Verification code</label>
+      <label className="block">
+        <span className="block text-xs font-semibold text-text-muted mb-1.5">Verification code</span>
         <input type="text" inputMode="numeric" value={code}
           onChange={e => setCode(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && confirm()} placeholder="123456"
           className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-4 py-2.5 text-text-primary text-base focus:outline-none focus:border-accent/50 font-mono tracking-[0.5em] text-center"
         />
-      </div>
+      </label>
       {error && (
         <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}

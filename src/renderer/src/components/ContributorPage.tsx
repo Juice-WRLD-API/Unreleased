@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react'
+﻿import { useEffect, useState, useRef, useId } from 'react'
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, XCircle, Upload, Replace, Trash2,
   FolderOpen, ChevronLeft, RefreshCw, FileUp, ArrowRight, FolderSearch, ArrowUpFromLine, X, FolderPlus,
@@ -114,6 +114,10 @@ function ApplyPanel({ onSubmitted, rejection, channel }: { onSubmitted: () => vo
 
 export default function ContributorPage(): JSX.Element {
   const { account, setActiveView, previousView, pendingCompProposal, setPendingCompProposal, uploads, activeChannel, channels } = useStorePick('account', 'setActiveView', 'previousView', 'pendingCompProposal', 'setPendingCompProposal', 'uploads', 'activeChannel', 'channels')
+  // One prefix for the change-proposal form: its labels sit in flex rows
+  // beside Browse/Pick buttons, so they associate by htmlFor rather than by
+  // wrapping the field.
+  const fieldId = useId()
   const activeUploads = uploads.filter((d) => d.type === 'upload' && d.state === 'downloading')
   const [application, setApplication] = useState<EditorApplication | null | undefined>(undefined)
   const [proposals, setProposals] = useState<CompFileProposal[]>([])
@@ -444,7 +448,7 @@ export default function ContributorPage(): JSX.Element {
             <h2 className="text-sm font-bold text-text-primary">New proposal</h2>
             {usesPathFields && (
             <div className="space-y-2">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-text-muted block">
+              <label htmlFor={`${fieldId}-path`} className="text-[11px] font-semibold uppercase tracking-wider text-text-muted block">
                 {changeType === 'move' ? 'Source (relative to comp/)'
                   : isCreateFolder ? 'New folder (relative to comp/)'
                   : changeType === 'delete_folder' ? 'Folder to delete (relative to comp/)'
@@ -453,7 +457,7 @@ export default function ContributorPage(): JSX.Element {
                   : 'Target (relative to comp/)'}
               </label>
               <div className="flex gap-2">
-                <input value={folderPath} onChange={e => setFolderPath(e.target.value)} placeholder="Folder - e.g. Compilation/Unreleased"
+                <input id={`${fieldId}-path`} value={folderPath} onChange={e => setFolderPath(e.target.value)} placeholder="Folder - e.g. Compilation/Unreleased"
                   className="flex-1 min-w-0 rounded-xl border border-[var(--border)] bg-surface-overlay px-4 py-2.5 text-sm font-mono text-text-primary focus:outline-none focus:border-accent" />
                 <button
                   type="button"
@@ -479,11 +483,14 @@ export default function ContributorPage(): JSX.Element {
             )}
 
             {isDelete && (
-              <div className="space-y-2">
+              // A group, not a field: the heading names the list of files the
+              // picker has collected, so there's no single control for a label
+              // element to point at.
+              <div className="space-y-2" role="group" aria-labelledby={`${fieldId}-del`}>
                 <div className="flex items-center justify-between gap-3">
-                  <label className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  <span id={`${fieldId}-del`} className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
                     Files to delete
-                  </label>
+                  </span>
                   <button type="button" onClick={() => setPicker('delete-files')}
                     className="shrink-0 px-3 py-1.5 rounded-lg border border-[var(--border)] bg-surface-overlay text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors flex items-center gap-1.5 text-xs font-semibold">
                     <FolderSearch size={14} /> Pick files
@@ -515,11 +522,11 @@ export default function ContributorPage(): JSX.Element {
             )}
             {needsDestination && (
               <div className="space-y-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-text-muted block">
+                <label htmlFor={`${fieldId}-dest`} className="text-[11px] font-semibold uppercase tracking-wider text-text-muted block">
                   {changeType === 'rename_folder' ? 'New location - same parent folder (relative to comp/)' : 'Destination (relative to comp/)'}
                 </label>
                 <div className="flex gap-2">
-                  <input value={destFolder} onChange={e => setDestFolder(e.target.value)} placeholder="Folder - e.g. Compilation/Released"
+                  <input id={`${fieldId}-dest`} value={destFolder} onChange={e => setDestFolder(e.target.value)} placeholder="Folder - e.g. Compilation/Released"
                     className="flex-1 min-w-0 rounded-xl border border-[var(--border)] bg-surface-overlay px-4 py-2.5 text-sm font-mono text-text-primary focus:outline-none focus:border-accent" />
                   <button
                     type="button"
@@ -554,12 +561,12 @@ export default function ContributorPage(): JSX.Element {
             </div>
             {carriesFile && (
               <div>
-                <label className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                <label htmlFor={`${fieldId}-files`} className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
                   {isUpload ? 'Files' : 'File'}
                   {isUpload && <span className="normal-case tracking-normal font-normal opacity-70"> - pick several to propose them all into the folder above</span>}
                 </label>
                 <div className="mt-1.5">
-                  <input ref={fileInputRef} type="file" multiple={isUpload}
+                  <input id={`${fieldId}-files`} ref={fileInputRef} type="file" multiple={isUpload}
                     onChange={e => {
                       // A replace swaps one file's contents, so it never
                       // takes more than the first even if the OS dialog is

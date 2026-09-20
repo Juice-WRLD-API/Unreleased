@@ -28,7 +28,13 @@ export default function ChatNotificationBanner(): JSX.Element | null {
   const dismiss = (toastId: number): void => setToasts((t) => t.filter((x) => x.toastId !== toastId))
 
   return createPortal(
-    <div className="fixed top-4 right-4 z-[250] flex flex-col gap-2 w-[320px] max-w-[calc(100vw-2rem)] pointer-events-none">
+    // Always-mounted live region, so an incoming message is announced rather
+    // than appearing silently. Polite: a new chat message shouldn't interrupt.
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-4 right-4 z-[250] flex flex-col gap-2 w-[320px] max-w-[calc(100vw-2rem)] pointer-events-none"
+    >
       {toasts.map((t) => (
         <div
           key={t.toastId}

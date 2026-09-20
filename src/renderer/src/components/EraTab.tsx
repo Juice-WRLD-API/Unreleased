@@ -53,41 +53,41 @@ function EditPanel({ era, onSaved, onDeleted }: { era: Era; onSaved: (era: Era) 
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Name</label>
+        <label className="block">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Name</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
           />
-        </div>
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Description</label>
+        </label>
+        <label className="block">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Description</span>
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional"
             className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
           />
-        </div>
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Time frame</label>
+        </label>
+        <label className="block">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Time frame</span>
           <input
             value={timeFrame}
             onChange={(e) => setTimeFrame(e.target.value)}
             placeholder="e.g. January - June 2018"
             className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
           />
-        </div>
-        <div>
-          <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Play count</label>
+        </label>
+        <label className="block">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Play count</span>
           <input
             type="number"
             value={playCount}
             onChange={(e) => setPlayCount(e.target.value)}
             className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary tabular-nums focus:outline-none focus:border-accent/40"
           />
-        </div>
+        </label>
 
         {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       </div>

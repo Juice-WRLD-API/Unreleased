@@ -4,7 +4,7 @@
 // row it belongs in. Unlike Heardle/Wordle there's no daily puzzle or score:
 // it's a personal ranking, persisted locally (see lib/tierlist) with no
 // server round-trip.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useId } from 'react'
 import {
   ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Check,
 } from 'lucide-react'
@@ -134,18 +134,20 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
   onDelete: () => void
   onClose: () => void
 }): JSX.Element {
+  const colorLabelId = useId()
   return (
     <Sheet onClose={onClose} title="Edit tier">
       <div className="px-5 pb-2">
-        <label className="text-xs text-text-muted mb-1 block">Label</label>
+        <label className="block"><span className="text-xs text-text-muted mb-1 block">Label</span>
         <input
           value={tier.label}
           maxLength={20}
           onChange={(e) => onChange({ ...tier, label: e.target.value })}
           className="w-full mb-4 px-3 py-2.5 rounded-xl bg-[var(--surface-overlay)] border border-[var(--border)] text-sm text-text-primary focus:outline-none focus:border-accent/50"
         />
-        <label className="text-xs text-text-muted mb-1 block">Color</label>
-        <div className="flex flex-wrap gap-2.5 mb-5">
+        </label>
+        <span className="text-xs text-text-muted mb-1 block" id={colorLabelId}>Color</span>
+        <div role="group" aria-labelledby={colorLabelId} className="flex flex-wrap gap-2.5 mb-5">
           {TIER_COLOR_PRESETS.map((c) => (
             <button
               key={c}

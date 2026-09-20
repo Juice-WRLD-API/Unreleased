@@ -211,11 +211,11 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         )}
 
         {p.status === 'pending' && (
-          <div>
-            <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</label>
+          <label className="block">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
             <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={3} placeholder="Optional…"
               className="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none resize-none" />
-          </div>
+          </label>
         )}
 
         {approveBlockedReason && (

@@ -349,40 +349,40 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col gap-3">
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Title</label>
+            <label className="block">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Title</span>
               <input value={title} onChange={e => setTitle(e.target.value)}
                 className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-lg font-bold text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40" />
-            </div>
+            </label>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Artist</label>
+              <label className="block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Artist</span>
                 <select value={artistId} onChange={e => setArtistId(e.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40">
                   {artists.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Type</label>
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Type</span>
                 <input value={type} onChange={e => setType(e.target.value)} placeholder="Album / EP / Single"
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Release date</label>
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Release date</span>
                 <input type="date" value={releaseDate} onChange={e => setReleaseDate(e.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Play count</label>
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Play count</span>
                 <input type="number" value={playCount} onChange={e => setPlayCount(e.target.value)}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] tabular-nums focus:outline-none focus:border-[var(--accent)]/40" />
-              </div>
+              </label>
             </div>
-            <div>
-              <label className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Description</label>
+            <label className="block">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Description</span>
               <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Optional"
                 className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent)]/40" />
-            </div>
+            </label>
             {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
           </div>
         </div>

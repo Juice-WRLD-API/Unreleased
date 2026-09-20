@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo, type ReactNode } from 'react'
+import { useState, useEffect, useRef, memo, type ReactNode, useId } from 'react'
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ChevronLeft,
   ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2,
@@ -1127,16 +1127,19 @@ function AppField({ label, value, onChange, rows, placeholder, hint }: {
   label: string; value: string; onChange: (v: string) => void
   rows?: number; placeholder?: string; hint?: string
 }): JSX.Element {
+  // htmlFor rather than wrapping: the label shares a flex row with the hint,
+  // so it cannot also be the element that wraps the field.
+  const id = useId()
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <label className="text-[11px] font-bold uppercase tracking-wider text-text-muted opacity-65">{label}</label>
+        <label htmlFor={id} className="text-[11px] font-bold uppercase tracking-wider text-text-muted opacity-65">{label}</label>
         {hint && <span className="text-[10px] text-text-muted opacity-55">{hint}</span>}
       </div>
       {(rows ?? 1) > 1
-        ? <textarea rows={rows} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        ? <textarea id={id} rows={rows} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
             className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40 resize-none placeholder:text-text-muted placeholder:opacity-30 transition-colors" />
-        : <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        : <input id={id} type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
             className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40 placeholder:text-text-muted placeholder:opacity-30 transition-colors" />
       }
     </div>
