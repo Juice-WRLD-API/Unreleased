@@ -100,6 +100,45 @@ export function normalizePrefText(value: string | null | undefined): string | nu
   return trimmed ? trimmed : null
 }
 
+/** A preference row as it travels to/from the profile blob. Every override
+ *  field is optional: the blob stores what it's given, and a row that carries
+ *  no override for a field simply omits it rather than spending bytes on an
+ *  explicit null. Rows predating this already arrive missing
+ *  `excluded_versions`, so readers have always had to tolerate absent keys -
+ *  normalizeSongPref is the single place that does. */
+export type WireSongPreference =
+  & { song: number }
+  & Partial<Omit<SongPreference, 'song'>>
+
+/** Fills a wire row out to a complete SongPreference. Everything downstream
+ *  (songToTrack, the version swap, the store's merge) reads full rows, so
+ *  absent keys are resolved here once rather than guarded at each use. */
+export function normalizeSongPref(row: WireSongPreference): SongPreference {
+  return {
+    song: row.song,
+    name: row.name ?? null,
+    cover_url: row.cover_url ?? null,
+    default_version: row.default_version ?? null,
+    excluded_versions: row.excluded_versions ?? [],
+    playcount: row.playcount ?? 0,
+  }
+}
+
+/** Drops fields a row has no value for before it goes up. The blob is
+ *  replaced wholesale on every PATCH, so a user with a few hundred
+ *  playcount-only rows re-sends three explicit nulls per row on every
+ *  debounced push; on a real 291-row profile that's ~33% of the
+ *  user_preferences array. normalizeSongPref is its exact inverse. */
+export function serializeSongPref(p: SongPreference): WireSongPreference {
+  const out: WireSongPreference = { song: p.song }
+  if (p.name != null) out.name = p.name
+  if (p.cover_url != null) out.cover_url = p.cover_url
+  if (p.default_version != null) out.default_version = p.default_version
+  if (p.excluded_versions?.length) out.excluded_versions = p.excluded_versions
+  if (p.playcount) out.playcount = p.playcount
+  return out
+}
+
 /** Server-side cap on `user_preferences` rows (the profile-blob validator's
  *  limit). Local storage keeps everything; only the pushed copy is capped. */
 export const SERVER_PREFS_LIMIT = 500

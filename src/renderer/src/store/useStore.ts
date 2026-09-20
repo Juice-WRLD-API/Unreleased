@@ -11,9 +11,9 @@ import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
-  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache,
+  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref,
 } from '../lib/songPrefs'
-import type { SongPreference, SongPrefMap, SongPrefPatch } from '../lib/songPrefs'
+import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
 import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
@@ -686,7 +686,7 @@ interface AppActions {
   /** Merges the profile's `user_preferences` blob (from getMe) with local
    *  state - profile wins per song except playcount, which takes the max -
    *  then pushes the merged array back up. Runs on login. */
-  syncSongPrefs: (serverPrefs?: SongPreference[]) => Promise<void>
+  syncSongPrefs: (serverPrefs?: WireSongPreference[]) => Promise<void>
   /** Same shape as syncSongPrefs, but a union rather than a per-key merge -
    *  play events are immutable, so the two sides just get deduped. */
   syncListeningPlays: (serverPlays?: ListeningPlayEvent[]) => Promise<void>
@@ -1856,10 +1856,13 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // The profile's copy wins for override fields (another device may have
       // edited them since this one last pushed) - except playcount, where
       // max() is the only merge that never loses plays made here offline.
-      for (const row of rows) {
+      for (const wire of rows) {
+        // Wire rows omit fields they have no value for (see serializeSongPref),
+        // so they're filled out before anything downstream reads them.
+        const row = normalizeSongPref(wire)
         const mine = local[row.song]
         merged[row.song] = mine
-          ? { ...row, playcount: Math.max(row.playcount ?? 0, mine.playcount ?? 0) }
+          ? { ...row, playcount: Math.max(row.playcount, mine.playcount ?? 0) }
           : row
       }
       // Rows that exist only on this device (set before signing in, or on

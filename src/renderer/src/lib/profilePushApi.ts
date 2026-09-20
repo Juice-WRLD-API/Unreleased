@@ -9,7 +9,7 @@
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
 import { apiRequest, authHeaders } from './apiClient'
-import { capSongPrefs } from './songPrefs'
+import { capSongPrefs, serializeSongPref } from './songPrefs'
 import type { SongPreference } from './songPrefs'
 import { capListeningPlays } from './listeningPlays'
 import type { ListeningPlayEvent } from './listeningPlays'
@@ -36,7 +36,10 @@ export async function pushProfile(patch: ProfilePushPatch): Promise<void> {
   const token = getToken()
   if (!token) return
   const body: Record<string, unknown> = {}
-  if (patch.songPrefs) body.user_preferences = capSongPrefs(patch.songPrefs)
+  // Serialized per row: the blob is replaced wholesale, so trimming fields a
+  // row has no value for is a straight cut to a body that's otherwise mostly
+  // explicit nulls for playcount-only rows.
+  if (patch.songPrefs) body.user_preferences = capSongPrefs(patch.songPrefs).map(serializeSongPref)
   if (patch.listeningPlays) body.listening_plays = capListeningPlays(patch.listeningPlays)
   if (patch.folders) body.playlist_folders = toServerFolders(patch.folders)
   if (patch.userSettings) body.user_settings = patch.userSettings

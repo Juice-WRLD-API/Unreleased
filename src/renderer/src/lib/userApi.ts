@@ -2,7 +2,7 @@ import { Track, ViewType } from '../types'
 import { JWAPI_BASE, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
-import type { SongPreference } from './songPrefs'
+import type { WireSongPreference } from './songPrefs'
 import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
@@ -46,7 +46,9 @@ export interface AccountUser {
   // JSON blobs stored on the profile and PATCHable through this same route -
   // per-song preferences and playlist folders (see lib/preferencesApi and
   // lib/foldersApi). Optional so cached/older responses stay assignable.
-  user_preferences?: SongPreference[]
+  // Rows arrive as stored: fields a row carries no value for are absent
+  // rather than null (see songPrefs' WireSongPreference/normalizeSongPref).
+  user_preferences?: WireSongPreference[]
   listening_plays?: ListeningPlayEvent[]
   playlist_folders?: ServerPlaylistFolder[]
   // Channel ids the user follows for news notifications (see lib/newsNotifications).
