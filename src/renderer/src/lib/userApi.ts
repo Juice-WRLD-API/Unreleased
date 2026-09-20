@@ -41,6 +41,10 @@ export interface AccountUser {
   // Grants News write access (create/edit-own/delete-own posts) - separate
   // from is_editor. Admins can write News regardless of this flag.
   is_news?: boolean
+  // Donor priority (see docs/content.tsx "Donor Priority API") - admin-granted
+  // only, never PATCHable. donor_since is null while is_donor is false.
+  is_donor?: boolean
+  donor_since?: string | null
   is_administrator: boolean
   otp_enabled: boolean
   // JSON blobs stored on the profile and PATCHable through this same route -
@@ -260,6 +264,8 @@ export interface PublicProfile {
   bio: string
   is_editor: boolean
   is_contributor: boolean
+  is_donor: boolean
+  donor_since: string | null
   public_play_history: boolean
   public_playlists: boolean
   public_now_playing: boolean

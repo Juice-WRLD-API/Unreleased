@@ -150,6 +150,7 @@ export default function ApiFilesView(): JSX.Element {
   const [textFile, setTextFile] = useState<TextFileSource | null>(null)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
+  const [boostToast, setBoostToast] = useState(false)
   // "Add to playlist" flyout, opened from the context menu.
   const [playlistsOpen, setPlaylistsOpen] = useState(false)
   const playlistItemRef = useRef<HTMLButtonElement>(null)
@@ -292,7 +293,11 @@ export default function ApiFilesView(): JSX.Element {
   const handleDownload = (entry: JWApiFileEntry): void => {
     const streamUrl = buildStreamUrl(entry.path, activeChannel)
     if (activeChannel) { triggerDownload(streamUrl, entry.name); return }
-    downloadFileSmart(entry.path, entry.name, streamUrl)
+    downloadFileSmart(entry.path, entry.name, streamUrl).then((isDonor) => {
+      if (!isDonor) return
+      setBoostToast(true)
+      setTimeout(() => setBoostToast(false), 1800)
+    })
   }
 
   // Text viewer - API files come over HTTP from the same stream URL the
@@ -1130,6 +1135,12 @@ export default function ApiFilesView(): JSX.Element {
       {copiedPath && (
         <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           <Check size={13} className="text-accent" /> {copiedKind === 'path' ? 'Path copied' : 'Link copied'}
+        </div>
+      )}
+
+      {boostToast && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+          <Heart size={13} className="text-pink-400" fill="currentColor" /> Priority routing active
         </div>
       )}
 

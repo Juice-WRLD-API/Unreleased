@@ -1074,6 +1074,8 @@ Authorization: Token <token>`}</Pre>
   "bio": "I love Juice WRLD",
   "is_editor": false,
   "is_contributor": false,
+  "is_donor": false,
+  "donor_since": null,
   "public_play_history": true,
   "public_playlists": true
 }`}</Pre>
@@ -1110,9 +1112,8 @@ Authorization: Token <token>`}</Pre>
           also needs its own <Code>is_public: true</Code> to appear, even with <Code>public_playlists</Code> on.
         </p>
         <p className="text-xs text-text-muted mt-2">
-          Donor status is never exposed here — <Code>is_donor</Code> / <Code>donor_since</Code> are absent from
-          this payload regardless of who's asking. Only the authenticated user sees their own donor status, via{' '}
-          <Code>GET /accounts/account/me/</Code>.
+          <Code>is_donor</Code> / <Code>donor_since</Code> are included here too, same shape as on{' '}
+          <Code>GET /accounts/account/me/</Code> — donor status is public on any user's profile, not just your own.
         </p>
       </Section>
 

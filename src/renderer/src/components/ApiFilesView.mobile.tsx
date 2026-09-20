@@ -299,6 +299,7 @@ export default function ApiFilesView(): JSX.Element {
     const streamUrl = buildStreamUrl(entry.path, activeChannel)
     if (activeChannel) { triggerDownload(streamUrl, entry.name); return }
     downloadFileSmart(entry.path, entry.name, streamUrl)
+      .then((isDonor) => { if (isDonor) showToast('Priority routing active') })
   }
 
   // ── Selection ──────────────────────────────────────────────────────────────

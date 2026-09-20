@@ -885,6 +885,18 @@ export default function Settings(): JSX.Element {
                       )}
                     </div>
 
+                    {account.is_donor && (
+                      <div className="flex items-center gap-2.5 mb-4 px-3 py-2.5 rounded-xl border border-pink-500/20 bg-pink-500/5">
+                        <Heart size={16} className="text-pink-400 shrink-0" fill="currentColor" />
+                        <div className="min-w-0">
+                          <p className="text-text-primary text-xs font-semibold">
+                            Donor{account.donor_since ? ` since ${new Date(account.donor_since).toLocaleDateString()}` : ''}
+                          </p>
+                          <p className="text-text-muted text-[11px]">Priority CDN downloads — your files get matched to faster nodes first</p>
+                        </div>
+                      </div>
+                    )}
+
                     <SettingsCard title="Bio">
                       <textarea
                         value={bioDraft}

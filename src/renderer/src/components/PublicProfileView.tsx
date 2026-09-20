@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
@@ -464,7 +464,7 @@ export default function PublicProfileView(): JSX.Element {
         <div className="flex-1 min-w-0">
           <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
           <p className="text-text-muted text-sm truncate">@{profile.username}</p>
-          {(profile.is_editor || profile.is_contributor) && (
+          {(profile.is_editor || profile.is_contributor || profile.is_donor) && (
             <div className="flex items-center gap-2 mt-1">
               {profile.is_editor && (
                 <span className="flex items-center gap-1 text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded-full">
@@ -474,6 +474,12 @@ export default function PublicProfileView(): JSX.Element {
               {profile.is_contributor && (
                 <span className="flex items-center gap-1 text-xs font-semibold text-text-secondary bg-surface-overlay px-2 py-0.5 rounded-full">
                   <Wrench size={12} /> Contributor
+                </span>
+              )}
+              {profile.is_donor && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-pink-400 bg-pink-500/10 px-2 py-0.5 rounded-full">
+                  <Heart size={12} fill="currentColor" />
+                  Donor{profile.donor_since && ` since ${new Date(profile.donor_since).toLocaleDateString()}`}
                 </span>
               )}
             </div>

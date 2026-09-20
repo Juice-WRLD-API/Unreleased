@@ -44,6 +44,10 @@ export interface CdnDownloadResult {
   blob: Blob
   node: CdnResolveNode
   verified: boolean
+  // Whether the 1.5x donor score multiplier applied to this resolution (see
+  // docs/content.tsx "Donor Priority API") - lets a caller confirm the boost
+  // actually took effect rather than just trusting the account flag.
+  isDonor: boolean
 }
 
 function readEnabled(): boolean {
@@ -122,7 +126,7 @@ class CdnService {
         }
 
         this.logDownload(node.node_id, filepath, bytesReceived)
-        return { blob, node, verified }
+        return { blob, node, verified, isDonor: resolution.is_donor }
       } catch {
         continue   // this node failed (timeout, NAT, offline, ...) - next one
       }
@@ -138,21 +142,26 @@ export default cdnService
 /** Drop-in replacement for `triggerDownload(buildStreamUrl(path), filename)`
  *  at the app's download call sites: tries the CDN first, verifies the
  *  hash, and only falls back to the direct API stream URL if the CDN can't
- *  serve it (currently: always, since no public nodes are registered yet). */
+ *  serve it (currently: always, since no public nodes are registered yet).
+ *  Resolves to whether the donor score boost actually applied to this
+ *  download, so a caller can confirm it rather than just trusting the
+ *  account's `is_donor` flag - `false` for a non-donor, a CDN fallback, or a
+ *  plain API download. */
 export async function downloadFileSmart(
   path: string,
   filename: string,
   streamUrl: string,
   onProgress?: (p: CdnDownloadProgress) => void
-): Promise<void> {
+): Promise<boolean> {
   const result = await cdnService.tryDownload(path, onProgress)
   if (!result) {
     triggerDownload(streamUrl, filename)
-    return
+    return false
   }
 
   const objectUrl = URL.createObjectURL(result.blob)
   triggerDownload(objectUrl, filename)
   // Give the download a moment to actually start before freeing the blob.
   setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+  return result.isDonor
 }
