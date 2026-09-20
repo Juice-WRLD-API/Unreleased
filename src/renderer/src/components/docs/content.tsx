@@ -158,6 +158,16 @@ function OverviewTab() {
           <Endpoint method="POST" path="/library/playlists/{id}/items/" description="Add a track to a playlist" />
           <Endpoint method="DELETE" path="/library/playlists/{id}/items/{song_id}/" description="Remove a track from a playlist" />
           <Endpoint method="GET" path="/library/playlists/public/{id}/" description="Fetch a playlist marked public (no auth required)" />
+          <Endpoint method="GET" path="/cdn/resolve/" description="Resolve a library file to ranked P2P CDN nodes + signed download tokens" />
+          <Endpoint method="GET" path="/cdn/ice-config/" description="STUN/TURN config for the CDN's WebRTC peer connections" />
+          <Endpoint method="GET" path="/cdn/nodes/" description="List online, approved, public CDN nodes (WebSocket /ws/cdn/signal/ carries the handshake)" />
+          <Endpoint method="POST" path="/cdn/report-violation/" description="Report a CDN node that served a file with a mismatched hash" />
+          <Endpoint method="POST" path="/cdn/log-download/" description="Log a completed CDN download (analytics, never errors)" />
+          <Endpoint method="GET" path="/cdn/master-hashes/" description="Paginated BLAKE2b master hash list; /since/{timestamp}/, /file/ and /signature/ variants" />
+          <Endpoint method="GET" path="/cdn/server-key/" description="Server RSA public key (PEM) for token and manifest verification" />
+          <Endpoint method="GET" path="/cdn/admin/nodes/" description="List every registered CDN node with trust score (admin)" />
+          <Endpoint method="PATCH" path="/cdn/admin/nodes/{node_id}/" description="Approve, disable or reset a CDN node (admin)" />
+          <Endpoint method="GET" path="/cdn/admin/stats/" description="CDN node and traffic totals (admin)" />
         </div>
       </Section>
 
@@ -558,6 +568,11 @@ GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&size=400`}</Pre>
 )
 // Returns 206 Partial Content with Content-Range header`}</Pre>
         <p className="text-xs text-text-muted mt-2">Responses: <Code>200 OK</Code> full file · <Code>206 Partial Content</Code> range</p>
+        <p className="text-xs text-text-muted mt-2">
+          This is also the fallback target for the distributed CDN: a client that tries{' '}
+          <Code>/cdn/resolve/</Code> first lands back here whenever no node can serve the file. See the
+          Distributed CDN tab.
+        </p>
       </Section>
 
       <Section title="Compressed Audio (GET /files/download-compressed/)" defaultOpen={false}>
@@ -3814,11 +3829,454 @@ GET /dms/{id}/envelopes/?key_version=1`}</Pre>
   )
 }
 
+function CdnTab() {
+  const { Code, Section, Endpoint, MethodPath } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title="What is the distributed CDN?">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          A peer-to-peer delivery layer for library files. Volunteer-run nodes host copies of the compilation
+          and serve them straight to the browser over WebRTC, so the file bytes never pass through the main
+          API server. The API only does three things: resolve a path to a ranked list of nodes, hand out
+          signed download tokens, and relay WebRTC signaling &mdash; roughly 2 KB of traffic per download.
+          Everything else is the node operator&apos;s bandwidth.
+        </p>
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
+          <span className="text-xs text-text-muted">Base path</span>
+          <Code>/juicewrld/cdn/</Code>
+          <span className="text-xs text-text-muted">Signaling</span>
+          <Code>/juicewrld/ws/cdn/signal/</Code>
+        </div>
+        <p className="text-xs text-text-muted mt-1">
+          The signaling socket also answers on <Code>/ws/cdn/signal/</Code> without the <Code>/juicewrld</Code>{' '}
+          prefix.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">The full download flow:</p>
+        <Pre>{`Browser                    API Server                  CDN Node
+   |                           |                           |
+   | 1. GET /cdn/resolve/?filepath=...                      |
+   | ------------------------> |                           |
+   | <--- ranked nodes + signed tokens ---                  |
+   |                           |                           |
+   | 2. WS /ws/cdn/signal/?role=client&token=TOKEN          |
+   | ------------------------> |  (relayed to the node)    |
+   | <--- { type: "ready", session_id, ice_servers } ---    |
+   |                           |                           |
+   | 3. RTCPeerConnection + DataChannel("file"), SDP offer  |
+   | --- offer --------------> | --- relayed ------------> |
+   | <-- answer -------------- | <-- answer -------------- |
+   |                           |                           |
+   | 4. P2P established (STUN hole-punched, encrypted)      |
+   | <=====================================================>|
+   |                           |                           |
+   | 5. { t:"meta" } -> binary chunks -> { t:"done" }       |
+   | <=====================================================>|
+   |                           |                           |
+   | 6. Verify BLAKE2b, assemble Blob                       |
+   |    mismatch -> POST /cdn/report-violation/             |
+   |    failure  -> next node -> GET /files/download/       |`}</Pre>
+        <p className="text-xs text-text-muted mt-3">
+          <span className="font-semibold text-text-primary">Rollout status:</span> every endpoint below is
+          live, but no public nodes have registered and the master manifest has not been generated yet &mdash;
+          so <Code>/cdn/resolve/</Code> currently answers with an empty <Code>nodes</Code> array and every
+          download falls through to the normal <Code>/files/download/</Code> path. Wiring a client up now is
+          safe: the fallback is the download you already do.
+        </p>
+      </Section>
+
+      <Section title="Endpoint Overview">
+        <div className="divide-y divide-[var(--border)]">
+          <Endpoint method="GET" path="/cdn/resolve/" description="Resolve a file path to ranked nodes + signed tokens (token optional, for donor boost)" />
+          <Endpoint method="GET" path="/cdn/ice-config/" description="STUN/TURN server list for RTCPeerConnection" />
+          <Endpoint method="GET" path="/cdn/server-key/" description="Server RSA public key (PEM), for verifying tokens and manifest signatures" />
+          <Endpoint method="GET" path="/cdn/nodes/" description="List online, approved, public nodes" />
+          <Endpoint method="POST" path="/cdn/report-violation/" description="Report a node that served a file with the wrong hash" />
+          <Endpoint method="POST" path="/cdn/log-download/" description="Log a completed CDN download (analytics)" />
+          <Endpoint method="GET" path="/cdn/master-hashes/" description="Paginated master hash list (WebSocket /ws/cdn/signal/ carries the WebRTC handshake)" />
+          <Endpoint method="GET" path="/cdn/master-hashes/since/{timestamp}/" description="Hash entries changed since an ISO timestamp (max 5000)" />
+          <Endpoint method="GET" path="/cdn/master-hashes/file/" description="Hash entry for a single file" />
+          <Endpoint method="GET" path="/cdn/master-hashes/signature/" description="Manifest version, hash and RSA signature" />
+          <Endpoint method="GET" path="/cdn/admin/nodes/" description="List every registered node with trust score and violations (admin)" />
+          <Endpoint method="PATCH" path="/cdn/admin/nodes/{node_id}/" description="Approve, disable, or reset a node (admin)" />
+          <Endpoint method="GET" path="/cdn/admin/stats/" description="CDN-wide node and traffic stats (admin)" />
+        </div>
+      </Section>
+
+      <Section title="Resolve a File (GET /cdn/resolve/)">
+        <MethodPath method="GET" path={`/cdn/resolve/`} />
+        <p className="text-xs text-text-muted mb-2">
+          Returns up to five nodes hosting the file, best first, each with its own signed token. Start at the
+          top of the list and work down.
+        </p>
+        <Table
+          headers={['Param', 'Required', 'Description']}
+          rows={[
+            [<Code>filepath</Code>, 'yes', 'Library-relative path, forward slashes. Missing → 400 { "error": "filepath required" }'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          Send <Code>Authorization: Token …</Code> for donor priority: users with <Code>is_donor</Code> on
+          their profile are ranked with a 1.5&times; speed multiplier, so they land on the faster nodes first.
+          The header is optional &mdash; without it the call is fully public.
+        </p>
+        <Pre>{`{
+  "filepath": "Compilation/1. Released Discography/…/Lucid Dreams.mp3",
+  "expected_hash": "a1b2c3d4e5f6…",
+  "size": 8432100,
+  "is_donor": false,
+  "transport": "webrtc",
+  "node_count": 3,
+  "nodes": [
+    {
+      "node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "FastNode-EU",
+      "region": "eu-west",
+      "upload_speed_mbps": 250.0,
+      "score": 12.4501,
+      "token": "eyJub2RlX2lkIjoi…",
+      "transport": "webrtc"
+    }
+  ]
+}`}</Pre>
+        <Table
+          headers={['Field', 'Type', 'Meaning']}
+          rows={[
+            [<Code>expected_hash</Code>, 'string', 'BLAKE2b-256 hex from the master list. Empty string if the file has no manifest entry yet'],
+            [<Code>size</Code>, 'number', 'Size in bytes from the master list, 0 if unknown'],
+            [<Code>is_donor</Code>, 'boolean', 'Whether the donor boost was applied to this ranking'],
+            [<Code>transport</Code>, 'string', 'Always "webrtc" today, both at the top level and per node'],
+            [<Code>node_count</Code>, 'number', 'Length of nodes. 0 means nobody hosts it — go straight to the API download'],
+            [<Code>nodes[].node_id</Code>, 'string', 'Node UUID. Needed for /report-violation/ and /log-download/'],
+            [<Code>nodes[].score</Code>, 'number', 'Ranking score, higher is better. Already sorted'],
+            [<Code>nodes[].token</Code>, 'string', 'Signed token for this node + filepath. Expires after 5 minutes'],
+          ]}
+        />
+      </Section>
+
+      <Section title="Download Tokens">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Each <Code>token</Code> is a server-signed payload carrying the node id, the filepath, a 5-minute
+          expiry, the donor flag and the requester. It does double duty: the signaling server validates the
+          signature and expiry before opening a session, and the node itself re-checks it against the
+          server&apos;s public key before sending a byte.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          Tokens are single-use per signaling session. If a download fails, use the next node&apos;s token from
+          the same resolution, or call <Code>/cdn/resolve/</Code> again for a fresh set.
+        </p>
+      </Section>
+
+      <Section title="ICE Configuration (GET /cdn/ice-config/)">
+        <MethodPath method="GET" path={`/cdn/ice-config/`} />
+        <p className="text-xs text-text-muted mb-2">
+          The STUN/TURN list for <Code>RTCPeerConnection</Code>. The same array ships inside the{' '}
+          <Code>ready</Code> signaling message, so fetching it separately is only worth doing if you want the
+          peer connection configured before the socket opens.
+        </p>
+        <Pre>{`{
+  "ice_servers": [
+    { "urls": "stun:stun.l.google.com:19302" },
+    { "urls": "stun:stun1.l.google.com:19302" }
+  ]
+}`}</Pre>
+      </Section>
+
+      <Section title="WebRTC Signaling (WS /ws/cdn/signal/)">
+        <Pre>{`wss://juicewrldapi.com/juicewrld/ws/cdn/signal/?role=client&token=TOKEN`}</Pre>
+        <p className="text-xs text-text-muted">
+          One socket per node attempt. <Code>role</Code> is <Code>client</Code> for a downloading browser; the
+          node holds the other end. The socket only carries the handshake &mdash; once the peer connection is
+          up, nothing else flows through it.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Close codes:</p>
+        <Table
+          headers={['Code', 'Meaning']}
+          rows={[
+            [<Code>4000</Code>, 'Invalid role'],
+            [<Code>4003</Code>, 'Invalid or expired token'],
+            [<Code>4004</Code>, 'Target node is not connected to signaling'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">Server → client:</p>
+        <Table
+          headers={['Type', 'Key fields', 'What to do']}
+          rows={[
+            [<Code>ready</Code>, 'session_id, ice_servers', 'Sent immediately on connect. Build the peer connection and send your offer'],
+            [<Code>answer</Code>, 'session_id, sdp', 'setRemoteDescription({ type: "answer", sdp })'],
+            [<Code>ice</Code>, 'session_id, candidate', 'Trickle candidate from the node. Rare — both sides are non-trickle by default'],
+            [<Code>error</Code>, 'reason', 'Session never started. Close and try the next node'],
+            [<Code>session_error</Code>, 'session_id, reason', 'Node rejected the session after it started. Same handling'],
+            [<Code>teardown</Code>, 'session_id', 'Node or server ended the session'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          <Code>reason</Code> is one of <Code>node_offline</Code>, <Code>invalid_token</Code>,{' '}
+          <Code>not_hosted</Code>, <Code>private</Code>. All four mean the same thing to a client: move on.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Client → server:</p>
+        <Table
+          headers={['Type', 'Payload', 'When']}
+          rows={[
+            [<Code>offer</Code>, '{ sdp }', 'After createOffer + setLocalDescription, once ICE gathering finishes'],
+            [<Code>ice</Code>, '{ candidate }', 'Optional, only if you trickle instead of waiting'],
+          ]}
+        />
+        <Pre>{`const ws = new WebSocket(signalUrl)
+let pc
+
+ws.onmessage = async (event) => {
+  const msg = JSON.parse(event.data)
+
+  if (msg.type === 'ready') {
+    pc = new RTCPeerConnection({ iceServers: msg.ice_servers })
+    const channel = pc.createDataChannel('file', { ordered: true })
+    channel.binaryType = 'arraybuffer'
+    channel.onmessage = handleData
+
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    await waitIceComplete(pc)        // 4s cap, then send anyway
+    ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }))
+  }
+
+  if (msg.type === 'answer') {
+    await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp })
+  }
+
+  if (msg.type === 'error' || msg.type === 'session_error') {
+    // tear down and move to the next node
+  }
+}`}</Pre>
+      </Section>
+
+      <Section title="DataChannel Protocol">
+        <p className="text-sm text-text-secondary">
+          Once the peer connection is up, the node pushes the file down the DataChannel named{' '}
+          <Code>file</Code> (ordered, reliable, default SCTP). Every frame is either a JSON control string or a
+          binary <Code>ArrayBuffer</Code> of file data &mdash; branch on <Code>typeof event.data</Code>.
+        </p>
+        <Pre>{`Node -> Browser:  { "t": "meta", "size": 8432100, "hash": "a1b2…", "chunk": 16384 }
+Node -> Browser:  <ArrayBuffer 16384 bytes>
+Node -> Browser:  <ArrayBuffer 16384 bytes>
+                  …
+Node -> Browser:  <ArrayBuffer remaining bytes>
+Node -> Browser:  { "t": "done", "size": 8432100 }`}</Pre>
+        <Table
+          headers={['Control frame', 'Fields', 'Meaning']}
+          rows={[
+            [<Code>meta</Code>, 'size, hash, chunk', 'Always first. hash is the BLAKE2b-256 hex, chunk is the binary frame size (16384 default)'],
+            [<Code>done</Code>, 'size', 'Transfer finished. Compare it against the bytes you actually received'],
+            [<Code>error</Code>, '(none)', 'Node-side failure. Abort and try the next node'],
+          ]}
+        />
+        <Pre>{`const chunks = []
+let received = 0
+let expectedSize = 0
+
+channel.onmessage = (event) => {
+  if (typeof event.data === 'string') {
+    const msg = JSON.parse(event.data)
+    if (msg.t === 'meta')  expectedSize = msg.size
+    if (msg.t === 'error') { /* abort, next node */ }
+    if (msg.t === 'done') {
+      const blob = new Blob(chunks)
+      // verify: await blake2bHexFromBlob(blob) === expected_hash
+    }
+    return
+  }
+  chunks.push(event.data)
+  received += event.data.byteLength
+  // progress = Math.round((received / expectedSize) * 100)
+}`}</Pre>
+      </Section>
+
+      <Section title="Hash Verification & Violations">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          Every file in the library carries a BLAKE2b-256 hash in the master list. After <Code>done</Code>,
+          hash the assembled Blob and compare it against <Code>expected_hash</Code> from the resolution. A
+          mismatch means the node served corrupted or tampered data &mdash; report it, then move to the next
+          node. Nothing about a P2P transfer is trustworthy until this check passes.
+        </p>
+        <MethodPath method="POST" path={`/cdn/report-violation/`} className="mt-3" />
+        <Pre>{`{
+  "node_id": "550e8400-e29b-41d4-a716-446655440000",
+  "filepath": "path/to/file.mp3",
+  "reported_hash": "deadbeef…"      // optional: what you computed
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>node_id</Code> and <Code>filepath</Code> are required; without them the call returns{' '}
+          <Code>400</Code> <Code>{'{ "error": "node_id and filepath required" }'}</Code>.
+        </p>
+        <Pre>{`{ "accepted": true, "node_active": true }`}</Pre>
+        <Table
+          headers={['Field', 'Meaning']}
+          rows={[
+            [<Code>accepted</Code>, 'false means the reported hash actually matches the master list — your read was wrong, not the node'],
+            [<Code>node_active</Code>, 'false means accumulated violations just auto-deactivated the node'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          Reports lower a node&apos;s trust score, so only fire one on a real hash mismatch &mdash; never on a
+          timeout, a stalled channel, or a failed handshake.
+        </p>
+      </Section>
+
+      <Section title="Log a Download (POST /cdn/log-download/)">
+        <MethodPath method="POST" path={`/cdn/log-download/`} />
+        <p className="text-xs text-text-muted mb-2">
+          Analytics only. Nodes log their own transfers, so a client call is optional and duplicates are
+          harmless. It never rejects a body: an incomplete payload still answers{' '}
+          <Code>{'{ "logged": true }'}</Code> and is quietly dropped.
+        </p>
+        <Pre>{`{
+  "node_id": "550e8400-e29b-41d4-a716-446655440000",
+  "filepath": "path/to/file.mp3",
+  "bytes_served": 8432100
+}`}</Pre>
+      </Section>
+
+      <Section title="Public Nodes (GET /cdn/nodes/)">
+        <MethodPath method="GET" path={`/cdn/nodes/`} />
+        <p className="text-xs text-text-muted mb-2">
+          Every node that is currently online, approved and public. Useful for a status page; not needed for
+          downloading, since <Code>/cdn/resolve/</Code> already picks.
+        </p>
+        <Pre>{`{
+  "nodes": [{
+    "node_id": "550e8400-…",
+    "name": "FastNode-EU",
+    "region": "eu-west",
+    "is_public": true,
+    "status": "online",
+    "online": true,
+    "file_count": 2400,
+    "current_storage_bytes": 51200000000,
+    "max_storage_bytes": 107374182400,
+    "upload_speed_mbps": 250.0,
+    "download_speed_mbps": 500.0
+  }]
+}`}</Pre>
+      </Section>
+
+      <Section title="Master Hash List" defaultOpen={false}>
+        <MethodPath method="GET" path={`/cdn/master-hashes/`} />
+        <p className="text-xs text-text-muted mb-2">
+          Paginated. <Code>page</Code> (default 1), <Code>page_size</Code> (default 500, max 2000), and{' '}
+          <Code>channel</Code> to filter by channel slug.
+        </p>
+        <Pre>{`{
+  "manifest_version": 12,
+  "count": 9800,
+  "page": 1,
+  "num_pages": 20,
+  "has_next": true,
+  "files": [{
+    "filepath": "Compilation/1. Released Discography/…/Lucid Dreams.mp3",
+    "blake2b_hash": "a1b2c3d4…",
+    "size": 8432100,
+    "channel_slug": "compilation",
+    "updated_at": "2026-09-20T12:00:00.000000+00:00"
+  }]
+}`}</Pre>
+        <MethodPath method="GET" path={`/cdn/master-hashes/since/{timestamp}/`} className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">
+          Incremental sync: up to 5000 entries updated after an ISO timestamp given in the path. The response
+          echoes the timestamp back, so you can tell it parsed.
+        </p>
+        <Pre>{`{ "since": "2026-01-01T00:00:00Z", "count": 0, "files": [] }`}</Pre>
+        <MethodPath method="GET" path={`/cdn/master-hashes/file/`} className="mt-3" />
+        <p className="text-xs text-text-muted">
+          One entry, by <Code>?filepath=</Code>. Missing param → <Code>400</Code>, unknown file →{' '}
+          <Code>404</Code>.
+        </p>
+        <MethodPath method="GET" path={`/cdn/master-hashes/signature/`} className="mt-3" />
+        <p className="text-xs text-text-muted mb-2">
+          The current manifest version, its hash, and an RSA signature over it &mdash; enough to verify the
+          whole list came from this server. Returns <Code>404</Code>{' '}
+          <Code>{'{ "error": "manifest not generated yet" }'}</Code> until the first manifest is built.
+        </p>
+        <Pre>{`{
+  "version": 12,
+  "manifest_hash": "f0e1d2c3b4a5…",
+  "signature": "base64-encoded-rsa-signature",
+  "total_files": 9800,
+  "total_bytes": 214748364800,
+  "generated_at": "2026-09-20T12:00:00.000000+00:00",
+  "public_key": "-----BEGIN PUBLIC KEY-----\\n…"
+}`}</Pre>
+      </Section>
+
+      <Section title="Server Public Key (GET /cdn/server-key/)" defaultOpen={false}>
+        <MethodPath method="GET" path={`/cdn/server-key/`} />
+        <p className="text-xs text-text-muted mb-2">
+          The server&apos;s RSA public key in PEM form. Nodes use it to verify download tokens and manifest
+          signatures; a browser client normally never needs it.
+        </p>
+        <Pre>{`{ "public_key": "-----BEGIN PUBLIC KEY-----\\nMIIBIjAN…\\n-----END PUBLIC KEY-----\\n" }`}</Pre>
+      </Section>
+
+      <Section title="Admin: Nodes & Stats" defaultOpen={false}>
+        <p className="text-xs text-text-muted mb-2">
+          All three need <Code>Authorization: Token …</Code> for a user with the <Code>administrator</Code>{' '}
+          role. Without one they answer <Code>401</Code>{' '}
+          <Code>{'{ "detail": "Authentication credentials were not provided." }'}</Code>.
+        </p>
+        <MethodPath method="GET" path={`/cdn/admin/nodes/`} />
+        <p className="text-xs text-text-muted">
+          Every registered node, not just the public online ones, with trust score, violation count and IP.
+        </p>
+        <MethodPath method="PATCH" path={`/cdn/admin/nodes/{node_id}/`} className="mt-3" />
+        <Table
+          headers={['Field', 'Type', 'Effect']}
+          rows={[
+            [<Code>is_approved</Code>, 'boolean', 'Approve a pending node, or revoke it'],
+            [<Code>is_active</Code>, 'boolean', 'Enable or disable without touching approval'],
+            [<Code>trust_score</Code>, 'number', 'Reset the score after a false-positive run of reports'],
+            [<Code>hash_violations</Code>, 'number', 'Reset the violation counter'],
+          ]}
+        />
+        <MethodPath method="GET" path={`/cdn/admin/stats/`} className="mt-3" />
+        <Pre>{`{
+  "total_nodes": 15,
+  "online_nodes": 8,
+  "pending_nodes": 3,
+  "total_bytes_served": 1099511627776,
+  "total_requests": 42000,
+  "manifest_version": 12,
+  "master_files": 9800,
+  "master_bytes": 214748364800
+}`}</Pre>
+      </Section>
+
+      <Section title="Timeouts, Fallback & Failure Modes">
+        <Table
+          headers={['Stage', 'Budget', 'On expiry']}
+          rows={[
+            ['Signaling connect', '15 s', 'No ready message → close the socket, try the next node'],
+            ['ICE gathering', '4 s', 'Send the offer anyway; it often still connects'],
+            ['Data stall', '30 s', 'No DataChannel frame for 30 s → abort, try the next node'],
+            ['Token lifetime', '5 min', 'Re-resolve for fresh tokens'],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">Fallback order:</p>
+        <ul className="space-y-2 text-sm text-text-secondary">
+          <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Walk the <Code>nodes</Code> array in score order. For each: open the signaling socket with that node&apos;s token, negotiate, receive, verify the hash.</li>
+          <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Any failure — offline node, handshake timeout, stalled channel, hash mismatch — tears everything down and moves to the next node.</li>
+          <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Nodes exhausted, or <Code>node_count</Code> was 0 to begin with → fall back to the ordinary <Code>GET /files/download/</Code>. The CDN is an optimisation, never a requirement; a client that can&apos;t do WebRTC just skips <Code>/cdn/resolve/</Code> entirely.</li>
+          <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Roughly 10-20% of consumer networks sit behind symmetric NAT, where STUN hole-punching can&apos;t work. Those attempts die at the peer-connection stage and fail over silently — expect it rather than treating it as a bug.</li>
+          <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Let users turn it off. A persisted preference that short-circuits <Code>/cdn/resolve/</Code> and goes straight to the API is the right escape hatch on a flaky network.</li>
+        </ul>
+      </Section>
+    </div>
+  )
+}
+
 export const TABS = [
   { id: 'overview',  label: 'Overview' },
   { id: 'songs',     label: 'Songs & Search' },
   { id: 'versions',  label: 'Versions' },
   { id: 'files',     label: 'Files & Stream' },
+  { id: 'cdn',       label: 'Distributed CDN' },
   { id: 'playlists', label: 'Playlists' },
   { id: 'radio',     label: '999 FM' },
   { id: 'heardle',   label: 'Heardle' },
@@ -3839,6 +4297,7 @@ const TAB_CONTENT: Record<TabId, () => JSX.Element> = {
   songs:     SongsTab,
   versions:  VersionsTab,
   files:     FilesTab,
+  cdn:       CdnTab,
   playlists: PlaylistsTab,
   radio:     RadioTab,
   heardle:   HeardleTab,
