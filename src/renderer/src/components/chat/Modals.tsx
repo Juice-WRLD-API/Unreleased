@@ -472,6 +472,7 @@ export function AddMembersModal({ serverId, onClose }: { serverId: number; onClo
 
 export function RenameCategoryModal({ serverId, category, onClose }: { serverId: number; category: string; onClose: () => void }): JSX.Element {
   const channels = useChatStore(useShallow((s) => s.servers.find((x) => x.id === serverId)?.channels.filter((c) => c.category === category) ?? []))
+  const renameLocalCategory = useChatStore((s) => s.renameLocalCategory)
   const toast = useChatToast()
   const [name, setName] = useState(category)
   const [busy, setBusy] = useState(false)
@@ -479,6 +480,11 @@ export function RenameCategoryModal({ serverId, category, onClose }: { serverId:
   const save = async (): Promise<void> => {
     const next = name.trim()
     if (next === category) { onClose(); return }
+    if (channels.length === 0) {
+      renameLocalCategory(serverId, category, next)
+      onClose()
+      return
+    }
     setBusy(true)
     try {
       const updated = await Promise.all(channels.map((c) => api.updateChannel(c.id, { category: next })))
@@ -498,12 +504,43 @@ export function RenameCategoryModal({ serverId, category, onClose }: { serverId:
   return (
     <DialogShell
       title="Rename category"
-      subtitle={`Applies to ${channels.length} channel${channels.length === 1 ? '' : 's'}`}
+      subtitle={channels.length > 0 ? `Applies to ${channels.length} channel${channels.length === 1 ? '' : 's'}` : 'This category has no channels yet'}
       onClose={onClose}
       footer={<><GhostButton onClick={onClose}>Cancel</GhostButton><PrimaryButton onClick={save} busy={busy} disabled={!name.trim()}>Save</PrimaryButton></>}
     >
       <Field label="Category name">
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void save() }} placeholder="e.g. Tracker" className={inputCls} />
+      </Field>
+    </DialogShell>
+  )
+}
+
+export function CreateCategoryModal({ serverId, onClose }: { serverId: number; onClose: () => void }): JSX.Element {
+  const existing = useChatStore(useShallow((s) => {
+    const server = s.servers.find((x) => x.id === serverId)
+    return new Set([...(server?.channels.map((c) => c.category).filter(Boolean) ?? []), ...(s.localCategories[serverId] ?? [])])
+  }))
+  const addLocalCategory = useChatStore((s) => s.addLocalCategory)
+  const toast = useChatToast()
+  const [name, setName] = useState('')
+
+  const save = (): void => {
+    const next = name.trim()
+    if (!next) return
+    if (existing.has(next)) { toast('That category already exists'); return }
+    addLocalCategory(serverId, next)
+    onClose()
+  }
+
+  return (
+    <DialogShell
+      title="Create category"
+      subtitle="Group channels under a heading - add channels to it whenever you're ready"
+      onClose={onClose}
+      footer={<><GhostButton onClick={onClose}>Cancel</GhostButton><PrimaryButton onClick={save} disabled={!name.trim()}>Create category</PrimaryButton></>}
+    >
+      <Field label="Category name">
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save() }} placeholder="e.g. Tracker" className={inputCls} />
       </Field>
     </DialogShell>
   )
@@ -900,15 +937,16 @@ function slugPreview(name: string): string {
   return name.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 100)
 }
 
-export function ChannelModal({ serverId, channel, onClose }: { serverId: number; channel?: ChatChannel; onClose: () => void }): JSX.Element {
+export function ChannelModal({ serverId, channel, defaultCategory, onClose }: { serverId: number; channel?: ChatChannel; defaultCategory?: string; onClose: () => void }): JSX.Element {
   const members = useChatStore((s) => s.members[serverId])
   const loadMembers = useChatStore((s) => s.loadMembers)
   const openRoom = useChatStore((s) => s.openRoom)
   const servers = useChatStore((s) => s.servers)
+  const removeLocalCategory = useChatStore((s) => s.removeLocalCategory)
   const toast = useChatToast()
   const [name, setName] = useState(channel?.name ?? '')
   const [topic, setTopic] = useState(channel?.topic ?? '')
-  const [category, setCategory] = useState(channel?.category ?? '')
+  const [category, setCategory] = useState(channel?.category ?? defaultCategory ?? '')
   const [isPrivate, setPrivate] = useState(channel?.is_private ?? false)
   const [allowed, setAllowed] = useState<Set<number>>(new Set(channel?.allowed_members ?? []))
   const [busy, setBusy] = useState(false)
@@ -916,10 +954,11 @@ export function ChannelModal({ serverId, channel, onClose }: { serverId: number;
 
   useEffect(() => { void loadMembers(serverId) }, [serverId, loadMembers])
 
+  const localCategories = useChatStore((s) => s.localCategories[serverId] ?? [])
   const categories = useMemo(() => {
     const server = servers.find((s) => s.id === serverId)
-    return [...new Set((server?.channels ?? []).map((c) => c.category).filter(Boolean))]
-  }, [servers, serverId])
+    return [...new Set([...(server?.channels ?? []).map((c) => c.category).filter(Boolean), ...localCategories])]
+  }, [servers, serverId, localCategories])
 
   const save = async (): Promise<void> => {
     setBusy(true)
@@ -935,6 +974,7 @@ export function ChannelModal({ serverId, channel, onClose }: { serverId: number;
       useChatStore.setState((s) => ({
         servers: s.servers.map((x) => x.id !== serverId ? x : { ...x, channels: [...x.channels.filter((c) => c.id !== result.id), result] }),
       }))
+      if (result.category) removeLocalCategory(serverId, result.category)
       if (!channel) openRoom({ kind: 'channel', id: result.id })
       onClose()
     } catch (err) {

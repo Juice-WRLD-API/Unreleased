@@ -108,6 +108,22 @@ function saveMuted(userId: number, muted: MutedIds): void {
   try { localStorage.setItem(`unreleased:chat:muted:${userId}`, JSON.stringify(muted)) } catch {}
 }
 
+// Categories with no channels yet don't exist server-side (category is just
+// a free-text field on ChatChannel), so an "empty" one is a client-only,
+// per-device placeholder kept here until a real channel adopts its name.
+function loadLocalCategories(userId: number): Record<number, string[]> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:localCategories:${userId}`) ?? '{}') as Record<number, string[]>
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveLocalCategories(userId: number, map: Record<number, string[]>): void {
+  try { localStorage.setItem(`unreleased:chat:localCategories:${userId}`, JSON.stringify(map)) } catch {}
+}
+
 const PRESENCE_KEY = 'unreleased:chatPresenceEnabled'
 const READ_KEY = 'unreleased:chatReadEnabled'
 
@@ -173,6 +189,9 @@ interface ChatState {
   mutedConversations: number[]
   serverOrder: number[]
   conversationOrder: number[]
+  // Empty categories (no channels yet), keyed by server id. See
+  // loadLocalCategories - these are a client-only placeholder, not synced.
+  localCategories: Record<number, string[]>
 
   activeServerId: number | null
   active: RoomRef | null
@@ -217,6 +236,9 @@ interface ChatState {
   toggleMuteConversation: (id: number) => void
   setServerOrder: (ids: number[]) => void
   setConversationOrder: (ids: number[]) => void
+  addLocalCategory: (serverId: number, name: string) => void
+  removeLocalCategory: (serverId: number, name: string) => void
+  renameLocalCategory: (serverId: number, from: string, to: string) => void
   openRoom: (room: RoomRef) => void
   setMobileRoomOpen: (open: boolean) => void
   loadOlder: (room: RoomRef) => Promise<void>
@@ -731,6 +753,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     mutedConversations: [],
     serverOrder: [],
     conversationOrder: [],
+    localCategories: {},
     activeServerId: null,
     active: null,
     mobileRoomOpen: false,
@@ -781,6 +804,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         pinnedServers: pinned.servers, pinnedConversations: pinned.conversations,
         serverOrder: order.servers, conversationOrder: order.conversations,
         mutedServers: muted.servers, mutedConversations: muted.conversations,
+        localCategories: loadLocalCategories(account.id),
       })
       useStore.getState()._syncChatMutes(muted.servers, muted.conversations)
       socket = new ChatSocket(
@@ -864,7 +888,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       nowPlayingRequested.clear()
       set({
         status: 'idle', me: null, meId: null, initialized: false, loadError: null,
-        servers: [], members: {}, roles: {}, bans: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], activeServerId: null, active: null,
+        servers: [], members: {}, roles: {}, bans: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], localCategories: {}, activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, nowPlaying: {}, keyState: {}, plain: {},
       })
@@ -964,6 +988,44 @@ export const useChatStore = create<ChatState>((set, get) => {
       set((s) => {
         saveOrder(meId, { servers: s.serverOrder, conversations: ids })
         return { conversationOrder: ids }
+      })
+    },
+
+    addLocalCategory: (serverId, name) => {
+      const meId = get().meId
+      const trimmed = name.trim()
+      if (!meId || !trimmed) return
+      set((s) => {
+        const existing = s.localCategories[serverId] ?? []
+        if (existing.includes(trimmed)) return s
+        const localCategories = { ...s.localCategories, [serverId]: [...existing, trimmed] }
+        saveLocalCategories(meId, localCategories)
+        return { localCategories }
+      })
+    },
+
+    removeLocalCategory: (serverId, name) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const existing = s.localCategories[serverId] ?? []
+        if (!existing.includes(name)) return s
+        const localCategories = { ...s.localCategories, [serverId]: existing.filter((c) => c !== name) }
+        saveLocalCategories(meId, localCategories)
+        return { localCategories }
+      })
+    },
+
+    renameLocalCategory: (serverId, from, to) => {
+      const meId = get().meId
+      const trimmed = to.trim()
+      if (!meId || !trimmed) return
+      set((s) => {
+        const existing = s.localCategories[serverId] ?? []
+        if (!existing.includes(from)) return s
+        const localCategories = { ...s.localCategories, [serverId]: existing.map((c) => (c === from ? trimmed : c)) }
+        saveLocalCategories(meId, localCategories)
+        return { localCategories }
       })
     },
 

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
 import type { ChatChannel, ChatMember, ChatUserBrief } from '../../lib/chatApi'
 import { BanMemberModal, ServerBansModal, SiteModerationModal, TimeoutMemberModal } from './Moderation'
-import { AddMembersModal, ChannelModal, CreateServerModal, DiscoverServersModal, MemberRolesModal, NewDmModal, RenameCategoryModal, RolesModal, ServerSettingsModal } from './Modals'
+import { AddMembersModal, ChannelModal, CreateCategoryModal, CreateServerModal, DiscoverServersModal, MemberRolesModal, NewDmModal, RenameCategoryModal, RolesModal, ServerSettingsModal } from './Modals'
 
 export type ChatModal =
   | { kind: 'create-server' }
@@ -10,7 +10,8 @@ export type ChatModal =
   | { kind: 'add-members'; serverId: number }
   | { kind: 'roles'; serverId: number }
   | { kind: 'member-roles'; serverId: number; member: ChatMember }
-  | { kind: 'channel'; serverId: number; channel?: ChatChannel }
+  | { kind: 'channel'; serverId: number; channel?: ChatChannel; defaultCategory?: string }
+  | { kind: 'create-category'; serverId: number }
   | { kind: 'rename-category'; serverId: number; category: string }
   | { kind: 'timeout-member'; serverId: number; member: ChatMember }
   | { kind: 'ban-member'; serverId: number; user: ChatUserBrief }
@@ -44,7 +45,8 @@ export function ModalHost({ children }: { children: ReactNode }): JSX.Element {
       {modal?.kind === 'add-members' && <AddMembersModal serverId={modal.serverId} onClose={close} />}
       {modal?.kind === 'roles' && <RolesModal serverId={modal.serverId} onClose={close} />}
       {modal?.kind === 'member-roles' && <MemberRolesModal serverId={modal.serverId} member={modal.member} onClose={close} />}
-      {modal?.kind === 'channel' && <ChannelModal serverId={modal.serverId} channel={modal.channel} onClose={close} />}
+      {modal?.kind === 'channel' && <ChannelModal serverId={modal.serverId} channel={modal.channel} defaultCategory={modal.defaultCategory} onClose={close} />}
+      {modal?.kind === 'create-category' && <CreateCategoryModal serverId={modal.serverId} onClose={close} />}
       {modal?.kind === 'rename-category' && <RenameCategoryModal serverId={modal.serverId} category={modal.category} onClose={close} />}
       {modal?.kind === 'timeout-member' && <TimeoutMemberModal serverId={modal.serverId} member={modal.member} onClose={close} />}
       {modal?.kind === 'ban-member' && <BanMemberModal serverId={modal.serverId} user={modal.user} onClose={close} />}

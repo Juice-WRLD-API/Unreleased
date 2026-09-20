@@ -1,6 +1,6 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BellOff, BellRing, ChevronDown, Compass, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
+import { BellOff, BellRing, ChevronDown, Compass, FolderPlus, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatChannel, ChatServer, Conversation } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
@@ -486,10 +486,16 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   const openRoom = useChatStore((s) => s.openRoom)
   const me = useChatStore((s) => s.me)
   const openModal = useOpenModal()
+  const localCategories = useChatStore((s) => s.localCategories[serverId] ?? [])
+  const removeLocalCategory = useChatStore((s) => s.removeLocalCategory)
   const [menu, setMenu] = useState(false)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [dragId, setDragId] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<{ category: string; index: number } | null>(null)
+  const [chanMenu, setChanMenu] = useState<{ channel: ChatChannel; x: number; y: number } | null>(null)
+  const [catMenu, setCatMenu] = useState<{ category: string; x: number; y: number } | null>(null)
+  const [confirmDeleteChannel, setConfirmDeleteChannel] = useState<ChatChannel | null>(null)
+  const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<{ category: string; count: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const toast = useChatToast()
   useDismiss(menu, () => setMenu(false), menuRef)
@@ -500,8 +506,11 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
       const k = c.category || ''
       map.set(k, [...(map.get(k) ?? []), c])
     }
+    for (const cat of localCategories) {
+      if (!map.has(cat)) map.set(cat, [])
+    }
     return [...map.entries()].sort(([a], [b]) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b)))
-  }, [server])
+  }, [server, localCategories])
 
   // Drag a channel row onto another row (or the empty space below a group)
   // to reorder it within a category, or into a different category entirely.
@@ -543,6 +552,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
           channels: x.channels.map((c) => results.find((r) => r.id === c.id) ?? c),
         }),
       }))
+      if (targetCategory) removeLocalCategory(serverId, targetCategory)
     } catch (err) {
       useChatStore.setState({ servers: prevServers })
       toast(errorText(err, 'Could not reorder channels'))
@@ -569,6 +579,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
           <div className="chat-pop absolute left-2 right-2 top-full mt-1 z-30 rounded-xl border border-[var(--border)] bg-surface shadow-2xl py-1">
             {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'add-members', serverId }) }}><span className="inline-flex items-center gap-2"><UserPlus size={14} />Add members</span></MenuItem>}
             {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'channel', serverId }) }}><span className="inline-flex items-center gap-2"><Plus size={14} />Create channel</span></MenuItem>}
+            {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'create-category', serverId }) }}><span className="inline-flex items-center gap-2"><FolderPlus size={14} />Create category</span></MenuItem>}
             {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'server-settings', serverId }) }}><span className="inline-flex items-center gap-2"><Settings size={14} />Server settings</span></MenuItem>}
             {!canManage && <p className="px-3 py-2 text-xs text-text-muted">Only owners and admins can manage this server.</p>}
           </div>
@@ -584,7 +595,15 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
             onDrop={(e) => { if (dragId == null) return; e.preventDefault(); void dropChannel(category, channels.length) }}
           >
             {category && (
-              <div className="group flex items-center pr-1">
+              <div
+                className="group flex items-center pr-1"
+                onContextMenu={(e) => {
+                  if (!canManage) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setCatMenu({ category, x: e.clientX, y: e.clientY })
+                }}
+              >
                 <button onClick={() => setCollapsed((c) => ({ ...c, [category]: !c[category] }))} className="flex-1 flex items-center gap-1 px-1 py-1 text-[11px] font-bold uppercase tracking-wider text-text-muted hover:text-text-secondary text-left">
                   <ChevronDown size={12} className={`transition-transform ${collapsed[category] ? '-rotate-90' : ''}`} />
                   <span className="truncate">{category}</span>
@@ -594,7 +613,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
                     <button onClick={() => openModal({ kind: 'rename-category', serverId, category })} title="Rename category" className="p-1 text-text-muted hover:text-text-primary">
                       <Pencil size={12} />
                     </button>
-                    <button onClick={() => openModal({ kind: 'channel', serverId })} title="Create channel" className="p-1 text-text-muted hover:text-text-primary">
+                    <button onClick={() => openModal({ kind: 'channel', serverId, defaultCategory: category })} title="Create channel" className="p-1 text-text-muted hover:text-text-primary">
                       <Plus size={14} />
                     </button>
                   </span>
@@ -631,6 +650,12 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
                         e.stopPropagation()
                         void dropChannel(category, dropTarget?.category === category ? dropTarget.index : idx)
                       }}
+                      onContextMenu={(e) => {
+                        if (!canManage) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setChanMenu({ channel: c, x: e.clientX, y: e.clientY })
+                      }}
                     >
                       <button
                         onClick={() => { openRoom({ kind: 'channel', id: c.id }); onPicked?.() }}
@@ -661,7 +686,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
             </div>
           </div>
         ))}
-        {server.channels.length === 0 && (
+        {server.channels.length === 0 && groups.length === 0 && (
           <div className="px-3 py-8 text-center">
             <p className="text-sm text-text-secondary">No channels you can see yet.</p>
             {canManage && <button onClick={() => openModal({ kind: 'channel', serverId })} className="mt-2 text-xs font-semibold text-accent hover:underline">Create the first one</button>}
@@ -670,6 +695,76 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
       </div>
       <StatusBar />
       {showFooter && <MeFooter />}
+      {chanMenu && (
+        <RoomMenu
+          x={chanMenu.x}
+          y={chanMenu.y}
+          onClose={() => setChanMenu(null)}
+          items={[
+            { label: 'Edit channel', icon: <Settings size={14} />, onClick: () => openModal({ kind: 'channel', serverId, channel: chanMenu.channel }) },
+            { label: 'Delete channel', icon: <Trash2 size={14} />, danger: true, onClick: () => setConfirmDeleteChannel(chanMenu.channel) },
+          ]}
+        />
+      )}
+      {catMenu && (
+        <RoomMenu
+          x={catMenu.x}
+          y={catMenu.y}
+          onClose={() => setCatMenu(null)}
+          items={[
+            { label: 'Create channel', icon: <Plus size={14} />, onClick: () => openModal({ kind: 'channel', serverId, defaultCategory: catMenu.category }) },
+            { label: 'Rename category', icon: <Pencil size={14} />, onClick: () => openModal({ kind: 'rename-category', serverId, category: catMenu.category }) },
+            { label: 'Delete category', icon: <Trash2 size={14} />, danger: true, onClick: () => setConfirmDeleteCategory({ category: catMenu.category, count: groups.find(([cat]) => cat === catMenu.category)?.[1].length ?? 0 }) },
+          ]}
+        />
+      )}
+      {confirmDeleteChannel && (
+        <ConfirmDialog
+          title={`Delete #${confirmDeleteChannel.name}?`}
+          body="Every message in this channel will be removed. This can't be undone."
+          confirmLabel="Delete channel"
+          onCancel={() => setConfirmDeleteChannel(null)}
+          onConfirm={() => {
+            const channel = confirmDeleteChannel
+            setConfirmDeleteChannel(null)
+            api.deleteChannel(channel.id)
+              .then(() => {
+                useChatStore.setState((s) => ({
+                  servers: s.servers.map((x) => x.id !== serverId ? x : { ...x, channels: x.channels.filter((c) => c.id !== channel.id) }),
+                  active: s.active?.kind === 'channel' && s.active.id === channel.id ? null : s.active,
+                }))
+              })
+              .catch((err) => toast(errorText(err, 'Could not delete channel')))
+          }}
+        />
+      )}
+      {confirmDeleteCategory && (
+        <ConfirmDialog
+          title={`Delete "${confirmDeleteCategory.category}"?`}
+          body={confirmDeleteCategory.count > 0 ? `${confirmDeleteCategory.count} channel${confirmDeleteCategory.count === 1 ? '' : 's'} will be moved out of this category.` : 'This category has no channels.'}
+          confirmLabel="Delete category"
+          onCancel={() => setConfirmDeleteCategory(null)}
+          onConfirm={() => {
+            const { category, count } = confirmDeleteCategory
+            setConfirmDeleteCategory(null)
+            if (count === 0) {
+              removeLocalCategory(serverId, category)
+              return
+            }
+            const channels = server.channels.filter((c) => c.category === category)
+            Promise.all(channels.map((c) => api.updateChannel(c.id, { category: '' })))
+              .then((updated) => {
+                useChatStore.setState((s) => ({
+                  servers: s.servers.map((x) => x.id !== serverId ? x : {
+                    ...x,
+                    channels: x.channels.map((c) => updated.find((u) => u.id === c.id) ?? c),
+                  }),
+                }))
+              })
+              .catch((err) => toast(errorText(err, 'Could not delete category')))
+          }}
+        />
+      )}
     </div>
   )
 }
