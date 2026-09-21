@@ -29,6 +29,7 @@ import { versionsEnabled } from '../lib/versionsApi'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard from './PlaylistCard'
+import { DonorPlaylistDetail, DonorPlaylistsSection } from './DonorPlaylists'
 import { allFolderedKeys, folderOfPlaylist, parsePlaylistKey } from '../lib/playlistFolders'
 import type { PlaylistFolder } from '../lib/playlistFolders'
 import { Folder, FolderPlus, FolderOpen, FolderMinus } from 'lucide-react'
@@ -536,6 +537,7 @@ export default function PlaylistsView(): JSX.Element {
   // exitSelectMode.
   const [showBulkPlaylists, setShowBulkPlaylists] = useState(false)
   const [bulkRemoving, setBulkRemoving] = useState(false)
+  const [donorSelectedId, setDonorSelectedId] = useState<string | null>(null)
   const [localRenaming, setLocalRenaming] = useState(false)
   const [localRenameVal, setLocalRenameVal] = useState('')
   const [showAddAllMenu, setShowAddAllMenu] = useState(false)
@@ -2860,6 +2862,12 @@ export default function PlaylistsView(): JSX.Element {
     )
   }
 
+  // ── Donor playlist detail ─────────────────────────────────────────────────
+
+  if (donorSelectedId !== null) {
+    return <DonorPlaylistDetail id={donorSelectedId} onBack={() => setDonorSelectedId(null)} />
+  }
+
   // ── Local playlist detail ─────────────────────────────────────────────────
 
   if (localSelectedId !== null) {
@@ -3071,6 +3079,9 @@ export default function PlaylistsView(): JSX.Element {
             <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet - click "New Playlist" to create one.</p>
           )}
         </div>
+
+        {/* ── Donor files - playlists of the account's cloud files (donors only). ── */}
+        <DonorPlaylistsSection onOpen={(id) => { setExpandedKey(null); setDonorSelectedId(id) }} />
 
         {/* ── Following section - other people's playlists followed from a
             share link. Live pointers, not copies (see FollowedPlaylist);

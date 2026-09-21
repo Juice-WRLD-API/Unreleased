@@ -7,6 +7,7 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
+import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
 import { buildStreamUrl, findSessionZips, songToTrack, getSongsByIds, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import ChangeVersionMenuItem from './ChangeVersionMenuItem'
@@ -116,6 +117,18 @@ function SubSheetHeader({ title, onBack }: { title: string; onBack: () => void }
 
 
 function downloadTrack(track: Track): void {
+  // Donor files need the auth header, so hand them to the blob path instead.
+  if (isDonorStreamUrl(track.streamUrl)) {
+    void ensureDonorUrl(track.streamUrl).then((url) => {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${track.title}.mp3`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    })
+    return
+  }
   const a = document.createElement('a')
   a.href = track.streamUrl ?? buildStreamUrl(track.path)
   a.download = `${track.title}.mp3`
@@ -356,7 +369,7 @@ export default function SongContextMenu({
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
   // only for staff, who are the only ones with a chat to share into.
-  const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl
+  const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
   // Sessions/unsurfaced are treated as unplayable - don't offer Play / Play
   // next / Add to queue for them (they'd never actually play). Local files
   // (no category in genre) stay playable as long as they have a path.

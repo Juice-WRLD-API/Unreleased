@@ -1,4 +1,4 @@
-import { Track, ViewType } from '../types'
+import { Track, ViewType, DonorPlaylist } from '../types'
 import { JWAPI_BASE, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
@@ -78,6 +78,8 @@ export interface UserSettings {
 
   // ── Appearance ──────────────────────────────────────────────────────────
   custom_skins?: Skin[]
+  /** Donor cloud-file playlists (see types DonorPlaylist). */
+  donor_playlists?: DonorPlaylist[]
   accent_color?: string
   app_text_scale?: number
   app_font?: string

@@ -81,6 +81,18 @@ export interface LocalPlaylist {
   coverImage?: string | null  // base64 data URL or null
 }
 
+// A playlist of donor cloud files (see lib/donorFilesApi). Stored in the
+// account's `user_settings.donor_playlists`, so it syncs across devices.
+// Entries are donor file_ids rather than embedded tracks: the file list is the
+// source of truth for names/sizes, and a file that's since been deleted just
+// drops out of the resolved list.
+export interface DonorPlaylist {
+  id: string
+  name: string
+  fileIds: string[]
+  createdAt: number
+}
+
 // A playlist for signed-out users - stored in localStorage, not tied to an
 // account or to local-file scanning (unlike LocalPlaylist). Tracks are
 // embedded directly rather than referenced by id, since a guest playlist can

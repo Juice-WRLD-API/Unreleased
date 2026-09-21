@@ -42,8 +42,13 @@ import {
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
+import { cachedDonorUrl, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
 
+// Donor cloud files can't be streamed by URL (the route needs the auth header),
+// so their `donor://` marker resolves to a fetched blob URL - or '' while that
+// fetch is still pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
+  if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
   return track.streamUrl ?? toFileUrl(track.path)
 }
 
@@ -353,6 +358,19 @@ export default function Player(): JSX.Element {
     }
     const nextTrackData = queue[nextIdx]
     if (!nextTrackData) return
+    if (isDonorStreamUrl(nextTrackData.streamUrl) && !cachedDonorUrl(nextTrackData.streamUrl)) {
+      // Not fetched yet: fetch, then load it into the spare slot if it's still
+      // the upcoming track.
+      void ensureDonorUrl(nextTrackData.streamUrl).then((u) => {
+        const s = useStore.getState()
+        const spare = getNext()
+        if (!spare || s.queue[nextIdx]?.id !== nextTrackData.id || s.currentTrack?.id === nextTrackData.id) return
+        spare.src = u
+        spare.load()
+        applyRate(spare)
+      }).catch(() => { /* the main load will surface a real failure */ })
+      return
+    }
     const url = resolvePlaybackUrl(nextTrackData)
     const na = getNext()
     if (!na || na.src === url) return
@@ -471,6 +489,29 @@ export default function Player(): JSX.Element {
       // rate setup below - apply it now or the faded-in track plays at 1x.
       applyRate(audio)
       setCurrentTrackReady(true)
+      return
+    }
+
+    if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
+      const trackId = currentTrack.id
+      setCurrentTrackReady(false)
+      cancelCF()
+      cancelPauseFade()
+      // Stop the previous track while the file downloads.
+      audio.removeAttribute('src')
+      audio.load()
+      ensureDonorUrl(currentTrack.streamUrl).then((url) => {
+        const s = useStore.getState()
+        const a = getActive()
+        if (!a || s.currentTrack?.id !== trackId) return
+        a.src = url
+        a.volume = volumeRef.current
+        applyRate(a)
+        if (s.isPlaying) playSlot(a)
+      }).catch((err) => {
+        console.error('Could not load donor file', err)
+        if (useStore.getState().currentTrack?.id === trackId) setIsPlaying(false)
+      })
       return
     }
 
@@ -657,6 +698,7 @@ export default function Player(): JSX.Element {
     if (recoveryTimer.current != null) return  // a retry is already queued
 
     const url = resolvePlaybackUrl(track)
+    if (!url) return  // donor file still downloading - nothing to reload yet
     // Nothing to retry into while the device is offline - don't burn attempts;
     // the 'online' listener in the watchdog retries the moment it's back.
     // Downloaded and local files are unaffected by connectivity.
@@ -1111,7 +1153,10 @@ export default function Player(): JSX.Element {
           : (nextIdx >= 0 && nextIdx < queue.length) ? queue[nextIdx] : null
         const na = getNext()
 
-        if (na && nextTrackData) {
+        // A donor file that hasn't finished downloading can't be faded into;
+        // skipping the crossfade falls back to a normal advance at track end.
+        const nextReady = !isDonorStreamUrl(nextTrackData?.streamUrl) || !!cachedDonorUrl(nextTrackData.streamUrl)
+        if (na && nextTrackData && nextReady) {
           cfActive.current = true
           cfIsRadio.current = isRadio
           cfTargetIdx.current = nextIdx

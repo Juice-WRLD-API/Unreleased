@@ -104,6 +104,10 @@ function OverviewTab() {
           <Endpoint method="POST" path="/reports/" description="Report wrong info on a song (no auth)" />
           <Endpoint method="GET" path="/reports/" description="List song reports (editor+)" />
           <Endpoint method="PATCH" path="/reports/{id}/" description="Review a song report (editor+)" />
+          <Endpoint method="GET" path="/accounts/donor/files/" description="List donor cloud files + quota (donor only, 1 GB)" />
+          <Endpoint method="POST" path="/accounts/donor/files/upload/" description="Upload an audio/image file to donor storage (donor only)" />
+          <Endpoint method="PATCH" path="/accounts/donor/files/{file_id}/" description="Rename a donor file or toggle its share link" />
+          <Endpoint method="GET" path="/accounts/donor/shared/{share_token}/" description="Download a shared donor file (no auth)" />
           <Endpoint method="POST" path="/accounts/logout/" description="Invalidate the current token" />
           <Endpoint method="GET" path="/accounts/application/" description="Fetch the logged-in user's editor or contributor application" />
           <Endpoint method="POST" path="/accounts/application/" description="Apply to become an editor or contributor" />
@@ -1347,6 +1351,104 @@ Authorization: Token <token>`}</Pre>
           debounced the same way as <Code>user_preferences</Code>, so a burst of plays collapses into one PATCH
           rather than one per play.
         </p>
+      </Section>
+
+
+      <Section title="Donor File Storage" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          Donors get <span className="font-semibold text-text-primary">1 GB</span> of private cloud storage for
+          audio and image files, optionally shareable by link. All donor routes require{' '}
+          <Code>Authorization: Token ...</Code> and <Code>is_donor = true</Code> (read it from{' '}
+          <Code>GET /accounts/account/me/</Code>); non-donors get 403 <Code>&quot;Donor status is required.&quot;</Code>{' '}
+          Paths below are relative to <Code>/accounts/</Code>.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Auth', 'Description']}
+          rows={[
+            ['GET', '/donor/files/', 'Donor', 'List files (newest first) + quota'],
+            ['GET', '/donor/files/quota/', 'Donor', 'Quota only'],
+            ['POST', '/donor/files/upload/', 'Donor', 'Upload a file (multipart, field "file")'],
+            ['GET', '/donor/files/{file_id}/', 'Donor', 'File metadata'],
+            ['PATCH', '/donor/files/{file_id}/', 'Donor', 'Rename and/or toggle sharing'],
+            ['DELETE', '/donor/files/{file_id}/', 'Donor', 'Delete file and reclaim space'],
+            ['GET', '/donor/files/{file_id}/download/', 'Donor', 'Stream own file (Range supported)'],
+            ['GET', '/donor/shared/{share_token}/', 'None', 'Download a shared file'],
+          ]}
+        />
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Limits</p>
+        <Table
+          headers={['Limit', 'Value']}
+          rows={[
+            ['Total storage per donor', '1 GB (1073741824 bytes)'],
+            ['Max single file', '100 MB'],
+            ['Upload rate', '60 uploads per hour'],
+            ['Audio types', '.mp3 .flac .wav .m4a .aac .ogg .opus .aiff .wma'],
+            ['Image types', '.jpg .jpeg .png .gif .webp'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Quota is enforced on upload; deleting a file reclaims its size immediately. Other extensions are rejected with 400.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">File object</p>
+        <Pre>{`{
+  "file_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "filename": "custom-track.mp3",
+  "mime_type": "audio/mpeg",
+  "size": 8432100,
+  "is_shared": false,
+  "share_token": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+  "share_url": "",
+  "created_at": "2026-09-21T17:00:00.000000+00:00",
+  "updated_at": "2026-09-21T17:00:00.000000+00:00"
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>share_url</Code> is empty unless <Code>is_shared</Code> is true. <Code>share_token</Code> is
+          generated at upload and never rotates.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Quota object</p>
+        <Pre>{`{ "used": 52428800, "quota": 1073741824, "remaining": 1021313024 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Returned as <Code>quota</Code> on list, upload and delete responses, and bare from{' '}
+          <Code>/donor/files/quota/</Code>. List returns <Code>{'{ "files": [...], "quota": {...} }'}</Code>;
+          upload returns <Code>{'{ "file": {...}, "quota": {...} }'}</Code> (201); delete returns{' '}
+          <Code>{'{ "detail": "Deleted.", "quota": {...} }'}</Code>.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Upload errors</p>
+        <Table
+          headers={['Status', 'Reason']}
+          rows={[
+            ['400', 'No file, invalid filename, extension not allowed, over 100 MB, or would exceed 1 GB (body includes current quota)'],
+            ['403', 'Not a donor'],
+            ['429', 'Upload rate limit exceeded'],
+          ]}
+        />
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Update (PATCH)</p>
+        <p className="text-xs text-text-muted mb-2">
+          Both fields optional. <Code>filename</Code> keeps the basename only (path segments stripped). Returns the
+          updated file object with <Code>share_url</Code> populated when sharing is on. Turning sharing off disables the link
+          without rotating the token.
+        </p>
+        <Pre>{`{ "filename": "renamed-track.mp3", "is_shared": true }`}</Pre>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Download</p>
+        <p className="text-xs text-text-muted">
+          Both download routes stream with Range support (206), so they work as an <Code>&lt;audio&gt;</Code> src.
+          Supports GET and HEAD. Add <Code>?download=1</Code> to force an attachment instead of inline playback. The
+          shared route needs no auth and only works while <Code>is_shared</Code> is true. 404 means not found, not
+          owned, deleted, or sharing disabled.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Sharing flow</p>
+        <Pre>{`1. POST  /donor/files/upload/            -> file
+2. PATCH /donor/files/<file_id>/         { "is_shared": true }
+3. Copy share_url from the PATCH response
+4. Anyone: GET <share_url>               (links never expire)
+5. PATCH { "is_shared": false }, or DELETE, to revoke`}</Pre>
       </Section>
 
 

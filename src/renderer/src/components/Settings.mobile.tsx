@@ -14,6 +14,7 @@ import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
+import DonorFiles from './DonorFiles'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
@@ -959,6 +960,11 @@ export default function Settings(): JSX.Element {
                         >
                           <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
                         </Row>
+                      </SettingsCard>
+                    )}
+                    {account.is_donor && (
+                      <SettingsCard title="Donor files">
+                        <DonorFiles />
                       </SettingsCard>
                     )}
                     {hasChatAccess(account) && (

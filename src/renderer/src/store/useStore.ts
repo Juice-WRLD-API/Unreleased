@@ -1,6 +1,9 @@
 ﻿import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist } from '../types'
+import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist } from '../types'
+import { listDonorFiles } from '../lib/donorFilesApi'
+import type { DonorFile } from '../lib/donorFilesApi'
+import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -502,6 +505,12 @@ interface AppState {
   // library tracks and work identically on every platform.
   guestPlaylists: GuestPlaylist[]
 
+  // Donor cloud-file playlists - see DonorPlaylist. Synced through
+  // user_settings.donor_playlists. donorFiles is the resolved file list those
+  // playlists point into (null until loaded).
+  donorPlaylists: DonorPlaylist[]
+  donorFiles: DonorFile[] | null
+
   // Other people's playlists followed from a share link - see FollowedPlaylist.
   // Local-only (localStorage), so this list is per-device.
   followedPlaylists: FollowedPlaylist[]
@@ -809,6 +818,17 @@ interface AppActions {
   // playlist's id so the caller can navigate straight to it.
   createGuestPlaylist: (name: string) => string
   deleteGuestPlaylist: (id: string) => void
+  loadDonorFiles: () => Promise<void>
+  setDonorFiles: (files: DonorFile[]) => void
+  createDonorPlaylist: (name: string, fileIds?: string[]) => string
+  deleteDonorPlaylist: (id: string) => void
+  renameDonorPlaylist: (id: string, name: string) => void
+  addToDonorPlaylist: (playlistId: string, fileId: string) => void
+  removeFromDonorPlaylist: (playlistId: string, fileId: string) => void
+  reorderDonorPlaylist: (playlistId: string, fileIds: string[]) => void
+  _setDonorPlaylists: (next: DonorPlaylist[]) => void
+  /** Points playlist entries at a file's new id (tag re-upload), or drops them when newId is null (delete). */
+  replaceDonorFileId: (oldId: string, newId: string | null) => void
   renameGuestPlaylist: (id: string, name: string) => void
   addToGuestPlaylist: (playlistId: string, track: Track) => void
   removeFromGuestPlaylist: (playlistId: string, trackId: string) => void
@@ -973,6 +993,7 @@ function buildUserSettings(s: AppStore): UserSettings {
     muted_user_ids: s.mutedUserIds,
     theme: s.theme,
     custom_skins: s.customSkins,
+    donor_playlists: s.donorPlaylists,
     accent_color: s.accentColor,
     app_text_scale: s.appTextScale,
     app_font: s.appFont,
@@ -1689,6 +1710,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
       ls.set('customSkins', serverSettings.custom_skins)
       setCustomSkinsCache(serverSettings.custom_skins)
     }
+    if (Array.isArray(serverSettings.donor_playlists) && JSON.stringify(serverSettings.donor_playlists) !== JSON.stringify(s.donorPlaylists)) {
+      set({ donorPlaylists: serverSettings.donor_playlists })
+      ls.set('donorPlaylists', serverSettings.donor_playlists)
+    }
     if (serverSettings.accent_color !== undefined && serverSettings.accent_color !== s.accentColor) s.setAccentColor(serverSettings.accent_color)
     if (serverSettings.app_text_scale !== undefined && serverSettings.app_text_scale !== s.appTextScale) s.setAppTextScale(serverSettings.app_text_scale)
     if (serverSettings.app_font && serverSettings.app_font !== s.appFont) s.setAppFont(getFont(serverSettings.app_font).id)
@@ -2244,7 +2269,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   logoutAccount: async () => {
     await userApi.logout()
     const localLikes = ls.get<string[]>('likedTrackIds') ?? []
-    set({ account: null, playlists: [], likedTrackIds: localLikes })
+    set({ account: null, playlists: [], likedTrackIds: localLikes, donorPlaylists: [], donorFiles: null })
+    // Like play history, these belong to the account, not the machine.
+    ls.set('donorPlaylists', [])
+    clearDonorPlaybackCache()
     // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
     get()._setSongPrefs(ls.get<SongPrefMap>('songPrefs') ?? {})
@@ -2364,6 +2392,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   localPlaylists: [],
   activeLocalPlaylistId: null,
   guestPlaylists: ls.get<GuestPlaylist[]>('guestPlaylists') ?? [],
+  donorPlaylists: ls.get<DonorPlaylist[]>('donorPlaylists') ?? [],
+  donorFiles: null,
   followedPlaylists: ls.get<FollowedPlaylist[]>('followedPlaylists') ?? [],
 
   setLibraryTracks: (libraryTracks) => set({ libraryTracks }),
@@ -2636,6 +2666,47 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ guestPlaylists: next })
     ls.set('guestPlaylists', next)
     return id
+  },
+  loadDonorFiles: async () => {
+    if (!get().account?.is_donor) return
+    try {
+      const { files } = await listDonorFiles()
+      get().setDonorFiles(files)
+    } catch { /* keep whatever was loaded; the UI shows its own load error */ }
+  },
+  setDonorFiles: (files) => set({ donorFiles: files }),
+  createDonorPlaylist: (name, fileIds = []) => {
+    const id = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    get()._setDonorPlaylists([...get().donorPlaylists, { id, name, fileIds, createdAt: Date.now() }])
+    return id
+  },
+  deleteDonorPlaylist: (id) => get()._setDonorPlaylists(get().donorPlaylists.filter((p) => p.id !== id)),
+  renameDonorPlaylist: (id, name) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === id ? { ...p, name } : p)),
+  addToDonorPlaylist: (playlistId, fileId) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
+      p.id === playlistId && !p.fileIds.includes(fileId) ? { ...p, fileIds: [...p.fileIds, fileId] } : p)),
+  removeFromDonorPlaylist: (playlistId, fileId) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
+      p.id === playlistId ? { ...p, fileIds: p.fileIds.filter((f) => f !== fileId) } : p)),
+  reorderDonorPlaylist: (playlistId, fileIds) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === playlistId ? { ...p, fileIds } : p)),
+  replaceDonorFileId: (oldId, newId) => {
+    const lists = get().donorPlaylists
+    if (!lists.some((p) => p.fileIds.includes(oldId))) return
+    get()._setDonorPlaylists(lists.map((p) => {
+      if (!p.fileIds.includes(oldId)) return p
+      // Re-uploaded copy (tag edit) keeps its slot; a deleted file just leaves.
+      const ids = newId
+        ? p.fileIds.map((id) => (id === oldId ? newId : id))
+        : p.fileIds.filter((id) => id !== oldId)
+      return { ...p, fileIds: ids }
+    }))
+  },
+  _setDonorPlaylists: (next) => {
+    set({ donorPlaylists: next })
+    ls.set('donorPlaylists', next)
+    get()._scheduleProfilePush(['userSettings'])
   },
   deleteGuestPlaylist: (id) => {
     const next = get().guestPlaylists.filter((p) => p.id !== id)

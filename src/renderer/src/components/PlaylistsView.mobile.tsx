@@ -29,6 +29,7 @@ import { versionsEnabled } from '../lib/versionsApi'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard, { FolderRow } from './PlaylistCard.mobile'
+import { DonorPlaylistDetail, DonorPlaylistsSection } from './DonorPlaylists'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useLongPress } from './mobile/useLongPress'
 import { useDragReorder } from './mobile/useDragReorder'
@@ -415,6 +416,7 @@ export default function PlaylistsView(): JSX.Element {
   // multi-select, no bulk actions. Just enough to create, open, rename, and
   // delete one, which is all that's needed while signed out.
   const [guestSelectedId, setGuestSelectedId] = useState<string | null>(null)
+  const [donorSelectedId, setDonorSelectedId] = useState<string | null>(null)
 
   // Context menu for a track row (shared with the Tracker's implementation).
   const [trackMenu, setTrackMenu] = useState<SongContextMenuState | null>(null)
@@ -1332,6 +1334,8 @@ export default function PlaylistsView(): JSX.Element {
               </>
             )}
 
+            <DonorPlaylistsSection onOpen={setDonorSelectedId} />
+
             {!account && (
               <div className="flex flex-col items-center text-center gap-3 px-8 py-8 mt-4 border-t border-[var(--border)]">
                 <p className="text-text-muted text-sm max-w-xs">
@@ -2154,7 +2158,8 @@ export default function PlaylistsView(): JSX.Element {
           </div>
           <LikedSongsView />
         </>
-      ) : guestSelectedId !== null ? renderGuestDetail()
+      ) : donorSelectedId !== null ? <DonorPlaylistDetail id={donorSelectedId} onBack={() => setDonorSelectedId(null)} />
+        : guestSelectedId !== null ? renderGuestDetail()
         : inDetail ? renderDetail()
           : renderLibrary()}
 
