@@ -14,6 +14,7 @@ import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
+import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
@@ -963,6 +964,7 @@ export default function Settings(): JSX.Element {
                     {hasChatAccess(account) && (
                       <SettingsCard title="Chat devices">
                         <ChatDevices userId={account.id} />
+                        <ChatKeyTransfer userId={account.id} />
                       </SettingsCard>
                     )}
 

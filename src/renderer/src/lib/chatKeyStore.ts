@@ -133,6 +133,23 @@ export async function getRoomKey(conversationId: number, version: number): Promi
   }
 }
 
+// Every room key this device holds, for export to another browser. Rows whose
+// wrapping failed to open are skipped rather than aborting the whole export.
+export async function allRoomKeys(): Promise<{ conversationId: number; version: number; key: Uint8Array }[]> {
+  const rows = await run<StoredRoomKey[]>(ROOM_KEYS, 'readonly', (s) => s.getAll())
+  const out: { conversationId: number; version: number; key: Uint8Array }[] = []
+  for (const row of rows) {
+    const [conversationId, version] = row.id.split(':').map(Number)
+    if (!Number.isFinite(conversationId) || !Number.isFinite(version)) continue
+    try {
+      out.push({ conversationId, version, key: await unseal(row.key, row.iv) })
+    } catch {
+      continue
+    }
+  }
+  return out
+}
+
 export async function putRoomKey(conversationId: number, version: number, key: Uint8Array): Promise<void> {
   const id = roomId(conversationId, version)
   roomKeyCache.set(id, key)

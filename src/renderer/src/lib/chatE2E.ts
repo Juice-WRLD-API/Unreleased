@@ -1,5 +1,5 @@
 import * as api from './chatApi'
-import type { ChatAttachment, ChatMessage, Conversation, UploadedFile } from './chatApi'
+import type { ChatAttachment, ChatDevice, ChatMessage, Conversation, UploadedFile } from './chatApi'
 import {
   decryptBytes, decryptName, decryptText, encryptBytes, encryptName, encryptText,
   generateIdentity, generateRoomKey, openRoomKey, sealRoomKey, toB64,
@@ -102,10 +102,30 @@ export function forgetPendingKeyFetches(conversationId: number): void {
   }
 }
 
+// Exactly one device per person is keyed automatically: the oldest one they
+// registered, which every participant derives the same way from the shared
+// device list. Their other browsers get keys by export/import instead, so a
+// room key is never sealed to more devices than it has to be. Revoking the
+// oldest device promotes the next one.
+export function primaryDevices(devices: ChatDevice[]): ChatDevice[] {
+  const best = new Map<number, ChatDevice>()
+  for (const d of devices) {
+    const cur = best.get(d.owner)
+    if (!cur || olderDevice(d, cur)) best.set(d.owner, d)
+  }
+  return [...best.values()]
+}
+
+function olderDevice(a: ChatDevice, b: ChatDevice): boolean {
+  if (a.created_at && b.created_at && a.created_at !== b.created_at) return a.created_at < b.created_at
+  return a.id < b.id
+}
+
 async function sealForDevices(conversationId: number, version: number, key: Uint8Array): Promise<void> {
   const { results } = await api.listConversationDevices(conversationId)
-  if (results.length === 0) return
-  const envelopes = await Promise.all(results.map(async (d) => ({
+  const targets = primaryDevices(results)
+  if (targets.length === 0) return
+  const envelopes = await Promise.all(targets.map(async (d) => ({
     recipient_device: d.id,
     key_version: version,
     encrypted_key: await sealRoomKey(key, d.public_key),
@@ -144,40 +164,27 @@ export async function resolveRoomKey(userId: number, conversation: Conversation,
   return { state: 'ready', ...established }
 }
 
-// A participant's new device needs the key everyone else already has. Our
-// own devices get every version this one holds, so a fresh browser can read
-// history too; other people only get the current one, the same as when
-// they're first keyed in, so nobody receives keys from before a rotation.
+// A participant's primary device needs the key everyone else already has.
+// Only that one device is keyed - their other browsers import it - and only
+// at the current version, so nobody receives keys from before a rotation.
 export async function shareKeyWithUser(userId: number, conversation: Conversation, targetUserId: number): Promise<void> {
-  const own = targetUserId === userId
-  const first = own ? 1 : conversation.current_key_version
-  const held: { version: number; key: Uint8Array }[] = []
-  for (let version = first; version <= conversation.current_key_version; version++) {
-    const key = await getRoomKey(conversation.id, version)
-    if (key) held.push({ version, key })
-  }
-  if (held.length === 0) return
+  const version = conversation.current_key_version
+  const key = await getRoomKey(conversation.id, version)
+  if (!key) return
   const device = await ensureDevice(userId)
   const { results } = await api.listConversationDevices(conversation.id)
-  const targets = results.filter((d) => d.owner === targetUserId && d.id !== device.serverId)
-  if (targets.length === 0) return
-  // Envelopes addressed to our own devices are visible to us, so those can be
-  // skipped once delivered instead of being re-sealed on every reconcile.
-  const delivered = new Set<string>()
-  if (own) {
-    for (const e of await api.listEnvelopes(conversation.id)) delivered.add(`${e.recipient_device}:${e.key_version}`)
-  }
-  const envelopes = await Promise.all(held.flatMap(({ version, key }) => targets
-    .filter((d) => !delivered.has(`${d.id}:${version}`))
-    .map(async (d) => ({ recipient_device: d.id, key_version: version, encrypted_key: await sealRoomKey(key, d.public_key) }))))
-  if (envelopes.length > 0) await api.postEnvelopes(conversation.id, envelopes)
+  const target = primaryDevices(results).find((d) => d.owner === targetUserId)
+  if (!target || target.id === device.serverId) return
+  await api.postEnvelopes(conversation.id, [{
+    recipient_device: target.id,
+    key_version: version,
+    encrypted_key: await sealRoomKey(key, target.public_key),
+  }])
 }
 
-// Pushes every key this device holds to our other devices that lack them.
-export async function shareKeysWithOwnDevices(userId: number, conversations: Conversation[]): Promise<void> {
-  for (const conv of conversations) {
-    await shareKeyWithUser(userId, conv, userId).catch(() => undefined)
-  }
+// Keys pasted in from another browser of ours - see lib/chatKeyTransfer.
+export async function adoptImportedKeys(conversationIds: number[]): Promise<void> {
+  for (const id of conversationIds) forgetPendingKeyFetches(id)
 }
 
 export async function decryptMessage(userId: number, message: ChatMessage): Promise<string> {

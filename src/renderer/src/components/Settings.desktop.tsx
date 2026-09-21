@@ -14,6 +14,7 @@ import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
+import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
@@ -704,6 +705,7 @@ export default function Settings(): JSX.Element {
                         </Row>
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Chat devices</p>
                         <ChatDevices userId={account.id} />
+                        <ChatKeyTransfer userId={account.id} />
                       </>
                     )}
 

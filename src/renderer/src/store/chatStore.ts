@@ -262,6 +262,7 @@ interface ChatState {
   startDm: (userIds: number[], name?: string) => Promise<Conversation>
   resolveKey: (conversationId: number) => Promise<void>
   decryptRoom: (conversationId: number) => Promise<void>
+  adoptKeys: (conversationIds: number[]) => Promise<void>
   ensureNowPlaying: (userIds: number[]) => void
   setPresenceEnabled: (on: boolean) => void
   setReadEnabled: (on: boolean) => void
@@ -691,15 +692,11 @@ export const useChatStore = create<ChatState>((set, get) => {
   // the key on, re-shares it to any currently-online participant. Covers gaps
   // left by the one-shot device.added/envelope.available push: a device that
   // was offline when that event fired never gets another chance otherwise.
-  // Our own other devices are covered too - presence never reports us coming
-  // online to ourselves, so without this a new browser of ours only got a key
-  // if another participant happened to be online at the same moment.
   const reconcileKeys = async (): Promise<void> => {
     const s = get()
     const meId = s.meId
     if (!meId) return
     const m = await e2e()
-    void m.shareKeysWithOwnDevices(meId, s.conversations)
     for (const conv of s.conversations) {
       for (const p of conv.participants) {
         if (p.user.id === meId || !s.online[p.user.id]) continue
@@ -709,10 +706,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   }
 
-  // Every poll tick: a device still missing keys asks again (nothing is pushed
-  // to it if the holder's share raced its registration), and a device holding
-  // keys hands them to any of our devices that has appeared since last check.
-  let ownDeviceIds: string | null = null
+  // A device still missing keys asks again each tick: nothing is pushed to it
+  // if the holder's share raced its registration, and a device that isn't the
+  // primary one only gets keys when they're imported into it.
   const pollKeys = async (): Promise<void> => {
     const s = get()
     const meId = s.meId
@@ -726,10 +722,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (s.keyState[conv.id] === 'ready') void get().decryptRoom(conv.id)
       else void get().resolveKey(conv.id)
     }
-    const ids = (await api.listMyDevices()).map((d) => d.id).sort((a, b) => a - b).join(',')
-    const changed = ownDeviceIds !== null && ownDeviceIds !== ids
-    ownDeviceIds = ids
-    if (changed) await m.shareKeysWithOwnDevices(meId, get().conversations)
   }
 
   const primeRoom = async (key: string): Promise<void> => {
@@ -909,7 +901,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (listPollTimer !== null) window.clearInterval(listPollTimer)
       listPollTimer = null
       seenNew.clear()
-      ownDeviceIds = null
       initPromise = null
       rerunResolve.clear()
       lastRoomBySpace.clear()
@@ -1425,6 +1416,17 @@ export const useChatStore = create<ChatState>((set, get) => {
         ...(get().lastMessage[key] ? [get().lastMessage[key]] : []),
       ].filter((msg) => msg.id > 0 && msg.is_encrypted && !(plain[msg.id] && 'text' in plain[msg.id]))
       await pool(targets, 8, decryptOne)
+    },
+
+    // Keys imported from another browser of ours: re-run every room they
+    // cover so anything that was stuck on "waiting" decrypts straight away.
+    adoptKeys: async (conversationIds) => {
+      const m = await e2e()
+      await m.adoptImportedKeys(conversationIds)
+      await pool(conversationIds, 4, async (id) => {
+        await get().resolveKey(id)
+        await get().decryptRoom(id)
+      })
     },
 
     ensureNowPlaying: (userIds) => {

@@ -12,6 +12,7 @@ const isMobileLabel = (label: string): boolean => /iOS|Android/.test(label)
 // storage, other browsers), so this lets you drop the ones you no longer use.
 export default function ChatDevices({ userId }: { userId: number }): JSX.Element {
   const [devices, setDevices] = useState<ChatDevice[] | null>(null)
+  const [keyedId, setKeyedId] = useState<number | null>(null)
   const [thisDevice, setThisDevice] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<number | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
@@ -19,9 +20,10 @@ export default function ChatDevices({ userId }: { userId: number }): JSX.Element
 
   const load = useCallback(async () => {
     try {
-      const [list, local] = await Promise.all([api.listMyDevices(), e2e().then((m) => m.localDeviceId(userId))])
+      const [list, m] = await Promise.all([api.listMyDevices(), e2e()])
       setDevices(list.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')))
-      setThisDevice(local)
+      setKeyedId(m.primaryDevices(list)[0]?.id ?? null)
+      setThisDevice(await m.localDeviceId(userId))
       setError(null)
     } catch (err) {
       setError((err as Error).message || 'Could not load devices')
@@ -67,6 +69,7 @@ export default function ChatDevices({ userId }: { userId: number }): JSX.Element
                   {current && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-accent">This device</span>}
                 </p>
                 <p className="text-text-muted text-[11px] truncate">
+                  {d.id === keyedId ? 'Receives new keys · ' : ''}
                   {d.created_at ? `Added ${new Date(d.created_at).toLocaleString()}` : `Device #${d.id}`}
                 </p>
               </div>
@@ -96,7 +99,8 @@ export default function ChatDevices({ userId }: { userId: number }): JSX.Element
         )
       })}
       <p className="text-text-muted text-[11px] pt-2">
-        A revoked browser stops receiving new keys. If it opens chat again it registers as a new device and needs keys shared to it again.
+        New conversation keys go to your oldest device only. Any other browser needs them exported from that device and imported,
+        below. Revoking the keyed device moves that role to the next oldest.
       </p>
       {error && <p className="text-red-400 text-[11px] pt-1">{error}</p>}
     </div>
