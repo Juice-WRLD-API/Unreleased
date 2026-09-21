@@ -460,11 +460,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (cameOnline && s.meId) {
           for (const conv of s.conversations) {
             if (!conv.participants.some((p) => p.user.id === ev.user_id)) continue
-            if (s.keyState[conv.id] === 'ready') {
-              void e2e().then((m) => m.shareKeyWithUser(s.meId!, conv, ev.user_id)).catch(() => undefined)
-            } else {
-              void get().resolveKey(conv.id)
-            }
+            // Sharing is a no-op when we hold no key, so it doesn't need to
+            // wait on keyState (only set once a room has been resolved).
+            void e2e().then((m) => m.shareKeyWithUser(s.meId!, conv, ev.user_id)).catch(() => undefined)
+            if (s.keyState[conv.id] !== 'ready') void get().resolveKey(conv.id)
           }
         }
         return
@@ -629,10 +628,13 @@ export const useChatStore = create<ChatState>((set, get) => {
         set((st) => ({
           conversations: st.conversations.map((c) => c.id === ev.conversation ? { ...c, current_key_version: Math.max(c.current_key_version, ev.key_version) } : c),
         }))
-        void get().resolveKey(ev.conversation)
+        void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
+          .then(() => get().resolveKey(ev.conversation))
         return
       case 'envelope.available':
-        void get().resolveKey(ev.conversation).then(() => get().decryptRoom(ev.conversation))
+        void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
+          .then(() => get().resolveKey(ev.conversation))
+          .then(() => get().decryptRoom(ev.conversation))
         return
       case 'device.added': {
         const conv = s.conversations.find((c) => c.id === ev.conversation)
@@ -689,21 +691,45 @@ export const useChatStore = create<ChatState>((set, get) => {
   // the key on, re-shares it to any currently-online participant. Covers gaps
   // left by the one-shot device.added/envelope.available push: a device that
   // was offline when that event fired never gets another chance otherwise.
+  // Our own other devices are covered too - presence never reports us coming
+  // online to ourselves, so without this a new browser of ours only got a key
+  // if another participant happened to be online at the same moment.
   const reconcileKeys = async (): Promise<void> => {
     const s = get()
     const meId = s.meId
     if (!meId) return
     const m = await e2e()
+    void m.shareKeysWithOwnDevices(meId, s.conversations)
     for (const conv of s.conversations) {
-      if (s.keyState[conv.id] === 'ready') {
-        for (const p of conv.participants) {
-          if (p.user.id === meId || !s.online[p.user.id]) continue
-          void m.shareKeyWithUser(meId, conv, p.user.id).catch(() => undefined)
-        }
-      } else {
-        void get().resolveKey(conv.id)
+      for (const p of conv.participants) {
+        if (p.user.id === meId || !s.online[p.user.id]) continue
+        void m.shareKeyWithUser(meId, conv, p.user.id).catch(() => undefined)
       }
+      if (s.keyState[conv.id] !== 'ready') void get().resolveKey(conv.id)
     }
+  }
+
+  // Every poll tick: a device still missing keys asks again (nothing is pushed
+  // to it if the holder's share raced its registration), and a device holding
+  // keys hands them to any of our devices that has appeared since last check.
+  let ownDeviceIds: string | null = null
+  const pollKeys = async (): Promise<void> => {
+    const s = get()
+    const meId = s.meId
+    if (!meId) return
+    const m = await e2e()
+    for (const conv of s.conversations) {
+      const missing = s.keyState[conv.id] === 'waiting'
+        || (s.rooms[`d:${conv.id}`]?.items ?? []).some((x) => { const p = s.plain[x.id]; return !!p && 'error' in p && p.error === 'missing-key' })
+      if (!missing) continue
+      m.forgetPendingKeyFetches(conv.id)
+      if (s.keyState[conv.id] === 'ready') void get().decryptRoom(conv.id)
+      else void get().resolveKey(conv.id)
+    }
+    const ids = (await api.listMyDevices()).map((d) => d.id).sort((a, b) => a - b).join(',')
+    const changed = ownDeviceIds !== null && ownDeviceIds !== ids
+    ownDeviceIds = ids
+    if (changed) await m.shareKeysWithOwnDevices(meId, get().conversations)
   }
 
   const primeRoom = async (key: string): Promise<void> => {
@@ -850,6 +876,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           ].filter((k) => (!active || k !== roomKey(active)) && !(k in known))
           return pool(keys, 4, primeRoom)
         }).catch(() => undefined)
+        void pollKeys().catch(() => undefined)
       }, LIST_POLL_MS)
 
       initPromise = (async () => {
@@ -882,6 +909,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (listPollTimer !== null) window.clearInterval(listPollTimer)
       listPollTimer = null
       seenNew.clear()
+      ownDeviceIds = null
       initPromise = null
       rerunResolve.clear()
       lastRoomBySpace.clear()

@@ -58,6 +58,11 @@ export function ensureDevice(userId: number): Promise<ActiveDevice> {
   return devicePromise
 }
 
+// This browser's device id, without registering one if it has none yet.
+export async function localDeviceId(userId: number): Promise<string | null> {
+  return (await loadDevice(userId))?.deviceId ?? null
+}
+
 export function resetDevice(): void {
   devicePromise = null
   deviceUserId = null
@@ -81,21 +86,26 @@ export function fetchRoomKey(userId: number, conversationId: number, version: nu
     const key = await openRoomKey(mine.encrypted_key, device.identity)
     await putRoomKey(conversationId, version, key)
     return key
-  })().finally(() => keyFetches.delete(id))
+  })().finally(() => {
+    if (keyFetches.get(id) === run) keyFetches.delete(id)
+  })
   keyFetches.set(id, run)
   return run
 }
 
-async function sealForDevices(
-  conversationId: number,
-  version: number,
-  key: Uint8Array,
-  filter?: (ownerId: number) => boolean,
-): Promise<void> {
+// A lookup already in flight may have listed envelopes before a new one was
+// posted; once we hear one exists, the next caller has to ask again rather
+// than share that stale answer.
+export function forgetPendingKeyFetches(conversationId: number): void {
+  for (const id of keyFetches.keys()) {
+    if (id.startsWith(`${conversationId}:`)) keyFetches.delete(id)
+  }
+}
+
+async function sealForDevices(conversationId: number, version: number, key: Uint8Array): Promise<void> {
   const { results } = await api.listConversationDevices(conversationId)
-  const targets = results.filter((d) => !filter || filter(d.owner))
-  if (targets.length === 0) return
-  const envelopes = await Promise.all(targets.map(async (d) => ({
+  if (results.length === 0) return
+  const envelopes = await Promise.all(results.map(async (d) => ({
     recipient_device: d.id,
     key_version: version,
     encrypted_key: await sealRoomKey(key, d.public_key),
@@ -134,12 +144,40 @@ export async function resolveRoomKey(userId: number, conversation: Conversation,
   return { state: 'ready', ...established }
 }
 
-// A participant's new device needs the key everyone else already has.
+// A participant's new device needs the key everyone else already has. Our
+// own devices get every version this one holds, so a fresh browser can read
+// history too; other people only get the current one, the same as when
+// they're first keyed in, so nobody receives keys from before a rotation.
 export async function shareKeyWithUser(userId: number, conversation: Conversation, targetUserId: number): Promise<void> {
-  const version = conversation.current_key_version
-  const key = await getRoomKey(conversation.id, version)
-  if (!key) return
-  await sealForDevices(conversation.id, version, key, (owner) => owner === targetUserId)
+  const own = targetUserId === userId
+  const first = own ? 1 : conversation.current_key_version
+  const held: { version: number; key: Uint8Array }[] = []
+  for (let version = first; version <= conversation.current_key_version; version++) {
+    const key = await getRoomKey(conversation.id, version)
+    if (key) held.push({ version, key })
+  }
+  if (held.length === 0) return
+  const device = await ensureDevice(userId)
+  const { results } = await api.listConversationDevices(conversation.id)
+  const targets = results.filter((d) => d.owner === targetUserId && d.id !== device.serverId)
+  if (targets.length === 0) return
+  // Envelopes addressed to our own devices are visible to us, so those can be
+  // skipped once delivered instead of being re-sealed on every reconcile.
+  const delivered = new Set<string>()
+  if (own) {
+    for (const e of await api.listEnvelopes(conversation.id)) delivered.add(`${e.recipient_device}:${e.key_version}`)
+  }
+  const envelopes = await Promise.all(held.flatMap(({ version, key }) => targets
+    .filter((d) => !delivered.has(`${d.id}:${version}`))
+    .map(async (d) => ({ recipient_device: d.id, key_version: version, encrypted_key: await sealRoomKey(key, d.public_key) }))))
+  if (envelopes.length > 0) await api.postEnvelopes(conversation.id, envelopes)
+}
+
+// Pushes every key this device holds to our other devices that lack them.
+export async function shareKeysWithOwnDevices(userId: number, conversations: Conversation[]): Promise<void> {
+  for (const conv of conversations) {
+    await shareKeyWithUser(userId, conv, userId).catch(() => undefined)
+  }
 }
 
 export async function decryptMessage(userId: number, message: ChatMessage): Promise<string> {

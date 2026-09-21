@@ -13,6 +13,7 @@ import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
+import ChatDevices from './chat/ChatDevices'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
@@ -957,6 +958,11 @@ export default function Settings(): JSX.Element {
                         >
                           <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
                         </Row>
+                      </SettingsCard>
+                    )}
+                    {hasChatAccess(account) && (
+                      <SettingsCard title="Chat devices">
+                        <ChatDevices userId={account.id} />
                       </SettingsCard>
                     )}
 

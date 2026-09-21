@@ -205,7 +205,7 @@ export default function RoomPane({ room, header, enterSends = true }: {
           <KeyRound size={16} className="shrink-0 text-amber-400" />
           <span className="flex-1">
             {keyState === 'waiting'
-              ? 'This device doesn’t have the key for this conversation yet. It will unlock as soon as another participant is online.'
+              ? 'This device doesn’t have the key for this conversation yet. It unlocks once another of your signed-in devices, or another participant, is online with chat open.'
               : 'Couldn’t set up encryption for this conversation.'}
           </span>
           <button onClick={() => void resolveKey(room.id)} className="shrink-0 font-semibold text-amber-300 hover:underline">Retry</button>
