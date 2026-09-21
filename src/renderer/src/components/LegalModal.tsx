@@ -174,8 +174,8 @@ function PrivacyContent(): JSX.Element {
 
       <H>2. Data stored on your device</H>
       <P>
-        Most of your data never leaves your device. The following are stored locally (in browser storage or, on the
-        desktop app, on your file system):
+        Most of your data stays on your device, except what syncs to your account if you sign in (see section 5). The
+        following are stored locally (in browser storage or, on the desktop app, on your file system):
       </P>
       <List
         items={[
@@ -218,7 +218,20 @@ function PrivacyContent(): JSX.Element {
           'Editor-related submissions (applications, edit proposals, reports) if you use those features.',
         ]}
       />
+      <P>
+        Signed-in accounts also have a public profile. It shows your Discord username, avatar, bio, and donor status if
+        applicable. Your play history, playlists, and what you&apos;re currently playing are visible to others only if
+        you turn on the matching options in Settings, and you can turn them off at any time. You can always see your own
+        history and playlists on your profile regardless of these options.
+      </P>
       <P>You can use the App without signing in; these syncing features simply stay local or unavailable.</P>
+
+      <H>5a. Peer-to-peer downloads</H>
+      <P>
+        Some file downloads are served through a distributed CDN of volunteer nodes. To fetch a file, the App opens a
+        WebRTC connection to a node, so that node can see your IP address, as with any direct peer connection. The API
+        provides the file&apos;s expected hash, and the App refuses any download that does not match it.
+      </P>
 
       <H>6. Optional integrations</H>
       <List

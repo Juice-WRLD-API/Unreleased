@@ -41,8 +41,9 @@ export default function CookieNotice(): JSX.Element | null {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-text-secondary text-xs leading-relaxed">
-              This app stores data locally on your device - settings, your session if you sign in, and cached content -
-              so it can work. It doesn&apos;t use third-party advertising or tracking cookies.{' '}
+              This app stores data on your device - settings, your session if you sign in, and cached content - so it
+              can work. If you sign in, your settings are also saved to your account so they follow you across devices.
+              It doesn&apos;t use third-party advertising or tracking cookies.{' '}
               <button
                 onClick={() => { useSandboxStore.getState().expand(); setShowPrivacy(true) }}
                 className="text-accent hover:underline font-medium"
