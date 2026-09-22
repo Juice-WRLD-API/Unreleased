@@ -610,9 +610,13 @@ export default function PublicProfileView(): JSX.Element {
         </div>
       )}
 
+      {/* Recently played, Wrapped, Playlists - side by side on wide screens to cut down on scrolling */}
+      {(showPlayHistory || showPlaylists) && (
+      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-8 items-start">
+
       {/* Recently played */}
       {showPlayHistory && (
-        <div className="mt-8">
+        <div>
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3">
             <History size={15} /> Recently played
           </h2>
@@ -652,7 +656,7 @@ export default function PublicProfileView(): JSX.Element {
 
       {/* Wrapped */}
       {showPlayHistory && (
-        <div className="mt-8">
+        <div>
           <div className="flex items-center justify-between mb-3">
             <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide">
               <BarChart3 size={15} /> Wrapped
@@ -716,7 +720,7 @@ export default function PublicProfileView(): JSX.Element {
 
       {/* Public playlists */}
       {showPlaylists && (
-        <div className="mt-8">
+        <div>
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3">
             <ListMusic size={15} /> Playlists
           </h2>
@@ -741,6 +745,9 @@ export default function PublicProfileView(): JSX.Element {
             </div>
           )}
         </div>
+      )}
+
+      </div>
       )}
 
       {trackMenu && (
