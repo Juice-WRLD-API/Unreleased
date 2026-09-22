@@ -3,6 +3,7 @@ import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine, FolderP
 import { useStorePick, UploadItem, StagedFileChange, StagedSongChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
+import { cancelDonorUpload, cancelAllDonorUploads, isDonorUploadId } from '../lib/donorUploads'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 import { proposeStagedSongChanges, stagedSongChangeLabel } from '../lib/compStagedSongChanges'
 
@@ -47,7 +48,7 @@ export default function UploadManager(): JSX.Element {
           </button>
         )}
         {uploads.filter((d) => d.type === 'upload' && d.state === 'downloading').length > 1 && (
-          <button onClick={cancelAllCompUploads} className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors px-1 rounded">
+          <button onClick={() => { cancelAllCompUploads(); cancelAllDonorUploads() }} className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors px-1 rounded">
             Cancel All
           </button>
         )}
@@ -222,7 +223,7 @@ function UploadRow({ item }: { item: UploadItem }): JSX.Element {
         <div className="flex items-center gap-1 shrink-0">
           {isActive && <span className="text-[var(--text-muted)] text-[10px]">{item.percent}%</span>}
           {isActive && isUpload && (
-            <button onClick={() => cancelCompUpload(item.id)} title="Cancel upload"
+            <button onClick={() => (isDonorUploadId(item.id) ? cancelDonorUpload(item.id) : cancelCompUpload(item.id))} title="Cancel upload"
               className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 transition-colors">
               <X size={12} />
             </button>

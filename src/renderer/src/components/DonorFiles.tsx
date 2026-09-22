@@ -5,6 +5,7 @@ import {
   updateDonorFile, uploadDonorFile, validateDonorUpload,
 } from '../lib/donorFilesApi'
 import type { DonorFile, DonorQuota } from '../lib/donorFilesApi'
+import { DONOR_UPLOADS_CHANGED, queueDonorUploads } from '../lib/donorUploads'
 import { formatBytes } from '../lib/format'
 import { isDonorAudio } from '../lib/donorPlayback'
 import { useStore } from '../store/useStore'
@@ -20,7 +21,6 @@ export default function DonorFiles(): JSX.Element {
   const [files, setFiles] = useState<DonorFile[] | null>(null)
   const [quota, setQuota] = useState<DonorQuota | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [uploading, setUploading] = useState<{ name: string; progress: number } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -56,28 +56,38 @@ export default function DonorFiles(): JSX.Element {
   const [newPlaylistName, setNewPlaylistName] = useState('')
   useEffect(() => { if (files) setDonorFiles(files) }, [files, setDonorFiles])
 
+  // Uploads run through lib/donorUploads (module-scoped, like comp proposal
+  // uploads) so they show progress in the Uploads panel and survive this
+  // component unmounting. This just reflects the result once each finishes.
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const { file, quota: q } = (e as CustomEvent<{ file: DonorFile; quota: DonorQuota }>).detail
+      setFiles((prev) => [file, ...(prev ?? [])])
+      setQuota(q)
+    }
+    window.addEventListener(DONOR_UPLOADS_CHANGED, handler)
+    return () => window.removeEventListener(DONOR_UPLOADS_CHANGED, handler)
+  }, [])
+
   // Object URLs pin the whole blob in memory until revoked.
   useEffect(() => () => { if (playing) URL.revokeObjectURL(playing.url) }, [playing])
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
 
-  const upload = async (picked: FileList | null): Promise<void> => {
+  // Validated up front so a bad pick never occupies a row in the Uploads
+  // panel - the actual transfer is queued there (see lib/donorUploads) rather
+  // than run inline, so it keeps going if this page is closed.
+  const upload = (picked: FileList | null): void => {
     if (!picked || picked.length === 0) return
     setError(null)
-    let currentQuota = quota
+    let remaining = quota?.remaining
+    const valid: File[] = []
     for (const file of Array.from(picked)) {
-      const problem = validateDonorUpload(file, currentQuota)
+      const problem = validateDonorUpload(file, quota && remaining !== undefined ? { ...quota, remaining } : null)
       if (problem) { setError(problem); continue }
-      setUploading({ name: file.name, progress: 0 })
-      try {
-        const res = await uploadDonorFile(file, (p) => setUploading({ name: file.name, progress: p }))
-        currentQuota = res.quota
-        setQuota(res.quota)
-        setFiles((prev) => [res.file, ...(prev ?? [])])
-      } catch (err) {
-        setError((err as Error).message || 'Upload failed')
-      }
+      if (remaining !== undefined) remaining -= file.size
+      valid.push(file)
     }
-    setUploading(null)
+    queueDonorUploads(valid)
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -191,8 +201,7 @@ export default function DonorFiles(): JSX.Element {
         await deleteDonorFile(f.file_id)
         deletedOld = true
       }
-      setUploading({ name: f.filename, progress: 0 })
-      const up = await uploadDonorFile(tagged, (p) => setUploading({ name: f.filename, progress: p }))
+      const up = await uploadDonorFile(tagged)
       let newQuota = up.quota
       if (!deletedOld) {
         try {
@@ -228,8 +237,6 @@ export default function DonorFiles(): JSX.Element {
       setError(message || 'Could not save tags')
       setTagEdit({ id: f.file_id, tags, saving: false })
       void load()
-    } finally {
-      setUploading(null)
     }
   }
 
@@ -277,20 +284,18 @@ export default function DonorFiles(): JSX.Element {
         accept={ACCEPT}
         multiple
         className="hidden"
-        onChange={(e) => void upload(e.target.files)}
+        onChange={(e) => upload(e.target.files)}
       />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        disabled={!!uploading}
         className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-60 my-2"
       >
-        {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-        {uploading ? `Uploading ${Math.round(uploading.progress * 100)}%` : 'Upload files'}
+        <Upload size={13} />Upload files
       </button>
-      {uploading && <p className="text-text-muted text-[11px] truncate">{uploading.name}</p>}
       <p className="text-text-muted text-[11px] pb-1">
         Audio and images, up to 100 MB each. Files are private unless you turn on a share link.
+        Progress shows in the Uploads panel.
       </p>
       {error && <p className="text-red-400 text-[11px] py-1">{error}</p>}
       {notice && <p className="text-accent text-[11px] py-1">{notice}</p>}
