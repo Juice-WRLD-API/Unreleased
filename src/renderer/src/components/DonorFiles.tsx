@@ -7,7 +7,7 @@ import {
 import type { DonorFile, DonorQuota } from '../lib/donorFilesApi'
 import { DONOR_UPLOADS_CHANGED, queueDonorUploads } from '../lib/donorUploads'
 import { formatBytes } from '../lib/format'
-import { isDonorAudio } from '../lib/donorPlayback'
+import { donorFileToTrack, donorTrackId, isDonorAudio } from '../lib/donorPlayback'
 import { useStore } from '../store/useStore'
 import { canEditTags, readMp3Tags, writeMp3Tags } from '../lib/mp3Tags'
 import type { Mp3Tags } from '../lib/mp3Tags'
@@ -25,12 +25,10 @@ export default function DonorFiles(): JSX.Element {
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
-  const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null)
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null)
   const [tagEdit, setTagEdit] = useState<{ id: string; tags: Mp3Tags | null; saving: boolean } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +54,22 @@ export default function DonorFiles(): JSX.Element {
   const [newPlaylistName, setNewPlaylistName] = useState('')
   useEffect(() => { if (files) setDonorFiles(files) }, [files, setDonorFiles])
 
+  // Playback goes through the normal queue/player rather than a local <audio>
+  // element - a local element dies the instant this component unmounts (e.g.
+  // switching away from Files), and never showed up in Now Playing/the mini
+  // player to begin with.
+  const currentTrackId = useStore((s) => s.currentTrack?.id)
+  const isPlayingGlobal = useStore((s) => s.isPlaying)
+  const setIsPlayingGlobal = useStore((s) => s.setIsPlaying)
+  const playTrack = useStore((s) => s.playTrack)
+  const togglePlay = (f: DonorFile): void => {
+    const trackId = donorTrackId(f.file_id)
+    if (currentTrackId === trackId) { setIsPlayingGlobal(!isPlayingGlobal); return }
+    const queueTracks = (files ?? []).filter(isDonorAudio).map(donorFileToTrack)
+    const track = queueTracks.find((t) => t.id === trackId)
+    if (track) playTrack(track, queueTracks)
+  }
+
   // Uploads run through lib/donorUploads (module-scoped, like comp proposal
   // uploads) so they show progress in the Uploads panel and survive this
   // component unmounting. This just reflects the result once each finishes.
@@ -70,7 +84,6 @@ export default function DonorFiles(): JSX.Element {
   }, [])
 
   // Object URLs pin the whole blob in memory until revoked.
-  useEffect(() => () => { if (playing) URL.revokeObjectURL(playing.url) }, [playing])
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
 
   // Validated up front so a bad pick never occupies a row in the Uploads
@@ -134,25 +147,10 @@ export default function DonorFiles(): JSX.Element {
       setQuota(res.quota)
       setFiles((prev) => prev?.filter((x) => x.file_id !== f.file_id) ?? prev)
       replaceDonorFileId(f.file_id, null)
-      if (playing?.id === f.file_id) setPlaying(null)
       if (preview?.id === f.file_id) setPreview(null)
       setConfirmDelete(null)
     } catch (err) {
       setError((err as Error).message || 'Could not delete file')
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const togglePlay = async (f: DonorFile): Promise<void> => {
-    if (playing?.id === f.file_id) { setPlaying(null); return }
-    setBusy(f.file_id)
-    try {
-      const blob = await fetchDonorFileBlob(f.file_id)
-      setPlaying({ id: f.file_id, url: URL.createObjectURL(blob) })
-      setError(null)
-    } catch (err) {
-      setError((err as Error).message || 'Could not play file')
     } finally {
       setBusy(null)
     }
@@ -215,7 +213,6 @@ export default function DonorFiles(): JSX.Element {
       setQuota(newQuota)
       setFiles((prev) => [saved, ...(prev ?? []).filter((x) => x.file_id !== f.file_id)])
       replaceDonorFileId(f.file_id, saved.file_id)
-      if (playing?.id === f.file_id) setPlaying(null)
       setTagEdit(null)
       setNotice(f.is_shared ? 'Tags saved. This file has a new share link - the old one no longer works.' : 'Tags saved.')
     } catch (err) {
@@ -346,8 +343,12 @@ export default function DonorFiles(): JSX.Element {
                   {isBusy ? <Loader2 size={13} className="animate-spin" /> : preview?.id === f.file_id ? <X size={13} /> : <FileImage size={13} />}
                 </IconBtn>
               ) : (
-                <IconBtn label={playing?.id === f.file_id ? 'Stop' : 'Play'} disabled={isBusy} onClick={() => void togglePlay(f)}>
-                  {isBusy ? <Loader2 size={13} className="animate-spin" /> : playing?.id === f.file_id ? <Pause size={13} /> : <Play size={13} />}
+                <IconBtn
+                  label={currentTrackId === donorTrackId(f.file_id) && isPlayingGlobal ? 'Pause' : 'Play'}
+                  disabled={isBusy}
+                  onClick={() => togglePlay(f)}
+                >
+                  {currentTrackId === donorTrackId(f.file_id) && isPlayingGlobal ? <Pause size={13} /> : <Play size={13} />}
                 </IconBtn>
               )}
               <IconBtn label="Download" disabled={isBusy} onClick={() => void download(f)}><Download size={13} /></IconBtn>
@@ -422,9 +423,6 @@ export default function DonorFiles(): JSX.Element {
               tagEdit.tags
                 ? <TagEditor file={f} initial={tagEdit.tags} saving={tagEdit.saving} onCancel={() => setTagEdit(null)} onSave={(t) => void saveTags(f, t)} />
                 : <div className="flex items-center gap-2 pt-2 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Reading tags…</div>
-            )}
-            {playing?.id === f.file_id && (
-              <audio ref={audioRef} src={playing.url} controls autoPlay onEnded={() => setPlaying(null)} className="w-full h-8 mt-2" />
             )}
             {preview?.id === f.file_id && (
               <img src={preview.url} alt={f.filename} className="mt-2 max-h-56 rounded-lg object-contain" />
