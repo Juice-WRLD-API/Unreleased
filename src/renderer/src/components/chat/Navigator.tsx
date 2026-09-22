@@ -821,7 +821,15 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
       {conv.is_group || others.length !== 1 ? (
         <span className="relative w-10 h-10 shrink-0">
           {others.slice(0, 2).map((p, i) => (
-            <ChatAvatar key={p.id} user={p.user} size={28} className={`absolute ${i === 0 ? 'top-0 left-0' : 'bottom-0 right-0 ring-2 ring-[var(--surface)] rounded-full'}`} />
+            // Position the wrapper, not ChatAvatar itself - ChatAvatar's own
+            // base classes always include `relative`, which in Tailwind's
+            // generated stylesheet beats an `absolute` passed via className
+            // (position utilities are emitted static/fixed/absolute/relative/
+            // sticky, so the later `relative` rule wins no matter the order
+            // in the class string) and the avatars overflow their box.
+            <span key={p.id} className={`absolute ${i === 0 ? 'top-0 left-0' : 'bottom-0 right-0'}`}>
+              <ChatAvatar user={p.user} size={28} className={i === 1 ? 'ring-2 ring-[var(--surface)]' : ''} />
+            </span>
           ))}
         </span>
       ) : (
