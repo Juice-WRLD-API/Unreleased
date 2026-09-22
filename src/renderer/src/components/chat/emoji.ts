@@ -423,6 +423,14 @@ export function emojiGlyph(name: string): string {
   return EMOJI[name] ?? name
 }
 
+// For plain-text contexts (sidebar previews, notifications) that don't run
+// the full markdown/rehype pipeline - swaps ":soap:" for its glyph so
+// previews don't show raw shortcodes.
+const PLAIN_SHORTCODE_RE = /:([a-z0-9_]+):/g
+export function shortcodesToGlyphs(text: string): string {
+  return text.replace(PLAIN_SHORTCODE_RE, (match, name) => EMOJI[name] ?? match)
+}
+
 // iOS-style PNGs for every glyph above, keyed by the same shortcode name.
 //
 // `?no-inline` is load-bearing: without it Vite base64s every PNG under its
