@@ -527,6 +527,7 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
                             <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
+                            <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdmin('cdn-nodes')} />
                           </>
                         )}
                         {isAdmin && (

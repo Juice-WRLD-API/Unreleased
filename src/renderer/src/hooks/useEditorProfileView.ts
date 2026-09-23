@@ -10,6 +10,7 @@ import {
 import { accountDisplayName } from '../lib/format'
 import * as reportsApi from '../lib/reportsApi'
 import { fetchEraList } from '../lib/erasApi'
+import { fetchCdnStats } from '../lib/cdnAdminApi'
 import type { AdminTab } from './useAdminQueue'
 import { filterCompProposals, compProposalSearchText, type CompFilterTab } from '../components/CompProposalList'
 import { useStaffRoles } from './useStaffRoles'
@@ -34,6 +35,7 @@ export interface AdminPreview {
   totalUsers: number | null
   totalChannels: number
   totalEras: number | null
+  pendingCdnNodes: number | null
   totalPending: number
   otpEnabled: boolean | null
   totalProposals: number | null
@@ -270,7 +272,10 @@ export function useEditorProfileView(): {
         isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
         isAdmin ? adminListUsers() : Promise.resolve(null),
         isAdmin ? fetchEraList() : Promise.resolve(null),
-      ]).then(([propCounts, compCounts, apps, reps, users, eras]) => {
+        // Caught on its own: the CDN is a separate backend app, and it being
+        // down shouldn't blank every other number on the tile.
+        isAdmin ? fetchCdnStats().catch(() => null) : Promise.resolve(null),
+      ]).then(([propCounts, compCounts, apps, reps, users, eras, cdn]) => {
         if (cancelled) return
         const pendingApplications = apps?.length ?? null
         const pendingReports = reps?.length ?? null
@@ -283,6 +288,7 @@ export function useEditorProfileView(): {
           totalUsers: users?.length ?? null,
           totalChannels: channelsRef.current.length,
           totalEras: eras?.length ?? null,
+          pendingCdnNodes: cdn?.pending_nodes ?? null,
           totalPending: propCounts.pending + compCounts.pending + (pendingApplications ?? 0) + (pendingReports ?? 0),
           otpEnabled: isAdmin ? !!account?.otp_enabled : null,
           totalProposals: isAdmin ? propCounts.total : null,
