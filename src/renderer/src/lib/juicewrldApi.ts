@@ -9,7 +9,38 @@ import { peekSessionEditOverride } from './sessionEditOverrides'
 import { peekActiveChannel } from './activeChannelState'
 import { peekSessionEditLink } from './sessionEditLinksMirror'
 
-export const JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
+export const DEFAULT_JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
+
+const API_BASE_OVERRIDE_KEY = 'jwapi_base_override'
+
+function readApiBaseOverride(): string | null {
+  try {
+    const raw = localStorage.getItem(API_BASE_OVERRIDE_KEY)
+    return raw ? raw.replace(/\/+$/, '') : null
+  } catch {
+    return null
+  }
+}
+
+// Every lib/*Api.ts file builds its own `${JWAPI_BASE}/...` constants at
+// import time, so this only takes effect on next load - setApiBaseOverride
+// reloads the app for that reason.
+export const JWAPI_BASE = readApiBaseOverride() ?? DEFAULT_JWAPI_BASE
+
+export function getApiBaseOverride(): string | null {
+  return readApiBaseOverride()
+}
+
+export function setApiBaseOverride(url: string | null): void {
+  try {
+    if (url && url.trim()) {
+      localStorage.setItem(API_BASE_OVERRIDE_KEY, url.trim().replace(/\/+$/, ''))
+    } else {
+      localStorage.removeItem(API_BASE_OVERRIDE_KEY)
+    }
+  } catch {}
+  location.reload()
+}
 
 /** The one host everything the API serves lives on - its endpoints under
  *  JWAPI_BASE, and the site's own static cover images under /assets/, which

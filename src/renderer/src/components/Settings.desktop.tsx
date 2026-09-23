@@ -5,7 +5,7 @@ import {
   FolderOpen, Monitor, BellOff, Bell, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio,
+  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
 } from 'lucide-react'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
@@ -20,6 +20,7 @@ import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIB
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
+import { DEFAULT_JWAPI_BASE, getApiBaseOverride, setApiBaseOverride } from '../lib/juicewrldApi'
 import { lastfmConfigured } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
@@ -288,6 +289,7 @@ export default function Settings(): JSX.Element {
   const [savingName, setSavingName] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
+  const [apiUrlInput, setApiUrlInput] = useState(() => getApiBaseOverride() ?? DEFAULT_JWAPI_BASE)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
   // otherwise re-expand it - see the matching comment on setShowSettings.
@@ -1711,6 +1713,41 @@ export default function Settings(): JSX.Element {
                     <Globe size={13} />
                     API
                   </a>
+                </div>
+
+                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
+                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
+                    <Server size={13} />
+                    API server
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={apiUrlInput}
+                      onChange={(e) => setApiUrlInput(e.target.value)}
+                      placeholder={DEFAULT_JWAPI_BASE}
+                      spellCheck={false}
+                      className="flex-1 min-w-0 bg-[var(--surface-overlay)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-1.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
+                    />
+                    <button
+                      onClick={() => setApiBaseOverride(apiUrlInput)}
+                      disabled={apiUrlInput.trim().replace(/\/+$/, '') === (getApiBaseOverride() ?? DEFAULT_JWAPI_BASE)}
+                      className="px-3 py-1.5 rounded-lg bg-accent/10 hover:bg-accent/15 disabled:opacity-40 disabled:hover:bg-accent/10 border border-accent/25 text-accent text-xs font-medium transition-colors shrink-0"
+                    >
+                      Save &amp; reload
+                    </button>
+                    {getApiBaseOverride() && (
+                      <button
+                        onClick={() => setApiBaseOverride(null)}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors shrink-0"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-text-muted text-[11px] mt-1.5">
+                    Points the app at a different Juice WRLD API instance. Requires a reload to take effect.
+                  </p>
                 </div>
 
                 {(!account || (!account.is_editor && !account.is_administrator)) && (
