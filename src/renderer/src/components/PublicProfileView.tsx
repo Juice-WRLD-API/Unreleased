@@ -612,14 +612,15 @@ export default function PublicProfileView(): JSX.Element {
 
       {/* Recently played, Wrapped, Playlists - side by side on wide screens to cut down on scrolling */}
       {(showPlayHistory || showPlaylists) && (
-      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-x-8 gap-y-8 items-start">
+      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch auto-rows-fr">
 
       {/* Recently played */}
       {showPlayHistory && (
-        <div>
-          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3">
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
             <History size={15} /> Recently played
           </h2>
+          <div className="overflow-y-auto max-h-[420px] -mx-1 px-1">
           {recentLoading ? (
             <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
           ) : recentTracks.length === 0 ? (
@@ -651,12 +652,13 @@ export default function PublicProfileView(): JSX.Element {
               ))}
             </div>
           )}
+          </div>
         </div>
       )}
 
       {/* Wrapped */}
       {showPlayHistory && (
-        <div>
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
           <div className="flex items-center justify-between mb-3">
             <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide">
               <BarChart3 size={15} /> Wrapped
@@ -720,14 +722,14 @@ export default function PublicProfileView(): JSX.Element {
 
       {/* Public playlists */}
       {showPlaylists && (
-        <div>
-          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3">
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
             <ListMusic size={15} /> Playlists
           </h2>
           {!effectivePlaylists || effectivePlaylists.length === 0 ? (
             <p className="text-text-muted text-sm">No public playlists.</p>
           ) : (
-            <div className="space-y-4">
+            <div className="overflow-y-auto max-h-[420px] -mx-1 px-1 space-y-4">
               {folderGroups.folders.map(({ folder, playlists }) => (
                 <div key={folder.id}>
                   <div className="flex items-center gap-1.5 mb-1.5 px-1">
