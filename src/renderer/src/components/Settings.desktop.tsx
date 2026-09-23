@@ -15,6 +15,7 @@ import { FONTS } from '../lib/fonts'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import DonorFiles from './DonorFiles'
+import MyCdnNodes from './MyCdnNodes'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
@@ -78,6 +79,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'account', label: 'Bio' },
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
+  { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'account', label: 'Log out' },
   // Appearance
@@ -716,6 +718,9 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </>
                     )}
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
+                    <MyCdnNodes />
 
                     <div className="mt-4 rounded-xl border border-[var(--border)] overflow-hidden">
                       <button

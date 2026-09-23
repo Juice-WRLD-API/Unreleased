@@ -15,6 +15,7 @@ import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIB
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import DonorFiles from './DonorFiles'
+import MyCdnNodes from './MyCdnNodes'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
@@ -154,6 +155,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'feedback', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
+  { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
@@ -973,6 +975,9 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </SettingsCard>
                     )}
+                    <SettingsCard title="My CDN nodes">
+                      <MyCdnNodes />
+                    </SettingsCard>
 
                     {showStaffProfile(account) && (
                       <SettingsCard>
