@@ -459,7 +459,7 @@ function MyProfileCard({ onEditProfile, onClose }: { onEditProfile: () => void; 
 
 function MeFooter(): JSX.Element | null {
   const me = useChatStore((s) => s.me)
-  const { setActiveView } = useStorePick('setActiveView')
+  const { setActiveView, setSettingsTab } = useStorePick('setActiveView', 'setSettingsTab')
   const [open, setOpen] = useState(false)
   if (!me) return null
   return (
@@ -474,7 +474,7 @@ function MeFooter(): JSX.Element | null {
           <p className="text-[11px] text-text-muted truncate">{me.role === 'administrator' ? 'Administrator' : 'Manager'}</p>
         </div>
       </button>
-      {open && <MyProfileCard onEditProfile={() => setActiveView('settings')} onClose={() => setOpen(false)} />}
+      {open && <MyProfileCard onEditProfile={() => { setSettingsTab('account'); setActiveView('settings') }} onClose={() => setOpen(false)} />}
     </div>
   )
 }
