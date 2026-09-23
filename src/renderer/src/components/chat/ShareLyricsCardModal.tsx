@@ -13,23 +13,26 @@ interface Props {
   onClose: () => void
 }
 
-function Row({ icon, label, sub, sent, onClick }: {
+function Row({ icon, label, sub, busy, sent, onClick }: {
   icon: React.ReactNode
   label: string
   sub?: string
+  busy: boolean
   sent: boolean
   onClick: () => void
 }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      disabled={sent}
+      disabled={sent || busy}
       className="w-full flex items-center gap-3 rounded-xl px-2.5 py-2 text-left hover:bg-surface-raised/70 transition-colors disabled:opacity-70"
     >
-      <span className="shrink-0">{icon}</span>
+      <span className="shrink-0">{busy ? <Loader2 size={16} className="animate-spin text-text-muted" /> : icon}</span>
       <span className="flex-1 min-w-0">
         <span className="block text-sm font-medium text-text-primary truncate">{label}</span>
-        {sub && <span className="block text-xs text-text-muted truncate">{sub}</span>}
+        {busy ? (
+          <span className="block text-xs text-text-muted truncate">Sending...</span>
+        ) : sub && <span className="block text-xs text-text-muted truncate">{sub}</span>}
       </span>
       {sent && (
         <span className="flex items-center gap-1 text-xs font-semibold text-accent shrink-0">
@@ -132,6 +135,7 @@ export default function ShareLyricsCardModal({ file, title, artist, onClose }: P
                           ? <ChatAvatar user={others[0].user} size={32} />
                           : <span className="w-8 h-8 rounded-full bg-surface-raised text-text-secondary flex items-center justify-center"><MessagesSquare size={15} /></span>}
                         label={conversationTitle(conv, meId)}
+                        busy={busy === key}
                         sent={sentTo.has(key)}
                         onClick={() => void share(room)}
                       />
@@ -152,7 +156,7 @@ export default function ShareLyricsCardModal({ file, title, artist, onClose }: P
                         key={key}
                         icon={<Hash size={16} className="text-text-muted" />}
                         label={channel.name}
-                        sub={busy === key ? 'Sending...' : undefined}
+                        busy={busy === key}
                         sent={sentTo.has(key)}
                         onClick={() => void share(room)}
                       />
