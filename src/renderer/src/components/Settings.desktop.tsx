@@ -14,7 +14,6 @@ import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
-import DonorFiles from './DonorFiles'
 import MyCdnNodes from './MyCdnNodes'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
@@ -696,13 +695,6 @@ export default function Settings(): JSX.Element {
                       <Toggle on={!!account.public_now_playing} onClick={() => void togglePublicNowPlaying()} />
                     </Row>
                     {privacyError && <p className="text-red-400 text-[11px] mt-1">{privacyError}</p>}
-
-                    {account.is_donor && (
-                      <>
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Donor files</p>
-                        <DonorFiles />
-                      </>
-                    )}
 
                     {hasChatAccess(account) && (
                       <>
