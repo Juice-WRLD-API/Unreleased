@@ -1,3 +1,4 @@
+import { Cloud } from 'lucide-react'
 import { useState } from 'react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useStore } from '../store/useStore'
@@ -28,9 +29,14 @@ export default function ApiFilesView(): JSX.Element {
           ))}
         </div>
       </div>
+      {/* Full width, matching the channel browser (ApiFilesView.desktop/mobile) -
+          this used to be capped to a narrow settings-style column. */}
       {mine ? (
-        <div className={`flex-1 min-h-0 overflow-y-auto pb-6 ${isMobile ? 'px-4' : 'px-5 max-w-3xl'}`}>
-          <h1 className="text-text-primary text-xl font-bold pt-4 pb-1">My files</h1>
+        <div className={`flex-1 min-h-0 overflow-y-auto ${isMobile ? 'px-4 pb-6' : 'px-5 pb-8'}`}>
+          <div className="flex items-center gap-2.5 pt-5 pb-3">
+            <Cloud size={18} className="text-text-muted shrink-0" />
+            <h1 className="text-text-primary text-xl font-bold">My files</h1>
+          </div>
           <DonorFiles />
         </div>
       ) : browser}
