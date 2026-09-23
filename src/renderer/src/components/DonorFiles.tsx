@@ -1,23 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Copy, Download, FileAudio, FileImage, ImagePlus, Link2, Link2Off, ListPlus, Loader2, Pause, Pencil, Play, Tag, Trash2, Upload, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  DONOR_ALLOWED_EXTENSIONS, deleteDonorFile, fetchDonorFileBlob, isImageFile, listDonorFiles,
-  updateDonorFile, uploadDonorFile, validateDonorUpload,
+  ArrowDown, ArrowUp, Check, Copy, Download, FileAudio, FileImage, ImagePlus, Link2, Link2Off,
+  ListPlus, Loader2, Music2, Pause, Pencil, Play, Search, Tag, Trash2, Upload, X,
+} from 'lucide-react'
+import {
+  DONOR_ALLOWED_EXTENSIONS, deleteDonorFile, isImageFile, listDonorFiles,
+  updateDonorFile, uploadDonorFile, validateDonorUpload, fetchDonorFileBlob,
 } from '../lib/donorFilesApi'
 import type { DonorFile, DonorQuota } from '../lib/donorFilesApi'
 import { DONOR_UPLOADS_CHANGED, queueDonorUploads } from '../lib/donorUploads'
+import { cachedDonorImageUrl, ensureDonorImageUrl } from '../lib/donorImageCache'
 import { formatBytes } from '../lib/format'
 import { donorFileToTrack, donorTrackId, isDonorAudio } from '../lib/donorPlayback'
 import { useStore } from '../store/useStore'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { canEditTags, readMp3Tags, writeMp3Tags } from '../lib/mp3Tags'
 import type { Mp3Tags } from '../lib/mp3Tags'
 
 const ACCEPT = DONOR_ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(',')
+type SortBy = 'date' | 'name' | 'size'
 
 // Donor cloud storage: upload, rename, share by link, play, download, delete.
 // Own-file downloads need the auth header, so playback/preview/download go
 // through a fetched blob instead of pointing an element straight at the URL.
 export default function DonorFiles(): JSX.Element {
+  const isMobile = useIsMobile()
   const [files, setFiles] = useState<DonorFile[] | null>(null)
   const [quota, setQuota] = useState<DonorQuota | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -28,6 +35,9 @@ export default function DonorFiles(): JSX.Element {
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null)
   const [tagEdit, setTagEdit] = useState<{ id: string; tags: Mp3Tags | null; saving: boolean } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<SortBy>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -83,8 +93,24 @@ export default function DonorFiles(): JSX.Element {
     return () => window.removeEventListener(DONOR_UPLOADS_CHANGED, handler)
   }, [])
 
-  // Object URLs pin the whole blob in memory until revoked.
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url) }, [preview])
+  const visibleFiles = useMemo(() => {
+    if (!files) return null
+    const q = search.trim().toLowerCase()
+    const filtered = q ? files.filter((f) => f.filename.toLowerCase().includes(q)) : files
+    const sorted = [...filtered].sort((a, b) => {
+      const cmp = sortBy === 'name' ? a.filename.localeCompare(b.filename)
+        : sortBy === 'size' ? a.size - b.size
+        : new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return sorted
+  }, [files, search, sortBy, sortDir])
+
+  const toggleSort = (by: SortBy): void => {
+    if (sortBy === by) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return }
+    setSortBy(by)
+    setSortDir(by === 'name' ? 'asc' : 'desc')
+  }
 
   // Validated up front so a bad pick never occupies a row in the Uploads
   // panel - the actual transfer is queued there (see lib/donorUploads) rather
@@ -156,12 +182,15 @@ export default function DonorFiles(): JSX.Element {
     }
   }
 
+  // Reuses the same cached blob the row thumbnail uses (see
+  // lib/donorImageCache), so opening the preview after the thumbnail has
+  // already loaded is instant and doesn't re-fetch the file.
   const togglePreview = async (f: DonorFile): Promise<void> => {
     if (preview?.id === f.file_id) { setPreview(null); return }
     setBusy(f.file_id)
     try {
-      const blob = await fetchDonorFileBlob(f.file_id)
-      setPreview({ id: f.file_id, url: URL.createObjectURL(blob) })
+      const url = await ensureDonorImageUrl(f.file_id)
+      setPreview({ id: f.file_id, url })
       setError(null)
     } catch (err) {
       setError((err as Error).message || 'Could not load image')
@@ -257,6 +286,7 @@ export default function DonorFiles(): JSX.Element {
   }
 
   const pct = quota && quota.quota > 0 ? Math.min(100, (quota.used / quota.quota) * 100) : 0
+  const thumbSize = 44
 
   return (
     <div>
@@ -275,161 +305,278 @@ export default function DonorFiles(): JSX.Element {
         </div>
       )}
 
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPT}
-        multiple
-        className="hidden"
-        onChange={(e) => upload(e.target.files)}
-      />
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-60 my-2"
-      >
-        <Upload size={13} />Upload files
-      </button>
-      <p className="text-text-muted text-[11px] pb-1">
-        Audio and images, up to 100 MB each. Files are private unless you turn on a share link.
-        Progress shows in the Uploads panel.
-      </p>
+      <div className="flex flex-wrap items-center gap-2 my-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ACCEPT}
+          multiple
+          className="hidden"
+          onChange={(e) => upload(e.target.files)}
+        />
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-60"
+        >
+          <Upload size={13} />Upload files
+        </button>
+        <p className="text-text-muted text-[11px]">
+          Audio and images, up to 100 MB each. Progress shows in the Uploads panel.
+        </p>
+      </div>
       {error && <p className="text-red-400 text-[11px] py-1">{error}</p>}
       {notice && <p className="text-accent text-[11px] py-1">{notice}</p>}
 
       {!files && !error && (
-        <div className="flex items-center gap-2 py-3 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Loading files…</div>
+        <div className="flex items-center gap-2 py-6 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Loading files…</div>
       )}
-      {files && files.length === 0 && <p className="text-text-muted text-xs py-3">No files yet.</p>}
+      {files && files.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-2 py-14 text-center">
+          <Music2 className="text-text-muted opacity-20" size={36} />
+          <p className="text-text-muted text-sm">No files yet.</p>
+          <p className="text-text-muted text-xs">Upload audio or images above - they're private unless you turn on a share link.</p>
+        </div>
+      )}
 
-      {files?.map((f) => {
-        const image = isImageFile(f)
-        const Icon = image ? FileImage : FileAudio
-        const isBusy = busy === f.file_id
-        const isRenaming = renaming?.id === f.file_id
-        return (
-          <div key={f.file_id} className="py-3 border-b border-[var(--border)] last:border-b-0">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 bg-[#475569]">
-                <Icon size={13} className="text-white" strokeWidth={2.25} />
-              </div>
-              <div className="min-w-0 flex-1">
-                {isRenaming ? (
-                  <input
-                    autoFocus
-                    value={renaming.draft}
-                    maxLength={255}
-                    onChange={(e) => setRenaming({ id: f.file_id, draft: e.target.value })}
-                    onBlur={() => void commitRename(f)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void commitRename(f)
-                      if (e.key === 'Escape') setRenaming(null)
-                    }}
-                    className="w-full bg-[var(--surface-overlay)] rounded px-1.5 py-0.5 text-sm text-text-primary focus:outline-none"
-                  />
-                ) : (
-                  <p className="text-text-primary text-sm truncate">{f.filename}</p>
-                )}
-                <p className="text-text-muted text-[11px] truncate">
-                  {formatBytes(f.size)} · {new Date(f.created_at).toLocaleDateString()}
-                  {f.is_shared && <span className="ml-1.5 text-accent">· Shared</span>}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1 mt-2 pl-[34px]">
-              {image ? (
-                <IconBtn label={preview?.id === f.file_id ? 'Hide preview' : 'Preview'} disabled={isBusy} onClick={() => void togglePreview(f)}>
-                  {isBusy ? <Loader2 size={13} className="animate-spin" /> : preview?.id === f.file_id ? <X size={13} /> : <FileImage size={13} />}
-                </IconBtn>
-              ) : (
-                <IconBtn
-                  label={currentTrackId === donorTrackId(f.file_id) && isPlayingGlobal ? 'Pause' : 'Play'}
-                  disabled={isBusy}
-                  onClick={() => togglePlay(f)}
-                >
-                  {currentTrackId === donorTrackId(f.file_id) && isPlayingGlobal ? <Pause size={13} /> : <Play size={13} />}
-                </IconBtn>
-              )}
-              <IconBtn label="Download" disabled={isBusy} onClick={() => void download(f)}><Download size={13} /></IconBtn>
-              {isDonorAudio(f) && (
-                <IconBtn label="Add to playlist" onClick={() => { setPlaylistPicker((c) => (c === f.file_id ? null : f.file_id)); setNewPlaylistName('') }}>
-                  <ListPlus size={13} />
-                </IconBtn>
-              )}
-              {!image && canEditTags(f.filename) && (
-                <IconBtn label="Edit tags" disabled={isBusy || tagEdit?.saving} onClick={() => void openTagEditor(f)}><Tag size={13} /></IconBtn>
-              )}
-              <IconBtn label="Rename" disabled={isBusy} onClick={() => setRenaming({ id: f.file_id, draft: f.filename })}><Pencil size={13} /></IconBtn>
-              <IconBtn label={f.is_shared ? 'Stop sharing' : 'Share link'} disabled={isBusy} onClick={() => void toggleShare(f)}>
-                {f.is_shared ? <Link2Off size={13} /> : <Link2 size={13} />}
-              </IconBtn>
-              {f.is_shared && f.share_url && (
-                <IconBtn label={copied === f.file_id ? 'Copied' : 'Copy link'} onClick={() => void copyLink(f)}>
-                  {copied === f.file_id ? <Check size={13} /> : <Copy size={13} />}
-                </IconBtn>
-              )}
-              {confirmDelete === f.file_id ? (
-                <span className="inline-flex items-center gap-2 ml-1">
-                  <button onClick={() => setConfirmDelete(null)} className="text-xs text-text-muted hover:text-text-primary">Cancel</button>
-                  <button
-                    onClick={() => void remove(f)}
-                    disabled={isBusy}
-                    className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/25 disabled:opacity-60"
-                  >
-                    {isBusy && <Loader2 size={11} className="animate-spin" />}Delete
-                  </button>
-                </span>
-              ) : (
-                <IconBtn label="Delete" danger disabled={isBusy} onClick={() => setConfirmDelete(f.file_id)}><Trash2 size={13} /></IconBtn>
-              )}
-            </div>
-
-            {playlistPicker === f.file_id && (
-              <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-2">
-                {donorPlaylists.length === 0 && <p className="text-text-muted text-[11px] px-1 pb-1">No donor playlists yet.</p>}
-                {donorPlaylists.map((p) => {
-                  const inList = p.fileIds.includes(f.file_id)
-                  return (
-                    <button
-                      key={p.id}
-                      onClick={() => (inList ? removeFromDonorPlaylist(p.id, f.file_id) : addToDonorPlaylist(p.id, f.file_id))}
-                      className="w-full flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-text-primary hover:bg-[var(--surface-overlay)]"
-                    >
-                      <span className="truncate">{p.name}</span>
-                      {inList && <Check size={13} className="text-accent shrink-0" />}
-                    </button>
-                  )
-                })}
-                <div className="flex items-center gap-2 pt-1.5">
-                  <input
-                    value={newPlaylistName}
-                    onChange={(e) => setNewPlaylistName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') }
-                    }}
-                    placeholder="New playlist…"
-                    className="flex-1 min-w-0 bg-[var(--surface-overlay)] rounded px-2 py-1 text-sm text-text-primary focus:outline-none"
-                  />
-                  <button
-                    onClick={() => { if (newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') } }}
-                    disabled={!newPlaylistName.trim()}
-                    className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-50"
-                  >Create</button>
-                </div>
-              </div>
-            )}
-            {tagEdit?.id === f.file_id && (
-              tagEdit.tags
-                ? <TagEditor file={f} initial={tagEdit.tags} saving={tagEdit.saving} onCancel={() => setTagEdit(null)} onSave={(t) => void saveTags(f, t)} />
-                : <div className="flex items-center gap-2 pt-2 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Reading tags…</div>
-            )}
-            {preview?.id === f.file_id && (
-              <img src={preview.url} alt={f.filename} className="mt-2 max-h-56 rounded-lg object-contain" />
+      {files && files.length > 0 && (
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1 min-w-[160px] max-w-sm">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search your files…"
+              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 pr-8 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                title="Clear search"
+              ><X size={14} /></button>
             )}
           </div>
-        )
-      })}
+          <div className="flex items-center gap-0.5 text-text-muted shrink-0">
+            {(['date', 'name', 'size'] as SortBy[]).map((by) => (
+              <button
+                key={by}
+                onClick={() => toggleSort(by)}
+                className={`flex items-center gap-0.5 text-xs px-2 py-1.5 rounded-md transition-colors capitalize ${
+                  sortBy === by ? 'bg-surface-raised text-text-primary' : 'hover:text-text-secondary hover:bg-surface-overlay'
+                }`}
+                title={`Sort by ${by === 'date' ? 'date added' : by}`}
+              >
+                {by === 'date' ? 'Newest' : by}
+                {sortBy === by && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {files && files.length > 0 && visibleFiles?.length === 0 && (
+        <p className="text-text-muted text-sm text-center py-8">No files match &quot;{search.trim()}&quot;</p>
+      )}
+
+      <div>
+        {visibleFiles?.map((f) => {
+          const image = isImageFile(f)
+          const isBusy = busy === f.file_id
+          const isRenaming = renaming?.id === f.file_id
+          const isCurrent = currentTrackId === donorTrackId(f.file_id)
+          const panelOpen = playlistPicker === f.file_id || tagEdit?.id === f.file_id || preview?.id === f.file_id
+          return (
+            <div key={f.file_id} className={`group rounded-xl px-2 py-2 transition-colors ${isCurrent ? 'bg-accent/5' : 'hover:bg-[var(--surface-overlay)]'}`}>
+              <div className="flex items-center gap-3">
+                {image ? (
+                  <button
+                    onClick={() => void togglePreview(f)}
+                    className="shrink-0"
+                    title={preview?.id === f.file_id ? 'Hide preview' : 'Preview'}
+                  >
+                    <DonorImageThumb fileId={f.file_id} size={thumbSize} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => togglePlay(f)}
+                    className="relative shrink-0 rounded-lg"
+                    title={isCurrent && isPlayingGlobal ? 'Pause' : 'Play'}
+                  >
+                    <DonorAudioTile size={thumbSize} />
+                    <div className={`absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg transition-opacity ${
+                      isCurrent ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    }`}>
+                      {isCurrent && isPlayingGlobal
+                        ? <Pause size={16} className="text-white" fill="currentColor" />
+                        : <Play size={16} className="text-white ml-0.5" fill="currentColor" />}
+                    </div>
+                  </button>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      value={renaming.draft}
+                      maxLength={255}
+                      onChange={(e) => setRenaming({ id: f.file_id, draft: e.target.value })}
+                      onBlur={() => void commitRename(f)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void commitRename(f)
+                        if (e.key === 'Escape') setRenaming(null)
+                      }}
+                      className="w-full bg-[var(--surface-overlay)] rounded px-1.5 py-0.5 text-sm text-text-primary focus:outline-none"
+                    />
+                  ) : (
+                    <p className={`text-sm truncate ${isCurrent ? 'text-accent font-medium' : 'text-text-primary'}`} title={f.filename}>
+                      {f.filename}
+                    </p>
+                  )}
+                  <p className="text-text-muted text-[11px] truncate">
+                    {formatBytes(f.size)} · {new Date(f.created_at).toLocaleDateString()}
+                    {f.is_shared && <span className="ml-1.5 text-accent">· Shared</span>}
+                  </p>
+                </div>
+
+                <div className={`flex items-center gap-0.5 shrink-0 transition-opacity ${
+                  isMobile || panelOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+                }`}>
+                  <IconBtn label="Download" disabled={isBusy} onClick={() => void download(f)}><Download size={13} /></IconBtn>
+                  {isDonorAudio(f) && (
+                    <IconBtn label="Add to playlist" onClick={() => { setPlaylistPicker((c) => (c === f.file_id ? null : f.file_id)); setNewPlaylistName('') }}>
+                      <ListPlus size={13} />
+                    </IconBtn>
+                  )}
+                  {!image && canEditTags(f.filename) && (
+                    <IconBtn label="Edit tags" disabled={isBusy || tagEdit?.saving} onClick={() => void openTagEditor(f)}><Tag size={13} /></IconBtn>
+                  )}
+                  <IconBtn label="Rename" disabled={isBusy} onClick={() => setRenaming({ id: f.file_id, draft: f.filename })}><Pencil size={13} /></IconBtn>
+                  <IconBtn label={f.is_shared ? 'Stop sharing' : 'Share link'} disabled={isBusy} onClick={() => void toggleShare(f)}>
+                    {f.is_shared ? <Link2Off size={13} /> : <Link2 size={13} />}
+                  </IconBtn>
+                  {f.is_shared && f.share_url && (
+                    <IconBtn label={copied === f.file_id ? 'Copied' : 'Copy link'} onClick={() => void copyLink(f)}>
+                      {copied === f.file_id ? <Check size={13} /> : <Copy size={13} />}
+                    </IconBtn>
+                  )}
+                  {confirmDelete === f.file_id ? (
+                    <span className="inline-flex items-center gap-2 ml-1">
+                      <button onClick={() => setConfirmDelete(null)} className="text-xs text-text-muted hover:text-text-primary">Cancel</button>
+                      <button
+                        onClick={() => void remove(f)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/25 disabled:opacity-60"
+                      >
+                        {isBusy && <Loader2 size={11} className="animate-spin" />}Delete
+                      </button>
+                    </span>
+                  ) : (
+                    <IconBtn label="Delete" danger disabled={isBusy} onClick={() => setConfirmDelete(f.file_id)}><Trash2 size={13} /></IconBtn>
+                  )}
+                </div>
+              </div>
+
+              {playlistPicker === f.file_id && (
+                <div className="mt-2 ml-[56px] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-2">
+                  {donorPlaylists.length === 0 && <p className="text-text-muted text-[11px] px-1 pb-1">No donor playlists yet.</p>}
+                  {donorPlaylists.map((p) => {
+                    const inList = p.fileIds.includes(f.file_id)
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => (inList ? removeFromDonorPlaylist(p.id, f.file_id) : addToDonorPlaylist(p.id, f.file_id))}
+                        className="w-full flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-text-primary hover:bg-[var(--surface-overlay)]"
+                      >
+                        <span className="truncate">{p.name}</span>
+                        {inList && <Check size={13} className="text-accent shrink-0" />}
+                      </button>
+                    )
+                  })}
+                  <div className="flex items-center gap-2 pt-1.5">
+                    <input
+                      value={newPlaylistName}
+                      onChange={(e) => setNewPlaylistName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') }
+                      }}
+                      placeholder="New playlist…"
+                      className="flex-1 min-w-0 bg-[var(--surface-overlay)] rounded px-2 py-1 text-sm text-text-primary focus:outline-none"
+                    />
+                    <button
+                      onClick={() => { if (newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') } }}
+                      disabled={!newPlaylistName.trim()}
+                      className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-50"
+                    >Create</button>
+                  </div>
+                </div>
+              )}
+              {tagEdit?.id === f.file_id && (
+                <div className="ml-[56px]">
+                  {tagEdit.tags
+                    ? <TagEditor file={f} initial={tagEdit.tags} saving={tagEdit.saving} onCancel={() => setTagEdit(null)} onSave={(t) => void saveTags(f, t)} />
+                    : <div className="flex items-center gap-2 pt-2 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Reading tags…</div>}
+                </div>
+              )}
+              {preview?.id === f.file_id && (
+                <img src={preview.url} alt={f.filename} className="mt-2 ml-[56px] max-h-64 rounded-lg object-contain" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Own-file downloads need the auth header, so this can't be a plain
+ *  `<img src>` - it fetches lazily (only once scrolled near) and caches the
+ *  blob URL (see lib/donorImageCache), shared with the "preview" panel. */
+function DonorImageThumb({ fileId, size }: { fileId: string; size: number }): JSX.Element {
+  const [url, setUrl] = useState<string | null>(() => cachedDonorImageUrl(fileId))
+  const [errored, setErrored] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (url || errored) return
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      io.disconnect()
+      ensureDonorImageUrl(fileId).then(setUrl).catch(() => setErrored(true))
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [fileId, url, errored])
+
+  return (
+    <div
+      ref={ref}
+      className="rounded-lg overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {url
+        ? <img src={url} alt="" className="w-full h-full object-cover" />
+        : errored
+          ? <FileImage size={size * 0.45} className="text-text-muted opacity-40" />
+          : <Loader2 size={size * 0.35} className="text-text-muted animate-spin opacity-40" />}
+    </div>
+  )
+}
+
+/** Donor audio files have no per-track art the app can read without
+ *  downloading the whole file (see the Edit tags panel for the one place
+ *  that does), so this is a generic tile - matching the fallback style
+ *  already used for playlists with no cover. */
+function DonorAudioTile({ size }: { size: number }): JSX.Element {
+  return (
+    <div
+      className="rounded-lg overflow-hidden bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0"
+      style={{ width: size, height: size }}
+    >
+      <Music2 size={size * 0.45} className="text-accent/70" />
     </div>
   )
 }
