@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Check, ChevronRight, Copy, Download, Link2, Link2Off, ListEnd, ListPlus, ListStart, Pencil, Play, Plus, Tag, Trash2, X,
 } from 'lucide-react'
@@ -38,7 +38,30 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   const [playlistsOpen, setPlaylistsOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
+  const submenuItemRef = useRef<HTMLDivElement>(null)
+  const flyoutRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState({ left: state.x, top: state.y })
+  const [flyoutPos, setFlyoutPos] = useState({ left: 0, top: 0 })
   const isAudio = !!onPlay
+
+  // Beside the menu, top-aligned with its row - flipped to the left side when
+  // there's no room on the right, and nudged up to stay on-screen.
+  useLayoutEffect(() => {
+    if (!playlistsOpen) return
+    const place = (): void => {
+      const menu = menuRef.current?.getBoundingClientRect()
+      const item = submenuItemRef.current?.getBoundingClientRect()
+      const fly = flyoutRef.current?.getBoundingClientRect()
+      if (!menu || !item || !fly) return
+      const left = menu.right + fly.width + 4 <= window.innerWidth - 8 ? menu.right + 4 : Math.max(8, menu.left - fly.width - 4)
+      const top = Math.max(8, Math.min(item.top - 4, window.innerHeight - fly.height - 8))
+      setFlyoutPos((p) => (p.left === left && p.top === top ? p : { left, top }))
+    }
+    place()
+    const ro = new ResizeObserver(place)
+    if (flyoutRef.current) ro.observe(flyoutRef.current)
+    return () => ro.disconnect()
+  }, [playlistsOpen, menuPos, donorPlaylists.length])
 
   useEffect(() => {
     const onDown = (e: MouseEvent): void => { if (!menuRef.current?.contains(e.target as Node)) onClose() }
@@ -62,37 +85,58 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   }
 
   return (
-    <ClampedMenu ref={menuRef} x={state.x} y={state.y} className="min-w-[200px] max-w-[260px]" onContextMenu={(e) => e.preventDefault()}>
+    <ClampedMenu ref={menuRef} x={state.x} y={state.y} onPositioned={setMenuPos} className="min-w-[200px] max-w-[260px]" onContextMenu={(e) => e.preventDefault()}
+      // Hovering any other row closes the flyout, like a native submenu.
+      onMouseOver={(e) => {
+        const t = e.target as Node
+        if (playlistsOpen && !submenuItemRef.current?.contains(t) && !flyoutRef.current?.contains(t)) setPlaylistsOpen(false)
+      }}
+    >
       <p className="px-3 pt-1.5 pb-1 text-[11px] text-text-muted truncate" title={file.filename}>{file.filename}</p>
       {isAudio && (
         <>
           <Item icon={Play} label="Play" onClick={run(onPlay)} />
           <Item icon={ListStart} label="Play next" onClick={run(() => playNext(donorFileToTrack(file)))} />
           <Item icon={ListEnd} label="Add to queue" onClick={run(() => addToQueue(donorFileToTrack(file)))} />
-          <Item icon={ListPlus} label="Add to donor playlist" trailing={<ChevronRight size={13} className={`transition-transform ${playlistsOpen ? 'rotate-90' : ''}`} />} onClick={() => setPlaylistsOpen((o) => !o)} />
+          <div ref={submenuItemRef} onMouseEnter={() => setPlaylistsOpen(true)}>
+            <Item
+              icon={ListPlus}
+              label="Add to donor playlist"
+              active={playlistsOpen}
+              trailing={<ChevronRight size={13} className="text-text-muted" />}
+              onClick={() => setPlaylistsOpen((o) => !o)}
+            />
+          </div>
           {playlistsOpen && (
-            <div className="mx-1.5 mb-1 rounded-lg bg-surface-overlay py-1">
-              {donorPlaylists.length === 0 && <p className="px-2.5 py-1 text-[11px] text-text-muted">No donor playlists yet.</p>}
+            // A child of the menu (so clicks in it count as "inside" for the
+            // outside-click close), but fixed-positioned beside it.
+            <div
+              ref={flyoutRef}
+              style={{ position: 'fixed', top: flyoutPos.top, left: flyoutPos.left, maxHeight: window.innerHeight - 16 }}
+              className="z-[60] w-56 overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1"
+            >
+              {donorPlaylists.length === 0 && <p className="px-3 py-1.5 text-[11px] text-text-muted">No donor playlists yet.</p>}
               {donorPlaylists.map((p) => {
                 const inList = p.fileIds.includes(file.file_id)
                 return (
                   <button
                     key={p.id}
                     onClick={() => (inList ? removeFromDonorPlaylist(p.id, file.file_id) : addToDonorPlaylist(p.id, file.file_id))}
-                    className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 text-left text-sm text-text-primary hover:bg-surface-raised"
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm text-text-primary hover:bg-surface-overlay"
                   >
                     <span className="truncate">{p.name}</span>
                     {inList && <Check size={13} className="text-accent shrink-0" />}
                   </button>
                 )
               })}
-              <div className="flex items-center gap-1 px-1.5 pt-1">
+              {donorPlaylists.length > 0 && <Divider />}
+              <div className="flex items-center gap-1 px-2 py-1">
                 <input
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') createWithFile() }}
                   placeholder="New playlist…"
-                  className="flex-1 min-w-0 bg-surface rounded px-2 py-1 text-xs text-text-primary focus:outline-none"
+                  className="flex-1 min-w-0 bg-surface-overlay rounded-md px-2 py-1 text-xs text-text-primary focus:outline-none"
                 />
                 <button onClick={createWithFile} disabled={!newName.trim()} className="p-1 rounded text-accent disabled:opacity-40" title="Create"><Plus size={14} /></button>
               </div>
@@ -115,17 +159,19 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   )
 }
 
-function Item({ icon: Icon, label, onClick, danger, trailing }: {
+function Item({ icon: Icon, label, onClick, danger, trailing, active }: {
   icon: LucideIcon
   label: string
   onClick: () => void
   danger?: boolean
   trailing?: React.ReactNode
+  /** Held highlighted while its submenu is open. */
+  active?: boolean
 }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-surface-overlay ${danger ? 'text-red-400' : 'text-text-primary'}`}
+      className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-surface-overlay ${active ? 'bg-surface-overlay' : ''} ${danger ? 'text-red-400' : 'text-text-primary'}`}
     >
       <Icon size={14} className={danger ? '' : 'text-text-muted'} />
       <span className="flex-1 truncate">{label}</span>
