@@ -6,6 +6,7 @@
 import type { Track } from '../types'
 import type { DonorFile } from './donorFilesApi'
 import { fetchDonorFileBlob, extensionOf } from './donorFilesApi'
+import { cachedDonorCover } from './donorCoverArt'
 
 const SCHEME = 'donor://'
 const MAX_CACHED = 3
@@ -58,13 +59,21 @@ export function ensureDonorUrl(streamUrl: string): Promise<string> {
 }
 
 /** Drop everything held in memory (sign-out). */
+export function donorFileIdFromTrackId(trackId: string): string | null {
+  return trackId.startsWith('donor-file-') ? trackId.slice('donor-file-'.length) : null
+}
+
 export function clearDonorPlaybackCache(): void {
   for (const url of cache.values()) URL.revokeObjectURL(url)
   cache.clear()
 }
 
 export function donorFileToTrack(f: DonorFile): Track {
+  // Embedded MP3 art, when the row tile has already looked it up. The Player
+  // also looks it up itself for a donor track that starts without one.
+  const cover = cachedDonorCover(f.file_id)
   return {
+    ...(cover ? { imageUrl: cover } : {}),
     id: donorTrackId(f.file_id),
     path: `${SCHEME}${f.file_id}`,
     streamUrl: `${SCHEME}${f.file_id}`,

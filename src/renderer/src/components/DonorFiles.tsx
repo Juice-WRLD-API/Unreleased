@@ -10,12 +10,15 @@ import {
 import type { DonorFile, DonorQuota } from '../lib/donorFilesApi'
 import { DONOR_UPLOADS_CHANGED, queueDonorUploads } from '../lib/donorUploads'
 import { cachedDonorImageUrl, ensureDonorImageUrl } from '../lib/donorImageCache'
+import { cachedDonorCover, ensureDonorCover, forgetDonorCover } from '../lib/donorCoverArt'
 import { formatBytes } from '../lib/format'
 import { donorFileToTrack, donorTrackId, isDonorAudio } from '../lib/donorPlayback'
 import { useStore } from '../store/useStore'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { canEditTags, readMp3Tags, writeMp3Tags } from '../lib/mp3Tags'
 import type { Mp3Tags } from '../lib/mp3Tags'
+import DonorContextMenu from './DonorContextMenu'
+import type { DonorMenuState } from './DonorContextMenu'
 
 const ACCEPT = DONOR_ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(',')
 type SortBy = 'date' | 'name' | 'size'
@@ -38,6 +41,8 @@ export default function DonorFiles(): JSX.Element {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<SortBy>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [ctxMenu, setCtxMenu] = useState<DonorMenuState | null>(null)
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), [])
   const inputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
@@ -173,6 +178,7 @@ export default function DonorFiles(): JSX.Element {
       setQuota(res.quota)
       setFiles((prev) => prev?.filter((x) => x.file_id !== f.file_id) ?? prev)
       replaceDonorFileId(f.file_id, null)
+      forgetDonorCover(f.file_id)
       if (preview?.id === f.file_id) setPreview(null)
       setConfirmDelete(null)
     } catch (err) {
@@ -387,8 +393,13 @@ export default function DonorFiles(): JSX.Element {
           const isRenaming = renaming?.id === f.file_id
           const isCurrent = currentTrackId === donorTrackId(f.file_id)
           const panelOpen = playlistPicker === f.file_id || tagEdit?.id === f.file_id || preview?.id === f.file_id
+            || confirmDelete === f.file_id || ctxMenu?.file.file_id === f.file_id
           return (
-            <div key={f.file_id} className={`group rounded-xl px-2 py-2 transition-colors ${isCurrent ? 'bg-accent/5' : 'hover:bg-[var(--surface-overlay)]'}`}>
+            <div
+              key={f.file_id}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
+              className={`group rounded-xl px-2 py-2 transition-colors ${isCurrent ? 'bg-accent/5' : ctxMenu?.file.file_id === f.file_id ? 'bg-[var(--surface-overlay)]' : 'hover:bg-[var(--surface-overlay)]'}`}
+            >
               <div className="flex items-center gap-3">
                 {image ? (
                   <button
@@ -404,7 +415,7 @@ export default function DonorFiles(): JSX.Element {
                     className="relative shrink-0 rounded-lg"
                     title={isCurrent && isPlayingGlobal ? 'Pause' : 'Play'}
                   >
-                    <DonorAudioTile size={thumbSize} />
+                    <DonorAudioTile fileId={f.file_id} filename={f.filename} size={thumbSize} />
                     <div className={`absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg transition-opacity ${
                       isCurrent ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     }`}>
@@ -526,6 +537,27 @@ export default function DonorFiles(): JSX.Element {
           )
         })}
       </div>
+
+      {ctxMenu && (() => {
+        const f = ctxMenu.file
+        const image = isImageFile(f)
+        return (
+          <DonorContextMenu
+            key={f.file_id}
+            state={ctxMenu}
+            onClose={closeCtxMenu}
+            onPlay={isDonorAudio(f)
+              ? () => (currentTrackId === donorTrackId(f.file_id) ? setIsPlayingGlobal(true) : togglePlay(f))
+              : undefined}
+            onDownload={() => void download(f)}
+            onRename={() => setRenaming({ id: f.file_id, draft: f.filename })}
+            onEditTags={!image && canEditTags(f.filename) ? () => void openTagEditor(f) : undefined}
+            onToggleShare={() => void toggleShare(f)}
+            onCopyLink={() => void copyLink(f)}
+            onDelete={() => setConfirmDelete(f.file_id)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -566,17 +598,35 @@ function DonorImageThumb({ fileId, size }: { fileId: string; size: number }): JS
   )
 }
 
-/** Donor audio files have no per-track art the app can read without
- *  downloading the whole file (see the Edit tags panel for the one place
- *  that does), so this is a generic tile - matching the fallback style
- *  already used for playlists with no cover. */
-function DonorAudioTile({ size }: { size: number }): JSX.Element {
+/** Embedded MP3 art, read from just the file's ID3 tag once the row scrolls
+ *  near (see lib/donorCoverArt). Anything without art - or any non-MP3 -
+ *  gets the generic tile used for playlists with no cover. */
+export function DonorAudioTile({ fileId, filename, size }: { fileId: string; filename: string; size: number }): JSX.Element {
+  const [url, setUrl] = useState<string | null | undefined>(() => cachedDonorCover(fileId))
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (url !== undefined) return
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      io.disconnect()
+      void ensureDonorCover(fileId, filename).then(setUrl)
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [fileId, filename, url])
+
   return (
     <div
+      ref={ref}
       className="rounded-lg overflow-hidden bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0"
       style={{ width: size, height: size }}
     >
-      <Music2 size={size * 0.45} className="text-accent/70" />
+      {url
+        ? <img src={url} alt="" className="w-full h-full object-cover" onError={() => setUrl(null)} />
+        : <Music2 size={size * 0.45} className="text-accent/70" />}
     </div>
   )
 }

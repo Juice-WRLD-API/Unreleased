@@ -42,7 +42,8 @@ import {
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
-import { cachedDonorUrl, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { ensureDonorCover } from '../lib/donorCoverArt'
 
 // Donor cloud files can't be streamed by URL (the route needs the auth header),
 // so their `donor://` marker resolves to a fetched blob URL - or '' while that
@@ -446,6 +447,14 @@ export default function Player(): JSX.Element {
       ext: '',
     }
     setCurrentTrackFull(synthetic)
+    // Donor files carry their art embedded in the file itself (MP3 ID3), not
+    // on the API - fetch just the tag and show it once it's read.
+    const donorFileId = donorFileIdFromTrackId(currentTrack.id)
+    if (donorFileId && !synthetic.albumArt) {
+      void ensureDonorCover(donorFileId).then((url) => {
+        if (url && !isStale()) setCurrentTrackFull({ ...synthetic, albumArt: url })
+      })
+    }
     // Fetch lyrics from API if this is a tracker song (id = "jw-{n}")
     const match = currentTrack.id.match(/^jw-(\d+)$/)
     if (match) {

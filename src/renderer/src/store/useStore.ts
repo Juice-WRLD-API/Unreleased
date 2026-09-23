@@ -5,6 +5,7 @@ import { listDonorFiles } from '../lib/donorFilesApi'
 import type { DonorFile } from '../lib/donorFilesApi'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
+import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -2275,6 +2276,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
     get()._setSongPrefs(ls.get<SongPrefMap>('songPrefs') ?? {})

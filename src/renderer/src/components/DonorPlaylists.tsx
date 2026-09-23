@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowDown, ArrowUp, Check, Cloud, Music2, Pencil, Play, Plus, Shuffle, Trash2, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -10,6 +10,10 @@ import type { DonorPlaylist } from '../types'
 import type { DonorFile } from '../lib/donorFilesApi'
 import PlaylistCard from './PlaylistCard'
 import MobilePlaylistCard from './PlaylistCard.mobile'
+import { DonorAudioTile } from './DonorFiles'
+import DonorContextMenu from './DonorContextMenu'
+import type { DonorMenuState } from './DonorContextMenu'
+import { fetchDonorFileBlob } from '../lib/donorFilesApi'
 
 // Playlists of donor cloud files. They sit on the Playlists page as a third
 // kind beside synced and on-device ones and use the same card + hero + track
@@ -224,6 +228,8 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [ctxMenu, setCtxMenu] = useState<DonorMenuState | null>(null)
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), [])
 
   useEffect(() => registerBackHandler(() => { onBack(); return true }), [onBack])
   // A playlist that vanished (deleted on another device via sync) has nothing to show.
@@ -330,7 +336,8 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
             return (
               <div
                 key={f.file_id}
-                className="group flex items-center gap-3 px-4 py-2 rounded-lg hover:bg-surface-raised transition-colors select-none"
+                className={`group flex items-center gap-3 px-4 py-2 rounded-lg transition-colors select-none ${ctxMenu?.file.file_id === f.file_id ? 'bg-surface-raised' : 'hover:bg-surface-raised'}`}
+                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
                 onDoubleClick={isMobile ? undefined : () => playTrack(t, tracks)}
               >
                 <button
@@ -341,6 +348,7 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
                   <span className="group-hover:hidden">{active ? '♪' : i + 1}</span>
                   <Play size={14} fill="currentColor" className="hidden group-hover:inline text-text-primary" />
                 </button>
+                <DonorAudioTile fileId={f.file_id} filename={f.filename} size={40} />
                 <div className="min-w-0 flex-1" onClick={isMobile ? () => playTrack(t, tracks) : undefined}>
                   <p className={`text-sm font-medium truncate ${active ? 'text-accent' : 'text-text-primary'}`} title={f.filename}>{t.title}</p>
                   <p className="text-text-muted text-xs truncate">{formatBytes(f.size)}</p>
@@ -355,6 +363,36 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
           })}
         </div>
       )}
+
+      {ctxMenu && (() => {
+        const f = ctxMenu.file
+        const t = tracks.find((x) => x.id === donorFileToTrack(f).id) ?? donorFileToTrack(f)
+        return (
+          <DonorContextMenu
+            key={f.file_id}
+            state={ctxMenu}
+            onClose={closeCtxMenu}
+            onPlay={() => playTrack(t, tracks)}
+            onDownload={() => void downloadFile(f)}
+            removeAction={{ label: 'Remove from this playlist', onClick: () => removeFromDonorPlaylist(playlist.id, f.file_id) }}
+          />
+        )
+      })()}
     </div>
   )
+}
+
+async function downloadFile(f: DonorFile): Promise<void> {
+  try {
+    const url = URL.createObjectURL(await fetchDonorFileBlob(f.file_id))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = f.filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  } catch (err) {
+    console.error('Could not download donor file', err)
+  }
 }
