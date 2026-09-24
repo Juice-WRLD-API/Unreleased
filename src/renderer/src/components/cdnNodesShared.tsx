@@ -1,10 +1,10 @@
 // Presentational pieces shared by CdnNodesTab (desktop) and its mobile
 // variant - the parts that read the same at either width. Buttons stay in
 // each layout since their touch-target sizing differs.
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, ArrowDown, Check, Loader2, Minus, Rss } from 'lucide-react'
 import type { CdnAdminNode, CdnAdminStats } from '../lib/cdnAdminApi'
 import { wasAutoDisabled, VIOLATION_LIMIT, DEFAULT_TRUST_SCORE } from '../lib/cdnAdminApi'
-import type { CdnOwnedNode } from '../lib/cdnAccountApi'
+import { nodeSyncState, type CdnOwnedNode } from '../lib/cdnAccountApi'
 import { cdnNodeBucket, CDN_BUCKET_STYLE, formatMbps } from '../hooks/useCdnNodesAdmin'
 import { formatBytes } from '../lib/format'
 import { relativeTime, shortDate, CopyButton } from './adminShared'
@@ -16,6 +16,48 @@ export function CdnBucketChip({ node }: { node: CdnOwnedNode }): JSX.Element {
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {s.label}
     </span>
+  )
+}
+
+const SYNC_STYLE = {
+  current: { badge: 'bg-emerald-500', Icon: Check },
+  behind: { badge: 'bg-amber-500', Icon: ArrowDown },
+  never: { badge: 'bg-zinc-500', Icon: Minus },
+} as const
+
+function syncTitle(n: CdnOwnedNode, latest: number): string {
+  const state = nodeSyncState(n, latest)
+  if (state === 'current') return `Up to date with the latest library changes (manifest v${latest})`
+  if (state === 'behind') return `Behind: synced v${n.synced_manifest_version}, latest is v${latest}. The node catches up on its next sync.`
+  return `Hasn't finished a sync yet (latest is v${latest})`
+}
+
+/** Whether the node has synced the newest master manifest, i.e. picked up
+ *  every approved proposal that changed the library. Renders nothing until
+ *  the server reports the node's synced version. Clicking re-fetches. */
+export function CdnSyncBadge({ node, latest = node.manifest_version, onRefresh, busy }: {
+  node: CdnOwnedNode
+  latest?: number
+  onRefresh?: () => void
+  busy?: boolean
+}): JSX.Element | null {
+  const state = nodeSyncState(node, latest)
+  if (!state || !latest) return null
+  const { badge, Icon } = SYNC_STYLE[state]
+  return (
+    <button
+      type="button"
+      onClick={onRefresh}
+      disabled={!onRefresh || busy}
+      title={syncTitle(node, latest)}
+      aria-label={syncTitle(node, latest)}
+      className="relative w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-text-primary disabled:hover:bg-transparent disabled:cursor-default"
+    >
+      {busy ? <Loader2 size={15} className="animate-spin" /> : <Rss size={15} />}
+      <span className={`absolute bottom-0.5 right-0.5 w-3 h-3 rounded-full flex items-center justify-center ring-2 ring-[var(--surface)] ${badge}`}>
+        <Icon size={8} strokeWidth={3.5} className="text-white" />
+      </span>
+    </button>
   )
 }
 
@@ -156,6 +198,9 @@ export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: s
         <Fact label="Last heartbeat" value={relativeTime(node.last_heartbeat)} />
         <Fact label="Registered" value={shortDate(node.created_at)} />
         <Fact label="Visibility" value={node.is_public ? 'Public' : 'Private'} />
+        {node.synced_manifest_version !== undefined && (
+          <Fact label="Synced manifest" value={node.synced_manifest_version == null ? 'Never' : `v${node.synced_manifest_version}`} />
+        )}
         {node.public_base_url && <Fact label="Base URL" value={node.public_base_url} copy={node.public_base_url} />}
         <Fact label="Node ID" value={node.node_id} copy={node.node_id} />
       </div>

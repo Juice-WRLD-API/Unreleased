@@ -35,6 +35,12 @@ export interface CdnOwnedNode {
   hash_violations?: number
   last_heartbeat?: string | null
   created_at?: string
+  /** Newest master manifest on the server. Bumps whenever approved
+   *  proposals change the library and the hash list is regenerated. */
+  manifest_version?: number
+  /** Manifest version the node last finished syncing, from its heartbeat.
+   *  Null for a node that hasn't completed a sync yet. */
+  synced_manifest_version?: number | null
 }
 
 function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -67,4 +73,15 @@ export function isNodeOnline(n: CdnOwnedNode): boolean {
   if (typeof n.online === 'boolean') return n.online
   if (n.last_heartbeat) return Date.now() - new Date(n.last_heartbeat).getTime() <= 300_000
   return n.status === 'online'
+}
+
+export type NodeSyncState = 'current' | 'behind' | 'never'
+
+/** Null when the server doesn't send the fields (older backend) or has no
+ *  manifest yet - there's nothing to compare, so show nothing. `latest`
+ *  overrides the node's own manifest_version (the admin stats carry it). */
+export function nodeSyncState(n: CdnOwnedNode, latest = n.manifest_version): NodeSyncState | null {
+  if (n.synced_manifest_version === undefined || !latest) return null
+  if (n.synced_manifest_version === null) return 'never'
+  return n.synced_manifest_version >= latest ? 'current' : 'behind'
 }

@@ -43,6 +43,9 @@ export interface CdnAdminNode {
   public_base_url: string
   last_heartbeat: string | null
   created_at: string
+  /** See CdnOwnedNode - both absent until the backend sends them. */
+  manifest_version?: number
+  synced_manifest_version?: number | null
 }
 
 export interface CdnAdminStats {

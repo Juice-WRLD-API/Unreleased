@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Server } from 'lucide-react'
+import { Loader2, Server, Trash2, Unlink } from 'lucide-react'
 import * as api from '../lib/cdnAccountApi'
 import type { CdnOwnedNode } from '../lib/cdnAccountApi'
 import { VIOLATION_LIMIT } from '../lib/cdnAdminApi'
 import { formatBytes, errorMessage } from '../lib/format'
 import { relativeTime } from './adminShared'
-import { CdnBucketChip } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge } from './cdnNodesShared'
 import { formatMbps } from '../hooks/useCdnNodesAdmin'
 
 type NodeAction = 'unlink' | 'delete'
@@ -32,6 +32,7 @@ export default function MyCdnNodes(): JSX.Element {
   const [confirming, setConfirming] = useState<{ id: string; action: NodeAction } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -43,6 +44,11 @@ export default function MyCdnNodes(): JSX.Element {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  const refresh = (): void => {
+    setRefreshing(true)
+    void load().finally(() => setRefreshing(false))
+  }
 
   const run = async (node: CdnOwnedNode, action: NodeAction): Promise<void> => {
     setBusy(node.node_id)
@@ -101,18 +107,23 @@ export default function MyCdnNodes(): JSX.Element {
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-0.5 shrink-0">
+                <CdnSyncBadge node={n} onRefresh={refresh} busy={refreshing} />
                 <button
                   onClick={() => setConfirming({ id: n.node_id, action: 'unlink' })}
-                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-text-primary"
+                  title="Unlink from your account"
+                  aria-label="Unlink from your account"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-text-primary"
                 >
-                  Unlink
+                  <Unlink size={15} />
                 </button>
                 <button
                   onClick={() => setConfirming({ id: n.node_id, action: 'delete' })}
-                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-red-400"
+                  title="Delete node"
+                  aria-label="Delete node"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-red-400"
                 >
-                  Delete
+                  <Trash2 size={15} />
                 </button>
               </div>
             )}

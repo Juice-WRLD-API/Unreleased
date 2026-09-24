@@ -3,13 +3,15 @@ import type { CdnAdminNode } from '../lib/cdnAdminApi'
 import { Empty, QueueSearch } from './adminShared'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
-import { CdnBucketChip, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
 
 // Mobile layout for the CDN nodes admin tab - list, then a full-screen detail
 // on tap (same pattern as EraTab.mobile). Behavior lives in useCdnNodesAdmin.
 
-function NodeDetail({ node, busy, actionError, onBack, actions }: {
+function NodeDetail({ node, latestManifest, onRefresh, busy, actionError, onBack, actions }: {
   node: CdnAdminNode
+  latestManifest?: number
+  onRefresh: () => void
   busy: boolean
   actionError: string | null
   onBack: () => void
@@ -27,7 +29,10 @@ function NodeDetail({ node, busy, actionError, onBack, actions }: {
           <p className="text-[15px] font-bold text-text-primary truncate">{node.name}</p>
           <p className="text-[11px] text-text-muted truncate">{node.owner_username || 'Unclaimed'}{node.region ? ` · ${node.region}` : ''}</p>
         </div>
-        <div className="shrink-0 pr-2"><CdnBucketChip node={node} /></div>
+        <div className="shrink-0 pr-2 flex items-center gap-1">
+          <CdnSyncBadge node={node} latest={node.manifest_version ?? latestManifest} onRefresh={onRefresh} />
+          <CdnBucketChip node={node} />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -59,6 +64,8 @@ export default function CdnNodesTab(): JSX.Element {
       <NodeDetail
         key={selected.node_id}
         node={selected}
+        latestManifest={stats?.manifest_version}
+        onRefresh={reload}
         busy={busyId === selected.node_id}
         actionError={actionError}
         onBack={() => setSelectedId(null)}

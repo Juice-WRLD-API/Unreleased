@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Loader2, AlertCircle, RefreshCw, Server } from 'lucide-react'
 import { Empty, QueueSearch } from './adminShared'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
-import { CdnBucketChip, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
 
 // Admin-only roster of distributed-CDN nodes (the volunteer machines running
 // jwa-cdn-node). Nodes register anonymously and serve nothing until approved
@@ -85,6 +85,7 @@ export default function CdnNodesTab(): JSX.Element {
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-text-primary text-lg font-bold truncate">{selected.name}</h2>
                   <CdnBucketChip node={selected} />
+                  <CdnSyncBadge node={selected} latest={selected.manifest_version ?? stats?.manifest_version} onRefresh={reload} busy={loading} />
                 </div>
                 <p className="text-text-muted text-xs mt-0.5 font-mono truncate">{selected.node_id}</p>
               </div>
