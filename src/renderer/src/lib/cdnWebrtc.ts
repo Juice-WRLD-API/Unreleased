@@ -103,9 +103,16 @@ export function downloadViaNode(
     let connectTimer: ReturnType<typeof setTimeout> | null = null
     let negotiationTimer: ReturnType<typeof setTimeout> | null = null
     let channelOpen = false
+    let answerApplied = false
+    // Candidates the node trickles before its answer is applied. addIceCandidate
+    // throws without a remote description, and the catch below would silently
+    // drop them - which can leave ICE with nothing that connects.
+    const pendingIce: RTCIceCandidateInit[] = []
+    let remoteIceCount = 0
 
     const ws = new WebSocket(`${WS_BASE}/ws/cdn/signal/?role=client&token=${encodeURIComponent(node.token)}`)
 
+    let iceServers: RTCIceServer[] = []
     const chunks: BlobPart[] = []
     let received = 0
     let expectedSize = 0
@@ -161,7 +168,7 @@ export function downloadViaNode(
       if (msg.type === 'ready') {
         if (connectTimer) { clearTimeout(connectTimer); connectTimer = null }
         try {
-          const iceServers = Array.isArray(msg.ice_servers) ? (msg.ice_servers as RTCIceServer[]) : []
+          iceServers = Array.isArray(msg.ice_servers) ? (msg.ice_servers as RTCIceServer[]) : []
           pc = new RTCPeerConnection({ iceServers })
           const channel = pc.createDataChannel('file', { ordered: true })
           channel.binaryType = 'arraybuffer'
@@ -214,7 +221,15 @@ export function downloadViaNode(
           }
           ws.send(JSON.stringify({ type: 'offer', sdp }))
           negotiationTimer = setTimeout(
-            () => fail(new CdnNodeError('negotiation', `no data channel within ${NEGOTIATION_TIMEOUT_MS / 1000}s`)),
+            () => fail(new CdnNodeError(
+              'negotiation',
+              `no data channel within ${NEGOTIATION_TIMEOUT_MS / 1000}s`,
+              // How far it got: no answer points at the node, an answer with
+              // ICE stuck at checking/failed points at NAT/firewall/TURN.
+              `answer ${answerApplied ? 'received' : 'never received'}, ice ${pc?.iceConnectionState ?? '?'}, `
+                + `connection ${pc?.connectionState ?? '?'}, ${remoteIceCount} remote candidates, `
+                + `${iceServers.length} ice servers`
+            )),
             NEGOTIATION_TIMEOUT_MS
           )
         } catch (err) {
@@ -226,6 +241,10 @@ export function downloadViaNode(
       if (msg.type === 'answer' && pc) {
         try {
           await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp as string })
+          answerApplied = true
+          for (const c of pendingIce.splice(0)) {
+            try { await pc.addIceCandidate(c) } catch {}
+          }
         } catch (err) {
           fail(asNodeError('negotiation', err, 'failed to apply answer'))
         }
@@ -233,7 +252,10 @@ export function downloadViaNode(
       }
 
       if (msg.type === 'ice' && pc && msg.candidate) {
-        try { await pc.addIceCandidate(msg.candidate as RTCIceCandidateInit) } catch {}
+        remoteIceCount++
+        const candidate = msg.candidate as RTCIceCandidateInit
+        if (!answerApplied) { pendingIce.push(candidate); return }
+        try { await pc.addIceCandidate(candidate) } catch {}
         return
       }
 
