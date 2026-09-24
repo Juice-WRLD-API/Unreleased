@@ -19,7 +19,7 @@ import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
-import { DEFAULT_JWAPI_BASE, API_SUBSYSTEM_LABELS, baseForSubsystem, getServerOverride, setServerOverride, type ApiSubsystem } from '../lib/apiServers'
+import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, type RouteRule } from '../lib/apiServers'
 import { lastfmConfigured } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
@@ -322,39 +322,101 @@ function Segmented<T extends string | number>({ value, options, onChange }: {
 // screen. `title` is the small caption above the group - worth setting on any
 // pane long enough to scroll, so the groups are findable rather than an
 // undifferentiated stack of cards.
-// One row of the "API server" card in About - lets a subsystem
-// (main/chat/radio) be pointed at a different host than the others. Each
-// subsystem falls back to the main API's resolved host as its placeholder,
-// so leaving chat/radio blank makes their intent ("same as main") explicit.
-function ApiServerRow({ subsystem }: { subsystem: ApiSubsystem }): JSX.Element {
-  const [value, setValue] = useState(() => getServerOverride(subsystem) ?? '')
-  const placeholder = subsystem === 'main' ? DEFAULT_JWAPI_BASE : baseForSubsystem(subsystem)
-  const current = getServerOverride(subsystem) ?? ''
+const SERVER_INPUT_CLASS = 'w-full min-w-0 bg-[var(--surface-raised)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-2 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors'
+const SERVER_SAVE_CLASS = 'flex-1 px-3 py-2 rounded-lg bg-accent/10 disabled:opacity-40 border border-accent/25 text-accent text-xs font-medium active:opacity-70'
+const SERVER_GHOST_CLASS = 'px-3 py-2 rounded-lg bg-[var(--surface-raised)] border border-[var(--border)] text-text-secondary text-xs font-medium active:opacity-70'
+
+// The "Main API" row of the API servers card in About - moves the whole app
+// to a different API instance.
+function ApiServerRow(): JSX.Element {
+  const [value, setValue] = useState(() => getServerOverride() ?? '')
+  const current = getServerOverride() ?? ''
   return (
-    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-      <p className="text-text-primary text-[13px] font-medium mb-1.5">{API_SUBSYSTEM_LABELS[subsystem]}</p>
+    <div className="py-3 border-b border-[var(--border)]">
+      <p className="text-text-primary text-[13px] font-medium mb-1.5">Main API</p>
       <input
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder={placeholder}
+        placeholder={DEFAULT_JWAPI_BASE}
         spellCheck={false}
-        className="w-full bg-[var(--surface-raised)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-2 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
+        className={SERVER_INPUT_CLASS}
       />
       <div className="flex gap-2 mt-2">
         <button
-          onClick={() => setServerOverride(subsystem, value)}
+          onClick={() => setServerOverride(value)}
           disabled={value.trim().replace(/\/+$/, '') === current}
-          className="flex-1 px-3 py-2 rounded-lg bg-accent/10 disabled:opacity-40 border border-accent/25 text-accent text-xs font-medium active:opacity-70"
+          className={SERVER_SAVE_CLASS}
         >
           Save &amp; reload
         </button>
         {current && (
-          <button
-            onClick={() => setServerOverride(subsystem, null)}
-            className="px-3 py-2 rounded-lg bg-[var(--surface-raised)] border border-[var(--border)] text-text-secondary text-xs font-medium active:opacity-70"
-          >
+          <button onClick={() => setServerOverride(null)} className={SERVER_GHOST_CLASS}>
             Reset
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Route rules under the main API: each sends one path prefix (`/cdn`,
+// `/chat`, ...) to its own server. Edited as a draft and saved together,
+// since saving reloads the app.
+function RouteRulesEditor(): JSX.Element {
+  const [saved] = useState(getRouteRules)
+  const [draft, setDraft] = useState<RouteRule[]>(saved)
+  const dirty = JSON.stringify(cleanRouteRules(draft)) !== JSON.stringify(saved)
+  const update = (i: number, patch: Partial<RouteRule>): void =>
+    setDraft((d) => d.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="py-3">
+      <p className="text-text-primary text-[13px] font-medium mb-1.5">Route rules</p>
+      <div className="flex flex-col gap-3">
+        {draft.map((rule, i) => (
+          <div key={i} className="flex flex-col gap-1.5">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={rule.prefix}
+                onChange={(e) => update(i, { prefix: e.target.value })}
+                placeholder="/cdn"
+                spellCheck={false}
+                className={SERVER_INPUT_CLASS}
+              />
+              <button
+                onClick={() => setDraft((d) => d.filter((_, j) => j !== i))}
+                aria-label="Remove rule"
+                className="p-2 rounded-lg text-text-muted active:text-red-500 active:bg-[var(--surface-raised)] shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={rule.base}
+              onChange={(e) => update(i, { base: e.target.value })}
+              placeholder={JWAPI_BASE}
+              spellCheck={false}
+              className={SERVER_INPUT_CLASS}
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={() => setDraft((d) => [...d, { prefix: '', base: '' }])}
+        className={`flex items-center justify-center gap-1 w-full mt-2.5 ${SERVER_GHOST_CLASS}`}
+      >
+        <Plus size={13} />
+        Add rule
+      </button>
+      <div className="flex gap-2 mt-2">
+        <button onClick={() => setRouteRules(draft)} disabled={!dirty} className={SERVER_SAVE_CLASS}>
+          Save &amp; reload
+        </button>
+        {dirty && (
+          <button onClick={() => setDraft(saved)} className={SERVER_GHOST_CLASS}>
+            Discard
           </button>
         )}
       </div>
@@ -1668,11 +1730,10 @@ export default function Settings(): JSX.Element {
                 </SettingsCard>
 
                 <SettingsCard title="API servers">
-                  <ApiServerRow subsystem="main" />
-                  <ApiServerRow subsystem="chat" />
-                  <ApiServerRow subsystem="radio" />
-                  <p className="text-text-muted text-[11px] mt-2 pb-1 leading-snug">
-                    Points the app at different Juice WRLD API instances per subsystem. Chat and radio fall back to the main API when left blank. Requires a reload to take effect.
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] pb-1 leading-snug">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
                   </p>
                 </SettingsCard>
 

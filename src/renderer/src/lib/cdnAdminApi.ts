@@ -4,11 +4,11 @@
 // Nodes register anonymously from the node app (jwa-cdn-node) and serve
 // nothing until an admin approves them here. Disabling (is_active false)
 // takes a node out but keeps its history; deleting wipes it.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { authedRequest } from './apiClient'
 import { getToken } from './userApi'
 
-const CDN_ADMIN_BASE = `${JWAPI_BASE}/cdn/admin`
+const CDN_ADMIN_BASE = routeUrl('/cdn/admin')
 
 export type CdnNodeStatus = 'pending' | 'online' | 'offline' | 'disabled'
 

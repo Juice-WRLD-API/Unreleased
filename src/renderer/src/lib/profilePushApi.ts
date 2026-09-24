@@ -6,7 +6,7 @@
 // song skip, which bumps both playcount and listening plays) fired one PATCH
 // per field instead of one PATCH total. This is the single combined pusher
 // the store's one shared debounce timer calls into instead.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
 import { apiRequest, authHeaders } from './apiClient'
 import { capSongPrefs, serializeSongPref } from './songPrefs'
@@ -17,7 +17,7 @@ import { toServerFolders } from './playlistFolders'
 import type { PlaylistFolder } from './playlistFolders'
 import type { UserSettings } from './userApi'
 
-const ME_URL = `${JWAPI_BASE}/accounts/account/me/`
+const ME_URL = routeUrl('/accounts/account/me/')
 
 export interface ProfilePushPatch {
   songPrefs?: SongPreference[]

@@ -1,10 +1,10 @@
 import { getToken } from './userApi'
-import { JWAPI_BASE } from './juicewrldApi'
+import { baseFor, routeUrl } from './juicewrldApi'
 import { apiRequest, authHeaders } from './apiClient'
 import type { Guess, GameStatus, HeardleSong } from './heardle'
 import { absoluteClipUrl, type PuzzleResponse } from './heardleApi'
 
-const MATCH_QUEUE_URL = `${JWAPI_BASE}/heardle/match/queue/`
+const MATCH_QUEUE_URL = routeUrl('/heardle/match/queue/')
 
 export interface MatchEndReveal {
   id: number
@@ -35,7 +35,7 @@ export interface MatchEndPayload {
 function wsOrigin(): string {
   const env = import.meta.env.VITE_JWAPI_WS as string | undefined
   if (env) return env.replace(/\/$/, '')
-  const apiRoot = JWAPI_BASE.replace(/\/juicewrld\/?$/, '')
+  const apiRoot = baseFor('/heardle').replace(/\/juicewrld\/?$/, '')
   return apiRoot.replace(/^http/, 'ws')
 }
 

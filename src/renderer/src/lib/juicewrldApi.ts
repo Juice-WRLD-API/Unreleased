@@ -8,9 +8,9 @@ import { createTtlCache } from './ttlCache'
 import { peekSessionEditOverride } from './sessionEditOverrides'
 import { peekActiveChannel } from './activeChannelState'
 import { peekSessionEditLink } from './sessionEditLinksMirror'
-import { JWAPI_BASE } from './apiServers'
+import { JWAPI_BASE, baseFor, routeUrl } from './apiServers'
 
-export { JWAPI_BASE }
+export { JWAPI_BASE, baseFor, routeUrl }
 
 /** The one host everything the API serves lives on - its endpoints under
  *  JWAPI_BASE, and the site's own static cover images under /assets/, which
@@ -211,7 +211,7 @@ export function filterSearchResults(entries: JWApiFileEntry[], term: string): JW
 // Builds the same URL/cache key apiFetch uses, so apiPeek below can read the
 // exact entry apiFetch wrote for a given path+params.
 function apiUrl(path: string, params: Record<string, string | number | null | undefined> = {}): string {
-  const url = new URL(JWAPI_BASE + path)
+  const url = new URL(routeUrl(path))
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v))
   }
@@ -295,7 +295,7 @@ export function apiPeek<T>(
 
 export function buildStreamUrl(path: string, channel?: string): string {
   const c = channel ? `&channel=${encodeURIComponent(channel)}` : ''
-  return `${JWAPI_BASE}/files/download/?path=${encodeURIComponent(path)}${c}`
+  return `${routeUrl('/files/download/')}?path=${encodeURIComponent(path)}${c}`
 }
 
 export interface JWApiChannel {
@@ -343,7 +343,7 @@ function degradable(url: string): boolean {
 }
 
 export function buildCoverArtUrl(path: string, small = false, channel?: string): string {
-  const url = new URL(`${JWAPI_BASE}/files/cover-art/`)
+  const url = new URL(routeUrl('/files/cover-art/'))
   url.searchParams.set('path', path)
   if (channel) url.searchParams.set('channel', channel)
   // size and small both degrade the same embedded original - size wins when
@@ -373,6 +373,29 @@ export function smallCoverUrl(url: string | null | undefined): string | undefine
     return u.toString()
   } catch {
     return `${url}&${SMALL_COVER_PARAM}`
+  }
+}
+
+/** Caps a full-size cover at FULL_COVER_SIZE.
+ *
+ *  /files/cover-art/ already carries `size` from buildCoverArtUrl, but
+ *  /files/download/ ignores `size` and serves an image file whole - a custom
+ *  cover under "Cover Arts/" can be a 30MB+ PNG. /files/image-thumbnail/ takes
+ *  the same path + channel and re-encodes to a JPEG at up to 1024px. GIFs stay
+ *  on /files/download/ so they keep their animation. */
+export function fullCoverUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined
+  if (!url.includes('/files/download/') || url.includes(SMALL_COVER_PARAM)) return url
+  if (!IMAGE_EXT.test(url) || /\.gif(&|$)/i.test(url)) return url
+  try {
+    // Rebuilt on the image-thumbnail route rather than edited in place, so a
+    // route rule for either endpoint picks the right host.
+    const u = new URL(routeUrl('/files/image-thumbnail/'))
+    new URL(url).searchParams.forEach((v, k) => u.searchParams.set(k, v))
+    u.searchParams.set('size', String(FULL_COVER_SIZE))
+    return u.toString()
+  } catch {
+    return url
   }
 }
 

@@ -1,10 +1,10 @@
 // Donor personal file storage (1 GB, audio + images, optional share links).
 // Routes live under /accounts/donor/ - see docs/content.tsx "Donor File Storage".
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { authedRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
-const BASE = `${JWAPI_BASE}/accounts/donor`
+const BASE = routeUrl('/accounts/donor')
 
 export const DONOR_MAX_FILE_SIZE = 100 * 1024 * 1024
 export const DONOR_ALLOWED_EXTENSIONS = [

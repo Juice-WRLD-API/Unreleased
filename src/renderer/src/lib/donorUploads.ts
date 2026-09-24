@@ -6,11 +6,11 @@
 import { useStore } from '../store/useStore'
 import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { errorMessage } from './format'
 import type { DonorFile, DonorQuota } from './donorFilesApi'
 
-const BASE = `${JWAPI_BASE}/accounts/donor`
+const BASE = routeUrl('/accounts/donor')
 
 /** Fired on `window` after each file finishes uploading, with the new file +
  *  quota in `detail` - lets any open donor-files UI update without polling. */

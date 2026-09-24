@@ -1,8 +1,8 @@
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { CONTRIBUTOR_ENABLED, getToken } from './userApi'
 import type { CompFileProposal } from './userApi'
 
-const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
+const ACCOUNT_BASE = routeUrl('/accounts')
 export const COMP_CHUNK_THRESHOLD = 16 * 1024 * 1024
 const MAX_RETRIES = 3
 

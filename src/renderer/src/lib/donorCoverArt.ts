@@ -8,7 +8,7 @@
 // MP3 (ID3v2) only. FLAC/M4A/OGG keep their art elsewhere in the container;
 // those files get null here and fall back to the generic tile.
 import jsmediatags from 'jsmediatags/dist/jsmediatags.min.js'
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
 import { extensionOf } from './donorFilesApi'
@@ -21,7 +21,7 @@ const cache = new Map<string, string | null>()
 const pending = new Map<string, Promise<string | null>>()
 const listeners = new Set<() => void>()
 
-const downloadUrl = (fileId: string): string => `${JWAPI_BASE}/accounts/donor/files/${fileId}/download/`
+const downloadUrl = (fileId: string): string => routeUrl(`/accounts/donor/files/${fileId}/download/`)
 
 async function fetchRange(fileId: string, start: number, end: number): Promise<ArrayBuffer> {
   const res = await fetch(downloadUrl(fileId), {

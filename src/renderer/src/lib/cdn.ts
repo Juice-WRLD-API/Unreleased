@@ -11,13 +11,13 @@
 // tryDownload() below returns null immediately. That's expected, not a bug -
 // this module activates on its own the moment nodes come online, with no
 // further wiring needed at the call sites.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
 import { downloadViaNode, type CdnDownloadProgress } from './cdnWebrtc'
 import { blake2bHexFromBlob } from './cdnBlake2b'
 import { triggerDownload } from './apiFilesShared'
 
-const CDN_BASE = `${JWAPI_BASE}/cdn`
+const CDN_BASE = routeUrl('/cdn')
 const ENABLED_KEY = 'cdnEnabled'
 
 export interface CdnResolveNode {

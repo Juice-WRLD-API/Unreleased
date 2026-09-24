@@ -7,7 +7,7 @@
 // answer (see pickDailySong), which is what makes the shared score grid mean
 // anything.
 import { apiRequest } from './apiClient'
-import { JWAPI_BASE, buildImageUrl, parseDuration } from './juicewrldApi'
+import { routeUrl, buildImageUrl, parseDuration } from './juicewrldApi'
 import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import { getVersionMetaForSongs } from './versionsApi'
 
@@ -325,7 +325,7 @@ interface CachedPool { ts: number; songs: HeardleSong[] }
 async function fetchPool(category: PoolId): Promise<HeardleSong[]> {
   const songs: HeardleSong[] = []
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = `${JWAPI_BASE}/songs/?category=${category}&page=${page}&page_size=${PAGE_SIZE}`
+    const url = `${routeUrl('/songs/')}?category=${category}&page=${page}&page_size=${PAGE_SIZE}`
     const data = await apiRequest<JWApiPaginatedResponse>(url)
     for (const song of data.results ?? []) {
       const s = slim(song)

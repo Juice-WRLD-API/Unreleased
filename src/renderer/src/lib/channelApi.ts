@@ -1,8 +1,8 @@
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { authedRequest } from './apiClient'
 import { getToken } from './userApi'
 
-const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
+const ACCOUNT_BASE = routeUrl('/accounts')
 
 export interface Channel {
   id: number

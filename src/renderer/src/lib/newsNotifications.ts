@@ -10,7 +10,7 @@
 // All of it is inert until NEWS_ENABLED (see newsApi) - the poll returns nothing
 // and the profile push no-ops, so this ships dormant with the rest of the
 // prepared frontend.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
 import { apiRequest, authHeaders } from './apiClient'
 import { fetchNews, NEWS_ENABLED, type NewsItem } from './newsApi'
@@ -21,7 +21,7 @@ export { notificationsSupported, notificationPermission, ensureNotifyPermission 
 const SUBS_KEY = 'unreleased:newsSubscriptions'
 const ENABLED_KEY = 'unreleased:newsNotificationsEnabled'
 const LAST_SEEN_KEY = 'unreleased:newsLastSeenId'
-const ME_URL = `${JWAPI_BASE}/accounts/account/me/`
+const ME_URL = routeUrl('/accounts/account/me/')
 
 // ─── Subscriptions ────────────────────────────────────────────────────────────
 

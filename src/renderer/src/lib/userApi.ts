@@ -1,5 +1,5 @@
 import { Track, ViewType, DonorPlaylist } from '../types'
-import { JWAPI_BASE, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
+import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
 import type { WireSongPreference } from './songPrefs'
@@ -12,8 +12,8 @@ import { cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
 
-const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
-const LIBRARY_BASE = `${JWAPI_BASE}/library`
+const ACCOUNT_BASE = routeUrl('/accounts')
+const LIBRARY_BASE = routeUrl('/library')
 const TOKEN_KEY = 'unreleased:authToken'
 
 export interface AccountUser {

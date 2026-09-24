@@ -16,7 +16,7 @@
 // editor/admin auth token; there's no bulk-write endpoint, so group
 // merges/title changes touching multiple rows send one request per
 // affected song.
-import { JWAPI_BASE, apiFetch } from './juicewrldApi'
+import { routeUrl, apiFetch } from './juicewrldApi'
 import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
@@ -93,7 +93,7 @@ async function getAllRows(): Promise<VersionRow[]> {
 async function writeVersions<T>(path: string, method: 'POST' | 'PATCH', body: Record<string, unknown>): Promise<T> {
   const token = getToken()
   if (!token) throw new Error('Not logged in')
-  const res = await fetch(`${JWAPI_BASE}/versions${path}`, {
+  const res = await fetch(routeUrl(`/versions${path}`), {
     method,
     headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify(body),

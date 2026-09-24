@@ -1,7 +1,7 @@
 // News feed data layer. `/news/` is live on the backend - `NEWS_ENABLED` is
 // kept as a kill switch (reads fall back to an empty state and mutations
 // throw a clear "not available" error) rather than removed outright.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { cacheGet } from './apiCache'
 import { getToken } from './userApi'
@@ -11,7 +11,7 @@ import { getMediaType } from './fileTypes'
 // intended contract, so no other change should be needed.
 export const NEWS_ENABLED = true
 
-const NEWS_BASE = `${JWAPI_BASE}/news`
+const NEWS_BASE = routeUrl('/news')
 
 function assertEnabled(): void {
   if (!NEWS_ENABLED) throw new Error('News is not available yet')

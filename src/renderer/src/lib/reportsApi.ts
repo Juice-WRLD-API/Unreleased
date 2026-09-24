@@ -16,7 +16,7 @@
 // There is no idempotency key server-side, so the store only flushes the
 // outbox from the MAIN window (pop-outs share localStorage and would
 // double-send every queued report otherwise).
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
 import { apiRequest, authHeaders } from './apiClient'
 import { FEEDBACK_CATEGORY_LABELS, SONG_ISSUE_LABELS } from './reports'
@@ -25,8 +25,8 @@ import type { PendingFeedback, PendingSongReport } from './reports'
 /** Live since /feedback/ and /reports/ shipped (2026-07-17). */
 export const reportsApiEnabled = true
 
-const FEEDBACK_URL = `${JWAPI_BASE}/feedback/`
-const SONG_REPORTS_URL = `${JWAPI_BASE}/reports/`
+const FEEDBACK_URL = routeUrl('/feedback/')
+const SONG_REPORTS_URL = routeUrl('/reports/')
 
 async function post(url: string, body: unknown): Promise<void> {
   // No cacheKey: a report is a mutation, so it must hit the network and fail

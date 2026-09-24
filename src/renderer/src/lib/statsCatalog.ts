@@ -17,7 +17,7 @@
 // those raw would blow the offline cache out.
 
 import { apiRequest } from './apiClient'
-import { JWAPI_BASE, getSongsByIds, songToTrack, loadAllSongs } from './juicewrldApi'
+import { routeUrl, getSongsByIds, songToTrack, loadAllSongs } from './juicewrldApi'
 import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import type { Track } from '../types'
 
@@ -120,7 +120,7 @@ function writeCache(songs: StatsSong[]): void {
 
 async function fetchPage(page: number): Promise<JWApiPaginatedResponse> {
   return apiRequest<JWApiPaginatedResponse>(
-    `${JWAPI_BASE}/songs/?page=${page}&page_size=${PAGE_SIZE}`,
+    `${routeUrl('/songs/')}?page=${page}&page_size=${PAGE_SIZE}`,
   )
 }
 

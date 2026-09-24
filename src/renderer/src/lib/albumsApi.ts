@@ -1,8 +1,8 @@
-import { JWAPI_BASE, apiFetch } from './juicewrldApi'
+import { routeUrl, apiFetch } from './juicewrldApi'
 import { apiRequest, authedRequest } from './apiClient'
 import { getToken } from './userApi'
 
-const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
+const ACCOUNT_BASE = routeUrl('/accounts')
 
 export interface Artist {
   id: number
