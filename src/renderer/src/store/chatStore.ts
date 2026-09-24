@@ -280,6 +280,10 @@ const seenNew = new Set<number>()
 // of each firing its own.
 const nowPlayingRequested = new Set<number>()
 const LIST_POLL_MS = 30_000
+// Rooms primeRoom has already fetched. The list poll can't use lastMessage
+// for this: an empty room never gets an entry there, so it was re-primed
+// (another limit=1 fetch) on every tick, forever.
+const primedRooms = new Set<string>()
 let initPromise: Promise<void> | null = null
 const rerunResolve = new Set<number>()
 // Last room open per server (-1 for DMs), so switching back lands where you were.
@@ -730,6 +734,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     const page = ref.kind === 'channel'
       ? await api.listChannelMessages(ref.id, { limit: 1 })
       : await api.listDmMessages(ref.id, { limit: 1 })
+    primedRooms.add(key)
     const latest = page.results.slice(-1)[0]
     if (!latest) return
     set((s) => ({ lastMessage: { ...s.lastMessage, [key]: latest } }))
@@ -865,7 +870,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           const keys = [
             ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
             ...get().conversations.map((c) => `d:${c.id}`),
-          ].filter((k) => (!active || k !== roomKey(active)) && !(k in known))
+          ].filter((k) => (!active || k !== roomKey(active)) && !(k in known) && !primedRooms.has(k))
           return pool(keys, 4, primeRoom)
         }).catch(() => undefined)
         void pollKeys().catch(() => undefined)
@@ -901,6 +906,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (listPollTimer !== null) window.clearInterval(listPollTimer)
       listPollTimer = null
       seenNew.clear()
+      primedRooms.clear()
       initPromise = null
       rerunResolve.clear()
       lastRoomBySpace.clear()
@@ -1391,7 +1397,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         const m = await e2e()
         const key = `d:${conversationId}`
         let room = get().rooms[key]
-        if (!room?.loaded) {
+        // A primed room already told us its newest message (in lastMessage,
+        // checked below) or that it has none - no need to ask again on every
+        // pollKeys tick while the key is still missing.
+        if (!room?.loaded && !primedRooms.has(key)) {
           const page = await api.listDmMessages(conversationId, { limit: 1 })
           room = { ...emptyRoom(), items: page.results }
         }
