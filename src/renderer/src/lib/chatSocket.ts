@@ -1,4 +1,4 @@
-import { JWAPI_BASE } from './juicewrldApi'
+import { CHAT_API_BASE } from './apiServers'
 import { getToken } from './userApi'
 import type { NowPlayingState } from './userApi'
 import type { ChannelOverride, ChatChannel, ChatMember, ChatMessage, ChatServer, Conversation, ServerBan, ServerRoleDef } from './chatApi'
@@ -54,7 +54,7 @@ function wsUrl(token: string, path: string): string {
   const env = import.meta.env.VITE_JWAPI_WS as string | undefined
   const origin = env
     ? env.replace(/\/$/, '')
-    : JWAPI_BASE.replace(/\/juicewrld\/?$/, '').replace(/^http/, 'ws')
+    : CHAT_API_BASE.replace(/\/juicewrld\/?$/, '').replace(/^http/, 'ws')
   return `${origin}${path}?token=${encodeURIComponent(token)}`
 }
 

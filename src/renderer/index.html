@@ -49,8 +49,8 @@
          https://*.juicewrldapi.com / wss://*.juicewrldapi.com (the bare
          domain is listed separately since a wildcard source doesn't match
          its own apex) cover staging/self-hosted instances the Settings ->
-         About "API server" override can point the app at - see
-         setApiBaseOverride in lib/juicewrldApi.ts. -->
+         About "API servers" overrides (main/chat/radio) can point the app
+         at - see setServerOverride in lib/apiServers.ts. -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
       script-src 'self' 'wasm-unsafe-eval' 'sha256-xjpTVCo7o4K9QG8ZmAgfjVUbc2OdYbdKgT/ClSf5AWE=' 'sha256-b1jw+VU6Z+2+MRzlWRKIER82x08obZjR7Y3a9A7hu74=' 'sha256-DalSI+ICv7kcV+43N8QN6XuXql+ZJwy3Yj2YOF8AtBA=' https://static.cloudflareinsights.com;

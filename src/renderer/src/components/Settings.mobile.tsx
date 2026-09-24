@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
@@ -19,7 +19,7 @@ import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
-import { DEFAULT_JWAPI_BASE, getApiBaseOverride, setApiBaseOverride } from '../lib/juicewrldApi'
+import { DEFAULT_JWAPI_BASE, API_SUBSYSTEM_LABELS, baseForSubsystem, getServerOverride, setServerOverride, type ApiSubsystem } from '../lib/apiServers'
 import { lastfmConfigured } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
@@ -322,6 +322,46 @@ function Segmented<T extends string | number>({ value, options, onChange }: {
 // screen. `title` is the small caption above the group - worth setting on any
 // pane long enough to scroll, so the groups are findable rather than an
 // undifferentiated stack of cards.
+// One row of the "API server" card in About - lets a subsystem
+// (main/chat/radio) be pointed at a different host than the others. Each
+// subsystem falls back to the main API's resolved host as its placeholder,
+// so leaving chat/radio blank makes their intent ("same as main") explicit.
+function ApiServerRow({ subsystem }: { subsystem: ApiSubsystem }): JSX.Element {
+  const [value, setValue] = useState(() => getServerOverride(subsystem) ?? '')
+  const placeholder = subsystem === 'main' ? DEFAULT_JWAPI_BASE : baseForSubsystem(subsystem)
+  const current = getServerOverride(subsystem) ?? ''
+  return (
+    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+      <p className="text-text-primary text-[13px] font-medium mb-1.5">{API_SUBSYSTEM_LABELS[subsystem]}</p>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        className="w-full bg-[var(--surface-raised)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-2 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
+      />
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={() => setServerOverride(subsystem, value)}
+          disabled={value.trim().replace(/\/+$/, '') === current}
+          className="flex-1 px-3 py-2 rounded-lg bg-accent/10 disabled:opacity-40 border border-accent/25 text-accent text-xs font-medium active:opacity-70"
+        >
+          Save &amp; reload
+        </button>
+        {current && (
+          <button
+            onClick={() => setServerOverride(subsystem, null)}
+            className="px-3 py-2 rounded-lg bg-[var(--surface-raised)] border border-[var(--border)] text-text-secondary text-xs font-medium active:opacity-70"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function SettingsCard({ title, children }: { title?: string; children: ReactNode }): JSX.Element {
   return (
     <div className="mb-4">
@@ -415,7 +455,6 @@ export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
-  const [apiUrlInput, setApiUrlInput] = useState(() => getApiBaseOverride() ?? DEFAULT_JWAPI_BASE)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   const {
     setShowSettings, setActiveView, openProfile,
@@ -1628,43 +1667,13 @@ export default function Settings(): JSX.Element {
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
 
-                <SettingsCard title="API server">
-                  <div className="py-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: '#0891b2' }}>
-                        <Server size={15} className="text-white" strokeWidth={2.25} />
-                      </div>
-                      <span className="text-text-primary text-[15px]">API URL</span>
-                    </div>
-                    <input
-                      type="text"
-                      value={apiUrlInput}
-                      onChange={(e) => setApiUrlInput(e.target.value)}
-                      placeholder={DEFAULT_JWAPI_BASE}
-                      spellCheck={false}
-                      className="w-full bg-[var(--surface-raised)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-2 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
-                    />
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={() => setApiBaseOverride(apiUrlInput)}
-                        disabled={apiUrlInput.trim().replace(/\/+$/, '') === (getApiBaseOverride() ?? DEFAULT_JWAPI_BASE)}
-                        className="flex-1 px-3 py-2 rounded-lg bg-accent/10 disabled:opacity-40 border border-accent/25 text-accent text-xs font-medium active:opacity-70"
-                      >
-                        Save &amp; reload
-                      </button>
-                      {getApiBaseOverride() && (
-                        <button
-                          onClick={() => setApiBaseOverride(null)}
-                          className="px-3 py-2 rounded-lg bg-[var(--surface-raised)] border border-[var(--border)] text-text-secondary text-xs font-medium active:opacity-70"
-                        >
-                          Reset
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-text-muted text-[11px] mt-2 leading-snug">
-                      Points the app at a different Juice WRLD API instance. Requires a reload to take effect.
-                    </p>
-                  </div>
+                <SettingsCard title="API servers">
+                  <ApiServerRow subsystem="main" />
+                  <ApiServerRow subsystem="chat" />
+                  <ApiServerRow subsystem="radio" />
+                  <p className="text-text-muted text-[11px] mt-2 pb-1 leading-snug">
+                    Points the app at different Juice WRLD API instances per subsystem. Chat and radio fall back to the main API when left blank. Requires a reload to take effect.
+                  </p>
                 </SettingsCard>
 
                 {/* Only shown to accounts that aren't already one - these are

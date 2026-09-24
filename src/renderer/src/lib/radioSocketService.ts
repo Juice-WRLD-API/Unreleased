@@ -1,4 +1,4 @@
-import { JWAPI_BASE } from './juicewrldApi'
+import { RADIO_API_BASE } from './apiServers'
 import { resumeEffectsContext } from './audioEffects'
 import { getToken } from './userApi'
 import type { RadioLiveState } from './radioLive'
@@ -65,14 +65,14 @@ export class RadioStreamClient {
   }
 
   private get wsUrl(): string {
-    const base = JWAPI_BASE.replace(/\/$/, '')
+    const base = RADIO_API_BASE.replace(/\/$/, '')
     const url = new URL(base)
     const proto = url.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${proto}//${url.host}${url.pathname}/ws/radio/`
   }
 
   private get httpStreamUrl(): string {
-    return `${JWAPI_BASE.replace(/\/$/, '')}/radio/stream.mp3`
+    return `${RADIO_API_BASE.replace(/\/$/, '')}/radio/stream.mp3`
   }
 
   attach(audioEl: HTMLAudioElement): void {

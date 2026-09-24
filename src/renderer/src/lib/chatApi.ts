@@ -1,8 +1,8 @@
-import { JWAPI_BASE } from './juicewrldApi'
+import { CHAT_API_BASE } from './apiServers'
 import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
-export const CHAT_BASE = `${JWAPI_BASE}/chat`
+export const CHAT_BASE = `${CHAT_API_BASE}/chat`
 export const MAX_CHAT_UPLOAD_BYTES = 25 * 1024 * 1024
 
 export type StaffRole = 'administrator' | 'manager' | string
