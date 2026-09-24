@@ -58,6 +58,12 @@ export interface CdnDownloadResult {
   isDonor: boolean
 }
 
+// Every tryDownload exit point logs why it did or didn't use a node, so the
+// devtools console (Verbose level) shows which source served a download.
+function debug(filepath: string, message: string, ...extra: unknown[]): void {
+  console.debug(`[cdn] ${filepath}: ${message}`, ...extra)
+}
+
 function readEnabled(): boolean {
   try {
     const stored = localStorage.getItem(ENABLED_KEY)
@@ -132,30 +138,42 @@ class CdnService {
     filepath: string,
     onProgress?: (p: CdnDownloadProgress) => void
   ): Promise<CdnDownloadResult | null> {
-    if (!this.enabled) return null
+    if (!this.enabled) { debug(filepath, 'CDN disabled in settings - using origin'); return null }
 
     const resolution = await this.resolve(filepath)
-    if (!resolution || resolution.node_count === 0) return null
-    if (resolution.direct) return null   // server says the origin beats every candidate
-    if (!resolution.expected_hash) return null   // nothing to verify against - don't trust a node blind
+    if (!resolution) { debug(filepath, 'resolve failed - using origin'); return null }
+    if (resolution.node_count === 0) { debug(filepath, 'no nodes host this file - using origin'); return null }
+    if (resolution.direct) {   // server says the origin beats every candidate
+      debug(filepath, 'server flagged direct (no node fast enough) - using origin', resolution.nodes)
+      return null
+    }
+    if (!resolution.expected_hash) {   // nothing to verify against - don't trust a node blind
+      debug(filepath, 'no expected hash in manifest - using origin')
+      return null
+    }
 
+    debug(filepath, `trying ${resolution.nodes.length} node(s)`, resolution.nodes.map((n) => `${n.name} (${n.node_id}, score ${n.score})`))
     for (const node of resolution.nodes) {
       try {
         const { blob, bytesReceived, elapsedMs } = await downloadViaNode(node, onProgress)
 
         const hash = await blake2bHexFromBlob(blob)
         if (hash !== resolution.expected_hash) {
+          debug(filepath, `hash mismatch from ${node.name} (${node.node_id}) - reported, trying next`, { expected: resolution.expected_hash, got: hash })
           this.reportViolation(node.node_id, filepath, hash)
           continue   // tampered or corrupted - try the next node, never hand this blob back
         }
 
+        debug(filepath, `served by ${node.name} (${node.node_id}): ${bytesReceived} bytes in ${elapsedMs} ms, hash verified`)
         this.logDownload(node.node_id, filepath, bytesReceived, elapsedMs)
         return { blob, node, verified: true, isDonor: resolution.is_donor }
-      } catch {
+      } catch (err) {
+        debug(filepath, `node ${node.name} (${node.node_id}) failed - trying next`, err)
         continue   // this node failed (timeout, NAT, offline, ...) - next one
       }
     }
 
+    debug(filepath, 'every node failed - using origin')
     return null
   }
 }
