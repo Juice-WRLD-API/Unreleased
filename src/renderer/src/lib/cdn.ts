@@ -168,7 +168,7 @@ class CdnService {
         this.logDownload(node.node_id, filepath, bytesReceived, elapsedMs)
         return { blob, node, verified: true, isDonor: resolution.is_donor }
       } catch (err) {
-        debug(filepath, `node ${node.name} (${node.node_id}) failed - trying next`, err)
+        debug(filepath, `node ${node.name} (${node.node_id}) failed - ${err instanceof Error ? err.message : String(err)} - trying next`)
         continue   // this node failed (timeout, NAT, offline, ...) - next one
       }
     }

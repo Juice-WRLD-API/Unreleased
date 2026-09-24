@@ -3,8 +3,17 @@
 // this is the client half of that spec. One call here is one node; the
 // caller (cdn.ts) walks the ranked node list and retries on any failure.
 import type { CdnResolveNode } from './cdn'
+import { baseFor } from './apiServers'
 
-const WS_BASE = 'wss://juicewrldapi.com/juicewrld'
+// Signaling must hit the same server that answered /cdn/resolve/ - it issued
+// the node token and is the one the node's own socket is registered with.
+// Hardcoding production here made every node look `node_offline` whenever a
+// server override or `/cdn` route rule pointed resolve somewhere else.
+const WS_BASE = (() => {
+  const url = new URL(baseFor('/cdn'))
+  const proto = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${url.host}${url.pathname.replace(/\/$/, '')}`
+})()
 
 const SIGNAL_CONNECT_TIMEOUT_MS = 15_000
 const ICE_GATHER_TIMEOUT_MS = 4_000
@@ -24,7 +33,27 @@ export interface CdnNodeDownloadResult {
   elapsedMs: number
 }
 
-class CdnNodeError extends Error {}
+// Signaling-server reason codes we know how to explain. Anything else is
+// logged as the raw code.
+const REASON_TEXT: Record<string, string> = {
+  node_offline: "node isn't connected to the signaling server (its app is closed or lost its connection)",
+}
+
+/** Which step of the attempt failed - signaling (WebSocket to the API),
+ *  negotiation (SDP/ICE), or transfer (the DataChannel itself). */
+export type CdnFailStage = 'signaling' | 'negotiation' | 'transfer'
+
+export class CdnNodeError extends Error {
+  constructor(readonly stage: CdnFailStage, readonly reason: string, detail?: string) {
+    super(`${stage}: ${REASON_TEXT[reason] ?? reason}${detail ? ` (${detail})` : ''}`)
+    this.name = 'CdnNodeError'
+  }
+}
+
+function asNodeError(stage: CdnFailStage, err: unknown, fallback: string): CdnNodeError {
+  if (err instanceof CdnNodeError) return err
+  return new CdnNodeError(stage, err instanceof Error ? `${err.name}: ${err.message}` : fallback)
+}
 
 function waitIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === 'complete') return Promise.resolve()
@@ -87,18 +116,18 @@ export function downloadViaNode(
     function bumpStallTimer(): void {
       if (dataStallTimer) clearTimeout(dataStallTimer)
       dataStallTimer = setTimeout(
-        () => fail(new CdnNodeError('data channel stalled')),
+        () => fail(new CdnNodeError('transfer', `data channel stalled - nothing received for ${DATA_STALL_TIMEOUT_MS / 1000}s`, `${received} bytes so far`)),
         DATA_STALL_TIMEOUT_MS
       )
     }
 
-    connectTimer = setTimeout(() => fail(new CdnNodeError('signaling connect timeout')), SIGNAL_CONNECT_TIMEOUT_MS)
+    connectTimer = setTimeout(() => fail(new CdnNodeError('signaling', `no 'ready' from the signaling server within ${SIGNAL_CONNECT_TIMEOUT_MS / 1000}s`)), SIGNAL_CONNECT_TIMEOUT_MS)
 
-    ws.onerror = () => fail(new CdnNodeError('signaling socket error'))
+    ws.onerror = () => fail(new CdnNodeError('signaling', 'WebSocket error connecting to the signaling server'))
     ws.onclose = (e) => {
       // A close before we resolved/rejected another way is itself a failure
       // (4000/4003/4004 per the signaling spec, or a plain network drop).
-      if (!settled) fail(new CdnNodeError(`signaling closed (${e.code})`))
+      if (!settled) fail(new CdnNodeError('signaling', `signaling socket closed with code ${e.code}`, e.reason || undefined))
     }
 
     ws.onmessage = async (event) => {
@@ -127,7 +156,7 @@ export function downloadViaNode(
                 expectedSize = typeof ctrl.size === 'number' ? ctrl.size : 0
                 transferStart = performance.now()
               } else if (ctrl.t === 'error') {
-                fail(new CdnNodeError('node reported an error'))
+                fail(new CdnNodeError('transfer', 'node reported an error', typeof ctrl.reason === 'string' ? ctrl.reason : typeof ctrl.message === 'string' ? ctrl.message : undefined))
               } else if (ctrl.t === 'done') {
                 const elapsedMs = transferStart ? Math.round(performance.now() - transferStart) : 0
                 succeed({ blob: new Blob(chunks), bytesReceived: received, elapsedMs })
@@ -151,7 +180,7 @@ export function downloadViaNode(
           if (settled) return
           ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }))
         } catch (err) {
-          fail(err instanceof Error ? err : new CdnNodeError('offer negotiation failed'))
+          fail(asNodeError('negotiation', err, 'offer negotiation failed'))
         }
         return
       }
@@ -160,7 +189,7 @@ export function downloadViaNode(
         try {
           await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp as string })
         } catch (err) {
-          fail(err instanceof Error ? err : new CdnNodeError('failed to apply answer'))
+          fail(asNodeError('negotiation', err, 'failed to apply answer'))
         }
         return
       }
@@ -171,12 +200,12 @@ export function downloadViaNode(
       }
 
       if (msg.type === 'error' || msg.type === 'session_error') {
-        fail(new CdnNodeError(String(msg.reason ?? msg.type)))
+        fail(new CdnNodeError(pc ? 'negotiation' : 'signaling', String(msg.reason ?? msg.type), typeof msg.detail === 'string' ? msg.detail : undefined))
         return
       }
 
       if (msg.type === 'teardown') {
-        fail(new CdnNodeError('session torn down'))
+        fail(new CdnNodeError(pc ? 'transfer' : 'signaling', 'session torn down by the signaling server', typeof msg.reason === 'string' ? msg.reason : undefined))
       }
     }
   })
