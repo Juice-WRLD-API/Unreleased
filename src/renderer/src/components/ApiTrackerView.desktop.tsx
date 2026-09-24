@@ -22,7 +22,7 @@ import { downloadFileSmart } from '../lib/cdn'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
-import { useCanEdit, useCanContribute } from '../hooks/useChannelRoles'
+import { useCanEdit, useCanContribute, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { loadRecentlyAddedMap } from '../lib/changesApi'
 import { loadSessionEditLinks } from '../lib/sessionEditsApi'
 import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
@@ -1711,7 +1711,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerTab, setApiTrackerTab,
     setActiveView, setApiFilesPath,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
-    openBulkEditor, fullEraNames, activeChannel,
+    openBulkEditor, fullEraNames, activeChannel, channels,
   } = useStore(useShallow(s => ({
     playTrack: s.playTrack, startRadio: s.startRadio, addToQueue: s.addToQueue,
     account: s.account, shuffle: s.shuffle,
@@ -1723,7 +1723,7 @@ export default function ApiTrackerView(): JSX.Element {
     likedTrackIds: s.likedTrackIds, toggleLike: s.toggleLike,
     openBulkEditor: s.openBulkEditor,
     fullEraNames: s.fullEraNames,
-    activeChannel: s.activeChannel,
+    activeChannel: s.activeChannel, channels: s.channels,
   })))
 
   const canEdit = useCanEdit()
@@ -2642,7 +2642,7 @@ export default function ApiTrackerView(): JSX.Element {
         const name = path.split('/').pop() || path
         const streamUrl = buildStreamUrl(path, activeChannel || undefined)
         // CDN only for the primary channel - see handleDownload's comment above.
-        if (activeChannel) triggerDownload(streamUrl, name)
+        if (!isPrimaryChannelSlug(channels, activeChannel)) triggerDownload(streamUrl, name)
         else await downloadFileSmart(path, name, streamUrl)
         await new Promise((r) => setTimeout(r, 350))
       }

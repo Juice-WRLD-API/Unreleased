@@ -297,7 +297,7 @@ export default function ApiFilesView(): JSX.Element {
   // file of the same name) and falls back to the direct stream URL.
   const handleDownload = (entry: JWApiFileEntry): void => {
     const streamUrl = buildStreamUrl(entry.path, activeChannel)
-    if (activeChannel) { triggerDownload(streamUrl, entry.name); return }
+    if (!isPrimary) { triggerDownload(streamUrl, entry.name); return }
     downloadFileSmart(entry.path, entry.name, streamUrl)
       .then((isDonor) => { if (isDonor) showToast('Priority routing active') })
   }
