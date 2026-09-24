@@ -13,7 +13,7 @@ export default function CdnNodesTab(): JSX.Element {
     filter, setFilter, filters, search, setSearch, visible,
     selectedId, setSelectedId, selected,
     busyId, actionError,
-    approve, revoke, setActive, resetTrust, restore,
+    approve, revoke, setActive, resetTrust, restore, remove,
   } = useCdnNodesAdmin()
 
   // Keep a valid selection as the filter/search narrows the roster.
@@ -100,6 +100,7 @@ export default function CdnNodesTab(): JSX.Element {
                 onSetActive={(active) => setActive(selected, active)}
                 onResetTrust={() => resetTrust(selected)}
                 onRestore={() => restore(selected)}
+                onDelete={() => remove(selected)}
               />
               {actionError && (
                 <p className="flex items-center gap-1.5 text-xs text-red-400"><AlertCircle size={12} /> {actionError}</p>

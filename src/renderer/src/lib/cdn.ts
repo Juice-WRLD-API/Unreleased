@@ -35,9 +35,17 @@ export interface CdnResolveResponse {
   expected_hash: string
   size: number
   is_donor: boolean
+  /** ISO country from Cloudflare, '' when unknown. Nodes in the same country
+   *  (x1.5) or continent (x1.2) are already boosted in `nodes` order. */
+  client_country?: string
   transport: string
   node_count: number
   nodes: CdnResolveNode[]
+  /** Server hint: no node is worth trying (none, or the best scores under
+   *  5.0 - roughly a node under 5 Mbps). Go straight to the origin. */
+  direct?: boolean
+  /** Origin /files/download/ URL for this file, default channel only. */
+  direct_url?: string
 }
 
 export interface CdnDownloadResult {
@@ -90,17 +98,27 @@ class CdnService {
     }).catch(() => {})
   }
 
-  logDownload(nodeId: string, filepath: string, bytesServed: number): void {
+  /** Reported as the listener, so the server folds the measured speed into
+   *  the node's observed_download_speed_mbps (median of the last 20 listener
+   *  samples) - node-reported samples don't move that figure. */
+  logDownload(nodeId: string, filepath: string, bytesServed: number, elapsedMs: number): void {
     fetch(`${CDN_BASE}/log-download/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node_id: nodeId, filepath, bytes_served: bytesServed }),
+      body: JSON.stringify({
+        node_id: nodeId,
+        filepath,
+        bytes_served: bytesServed,
+        ...(elapsedMs > 0 ? { elapsed_ms: elapsedMs } : {}),
+        reported_by: 'listener',
+      }),
     }).catch(() => {})
   }
 
   /** Walks the ranked node list for `filepath`, trying each over WebRTC
    *  until one verifies against the master hash table. Returns null if the
-   *  CDN is disabled, no node hosts the file, the file has no hash in the
+   *  CDN is disabled, no node hosts the file, the server flags the
+   *  resolution `direct` (every candidate too slow to beat the origin), the file has no hash in the
    *  manifest yet, or every node fails - the caller's job is to fall back
    *  to the normal API download in that case.
    *
@@ -118,11 +136,12 @@ class CdnService {
 
     const resolution = await this.resolve(filepath)
     if (!resolution || resolution.node_count === 0) return null
+    if (resolution.direct) return null   // server says the origin beats every candidate
     if (!resolution.expected_hash) return null   // nothing to verify against - don't trust a node blind
 
     for (const node of resolution.nodes) {
       try {
-        const { blob, bytesReceived } = await downloadViaNode(node, onProgress)
+        const { blob, bytesReceived, elapsedMs } = await downloadViaNode(node, onProgress)
 
         const hash = await blake2bHexFromBlob(blob)
         if (hash !== resolution.expected_hash) {
@@ -130,7 +149,7 @@ class CdnService {
           continue   // tampered or corrupted - try the next node, never hand this blob back
         }
 
-        this.logDownload(node.node_id, filepath, bytesReceived)
+        this.logDownload(node.node_id, filepath, bytesReceived, elapsedMs)
         return { blob, node, verified: true, isDonor: resolution.is_donor }
       } catch {
         continue   // this node failed (timeout, NAT, offline, ...) - next one

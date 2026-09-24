@@ -56,6 +56,7 @@ export function useCdnNodesAdmin(): {
   setActive: (n: CdnAdminNode, active: boolean) => Promise<void>
   resetTrust: (n: CdnAdminNode) => Promise<void>
   restore: (n: CdnAdminNode) => Promise<void>
+  remove: (n: CdnAdminNode) => Promise<void>
 } {
   const [nodes, setNodes] = useState<CdnAdminNode[]>([])
   const [stats, setStats] = useState<CdnAdminStats | null>(null)
@@ -144,11 +145,27 @@ export function useCdnNodesAdmin(): {
     [patch],
   )
 
+  const remove = useCallback(async (n: CdnAdminNode) => {
+    if (!confirm(`Permanently delete "${n.name}"? Its file list, speed samples, violations and download logs are wiped and its API key stops working. Disable it instead to keep the history.`)) return
+    setBusyId(n.node_id)
+    setActionError(null)
+    try {
+      await cdnAdminApi.deleteCdnNode(n.node_id)
+      setNodes((prev) => prev.filter((x) => x.node_id !== n.node_id))
+      setSelectedId((id) => (id === n.node_id ? null : id))
+      cdnAdminApi.fetchCdnStats().then(setStats).catch(() => {})
+    } catch (e) {
+      setActionError(errorMessage(e, 'Could not delete the node'))
+    } finally {
+      setBusyId(null)
+    }
+  }, [])
+
   return {
     nodes, stats, loading, error, reload,
     filter, setFilter, filters, search, setSearch, visible,
     selectedId, setSelectedId, selected,
     busyId, actionError,
-    approve, revoke, setActive, resetTrust, restore,
+    approve, revoke, setActive, resetTrust, restore, remove,
   }
 }

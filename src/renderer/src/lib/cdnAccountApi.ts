@@ -27,6 +27,8 @@ export interface CdnOwnedNode {
   current_storage_bytes?: number
   max_storage_bytes?: number
   upload_speed_mbps?: number
+  /** Median of the last 20 listener-reported transfer speeds. */
+  observed_download_speed_mbps?: number | null
   total_bytes_served?: number
   total_requests?: number
   trust_score?: number
@@ -47,7 +49,15 @@ export async function fetchMyNodes(): Promise<CdnOwnedNode[]> {
   return data?.nodes ?? data?.results ?? []
 }
 
+/** Removes the node from this account only - it keeps running and can be
+ *  re-claimed with its API key. Needs `unlink=1`: a bare DELETE now deletes. */
 export async function unlinkMyNode(nodeId: string): Promise<void> {
+  await request(`${NODES_BASE}/${encodeURIComponent(nodeId)}/?unlink=1`, { method: 'DELETE' })
+}
+
+/** Permanently deletes the node server-side: its file list, speed samples,
+ *  violations and download logs go with it and its API key stops working. */
+export async function deleteMyNode(nodeId: string): Promise<void> {
   await request(`${NODES_BASE}/${encodeURIComponent(nodeId)}/`, { method: 'DELETE' })
 }
 

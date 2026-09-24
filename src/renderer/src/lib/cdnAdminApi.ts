@@ -2,8 +2,8 @@
 // CDN-wide stats under /cdn/admin/. The download side lives in cdn.ts.
 //
 // Nodes register anonymously from the node app (jwa-cdn-node) and serve
-// nothing until an admin approves them here. There's no delete endpoint:
-// disabling (is_active false) is how a node gets taken out.
+// nothing until an admin approves them here. Disabling (is_active false)
+// takes a node out but keeps its history; deleting wipes it.
 import { JWAPI_BASE } from './juicewrldApi'
 import { authedRequest } from './apiClient'
 import { getToken } from './userApi'
@@ -31,6 +31,9 @@ export interface CdnAdminNode {
   max_storage_bytes: number
   upload_speed_mbps: number
   download_speed_mbps: number
+  /** Median of the last 20 listener-reported transfer speeds; absent or null
+   *  until listeners have reported any. */
+  observed_download_speed_mbps?: number | null
   trust_score: number
   hash_violations: number
   total_bytes_served: number
@@ -81,6 +84,13 @@ export async function updateCdnNode(nodeId: string, patch: CdnNodePatch): Promis
     method: 'PATCH',
     body: JSON.stringify(patch),
   })
+}
+
+/** Permanently deletes the node. Cascades to its file list, throughput
+ *  samples, peer speed tests, violations and download logs, and its API key
+ *  stops working immediately. */
+export async function deleteCdnNode(nodeId: string): Promise<void> {
+  await request(`${CDN_ADMIN_BASE}/nodes/${encodeURIComponent(nodeId)}/`, { method: 'DELETE' })
 }
 
 /** True when the server pulled the node for hash violations rather than an

@@ -19,6 +19,9 @@ export interface CdnDownloadProgress {
 export interface CdnNodeDownloadResult {
   blob: Blob
   bytesReceived: number
+  /** Wall-clock ms from the node's meta frame to its done frame - the data
+   *  transfer alone, without signaling or ICE setup. */
+  elapsedMs: number
 }
 
 class CdnNodeError extends Error {}
@@ -58,6 +61,7 @@ export function downloadViaNode(
     const chunks: BlobPart[] = []
     let received = 0
     let expectedSize = 0
+    let transferStart = 0
 
     function cleanup(): void {
       if (connectTimer) clearTimeout(connectTimer)
@@ -121,10 +125,12 @@ export function downloadViaNode(
               try { ctrl = JSON.parse(ev.data) } catch { return }
               if (ctrl.t === 'meta') {
                 expectedSize = typeof ctrl.size === 'number' ? ctrl.size : 0
+                transferStart = performance.now()
               } else if (ctrl.t === 'error') {
                 fail(new CdnNodeError('node reported an error'))
               } else if (ctrl.t === 'done') {
-                succeed({ blob: new Blob(chunks), bytesReceived: received })
+                const elapsedMs = transferStart ? Math.round(performance.now() - transferStart) : 0
+                succeed({ blob: new Blob(chunks), bytesReceived: received, elapsedMs })
               }
               return
             }

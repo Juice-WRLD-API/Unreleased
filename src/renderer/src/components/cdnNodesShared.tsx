@@ -74,7 +74,7 @@ const TONE = {
 /** Which actions make sense depends on how the node got into its state - an
  *  auto-disabled node needs the combined restore, an admin-disabled one just
  *  needs switching back on. `sizing` carries the per-platform button size. */
-export function CdnNodeActions({ node, busy, sizing, onApprove, onRevoke, onSetActive, onResetTrust, onRestore }: {
+export function CdnNodeActions({ node, busy, sizing, onApprove, onRevoke, onSetActive, onResetTrust, onRestore, onDelete }: {
   node: CdnAdminNode
   busy: boolean
   sizing: string
@@ -83,6 +83,7 @@ export function CdnNodeActions({ node, busy, sizing, onApprove, onRevoke, onSetA
   onSetActive: (active: boolean) => void
   onResetTrust: () => void
   onRestore: () => void
+  onDelete: () => void
 }): JSX.Element {
   const autoDisabled = !node.is_active && wasAutoDisabled(node)
   const actions: { label: string; tone: keyof typeof TONE; run: () => void }[] = []
@@ -97,6 +98,7 @@ export function CdnNodeActions({ node, busy, sizing, onApprove, onRevoke, onSetA
       actions.push({ label: 'Reset trust', tone: 'neutral', run: onResetTrust })
     }
   }
+  actions.push({ label: 'Delete', tone: 'bad', run: onDelete })
   return (
     <div className="flex flex-wrap items-center gap-2">
       {actions.map((a) => (
@@ -143,6 +145,7 @@ export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: s
       <div className={`grid ${columns} gap-x-4 gap-y-3`}>
         <Fact label="Upload" value={formatMbps(node.upload_speed_mbps)} />
         <Fact label="Download" value={formatMbps(node.download_speed_mbps)} />
+        <Fact label="To listeners" value={node.observed_download_speed_mbps ? formatMbps(node.observed_download_speed_mbps) : '—'} />
         <Fact label="Served" value={formatBytes(node.total_bytes_served)} />
         <Fact label="Requests" value={node.total_requests.toLocaleString()} />
         <Fact label="Trust" value={String(Math.round(node.trust_score))} />

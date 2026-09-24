@@ -49,7 +49,7 @@ export default function CdnNodesTab(): JSX.Element {
     filter, setFilter, filters, search, setSearch, visible,
     setSelectedId, selected,
     busyId, actionError,
-    approve, revoke, setActive, resetTrust, restore,
+    approve, revoke, setActive, resetTrust, restore, remove,
   } = useCdnNodesAdmin()
 
   if (loading && nodes.length === 0) return <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
@@ -68,6 +68,7 @@ export default function CdnNodesTab(): JSX.Element {
           onSetActive: (active) => setActive(selected, active),
           onResetTrust: () => resetTrust(selected),
           onRestore: () => restore(selected),
+          onDelete: () => remove(selected),
         }}
       />
     )

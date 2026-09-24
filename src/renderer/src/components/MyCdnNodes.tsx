@@ -8,6 +8,8 @@ import { relativeTime } from './adminShared'
 import { CdnBucketChip } from './cdnNodesShared'
 import { formatMbps } from '../hooks/useCdnNodesAdmin'
 
+type NodeAction = 'unlink' | 'delete'
+
 function statsLine(n: CdnOwnedNode): string {
   const parts: string[] = []
   if (n.current_storage_bytes != null) {
@@ -16,17 +18,18 @@ function statsLine(n: CdnOwnedNode): string {
   if (n.file_count != null) parts.push(`${n.file_count.toLocaleString()} files`)
   if (n.total_bytes_served) parts.push(`${formatBytes(n.total_bytes_served)} served`)
   if (n.upload_speed_mbps) parts.push(`${formatMbps(n.upload_speed_mbps)} up`)
+  if (n.observed_download_speed_mbps) parts.push(`${formatMbps(n.observed_download_speed_mbps)} to listeners`)
   if (n.last_heartbeat !== undefined) parts.push(`seen ${relativeTime(n.last_heartbeat)}`)
   return parts.join(' · ')
 }
 
 // Settings > Account: the CDN nodes linked to this account. Read-only apart
-// from unlinking - a node's name, storage and channels live in the node app,
+// from unlinking and deleting - a node's name, storage and channels live in the node app,
 // which pushes them to the server on every save there and never reads them
 // back, so editing them here would just be overwritten.
 export default function MyCdnNodes(): JSX.Element {
   const [nodes, setNodes] = useState<CdnOwnedNode[] | null>(null)
-  const [confirming, setConfirming] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<{ id: string; action: NodeAction } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,14 +44,14 @@ export default function MyCdnNodes(): JSX.Element {
 
   useEffect(() => { void load() }, [load])
 
-  const unlink = async (node: CdnOwnedNode): Promise<void> => {
+  const run = async (node: CdnOwnedNode, action: NodeAction): Promise<void> => {
     setBusy(node.node_id)
     try {
-      await api.unlinkMyNode(node.node_id)
+      await (action === 'delete' ? api.deleteMyNode(node.node_id) : api.unlinkMyNode(node.node_id))
       setConfirming(null)
       setNodes((prev) => prev?.filter((n) => n.node_id !== node.node_id) ?? prev)
     } catch (err) {
-      setError(errorMessage(err, 'Could not unlink the node'))
+      setError(errorMessage(err, action === 'delete' ? 'Could not delete the node' : 'Could not unlink the node'))
     } finally {
       setBusy(null)
     }
@@ -85,31 +88,41 @@ export default function MyCdnNodes(): JSX.Element {
                 )}
               </div>
             </div>
-            {confirming === n.node_id ? (
+            {confirming?.id === n.node_id ? (
               <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-text-muted">{confirming.action === 'delete' ? 'Delete for good?' : 'Unlink?'}</span>
                 <button onClick={() => setConfirming(null)} className="text-xs text-text-muted hover:text-text-primary">Cancel</button>
                 <button
-                  onClick={() => void unlink(n)}
+                  onClick={() => void run(n, confirming.action)}
                   disabled={busy === n.node_id}
                   className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/25 disabled:opacity-60"
                 >
-                  {busy === n.node_id && <Loader2 size={11} className="animate-spin" />}Unlink
+                  {busy === n.node_id && <Loader2 size={11} className="animate-spin" />}{confirming.action === 'delete' ? 'Delete' : 'Unlink'}
                 </button>
               </div>
             ) : (
-              <button
-                onClick={() => setConfirming(n.node_id)}
-                className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-red-400"
-              >
-                Unlink
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => setConfirming({ id: n.node_id, action: 'unlink' })}
+                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-text-primary"
+                >
+                  Unlink
+                </button>
+                <button
+                  onClick={() => setConfirming({ id: n.node_id, action: 'delete' })}
+                  className="rounded-lg px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-red-400"
+                >
+                  Delete
+                </button>
+              </div>
             )}
           </div>
         )
       })}
       <p className="text-text-muted text-[11px] pt-2">
         To link a node, open the CDN node app, go to Setup &gt; Account and paste your auth token from this page.
-        Unlinking doesn't stop the node serving files. It only removes it from your account.
+        Unlinking only removes the node from your account. It keeps serving and can be re-linked with its API key.
+        Deleting removes it from the network for good, with its stats and history, and its API key stops working.
       </p>
       {error && <p className="text-red-400 text-[11px] pt-1">{error}</p>}
     </div>
