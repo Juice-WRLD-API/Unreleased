@@ -18,6 +18,14 @@ const WS_BASE = (() => {
 const SIGNAL_CONNECT_TIMEOUT_MS = 15_000
 const ICE_GATHER_TIMEOUT_MS = 4_000
 const DATA_STALL_TIMEOUT_MS = 30_000
+// Offer sent -> data channel open. The node can take ~5s just to answer (it
+// gathers on every network adapter) and gives up itself at 30s.
+const NEGOTIATION_TIMEOUT_MS = 15_000
+
+/** Reason code for a browser that gathered zero ICE candidates - WebRTC IP
+ *  leak protection (VPN app/extension, Brave's WebRTC policy, Firefox
+ *  proxy_only). Browser-wide, so the caller stops trying nodes entirely. */
+export const NO_ICE_CANDIDATES = 'no_ice_candidates'
 
 export interface CdnDownloadProgress {
   loaded: number
@@ -37,6 +45,15 @@ export interface CdnNodeDownloadResult {
 // logged as the raw code.
 const REASON_TEXT: Record<string, string> = {
   node_offline: "node isn't connected to the signaling server (its app is closed or lost its connection)",
+  [NO_ICE_CANDIDATES]: "this browser isn't allowed to make WebRTC connections (VPN or privacy setting blocking WebRTC)",
+  connect_timeout: 'node saw no connection within 30s',
+  connect_failed: "node's ICE/connection failed",
+  bad_offer: "node couldn't parse the offer",
+  transfer_failed: 'node hit an error mid-transfer',
+  invalid_token: "token didn't verify, or wasn't for this node/file",
+  not_hosted: "node doesn't have the file",
+  private: 'node is private',
+  busy: 'node is at its upload connection limit',
 }
 
 /** Which step of the attempt failed - signaling (WebSocket to the API),
@@ -84,6 +101,8 @@ export function downloadViaNode(
     let pc: RTCPeerConnection | null = null
     let dataStallTimer: ReturnType<typeof setTimeout> | null = null
     let connectTimer: ReturnType<typeof setTimeout> | null = null
+    let negotiationTimer: ReturnType<typeof setTimeout> | null = null
+    let channelOpen = false
 
     const ws = new WebSocket(`${WS_BASE}/ws/cdn/signal/?role=client&token=${encodeURIComponent(node.token)}`)
 
@@ -95,6 +114,7 @@ export function downloadViaNode(
     function cleanup(): void {
       if (connectTimer) clearTimeout(connectTimer)
       if (dataStallTimer) clearTimeout(dataStallTimer)
+      if (negotiationTimer) clearTimeout(negotiationTimer)
       try { ws.close() } catch {}
       try { pc?.close() } catch {}
     }
@@ -146,7 +166,16 @@ export function downloadViaNode(
           const channel = pc.createDataChannel('file', { ordered: true })
           channel.binaryType = 'arraybuffer'
 
-          channel.onopen = () => bumpStallTimer()
+          channel.onopen = () => {
+            channelOpen = true
+            if (negotiationTimer) { clearTimeout(negotiationTimer); negotiationTimer = null }
+            bumpStallTimer()
+          }
+          pc.onconnectionstatechange = () => {
+            if (pc?.connectionState === 'failed') {
+              fail(new CdnNodeError(channelOpen ? 'transfer' : 'negotiation', 'peer connection failed'))
+            }
+          }
           channel.onmessage = (ev: MessageEvent) => {
             bumpStallTimer()
             if (typeof ev.data === 'string') {
@@ -178,7 +207,16 @@ export function downloadViaNode(
           await pc.setLocalDescription(offer)
           await waitIceGatheringComplete(pc)
           if (settled) return
-          ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }))
+          const sdp = pc.localDescription?.sdp ?? ''
+          if (!/^a=candidate:/m.test(sdp)) {
+            fail(new CdnNodeError('negotiation', NO_ICE_CANDIDATES))
+            return
+          }
+          ws.send(JSON.stringify({ type: 'offer', sdp }))
+          negotiationTimer = setTimeout(
+            () => fail(new CdnNodeError('negotiation', `no data channel within ${NEGOTIATION_TIMEOUT_MS / 1000}s`)),
+            NEGOTIATION_TIMEOUT_MS
+          )
         } catch (err) {
           fail(asNodeError('negotiation', err, 'offer negotiation failed'))
         }

@@ -13,12 +13,18 @@
 // further wiring needed at the call sites.
 import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
-import { downloadViaNode, type CdnDownloadProgress } from './cdnWebrtc'
+import { downloadViaNode, CdnNodeError, NO_ICE_CANDIDATES, type CdnDownloadProgress } from './cdnWebrtc'
 import { blake2bHexFromBlob } from './cdnBlake2b'
 import { triggerDownload } from './apiFilesShared'
 
 const CDN_BASE = routeUrl('/cdn')
 const ENABLED_KEY = 'cdnEnabled'
+
+// Set once a node attempt finds this browser gathers no ICE candidates
+// (WebRTC blocked by a VPN/privacy setting). Browser-wide and won't change
+// mid-session, so later downloads skip the CDN instead of repeating the
+// ~4s gather every time.
+let webrtcBlocked = false
 
 export interface CdnResolveNode {
   node_id: string
@@ -139,6 +145,7 @@ class CdnService {
     onProgress?: (p: CdnDownloadProgress) => void
   ): Promise<CdnDownloadResult | null> {
     if (!this.enabled) { debug(filepath, 'CDN disabled in settings - using origin'); return null }
+    if (webrtcBlocked) { debug(filepath, 'WebRTC blocked in this browser (found earlier this session) - using origin'); return null }
 
     const resolution = await this.resolve(filepath)
     if (!resolution) { debug(filepath, 'resolve failed - using origin'); return null }
@@ -168,6 +175,11 @@ class CdnService {
         this.logDownload(node.node_id, filepath, bytesReceived, elapsedMs)
         return { blob, node, verified: true, isDonor: resolution.is_donor }
       } catch (err) {
+        if (err instanceof CdnNodeError && err.reason === NO_ICE_CANDIDATES) {
+          webrtcBlocked = true
+          debug(filepath, `WebRTC blocked - ${err.message} - skipping remaining nodes, using origin`)
+          return null
+        }
         debug(filepath, `node ${node.name} (${node.node_id}) failed - ${err instanceof Error ? err.message : String(err)} - trying next`)
         continue   // this node failed (timeout, NAT, offline, ...) - next one
       }
