@@ -30,6 +30,19 @@ export interface RouteRule {
 
 const stripSlash = (s: string): string => s.trim().replace(/\/+$/, '')
 
+// Bases are fed to `new URL()` at import time (JWAPI_HOST, cdnWebrtc's
+// WS_BASE), so a stored value without a scheme - `staging.example.com` -
+// would throw before React mounts and leave a blank page with no way back
+// to Settings. Anything that isn't an absolute http(s) URL is ignored.
+function isHttpUrl(s: string): boolean {
+  try {
+    const { protocol } = new URL(s)
+    return protocol === 'https:' || protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
 export function normalizePrefix(prefix: string): string {
   const p = stripSlash(prefix)
   if (!p) return ''
@@ -39,7 +52,8 @@ export function normalizePrefix(prefix: string): string {
 function readMain(): string | null {
   try {
     const raw = localStorage.getItem(MAIN_KEY)
-    return raw ? stripSlash(raw) : null
+    const base = raw ? stripSlash(raw) : ''
+    return isHttpUrl(base) ? base : null
   } catch {
     return null
   }
@@ -63,7 +77,7 @@ function readRules(): RouteRule[] {
     return parsed
       .filter((r): r is RouteRule => typeof r?.prefix === 'string' && typeof r?.base === 'string')
       .map((r) => ({ prefix: normalizePrefix(r.prefix), base: stripSlash(r.base) }))
-      .filter((r) => r.prefix && r.base)
+      .filter((r) => r.prefix && isHttpUrl(r.base))
   } catch {
     return []
   }
@@ -121,7 +135,7 @@ export function setServerOverride(url: string | null): void {
 export function cleanRouteRules(rules: RouteRule[]): RouteRule[] {
   return rules
     .map((r) => ({ prefix: normalizePrefix(r.prefix), base: stripSlash(r.base) }))
-    .filter((r) => r.prefix && r.base)
+    .filter((r) => r.prefix && isHttpUrl(r.base))
 }
 
 export function setRouteRules(rules: RouteRule[]): void {
