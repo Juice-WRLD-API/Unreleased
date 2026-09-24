@@ -1404,7 +1404,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           const page = await api.listDmMessages(conversationId, { limit: 1 })
           room = { ...emptyRoom(), items: page.results }
         }
-        const hasMessages = room.items.some((x) => x.id > 0 && x.key_version === conv!.current_key_version)
+        // Primed-but-unopened rooms skip the fetch above and have no room entry
+        // at all - their answer is in lastMessage.
+        const hasMessages = (room?.items ?? []).some((x) => x.id > 0 && x.key_version === conv!.current_key_version)
           || get().lastMessage[key]?.key_version === conv.current_key_version
         const res = await m.resolveRoomKey(meId, conv, hasMessages)
         set((s) => ({ keyState: { ...s.keyState, [conversationId]: res.state } }))
