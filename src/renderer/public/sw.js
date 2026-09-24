@@ -8,7 +8,8 @@
 // fallback. Content-hashed build assets (/assets/*) are immutable - new deploys
 // get new filenames - so those alone are cache-first for speed.
 
-const VERSION = 'v2'
+// v3: drops v2's asset cache, which could hold 404s (see /assets/ below).
+const VERSION = 'v3'
 const SHELL_CACHE = `shell-${VERSION}`
 const ASSET_CACHE = `assets-${VERSION}`
 
@@ -57,8 +58,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       try {
         const net = await fetch(req)
-        const cache = await caches.open(SHELL_CACHE)
-        cache.put('/', net.clone())
+        if (net.ok) {
+          const cache = await caches.open(SHELL_CACHE)
+          cache.put('/', net.clone())
+        }
         return net
       } catch {
         return (await caches.match('/')) || Response.error()
@@ -73,8 +76,13 @@ self.addEventListener('fetch', (event) => {
       const hit = await caches.match(req)
       if (hit) return hit
       const net = await fetch(req)
-      const cache = await caches.open(ASSET_CACHE)
-      cache.put(req, net.clone())
+      // Only cache real hits. A chunk requested mid-deploy (or after one) 404s,
+      // and caching that 404 cache-first would pin the failure - lazyView's
+      // reload would boot the same build and get the same cached 404 forever.
+      if (net.ok) {
+        const cache = await caches.open(ASSET_CACHE)
+        cache.put(req, net.clone())
+      }
       return net
     })())
     return
@@ -85,8 +93,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     try {
       const net = await fetch(req)
-      const cache = await caches.open(ASSET_CACHE)
-      cache.put(req, net.clone())
+      if (net.ok) {
+        const cache = await caches.open(ASSET_CACHE)
+        cache.put(req, net.clone())
+      }
       return net
     } catch {
       return (await caches.match(req)) || Response.error()

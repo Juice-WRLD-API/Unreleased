@@ -13,7 +13,7 @@ import { lazy, ComponentType, LazyExoticComponent } from 'react'
 const RELOAD_KEY = 'chunk-reload-at'
 const RELOAD_COOLDOWN_MS = 15_000
 
-function isChunkLoadError(err: unknown): boolean {
+export function isChunkLoadError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
   return /dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(msg)
 }

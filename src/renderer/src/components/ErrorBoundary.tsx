@@ -1,6 +1,7 @@
 import { Component, ReactNode } from 'react'
 import { AlertTriangle, Copy, Check, Flag, Loader2, CloudOff } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { isChunkLoadError } from '../lib/lazyView'
 
 // Strips anything a stack/component-stack shouldn't be carrying off-device
 // before an auto-report sends it anywhere: a dev server serves modules from
@@ -63,6 +64,14 @@ export default class ErrorBoundary extends Component<Props, State> {
     this.componentStack = info.componentStack
     this.reported = false
     if (useStore.getState().autoReportErrors) void this.reportError(true)
+  }
+
+  // A failed chunk import can't be retried in place: React.lazy caches the
+  // rejected promise, so clearing the error just re-throws it. Only a reload
+  // picks up the current build's chunk names.
+  private retry = (): void => {
+    if (isChunkLoadError(this.state.error)) window.location.reload()
+    else this.setState({ error: null })
   }
 
   private copyError = (): void => {
@@ -148,9 +157,9 @@ export default class ErrorBoundary extends Component<Props, State> {
             <div className="flex items-center gap-4 mt-1">
               <button
                 className="text-xs text-accent hover:text-accent-hover underline"
-                onClick={() => this.setState({ error: null })}
+                onClick={this.retry}
               >
-                Try again
+                {isChunkLoadError(this.state.error) ? 'Reload' : 'Try again'}
               </button>
               {overlay && this.props.onDismiss && (
                 <button className="text-xs text-text-muted hover:text-text-primary underline" onClick={this.dismiss}>
