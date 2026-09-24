@@ -1,5 +1,5 @@
 import { ReactEventHandler, useEffect, useState } from 'react'
-import { hasSmallCoverVariant, smallCoverUrl } from '../lib/juicewrldApi'
+import { fullCoverUrl, hasSmallCoverVariant, smallCoverUrl } from '../lib/juicewrldApi'
 
 interface Props {
   src: string | null | undefined
@@ -24,8 +24,11 @@ interface Props {
 // though the browser already has the full image cached.
 const fullyLoadedSrcs = new Set<string>()
 
-export function ProgressiveCover({ src, alt = '', className = '', onError }: Props): JSX.Element | null {
-  const placeholder = hasSmallCoverVariant(src) ? smallCoverUrl(src) : undefined
+export function ProgressiveCover({ src: rawSrc, alt = '', className = '', onError }: Props): JSX.Element | null {
+  // The full step goes through the size cap; the placeholder is derived from
+  // the raw URL since `small` is a /files/download/ param.
+  const src = fullCoverUrl(rawSrc)
+  const placeholder = hasSmallCoverVariant(rawSrc) ? smallCoverUrl(rawSrc) : undefined
   // Stored as the src it belongs to rather than a bare boolean: a boolean is
   // only reset inside the effect, which runs *after* the first render with the
   // new src - so that render still saw `true` from the previous track and
