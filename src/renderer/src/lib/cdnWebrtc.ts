@@ -18,9 +18,12 @@ const WS_BASE = (() => {
 const SIGNAL_CONNECT_TIMEOUT_MS = 15_000
 const ICE_GATHER_TIMEOUT_MS = 4_000
 const DATA_STALL_TIMEOUT_MS = 30_000
-// Offer sent -> data channel open. The node can take ~5s just to answer (it
-// gathers on every network adapter) and gives up itself at 30s.
-const NEGOTIATION_TIMEOUT_MS = 15_000
+// Offer sent -> answer. The node can take 5-6s just to answer (it gathers on
+// every network adapter) and gives up itself at 30s.
+const ANSWER_TIMEOUT_MS = 20_000
+// Answer applied -> data channel open. Timed separately so a slow answer
+// doesn't eat into the time ICE gets to connect.
+const ICE_CONNECT_TIMEOUT_MS = 15_000
 
 /** Reason code for a browser that gathered zero ICE candidates - WebRTC IP
  *  leak protection (VPN app/extension, Brave's WebRTC policy, Firefox
@@ -140,6 +143,22 @@ export function downloadViaNode(
       resolve(result)
     }
 
+    function armNegotiationTimer(ms: number, message: string): void {
+      if (negotiationTimer) clearTimeout(negotiationTimer)
+      negotiationTimer = setTimeout(
+        () => fail(new CdnNodeError(
+          'negotiation',
+          message,
+          // How far it got: no answer points at the node, an answer with
+          // ICE stuck at checking/failed points at NAT/firewall/TURN.
+          `answer ${answerApplied ? 'received' : 'never received'}, ice ${pc?.iceConnectionState ?? '?'}, `
+            + `connection ${pc?.connectionState ?? '?'}, ${remoteIceCount} remote candidates, `
+            + `${iceServers.length} ice servers`
+        )),
+        ms
+      )
+    }
+
     function bumpStallTimer(): void {
       if (dataStallTimer) clearTimeout(dataStallTimer)
       dataStallTimer = setTimeout(
@@ -220,18 +239,7 @@ export function downloadViaNode(
             return
           }
           ws.send(JSON.stringify({ type: 'offer', sdp }))
-          negotiationTimer = setTimeout(
-            () => fail(new CdnNodeError(
-              'negotiation',
-              `no data channel within ${NEGOTIATION_TIMEOUT_MS / 1000}s`,
-              // How far it got: no answer points at the node, an answer with
-              // ICE stuck at checking/failed points at NAT/firewall/TURN.
-              `answer ${answerApplied ? 'received' : 'never received'}, ice ${pc?.iceConnectionState ?? '?'}, `
-                + `connection ${pc?.connectionState ?? '?'}, ${remoteIceCount} remote candidates, `
-                + `${iceServers.length} ice servers`
-            )),
-            NEGOTIATION_TIMEOUT_MS
-          )
+          armNegotiationTimer(ANSWER_TIMEOUT_MS, `no answer from the node within ${ANSWER_TIMEOUT_MS / 1000}s`)
         } catch (err) {
           fail(asNodeError('negotiation', err, 'offer negotiation failed'))
         }
@@ -242,6 +250,9 @@ export function downloadViaNode(
         try {
           await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp as string })
           answerApplied = true
+          if (!channelOpen) {
+            armNegotiationTimer(ICE_CONNECT_TIMEOUT_MS, `no data channel within ${ICE_CONNECT_TIMEOUT_MS / 1000}s of the answer`)
+          }
           for (const c of pendingIce.splice(0)) {
             try { await pc.addIceCandidate(c) } catch {}
           }
