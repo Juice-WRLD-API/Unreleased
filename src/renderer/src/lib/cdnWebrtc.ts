@@ -75,24 +75,6 @@ function asNodeError(stage: CdnFailStage, err: unknown, fallback: string): CdnNo
   return new CdnNodeError(stage, err instanceof Error ? `${err.name}: ${err.message}` : fallback)
 }
 
-function waitIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
-  if (pc.iceGatheringState === 'complete') return Promise.resolve()
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pc.removeEventListener('icegatheringstatechange', onChange)
-      resolve()   // send the offer anyway - it may still connect
-    }, ICE_GATHER_TIMEOUT_MS)
-    function onChange(): void {
-      if (pc.iceGatheringState === 'complete') {
-        clearTimeout(timer)
-        pc.removeEventListener('icegatheringstatechange', onChange)
-        resolve()
-      }
-    }
-    pc.addEventListener('icegatheringstatechange', onChange)
-  })
-}
-
 /** Downloads one file from one CDN node over WebRTC. Rejects on any
  *  failure - the caller is expected to catch and move to the next node. */
 export function downloadViaNode(
@@ -105,13 +87,17 @@ export function downloadViaNode(
     let dataStallTimer: ReturnType<typeof setTimeout> | null = null
     let connectTimer: ReturnType<typeof setTimeout> | null = null
     let negotiationTimer: ReturnType<typeof setTimeout> | null = null
+    let gatherTimer: ReturnType<typeof setTimeout> | null = null
     let channelOpen = false
     let answerApplied = false
+    let localCandidateCount = 0
+    const localCandidateTypes: Record<string, number> = {}
     // Candidates the node trickles before its answer is applied. addIceCandidate
     // throws without a remote description, and the catch below would silently
     // drop them - which can leave ICE with nothing that connects.
     const pendingIce: RTCIceCandidateInit[] = []
     let remoteIceCount = 0
+    let sessionId = ''
 
     const ws = new WebSocket(`${WS_BASE}/ws/cdn/signal/?role=client&token=${encodeURIComponent(node.token)}`)
 
@@ -125,13 +111,24 @@ export function downloadViaNode(
       if (connectTimer) clearTimeout(connectTimer)
       if (dataStallTimer) clearTimeout(dataStallTimer)
       if (negotiationTimer) clearTimeout(negotiationTimer)
+      if (gatherTimer) clearTimeout(gatherTimer)
       try { ws.close() } catch {}
       try { pc?.close() } catch {}
+    }
+
+    function localSummary(): string {
+      const parts = Object.entries(localCandidateTypes).map(([type, n]) => `${type}:${n}`)
+      return parts.length ? parts.join(' ') : 'none'
     }
 
     function fail(err: Error): void {
       if (settled) return
       settled = true
+      console.debug(
+        `[cdn] session ${sessionId || '?'} failing: ${err instanceof Error ? err.message : String(err)}`
+          + ` (bytes ${received}, ice ${pc?.iceConnectionState ?? '?'}, conn ${pc?.connectionState ?? '?'},`
+          + ` local ${localSummary()}, ${remoteIceCount} remote candidates)`
+      )
       cleanup()
       reject(err)
     }
@@ -152,8 +149,8 @@ export function downloadViaNode(
           // How far it got: no answer points at the node, an answer with
           // ICE stuck at checking/failed points at NAT/firewall/TURN.
           `answer ${answerApplied ? 'received' : 'never received'}, ice ${pc?.iceConnectionState ?? '?'}, `
-            + `connection ${pc?.connectionState ?? '?'}, ${remoteIceCount} remote candidates, `
-            + `${iceServers.length} ice servers`
+            + `connection ${pc?.connectionState ?? '?'}, local candidates ${localSummary()}, `
+            + `${remoteIceCount} remote candidates, ${iceServers.length} ice servers`
         )),
         ms
       )
@@ -186,11 +183,26 @@ export function downloadViaNode(
 
       if (msg.type === 'ready') {
         if (connectTimer) { clearTimeout(connectTimer); connectTimer = null }
+        sessionId = typeof msg.session_id === 'string' ? msg.session_id : ''
         try {
           iceServers = Array.isArray(msg.ice_servers) ? (msg.ice_servers as RTCIceServer[]) : []
           pc = new RTCPeerConnection({ iceServers })
           const channel = pc.createDataChannel('file', { ordered: true })
           channel.binaryType = 'arraybuffer'
+
+          pc.onicecandidate = (e) => {
+            if (e.candidate) {
+              localCandidateCount++
+              const type = e.candidate.type || 'unknown'
+              localCandidateTypes[type] = (localCandidateTypes[type] || 0) + 1
+              try { ws.send(JSON.stringify({ type: 'ice', candidate: e.candidate.toJSON() })) } catch {}
+            } else {
+              console.debug(`[cdn] gathered candidates: ${localSummary()}`)
+              if (localCandidateCount === 0) {
+                fail(new CdnNodeError('negotiation', NO_ICE_CANDIDATES))
+              }
+            }
+          }
 
           channel.onopen = () => {
             channelOpen = true
@@ -198,9 +210,12 @@ export function downloadViaNode(
             bumpStallTimer()
           }
           pc.onconnectionstatechange = () => {
-            if (pc?.connectionState === 'failed') {
-              fail(new CdnNodeError(channelOpen ? 'transfer' : 'negotiation', 'peer connection failed'))
+            if (pc?.connectionState !== 'failed') return
+            if (channelOpen && received > 0) {
+              console.debug(`[cdn] session ${sessionId || '?'} connection failed with ${received} bytes in; letting the stall timer decide`)
+              return
             }
+            fail(new CdnNodeError(channelOpen ? 'transfer' : 'negotiation', 'peer connection failed'))
           }
           channel.onmessage = (ev: MessageEvent) => {
             bumpStallTimer()
@@ -231,14 +246,13 @@ export function downloadViaNode(
 
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
-          await waitIceGatheringComplete(pc)
           if (settled) return
-          const sdp = pc.localDescription?.sdp ?? ''
-          if (!/^a=candidate:/m.test(sdp)) {
-            fail(new CdnNodeError('negotiation', NO_ICE_CANDIDATES))
-            return
-          }
-          ws.send(JSON.stringify({ type: 'offer', sdp }))
+          ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp ?? offer.sdp ?? '' }))
+          gatherTimer = setTimeout(() => {
+            if (!settled && localCandidateCount === 0) {
+              fail(new CdnNodeError('negotiation', NO_ICE_CANDIDATES))
+            }
+          }, ICE_GATHER_TIMEOUT_MS)
           armNegotiationTimer(ANSWER_TIMEOUT_MS, `no answer from the node within ${ANSWER_TIMEOUT_MS / 1000}s`)
         } catch (err) {
           fail(asNodeError('negotiation', err, 'offer negotiation failed'))
