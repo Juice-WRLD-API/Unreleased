@@ -28,6 +28,7 @@ import { versionsEnabled } from '../lib/versionsApi'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard from './PlaylistCard'
+import { DonorPlaylistsSection, DonorPlaylistDetail } from './DonorPlaylists'
 import { allFolderedKeys, folderOfPlaylist, parsePlaylistKey } from '../lib/playlistFolders'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { ClampedMenu } from './ClampedMenu'
@@ -427,6 +428,10 @@ export default function PlaylistsView(): JSX.Element {
   const [showLiked, setShowLiked] = useState(false)
   const [detail, setDetail] = useState<PlaylistDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  // Which donor playlist (if any) is open — a third, local-only kind beside
+  // the store-backed selectedId/localSelectedId, mirroring the same "third
+  // grid section" pattern donor files already got in the library grid below.
+  const [donorSelectedId, setDonorSelectedId] = useState<string | null>(null)
 
   // Inline "quick view" expansion — clicking a card in the grid expands a
   // panel below its row (Apple Music-style) instead of navigating away.
@@ -877,7 +882,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // Listen for sidebar "Playlists" re-click → go back to library
   useEffect(() => {
-    const h = () => { setSelectedId(null); setLocalSelectedId(null); setRenaming(false); setSearch(''); setSearchOpen(false); setSort({ field: 'default', dir: 'asc' }); setIsSharedView(false); setExpandedKey(null) }
+    const h = () => { setSelectedId(null); setLocalSelectedId(null); setDonorSelectedId(null); setRenaming(false); setSearch(''); setSearchOpen(false); setSort({ field: 'default', dir: 'asc' }); setIsSharedView(false); setExpandedKey(null) }
     window.addEventListener('playlists:back', h)
     return () => window.removeEventListener('playlists:back', h)
   }, [])
@@ -3084,6 +3089,12 @@ export default function PlaylistsView(): JSX.Element {
     )
   }
 
+  // ── Donor playlist detail ─────────────────────────────────────────────────
+
+  if (donorSelectedId !== null) {
+    return <DonorPlaylistDetail id={donorSelectedId} onBack={() => setDonorSelectedId(null)} />
+  }
+
   // ── Local playlist detail ─────────────────────────────────────────────────
 
   if (localSelectedId !== null) {
@@ -3418,6 +3429,9 @@ export default function PlaylistsView(): JSX.Element {
             <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet — click "New Playlist" to create one.</p>
           )}
         </div>
+
+        {/* ── Donor files — playlists of the account's cloud files (donors only). ── */}
+        <DonorPlaylistsSection onOpen={(id) => { setExpandedKey(null); setDonorSelectedId(id) }} />
 
         {/* ── Following section — other people's playlists followed from a
             share link. Live pointers, not copies (see FollowedPlaylist);
