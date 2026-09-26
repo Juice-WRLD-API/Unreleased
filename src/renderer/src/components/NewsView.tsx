@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   ChevronLeft, Newspaper, RefreshCw, AlertCircle, Plus, Settings2,
-  Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow,
+  Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow, Share2,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import {
@@ -15,6 +15,8 @@ import NewsComposeModal from './NewsComposeModal'
 import NewsChannelsModal from './NewsChannelsModal'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
+import { hasChatAccess } from '../store/chatStore'
+import ShareNewsModal from './chat/ShareNewsModal'
 
 type NewsMode = 'news' | 'feed'
 
@@ -292,13 +294,15 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
 
 // ─── Article detail ───────────────────────────────────────────────────────────
 
-function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete }: {
+function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete, canShareToChat, onShare }: {
   item: NewsItem
   channelLabel: string | null
   onBack: () => void
   canManage: boolean
   onEdit: (item: NewsItem) => void
   onDelete: (item: NewsItem) => void
+  canShareToChat: boolean
+  onShare: (item: NewsItem) => void
 }) {
   return (
     <div className="max-w-3xl mx-auto">
@@ -309,12 +313,17 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
         >
           <ChevronLeft size={16} /> Back to news
         </button>
-        {canManage && (
-          <div className="ml-auto flex items-center gap-1">
-            <button onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Pencil size={13} /> Edit</button>
-            <button onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-red-400 hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Trash2 size={13} /> Delete</button>
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-1">
+          {canShareToChat && (
+            <button onClick={() => onShare(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Share2 size={13} /> Share to chat</button>
+          )}
+          {canManage && (
+            <>
+              <button onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Pencil size={13} /> Edit</button>
+              <button onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-red-400 hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Trash2 size={13} /> Delete</button>
+            </>
+          )}
+        </div>
       </div>
       {item.image_url && (
         <div className="aspect-[16/7] w-full overflow-hidden rounded-2xl bg-[var(--surface-overlay)] mb-5">
@@ -348,6 +357,7 @@ export default function NewsView(): JSX.Element {
   // buttons don't offer an action the API would reject.
   const canManageItem = (item: NewsItem): boolean =>
     !!account && (account.is_administrator || (!!account.is_news && item.author_id != null && item.author_id === account.id))
+  const canShareToChat = hasChatAccess(account)
 
   const [mode, setMode] = useState<NewsMode>('news')
   const [channel, setChannel] = useState<string>(DEFAULT_NEWS_CHANNEL)
@@ -366,6 +376,7 @@ export default function NewsView(): JSX.Element {
   const [composeOpen, setComposeOpen] = useState(false)
   const [editing, setEditing] = useState<NewsItem | null>(null)
   const [channelsOpen, setChannelsOpen] = useState(false)
+  const [sharing, setSharing] = useState<NewsItem | null>(null)
 
   const loadChannels = useCallback(async () => {
     try {
@@ -581,6 +592,8 @@ export default function NewsView(): JSX.Element {
             canManage={canManageItem(selected)}
             onEdit={openEdit}
             onDelete={handleDelete}
+            canShareToChat={canShareToChat}
+            onShare={setSharing}
           />
         ) : (
           <div className="max-w-6xl mx-auto">
@@ -634,6 +647,7 @@ export default function NewsView(): JSX.Element {
           onChanged={loadChannels}
         />
       )}
+      {sharing && <ShareNewsModal item={sharing} onClose={() => setSharing(null)} />}
     </div>
   )
 }

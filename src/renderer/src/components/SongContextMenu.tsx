@@ -2,17 +2,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen,
   ChevronDown, ChevronRight, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2,
-  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog,
+  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry } from '../lib/juicewrldApi'
+import { isDonorStreamUrl } from '../lib/donorPlayback'
 import { Track } from '../types'
 import ChangeVersionMenuItem from './ChangeVersionMenuItem'
 import { placeFlyout } from '../lib/menuFlyout'
 import { versionsEnabled } from '../lib/versionsApi'
 import { downloadFileSmart } from '../lib/cdn'
+import { hasChatAccess } from '../store/chatStore'
+import ShareSongModal from './chat/ShareSongModal'
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
@@ -140,6 +143,7 @@ export default function SongContextMenu({
   // placement (it has to re-place itself when its list finishes loading) — the
   // open state stays here so all three submenus remain mutually exclusive.
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const versionItemRef = useRef<HTMLButtonElement>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [doneId, setDoneId] = useState<number | null>(null)
@@ -242,6 +246,10 @@ export default function SongContextMenu({
   // but it can join one of the device-local playlists instead.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
   const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly)
+  // Sharing rides the song's own stream URL, so it only makes sense for real
+  // API songs (not local-only files, which nobody else can reach) and only
+  // for staff, who are the only ones with a chat to share into.
+  const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
   // Sessions/unsurfaced are treated as unplayable — don't offer Play / Play
   // next / Add to queue for them (they'd never actually play). Local files
   // (no category in genre) stay playable as long as they have a path.
@@ -287,6 +295,10 @@ export default function SongContextMenu({
     const { top, left } = placeFlyout(item, menu, sub)
     setFileSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
   }, [fileOpen, pos])
+
+  if (shareOpen && canShareToChat) {
+    return <ShareSongModal track={track} songId={songId as number} onClose={onClose} />
+  }
 
   return (
     <div
@@ -487,6 +499,9 @@ export default function SongContextMenu({
               trailing={<ChevronRight size={13} className="text-text-muted" />}
               onClick={() => setPlaylistsOpen(o => !o)}
             />
+          )}
+          {canShareToChat && (
+            <MenuItem icon={<Share2 size={14} />} label="Share to chat" onClick={() => setShareOpen(true)} />
           )}
           {onShowInFiles && track.path && (
             <MenuItem icon={<Folder size={14} />} label="Show in Files" onClick={() => { onShowInFiles(); onClose() }} />

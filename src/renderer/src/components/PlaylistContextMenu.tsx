@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download,
+  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download, Share2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -10,6 +10,8 @@ import type { PlaylistSummary } from '../lib/userApi'
 import { JWAPI_BASE } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
 import { Track } from '../types'
+import { hasChatAccess } from '../store/chatStore'
+import SharePlaylistModal from './chat/SharePlaylistModal'
 
 // Self-contained context menu for an API playlist — usable from anywhere
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing
@@ -49,9 +51,9 @@ export default function PlaylistContextMenu({ state, onClose }: {
   state: PlaylistContextMenuState
   onClose: () => void
 }): JSX.Element {
-  const { playlists, playCollection, addToQueue, refreshPlaylists, setPendingPlaylistId, setActiveView, offlinePlaylists, offlineSync, downloadPlaylistOffline, removePlaylistOffline } = useStore(
+  const { playlists, account, playCollection, addToQueue, refreshPlaylists, setPendingPlaylistId, setActiveView, offlinePlaylists, offlineSync, downloadPlaylistOffline, removePlaylistOffline } = useStore(
     useShallow(s => ({
-      playlists: s.playlists, playCollection: s.playCollection, addToQueue: s.addToQueue,
+      playlists: s.playlists, account: s.account, playCollection: s.playCollection, addToQueue: s.addToQueue,
       refreshPlaylists: s.refreshPlaylists, setPendingPlaylistId: s.setPendingPlaylistId,
       setActiveView: s.setActiveView,
       offlinePlaylists: s.offlinePlaylists, offlineSync: s.offlineSync,
@@ -66,8 +68,14 @@ export default function PlaylistContextMenu({ state, onClose }: {
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [shareCopied, setShareCopied] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [shareToChatOpen, setShareToChatOpen] = useState(false)
+  const canShareToChat = hasChatAccess(account)
 
   const otherPlaylists = playlists.filter(p => p.id !== playlist.id)
+
+  if (shareToChatOpen) {
+    return <SharePlaylistModal playlist={playlist} onClose={onClose} />
+  }
 
   const open = (): void => { setPendingPlaylistId(playlist.id); setActiveView('playlists'); onClose() }
 
@@ -145,6 +153,21 @@ export default function PlaylistContextMenu({ state, onClose }: {
       setPlaylist(p => ({ ...p, is_public: !p.is_public }))
       await refreshPlaylists()
     } catch {} finally { setBusy(false) }
+  }
+
+  // Sharing a private playlist to chat means recipients need to be able to
+  // open it, so it's made public first (with confirmation) rather than
+  // silently sharing a link nobody else can follow.
+  const shareToChat = async (): Promise<void> => {
+    if (!playlist.is_public) {
+      if (!window.confirm('This playlist is private. Sharing it to chat will make it public so recipients can open it. Continue?')) return
+      try {
+        await userApi.updatePlaylist(playlist.id, { is_public: true })
+        setPlaylist(p => ({ ...p, is_public: true }))
+        await refreshPlaylists()
+      } catch { return }
+    }
+    setShareToChatOpen(true)
   }
 
   const addAllTo = async (targetId: number): Promise<void> => {
@@ -240,6 +263,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
             <div className="border-t border-[var(--border)] my-1" />
             <MenuItem icon={shareCopied ? Check : Link} label={shareCopied ? 'Link copied!' : 'Copy share link'} onClick={copyShare} />
             <MenuItem icon={playlist.is_public ? Globe : Lock} label={playlist.is_public ? 'Make private' : 'Make public'} disabled={busy} onClick={togglePublic} />
+            {canShareToChat && <MenuItem icon={Share2} label="Share to chat" onClick={() => void shareToChat()} />}
             <div className="border-t border-[var(--border)] my-1" />
             <MenuItem icon={Pencil} label="Rename" onClick={() => { setRenameVal(playlist.name); setRenaming(true) }} />
             {otherPlaylists.length > 0 && (
