@@ -10,6 +10,10 @@
 // process, which owns the real clipboard and the native save dialog; on the web
 // build they go to the async Clipboard API and an <a download> blob link.
 
+import { JWAPI_SITE } from './juicewrldApi'
+
+const JWAPI_HOST = new URL(JWAPI_SITE).hostname
+
 const MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -25,12 +29,64 @@ function desktop(): any {
   return (window as any).electron
 }
 
-async function fetchImageBlob(url: string): Promise<Blob> {
-  const res = await fetch(url)
+// A song with no custom cover of its own falls back to an era/project image
+// under the API site's own /assets/ path ("/assets/jute.png"), a static file
+// served with no CORS header at all - unlike the API's own endpoints, which
+// send Access-Control-Allow-Origin. A plain <img> paints those fine (which is
+// why they show up everywhere on screen), but fetch()/canvas can't read their
+// bytes, so copy/save/ShareLyricsModal's export silently dropped the cover
+// for exactly those songs. Retry through an image CORS proxy when the direct
+// read fails.
+const CORS_PROXIES: ((url: string) => string)[] = [
+  (url) => `https://images.weserv.nl/?url=${encodeURIComponent(url)}`,
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+]
+
+// A proxy that's down or rate-limiting would otherwise hang whatever is
+// awaiting these bytes - ShareLyricsModal's export buttons block on exactly
+// this fetch before they rasterize the card.
+const PROXY_TIMEOUT_MS = 8000
+
+/** Whether `url` may be handed to a third-party proxy. Only the API's own
+ *  https hosts qualify: a user's personal cover is a data:/blob: URL (or a
+ *  local-media: one on desktop) that a proxy could never fetch anyway, and
+ *  sending those out would leak a local file's contents off-device. */
+function isProxyableCoverUrl(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url)
+    return protocol === 'https:' && (hostname === JWAPI_HOST || hostname.endsWith(`.${JWAPI_HOST}`))
+  } catch {
+    return false
+  }
+}
+
+async function requestImageBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`Image request failed (${res.status})`)
   const blob = await res.blob()
   if (!blob.size) throw new Error('Image was empty')
   return blob
+}
+
+async function fetchImageBlob(url: string): Promise<Blob> {
+  try {
+    return await requestImageBlob(url)
+  } catch (err) {
+    if (!isProxyableCoverUrl(url)) throw err
+    for (const proxy of CORS_PROXIES) {
+      try {
+        const blob = await requestImageBlob(proxy(url), AbortSignal.timeout(PROXY_TIMEOUT_MS))
+        // A proxy that's rate-limited or couldn't reach the origin still
+        // answers 200, with its own HTML/JSON error page - that passes both
+        // checks above and would be "copied" as a broken image otherwise.
+        if (blob.type.startsWith('image/')) return blob
+      } catch {
+        // Fall through to the next proxy, then rethrow the direct failure -
+        // that's the one worth reporting, not a proxy's own trouble.
+      }
+    }
+    throw err
+  }
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -70,6 +126,13 @@ export function coverFileName(title: string, mime: string): string {
     .trim()
     .slice(0, 80) || 'cover'
   return `${base}.${MIME_EXT[mime] ?? 'jpg'}`
+}
+
+/** Fetches a remote cover and returns it as a data: URL, for embedding in
+ *  contexts (like a canvas-rendered share card) that need the bytes inlined
+ *  rather than a cross-origin <img> src. */
+export async function fetchImageDataUrl(url: string): Promise<string> {
+  return blobToDataUrl(await fetchImageBlob(url))
 }
 
 /** Puts the cover on the clipboard as an image, pasteable into other apps. */

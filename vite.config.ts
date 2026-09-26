@@ -23,7 +23,7 @@ const devCspPlugin = {
       img-src 'self' data: blob: local-media: https:;
       media-src 'self' blob: local-media: https:;
       font-src 'self';
-      connect-src 'self' ws://localhost:3018 https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com local-media:;
+      connect-src 'self' ws://localhost:3018 https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com https://images.weserv.nl local-media:;
       worker-src 'self' blob:;
       object-src 'none';
       base-uri 'self';
