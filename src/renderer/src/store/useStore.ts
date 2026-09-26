@@ -32,6 +32,7 @@ import { newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistF
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
+import type { GifResult } from '../lib/gifApi'
 import { getFont } from '../lib/fonts'
 import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
 import type { CommunityEdit } from '../lib/audioEffects'
@@ -532,6 +533,9 @@ interface AppActions {
   /** Called from chatStore whenever its local mutedServers/mutedConversations
    *  change, so this store's mirror of them stays current. */
   _syncChatMutes: (mutedServers: number[], mutedConversations: number[]) => void
+  // GIFs favorited from the chat GIF picker (see lib/gifApi).
+  favoriteGifs: GifResult[]
+  toggleFavoriteGif: (gif: GifResult) => void
   setShowDiagnostics: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -1273,6 +1277,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
       && mutedConversations.length === s.chatMutedConversations.length && mutedConversations.every((id) => s.chatMutedConversations.includes(id))) return
     set({ chatMutedServers: mutedServers, chatMutedConversations: mutedConversations })
   },
+  toggleFavoriteGif: (gif) => {
+    const { favoriteGifs } = get()
+    const next = favoriteGifs.some((g) => g.id === gif.id)
+      ? favoriteGifs.filter((g) => g.id !== gif.id)
+      : [gif, ...favoriteGifs]
+    set({ favoriteGifs: next })
+    ls.set('favoriteGifs', next)
+  },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
   setShowQueue: (showQueue) => set({ showQueue }),
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
@@ -1927,6 +1939,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // account hydrate calls _syncChatMutes.
   chatMutedServers: [],
   chatMutedConversations: [],
+  favoriteGifs: ls.get<GifResult[]>('favoriteGifs') ?? [],
   setPendingPlaylistId: (id) => set({ pendingPlaylistId: id }),
   playlistsSelectedId: null,
   playlistsSelectedLocalId: null,

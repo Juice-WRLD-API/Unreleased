@@ -24,6 +24,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/stats') return 'stats'
   if (pathname === '/statistics') return 'statistics'
   if (pathname.startsWith('/u/')) return 'public-profile'
+  if (pathname.startsWith('/chat')) return 'chat'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
   if (pathname === '/library') return 'library'
   if (pathname === '/auth/discord/callback') return 'api-tracker'
@@ -77,6 +78,7 @@ const TierlistView = lazyView(() => import('./components/TierlistView'))
 const StatsView = lazyView(() => import('./components/StatsView'))
 const StatisticsView = lazyView(() => import('./components/StatisticsView'))
 const PublicProfileView = lazyView(() => import('./components/PublicProfileView'))
+const ChatView = lazyView(() => import('./components/ChatView'))
 const AlbumsAdminView = lazyView(() => import('./components/AlbumsAdminView'))
 const LocalEditorPage = lazyView(() => import('./components/LocalEditorPage'))
 const ContributorPage = lazyView(() => import('./components/ContributorPage'))
@@ -290,6 +292,7 @@ export default function App(): JSX.Element {
               : activeView === 'stats' ? <StatsView />
               : activeView === 'statistics' ? <StatisticsView />
               : activeView === 'public-profile' ? <PublicProfileView />
+              : activeView === 'chat' ? <ChatView />
               : activeView === 'library' ? <LibraryTab />
               : activeView === 'local-editor' ? <LocalEditorPage />
               : activeView === 'albums-admin' ? <AlbumsAdminView />

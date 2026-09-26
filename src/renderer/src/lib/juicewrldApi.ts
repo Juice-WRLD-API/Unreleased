@@ -570,6 +570,18 @@ export async function resolveTitleToSong(title: string): Promise<JWApiSong | nul
   }
 }
 
+export async function searchSongs(title: string, limit = 8): Promise<JWApiSong[]> {
+  const raw = (title ?? '').trim()
+  if (!raw) return []
+  const search = cleanTitleForSearch(stripFileTitleCruft(raw)) || raw
+  try {
+    const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search, page_size: limit })
+    return (data.results ?? []).filter((s) => !['unsurfaced', 'recording_session'].includes(s.category)).slice(0, limit)
+  } catch {
+    return []
+  }
+}
+
 // ─── Site deep links ──────────────────────────────────────────────────────────
 
 export const JWAPI_SITE = 'https://juicewrldapi.com'

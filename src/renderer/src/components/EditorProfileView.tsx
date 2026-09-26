@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Loader2, Trophy, FileEdit, ChevronLeft, Pencil, Trash2, RefreshCw, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Search, Flag, ShieldCheck, FolderOpen, Copy, PictureInPicture2, User } from 'lucide-react'
+import { Loader2, Trophy, FileEdit, ChevronLeft, Pencil, Trash2, RefreshCw, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Search, Flag, ShieldCheck, FolderOpen, Copy, PictureInPicture2, User, MessagesSquare } from 'lucide-react'
+import { hasChatAccess } from '../store/chatStore'
 import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
 import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
 import { getMyProposals, getLeaderboard, withdrawProposal, createProposal, resubmitProposal, SongEditProposal, ProposalStatus, getMyCompProposals, withdrawCompProposal, CompFileProposal, isChannelContributor, isChannelManager } from '../lib/userApi'
@@ -599,6 +600,15 @@ export default function EditorProfileView(): JSX.Element {
             >
               <User size={13} />
             </button>
+            {hasChatAccess(account) && (
+              <button
+                onClick={() => go('chat')}
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+                title="Staff chat"
+              >
+                <MessagesSquare size={13} />
+              </button>
+            )}
             {/* Shown only when the pop-out is turned off — with it on, this page
                 *is* the pop-out and the button would reopen the window it's
                 already in. */}
