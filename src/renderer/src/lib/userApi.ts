@@ -52,6 +52,17 @@ export interface AccountUser {
   // Channel ids the user follows for news notifications (see lib/newsNotifications).
   news_subscriptions?: string[]
   memberships?: ChannelMembership[]
+  // Free-form JSON settings blob, PATCHable whole-object through this same
+  // route. Only the fields the chat feature needs are modeled here so far.
+  user_settings?: UserSettings
+}
+
+export interface UserSettings {
+  /** Account ids of servers/conversations this device has muted in chat -
+   *  mirrors chatStore's own local copy so it can follow the user across
+   *  devices once this blob is PATCHable from here too. */
+  muted_servers?: number[]
+  muted_conversations?: number[]
 }
 
 export interface ChannelMembership {

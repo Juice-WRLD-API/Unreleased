@@ -519,6 +519,19 @@ interface AppActions {
   openOwnPublicProfile: () => void
   /** Opens any user's public profile by id. */
   openPublicProfile: (userId: number) => void
+  // Account ids of users whose chat messages are hidden from this account.
+  mutedUserIds: number[]
+  muteUser: (userId: number) => void
+  unmuteUser: (userId: number) => void
+  toggleMuteUser: (userId: number) => void
+  // Mirror of chatStore's mutedServers/mutedConversations (that store owns
+  // them; this is just a copy chatStore keeps in sync via _syncChatMutes so
+  // other surfaces can read it without importing chatStore back).
+  chatMutedServers: number[]
+  chatMutedConversations: number[]
+  /** Called from chatStore whenever its local mutedServers/mutedConversations
+   *  change, so this store's mirror of them stays current. */
+  _syncChatMutes: (mutedServers: number[], mutedConversations: number[]) => void
   setShowDiagnostics: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -1235,6 +1248,31 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
     set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
+  muteUser: (userId) => {
+    const { mutedUserIds } = get()
+    if (mutedUserIds.includes(userId)) return
+    const next = [...mutedUserIds, userId]
+    set({ mutedUserIds: next })
+    ls.set('mutedUserIds', next)
+  },
+  unmuteUser: (userId) => {
+    const { mutedUserIds } = get()
+    if (!mutedUserIds.includes(userId)) return
+    const next = mutedUserIds.filter((id) => id !== userId)
+    set({ mutedUserIds: next })
+    ls.set('mutedUserIds', next)
+  },
+  toggleMuteUser: (userId) => {
+    const { mutedUserIds, muteUser, unmuteUser } = get()
+    if (mutedUserIds.includes(userId)) unmuteUser(userId)
+    else muteUser(userId)
+  },
+  _syncChatMutes: (mutedServers, mutedConversations) => {
+    const s = get()
+    if (mutedServers.length === s.chatMutedServers.length && mutedServers.every((id) => s.chatMutedServers.includes(id))
+      && mutedConversations.length === s.chatMutedConversations.length && mutedConversations.every((id) => s.chatMutedConversations.includes(id))) return
+    set({ chatMutedServers: mutedServers, chatMutedConversations: mutedConversations })
+  },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
   setShowQueue: (showQueue) => set({ showQueue }),
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
@@ -1883,6 +1921,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
   playlists: [],
   showUserAuth: false,
   pendingPlaylistId: null,
+  mutedUserIds: ls.get<number[]>('mutedUserIds') ?? [],
+  // Mirrors chatStore's own local mutedServers/mutedConversations (that store
+  // owns them; see chatStore's loadMuted/saveMuted). Empty until chatStore's
+  // account hydrate calls _syncChatMutes.
+  chatMutedServers: [],
+  chatMutedConversations: [],
   setPendingPlaylistId: (id) => set({ pendingPlaylistId: id }),
   playlistsSelectedId: null,
   playlistsSelectedLocalId: null,
