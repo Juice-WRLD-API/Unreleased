@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Loader2, Trophy, FileEdit, ChevronLeft, Pencil, Trash2, RefreshCw, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Search, Flag, ShieldCheck, FolderOpen, Copy, PictureInPicture2 } from 'lucide-react'
+import { Loader2, Trophy, FileEdit, ChevronLeft, Pencil, Trash2, RefreshCw, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Search, Flag, ShieldCheck, FolderOpen, Copy, PictureInPicture2, User } from 'lucide-react'
 import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
 import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
 import { getMyProposals, getLeaderboard, withdrawProposal, createProposal, resubmitProposal, SongEditProposal, ProposalStatus, getMyCompProposals, withdrawCompProposal, CompFileProposal, isChannelContributor, isChannelManager } from '../lib/userApi'
@@ -389,7 +389,7 @@ function changeTypeLabel(type: string): string {
 
 export default function EditorProfileView(): JSX.Element {
   const isElectron = navigator.userAgent.includes('Electron')
-  const { account, setPendingEditorSongId, setPendingEditProposal, activeChannel, channels, setActiveChannel, loadChannels } = useStore(useShallow(s => ({
+  const { account, setPendingEditorSongId, setPendingEditProposal, activeChannel, channels, setActiveChannel, loadChannels, openOwnPublicProfile } = useStore(useShallow(s => ({
     account: s.account,
     setPendingEditorSongId: s.setPendingEditorSongId,
     setPendingEditProposal: s.setPendingEditProposal,
@@ -397,6 +397,7 @@ export default function EditorProfileView(): JSX.Element {
     channels: s.channels,
     setActiveChannel: s.setActiveChannel,
     loadChannels: s.loadChannels,
+    openOwnPublicProfile: s.openOwnPublicProfile,
   })))
   // Every list on this page — my proposals, my comp proposals, the Admin tab's
   // review queues — is already scoped to activeChannel (see the effects
@@ -591,6 +592,13 @@ export default function EditorProfileView(): JSX.Element {
                 ))}
               </div>
             )}
+            <button
+              onClick={openOwnPublicProfile}
+              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+              title="View your public profile"
+            >
+              <User size={13} />
+            </button>
             {/* Shown only when the pop-out is turned off — with it on, this page
                 *is* the pop-out and the button would reopen the window it's
                 already in. */}

@@ -20,6 +20,15 @@ export interface AccountUser {
   discord_id: string
   discord_username: string
   discord_avatar: string
+  // The account's actual login handle, set on every account. discord_username
+  // is empty for username/password accounts, so this is the fallback
+  // wherever a handle must never be blank.
+  username?: string
+  avatar?: string
+  bio?: string
+  public_play_history?: boolean
+  public_playlists?: boolean
+  public_now_playing?: boolean
   is_editor: boolean
   is_contributor: boolean
   // Optional: the API only started returning this with the manager role, so
@@ -28,6 +37,10 @@ export interface AccountUser {
   // Grants News write access (create/edit-own/delete-own posts) — separate
   // from is_editor. Admins can write News regardless of this flag.
   is_news?: boolean
+  // Donor priority - admin-granted only, never PATCHable. donor_since is null
+  // while is_donor is false.
+  is_donor?: boolean
+  donor_since?: string | null
   is_administrator: boolean
   otp_enabled: boolean
   // JSON blobs stored on the profile and PATCHable through this same route —
@@ -147,6 +160,34 @@ export interface PlaylistDetail {
   items: PlaylistItemEntry[]
   created_at: string
   updated_at: string
+}
+
+export interface NowPlayingState {
+  song: number
+  path: string
+  position: number
+  updated_at: string
+}
+
+export interface NowPlayingResponse {
+  now_playing: NowPlayingState | null
+}
+
+export interface PublicProfile {
+  id: number
+  username: string
+  display_name: string
+  avatar: string
+  bio: string
+  is_editor: boolean
+  is_contributor: boolean
+  is_donor: boolean
+  donor_since: string | null
+  public_play_history: boolean
+  public_playlists: boolean
+  public_now_playing: boolean
+  play_history?: ListeningPlayEvent[]
+  playlists?: PlaylistSummary[]
 }
 
 export function getToken(): string | null {
@@ -413,6 +454,16 @@ export async function getPublicPlaylist(id: number): Promise<PlaylistDetail> {
   const result = await request<PlaylistDetail>(url, {}, false, url)
   playlistDetailCache.set(id, result)
   return result
+}
+
+export async function getPublicProfile(userId: number): Promise<PublicProfile> {
+  const url = `${ACCOUNT_BASE}/profile/${userId}/`
+  return request(url, { method: 'GET' }, false, url)
+}
+
+export async function getNowPlaying(userId: number): Promise<NowPlayingResponse> {
+  const url = `${ACCOUNT_BASE}/profile/${userId}/np/`
+  return request(url, { method: 'GET' }, false)
 }
 
 /** Fetch cover of a public playlist without authentication. */
@@ -802,6 +853,10 @@ export async function adminListUsers(roleFilter?: string): Promise<AdminUser[]> 
   const url = new URL(`${ACCOUNT_BASE}/admin/users/`)
   if (roleFilter) url.searchParams.set('role', roleFilter)
   return request(url.toString(), { method: 'GET' })
+}
+
+export async function adminGetUser(userId: number): Promise<AdminUser> {
+  return request(`${ACCOUNT_BASE}/admin/users/${userId}/`, { method: 'GET' })
 }
 
 export async function adminUpdateUser(userId: number, payload: {

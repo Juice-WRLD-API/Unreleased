@@ -515,6 +515,10 @@ interface AppActions {
    *  bottom nav tab, the player's profile hotkey). Opens the pop-out window
    *  when that's enabled, otherwise navigates in-app. */
   openProfile: () => void
+  /** Opens the signed-in user's own public profile (/u/<id>). */
+  openOwnPublicProfile: () => void
+  /** Opens any user's public profile by id. */
+  openPublicProfile: (userId: number) => void
   setShowDiagnostics: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -1215,6 +1219,21 @@ export const useStore = create<AppStore>((set, get, store) => ({
       return
     }
     get().setActiveView(view)
+  },
+  openOwnPublicProfile: () => {
+    const account = get().account
+    if (!account) return
+    get().openPublicProfile(account.id)
+  },
+  openPublicProfile: (userId) => {
+    // public-profile's userId lives in the URL path itself (/u/<id>), not in
+    // store state, so this can't reuse setActiveView's path table - push
+    // directly and always set state (even if already on 'public-profile',
+    // e.g. navigating there from someone else's page) so the view re-reads
+    // the new path.
+    const path = `/u/${userId}`
+    if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
+    set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
   setShowQueue: (showQueue) => set({ showQueue }),

@@ -242,6 +242,13 @@ export function getSongById(id: number): Promise<JWApiSong> {
   return entry.promise
 }
 
+export async function getSongsByIds(ids: number[]): Promise<JWApiSong[]> {
+  const unique = Array.from(new Set(ids))
+  if (unique.length === 0) return []
+  const results = await Promise.all(unique.map((id) => getSongById(id).catch(() => null)))
+  return results.filter((s): s is JWApiSong => s !== null)
+}
+
 // ─── URL helpers ──────────────────────────────────────────────────────────────
 
 export function buildStreamUrl(path: string, channel?: string): string {
