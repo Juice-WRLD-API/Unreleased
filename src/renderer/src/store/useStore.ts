@@ -363,6 +363,10 @@ interface AppState {
   // API tracker extras
   apiTrackerCategory: string
   apiTrackerEra: string
+  // One-shot deep link consumed by ApiTrackerView on mount to pick which tab
+  // (Songs/Lyrics/Overview/Producers) opens - see StatisticsView's tab bar,
+  // the only current setter.
+  apiTrackerTab: string
   apiFilesPath: string
   apiFilesLastPath: string
 
@@ -660,6 +664,7 @@ interface AppActions {
 
   setApiTrackerCategory: (cat: string) => void
   setApiTrackerEra: (era: string) => void
+  setApiTrackerTab: (tab: string) => void
   setApiFilesPath: (path: string) => void
   setApiFilesLastPath: (path: string) => void
 
@@ -1138,6 +1143,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'wordle': '/wordle',
       'tierlist': '/tierlist',
       'stats': '/stats',
+      'statistics': '/statistics',
     }
     window.history.pushState({ view }, '', paths[view] ?? '/tracker')
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
@@ -1829,11 +1835,13 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // -- API tracker extras ----------------------------------------------------
   apiTrackerCategory: '',
   apiTrackerEra: '',
+  apiTrackerTab: '',
   apiFilesPath: '',
   apiFilesLastPath: '',
 
   setApiTrackerCategory: (cat) => set({ apiTrackerCategory: cat }),
   setApiTrackerEra: (era) => set({ apiTrackerEra: era }),
+  setApiTrackerTab: (tab) => set({ apiTrackerTab: tab }),
   setApiFilesLastPath: (path) => set({ apiFilesLastPath: path }),
   setApiFilesPath: (path) => set({ apiFilesPath: path }),
 

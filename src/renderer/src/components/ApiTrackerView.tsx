@@ -4,7 +4,7 @@ import {
   LayoutList, Rows3, Info, ListPlus, ListFilter,
   ChevronUp, ChevronDown, MoreHorizontal, Plus, ListMusic, PackageOpen,
   CheckSquare2, Square, Link2, Layers, LayoutGrid, Mic2, CalendarDays, ChevronLeft, ChevronRight, Users,
-  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type,
+  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type, BarChart3,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -33,6 +33,10 @@ import { useMultiSelect } from '../hooks/useMultiSelect'
 type Category = 'released' | 'unreleased' | 'unsurfaced' | 'recording_session' | ''
 type ViewMode = 'list' | 'detail' | 'grid'
 type TrackerTab = 'songs' | 'lyrics' | 'calendar' | 'producers'
+const TRACKER_TABS: TrackerTab[] = ['songs', 'lyrics', 'calendar', 'producers']
+function isTrackerTab(v: string): v is TrackerTab {
+  return (TRACKER_TABS as string[]).includes(v)
+}
 
 // ─── Era color palette (Calendar tab) ─────────────────────────────────────────
 // Eras are dynamic (fetched from the API, not a fixed enum), so colors are
@@ -1838,6 +1842,7 @@ export default function ApiTrackerView(): JSX.Element {
     playTrack, startRadio, addToQueue, account, shuffle,
     apiTrackerCategory, setApiTrackerCategory,
     apiTrackerEra, setApiTrackerEra,
+    apiTrackerTab, setApiTrackerTab,
     setActiveView, setApiFilesPath, setPendingEditorSongId,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
     openBulkEditor, fullEraNames, offlineTracks,
@@ -1846,6 +1851,7 @@ export default function ApiTrackerView(): JSX.Element {
     account: s.account, shuffle: s.shuffle,
     apiTrackerCategory: s.apiTrackerCategory, setApiTrackerCategory: s.setApiTrackerCategory,
     apiTrackerEra: s.apiTrackerEra, setApiTrackerEra: s.setApiTrackerEra,
+    apiTrackerTab: s.apiTrackerTab, setApiTrackerTab: s.setApiTrackerTab,
     setActiveView: s.setActiveView, setApiFilesPath: s.setApiFilesPath,
     setPendingEditorSongId: s.setPendingEditorSongId,
     playlists: s.playlists, refreshPlaylists: s.refreshPlaylists, setShowUserAuth: s.setShowUserAuth,
@@ -1861,7 +1867,13 @@ export default function ApiTrackerView(): JSX.Element {
   // once so eraLabel() has something to show once the user opts in.
   useEffect(() => { loadEraFullNames().catch(() => {}) }, [])
 
-  const [trackerTab, setTrackerTab] = useState<TrackerTab>('songs')
+  const [trackerTab, setTrackerTab] = useState<TrackerTab>(
+    () => (isTrackerTab(apiTrackerTab) ? apiTrackerTab : 'songs'),
+  )
+  // Deep link is one-shot - consumed into the initial state above, so it must
+  // not linger and re-apply on a later render (e.g. after switching tabs by
+  // hand and coming back to this view).
+  useEffect(() => { if (apiTrackerTab) setApiTrackerTab('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [contextMenu, setContextMenu] = useState<{ song: JWApiSong; x: number; y: number } | null>(null)
   const [bulkContextMenu, setBulkContextMenu] = useState<BulkContextMenuState | null>(null)
@@ -2774,6 +2786,12 @@ export default function ApiTrackerView(): JSX.Element {
             }`}
           >
             <Users size={11} /> Producers
+          </button>
+          <button
+            onClick={() => setActiveView('statistics')}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+          >
+            <BarChart3 size={11} /> Statistics
           </button>
         </div>
 

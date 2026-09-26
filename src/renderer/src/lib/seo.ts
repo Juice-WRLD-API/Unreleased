@@ -82,6 +82,12 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     description:
       'How to use the unreleased player: search and filters, playlists, the equalizer, offline downloads, Last.fm scrobbling, and keyboard shortcuts.',
   },
+  statistics: {
+    path: '/statistics',
+    title: 'Catalog statistics',
+    description:
+      'How big the Juice WRLD catalog is: total songs, the split across released, unreleased, unsurfaced and recording sessions, and a per-era breakdown.',
+  },
   // Personal or unstable surfaces: crawlable in principle, worthless in an
   // index, and in several cases they render empty for a signed-out crawler.
   liked: { path: '/liked', title: 'Liked songs', description: 'Your liked Juice WRLD songs.', noindex: true },
