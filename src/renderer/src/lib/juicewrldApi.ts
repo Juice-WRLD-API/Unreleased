@@ -24,6 +24,8 @@ export interface JWApiSong {
   track_titles: string[]
   path: string
   length: string                     // "3:59"
+  bpm?: number | null
+  key?: string | null
   credited_artists: string
   producers: string
   engineers?: string | null
