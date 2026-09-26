@@ -14,7 +14,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { buildImageUrl, buildStreamUrl, JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack } from '../lib/juicewrldApi'
+import { buildImageUrl, buildStreamUrl, JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { fisherYates } from '../store/queueSlice'
@@ -35,6 +35,7 @@ import { ClampedMenu } from './ClampedMenu'
 import type { PlaylistFolder } from '../lib/playlistFolders'
 import { Folder, FolderPlus, FolderOpen, FolderMinus } from 'lucide-react'
 import { loadEraFullNames, eraLabel } from '../lib/eras'
+import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
 
 // One parsed line of an .m3u: a file path, plus the #EXTINF title/duration
 // when the exporter wrote them. Import can either match the path to a local
@@ -517,6 +518,7 @@ export default function PlaylistsView(): JSX.Element {
   const [localRenameVal, setLocalRenameVal] = useState('')
   const [showAddAllMenu, setShowAddAllMenu] = useState(false)
   const addAllMenuRef = useRef<HTMLDivElement>(null)
+  const [showExportMenu, setShowExportMenu] = useState(false)
   // The open-playlist hero's "⋯" menu (replaces the old cluster of loose
   // action buttons next to Play/Shuffle).
   const [showHeroMenu, setShowHeroMenu] = useState(false)
@@ -1382,9 +1384,24 @@ export default function PlaylistsView(): JSX.Element {
     } catch {}
   }, [selectedId, detail])
 
+  const handleExportJson = useCallback(() => {
+    if (!detail) return
+    const name = detail.name ?? summary?.name ?? 'playlist'
+    downloadBlob(JSON.stringify(playlistJsonPayload(detail), null, 2), 'application/json', `${name}.json`)
+  }, [detail, summary])
+
+  const handleExportM3u = useCallback(() => {
+    if (!detail) return
+    const name = detail.name ?? summary?.name ?? 'playlist'
+    downloadBlob(playlistM3uContent(tracks), 'audio/x-mpegurl', `${name}.m3u`)
+  }, [detail, summary, tracks])
+
   const handleAddAllTo = useCallback(async (targetId: number, srcDetail: PlaylistDetail) => {
     setAddingAll(true)
-    const eligible = srcDetail.items.filter(item => !['recording_session', 'unsurfaced'].includes(item.song.category))
+    const eligible = srcDetail.items.filter(item =>
+      item.song.category !== 'unsurfaced'
+      && (item.song.category !== 'recording_session' || !!resolveSessionEditSource(item.song).path)
+    )
     await Promise.all(eligible.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
     srcDetail.items.forEach(i => targetSet.add(i.song.id))
@@ -1399,7 +1416,10 @@ export default function PlaylistsView(): JSX.Element {
     setImportState('loading')
     try {
       const allowedIds = detail.items
-        .filter(item => !['recording_session', 'unsurfaced'].includes(item.song.category))
+        .filter(item =>
+          item.song.category !== 'unsurfaced'
+          && (item.song.category !== 'recording_session' || !!resolveSessionEditSource(item.song).path)
+        )
         .map(item => item.song.id)
 
       // Request 1: create playlist with name + description + song_ids in one shot
@@ -2572,7 +2592,7 @@ export default function PlaylistsView(): JSX.Element {
                   <div className="relative" ref={heroMenuRef}>
                     <button
                       ref={heroBtnRef}
-                      onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v); setShowAddAllMenu(false) }}
+                      onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v); setShowAddAllMenu(false); setShowExportMenu(false) }}
                       title="More"
                       className={`p-2.5 rounded-full text-sm transition-colors ${showHeroMenu ? 'text-white bg-white/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
                     >
@@ -2583,7 +2603,7 @@ export default function PlaylistsView(): JSX.Element {
                         "Add all to playlist" list stays fully visible. */}
                     {showHeroMenu && createPortal(
                       <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => { setShowHeroMenu(false); setShowAddAllMenu(false) }} />
+                        <div className="fixed inset-0 z-[60]" onClick={() => { setShowHeroMenu(false); setShowAddAllMenu(false); setShowExportMenu(false) }} />
                         {(() => {
                           const r = heroBtnRef.current?.getBoundingClientRect()
                           const top = r ? r.bottom + 6 : 0
@@ -2600,6 +2620,25 @@ export default function PlaylistsView(): JSX.Element {
                                 disabled={zipState === 'loading' || tracks.length === 0}
                                 onClick={() => { handleZipDownload(tracks, detail.name ?? summary?.name ?? 'playlist') }}
                               />
+                              <MenuItem
+                                icon={FileDown}
+                                label="Export playlist"
+                                disabled={tracks.length === 0}
+                                trailing={<span className="text-text-muted text-xs">{showExportMenu ? '⌄' : '›'}</span>}
+                                onClick={() => setShowExportMenu(v => !v)}
+                              />
+                              {showExportMenu && (
+                                <div className="border-t border-b border-[var(--border)]">
+                                  <button onClick={() => { setShowExportMenu(false); setShowHeroMenu(false); handleExportJson() }}
+                                    className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                                    As JSON
+                                  </button>
+                                  <button onClick={() => { setShowExportMenu(false); setShowHeroMenu(false); handleExportM3u() }}
+                                    className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                                    As M3U
+                                  </button>
+                                </div>
+                              )}
                               {!!(window as any).electron && (
                                 <MenuItem
                                   icon={offlineSyncState?.state === 'syncing' ? Loader2 : Download}
