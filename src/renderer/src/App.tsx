@@ -4,6 +4,7 @@ import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle } from './lib/platform'
 import { applySeo } from './lib/seo'
+import { loadSessionEditLinks } from './lib/sessionEditsApi'
 import { lazyView } from './lib/lazyView'
 import { ViewType } from './types'
 
@@ -115,9 +116,15 @@ function WindowControls(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel')
   useThemeEffects()
+
+  // Warms the session-edit auto-match mirror so any view that resolves a
+  // recording_session song's playback (songToTrack, ApiTrackerView, etc.)
+  // sees it filled in without depending on the Tracker having been opened
+  // first this session.
+  useEffect(() => { loadSessionEditLinks(activeChannel).catch(() => {}) }, [activeChannel])
   // Seed auth token from env in local dev only — import.meta.env.DEV is false in production
   // builds, so this never runs for real users even if the token is baked into the bundle.
   useEffect(() => {

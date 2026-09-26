@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen,
   ChevronDown, ChevronRight, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2,
-  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2,
+  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -67,6 +67,14 @@ interface Props {
    *  contexts where switching doesn't make sense (e.g. WRLD's FM radio,
    *  which is server-driven and can't be manually redirected). */
   disableChangeVersion?: boolean
+
+  /** Session-edit file linking (Tracker only) — lets an editor/contributor
+   *  manually point a recording-session song at its session-edit audio file
+   *  when the automatic filename match got it wrong or found nothing. */
+  canLinkSessionFile?: boolean
+  hasSessionLinkOverride?: boolean
+  onLinkSessionFile?: () => void
+  onClearSessionLink?: () => void
 }
 
 function MenuItem({ icon, label, onClick, destructive, trailing, innerRef }: {
@@ -98,7 +106,11 @@ function Divider(): JSX.Element {
 function downloadTrack(track: Track): void {
   // P2P CDN first (if any node has the file), falling back to the normal
   // stream URL the instant no node answers - see lib/cdn's downloadFileSmart.
-  void downloadFileSmart(track.path, `${track.title}.mp3`, buildStreamUrl(track.path))
+  // track.streamUrl is already channel-correct (songToTrack resolved it via
+  // resolveSessionEditSource) - rebuilding from track.path alone would drop
+  // that for a session-edit-linked recording_session song on a non-primary
+  // channel.
+  void downloadFileSmart(track.path, `${track.title}.mp3`, track.streamUrl ?? buildStreamUrl(track.path))
 }
 
 function downloadZipEntry(entry: JWApiFileEntry): void {
@@ -116,6 +128,7 @@ export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
   onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect, onEditLocalMetadata,
   liked, onToggleLike, removeAction, song, disableChangeVersion,
+  canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
   const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist, offlineTracks, removeOfflineTrack, downloadTrackOffline, autoDownloadIfOffline, addLibraryTrack } = useStore(
     useShallow(s => ({
@@ -240,7 +253,7 @@ export default function SongContextMenu({
   // A couple of callers use a -1 sentinel for "no real song" instead of null
   // (e.g. shared-playlist placeholder rows) — treat both as invalid.
   const hasValidSong = songId != null && songId > 0
-  const isUnplayable = ['recording_session', 'unsurfaced'].includes(track.genre)
+  const isUnplayable = track.genre === 'unsurfaced' || (track.genre === 'recording_session' && !track.path)
   // A local library file with no matching API song — it already lives on
   // disk (so "Download" is meaningless) and can't join a server playlist,
   // but it can join one of the device-local playlists instead.
@@ -549,6 +562,15 @@ export default function SongContextMenu({
                 label={zipLoading ? 'Finding files…' : 'Download session (ZIP)'}
                 onClick={loadSessionZips}
               />
+            </>
+          )}
+          {song && canLinkSessionFile && track.genre === 'recording_session' && onLinkSessionFile && (
+            <>
+              <Divider />
+              <MenuItem icon={<FileAudio2 size={14} />} label="Link session file…" onClick={() => { onLinkSessionFile(); onClose() }} />
+              {hasSessionLinkOverride && onClearSessionLink && (
+                <MenuItem icon={<X size={14} />} label="Clear manual link" onClick={() => { onClearSessionLink(); onClose() }} />
+              )}
             </>
           )}
           {track.path && !isLocalOnly && (

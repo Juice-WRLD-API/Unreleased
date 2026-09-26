@@ -14,11 +14,15 @@ import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
 import {
   apiFetch, apiPeek, songToTrack, parseDuration, buildStreamUrl, CATEGORY_LABELS, CATEGORY_COLORS, JWAPI_BASE,
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra, loadAllSongs,
+  parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
-import { useCanEdit } from '../hooks/useChannelRoles'
+import { useCanEdit, useCanContribute } from '../hooks/useChannelRoles'
+import FilePickerModal from './FilePickerModal'
+import { loadSessionEditLinks } from '../lib/sessionEditsApi'
+import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
@@ -1841,7 +1845,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerTab, setApiTrackerTab,
     setActiveView, setApiFilesPath, setPendingEditorSongId,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
-    openBulkEditor, fullEraNames, offlineTracks,
+    openBulkEditor, fullEraNames, offlineTracks, activeChannel,
   } = useStore(useShallow(s => ({
     playTrack: s.playTrack, startRadio: s.startRadio, addToQueue: s.addToQueue,
     account: s.account, shuffle: s.shuffle,
@@ -1855,9 +1859,31 @@ export default function ApiTrackerView(): JSX.Element {
     openBulkEditor: s.openBulkEditor,
     fullEraNames: s.fullEraNames,
     offlineTracks: s.offlineTracks,
+    activeChannel: s.activeChannel,
   })))
 
   const canEdit = useCanEdit()
+  const canContribute = useCanContribute()
+  const canLinkSessions = canEdit || canContribute
+  const [sessionEditOverrideVersion, setSessionEditOverrideVersion] = useState(0)
+  const [linkingSessionSong, setLinkingSessionSong] = useState<JWApiSong | null>(null)
+  const [sessionEditLinks, setSessionEditLinks] = useState<Map<number, { path: string; duration: string | null }> | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    loadSessionEditLinks(activeChannel).then((m) => { if (!cancelled) setSessionEditLinks(m) }).catch(console.error)
+    return () => { cancelled = true }
+  }, [activeChannel])
+  // Overlays a matched (or manually overridden) session-edit file's path/
+  // duration onto a recording_session song that has no path of its own —
+  // songToTrack does the same via resolveSessionEditSource for playback, but
+  // the plain JWApiSong objects rendered directly in this view (list rows,
+  // the lyrics/calendar tabs) need it applied by hand too.
+  const linkSessionEdit = useCallback((s: JWApiSong): JWApiSong => {
+    if (s.category !== 'recording_session') return s
+    const { path, length } = resolveSessionEditSource(s)
+    return path === s.path && length === s.length ? s : { ...s, path, length }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionEditLinks, activeChannel, sessionEditOverrideVersion])
 
   // Full era names aren't in the offline cache seed for every session — fetch
   // once so eraLabel() has something to show once the user opts in.
@@ -2160,6 +2186,8 @@ export default function ApiTrackerView(): JSX.Element {
       .finally(() => setLyricsLoading(false))
   }
 
+  const linkedLyricsResults = useMemo(() => lyricsResults.map(linkSessionEdit), [lyricsResults, linkSessionEdit])
+
   // ── Calendar (separate tab) — songs grouped by recording date ─────────────
   // Fetches the whole catalog once (lazily, on first visiting the tab) since
   // there's no server-side way to filter/group by record_dates — it's parsed
@@ -2179,30 +2207,32 @@ export default function ApiTrackerView(): JSX.Element {
       .finally(() => setCalendarLoading(false))
   }, [trackerTab])
 
+  const linkedCalendarSongs = useMemo(() => calendarSongs.map(linkSessionEdit), [calendarSongs, linkSessionEdit])
+
   const calendarByDate = useMemo(() => {
     const map = new Map<string, JWApiSong[]>()
-    for (const song of calendarSongs) {
+    for (const song of linkedCalendarSongs) {
       for (const key of extractDateKeys(song.record_dates)) {
         if (!map.has(key)) map.set(key, [])
         map.get(key)!.push(song)
       }
     }
     return map
-  }, [calendarSongs])
+  }, [linkedCalendarSongs])
 
   // `recording_locations` is also free text (e.g. "Record One Studios, Los
   // Angeles") — grouped by the exact trimmed string rather than parsed into
   // parts, since there's no reliable delimiter between studio name and city.
   const calendarByStudio = useMemo(() => {
     const map = new Map<string, JWApiSong[]>()
-    for (const song of calendarSongs) {
+    for (const song of linkedCalendarSongs) {
       const loc = song.recording_locations?.trim()
       if (!loc) continue
       if (!map.has(loc)) map.set(loc, [])
       map.get(loc)!.push(song)
     }
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length)
-  }, [calendarSongs])
+  }, [linkedCalendarSongs])
 
   // `producers` and `engineers` are both free text, often multiple names
   // separated by commas (e.g. "Nick Mira, Taz Taylor") — split so each
@@ -2225,12 +2255,12 @@ export default function ApiTrackerView(): JSX.Element {
   }
 
   const producersByName = useMemo(
-    () => groupByNameField(calendarSongs, (s) => s.producers),
-    [calendarSongs]
+    () => groupByNameField(linkedCalendarSongs, (s) => s.producers),
+    [linkedCalendarSongs]
   )
   const engineersByName = useMemo(
-    () => groupByNameField(calendarSongs, (s) => s.engineers),
-    [calendarSongs]
+    () => groupByNameField(linkedCalendarSongs, (s) => s.engineers),
+    [linkedCalendarSongs]
   )
 
   // Assigns each era a stable color by its position in `eras` (already
@@ -2429,10 +2459,10 @@ export default function ApiTrackerView(): JSX.Element {
   }, [])
 
   const filteredSongs = useMemo(() => {
-    if (!fetchAllMode) return songs
+    if (!fetchAllMode) return songs.map(linkSessionEdit)
     const passesAll = (s: JWApiSong): boolean => matchesFilters(s) && matchesFieldFilters(s, parsedSearch.filters)
-    return rawAllSongs.filter(passesAll)
-  }, [fetchAllMode, songs, rawAllSongs, matchesFilters, parsedSearch.filters])
+    return rawAllSongs.filter(passesAll).map(linkSessionEdit)
+  }, [fetchAllMode, songs, rawAllSongs, matchesFilters, parsedSearch.filters, linkSessionEdit])
 
   const displayCount = fetchAllMode ? filteredSongs.length : count
 
@@ -2480,6 +2510,10 @@ export default function ApiTrackerView(): JSX.Element {
       s.track_titles?.join(' '), s.name, s.credited_artists, s.producers, s.engineers,
       s.era?.name, s.notes, s.additional_information, s.session_titles, s.original_key,
     ].filter(Boolean).join(' '))
+    filtered = filtered.map((g) => {
+      if (!g.members.some((m) => m.item.category === 'recording_session')) return g
+      return { ...g, members: g.members.map((m) => m.item.category === 'recording_session' ? { ...m, item: linkSessionEdit(m.item) } : m) }
+    })
     // Field-qualified tokens (artists:"...", etc.) aren't handled by
     // filterCompactGroups' plain free-text match, so apply them here as an
     // extra member-level pass — a group survives only if at least one
@@ -2512,7 +2546,7 @@ export default function ApiTrackerView(): JSX.Element {
       sorted.sort((a, b) => (a.members.length - b.members.length) * dir || a.title.localeCompare(b.title))
     }
     return sorted
-  }, [compactGroups, parsedSearch, compactSort, categoryFilter, eraFilter, libraryFilter, matchesFilters, songInLibrary])
+  }, [compactGroups, parsedSearch, compactSort, categoryFilter, eraFilter, libraryFilter, matchesFilters, songInLibrary, linkSessionEdit])
 
   // Multi-select — select mode, the selected-songs Map, Escape-to-exit, and
   // Ctrl/Cmd+A "select all" are all handled by the shared hook (see its docs
@@ -2623,7 +2657,7 @@ export default function ApiTrackerView(): JSX.Element {
   // actions are disabled entirely rather than silently dropping it — a
   // partial add on a selection the user made as one unit is surprising.
   const bulkEligibleSongs = useMemo(
-    () => selectedSongs.filter(s => !['recording_session', 'unsurfaced'].includes(s.category)),
+    () => selectedSongs.filter(s => s.category !== 'unsurfaced' && (s.category !== 'recording_session' || !!s.path)),
     [selectedSongs]
   )
   const canBulkAddToPlaylist = selectedSongs.length > 0 && bulkEligibleSongs.length === selectedSongs.length
@@ -2735,6 +2769,29 @@ export default function ApiTrackerView(): JSX.Element {
     setApiFilesPath(folderPath)
     setActiveView('api-files')
   }, [setApiFilesPath, setActiveView])
+
+  const handleSessionFilePicked = useCallback(async (path: string): Promise<void> => {
+    const song = linkingSessionSong
+    setLinkingSessionSong(null)
+    if (!song) return
+    let duration: string | null = null
+    try {
+      const parts = path.split('/')
+      const folder = parts.slice(0, -1).join('/')
+      const params: Record<string, string> = folder ? { path: folder } : {}
+      if (activeChannel) params.channel = activeChannel
+      const data = apiPeek<JWApiBrowseResponse>('/files/browse/', params) ?? await apiFetch<JWApiBrowseResponse>('/files/browse/', params)
+      const entry = parseBrowseEntries(data).find((e) => e.path === path)
+      duration = entry?.duration ?? null
+    } catch (err) { console.error(err) }
+    setSessionEditOverride(song.id, activeChannel, { path, duration })
+    setSessionEditOverrideVersion((v) => v + 1)
+  }, [linkingSessionSong, activeChannel])
+
+  const handleClearSessionLink = useCallback((song: JWApiSong): void => {
+    setSessionEditOverride(song.id, activeChannel, null)
+    setSessionEditOverrideVersion((v) => v + 1)
+  }, [activeChannel])
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -2991,7 +3048,7 @@ export default function ApiTrackerView(): JSX.Element {
           ) : (
             <>
               <div className="space-y-0.5">
-                {lyricsResults.map((song) => (
+                {linkedLyricsResults.map((song) => (
                   <LyricResultRow
                     key={song.id}
                     song={song}
@@ -3653,6 +3710,20 @@ export default function ApiTrackerView(): JSX.Element {
           onSelect={() => toggleSelect(contextMenu.song)}
           liked={likedTrackIds.includes(`jw-${contextMenu.song.id}`)}
           onToggleLike={() => toggleLike(`jw-${contextMenu.song.id}`)}
+          canLinkSessionFile={canLinkSessions}
+          hasSessionLinkOverride={!!peekSessionEditOverride(contextMenu.song.id, activeChannel)}
+          onLinkSessionFile={() => setLinkingSessionSong(contextMenu.song)}
+          onClearSessionLink={() => handleClearSessionLink(contextMenu.song)}
+        />
+      )}
+
+      {linkingSessionSong && (
+        <FilePickerModal
+          kind="audio"
+          songTitle={linkingSessionSong.name}
+          title="Link Session Edit file"
+          onSelect={handleSessionFilePicked}
+          onClose={() => setLinkingSessionSong(null)}
         />
       )}
 
