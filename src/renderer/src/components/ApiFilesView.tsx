@@ -27,6 +27,7 @@ import {
   JWAPI_BASE,
 } from '../lib/juicewrldApi'
 import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
+import { downloadFileSmart } from '../lib/cdn'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { ClampedMenu } from './ClampedMenu'
 import { Track } from '../types'
@@ -73,6 +74,20 @@ function breadcrumbs(path: string): { label: string; path: string }[] {
 function parentFolder(path: string): string {
   const i = path.lastIndexOf('/')
   return i > 0 ? path.slice(0, i) : ''
+}
+
+// Same anchor-click trick lib/cdn's own fallback uses - kept local rather
+// than shared, since this is the only other place in the app that triggers
+// a browser-style download outside the CDN path itself.
+function triggerDownload(url: string, filename: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 function fileToTrack(entry: JWApiFileEntry, channel?: string): Track {
@@ -675,16 +690,13 @@ export default function ApiFilesView(): JSX.Element {
     }
   }
 
+  // Tries the P2P CDN first (primary channel only - /cdn/resolve/ has no
+  // channel param, so a non-primary path could collide with a different
+  // file of the same name) and falls back to the direct stream URL.
   const handleDownload = (entry: JWApiFileEntry): void => {
-    const url = buildStreamUrl(entry.path, activeChannel)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = entry.name
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const streamUrl = buildStreamUrl(entry.path, activeChannel)
+    if (!isPrimary) { triggerDownload(streamUrl, entry.name); return }
+    void downloadFileSmart(entry.path, entry.name, streamUrl)
   }
 
   const openLightbox = (entry: JWApiFileEntry): void => {

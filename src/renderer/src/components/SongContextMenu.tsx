@@ -12,6 +12,7 @@ import { Track } from '../types'
 import ChangeVersionMenuItem from './ChangeVersionMenuItem'
 import { placeFlyout } from '../lib/menuFlyout'
 import { versionsEnabled } from '../lib/versionsApi'
+import { downloadFileSmart } from '../lib/cdn'
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
@@ -92,14 +93,9 @@ function Divider(): JSX.Element {
 
 
 function downloadTrack(track: Track): void {
-  const a = document.createElement('a')
-  a.href = buildStreamUrl(track.path)
-  a.download = `${track.title}.mp3`
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+  // P2P CDN first (if any node has the file), falling back to the normal
+  // stream URL the instant no node answers - see lib/cdn's downloadFileSmart.
+  void downloadFileSmart(track.path, `${track.title}.mp3`, buildStreamUrl(track.path))
 }
 
 function downloadZipEntry(entry: JWApiFileEntry): void {

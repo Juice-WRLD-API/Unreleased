@@ -29,6 +29,7 @@ import { formatDuration } from '../lib/format'
 import { parseSearchQuery, matchesFieldFilters, SEARCH_FIELD_HELP } from '../lib/trackerSearch'
 import { loadEraFullNames, eraLabel } from '../lib/eras'
 import { useMultiSelect } from '../hooks/useMultiSelect'
+import { downloadFileSmart } from '../lib/cdn'
 
 type Category = 'released' | 'unreleased' | 'unsurfaced' | 'recording_session' | ''
 type ViewMode = 'list' | 'detail' | 'grid'
@@ -1444,12 +1445,7 @@ const SongCard = memo(function SongCard({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              const a = document.createElement('a')
-              a.href = buildStreamUrl(song.path)
-              a.download = `${title}.mp3`
-              a.target = '_blank'
-              a.rel = 'noopener noreferrer'
-              document.body.appendChild(a); a.click(); document.body.removeChild(a)
+              void downloadFileSmart(song.path, `${title}.mp3`, buildStreamUrl(song.path))
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"

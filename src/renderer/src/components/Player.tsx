@@ -39,12 +39,18 @@ import {
   setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted,
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
+import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { ensureDonorCover } from '../lib/donorCoverArt'
 
 // Downloaded-for-offline audio always wins over streaming — same track id,
-// just playing from local disk instead of the API.
+// just playing from local disk instead of the API. Donor cloud files can't be
+// streamed by URL (the route needs the auth header), so their `donor://`
+// marker resolves to a fetched blob URL - or '' while that fetch is still
+// pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   const offline = useStore.getState().offlineTracks[track.id]
   if (offline) return toFileUrl(offline.localPath)
+  if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
   return track.streamUrl ?? toFileUrl(track.path)
 }
 
@@ -311,6 +317,19 @@ export default function Player(): JSX.Element {
     }
     const nextTrackData = queue[nextIdx]
     if (!nextTrackData) return
+    if (isDonorStreamUrl(nextTrackData.streamUrl) && !cachedDonorUrl(nextTrackData.streamUrl)) {
+      // Not fetched yet: fetch, then load it into the spare slot if it's still
+      // the upcoming track.
+      void ensureDonorUrl(nextTrackData.streamUrl).then((u) => {
+        const s = useStore.getState()
+        const spare = getNext()
+        if (!spare || s.queue[nextIdx]?.id !== nextTrackData.id || s.currentTrack?.id === nextTrackData.id) return
+        spare.src = u
+        spare.load()
+        applyRate(spare)
+      }).catch(() => { /* the main load will surface a real failure */ })
+      return
+    }
     const url = resolvePlaybackUrl(nextTrackData)
     const na = getNext()
     if (!na || na.src === url) return
@@ -390,6 +409,14 @@ export default function Player(): JSX.Element {
       ext: '',
     }
     setCurrentTrackFull(synthetic)
+    // Donor files carry their art embedded in the file itself (MP3 ID3), not
+    // on the API - fetch just the tag and show it once it's read.
+    const donorFileId = donorFileIdFromTrackId(currentTrack.id)
+    if (donorFileId && !synthetic.albumArt) {
+      void ensureDonorCover(donorFileId).then((url) => {
+        if (url && !isStale()) setCurrentTrackFull({ ...synthetic, albumArt: url })
+      })
+    }
     // Fetch lyrics from API if this is a tracker song (id = "jw-{n}")
     const match = currentTrack.id.match(/^jw-(\d+)$/)
     if (match) {
@@ -417,7 +444,7 @@ export default function Player(): JSX.Element {
           })
           .catch(() => {/* no network — offline snapshot (if any) already applied above */})
       }
-    } else {
+    } else if (!donorFileId) {
       // Local track — load lyrics + cover art from IPC
       const el = (window as any).electron
       if (el && currentTrack.path) {
@@ -462,6 +489,30 @@ export default function Player(): JSX.Element {
       // This slot was loaded by the crossfade preload, which never ran the
       // rate setup below — apply it now or the faded-in track plays at 1x.
       applyRate(audio)
+      return
+    }
+
+    // Donor cloud files can't be streamed by URL (the route needs the auth
+    // header) - fetch the blob first, then load it once it's ready.
+    if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
+      const trackId = currentTrack.id
+      cancelCF()
+      cancelPauseFade()
+      // Stop the previous track while the file downloads.
+      audio.removeAttribute('src')
+      audio.load()
+      ensureDonorUrl(currentTrack.streamUrl).then((url) => {
+        const s = useStore.getState()
+        const a = getActive()
+        if (!a || s.currentTrack?.id !== trackId) return
+        a.src = url
+        a.volume = volumeRef.current
+        applyRate(a)
+        if (s.isPlaying) a.play().catch(console.error)
+      }).catch((err) => {
+        console.error('Could not load donor file', err)
+        if (useStore.getState().currentTrack?.id === trackId) setIsPlaying(false)
+      })
       return
     }
 
@@ -1139,7 +1190,10 @@ export default function Player(): JSX.Element {
           : (nextIdx >= 0 && nextIdx < queue.length) ? queue[nextIdx] : null
         const na = getNext()
 
-        if (na && nextTrackData) {
+        // A donor file that hasn't finished downloading can't be faded into;
+        // skipping the crossfade falls back to a normal advance at track end.
+        const nextReady = !isDonorStreamUrl(nextTrackData?.streamUrl) || !!cachedDonorUrl(nextTrackData.streamUrl)
+        if (na && nextTrackData && nextReady) {
           // Entering a healthy crossfade supersedes any delayed reload of the
           // outgoing slot. Invalidate both its timer and metadata callback.
           recoveryGeneration.current++
