@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, FollowedPlaylist, OfflineTrackMeta, OfflinePlaylistEntry, ConvertTarget } from '../types'
+import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, FollowedPlaylist, DonorPlaylist, OfflineTrackMeta, OfflinePlaylistEntry, ConvertTarget } from '../types'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -33,6 +33,8 @@ import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolder
 import { createQueueSlice, QueueSlice } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import type { GifResult } from '../lib/gifApi'
+import { listDonorFiles } from '../lib/donorFilesApi'
+import type { DonorFile } from '../lib/donorFilesApi'
 import { getFont } from '../lib/fonts'
 import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
 import type { CommunityEdit } from '../lib/audioEffects'
@@ -456,6 +458,13 @@ interface AppState {
   // Local-only (localStorage), so this list is per-device.
   followedPlaylists: FollowedPlaylist[]
 
+  // Donor cloud-file playlists - see DonorPlaylist. Local-only (localStorage),
+  // unlike web-dev's, which syncs through user_settings.donor_playlists - app
+  // has no cross-device settings sync yet. donorFiles is the resolved file
+  // list those playlists point into (null until loaded).
+  donorPlaylists: DonorPlaylist[]
+  donorFiles: DonorFile[] | null
+
   // Offline playlist sync (Electron only) � API-backed playlists downloaded
   // for offline playback, kept in sync with the API's song metadata.
   offlineTracks: Record<string, OfflineTrackMeta>
@@ -766,6 +775,20 @@ interface AppActions {
   followPlaylist: (meta: { id: number; name: string; trackCount: number; coverUrl: string | null }) => void
   unfollowPlaylist: (id: number) => void
   updateFollowedPlaylistMeta: (id: number, meta: { name: string; trackCount: number; coverUrl: string | null }) => void
+
+  loadDonorFiles: () => Promise<void>
+  setDonorFiles: (files: DonorFile[]) => void
+  createDonorPlaylist: (name: string, fileIds?: string[]) => string
+  deleteDonorPlaylist: (id: string) => void
+  renameDonorPlaylist: (id: string, name: string) => void
+  addToDonorPlaylist: (playlistId: string, fileId: string) => void
+  removeFromDonorPlaylist: (playlistId: string, fileId: string) => void
+  reorderDonorPlaylist: (playlistId: string, fileIds: string[]) => void
+  // A re-tagged file re-uploads under a new file_id; a deleted one just goes
+  // away. Either way, any donor playlist pointing at the old id needs fixing
+  // up so it doesn't silently drop a track next time it's opened.
+  replaceDonorFileId: (oldId: string, newId: string | null) => void
+  _setDonorPlaylists: (next: DonorPlaylist[]) => void
 
   loadOfflineLibrary: () => Promise<void>
   downloadPlaylistOffline: (key: string, name: string, songIds: number[], opts?: { silent?: boolean }) => Promise<void>
@@ -2051,7 +2074,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   logoutAccount: async () => {
     await userApi.logout()
     const localLikes = ls.get<string[]>('likedTrackIds') ?? []
-    set({ account: null, playlists: [], likedTrackIds: localLikes })
+    set({ account: null, playlists: [], likedTrackIds: localLikes, donorFiles: null })
     // Overrides stay on this device after signing out, the same way likes do �
     // they're re-merged upward on the next login.
     get()._setSongPrefs(ls.get<SongPrefMap>('songPrefs') ?? {})
@@ -2207,6 +2230,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   localPlaylists: [],
   activeLocalPlaylistId: null,
   followedPlaylists: ls.get<FollowedPlaylist[]>('followedPlaylists') ?? [],
+  donorPlaylists: ls.get<DonorPlaylist[]>('donorPlaylists') ?? [],
+  donorFiles: null,
 
   // -- Offline playlist sync ------------------------------------------------
   offlineTracks: {},
@@ -2531,6 +2556,48 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const next = existing.map((f) => f.id === id ? { ...f, ...meta } : f)
     set({ followedPlaylists: next })
     ls.set('followedPlaylists', next)
+  },
+
+  // -- Donor cloud files/playlists (local-only - see DonorPlaylist) -----------
+  loadDonorFiles: async () => {
+    if (!get().account?.is_donor) return
+    try {
+      const { files } = await listDonorFiles()
+      get().setDonorFiles(files)
+    } catch { /* keep whatever was loaded; the UI shows its own load error */ }
+  },
+  setDonorFiles: (files) => set({ donorFiles: files }),
+  createDonorPlaylist: (name, fileIds = []) => {
+    const id = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    get()._setDonorPlaylists([...get().donorPlaylists, { id, name, fileIds, createdAt: Date.now() }])
+    return id
+  },
+  deleteDonorPlaylist: (id) => get()._setDonorPlaylists(get().donorPlaylists.filter((p) => p.id !== id)),
+  renameDonorPlaylist: (id, name) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === id ? { ...p, name } : p)),
+  addToDonorPlaylist: (playlistId, fileId) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
+      p.id === playlistId && !p.fileIds.includes(fileId) ? { ...p, fileIds: [...p.fileIds, fileId] } : p)),
+  removeFromDonorPlaylist: (playlistId, fileId) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
+      p.id === playlistId ? { ...p, fileIds: p.fileIds.filter((f) => f !== fileId) } : p)),
+  reorderDonorPlaylist: (playlistId, fileIds) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === playlistId ? { ...p, fileIds } : p)),
+  replaceDonorFileId: (oldId, newId) => {
+    const lists = get().donorPlaylists
+    if (!lists.some((p) => p.fileIds.includes(oldId))) return
+    get()._setDonorPlaylists(lists.map((p) => {
+      if (!p.fileIds.includes(oldId)) return p
+      // Re-uploaded copy (tag edit) keeps its slot; a deleted file just leaves.
+      const ids = newId
+        ? p.fileIds.map((id) => (id === oldId ? newId : id))
+        : p.fileIds.filter((id) => id !== oldId)
+      return { ...p, fileIds: ids }
+    }))
+  },
+  _setDonorPlaylists: (next) => {
+    set({ donorPlaylists: next })
+    ls.set('donorPlaylists', next)
   },
 
   // -- Offline playlist sync ------------------------------------------------

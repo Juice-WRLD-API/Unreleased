@@ -85,6 +85,18 @@ export interface LocalPlaylist {
   coverImage?: string | null  // base64 data URL or null
 }
 
+// A playlist of donor cloud files (see lib/donorFilesApi). Entries are donor
+// file_ids rather than embedded tracks: the file list is the source of truth
+// for names/sizes, and a file that's since been deleted just drops out of the
+// resolved list. Local-only for now (unlike web-dev's, which syncs via
+// user_settings.donor_playlists — app has no cross-device settings sync yet).
+export interface DonorPlaylist {
+  id: string
+  name: string
+  fileIds: string[]
+  createdAt: number
+}
+
 // A live pointer to someone else's synced playlist, saved from a share link
 // without cloning its songs — opening it always re-fetches the owner's
 // current playlist (see PlaylistsView's shared-view load path), so edits the
