@@ -5,8 +5,10 @@ import {
   FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search,
+  ScrollText, ShieldCheck, Disc, Images, Search, Cloud,
 } from 'lucide-react'
+import DonorFiles from './DonorFiles'
+import MyCdnNodes from './MyCdnNodes'
 import { useStore, useStorePick, type SidebarPosition, type AppMenuPosition, type PopoutWindowKind } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, effectiveGlobalBinding, comboTokens, eventToCombo, isGloballyRegistrable } from '../lib/hotkeys'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
@@ -79,7 +81,7 @@ const POPOUT_KINDS: { key: PopoutWindowKind; label: string; sub?: string }[] = [
 ]
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'
-type Tab = 'appearance' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
+type Tab = 'appearance' | 'playback' | 'shortcuts' | 'library' | 'app' | 'donor' | 'developer' | 'feedback' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `electronOnly`/`devOnly` mirror
@@ -576,6 +578,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     ...(isElectron ? [{ id: 'library' as Tab, label: 'Library', icon: FolderOpen }] : []),
     ...(isElectron ? [{ id: 'app' as Tab, label: 'App', icon: Monitor }] : []),
+    ...(account?.is_donor ? [{ id: 'donor' as Tab, label: 'Donor', icon: Cloud }] : []),
     ...(isElectron && developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench }] : []),
     { id: 'feedback', label: 'Feedback', icon: MessageCircle },
     { id: 'about', label: 'About', icon: Info },
@@ -583,7 +586,8 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
 
   useEffect(() => {
     if (tab === 'developer' && !developerMode) setTab('app')
-  }, [tab, developerMode])
+    if (tab === 'donor' && !account?.is_donor) setTab('appearance')
+  }, [tab, developerMode, account?.is_donor])
 
   // ── Settings search — a flat filter over SETTINGS_SEARCH_INDEX rather than
   // per-tab content, since matches can live on a tab you're not currently
@@ -2187,6 +2191,23 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     Open
                   </button>
                 </Row>
+              </div>
+            )}
+
+            {/* ── Donor ── */}
+            {!settingsQueryTrimmed && tab === 'donor' && account?.is_donor && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-1">Donor</h3>
+                <p className="text-text-muted text-xs mb-4 leading-relaxed max-w-md">
+                  Thanks for donating — this unlocks 1&nbsp;GB of personal cloud storage for audio and
+                  images, playable and shareable from anywhere.
+                </p>
+                <DonorFiles />
+                <h4 className="text-text-primary text-sm font-bold mt-6 mb-1">My CDN nodes</h4>
+                <p className="text-text-muted text-xs mb-2 leading-relaxed max-w-md">
+                  Nodes you've linked from the CDN node app, helping serve the library over P2P.
+                </p>
+                <MyCdnNodes />
               </div>
             )}
 

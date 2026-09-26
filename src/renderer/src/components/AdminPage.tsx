@@ -4,7 +4,7 @@ import {
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
   ChevronDown, ChevronUp, Shield, TrendingUp, MessageSquare, Calendar,
   Hash, Minus, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
-  Flag, History, Play, Radio,
+  Flag, History, Play, Radio, Server,
 } from 'lucide-react'
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
@@ -21,9 +21,10 @@ import ReportsTab from './ReportsTab'
 import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
+import CdnNodesTab from './CdnNodesTab'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 
-type Tab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'eras' | 'security' | 'channels'
+type Tab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes'
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
     { id: 'stats',        label: 'Stats',        icon: <TrendingUp size={13} /> },
     { id: 'eras',         label: 'Eras',         icon: <Calendar size={13} /> },
     { id: 'channels',     label: 'Channels',     icon: <Radio size={13} /> },
+    { id: 'cdn-nodes',    label: 'CDN nodes',    icon: <Server size={13} /> },
     { id: 'security',     label: 'Security',     icon: <Shield size={13} /> },
   ]
   // No Security tab for managers: it renders a flat "2FA is enabled", which the
@@ -364,6 +366,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
         {tab === 'stats'        && <StatsTab applications={applications} proposals={proposals} users={users} />}
         {tab === 'eras'         && <EraTab />}
         {tab === 'channels'     && <ChannelsTab />}
+        {tab === 'cdn-nodes'    && <CdnNodesTab />}
         {tab === 'security'     && <SecurityTab />}
       </div>
     </div>
