@@ -20,9 +20,10 @@ import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSe
 import ReportsTab from './ReportsTab'
 import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
+import EraTab from './EraTab'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 
-type Tab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'security' | 'channels'
+type Tab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'eras' | 'security' | 'channels'
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -267,6 +268,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
     { id: 'reports',      label: 'Reports',      icon: <Flag size={13} />,       badge: pendingReports || undefined },
     { id: 'users',        label: 'Users',        icon: <Users size={13} /> },
     { id: 'stats',        label: 'Stats',        icon: <TrendingUp size={13} /> },
+    { id: 'eras',         label: 'Eras',         icon: <Calendar size={13} /> },
     { id: 'channels',     label: 'Channels',     icon: <Radio size={13} /> },
     { id: 'security',     label: 'Security',     icon: <Shield size={13} /> },
   ]
@@ -360,6 +362,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
         {tab === 'reports'      && <ReportsTab reports={reports} status={reportStatus} setStatus={setReportStatus} onChanged={() => setRefreshKey(k => k + 1)} />}
         {tab === 'users'        && <UsersTab users={users} onChanged={() => setRefreshKey(k => k + 1)} currentUserId={account?.id} />}
         {tab === 'stats'        && <StatsTab applications={applications} proposals={proposals} users={users} />}
+        {tab === 'eras'         && <EraTab />}
         {tab === 'channels'     && <ChannelsTab />}
         {tab === 'security'     && <SecurityTab />}
       </div>

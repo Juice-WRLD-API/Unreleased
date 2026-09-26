@@ -27,3 +27,8 @@ export function formatBytes(b: number): string {
   if (b < 1073741824) return `${(b / 1048576).toFixed(1)} MB`
   return `${(b / 1073741824).toFixed(2)} GB`
 }
+
+/** Unwraps a caught value's message, falling back for non-Error throws (e.g. a rejected string/object). */
+export function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}
