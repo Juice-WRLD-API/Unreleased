@@ -64,6 +64,13 @@ export default function HomeViewMobile(): JSX.Element {
   // rather than in the shared hook.
   const { moreTabs } = useMobileNavSplit()
   const setShowMoreNav = useStore((s) => s.setShowMoreNav)
+  const setApiTrackerTab = useStore((s) => s.setApiTrackerTab)
+  const setFocusApiTrackerSearch = useStore((s) => s.setFocusApiTrackerSearch)
+  const openTrackerSearch = (): void => {
+    setApiTrackerTab('songs')
+    setFocusApiTrackerSearch(true)
+    setActiveView('api-tracker')
+  }
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto pt-2 pb-4">
@@ -79,7 +86,7 @@ export default function HomeViewMobile(): JSX.Element {
         </button>
         <h1 className="flex-1 min-w-0 text-text-primary text-[26px] font-bold leading-tight">Home</h1>
         <button
-          onClick={() => setActiveView('api-tracker')}
+          onClick={openTrackerSearch}
           aria-label="Search the catalog"
           className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
         >

@@ -423,6 +423,9 @@ interface AppState {
   // (Songs/Lyrics/Overview/Producers) opens - see StatisticsView's tab bar,
   // the only current setter.
   apiTrackerTab: string
+  // One-shot deep link: when true, ApiTrackerView focuses its search input on
+  // mount (and clears the flag) - set by the mobile Home search shortcut.
+  focusApiTrackerSearch: boolean
   apiFilesPath: string
   apiFilesLastPath: string
 
@@ -760,6 +763,7 @@ interface AppActions {
   setApiTrackerCategory: (cat: string) => void
   setApiTrackerEra: (era: string) => void
   setApiTrackerTab: (tab: string) => void
+  setFocusApiTrackerSearch: (focus: boolean) => void
   setApiFilesPath: (path: string) => void
   setApiFilesLastPath: (path: string) => void
 
@@ -2129,12 +2133,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
   apiTrackerCategory: '',
   apiTrackerEra: '',
   apiTrackerTab: '',
+  focusApiTrackerSearch: false,
   apiFilesPath: '',
   apiFilesLastPath: '',
 
   setApiTrackerCategory: (cat) => set({ apiTrackerCategory: cat }),
   setApiTrackerEra: (era) => set({ apiTrackerEra: era }),
   setApiTrackerTab: (tab) => set({ apiTrackerTab: tab }),
+  setFocusApiTrackerSearch: (focus) => set({ focusApiTrackerSearch: focus }),
   setApiFilesLastPath: (path) => set({ apiFilesLastPath: path }),
   setApiFilesPath: (path) => set({ apiFilesPath: path }),
 

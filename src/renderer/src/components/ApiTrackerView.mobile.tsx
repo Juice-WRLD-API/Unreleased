@@ -663,6 +663,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerCategory, setApiTrackerCategory,
     apiTrackerEra, setApiTrackerEra,
     apiTrackerTab, setApiTrackerTab,
+    focusApiTrackerSearch, setFocusApiTrackerSearch,
     setActiveView, setApiFilesPath, setPendingEditorSongId,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
     openBulkEditor, currentTrack, isPlaying, fullEraNames,
@@ -672,6 +673,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerCategory: s.apiTrackerCategory, setApiTrackerCategory: s.setApiTrackerCategory,
     apiTrackerEra: s.apiTrackerEra, setApiTrackerEra: s.setApiTrackerEra,
     apiTrackerTab: s.apiTrackerTab, setApiTrackerTab: s.setApiTrackerTab,
+    focusApiTrackerSearch: s.focusApiTrackerSearch, setFocusApiTrackerSearch: s.setFocusApiTrackerSearch,
     setActiveView: s.setActiveView, setApiFilesPath: s.setApiFilesPath,
     setPendingEditorSongId: s.setPendingEditorSongId,
     playlists: s.playlists, refreshPlaylists: s.refreshPlaylists, setShowUserAuth: s.setShowUserAuth,
@@ -847,6 +849,14 @@ export default function ApiTrackerView(): JSX.Element {
 
   const [search, setSearch] = useState(getInitialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(getInitialSearch)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  // One-shot: the mobile Home search shortcut sets this before navigating here
+  // so the keyboard comes up immediately instead of landing on a dead screen.
+  useEffect(() => {
+    if (!focusApiTrackerSearch || trackerTab !== 'songs') return
+    searchInputRef.current?.focus()
+    setFocusApiTrackerSearch(false)
+  }, [focusApiTrackerSearch, trackerTab, setFocusApiTrackerSearch])
   // Sets rather than single values so more than one category/era can be active
   // at once (OR'd within each dimension, AND'd across them). The API accepts one
   // `category`/`era` per request, so anything beyond a single selection in
@@ -1577,6 +1587,7 @@ export default function ApiTrackerView(): JSX.Element {
                   ? <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
                   : <Mic2 size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />}
                 <input
+                  ref={trackerTab === 'songs' ? searchInputRef : undefined}
                   type="search"
                   value={trackerTab === 'songs' ? search : lyricsQuery}
                   onChange={(e) => trackerTab === 'songs' ? setSearch(e.target.value) : setLyricsQuery(e.target.value)}
