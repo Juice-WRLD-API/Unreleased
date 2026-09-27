@@ -1261,7 +1261,7 @@ Authorization: Token <token>`}</Pre>
   "nav_visibility": { "wrld": true },
   "nav_control_order": ["queue", "..."],
   "nav_control_visibility": { "queue": true },
-  "home_section_visibility": { "recentlyPlayed": true },
+  "home_section_visibility": { "recent": true },
 
   "playback_speed": 1,
   "crossfade_enabled": false,
