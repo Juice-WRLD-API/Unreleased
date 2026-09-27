@@ -7,7 +7,7 @@ import * as userApi from '../lib/userApi'
 import type { AccountUser, PlaylistSummary } from '../lib/userApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
-import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels } from '../lib/juicewrldApi'
+import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache,
@@ -25,8 +25,10 @@ import {
   appendListeningPlay,
   mergeListeningPlays,
   normalizeListeningPlayEvent,
+  sortListeningPlays,
 } from '../lib/listeningPlays'
 import type { ListeningPlayEvent } from '../lib/listeningPlays'
+import { loadRecentTracks, backfillRecentTracks, RECENT_TRACKS_LIMIT } from '../lib/recentTracks'
 import * as reportsApi from '../lib/reportsApi'
 import { newReportId, isDeliverable } from '../lib/reports'
 import type {
@@ -678,6 +680,12 @@ interface AppActions {
   /** Same shape as syncSongPrefs, but a union rather than a per-key merge �
    *  play events are immutable, so the two sides just get deduped. */
   syncListeningPlays: (serverPlays?: ListeningPlayEvent[]) => Promise<void>
+  /** Resolves whatever of the newest `listeningPlays` ids aren't already in
+   *  this device's local recent-tracks ring (Home's "Recently played") and
+   *  merges them in - the ring is per-device local storage, so a play
+   *  credited elsewhere never lands here on its own. Runs after
+   *  syncListeningPlays so it sees the merged log, not just this device's. */
+  _backfillRecentTracks: () => Promise<void>
   /** Internal � the single write path for songPrefs (state + localStorage +
    *  lib/songPrefs' cache). */
   _setSongPrefs: (next: SongPrefMap) => void
@@ -1798,6 +1806,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
     } catch {}
   },
 
+  _backfillRecentTracks: async () => {
+    const orderedIds = sortListeningPlays(get().listeningPlays).map((e) => e.song).slice(0, RECENT_TRACKS_LIMIT)
+    if (orderedIds.length === 0) return
+    const existingIds = new Set(loadRecentTracks().map((t) => t.id))
+    const missing = orderedIds.filter((id) => !existingIds.has(`jw-${id}`))
+    if (missing.length === 0) return
+    try {
+      const songs = await getSongsByIds(missing)
+      const resolved = new Map(songs.map((s) => [s.id, songToTrack(s)]))
+      backfillRecentTracks(orderedIds, resolved)
+    } catch {}
+  },
+
   // -- Reports (feedback + song issue reports) --------------------------------
   pendingReports: ls.get<PendingReport[]>('pendingReports') ?? [],
   reportModal: null,
@@ -2107,7 +2128,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // with local state and push the result back, no extra requests needed.
       const profile = get().account
       await get().syncSongPrefs(profile?.user_preferences)
-      get().syncListeningPlays(profile?.listening_plays)
+      await get().syncListeningPlays(profile?.listening_plays)
+      get()._backfillRecentTracks()
       get().syncFolders(profile?.playlist_folders)
       // Deliver any reports queued while signed out � a logged-in flush can
       // attach the account's Discord username as the contact field.

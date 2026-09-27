@@ -17,7 +17,8 @@ import { ls } from './persist'
 import type { Track } from '../types'
 
 const KEY = 'recent-tracks'
-const LIMIT = 20
+export const RECENT_TRACKS_LIMIT = 20
+const LIMIT = RECENT_TRACKS_LIMIT
 
 export function loadRecentTracks(): Track[] {
   const saved = ls.get<Track[]>(KEY)
@@ -28,4 +29,24 @@ export function loadRecentTracks(): Track[] {
 export function rememberRecentTrack(track: Track): void {
   const next = [track, ...loadRecentTracks().filter((t) => t.id !== track.id)].slice(0, LIMIT)
   ls.set(KEY, next)
+}
+
+/** Backfills the ring with tracks it doesn't have yet - e.g. plays credited
+ *  on another device, which never wrote into *this* device's local-only
+ *  ring. `orderedSongIds` is `listeningPlays` (already merged with the
+ *  synced server copy), newest first; `resolved` holds whatever of those
+ *  ids got looked up over the network. Entries for ids outside that list are
+ *  kept as-is, oldest ones falling off once back over LIMIT. */
+export function backfillRecentTracks(orderedSongIds: number[], resolved: Map<number, Track>): void {
+  const existing = loadRecentTracks()
+  const existingById = new Map(existing.map((t) => [t.id, t]))
+  const seen = new Set<string>()
+  const merged: Track[] = []
+  for (const songId of orderedSongIds) {
+    const trackId = `jw-${songId}`
+    const track = resolved.get(songId) ?? existingById.get(trackId)
+    if (track && !seen.has(trackId)) { merged.push(track); seen.add(trackId) }
+  }
+  for (const t of existing) if (!seen.has(t.id)) { merged.push(t); seen.add(t.id) }
+  ls.set(KEY, merged.slice(0, LIMIT))
 }
