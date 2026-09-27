@@ -6,7 +6,10 @@ import {
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
+  AudioLines,
 } from 'lucide-react'
+import { VISUALIZERS, type Boost, type Quality } from '../lib/viz'
+import { useVizStore, type CaptionPos, type VizCycle } from '../store/vizStore'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
 import { SKINS, getSkin } from '../lib/skins'
@@ -96,6 +99,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
+  { tab: 'appearance', label: 'Fullscreen visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
   { tab: 'appearance', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'appearance', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
   { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
@@ -316,6 +320,153 @@ function RouteRulesEditor(): JSX.Element {
           Save &amp; reload
         </button>
       </div>
+    </div>
+  )
+}
+
+function Pills<T extends string>({ value, options, onChange }: {
+  value: T
+  options: { value: T; label: string; disabled?: boolean; title?: string }[]
+  onChange: (value: T) => void
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          disabled={o.disabled}
+          title={o.title}
+          className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-35 disabled:pointer-events-none ${
+            value === o.value
+              ? 'bg-accent/15 text-accent border-[var(--accent)]'
+              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Probed once and released straight away - a live context per Settings render
+// would count against the browser's cap on WebGL contexts.
+let webglProbe: boolean | null = null
+function webglAvailable(): boolean {
+  if (webglProbe === null) {
+    const gl = document.createElement('canvas').getContext('webgl')
+    webglProbe = !!gl
+    gl?.getExtension('WEBGL_lose_context')?.loseContext()
+  }
+  return webglProbe
+}
+
+function VizSettings(): JSX.Element {
+  const s = useVizStore()
+  const [open, setOpen] = useState(false)
+  const gl = webglAvailable()
+  const line = (label: string, control: ReactNode): JSX.Element => (
+    <div className="flex items-start gap-2">
+      <span className="text-text-muted text-[11px] w-[86px] shrink-0 pt-1">{label}</span>
+      <div className="min-w-0 flex-1">{control}</div>
+    </div>
+  )
+  return (
+    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className={`flex items-center gap-2.5 w-full text-left ${open ? 'mb-2.5' : ''}`}
+      >
+        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
+          <AudioLines size={13} className="text-white" strokeWidth={2.25} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="text-text-primary text-sm">Fullscreen visualizer</span>
+          <p className="text-text-muted text-[11px]">Plays behind WRLD in fullscreen - ← → switches visualizer, V toggles visualizer only</p>
+        </div>
+        <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+      <div className="flex flex-col gap-2.5 pl-[34px]">
+        {line('Visualizer', (
+          <Pills
+            // A saved shader mode plays as Aurora without WebGL; highlight that.
+            value={!gl && VISUALIZERS.find((v) => v.id === s.vizMode)?.engine === 'gl' ? 'aurora' : s.vizMode}
+            onChange={(id) => s.selectMode(id, true)}
+            options={VISUALIZERS.map((v) => ({
+              value: v.id,
+              label: v.name,
+              disabled: v.engine === 'gl' && !gl,
+              title: v.engine === 'gl' && !gl ? 'Needs WebGL, which this browser has turned off' : undefined,
+            }))}
+          />
+        ))}
+        {line('Quality', (
+          <Pills<Quality>
+            value={s.vizQuality}
+            onChange={s.setVizQuality}
+            options={[
+              { value: 'low', label: 'Low' },
+              { value: 'medium', label: 'Medium' },
+              { value: 'high', label: 'High' },
+              { value: 'ultra', label: 'Ultra' },
+            ]}
+          />
+        ))}
+        {line('Input boost', (
+          <Pills<Boost>
+            value={s.vizBoost}
+            onChange={s.setVizBoost}
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'auto', label: 'Auto', title: 'Lifts quiet tracks, and low volume, so the visuals still move' },
+              { value: '2', label: '2×' },
+              { value: '4', label: '4×' },
+              { value: '8', label: '8×' },
+            ]}
+          />
+        ))}
+        {line('Auto-switch', (
+          <Pills<VizCycle>
+            value={s.vizCycle}
+            onChange={s.setVizCycle}
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'track', label: 'Each track' },
+              { value: 'album', label: 'Each album' },
+            ]}
+          />
+        ))}
+        {line('Layout', (
+          <Pills<'player' | 'minimal'>
+            value={s.immMinimal ? 'minimal' : 'player'}
+            onChange={(v) => s.setImmMinimal(v === 'minimal')}
+            options={[
+              { value: 'player', label: 'Player & lyrics' },
+              { value: 'minimal', label: 'Visualizer only' },
+            ]}
+          />
+        ))}
+        {s.immMinimal && line('Caption', (
+          <Pills<CaptionPos>
+            value={s.immCaptionPos}
+            onChange={s.setImmCaptionPos}
+            options={[
+              { value: 'tl', label: 'Top left' },
+              { value: 'tr', label: 'Top right' },
+              { value: 'bl', label: 'Bottom left' },
+              { value: 'br', label: 'Bottom right' },
+            ]}
+          />
+        ))}
+        <div className="flex items-center gap-2">
+          <span className="text-text-muted text-[11px] w-[86px] shrink-0">Artwork colors</span>
+          <Toggle on={s.vizUseArtwork} onClick={() => s.setVizUseArtwork(!s.vizUseArtwork)} />
+        </div>
+      </div>
+      )}
     </div>
   )
 }
@@ -1272,6 +1423,7 @@ export default function Settings(): JSX.Element {
                     />
                   </div>
                 </div>
+                <VizSettings />
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
