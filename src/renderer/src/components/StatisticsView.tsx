@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from 'react'
-import { BarChart3, Play, Radio, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
+import { ArrowLeft, BarChart3, MoreVertical, Play, Radio, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useIsMobile } from '../hooks/useIsMobile'
 import {
   apiFetch, apiPeek, getSongById, songToTrack,
   CATEGORY_LABELS, CATEGORY_COLORS,
@@ -39,7 +40,7 @@ const CATEGORY_ORDER: (keyof JWApiStats['category_stats'])[] = [
 // a fixed-height scroll area sized to ~15 rows - same visible count, same
 // max-height, so the two sit at equal height side by side instead of one
 // stopping short or growing to chase the other's content.
-const LIST_MAX_HEIGHT = 'max-h-[720px]'
+const LIST_MAX_HEIGHT = 'max-h-[420px] md:max-h-[720px]'
 
 // ─── Era timeline ───────────────────────────────────────────────────────────
 // time_frame is free text, not two structured date fields, e.g.
@@ -265,19 +266,20 @@ function RowThumb({ cover, fallback }: { cover?: StatsSong; fallback: React.Reac
   )
 }
 
-function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu }: {
+function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu, isMobile }: {
   song: JWApiTopSong
   cover?: StatsSong
   rank: number
   max: number
   onPlay: (id: number) => void
   onContextMenu: (id: number, cover: StatsSong | undefined, e: React.MouseEvent) => void
+  isMobile: boolean
 }): JSX.Element {
   return (
-    <button
+    <div
       onClick={() => onPlay(song.id)}
       onContextMenu={(e) => onContextMenu(song.id, cover, e)}
-      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised transition-colors text-left"
+      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised active:bg-surface-raised transition-colors text-left cursor-pointer"
     >
       <span className="w-5 text-text-muted text-xs tabular-nums text-right shrink-0">{rank}</span>
       <RowThumb
@@ -307,21 +309,29 @@ function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu }: {
       <span className="text-text-muted text-xs tabular-nums shrink-0 w-16 text-right">
         {song.play_count.toLocaleString()}
       </span>
-    </button>
+      {isMobile && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onContextMenu(song.id, cover, e) }}
+          className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-muted active:text-accent"
+          aria-label="More options"
+        ><MoreVertical size={16} /></button>
+      )}
+    </div>
   )
 }
 
-function RecentPlayRow({ play, cover, onPlay, onContextMenu }: {
+function RecentPlayRow({ play, cover, onPlay, onContextMenu, isMobile }: {
   play: JWApiRecentPlay
   cover?: StatsSong
   onPlay: (id: number) => void
   onContextMenu: (id: number, cover: StatsSong | undefined, e: React.MouseEvent) => void
+  isMobile: boolean
 }): JSX.Element {
   return (
-    <button
+    <div
       onClick={() => onPlay(play.song_id)}
       onContextMenu={(e) => onContextMenu(play.song_id, cover, e)}
-      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised transition-colors text-left"
+      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised active:bg-surface-raised transition-colors text-left cursor-pointer"
     >
       <RowThumb
         cover={cover}
@@ -342,7 +352,14 @@ function RecentPlayRow({ play, cover, onPlay, onContextMenu }: {
       >
         {relativeTime(play.played_at)}
       </span>
-    </button>
+      {isMobile && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onContextMenu(play.song_id, cover, e) }}
+          className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-muted active:text-accent"
+          aria-label="More options"
+        ><MoreVertical size={16} /></button>
+      )}
+    </div>
   )
 }
 
@@ -351,6 +368,7 @@ export default function StatisticsView(): JSX.Element {
     'setActiveView', 'playTrack', 'playNext', 'setApiTrackerEra', 'setApiTrackerTab',
   )
   const canEdit = useCanEdit()
+  const isMobile = useIsMobile()
 
   // Consumed by ApiTrackerView on mount (see its own effect reading
   // apiTrackerEra/setApiTrackerEra) — the same deep-link slot other flows
@@ -470,50 +488,47 @@ export default function StatisticsView(): JSX.Element {
 
   const loading = !stats && !playStats
 
+  const tabBtn = (icon: React.ReactNode, label: string, onClick: () => void, active = false): JSX.Element => (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors shrink-0 ${
+        active ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'
+      }`}
+    >
+      {icon} {label}
+    </button>
+  )
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Header */}
-      <div className="flex-shrink-0 px-4 md:px-5 pt-4 md:pt-5 pb-4 border-b border-[var(--border)]">
-        <div className="flex items-center gap-3">
+      <div
+        className="flex-shrink-0 px-4 md:px-5 pb-4 border-b border-[var(--border)]"
+        style={{ paddingTop: isMobile ? 'max(1rem, var(--top-inset))' : '1.25rem' }}
+      >
+        <div className="flex items-center gap-2">
+          {isMobile && (
+            <button
+              onClick={() => window.history.back()}
+              aria-label="Back"
+              className="-ml-1.5 w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
+            ><ArrowLeft size={19} /></button>
+          )}
           <h1 className="text-text-primary text-xl font-bold">Statistics</h1>
         </div>
 
-        <div className="flex items-center gap-0.5 mt-1 w-fit bg-surface-overlay rounded-md p-0.5">
-          <button
-            onClick={() => openTrackerTab('songs')}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
-          >
-            <Music2 size={11} /> Songs
-          </button>
-          <button
-            onClick={() => openTrackerTab('lyrics')}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
-          >
-            <Mic2 size={11} /> Lyrics
-          </button>
-          <button
-            onClick={() => openTrackerTab('calendar')}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
-          >
-            <CalendarDays size={11} /> Overview
-          </button>
-          <button
-            onClick={() => openTrackerTab('producers')}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
-          >
-            <Users size={11} /> Producers
-          </button>
-          <button
-            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors bg-surface-raised text-text-primary"
-          >
-            <BarChart3 size={11} /> Statistics
-          </button>
+        <div className="flex items-center gap-0.5 mt-2 bg-surface-overlay rounded-md p-0.5 overflow-x-auto no-scrollbar w-fit max-w-full">
+          {tabBtn(<Music2 size={11} />, 'Songs', () => openTrackerTab('songs'))}
+          {tabBtn(<Mic2 size={11} />, 'Lyrics', () => openTrackerTab('lyrics'))}
+          {tabBtn(<CalendarDays size={11} />, 'Overview', () => openTrackerTab('calendar'))}
+          {tabBtn(<Users size={11} />, 'Producers', () => openTrackerTab('producers'))}
+          {tabBtn(<BarChart3 size={11} />, 'Statistics', () => undefined, true)}
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-[1600px] mx-auto space-y-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="max-w-[1600px] mx-auto space-y-5 md:space-y-6">
           {loading ? (
             <div className="space-y-4">
               <div className="h-24 bg-surface-raised animate-pulse rounded-xl" />
@@ -523,13 +538,13 @@ export default function StatisticsView(): JSX.Element {
           ) : (
             <>
               {/* Hero */}
-              <div className="flex items-center gap-6 flex-wrap">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0">
-                    <BarChart3 size={28} className="text-accent" />
+              <div className="flex items-center gap-4 md:gap-6 flex-wrap">
+                <div className="flex items-center gap-3 md:gap-4">
+                  <div className="w-12 h-12 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0">
+                    <BarChart3 size={24} className="text-accent" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-text-primary text-3xl font-bold tabular-nums">{(stats?.total_songs ?? 0).toLocaleString()}</p>
+                    <p className="text-text-primary text-2xl md:text-3xl font-bold tabular-nums">{(stats?.total_songs ?? 0).toLocaleString()}</p>
                     <p className="text-text-muted text-sm">songs in the catalog</p>
                   </div>
                 </div>
@@ -579,7 +594,7 @@ export default function StatisticsView(): JSX.Element {
                   column - two lg-width columns instead pair related sections
                   (song lists together, era charts together) so there's less
                   to scroll through on a wide window. */}
-              <div className="grid lg:grid-cols-2 gap-6">
+              <div className="grid lg:grid-cols-2 gap-4 md:gap-6">
                 {/* Top songs */}
                 {playStats && playStats.top_songs.length > 0 && (
                   <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-2 py-3.5">
@@ -590,7 +605,7 @@ export default function StatisticsView(): JSX.Element {
                       {playStats.top_songs.map((song, i) => (
                         <TopSongRow
                           key={song.id} song={song} cover={songMap.get(song.id)} rank={i + 1} max={maxTopSongPlays}
-                          onPlay={playById} onContextMenu={openContextMenu}
+                          onPlay={playById} onContextMenu={openContextMenu} isMobile={isMobile}
                         />
                       ))}
                     </div>
@@ -607,7 +622,7 @@ export default function StatisticsView(): JSX.Element {
                       {playStats.recent_plays.map((play) => (
                         <RecentPlayRow
                           key={play.id} play={play} cover={songMap.get(play.song_id)}
-                          onPlay={playById} onContextMenu={openContextMenu}
+                          onPlay={playById} onContextMenu={openContextMenu} isMobile={isMobile}
                         />
                       ))}
                     </div>
