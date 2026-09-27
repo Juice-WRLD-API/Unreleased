@@ -1,12 +1,30 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  Check, ChevronRight, Copy, Download, Link2, Link2Off, ListEnd, ListPlus, ListStart, Pencil, Play, Plus, Tag, Trash2, X,
+  Check, ChevronLeft, ChevronRight, Copy, Download, Link2, Link2Off, ListEnd, ListPlus, ListStart, Pencil, Play, Plus, Tag, Trash2, X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { donorFileToTrack } from '../lib/donorPlayback'
 import type { DonorFile } from '../lib/donorFilesApi'
 import { ClampedMenu } from './ClampedMenu'
+import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
+
+// A mobile sub-sheet's header: back chevron + title - see SongContextMenu's
+// own copy for why (the whole menu closes on scrim tap, so a sub-sheet needs
+// its own explicit way back to the main one).
+function SubSheetHeader({ title, onBack }: { title: string; onBack: () => void }): JSX.Element {
+  return (
+    <button
+      onClick={onBack}
+      title="Back"
+      className="w-full flex items-center gap-1 px-3 pt-3 pb-1 text-text-primary font-semibold text-[15px]"
+    >
+      <ChevronLeft size={19} className="text-text-muted shrink-0" />
+      {title}
+    </button>
+  )
+}
 
 export interface DonorMenuState { file: DonorFile; x: number; y: number }
 
@@ -29,6 +47,7 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   removeAction?: { label: string; onClick: () => void }
 }): JSX.Element {
   const { file } = state
+  const isMobile = useIsMobile()
   const playNext = useStore((s) => s.playNext)
   const addToQueue = useStore((s) => s.addToQueue)
   const donorPlaylists = useStore((s) => s.donorPlaylists)
@@ -36,6 +55,7 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   const removeFromDonorPlaylist = useStore((s) => s.removeFromDonorPlaylist)
   const createDonorPlaylist = useStore((s) => s.createDonorPlaylist)
   const [playlistsOpen, setPlaylistsOpen] = useState(false)
+  const [mobileSub, setMobileSub] = useState<'playlists' | null>(null)
   const [newName, setNewName] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   const submenuItemRef = useRef<HTMLDivElement>(null)
@@ -45,9 +65,10 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   const isAudio = !!onPlay
 
   // Beside the menu, top-aligned with its row - flipped to the left side when
-  // there's no room on the right, and nudged up to stay on-screen.
+  // there's no room on the right, and nudged up to stay on-screen. Desktop
+  // only - the mobile sheet below swaps its whole content instead.
   useLayoutEffect(() => {
-    if (!playlistsOpen) return
+    if (isMobile || !playlistsOpen) return
     const place = (): void => {
       const menu = menuRef.current?.getBoundingClientRect()
       const item = submenuItemRef.current?.getBoundingClientRect()
@@ -61,9 +82,10 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
     const ro = new ResizeObserver(place)
     if (flyoutRef.current) ro.observe(flyoutRef.current)
     return () => ro.disconnect()
-  }, [playlistsOpen, menuPos, donorPlaylists.length])
+  }, [isMobile, playlistsOpen, menuPos, donorPlaylists.length])
 
   useEffect(() => {
+    if (isMobile) return
     const onDown = (e: MouseEvent): void => { if (!menuRef.current?.contains(e.target as Node)) onClose() }
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
     const onScroll = (): void => onClose()
@@ -75,13 +97,73 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
       document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', onScroll, true)
     }
-  }, [onClose])
+  }, [isMobile, onClose])
 
   const run = (fn?: () => void) => (): void => { onClose(); fn?.() }
   const createWithFile = (): void => {
     if (!newName.trim()) return
     createDonorPlaylist(newName.trim(), [file.file_id])
     onClose()
+  }
+
+  if (isMobile) {
+    if (mobileSub === 'playlists') {
+      return (
+        <Sheet onClose={() => setMobileSub(null)} header={<SubSheetHeader title="Add to donor playlist" onBack={() => setMobileSub(null)} />}>
+          {donorPlaylists.length === 0 && <p className="px-5 py-3 text-sm text-text-muted">No donor playlists yet.</p>}
+          {donorPlaylists.map((p) => {
+            const inList = p.fileIds.includes(file.file_id)
+            return (
+              <SheetItem
+                key={p.id}
+                icon={ListPlus}
+                label={p.name}
+                active={inList}
+                trailing={inList ? <Check size={16} className="text-accent" /> : undefined}
+                onClick={() => (inList ? removeFromDonorPlaylist(p.id, file.file_id) : addToDonorPlaylist(p.id, file.file_id))}
+              />
+            )
+          })}
+          <SheetDivider />
+          <div className="flex gap-2 px-5 py-2">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') createWithFile() }}
+              placeholder="Playlist name"
+              className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none"
+            />
+            <button onClick={createWithFile} disabled={!newName.trim()} className="px-3 rounded-lg bg-accent/15 text-accent disabled:opacity-40">
+              <Plus size={16} />
+            </button>
+          </div>
+        </Sheet>
+      )
+    }
+
+    return (
+      <Sheet onClose={onClose} title={file.filename}>
+        {isAudio && (
+          <>
+            <SheetItem icon={Play} label="Play" onClick={run(onPlay)} />
+            <SheetItem icon={ListStart} label="Play next" onClick={run(() => playNext(donorFileToTrack(file)))} />
+            <SheetItem icon={ListEnd} label="Add to queue" onClick={run(() => addToQueue(donorFileToTrack(file)))} />
+            <SheetItem icon={ListPlus} label="Add to donor playlist" trailing={<ChevronRight size={16} className="text-text-muted" />} onClick={() => setMobileSub('playlists')} />
+            <SheetDivider />
+          </>
+        )}
+        {onDownload && <SheetItem icon={Download} label="Download" onClick={run(onDownload)} />}
+        {onRename && <SheetItem icon={Pencil} label="Rename" onClick={run(onRename)} />}
+        {onEditTags && <SheetItem icon={Tag} label="Edit tags" onClick={run(onEditTags)} />}
+        {onToggleShare && (
+          <SheetItem icon={file.is_shared ? Link2Off : Link2} label={file.is_shared ? 'Stop sharing' : 'Create share link'} onClick={run(onToggleShare)} />
+        )}
+        {onCopyLink && file.is_shared && file.share_url && <SheetItem icon={Copy} label="Copy share link" onClick={run(onCopyLink)} />}
+        {(removeAction || onDelete) && <SheetDivider />}
+        {removeAction && <SheetItem icon={X} label={removeAction.label} onClick={run(removeAction.onClick)} />}
+        {onDelete && <SheetItem icon={Trash2} label="Delete file" danger onClick={run(onDelete)} />}
+      </Sheet>
+    )
   }
 
   return (

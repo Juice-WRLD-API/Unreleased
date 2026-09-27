@@ -288,11 +288,19 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
                   <p className={`text-sm font-medium truncate ${active ? 'text-accent' : 'text-text-primary'}`} title={f.filename}>{t.title}</p>
                   <p className="text-text-muted text-xs truncate">{formatBytes(f.size)}</p>
                 </div>
-                <div className="flex items-center gap-0.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => move(f.file_id, -1)} disabled={i === 0} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move up"><ArrowUp size={13} /></button>
-                  <button onClick={() => move(f.file_id, 1)} disabled={i === files.length - 1} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move down"><ArrowDown size={13} /></button>
-                  <button onClick={() => removeFromDonorPlaylist(playlist.id, f.file_id)} className="p-1.5 rounded text-text-muted hover:text-red-400" title="Remove from playlist"><X size={13} /></button>
-                </div>
+                {isMobile ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
+                    className="w-10 h-11 -mr-2 shrink-0 flex items-center justify-center text-text-muted active:text-accent"
+                    aria-label="More options"
+                  ><MoreVertical size={18} /></button>
+                ) : (
+                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => move(f.file_id, -1)} disabled={i === 0} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move up"><ArrowUp size={13} /></button>
+                    <button onClick={() => move(f.file_id, 1)} disabled={i === files.length - 1} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move down"><ArrowDown size={13} /></button>
+                    <button onClick={() => removeFromDonorPlaylist(playlist.id, f.file_id)} className="p-1.5 rounded text-text-muted hover:text-red-400" title="Remove from playlist"><X size={13} /></button>
+                  </div>
+                )}
               </div>
             )
           })}
