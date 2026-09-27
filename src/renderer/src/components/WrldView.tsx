@@ -8,7 +8,7 @@ import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, split
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
 import { runPlayerCommand } from '../lib/windowSync'
-import { buildImageUrl, apiFetch, songToTrack, JWAPI_BASE, playlistCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
+import { buildImageUrl, apiFetch, songToTrack, JWAPI_BASE, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { searchRadioLibrary } from '../lib/radioLibrary'
 import type { RadioLibraryTrack } from '../lib/radioLibrary'
@@ -308,11 +308,14 @@ export default function WrldView(): JSX.Element {
       if (cancelled) return
       // A version linked in the /versions/ table isn't necessarily playable —
       // recording-session songs (and some unsurfaced ones) have no `path`,
-      // same gate used for bulk queue/playlist adds elsewhere in the app.
+      // same gate used for bulk queue/playlist adds elsewhere in the app. A
+      // recording-session song can still resolve to a playable file through a
+      // manual/auto session-edit link, so defer to the same resolver those
+      // other call sites use rather than checking `path` alone.
       const withPaths = await Promise.all(metas.map(async m => {
         try {
           const song = await apiFetch<JWApiSong>(`/songs/${m.songId}/`)
-          return song.path ? m : null
+          return resolveSessionEditSource(song).path ? m : null
         } catch { return null }
       }))
       if (cancelled) return

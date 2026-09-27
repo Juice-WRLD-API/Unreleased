@@ -29,9 +29,10 @@
          local-media: is the custom scheme the desktop build streams local
          audio/video through (see electron/main.js); it's a no-op origin on
          the web build. connect-src lists every host the renderer actually
-         calls: the API, its match-play websocket, Last.fm scrobbling, and
-         the CORS proxies (lyrics - see EditorPage.tsx; cover art without its
-         own CORS header - see coverImage.ts). -->
+         calls: the API, its match-play websocket, Last.fm scrobbling, the
+         CORS proxies (lyrics - see EditorPage.tsx; cover art without its
+         own CORS header - see coverImage.ts), and the chat GIF picker's
+         Tenor/Giphy search (see gifApi.ts). -->
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
       script-src 'self' 'sha256-xjpTVCo7o4K9QG8ZmAgfjVUbc2OdYbdKgT/ClSf5AWE=' 'sha256-b1jw+VU6Z+2+MRzlWRKIER82x08obZjR7Y3a9A7hu74=';
@@ -39,7 +40,7 @@
       img-src 'self' data: blob: local-media: https:;
       media-src 'self' blob: local-media: https:;
       font-src 'self';
-      connect-src 'self' https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com https://images.weserv.nl local-media:;
+      connect-src 'self' https://juicewrldapi.com wss://juicewrldapi.com https://ws.audioscrobbler.com https://api.allorigins.win https://corsproxy.io https://api.github.com https://images.weserv.nl https://tenor.googleapis.com https://*.tenor.com https://api.giphy.com https://*.giphy.com local-media:;
       worker-src 'self';
       object-src 'none';
       base-uri 'self';

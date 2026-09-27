@@ -6,7 +6,7 @@ import {
   Hash, Minus, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
   Flag, History, Play, Radio, Server,
 } from 'lucide-react'
-import { apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { apiFetch, songToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -742,8 +742,11 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     try {
       const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
       // An unsurfaced song is a real catalog entry with no file behind it —
-      // the proposal is still reviewable, there's just nothing to play.
-      if (!song.path) { setPlayError('No file on this song to play'); return }
+      // the proposal is still reviewable, there's just nothing to play. A
+      // recording-session song with no `path` of its own may still resolve to
+      // a playable file through a session-edit link, same as songToTrack()
+      // itself already accounts for below.
+      if (!resolveSessionEditSource(song).path) { setPlayError('No file on this song to play'); return }
       const track = songToTrack(song)
       playTrack(track, [track])
     } catch {
