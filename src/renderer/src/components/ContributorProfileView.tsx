@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw, ChevronLeft, Plus, FolderOpen } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
+import { RefreshCw, ChevronLeft, Plus, FolderOpen, Trophy, Pencil, Check, X, Loader2 } from 'lucide-react'
+import { useStore, useStorePick } from '../store/useStore'
 import { navigateFromWindow } from '../lib/windowSync'
 import * as userApi from '../lib/userApi'
+import { updateDisplayName } from '../lib/userApi'
 import type { CompFileProposal } from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import CompProposalList, { CompFilterBar, filterCompProposals, type CompFilterTab } from './CompProposalList'
+import RoleBadges from './RoleBadges'
+import { Tile } from './Tile'
 
 // A contributor-only account's home. Reviewing other people's proposals is
 // deliberately NOT here — that queue lives in exactly one place, the Admin
 // page's "Comp files" tab, reachable from the editor profile.
 
+// Bento tile grid — mirrors the tile treatment EditorProfileView uses. A
+// simple responsive grid-cols-2 stack that escalates to 4 columns at `sm` —
+// this page has too little content to justify a height-filling bento like
+// EditorProfileView's.
 export default function ContributorProfileView(): JSX.Element {
   const { account, activeChannel, channels } = useStorePick('account', 'activeChannel', 'channels')
   // Also renders as its own window (FloatApp's `profile` view), where
@@ -22,7 +29,38 @@ export default function ContributorProfileView(): JSX.Element {
   const [refreshKey, setRefreshKey] = useState(0)
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
 
-  const isContributor = userApi.isChannelContributor(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+
+  function startEditName(): void {
+    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  async function saveDisplayName(): Promise<void> {
+    const trimmed = nameInput.trim()
+    if (!trimmed || trimmed === account?.display_name) { setEditingName(false); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
+  const isContributor = userApi.isChannelContributor(account, activeChannel, isPrimary)
+  const isAdmin = !!account?.is_administrator
+  const isManager = userApi.isChannelManager(account, activeChannel, isPrimary)
+  const isEditor = !!account?.is_editor
 
   useEffect(() => {
     if (!isContributor) {
@@ -65,44 +103,126 @@ export default function ContributorProfileView(): JSX.Element {
 
   return (
     <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 px-5 py-4 border-b border-[var(--border)] flex items-center gap-3">
+      <div className="shrink-0 px-4 sm:px-5 py-3 flex items-center gap-2">
         <button onClick={() => go('api-tracker')} className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors md:hidden">
           <ChevronLeft size={18} />
         </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-base font-bold text-text-primary">{account.display_name || account.discord_username}</h1>
-          <p className="text-xs text-text-muted">
-            Contributor · {approvedCount} approved
-            {account.is_editor ? ' · also editor' : ''}
-          </p>
-        </div>
-        {account.is_editor && (
-          <button onClick={() => go('editor-profile')} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface-raised text-text-secondary hover:text-text-primary transition-colors">
-            Editor profile
-          </button>
-        )}
-        <button onClick={() => go('contributor')} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-accent text-white flex items-center gap-1.5">
-          <Plus size={14} /> New proposal
-        </button>
-        <button onClick={() => go('api-files')} className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors" title="Browse comp files">
-          <FolderOpen size={16} />
-        </button>
+        <h1 className="flex-1 min-w-0 text-base font-bold text-text-primary truncate">Contributor profile</h1>
         <button onClick={() => setRefreshKey(k => k + 1)} className="p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors">
           <RefreshCw size={16} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div className="mb-4">
-          <CompFilterBar filter={filter} setFilter={setFilter} />
+      <div className="flex-1 overflow-y-auto px-4 sm:px-5 pb-4 sm:pb-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+
+          {/* Identity */}
+          <Tile span="col-span-2 sm:col-span-2">
+            <div className="flex items-center gap-3">
+              {account.avatar ? (
+                <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
+              ) : account.discord_avatar ? (
+                <img src={account.discord_avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold shrink-0">
+                  {(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                {editingName ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      autoFocus
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveDisplayName()
+                        if (e.key === 'Escape') setEditingName(false)
+                      }}
+                      maxLength={50}
+                      disabled={savingName}
+                      className="min-w-0 w-36 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                    <button
+                      onClick={saveDisplayName}
+                      disabled={savingName}
+                      className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40"
+                      title="Save"
+                    >
+                      {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                    </button>
+                    <button
+                      onClick={() => setEditingName(false)}
+                      disabled={savingName}
+                      className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+                      title="Cancel"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <h2 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
+                    {account.display_name || account.discord_username}
+                    <button
+                      onClick={startEditName}
+                      className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
+                      title="Edit display name"
+                    >
+                      <Pencil size={11} />
+                    </button>
+                  </h2>
+                )}
+                {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
+                <div className="mt-1">
+                  <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={isEditor} isContributor={isContributor} />
+                </div>
+              </div>
+            </div>
+          </Tile>
+
+          {/* Stats */}
+          <Tile title="Stats" icon={<Trophy size={13} />} span="col-span-2 sm:col-span-2">
+            <div className="flex-1 flex flex-col justify-center gap-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
+                {approvedCount} approved
+              </p>
+            </div>
+          </Tile>
+
+          {/* Quick actions */}
+          <Tile title="Quick actions" span="col-span-2 sm:col-span-4">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => go('contributor')} className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors">
+                <Plus size={12} /> New comp proposal
+              </button>
+              <button onClick={() => go('api-files')} className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors">
+                <FolderOpen size={12} /> Browse comp files
+              </button>
+              {(isEditor || isManager) && (
+                <button onClick={() => go('editor-profile')} className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors">
+                  {isEditor ? 'Editor profile' : 'Manager profile'}
+                </button>
+              )}
+            </div>
+          </Tile>
+
+          {/* Comp Files — large */}
+          <Tile title="Comp Files" icon={<FolderOpen size={13} />} span="col-span-2 sm:col-span-4">
+            <div className="flex items-center gap-2 mb-2 shrink-0">
+              <CompFilterBar filter={filter} setFilter={setFilter} />
+            </div>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <CompProposalList
+                proposals={filtered}
+                loading={loading}
+                onSelect={() => go('contributor')}
+                onWithdraw={withdraw}
+                withdrawingId={withdrawingId}
+              />
+            </div>
+          </Tile>
+
         </div>
-        <CompProposalList
-          proposals={filtered}
-          loading={loading}
-          onSelect={() => go('contributor')}
-          onWithdraw={withdraw}
-          withdrawingId={withdrawingId}
-        />
       </div>
     </div>
   )
