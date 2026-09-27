@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
@@ -21,6 +21,7 @@ import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } fr
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, type RouteRule } from '../lib/apiServers'
 import { lastfmConfigured } from '../lib/lastfm'
+import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { IS_IOS } from '../lib/platform'
@@ -151,6 +152,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'playback', label: 'Notification sound' },
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
+  { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Feedback / About
   { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'feedback', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
@@ -516,6 +518,7 @@ function CommitFreshnessBulb(): JSX.Element | null {
 export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
+  const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   const {
@@ -1671,6 +1674,24 @@ export default function Settings(): JSX.Element {
                         </button>
                       )
                     )}
+                  </Block>
+                  <Block
+                    icon={Server}
+                    iconColor="#0ea5e9"
+                    label="Distributed CDN downloads"
+                    sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
+                    action={
+                      <Toggle
+                        on={cdnEnabled}
+                        onClick={() => {
+                          const next = !cdnEnabled
+                          cdnService.setEnabled(next)
+                          setCdnEnabled(next)
+                        }}
+                      />
+                    }
+                  >
+                    <></>
                   </Block>
                 </SettingsCard>
               </div>

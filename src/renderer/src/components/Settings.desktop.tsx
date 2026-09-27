@@ -22,6 +22,7 @@ import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, type RouteRule } from '../lib/apiServers'
 import { lastfmConfigured } from '../lib/lastfm'
+import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { formatBytes, accountDisplayName, initial } from '../lib/format'
@@ -112,6 +113,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Notification sound' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
+  { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Shortcuts
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
@@ -371,6 +373,7 @@ function CommitFreshnessBulb(): JSX.Element | null {
 
 export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
+  const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [tokenCopied, setTokenCopied] = useState(false)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const {
@@ -1641,6 +1644,21 @@ export default function Settings(): JSX.Element {
                       </button>
                     )
                   )}
+                </Row>
+                <Row
+                  icon={Server}
+                  iconColor="#0ea5e9"
+                  label="Distributed CDN downloads"
+                  sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
+                >
+                  <Toggle
+                    on={cdnEnabled}
+                    onClick={() => {
+                      const next = !cdnEnabled
+                      cdnService.setEnabled(next)
+                      setCdnEnabled(next)
+                    }}
+                  />
                 </Row>
               </div>
             )}
