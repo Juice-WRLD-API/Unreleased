@@ -23,6 +23,8 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
+import WrldVisualizer from './WrldVisualizer'
+import { useVizStore } from '../store/vizStore'
 import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
   usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
@@ -195,6 +197,14 @@ export default function WrldView(): JSX.Element {
     setWrldFullscreen(fullscreen)
     return () => setWrldFullscreen(false)
   }, [fullscreen, setWrldFullscreen])
+
+  // Visualizer-only: in fullscreen, the player, lyrics and page chrome step
+  // aside and WrldVisualizer draws a caption in their place. Hidden with
+  // display rather than unmounted, so toggling back doesn't restart the lyric
+  // scroll or refetch anything.
+  const immMinimal = useVizStore(s => s.immMinimal)
+  const vizMinimal = fullscreen && immMinimal
+  const hideForViz = vizMinimal ? { display: 'none' } : undefined
 
   const {
     suggestQuery, setSuggestQuery, suggestResults, suggestLoading,
@@ -380,6 +390,7 @@ export default function WrldView(): JSX.Element {
         ? 'w-14 h-14 rounded-xl overflow-hidden shrink-0 shadow-lg'
         : 'rounded-3xl overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.8)] w-full'}
       style={mobile ? {} : { aspectRatio: '1' }}
+      data-viz={mobile ? undefined : 'cover'}
       // Right-click → "Change cover", same as mobile's long-press. Only on
       // the big desktop art, not the small header thumbnail (mobile=true) -
       // mirrors mobile only wiring this to its one large cover.
@@ -684,7 +695,7 @@ export default function WrldView(): JSX.Element {
           one unit - 999FM sits top-right on mobile, top-left on desktop
           (md:), and fullscreen now rides along right next to it instead of
           living in its own corner. */}
-      <div className="absolute z-30 flex items-center gap-2 top-3 right-3 md:top-4 md:left-4 md:right-auto">
+      <div className="absolute z-30 flex items-center gap-2 top-3 right-3 md:top-4 md:left-4 md:right-auto" style={hideForViz} data-viz-fade>
         <button
           onClick={toggleFm}
           disabled={fmDisabled}
@@ -751,8 +762,23 @@ export default function WrldView(): JSX.Element {
             )}
           </div>
 
+          {fullscreen && (
+            <WrldVisualizer
+              rootRef={fsOverlayRef}
+              artUrl={artSrc && !artError ? artSrc : null}
+              title={displayTitle ?? ''}
+              artist={displayArtist ?? ''}
+              trackKey={radioFmActive ? (radioFmNowPlaying?.title ?? null) : (currentTrack?.id ?? null)}
+              albumKey={displayAlbum ?? null}
+              hasLyrics={!!rawLyrics}
+              txtPri={txtPri}
+              txtSec={txtSec}
+              onExit={exitFullscreen}
+            />
+          )}
+
           {/* Mobile layout */}
-          <div className="md:hidden relative z-10 flex flex-col h-full min-h-0">
+          <div className="md:hidden relative z-10 flex flex-col h-full min-h-0" style={hideForViz}>
 
             <div className={showLyricsColumn ? 'contents' : 'flex-1 flex flex-col justify-center'}>
               {/* Header: art + title */}
@@ -946,7 +972,7 @@ export default function WrldView(): JSX.Element {
           </div>
 
           {/* Desktop layout */}
-          <div className="hidden md:flex relative z-10 flex-1 h-full overflow-hidden">
+          <div className="hidden md:flex relative z-10 flex-1 h-full overflow-hidden" style={hideForViz}>
 
             {/* Left column - Apple Music style. A true 50/50 split with the
                 lyrics column, not a narrow fixed-width sidebar next to a huge
@@ -984,7 +1010,7 @@ export default function WrldView(): JSX.Element {
               </div>
 
               {/* Title + artist */}
-              <div className="w-full px-1" style={{ maxWidth: 320 }}>
+              <div className="w-full px-1" style={{ maxWidth: 320 }} data-viz="meta">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     {displayTitle  && <p className="font-bold text-xl leading-tight truncate" style={{ color: txtPri }} title={displayTitle}>{displayTitle}</p>}
@@ -1027,14 +1053,14 @@ export default function WrldView(): JSX.Element {
               </div>
 
               {/* Progress bar - FM gets a read-only version (no scrubbing on live radio) */}
-              <div className="w-full" style={{ maxWidth: 320 }}>
+              <div className="w-full" style={{ maxWidth: 320 }} data-viz="meta">
                 {radioFmActive
                   ? <FmProgressBar txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />
                   : <ProgressBar txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />}
               </div>
 
               {/* Playback controls */}
-              <div className="w-full flex flex-col gap-4" style={{ maxWidth: 320 }}>
+              <div className="w-full flex flex-col gap-4" style={{ maxWidth: 320 }} data-viz="meta">
                 {/* Main controls row - hidden during 999FM; it's a live stream,
                     nothing here to locally play/pause/seek. Voting to skip
                     lives in the FM panel itself instead of a repurposed button. */}
@@ -1242,7 +1268,7 @@ export default function WrldView(): JSX.Element {
                 left column) so it gets the full column's height instead of
                 a cramped 300px-capped overlay. */}
             {showLyricsColumn && (
-            <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+            <div className="flex-1 min-w-0 overflow-hidden flex flex-col" data-viz="panel">
               {showQueue && !radioFmActive ? (
                 <div className="h-full flex items-stretch justify-center px-6 xl:px-10 py-7">
                   <div className="w-full max-w-[440px] h-full animate-wrld-queue-in">
@@ -1273,7 +1299,7 @@ export default function WrldView(): JSX.Element {
       </>
 
       {/* ── Notch menu ── */}
-      <div className="group absolute right-0 top-0 bottom-0 z-20 flex items-center">
+      <div className="group absolute right-0 top-0 bottom-0 z-20 flex items-center" style={hideForViz}>
 
         {/* Expanded panel - slides in on hover */}
         {/* Clip width is in rem (17rem = 272px at scale 1) so it grows together
@@ -2231,7 +2257,11 @@ const LyricsPanel = memo(function LyricsPanel({
               <div
                 key={i}
                 ref={isActive ? activeRef : undefined}
-                onClick={() => seekAudio(line.time)}
+                data-viz-active={isActive || undefined}
+                // A line is active once currentTime - lyricsOffset reaches its
+                // time, so that's where to land - seeking to the bare time
+                // left the previous line highlighted for `offset` seconds.
+                onClick={() => seekAudio(Math.max(0, line.time + lyricsOffset))}
                 className={`cursor-pointer select-none ${lyricsAlign === 'center' ? 'origin-center mx-auto text-center' : 'origin-left'}`}
                 style={{
                   // The active line grows via `scale()`, anchored at its left

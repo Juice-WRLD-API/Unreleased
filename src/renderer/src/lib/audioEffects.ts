@@ -342,6 +342,17 @@ export function getCurrentPeak(): number {
   return peak
 }
 
+// The mixed player signal (pre-EQ, post element volume), for analysis taps
+// like the fullscreen visualizer. Null while the graph isn't built - never on
+// iOS, and on Android not until an effect is switched on - so callers must
+// cope without it rather than forcing the graph, which would cost background
+// playback. Read-only by contract: connect analysers to it, never anything
+// that reaches ctx.destination (that plays the audio twice and skips the EQ),
+// and never call a bare disconnect() on it (that cuts the playback chain).
+export function getAnalysisTap(): { ctx: AudioContext; node: AudioNode } | null {
+  return ctx && chainInput ? { ctx, node: chainInput } : null
+}
+
 // Autoplay policies can leave a fresh context suspended - call on every
 // play so audio never sits routed into a dead graph.
 export function resumeEffectsContext(): void {

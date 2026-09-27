@@ -28,6 +28,12 @@ function onWindowKeyDown(e: KeyboardEvent): void {
   handlers[handlers.length - 1]?.()
 }
 
+/** True while any Escape-dismissable layer is open - for page-level shortcuts
+ *  that shouldn't act on whatever sits underneath a dialog or menu. */
+export function hasEscapeLayer(): boolean {
+  return handlers.length > 0
+}
+
 export function useEscapeToClose(onClose: () => void, active = true): void {
   // The callback goes through a ref so the effect depends only on `active`.
   // Depending on `onClose` would re-run it whenever a caller passes a fresh
