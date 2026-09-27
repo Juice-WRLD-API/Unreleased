@@ -73,9 +73,9 @@ function debug(filepath: string, message: string, ...extra: unknown[]): void {
 function readEnabled(): boolean {
   try {
     const stored = localStorage.getItem(ENABLED_KEY)
-    return stored === null ? true : stored === 'true'
+    return stored === null ? false : stored === 'true'
   } catch {
-    return true   // no localStorage (private mode, etc.) - default on, same as a fresh install
+    return false   // no localStorage (private mode, etc.) - default off, same as a fresh install
   }
 }
 
