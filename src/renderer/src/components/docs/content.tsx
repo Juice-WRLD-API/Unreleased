@@ -1259,8 +1259,8 @@ Authorization: Token <token>`}</Pre>
 
   "nav_order": ["home", "wrld", "..."],
   "nav_visibility": { "wrld": true },
-  "nav_control_order": ["queue", "..."],
-  "nav_control_visibility": { "queue": true },
+  "nav_control_order": ["profile", "..."],
+  "nav_control_visibility": { "profile": true },
   "home_section_visibility": { "recent": true },
 
   "playback_speed": 1,
