@@ -123,6 +123,13 @@ export default function WrldView(): JSX.Element {
     setShowOutputPicker((v) => !v)
   }
 
+  // Keep the queue panel mounted after its first open instead of unmounting
+  // it on close - same reasoning as the app-wide QueuePanel in App.tsx:
+  // unmounting destroys every cover <img>, so reopening the queue made them
+  // all reload/re-decode from scratch instead of just reappearing.
+  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
+  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
+
   const [fmTab, setFmTab] = useState<'radio' | 'lyrics'>('radio')
   // Fullscreen renders the page through a portal (covers the sidebar/other
   // chrome) AND requests real OS/browser-level fullscreen — the portal alone
@@ -1394,13 +1401,21 @@ export default function WrldView(): JSX.Element {
                 a cramped 300px-capped overlay. */}
           {showLyricsColumn && (
             <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
-              {showQueue && !radioFmActive ? (
-                <div className="h-full flex items-stretch justify-center px-6 xl:px-10 py-7">
-                  <div className="w-full max-w-[440px] h-full animate-wrld-queue-in">
+              {/* Kept mounted (hidden via CSS) once opened rather than
+                  unmounted on close - same reasoning as the app-wide
+                  QueuePanel: unmounting destroyed every cover <img>, forcing
+                  a visible reload/re-decode of the whole list on reopen. */}
+              {queueEverOpened && (
+                <div
+                  className="h-full flex items-stretch justify-center px-6 xl:px-10 py-7 animate-wrld-queue-in"
+                  style={showQueue && !radioFmActive ? undefined : { display: 'none' }}
+                >
+                  <div className="w-full max-w-[440px] h-full">
                     <WrldQueuePanel variant="panel" onClose={() => setShowQueue(false)} />
                   </div>
                 </div>
-              ) : radioFmActive ? (
+              )}
+              {showQueue && !radioFmActive ? null : radioFmActive ? (
                 <>
                   <div className="flex items-center gap-1 px-6 pt-5 pb-3 shrink-0">
                     {(['radio', 'lyrics'] as const).map(tab => (
@@ -1521,8 +1536,8 @@ export default function WrldView(): JSX.Element {
       {/* Mobile queue — full-screen sheet (there's no side-by-side room for
           an inline drawer like the desktop layout gets). Hidden during 999FM,
           a live stream with nothing to queue/reorder. */}
-      {showQueue && !radioFmActive && (
-        <div className="md:hidden">
+      {queueEverOpened && (
+        <div className="md:hidden" style={showQueue && !radioFmActive ? undefined : { display: 'none' }}>
           <WrldQueuePanel variant="sheet" onClose={() => setShowQueue(false)} />
         </div>
       )}
@@ -1950,7 +1965,7 @@ function WrldQueueRow({ track, isActive, isPlaying, showDrag, onPlay, onRemove }
         <div className="w-3.5 shrink-0" />
       )}
       <div className="w-9 h-9 rounded shrink-0 overflow-hidden bg-white/[0.06]">
-        <AlbumArtThumbnail track={track} size={36} fill className="w-full h-full" shimmer={false} />
+        <AlbumArtThumbnail track={track} size={36} fill className="w-full h-full" shimmer={false} eager />
       </div>
       <div className="flex-1 min-w-0">
         <p className={`text-xs font-medium truncate leading-tight ${isActive ? 'text-accent' : 'text-white/85'}`} title={track.title}>{track.title}</p>

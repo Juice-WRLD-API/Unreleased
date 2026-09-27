@@ -1,4 +1,4 @@
-import React, { useEffect, Suspense } from 'react'
+import React, { useEffect, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -122,6 +122,11 @@ function WindowControls(): JSX.Element {
 export default function App(): JSX.Element {
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel } = useStorePick(
     'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel')
+  // Keep the panel mounted after its first open instead of unmounting on
+  // close - unmounting destroyed every cover <img>, so reopening the queue
+  // made them all reload/re-decode from scratch instead of just reappearing.
+  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
+  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
   useThemeEffects()
 
   // Warms the session-edit auto-match mirror so any view that resolves a
@@ -313,7 +318,13 @@ export default function App(): JSX.Element {
             </Suspense>
           </ErrorBoundary>
             {showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
-            {showQueue && activeView !== 'wrld' && <ErrorBoundary><QueuePanel /></ErrorBoundary>}
+            {queueEverOpened && (
+              <ErrorBoundary>
+                <div style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
+                  <QueuePanel />
+                </div>
+              </ErrorBoundary>
+            )}
           </div>
         </main>
       </div>
