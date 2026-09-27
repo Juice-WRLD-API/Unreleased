@@ -26,6 +26,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
+import { IS_IOS } from '../lib/platform'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useDragReorder } from './mobile/useDragReorder'
 import { useLongPress } from './mobile/useLongPress'
@@ -1274,8 +1275,25 @@ function QueueRow({ track, active, playing, dragging, anyDragging, rowStyle, onD
 // pause doesn't re-render the whole page (and with it the cover and lyrics).
 
 /** Volume. The knob is always drawn - a hover-only one is invisible on touch,
- *  and there's no other cue that the line is draggable. */
+ *  and there's no other cue that the line is draggable.
+ *
+ *  iOS Safari ignores HTMLMediaElement.volume entirely (see Player.tsx) - the
+ *  hardware buttons are the only thing that actually changes output there, so
+ *  dragging this would silently do nothing. Swap it for a hint instead of
+ *  shipping a control that looks interactive but isn't. */
 const VolumeRow = memo(function VolumeRow({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
+  if (IS_IOS) {
+    return (
+      <div className="flex items-center gap-3 h-9" style={{ color: txtTer }}>
+        <Volume2 size={17} className="shrink-0" />
+        <span className="text-xs">Use the side buttons to adjust volume</span>
+      </div>
+    )
+  }
+  return <DraggableVolumeRow txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />
+})
+
+const DraggableVolumeRow = memo(function DraggableVolumeRow({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
   const { volume, setVolume } = useStorePick('volume', 'setVolume')
   const barRef = useRef<HTMLDivElement>(null)
   // Remember the level before muting so unmuting restores it, instead of
