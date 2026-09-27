@@ -314,6 +314,26 @@ export async function getMe(): Promise<AccountUser> {
   return request(url, { method: 'GET' }, true, url)
 }
 
+export async function updateDisplayName(displayName: string): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ display_name: displayName }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function updateAvatar(base64: string): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ avatar: base64 }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
 export async function getFavorites(): Promise<FavoriteEntry[]> {
   const url = `${LIBRARY_BASE}/favorites/`
   return request(url, { method: 'GET' }, true, url)
@@ -838,6 +858,15 @@ export async function adminListProposals(statusFilter?: ProposalStatus, channel?
   return request(url.toString(), { method: 'GET' }, true, url.toString())
 }
 
+export interface ProposalCounts { total: number; pending: number; approved: number; rejected: number; reversed: number }
+
+export async function adminProposalCounts(channel?: string): Promise<ProposalCounts> {
+  const url = new URL(`${ACCOUNT_BASE}/admin/proposals/`)
+  url.searchParams.set('counts', '1')
+  if (channel) url.searchParams.set('channel', channel)
+  return request(url.toString(), { method: 'GET' }, true, url.toString())
+}
+
 export async function adminReviewProposal(id: number, payload: {
   action: 'approve' | 'reject' | 'revise'
   review_notes?: string
@@ -1047,6 +1076,14 @@ export async function adminListCompProposals(statusFilter?: ProposalStatus, chan
   if (!CONTRIBUTOR_ENABLED) return []
   const url = new URL(`${ACCOUNT_BASE}/admin/comp-proposals/`)
   if (statusFilter) url.searchParams.set('status', statusFilter)
+  if (channel) url.searchParams.set('channel', channel)
+  return request(url.toString(), { method: 'GET' }, true, url.toString())
+}
+
+export async function adminCompProposalCounts(channel?: string): Promise<ProposalCounts> {
+  if (!CONTRIBUTOR_ENABLED) return { total: 0, pending: 0, approved: 0, rejected: 0, reversed: 0 }
+  const url = new URL(`${ACCOUNT_BASE}/admin/comp-proposals/`)
+  url.searchParams.set('counts', '1')
   if (channel) url.searchParams.set('channel', channel)
   return request(url.toString(), { method: 'GET' }, true, url.toString())
 }

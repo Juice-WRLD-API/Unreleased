@@ -171,7 +171,7 @@ const ProposalDiff = memo(function ProposalDiff({ proposal }: { proposal: SongEd
 // profile's Admin tab) — no back button, page title, or window-control
 // clearance, since the host view owns that chrome.
 export default function AdminPage({ embedded = false }: { embedded?: boolean }): JSX.Element {
-  const { account, loadAccount, showNowPlaying, showQueue, activeChannel, channels } = useStorePick('account', 'loadAccount', 'showNowPlaying', 'showQueue', 'activeChannel', 'channels')
+  const { account, loadAccount, showNowPlaying, showQueue, activeChannel, channels, activeAdminTab, setActiveAdminTab } = useStorePick('account', 'loadAccount', 'showNowPlaying', 'showQueue', 'activeChannel', 'channels', 'activeAdminTab', 'setActiveAdminTab')
   // Renders inside the profile page, which can itself be a pop-out window —
   // setActiveView would go nowhere there. See navigateFromWindow.
   const go = navigateFromWindow
@@ -191,7 +191,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
   const canAccessStaff = isFullAdmin || isManager
   const otpEnabled = !!account?.otp_enabled
 
-  const [tab,          setTab]          = useState<Tab>('proposals')
+  const [tab,          setTab]          = useState<Tab>(() => activeAdminTab ?? 'proposals')
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState<string | null>(null)
   const [refreshKey,   setRefreshKey]   = useState(0)
@@ -233,6 +233,18 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
   }, [tab, canAccessStaff, isFullAdmin, propStatus, reportStatus, activeChannel])
 
   useEffect(() => { load() }, [load, refreshKey])
+
+  // A stat box on the Editor/Contributor profile's Admin tile deep-links here
+  // via activeAdminTab rather than a prop — this page can mount fresh (the
+  // normal case, navigated to from elsewhere) or already be showing (this
+  // effect still catches that). Cleared right after so a later manual tab
+  // click, or just remounting this page later, doesn't get overridden by a
+  // stale deep link.
+  useEffect(() => {
+    if (activeAdminTab == null) return
+    setTab(activeAdminTab)
+    setActiveAdminTab(null)
+  }, [activeAdminTab, setActiveAdminTab])
 
   if (!canAccessStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">

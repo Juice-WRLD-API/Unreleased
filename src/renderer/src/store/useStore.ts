@@ -13,6 +13,10 @@ import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache,
 } from '../lib/songPrefs'
 import type { SongPreference, SongPrefMap, SongPrefPatch } from '../lib/songPrefs'
+
+// AdminPage's own tab set (see its local `Tab` type) — duplicated here rather
+// than imported so the store doesn't depend on a component file; keep in sync.
+export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes'
 import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
 import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
@@ -189,6 +193,10 @@ interface AppState {
   // like the editor send its back button/redirects to wherever the user
   // actually came from instead of a hardcoded destination.
   previousView: ViewType | null
+  // Which AdminPage tab to land on next time activeView becomes 'admin' — set
+  // by the Editor/Contributor profile's Admin tile stat boxes so a click deep
+  // links straight to that queue instead of always landing on the default tab.
+  activeAdminTab: AdminTab | null
   showNowPlaying: boolean
   showSettings: boolean
   // Which Settings tab to show on next open (deep-link from the app menu, e.g.
@@ -530,6 +538,7 @@ interface AppActions {
   playCommunityEdit: (edit: CommunityEdit) => void
 
   setActiveView: (view: ViewType) => void
+  setActiveAdminTab: (tab: AdminTab | null) => void
   setShowNowPlaying: (show: boolean) => void
   setRadioFmActive: (active: boolean) => void
   setRadioFmIsLive: (live: boolean | null) => void
@@ -1172,6 +1181,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // -- UI --------------------------------------------------------------------
   activeView: 'api-tracker',
   previousView: null,
+  activeAdminTab: null,
   showNowPlaying: false,
   showSettings: false,
   settingsTab: null,
@@ -1233,6 +1243,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     window.history.pushState({ view }, '', paths[view] ?? '/tracker')
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
   },
+  setActiveAdminTab: (tab) => set({ activeAdminTab: tab }),
   setShowNowPlaying: (showNowPlaying) => set({ showNowPlaying }),
   setRadioFmActive: (radioFmActive) => set({ radioFmActive }),
   setRadioFmIsLive: (radioFmIsLive) => set({ radioFmIsLive }),

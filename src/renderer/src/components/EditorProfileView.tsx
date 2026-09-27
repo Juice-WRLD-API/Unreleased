@@ -2,18 +2,26 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Loader2, Trophy, FileEdit, ChevronLeft, Pencil, Trash2, RefreshCw, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Search, Flag, ShieldCheck, FolderOpen, Copy, PictureInPicture2, User, MessagesSquare } from 'lucide-react'
 import { hasChatAccess } from '../store/chatStore'
-import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
+import { useStore, IS_FLOAT_WINDOW, type AdminTab } from '../store/useStore'
 import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
-import { getMyProposals, getLeaderboard, withdrawProposal, createProposal, resubmitProposal, SongEditProposal, ProposalStatus, getMyCompProposals, withdrawCompProposal, CompFileProposal, isChannelContributor, isChannelManager } from '../lib/userApi'
+import {
+  getMyProposals, getLeaderboard, withdrawProposal, createProposal, resubmitProposal, SongEditProposal, ProposalStatus,
+  getMyCompProposals, withdrawCompProposal, CompFileProposal, isChannelContributor, isChannelManager,
+  updateDisplayName, updateAvatar, compressImageFile,
+  adminProposalCounts, adminCompProposalCounts, adminListApplications, adminListUsers,
+} from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { apiFetch, JWApiEra, JWApiSong } from '../lib/juicewrldApi'
+import { fetchEraList } from '../lib/erasApi'
+import { fetchCdnStats } from '../lib/cdnAdminApi'
 import * as reportsApi from '../lib/reportsApi'
 import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
 import ReportsTab from './ReportsTab'
 import FilePickerModal from './FilePickerModal'
 import { BasicRow, BasicSelect, SyncedLyricsTable, cleanDate } from './EditorPage'
-import AdminPage from './AdminPage'
 import CompProposalList, { CompFilterBar, filterCompProposals, type CompFilterTab } from './CompProposalList'
+import RoleBadges from './RoleBadges'
+import { Tile } from './Tile'
 
 const CATEGORIES = [
   { value: 'released', label: 'Released' },
@@ -388,9 +396,51 @@ function changeTypeLabel(type: string): string {
   return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
+interface AdminPreview {
+  pendingProposals: number
+  pendingComp: number
+  pendingApplications: number | null
+  pendingReports: number | null
+  totalUsers: number | null
+  totalChannels: number
+  totalEras: number | null
+  pendingCdnNodes: number | null
+  totalPending: number
+  totalProposals: number | null
+  approvedProposals: number | null
+  approvalPct: number | null
+  editors: number | null
+  managers: number | null
+  applicants: number | null
+}
+
+function AdminStatBox({ label, value, highlight, onClick }: {
+  label: string
+  value: number | string | null | undefined
+  /** Render the value in accent color — pass for a "pending" count that's
+   *  nonzero, or any other value worth calling out. Plain totals (Users,
+   *  Channels) leave this unset. */
+  highlight?: boolean
+  onClick?: () => void
+}): JSX.Element {
+  const Comp = onClick ? 'button' : 'div'
+  return (
+    <Comp
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`rounded-lg bg-[var(--surface-raised)]/60 px-2 py-1.5 text-center min-w-0 ${onClick ? 'hover:bg-[var(--surface-raised)] transition-colors cursor-pointer' : ''}`}
+    >
+      <p className={`text-base font-bold tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
+        {value === null || value === undefined ? '—' : value}
+      </p>
+      <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted mt-0.5 truncate">{label}</p>
+    </Comp>
+  )
+}
+
 export default function EditorProfileView(): JSX.Element {
   const isElectron = navigator.userAgent.includes('Electron')
-  const { account, setPendingEditorSongId, setPendingEditProposal, activeChannel, channels, setActiveChannel, loadChannels, openOwnPublicProfile } = useStore(useShallow(s => ({
+  const { account, setPendingEditorSongId, setPendingEditProposal, activeChannel, channels, setActiveChannel, loadChannels, openOwnPublicProfile, setActiveAdminTab } = useStore(useShallow(s => ({
     account: s.account,
     setPendingEditorSongId: s.setPendingEditorSongId,
     setPendingEditProposal: s.setPendingEditProposal,
@@ -399,8 +449,9 @@ export default function EditorProfileView(): JSX.Element {
     setActiveChannel: s.setActiveChannel,
     loadChannels: s.loadChannels,
     openOwnPublicProfile: s.openOwnPublicProfile,
+    setActiveAdminTab: s.setActiveAdminTab,
   })))
-  // Every list on this page — my proposals, my comp proposals, the Admin tab's
+  // Every list on this page — my proposals, my comp proposals, the Admin tile's
   // review queues — is already scoped to activeChannel (see the effects
   // below and AdminPage). ApiFilesView is the only other place that lets a
   // user change it; without a switcher here too, reviewing a second channel
@@ -427,22 +478,66 @@ export default function EditorProfileView(): JSX.Element {
   const [refreshing, setRefreshing] = useState(false)
   const [showAddSong, setShowAddSong] = useState(false)
 
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [avatarUploading, setAvatarUploading] = useState(false)
+  const [avatarError, setAvatarError] = useState<string | null>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+
+  function startEditName(): void {
+    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameError(null)
+    setEditingName(true)
+  }
+  function cancelEditName(): void { setEditingName(false) }
+
+  async function saveDisplayName(): Promise<void> {
+    const trimmed = nameInput.trim()
+    if (!trimmed || trimmed === account?.display_name) { setEditingName(false); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  async function handleAvatarFile(file: File): Promise<void> {
+    setAvatarError(null)
+    setAvatarUploading(true)
+    try {
+      const base64 = await compressImageFile(file, 256, 200)
+      const updated = await updateAvatar(base64)
+      useStore.setState({ account: updated })
+    } catch {
+      setAvatarError('Could not update photo.')
+    }
+    setAvatarUploading(false)
+  }
+
   // Reports review (moved out of the Admin sidebar entry for editor-only
-  // accounts — it now lives as a tab alongside their own proposals).
+  // accounts — it now lives as its own tile alongside their own proposals).
   const canReviewReports = !!(account?.is_editor || account?.is_administrator)
-  // Not `|| is_administrator`: this tab lists proposals *you* submitted, and
+  // Not `|| is_administrator`: this tile lists proposals *you* submitted, and
   // an admin who never contributed has none. Their review queue is the Admin
-  // tab's "Comp files" — the one place proposals are reviewed.
+  // tile's own stat boxes.
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const isContributor = isChannelContributor(account, activeChannel, isPrimary)
   const isAdmin = !!account?.is_administrator
   // Managers review the same two queues admins do, so they get the same
-  // embedded panel here. Scoped to the active channel — a manager grant on
-  // one channel shouldn't leave this tab visible (and then erroring) on a
+  // Admin tile here. Scoped to the active channel — a manager grant on one
+  // channel shouldn't leave this tile visible (and then erroring) on a
   // channel they don't actually manage.
   const isManager = isChannelManager(account, activeChannel, isPrimary)
   const canReviewStaff = isAdmin || isManager
-  const [profileTab, setProfileTab] = useState<'proposals' | 'reports' | 'admin' | 'comp'>('proposals')
+  const [proposalsView, setProposalsView] = useState<'songs' | 'comp'>('songs')
   const [reportStatus, setReportStatus] = useState<SongReportStatus | ''>('pending')
   const [reports, setReports] = useState<SongReportRow[]>([])
   const [loadingReports, setLoadingReports] = useState(false)
@@ -452,10 +547,10 @@ export default function EditorProfileView(): JSX.Element {
   const [withdrawingCompId, setWithdrawingCompId] = useState<number | null>(null)
 
   useEffect(() => {
-    if (profileTab !== 'comp' || !isContributor) return
+    if (proposalsView !== 'comp' || !isContributor) return
     setLoadingComp(true)
     getMyCompProposals(activeChannel).then(setCompProposals).catch(() => {}).finally(() => setLoadingComp(false))
-  }, [profileTab, isContributor, refreshKey, activeChannel])
+  }, [proposalsView, isContributor, refreshKey, activeChannel])
 
   const handleWithdrawComp = async (id: number): Promise<void> => {
     setWithdrawingCompId(id)
@@ -470,13 +565,13 @@ export default function EditorProfileView(): JSX.Element {
   }
 
   useEffect(() => {
-    if (profileTab !== 'reports' || !canReviewReports) return
+    if (!canReviewReports) return
     setLoadingReports(true)
     reportsApi.listSongReports(reportStatus || undefined)
       .then(setReports)
       .catch(() => {})
       .finally(() => setLoadingReports(false))
-  }, [profileTab, reportStatus, refreshKey, canReviewReports])
+  }, [reportStatus, refreshKey, canReviewReports])
 
   const handleDelete = async (id: number): Promise<void> => {
     setDeletingId(id)
@@ -504,6 +599,11 @@ export default function EditorProfileView(): JSX.Element {
     go('editor')
   }
 
+  const openAdmin = (tab: AdminTab): void => {
+    setActiveAdminTab(tab)
+    go('admin')
+  }
+
   useEffect(() => {
     setRefreshing(true)
     Promise.all([
@@ -515,6 +615,67 @@ export default function EditorProfileView(): JSX.Element {
       setRefreshing(false)
     })
   }, [refreshKey, activeChannel])
+
+  // Lightweight counts for the Admin tile's stat boxes — a click on one
+  // navigates to the real standalone AdminPage at that tab (via openAdmin),
+  // same as typing the URL would; this tile is only a glanceable preview, not
+  // a second place to actually review anything. Managers only ever reach
+  // Song edits + Comp files in their own nav, so the admin-only sections
+  // (applications/users/eras/CDN/stats) are skipped for them rather than
+  // fetched against endpoints that would 403.
+  const [adminPreview, setAdminPreview] = useState<AdminPreview | null>(null)
+  useEffect(() => {
+    if (!canReviewStaff) { setAdminPreview(null); return }
+    let cancelled = false
+    // Deferred by one microtask so React StrictMode's dev-only synchronous
+    // double-invoke (mount → cleanup → remount) skips firing the actual
+    // network requests on the first, soon-to-be-cleaned-up pass.
+    Promise.resolve().then(() => {
+      if (cancelled) return
+      Promise.all([
+        adminProposalCounts(activeChannel),
+        adminCompProposalCounts(activeChannel),
+        isAdmin ? adminListApplications('pending') : Promise.resolve(null),
+        isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
+        isAdmin ? adminListUsers() : Promise.resolve(null),
+        isAdmin ? fetchEraList() : Promise.resolve(null),
+        // Caught on its own: the CDN is a separate backend app, and it being
+        // down shouldn't blank every other number on the tile.
+        isAdmin ? fetchCdnStats().catch(() => null) : Promise.resolve(null),
+      ]).then(([propCounts, compCounts, apps, reps, users, eras, cdn]) => {
+        if (cancelled) return
+        const pendingApplications = apps?.length ?? null
+        const pendingReports = reps?.length ?? null
+        const reviewed = propCounts.total - propCounts.pending
+        setAdminPreview({
+          pendingProposals: propCounts.pending,
+          pendingComp: compCounts.pending,
+          pendingApplications,
+          pendingReports,
+          totalUsers: users?.length ?? null,
+          totalChannels: channels.length,
+          totalEras: eras?.length ?? null,
+          pendingCdnNodes: cdn?.pending_nodes ?? null,
+          totalPending: propCounts.pending + compCounts.pending + (pendingApplications ?? 0) + (pendingReports ?? 0),
+          totalProposals: isAdmin ? propCounts.total : null,
+          approvedProposals: isAdmin ? propCounts.approved : null,
+          approvalPct: isAdmin ? (reviewed > 0 ? Math.round(propCounts.approved / reviewed * 100) : 0) : null,
+          editors: users ? users.filter(u => u.role === 'editor').length : null,
+          managers: users ? users.filter(u => !!u.manager_enabled).length : null,
+          applicants: users ? users.filter(u => u.role === 'applicant').length : null,
+        })
+      }).catch(() => { if (!cancelled) setAdminPreview(null) })
+    })
+    return () => { cancelled = true }
+    // channels.length deliberately excluded - a channel-list refresh alone
+    // shouldn't refire these admin-only requests.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canReviewStaff, isAdmin, activeChannel, refreshKey])
+
+  // Admins without 2FA get everything in the Admin tile hidden except the
+  // Security box itself, so a compromised (password-only) admin account
+  // can't be used to browse or act on admin-only data from this dashboard.
+  const otpLocked = isAdmin && !account?.otp_enabled
 
   const myEntry = leaderboard.find((e) => e.discord_username === account?.discord_username)
 
@@ -548,427 +709,548 @@ export default function EditorProfileView(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-      {/* ── Header ── */}
-      {/* The utility row (channel switcher / pop-out / refresh) is right-aligned
-          here, which in Electron sits directly under the fixed window-control
-          buttons (minimize/maximize/close, 28px tall) — the app's `main`
-          element doesn't otherwise reserve space for them, it just draws a
-          drag region behind the content. Extra top padding pushes this row
-          below that band instead of overlapping it. */}
-      {/* The pop-out has FloatTitleBar above it holding its own controls, in
-          normal flow — so it needs none of that clearance. */}
-      <div className={`px-6 pb-5 border-b border-[var(--border)] shrink-0 ${isElectron && !floating ? 'pt-9' : 'pt-5'}`}>
-        <div className="flex items-center justify-between mb-4">
-          {floating ? (
-            // No "Back" in a pop-out — there's nothing behind it. Docking puts
-            // the profile back in the main window and closes this one, which is
-            // the in-the-moment escape hatch for someone who doesn't want the
-            // separate window right now (the Settings toggle is the permanent one).
-            <button
-              onClick={() => { attachToMainWindow({ view: 'profile' }); el?.closeSelf?.() }}
-              className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
-              title="Move back into the main window"
-            >
-              <PictureInPicture2 size={13} /> Dock
-            </button>
-          ) : (
-            <button
-              onClick={() => go('api-tracker')}
-              className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
-            >
-              <ChevronLeft size={14} /> Back
-            </button>
+      {/* ── Toolbar: back/dock, channel switcher, profile/chat/pop-out/refresh ── */}
+      <div className={`flex items-center justify-between px-4 md:px-5 pb-3 shrink-0 ${isElectron && !floating ? 'pt-9' : 'pt-4'}`}>
+        {floating ? (
+          // No "Back" in a pop-out — there's nothing behind it. Docking puts
+          // the profile back in the main window and closes this one, which is
+          // the in-the-moment escape hatch for someone who doesn't want the
+          // separate window right now (the Settings toggle is the permanent one).
+          <button
+            onClick={() => { attachToMainWindow({ view: 'profile' }); el?.closeSelf?.() }}
+            className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
+            title="Move back into the main window"
+          >
+            <PictureInPicture2 size={13} /> Dock
+          </button>
+        ) : (
+          <button
+            onClick={() => go('api-tracker')}
+            className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
+          >
+            <ChevronLeft size={14} /> Back
+          </button>
+        )}
+        <div className="flex items-center gap-1.5">
+          {channels.length > 0 && (
+            <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5 mr-1">
+              {channels.map((ch) => (
+                <button
+                  key={ch.slug}
+                  onClick={() => setActiveChannel(ch.slug)}
+                  disabled={channels.length === 1}
+                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'} disabled:opacity-70`}
+                  title={ch.description || ch.name}
+                >{ch.name}</button>
+              ))}
+            </div>
           )}
-          <div className="flex items-center gap-1.5">
-            {channels.length > 0 && (
-              <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5 mr-1">
-                {channels.map((ch) => (
-                  <button
-                    key={ch.slug}
-                    onClick={() => setActiveChannel(ch.slug)}
-                    disabled={channels.length === 1}
-                    className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'} disabled:opacity-70`}
-                    title={ch.description || ch.name}
-                  >{ch.name}</button>
-                ))}
-              </div>
-            )}
+          <button
+            onClick={openOwnPublicProfile}
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+            title="View your public profile"
+          >
+            <User size={13} />
+          </button>
+          {hasChatAccess(account) && (
             <button
-              onClick={openOwnPublicProfile}
+              onClick={() => go('chat')}
               className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-              title="View your public profile"
+              title="Staff chat"
             >
-              <User size={13} />
+              <MessagesSquare size={13} />
             </button>
-            {hasChatAccess(account) && (
-              <button
-                onClick={() => go('chat')}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-                title="Staff chat"
-              >
-                <MessagesSquare size={13} />
-              </button>
-            )}
-            {/* Shown only when the pop-out is turned off — with it on, this page
-                *is* the pop-out and the button would reopen the window it's
-                already in. */}
-            {!floating && el?.openFloatWindow && (
-              <button
-                onClick={() => el.openFloatWindow('profile')}
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-                title="Open in its own window"
-              >
-                <PictureInPicture2 size={13} />
-              </button>
-            )}
-            <button
-              onClick={() => setRefreshKey(k => k + 1)}
-              disabled={refreshing}
-              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
-              title="Refresh"
-            >
-              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4">
-          {account?.discord_avatar ? (
-            <img src={account.discord_avatar} alt="" className="w-14 h-14 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
-          ) : (
-            <div className="w-14 h-14 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xl font-bold shrink-0">
-              {(account?.display_name || account?.discord_username || '?').charAt(0).toUpperCase()}
-            </div>
           )}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-text-primary text-xl font-bold truncate">
-                {account?.display_name || account?.discord_username || 'My Profile'}
-              </h1>
-              {account?.is_administrator && (
-                <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent text-[10px] font-semibold uppercase tracking-wide shrink-0">Admin</span>
-              )}
-              {isManager && !account?.is_administrator && (
-                <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 text-[10px] font-semibold uppercase tracking-wide shrink-0">Manager</span>
-              )}
-              {account?.is_editor && !account.is_administrator && (
-                <span className="px-1.5 py-0.5 rounded bg-surface-overlay text-text-secondary text-[10px] font-semibold uppercase tracking-wide shrink-0">Editor</span>
-              )}
-              {isContributor && !account?.is_administrator && (
-                <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400 text-[10px] font-semibold uppercase tracking-wide shrink-0">Contributor</span>
-              )}
-            </div>
-            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-              {myEntry && (
-                <p className="text-text-muted text-xs flex items-center gap-1.5">
-                  <Trophy size={11} className="text-accent" />
-                  Rank #{myEntry.rank} · {myEntry.approved_count} approved
-                </p>
-              )}
-              {!loadingProposals && (
-                <p className="text-text-muted opacity-60 text-xs">{proposals.length} proposal{proposals.length !== 1 ? 's' : ''} submitted</p>
-              )}
-            </div>
-          </div>
+          {/* Shown only when the pop-out is turned off — with it on, this page
+              *is* the pop-out and the button would reopen the window it's
+              already in. */}
+          {!floating && el?.openFloatWindow && (
+            <button
+              onClick={() => el.openFloatWindow('profile')}
+              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+              title="Open in its own window"
+            >
+              <PictureInPicture2 size={13} />
+            </button>
+          )}
+          <button
+            onClick={() => setRefreshKey(k => k + 1)}
+            disabled={refreshing}
+            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+            title="Refresh"
+          >
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
 
-      {/* ── Tabs ── */}
-      {(canReviewReports || isContributor || canReviewStaff) && (
-        <div className="flex items-center gap-1 px-6 pt-3 shrink-0 border-b border-[var(--border)]">
-          {([
-            { id: 'proposals' as const, label: 'Proposals', icon: <FileEdit size={13} /> },
-            ...(isContributor ? [{ id: 'comp' as const, label: 'Comp files', icon: <FolderOpen size={13} /> }] : []),
-            ...(canReviewReports ? [{ id: 'reports' as const, label: 'Reports', icon: <Flag size={13} /> }] : []),
-            ...(canReviewStaff ? [{ id: 'admin' as const, label: isAdmin ? 'Admin' : 'Manager', icon: <ShieldCheck size={13} /> }] : []),
-          ]).map(t => (
-            <button key={t.id} onClick={() => setProfileTab(t.id)}
-              className={`relative flex items-center gap-1.5 px-4 py-2.5 text-[12px] font-medium transition-colors border-b-2 ${
-                profileTab === t.id
-                  ? 'text-accent border-accent'
-                  : 'text-text-muted hover:text-text-primary border-transparent'
-              }`}>
-              <span className={profileTab === t.id ? 'text-accent' : ''}>{t.icon}</span>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* ── Bento grid ──
+          Explicit left/right columns instead of one grid with mixed
+          row-spans: auto-placement with uneven spans (1/2/3 rows across a
+          4-col track) produces an unpredictable implicit row count, so
+          `auto-rows-[minmax(0,1fr)]` would squeeze some tracks down to a
+          sliver and let others bleed past their tile's rounded border. Every
+          grid below is either non-spanning (safe auto-placement) or a single
+          flex-1 cell, with min-h-0 threaded down each flex/grid ancestor so a
+          tile's own content scrolls internally instead of overflowing it. */}
+      <div className="flex-1 overflow-y-auto md:overflow-hidden px-4 md:px-5 pb-4 md:pb-5">
+        <div className="flex flex-col gap-3 md:gap-4 md:h-full">
 
-      {profileTab === 'admin' && canReviewStaff ? (
-        <div className="flex-1 overflow-hidden p-4 md:p-5">
-          <div className="h-full rounded-2xl border border-[var(--border)] bg-surface-raised/40 overflow-hidden flex flex-col">
-            <AdminPage embedded />
-          </div>
-        </div>
-      ) : profileTab === 'comp' && isContributor ? (
-        <div className="flex-1 overflow-hidden p-4 md:p-5">
-          <div className="h-full flex flex-col min-h-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-surface-raised/40">
-            <div className="px-5 pt-4 pb-3 shrink-0 border-b border-[var(--border)]">
-              <div className="flex items-center gap-2 mb-3">
-                <FolderOpen size={13} className="text-text-muted" />
-                <h2 className="text-text-secondary text-xs font-semibold uppercase tracking-widest">Comp Files</h2>
-                {!loadingComp && (
-                  <span className="text-text-muted text-xs">
-                    {compProposals.length} total · {compProposals.filter(p => p.status === 'approved').length} approved
-                  </span>
-                )}
-                <button
-                  onClick={() => go('contributor')}
-                  className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors"
-                  title="Propose a comp file change"
-                >
-                  <Plus size={12} /> New comp proposal
-                </button>
-              </div>
-              <CompFilterBar filter={compFilter} setFilter={setCompFilter} />
-            </div>
-            <div className="flex-1 overflow-y-auto min-h-0 p-3">
-              <CompProposalList
-                proposals={filterCompProposals(compProposals, compFilter)}
-                loading={loadingComp}
-                onSelect={() => go('contributor')}
-                onWithdraw={handleWithdrawComp}
-                withdrawingId={withdrawingCompId}
-              />
-            </div>
-          </div>
-        </div>
-      ) : profileTab === 'reports' && canReviewReports ? (
-        <div className="flex-1 overflow-hidden p-5">
-          <div className="h-full rounded-2xl border border-[var(--border)] bg-surface-raised/40 overflow-hidden relative">
-            {loadingReports && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 backdrop-blur-[1px]">
-                <Loader2 size={20} className="animate-spin text-text-muted" />
-              </div>
-            )}
-            <ReportsTab
-              reports={reports}
-              status={reportStatus}
-              setStatus={setReportStatus}
-              onChanged={() => setRefreshKey(k => k + 1)}
-            />
-          </div>
-        </div>
-      ) : (
-      // Stacked below md — side by side, the fixed-width leaderboard left
-      // the proposals column 2px wide on a phone.
-      <div className="flex-1 flex flex-col md:flex-row gap-4 md:gap-5 overflow-hidden p-4 md:p-5">
+          {/* Top row: identity+stats and Quick actions side by side, sharing
+              a flex row (default items-stretch) so they render at the same
+              height. */}
+          <div className="flex flex-col md:flex-row gap-3 md:gap-4 shrink-0">
+            {/* Identity + Stats — one tile. */}
+            <div className="md:w-[42%]">
+              <Tile span="h-full">
+                <div className="flex-1 flex items-center">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAvatarFile(f); e.target.value = '' }} />
+                      <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} className="relative w-12 h-12 shrink-0 rounded-full group">
+                        {account?.avatar ? (
+                          <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--border)]" />
+                        ) : account?.discord_avatar ? (
+                          <img src={account.discord_avatar} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--border)]" />
+                        ) : (
+                          <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold">
+                            {(account?.display_name || account?.discord_username || '?').charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface opacity-0 group-hover:opacity-100 transition-opacity">
+                          {avatarUploading ? <Loader2 size={10} className="animate-spin" /> : <Pencil size={10} />}
+                        </span>
+                      </button>
+                      <div className="min-w-0">
+                        {avatarError && <p className="text-[10px] text-red-400 mb-0.5">{avatarError}</p>}
+                        {editingName ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={nameInput}
+                              onChange={(e) => setNameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveDisplayName()
+                                if (e.key === 'Escape') cancelEditName()
+                              }}
+                              maxLength={50}
+                              disabled={savingName}
+                              className="min-w-0 w-36 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                            />
+                            <button
+                              onClick={saveDisplayName}
+                              disabled={savingName}
+                              className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40"
+                              title="Save"
+                            >
+                              {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            </button>
+                            <button
+                              onClick={cancelEditName}
+                              disabled={savingName}
+                              className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+                              title="Cancel"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <h1 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
+                            {account?.display_name || account?.discord_username || 'My Profile'}
+                            <button
+                              onClick={startEditName}
+                              className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
+                              title="Edit display name"
+                            >
+                              <Pencil size={11} />
+                            </button>
+                          </h1>
+                        )}
+                        {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
+                        <div className="mt-1">
+                          <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={!!account?.is_editor} isContributor={isContributor} />
+                        </div>
+                      </div>
+                    </div>
 
-        {/* ── Left: My Proposals ── */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-surface-raised/40">
-          {/* Section header */}
-          <div className="px-5 pt-4 pb-3 shrink-0 border-b border-[var(--border)]">
-            <div className="flex items-center gap-2 mb-3">
-              <FileEdit size={13} className="text-text-muted" />
-              <h2 className="text-text-secondary text-xs font-semibold uppercase tracking-widest">My Proposals</h2>
-              {!loadingProposals && (
-                <span className="text-text-muted text-xs">{proposals.length} total</span>
-              )}
-              {(account?.is_editor || account?.is_administrator) && (
-                <div className="ml-auto flex items-center gap-1.5">
+                    <div className="w-px self-stretch bg-[var(--border)] shrink-0" />
+
+                    <div className="flex items-center gap-1.5 text-text-muted shrink-0">
+                      <Trophy size={13} />
+                      <div className="flex flex-col gap-0.5">
+                        <p className="text-[10px] font-bold uppercase tracking-widest">
+                          {myEntry ? `Rank #${myEntry.rank}` : 'Unranked'}
+                        </p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">
+                          {myEntry ? `${myEntry.approved_count} approved` : '0 approved'} · {!loadingProposals ? `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''} total` : '…'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Tile>
+            </div>
+
+            <div className="md:flex-1">
+              <Tile title="Quick actions" span="h-full">
+                <div className="flex items-center gap-2">
+                  {(account?.is_editor || account?.is_administrator) && (
+                    <button
+                      onClick={() => setShowAddSong(true)}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                    >
+                      <Plus size={12} /> New song
+                    </button>
+                  )}
+                  {account?.is_administrator && (
+                    <button
+                      onClick={() => go('albums-admin')}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors"
+                    >
+                      Edit albums
+                    </button>
+                  )}
+                </div>
+              </Tile>
+            </div>
+          </div>
+
+          {/* Bottom row: My Proposals (left, fixed width) and the medium
+              tile grid (right, fills the rest), each filling the remaining
+              height. */}
+          <div className="flex flex-col md:flex-row gap-3 md:gap-4 flex-1 md:min-h-0">
+          <div className="flex flex-col gap-3 md:gap-4 md:w-[42%] md:min-h-0">
+            <Tile
+              title={isContributor ? undefined : 'My Proposals'}
+              icon={isContributor ? undefined : <FileEdit size={13} />}
+              span="flex-1 min-h-[22rem] md:min-h-0"
+            >
+              {/* Contributors get a toggle here instead of Tile's fixed
+                  title, since this tile now covers both song-edit proposals
+                  and comp-file proposals - two separate queues. */}
+              {isContributor && (
+                <div className="flex items-center gap-1 mb-3 shrink-0">
                   <button
-                    onClick={() => go('albums-admin')}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors"
-                    title="Edit albums (wrlddata.json)"
+                    onClick={() => setProposalsView('songs')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors ${
+                      proposalsView === 'songs' ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary'
+                    }`}
                   >
-                    Edit albums
+                    <FileEdit size={13} /> Proposals
                   </button>
                   <button
-                    onClick={() => setShowAddSong(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors"
-                    title="Propose a new song"
+                    onClick={() => setProposalsView('comp')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors ${
+                      proposalsView === 'comp' ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary'
+                    }`}
                   >
-                    <Plus size={12} /> New song
+                    <FolderOpen size={13} /> Comp files
                   </button>
                 </div>
               )}
-            </div>
 
-            {/* Search */}
-            <div className="relative mb-3">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search proposals…"
-                className="w-full bg-surface-overlay text-text-primary text-xs pl-7 pr-7 py-2 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 placeholder:text-text-muted"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
-                  <X size={13} />
-                </button>
-              )}
-            </div>
+              {proposalsView === 'songs' || !isContributor ? (
+                <>
+                  <div className="mb-3 shrink-0">
+                    <div className="relative mb-2">
+                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <input
+                        type="text"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search proposals…"
+                        className="w-full bg-surface-overlay text-text-primary text-sm pl-7 pr-7 py-2 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 placeholder:text-text-muted"
+                      />
+                      {search && (
+                        <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {TABS.map(({ key, label }) => {
+                        const count = tabCount(key)
+                        const active = filter === key
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => setFilter(key)}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${
+                              active ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
+                            }`}
+                          >
+                            {label}
+                            {count > 0 && (
+                              <span className={`text-[10px] tabular-nums ${active ? 'text-accent/70' : 'text-text-muted'}`}>
+                                {count}
+                              </span>
+                            )}
+                          </button>
+                        )
+                      })}
+                      {(account?.is_editor || account?.is_administrator) && (
+                        <button
+                          onClick={() => setShowAddSong(true)}
+                          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
+                          title="Propose a new song"
+                        >
+                          <Plus size={12} /> New song
+                        </button>
+                      )}
+                    </div>
+                  </div>
 
-            {/* Filter tabs */}
-            <div className="flex gap-1">
-              {TABS.map(({ key, label }) => {
-                const count = tabCount(key)
-                const active = filter === key
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setFilter(key)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-                      active ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
-                    }`}
-                  >
-                    {label}
-                    {count > 0 && (
-                      <span className={`text-[10px] tabular-nums ${active ? 'text-accent/70' : 'text-text-muted'}`}>
-                        {count}
-                      </span>
+                  <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+                    {loadingProposals ? (
+                      <div className="flex justify-center py-12">
+                        <Loader2 size={18} className="animate-spin text-text-muted" />
+                      </div>
+                    ) : filteredProposals.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 gap-2 text-text-muted opacity-50">
+                        <FileEdit size={28} />
+                        <p className="text-sm">
+                          {search.trim()
+                            ? `No proposals match "${search.trim()}"`
+                            : filter === 'all' ? 'No proposals yet' : `No ${filter} proposals`}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {filteredProposals.map((p) => {
+                          const s = STATUS_STYLES[p.status]
+                          return (
+                            <div key={p.id} className="flex items-stretch gap-0 rounded-xl overflow-hidden bg-surface/60 border border-[var(--border)] hover:border-accent/30 transition-colors group">
+                              {/* Status bar */}
+                              <div className={`w-1 shrink-0 ${s.bar}`} />
+                              <div className="flex items-center gap-3 px-3.5 py-3 flex-1 min-w-0">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-text-primary text-sm font-medium truncate">{p.title || `Song #${p.song}`}</p>
+                                  <p className="text-text-muted text-xs mt-0.5">{changeTypeLabel(p.change_type)} · {formatDate(p.created_at)}</p>
+                                </div>
+                                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${s.badge}`}>
+                                  {s.label}
+                                </span>
+                                {p.status === 'pending' && (
+                                  /* Always visible on touch (no hover to reveal them) */
+                                  <div className="flex items-center gap-0.5 shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                    <button
+                                      onClick={() => handleEdit(p)}
+                                      className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-all"
+                                      title="Edit proposal"
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                    <button
+                                      onClick={() => handleResubmit(p)}
+                                      disabled={resubmittingId === p.id || deletingId === p.id}
+                                      className="p-1.5 rounded-lg text-text-muted hover:text-accent hover:bg-accent/10 transition-all disabled:opacity-40"
+                                      title="Resubmit proposal (withdraws and re-submits fresh)"
+                                    >
+                                      {resubmittingId === p.id
+                                        ? <Loader2 size={12} className="animate-spin" />
+                                        : <RefreshCw size={12} />
+                                      }
+                                    </button>
+                                    <button
+                                      onClick={() => handleDelete(p.id)}
+                                      disabled={deletingId === p.id || resubmittingId === p.id}
+                                      className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                                      title="Withdraw proposal"
+                                    >
+                                      {deletingId === p.id
+                                        ? <Loader2 size={12} className="animate-spin" />
+                                        : <Trash2 size={12} />
+                                      }
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     )}
-                  </button>
-                )
-              })}
-            </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mb-3 shrink-0">
+                    <div className="relative mb-2">
+                      <CompFilterBar filter={compFilter} setFilter={setCompFilter} />
+                    </div>
+                    <button
+                      onClick={() => go('contributor')}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
+                      title="Propose a comp file change"
+                    >
+                      <Plus size={12} /> New comp proposal
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+                    <CompProposalList
+                      proposals={filterCompProposals(compProposals, compFilter)}
+                      loading={loadingComp}
+                      onSelect={() => go('contributor')}
+                      onWithdraw={handleWithdrawComp}
+                      withdrawingId={withdrawingCompId}
+                    />
+                  </div>
+                </>
+              )}
+            </Tile>
           </div>
 
-          {/* Proposals list */}
-          <div className="flex-1 overflow-y-auto min-h-0 p-3">
-            {loadingProposals ? (
-              <div className="flex justify-center py-12">
-                <Loader2 size={18} className="animate-spin text-text-muted" />
-              </div>
-            ) : filteredProposals.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2 text-text-muted opacity-50">
-                <FileEdit size={28} />
-                <p className="text-sm">
-                  {search.trim()
-                    ? `No proposals match "${search.trim()}"`
-                    : filter === 'all' ? 'No proposals yet' : `No ${filter} proposals`}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                {filteredProposals.map((p) => {
-                  const s = STATUS_STYLES[p.status]
-                  return (
-                    <div key={p.id} className="flex items-stretch gap-0 rounded-xl overflow-hidden bg-surface/60 border border-[var(--border)] hover:border-accent/30 transition-colors group">
-                      {/* Status bar */}
-                      <div className={`w-1 shrink-0 ${s.bar}`} />
-                      <div className="flex items-center gap-3 px-3.5 py-3 flex-1 min-w-0">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-text-primary text-sm font-medium truncate">{p.title || `Song #${p.song}`}</p>
-                          <p className="text-text-muted text-xs mt-0.5">{changeTypeLabel(p.change_type)} · {formatDate(p.created_at)}</p>
-                        </div>
-                        <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${s.badge}`}>
-                          {s.label}
-                        </span>
-                        {p.status === 'pending' && (
-                          /* Always visible on touch (no hover to reveal them) */
-                          <div className="flex items-center gap-0.5 shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => handleEdit(p)}
-                              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-all"
-                              title="Edit proposal"
-                            >
-                              <Pencil size={12} />
-                            </button>
-                            <button
-                              onClick={() => handleResubmit(p)}
-                              disabled={resubmittingId === p.id || deletingId === p.id}
-                              className="p-1.5 rounded-lg text-text-muted hover:text-accent hover:bg-accent/10 transition-all disabled:opacity-40"
-                              title="Resubmit proposal (withdraws and re-submits fresh)"
-                            >
-                              {resubmittingId === p.id
-                                ? <Loader2 size={12} className="animate-spin" />
-                                : <RefreshCw size={12} />
-                              }
-                            </button>
-                            <button
-                              onClick={() => handleDelete(p.id)}
-                              disabled={deletingId === p.id || resubmittingId === p.id}
-                              className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-all disabled:opacity-40"
-                              title="Withdraw proposal"
-                            >
-                              {deletingId === p.id
-                                ? <Loader2 size={12} className="animate-spin" />
-                                : <Trash2 size={12} />
-                              }
-                            </button>
+          {/* Right column: a plain (non-spanning, so safely auto-placed)
+              2-col grid of whichever medium tiles apply. */}
+          <div className="flex flex-col gap-3 md:gap-4 md:flex-1 md:min-h-0">
+            <div className="grid grid-cols-2 gap-3 md:gap-4 md:flex-1 md:min-h-0 auto-rows-[minmax(16rem,1fr)] md:auto-rows-[minmax(0,1fr)]">
+              <Tile title="Leaderboard" icon={<Trophy size={13} />}>
+                <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+                  {loadingLeaderboard ? (
+                    <div className="flex justify-center py-12">
+                      <Loader2 size={18} className="animate-spin text-text-muted" />
+                    </div>
+                  ) : leaderboard.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-2 text-text-muted opacity-50">
+                      <Trophy size={28} />
+                      <p className="text-sm">No data</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {leaderboard.map((entry) => {
+                        const isMe = entry.discord_username === account?.discord_username
+                        const rankStyle = RANK_STYLES[entry.rank]
+                        return (
+                          <div
+                            key={entry.user_id}
+                            className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
+                              isMe ? 'bg-accent/8 ring-1 ring-accent/20' : 'hover:bg-surface-overlay'
+                            }`}
+                          >
+                            <span className="w-5 shrink-0 flex items-center justify-center">
+                              <span className={`text-sm tabular-nums rounded-md px-1 py-0.5 ${
+                                rankStyle ? `${rankStyle.num} ${rankStyle.badge}` : 'text-text-muted font-medium'
+                              }`}>
+                                {entry.rank}
+                              </span>
+                            </span>
+
+                            {entry.discord_avatar ? (
+                              <img src={entry.discord_avatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <div className="w-7 h-7 rounded-full bg-surface-raised flex items-center justify-center text-xs text-text-muted shrink-0">
+                                {(entry.discord_username || '?').charAt(0).toUpperCase()}
+                              </div>
+                            )}
+
+                            <p className={`flex-1 min-w-0 text-sm truncate ${isMe ? 'text-accent font-semibold' : 'text-text-primary'}`}>
+                              {entry.username || entry.discord_username}
+                              {isMe && <span className="ml-1.5 text-xs opacity-60 font-normal">you</span>}
+                            </p>
+
+                            <span className={`text-sm tabular-nums shrink-0 font-semibold ${isMe ? 'text-accent' : rankStyle ? rankStyle.num : 'text-text-muted'}`}>
+                              {entry.approved_count}
+                            </span>
                           </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </Tile>
+
+              {canReviewReports && (
+                <Tile title="Reports" icon={<Flag size={13} />}>
+                  <div className="flex-1 relative min-h-0">
+                    {loadingReports && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 backdrop-blur-[1px]">
+                        <Loader2 size={20} className="animate-spin text-text-muted" />
+                      </div>
+                    )}
+                    <ReportsTab
+                      reports={reports}
+                      status={reportStatus}
+                      setStatus={setReportStatus}
+                      onChanged={() => setRefreshKey(k => k + 1)}
+                    />
+                  </div>
+                </Tile>
+              )}
+
+              {canReviewStaff && (
+                // Spans the full width of this 2-col grid (was one cell) —
+                // the clickable stat rows need more room than a single
+                // generic "open the panel" tile did.
+                <Tile title={isAdmin ? 'Admin' : 'Manager'} icon={<ShieldCheck size={13} />} span="col-span-2">
+                  <div className="flex-1 flex gap-4 text-text-muted">
+                    {/* Split into two side-by-side groups so the tile reads
+                        as "queues to open" vs "numbers to glance at" instead
+                        of one undifferentiated wall of boxes. Managers only
+                        ever reach Song edits + Comp files (both open a
+                        queue), so they never see a Stats group at all and
+                        Queues just takes the full width on its own. Admins
+                        without 2FA only see the Security box (highlighted)
+                        so they can find and turn it on. */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Queues</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {!otpLocked && (
+                          <>
+                            <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
+                            <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
+                          </>
+                        )}
+                        {isAdmin && !otpLocked && (
+                          <>
+                            <AdminStatBox label="Applications" value={adminPreview?.pendingApplications} highlight={!!adminPreview?.pendingApplications} onClick={() => openAdmin('applications')} />
+                            <AdminStatBox label="Reports" value={adminPreview?.pendingReports} highlight={!!adminPreview?.pendingReports} onClick={() => openAdmin('reports')} />
+                            <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
+                            <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
+                            <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
+                            <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdmin('cdn-nodes')} />
+                          </>
+                        )}
+                        {isAdmin && (
+                          <AdminStatBox
+                            label="Security"
+                            value={account ? (account.otp_enabled ? 'ON' : 'OFF') : undefined}
+                            highlight={account?.otp_enabled === false}
+                            onClick={() => openAdmin('security')}
+                          />
                         )}
                       </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Right: Leaderboard ── */}
-        {/* Mobile: fixed-height strip under the proposals list (which keeps
-            the remaining height); desktop: full-height side column. */}
-        <div className="h-44 md:h-auto w-full md:w-80 flex flex-col min-h-0 overflow-hidden shrink-0 rounded-2xl border border-[var(--border)] bg-surface-raised/40">
-          <div className="px-5 pt-4 pb-3 shrink-0 flex items-center gap-2 border-b border-[var(--border)]">
-            <Trophy size={13} className="text-text-muted" />
-            <h2 className="text-text-secondary text-xs font-semibold uppercase tracking-widest">Leaderboard</h2>
-          </div>
-
-          <div className="flex-1 overflow-y-auto min-h-0 p-3">
-            {loadingLeaderboard ? (
-              <div className="flex justify-center py-12">
-                <Loader2 size={18} className="animate-spin text-text-muted" />
-              </div>
-            ) : leaderboard.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 gap-2 text-text-muted opacity-50">
-                <Trophy size={28} />
-                <p className="text-sm">No data</p>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {leaderboard.map((entry) => {
-                  const isMe = entry.discord_username === account?.discord_username
-                  const rankStyle = RANK_STYLES[entry.rank]
-                  return (
-                    <div
-                      key={entry.user_id}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
-                        isMe ? 'bg-accent/8 ring-1 ring-accent/20' : 'hover:bg-surface-overlay'
-                      }`}
-                    >
-                      {/* Rank */}
-                      <span className={`w-5 shrink-0 flex items-center justify-center`}>
-                        <span className={`text-xs tabular-nums rounded-md px-1 py-0.5 ${
-                          rankStyle ? `${rankStyle.num} ${rankStyle.badge}` : 'text-text-muted font-medium'
-                        }`}>
-                          {entry.rank}
-                        </span>
-                      </span>
-
-                      {/* Avatar */}
-                      {entry.discord_avatar ? (
-                        <img src={entry.discord_avatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
-                      ) : (
-                        <div className="w-7 h-7 rounded-full bg-surface-raised flex items-center justify-center text-xs text-text-muted shrink-0">
-                          {(entry.discord_username || '?').charAt(0).toUpperCase()}
-                        </div>
+                      {otpLocked && (
+                        <p className="text-[10px] text-text-muted mt-1.5">Enable 2FA to unlock the rest of the admin tile.</p>
                       )}
-
-                      {/* Name */}
-                      <p className={`flex-1 min-w-0 text-sm truncate ${isMe ? 'text-accent font-semibold' : 'text-text-primary'}`}>
-                        {entry.username || entry.discord_username}
-                        {isMe && <span className="ml-1.5 text-xs opacity-60 font-normal">you</span>}
-                      </p>
-
-                      {/* Approved count */}
-                      <span className={`text-xs tabular-nums shrink-0 font-semibold ${isMe ? 'text-accent' : rankStyle ? rankStyle.num : 'text-text-muted'}` }>
-                        {entry.approved_count}
-                      </span>
                     </div>
-                  )
-                })}
-              </div>
-            )}
+
+                    {/* Every queue already opens from the button to its left
+                        - no leftover "Stats" button, so the old Stats tab's
+                        own metrics, plus the Total pending rollup, land here
+                        instead as plain non-clickable numbers. */}
+                    {isAdmin && !otpLocked && (
+                      <div className="flex-1 min-w-0 pl-4 border-l border-[var(--border)]">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Stats</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <AdminStatBox label="Total pending" value={adminPreview?.totalPending} highlight={!!adminPreview?.totalPending} />
+                          <AdminStatBox label="Total proposals" value={adminPreview?.totalProposals} />
+                          <AdminStatBox label="Approved" value={adminPreview?.approvedProposals} highlight={!!adminPreview?.approvedProposals} />
+                          <AdminStatBox label="Approval rate" value={adminPreview?.approvalPct != null ? `${adminPreview.approvalPct}%` : undefined} />
+                          <AdminStatBox label="Editors" value={adminPreview?.editors} />
+                          <AdminStatBox label="Managers" value={adminPreview?.managers} />
+                          <AdminStatBox label="Applicants" value={adminPreview?.applicants} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </Tile>
+              )}
+            </div>
           </div>
+          </div>
+
         </div>
       </div>
-      )}
 
       {showAddSong && (
         <AddSongModal
