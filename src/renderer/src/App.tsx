@@ -1,4 +1,4 @@
-import { useEffect, Suspense } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -103,6 +103,11 @@ export default function App(): JSX.Element {
   // instead of empty space. Everywhere else this is just activeView itself.
   const bgView = activeView === 'wrld' ? (previousView ?? 'api-tracker') : activeView
   const isMobile = useIsMobile()
+  // Keep the panel mounted after its first open instead of unmounting on
+  // close - unmounting destroyed every cover <img>, so reopening the queue
+  // made them all reload/re-decode from scratch instead of just reappearing.
+  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
+  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -320,7 +325,13 @@ export default function App(): JSX.Element {
                 desktop-only bottom bar), but excluding it here is the real
                 guarantee rather than relying on that. */}
             {!isMobile && showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
-            {showQueue && activeView !== 'wrld' && <ErrorBoundary><QueuePanel /></ErrorBoundary>}
+            {queueEverOpened && (
+              <ErrorBoundary>
+                <div style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
+                  <QueuePanel />
+                </div>
+              </ErrorBoundary>
+            )}
           </div>
         </main>
       </div>

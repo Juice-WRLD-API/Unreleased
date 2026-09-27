@@ -31,7 +31,9 @@ import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useDragReorder } from './mobile/useDragReorder'
 import { useLongPress } from './mobile/useLongPress'
 import { useBackToClose } from '../hooks/useBackToClose'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
+import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
 import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
   usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
@@ -105,6 +107,12 @@ export default function WrldView(): JSX.Element {
 
   const [sheet, setSheet] = useState<'radio' | 'versions' | null>(null)
   const [lyricsOpen, setLyricsOpen] = useState(false)
+  // Keep the queue sheet mounted after its first open instead of unmounting
+  // it on close - same reasoning as the app-wide QueuePanel in App.tsx:
+  // unmounting destroyed every cover <img>, so reopening the queue made them
+  // all reload/re-decode from scratch instead of just reappearing.
+  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
+  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
 
   // iOS's installed-PWA safe-area sliver at the very top of the screen isn't
   // always actually covered by .app-shell - see the html.wrld-active rule in
@@ -460,7 +468,7 @@ export default function WrldView(): JSX.Element {
             </div>
           )}
 
-          <VolumeRow txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />
+          {!IS_IOS && <VolumeRow txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />}
 
           {/* Everything that used to occupy a second column now hangs off
               these - each opens a sheet over the player rather than replacing
@@ -499,7 +507,7 @@ export default function WrldView(): JSX.Element {
       )}
 
       {/* ── Queue ────────────────────────────────────────────────────────── */}
-      {showQueue && !radioFmActive && <QueueSheet onClose={() => setShowQueue(false)} />}
+      {queueEverOpened && <QueueSheet open={showQueue && !radioFmActive} onClose={() => setShowQueue(false)} />}
 
       {/* ── 999 FM panel ─────────────────────────────────────────────────── */}
       {sheet === 'radio' && (
@@ -961,7 +969,10 @@ const MAX_HISTORY_SHOWN = 10
 // Full-height sheet rather than the desktop side panel. Drag-to-reorder is
 // gone - there's no HTML5 drag on touch - replaced by an explicit reorder mode
 // with up/down buttons, the same pattern the Playlists tab uses.
-function QueueSheet({ onClose }: { onClose: () => void }): JSX.Element {
+// Kept in sync with mobile/Sheet.tsx's EXIT_MS / .animate-sheet-out duration.
+const QUEUE_SHEET_EXIT_MS = 200
+
+function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
   const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue } = useStore(useShallow(s => ({
     queue: s.queue,
     queueIndex: s.queueIndex,
@@ -996,27 +1007,89 @@ function QueueSheet({ onClose }: { onClose: () => void }): JSX.Element {
   const upcomingIndexed = upcoming.map((track, i) => ({ track, i }))
   const filteredUpcoming = query ? upcomingIndexed.filter(({ track }) => matchesQuery(track)) : upcomingIndexed
 
-  return (
-    <Sheet
-      onClose={onClose}
-      title="Playing next"
-      header={
-        <div className="flex items-center gap-2 px-5 pt-2">
-          {shuffle && upcoming.length > 0 && (
-            <button
-              onClick={reshuffleQueue}
-              className="h-8 px-3 rounded-full text-xs font-semibold bg-surface-overlay text-text-secondary flex items-center gap-1.5"
-            ><RefreshCw size={13} /> Reshuffle</button>
-          )}
-          {upcoming.length > 0 && (
-            <button
-              onClick={clearQueue}
-              className="h-8 px-3 rounded-full text-xs font-semibold bg-surface-overlay text-red-400 flex items-center gap-1.5"
-            ><Trash2 size={13} /> Clear</button>
-          )}
+  // ── Persistent shell ──────────────────────────────────────────────────────
+  // Reimplements mobile/Sheet.tsx's chrome (scrim, slide-up card, drag-to-
+  // dismiss, back/escape handling) driven by an `open` prop instead of mount
+  // lifecycle. The generic Sheet is designed to mount only while open and
+  // unmount itself after its exit animation - fine for menus/pickers, but
+  // here it destroyed every cover <img> on close, so reopening the queue
+  // reloaded/re-decoded them all from scratch. This stays mounted (once
+  // opened) and just plays the same animations, hiding via CSS afterward.
+  const [closing, setClosing] = useState(false)
+  const [entered, setEntered] = useState(false)
+  const wasOpenRef = useRef(open)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useEffect(() => {
+    if (open) {
+      setClosing(false)
+      setEntered(false)
+    } else if (wasOpenRef.current) {
+      setClosing(true)
+      const t = window.setTimeout(() => setClosing(false), QUEUE_SHEET_EXIT_MS)
+      wasOpenRef.current = open
+      return () => window.clearTimeout(t)
+    }
+    wasOpenRef.current = open
+  }, [open])
+
+  const requestClose = useCallback(() => closeRef.current(), [])
+
+  useBackToClose(requestClose, open)
+  useEscapeToClose(requestClose, open)
+
+  useEffect(() => {
+    if (!open) return
+    dimThemeColorMeta(0.5)
+    return () => syncThemeColorMeta()
+  }, [open])
+
+  const { style: dragStyle, handlers: dragHandlers } = useDragToDismiss(requestClose, {
+    threshold: 90,
+    rubberBand: true,
+    transition: 'transform 220ms cubic-bezier(0.16,1,0.3,1)',
+  })
+
+  const showing = open || closing
+
+  return createPortal(
+    <>
+      <div
+        className={`fixed inset-0 z-[80] bg-black/50 ${closing ? 'animate-scrim-out' : open ? 'animate-scrim-in' : ''}`}
+        style={showing ? undefined : { display: 'none' }}
+        onClick={requestClose}
+        onContextMenu={(e) => { e.preventDefault(); requestClose() }}
+      />
+      <div
+        className={`fixed z-[81] left-0 right-0 bottom-0 flex flex-col max-h-[82svh] bg-surface rounded-t-[22px] border-t border-[var(--border)] shadow-2xl ${
+          closing ? 'animate-sheet-out' : entered ? '' : open ? 'animate-sheet-in' : ''
+        }`}
+        style={{ ...dragStyle, ...(showing ? {} : { display: 'none' }) }}
+        onAnimationEnd={(e) => { if (e.target === e.currentTarget) setEntered(true) }}
+      >
+        <div className="shrink-0 pt-3 pb-1 touch-none" {...dragHandlers}>
+          <div className="mx-auto w-9 h-1 rounded-full bg-[var(--text-muted)] opacity-40" />
+          <h3 className="px-5 pt-3 text-text-primary font-semibold text-[15px]">Playing next</h3>
+          <div className="flex items-center gap-2 px-5 pt-2">
+            {shuffle && upcoming.length > 0 && (
+              <button
+                onClick={reshuffleQueue}
+                className="h-8 px-3 rounded-full text-xs font-semibold bg-surface-overlay text-text-secondary flex items-center gap-1.5"
+              ><RefreshCw size={13} /> Reshuffle</button>
+            )}
+            {upcoming.length > 0 && (
+              <button
+                onClick={clearQueue}
+                className="h-8 px-3 rounded-full text-xs font-semibold bg-surface-overlay text-red-400 flex items-center gap-1.5"
+              ><Trash2 size={13} /> Clear</button>
+            )}
+          </div>
         </div>
-      }
-    >
+        <div
+          className="overflow-y-auto overscroll-contain py-1"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
+        >
       {/* History - during radio the queue holds *only* played history, so
           without this the sheet looks empty in radio mode. */}
       {history.length > 0 && (
@@ -1113,7 +1186,10 @@ function QueueSheet({ onClose }: { onClose: () => void }): JSX.Element {
       ) : currentTrack ? (
         <p className="text-text-muted text-xs text-center py-5">Nothing up next</p>
       ) : null}
-    </Sheet>
+        </div>
+      </div>
+    </>,
+    document.body,
   )
 }
 
@@ -1239,7 +1315,7 @@ function QueueRow({ track, active, playing, dragging, anyDragging, rowStyle, onD
         }}
       >
         <div className="w-11 h-11 rounded-lg shrink-0 overflow-hidden bg-surface-overlay">
-          <AlbumArtThumbnail track={track} size={44} fill className="w-full h-full" shimmer={false} />
+          <AlbumArtThumbnail track={track} size={44} fill className="w-full h-full" shimmer={false} eager />
         </div>
         <div className="flex-1 min-w-0">
           <p className={`text-[15px] truncate leading-snug ${active ? 'text-accent font-semibold' : 'text-text-primary'}`}>{track.title}</p>
@@ -1277,23 +1353,10 @@ function QueueRow({ track, active, playing, dragging, anyDragging, rowStyle, onD
 /** Volume. The knob is always drawn - a hover-only one is invisible on touch,
  *  and there's no other cue that the line is draggable.
  *
- *  iOS Safari ignores HTMLMediaElement.volume entirely (see Player.tsx) - the
- *  hardware buttons are the only thing that actually changes output there, so
- *  dragging this would silently do nothing. Swap it for a hint instead of
- *  shipping a control that looks interactive but isn't. */
+ *  Not rendered on iOS at all (see call site) - Safari ignores
+ *  HTMLMediaElement.volume entirely there (see Player.tsx), so this would be
+ *  a control that looks interactive but does nothing. */
 const VolumeRow = memo(function VolumeRow({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
-  if (IS_IOS) {
-    return (
-      <div className="flex items-center gap-3 h-9" style={{ color: txtTer }}>
-        <Volume2 size={17} className="shrink-0" />
-        <span className="text-xs">Use the side buttons to adjust volume</span>
-      </div>
-    )
-  }
-  return <DraggableVolumeRow txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />
-})
-
-const DraggableVolumeRow = memo(function DraggableVolumeRow({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
   const { volume, setVolume } = useStorePick('volume', 'setVolume')
   const barRef = useRef<HTMLDivElement>(null)
   // Remember the level before muting so unmuting restores it, instead of

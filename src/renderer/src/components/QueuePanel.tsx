@@ -448,7 +448,7 @@ function QueueRow({
 
       {/* Art */}
       <div className="w-9 h-9 rounded shrink-0 overflow-hidden bg-surface-overlay">
-        <AlbumArtThumbnail track={track} size={36} fill className="w-full h-full" shimmer={false} rootMargin="200px" />
+        <AlbumArtThumbnail track={track} size={36} fill className="w-full h-full" shimmer={false} eager />
       </div>
 
       {/* Info */}
