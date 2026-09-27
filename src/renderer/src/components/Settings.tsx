@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search, Cloud,
+  ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server,
 } from 'lucide-react'
 import DonorFiles from './DonorFiles'
 import MyCdnNodes from './MyCdnNodes'
@@ -21,6 +21,7 @@ import {
   lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
 } from '../lib/lastfm'
 import { cacheClearAll } from '../lib/apiCache'
+import cdnService from '../lib/cdn'
 import { formatBytes } from '../lib/format'
 import { navigateMainWindow, attachToMainWindow } from '../lib/windowSync'
 import type { ViewType } from '../types'
@@ -116,6 +117,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
+  { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Shortcuts
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
   { tab: 'shortcuts', label: 'Global shortcuts', sub: 'Work while the app is in the background', electronOnly: true },
@@ -291,6 +293,7 @@ interface AppSettings {
 export default function Settings({ floating = false }: { floating?: boolean }): JSX.Element {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
+  const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
@@ -1692,6 +1695,21 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       </button>
                     )
                   )}
+                </Row>
+                <Row
+                  icon={Server}
+                  iconColor="#0ea5e9"
+                  label="Distributed CDN downloads"
+                  sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
+                >
+                  <Toggle
+                    on={cdnEnabled}
+                    onClick={() => {
+                      const next = !cdnEnabled
+                      cdnService.setEnabled(next)
+                      setCdnEnabled(next)
+                    }}
+                  />
                 </Row>
               </div>
             )}
