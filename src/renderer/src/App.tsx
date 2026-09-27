@@ -42,6 +42,7 @@ import RadioFmPlayer from './components/RadioFmPlayer'
 import RadioVotePopup from './components/RadioVotePopup'
 import DiscordRpcSync from './components/DiscordRpcSync'
 import LastfmScrobbler from './components/LastfmScrobbler'
+import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
@@ -325,6 +326,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><RadioVotePopup /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DiscordRpcSync /></ErrorBoundary>
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       {showSettings && (

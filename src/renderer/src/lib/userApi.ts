@@ -477,6 +477,18 @@ export async function getNowPlaying(userId: number): Promise<NowPlayingResponse>
   return request(url, { method: 'GET' }, false)
 }
 
+export async function updateNowPlaying(
+  nowPlaying: { song: number; path?: string; position?: number } | null,
+): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ now_playing: nowPlaying ?? {} }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
 /** Fetch cover of a public playlist without authentication. */
 export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverEntry> {
   const cached = playlistCoverCache.get(id)
