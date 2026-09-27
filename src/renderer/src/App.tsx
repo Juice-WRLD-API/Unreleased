@@ -44,6 +44,7 @@ import DiscordRpcSync from './components/DiscordRpcSync'
 import LastfmScrobbler from './components/LastfmScrobbler'
 import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
+import ChatNotificationBanner from './components/ChatNotificationBanner'
 import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
 import ConvertFormatModal from './components/ConvertFormatModal'
@@ -51,6 +52,7 @@ import BulkEditModal from './components/BulkEditModal'
 import UrlImportModal from './components/UrlImportModal'
 import InstallPrompt from './components/InstallPrompt'
 import CookieNotice from './components/CookieNotice'
+import DonationNotice from './components/DonationNotice'
 import { GlobalSongInfoHost } from './components/SongInfoModal'
 import Player from './components/Player'
 import NowPlaying from './components/NowPlaying'
@@ -66,6 +68,7 @@ import SandboxNotch from './components/SandboxNotch'
 // or small (web), so a spinner would just flash. lazyView (not React's lazy)
 // so a chunk that vanished in a redeploy triggers a reload instead of an
 // error card — see lib/lazyView.
+const HomeView = lazyView(() => import('./components/HomeView'))
 const EditorPage = lazyView(() => import('./components/EditorPage'))
 const AdminPage = lazyView(() => import('./components/AdminPage'))
 const SharedPlaylistView = lazyView(() => import('./components/SharedPlaylistView'))
@@ -281,7 +284,8 @@ export default function App(): JSX.Element {
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
             <Suspense fallback={null}>
-            {activeView === 'api-tracker' ? <ApiTrackerView />
+            {activeView === 'home' ? <HomeView />
+              : activeView === 'api-tracker' ? <ApiTrackerView />
               : activeView === 'api-files' ? <ApiFilesView />
               : activeView === 'editor' ? <EditorPage />
               : activeView === 'contributor' ? <ContributorPage />
@@ -328,6 +332,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       {showSettings && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowSettings(false)}>
@@ -350,6 +355,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary variant="overlay"><UrlImportModal /></ErrorBoundary>
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DownloadManager /></ErrorBoundary>
       {/* Rendered last on purpose: Chromium builds the frameless window's

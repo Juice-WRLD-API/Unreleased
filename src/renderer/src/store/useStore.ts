@@ -45,6 +45,7 @@ import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
 import type { CommunityEdit } from '../lib/audioEffects'
 import { HOTKEY_ACTIONS, effectiveBinding, effectiveGlobalBinding, defaultGlobalBinding } from '../lib/hotkeys'
 import { DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
+import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
 import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
@@ -251,6 +252,8 @@ interface AppState {
   // own default for anything absent, so lets the user hide built-ins and add
   // the off-by-default extras.
   navVisibility: Record<string, boolean>
+  // Per-section show/hide for the Home dashboard, same model as navVisibility.
+  homeSectionVisibility: Record<string, boolean>
   // Order + visibility for the foot-of-menu controls (Profile, Log out,
   // Diagnostics, Download, Settings) � same model as navOrder/navVisibility.
   navControlOrder: string[]
@@ -603,6 +606,7 @@ interface AppActions {
   setAppMenuPosition: (position: AppMenuPosition) => void
   setNavOrder: (order: ViewType[]) => void
   setNavItemVisible: (view: ViewType, visible: boolean) => void
+  setHomeSectionVisible: (id: string, visible: boolean) => void
   setNavControlOrder: (order: string[]) => void
   setNavControlVisible: (id: string, visible: boolean) => void
 
@@ -1179,7 +1183,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   // -- UI --------------------------------------------------------------------
-  activeView: 'api-tracker',
+  activeView: 'home',
   previousView: null,
   activeAdminTab: null,
   showNowPlaying: false,
@@ -1209,6 +1213,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   appMenuPosition: ls.get<AppMenuPosition>('appMenuPosition') ?? 'sidebar',
   navOrder: ls.get<ViewType[]>('navOrder') ?? DEFAULT_NAV_ORDER,
   navVisibility: { ...DEFAULT_NAV_VISIBILITY, ...(ls.get<Record<string, boolean>>('navVisibility') ?? {}) },
+  homeSectionVisibility: { ...DEFAULT_HOME_SECTION_VISIBILITY, ...(ls.get<Record<string, boolean>>('homeSectionVisibility') ?? {}) },
   navControlOrder: (() => {
     const saved = ls.get<string[]>('navControlOrder') ?? DEFAULT_NAV_CONTROL_ORDER
     return saved.filter((id) => id !== 'return-api')
@@ -1440,6 +1445,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition) },
   setAppMenuPosition: (appMenuPosition) => { set({ appMenuPosition }); ls.set('appMenuPosition', appMenuPosition) },
   setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder) },
+  setHomeSectionVisible: (id, visible) => {
+    const homeSectionVisibility = { ...get().homeSectionVisibility, [id]: visible }
+    set({ homeSectionVisibility })
+    ls.set('homeSectionVisibility', homeSectionVisibility)
+  },
   setNavItemVisible: (view, visible) => {
     const navVisibility = { ...get().navVisibility, [view]: visible }
     set({ navVisibility })

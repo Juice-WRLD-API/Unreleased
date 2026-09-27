@@ -29,6 +29,7 @@ import { eventToCombo, resolveAction, getAction, effectiveGlobalBinding, comboTo
 import { formatDuration } from '../lib/format'
 import { apiFetch, smallCoverUrl, JWApiSong } from '../lib/juicewrldApi'
 import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
+import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
 import { FullTrack } from '../types'
@@ -1137,6 +1138,9 @@ export default function Player(): JSX.Element {
     if (songId == null) return
     creditedTrackId.current = track.id
     useStore.getState().bumpSongPlaycount(songId)
+    // Same moment, but kept separate: bumpSongPlaycount only receives the id,
+    // and Home needs the whole Track to render (and replay) a row offline.
+    rememberRecentTrack(track)
   }
 
   const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>): void => {

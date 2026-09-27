@@ -39,6 +39,10 @@ type SeoEntry = {
 }
 
 const ROUTES: Record<ViewType, SeoEntry> = {
+  home: {
+    title: 'unreleased — Juice WRLD music player',
+    description: DEFAULT_DESCRIPTION,
+  },
   'api-tracker': {
     // Canonical on the root, not /tracker: the two render the same view and
     // the root is what people link to. /tracker consolidates into it.

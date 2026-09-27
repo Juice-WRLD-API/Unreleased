@@ -4,6 +4,7 @@ import LegalModal from './LegalModal'
 import { useSandboxStore } from './Modal'
 
 const STORAGE_KEY = 'cookie-notice-ack'
+export const COOKIE_NOTICE_ACK_EVENT = 'cookie-notice-ack'
 
 // A one-time, informational storage notice. The App only uses strictly
 // necessary local storage (settings, session, cache) — there's no third-party
@@ -25,6 +26,7 @@ export default function CookieNotice(): JSX.Element | null {
     } catch {
       // best effort — dismiss for this session regardless
     }
+    window.dispatchEvent(new Event(COOKIE_NOTICE_ACK_EVENT))
     setAck(true)
   }
 
