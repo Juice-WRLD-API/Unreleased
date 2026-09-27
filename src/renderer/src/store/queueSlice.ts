@@ -17,7 +17,7 @@ import { apiFetch, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiPaginatedResponse, JWApiSong } from '../lib/juicewrldApi'
 import { getOwnVersionMeta, getVersionGroup } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
-import { peekSongPref, hasAnyDefaultVersion } from '../lib/songPrefs'
+import { peekSongPref, hasAnyDefaultVersion, hasAnyExcludedVersion } from '../lib/songPrefs'
 import { ls } from '../lib/persist'
 import { resolveQueueContext } from './queueContext'
 
@@ -213,6 +213,25 @@ function groupDefaultVersion(songId: number, group: SongVersionMeta[]): string |
   return null
 }
 
+/** Version labels this user never wants auto-picked from `songId`'s group
+ *  (e.g. compact view's shuffle-play) — a union across every member's own
+ *  excluded list, since exclusion (like the default version) is really a
+ *  property of the group rather than any one row. */
+export function groupExcludedVersions(songId: number, group: SongVersionMeta[]): Set<string> {
+  const excluded = new Set<string>()
+  for (const label of peekSongPref(songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
+  for (const member of group) {
+    for (const label of peekSongPref(member.songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
+  }
+  return excluded
+}
+
+/** True if `meta`'s version label is in `excluded` — used to filter a
+ *  group's members before an automatic pick. Members with no version label
+ *  (recording sessions, etc.) are never excludable this way. */
+export const isExcludedVersion = (meta: SongVersionMeta | null | undefined, excluded: Set<string>): boolean =>
+  !!meta?.version && excluded.has(meta.version.trim().toLowerCase())
+
 const apiSongId = (track: Track): number | null => {
   if (!track.id.startsWith('jw-')) return null
   const songId = Number(track.id.slice(3))
@@ -232,17 +251,31 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
   if (songId == null) return null
 
   const [own, group] = await Promise.all([getOwnVersionMeta(songId), getVersionGroup(songId)])
+  const excluded = groupExcludedVersions(songId, group)
 
   const wanted = groupDefaultVersion(songId, group)
-  if (wanted) {
+  if (wanted && !excluded.has(wanted.trim().toLowerCase())) {
     if (matchesVersionLabel(own, wanted)) return null
     const target = group.find(m => matchesVersionLabel(m, wanted))
     if (!target) return null
     return songToTrack(await apiFetch<JWApiSong>(`/songs/${target.songId}/`))
   }
 
+  // The picked version itself is off-limits (e.g. radio landed on a
+  // compacted rip the user excluded) - move to a sibling that isn't, same as
+  // compact view's shuffle-play would. A preferred OG sibling wins when that
+  // toggle is on and it isn't itself excluded; otherwise take the first
+  // playable, non-excluded member. Nothing to do if every sibling is
+  // excluded too - better to keep playing something than nothing.
+  if (isExcludedVersion(own, excluded)) {
+    const preferredOg = preferOg ? group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded)) : undefined
+    const fallback = preferredOg ?? group.find(m => m.songId !== songId && !isExcludedVersion(m, excluded))
+    if (!fallback) return null
+    return songToTrack(await apiFetch<JWApiSong>(`/songs/${fallback.songId}/`))
+  }
+
   if (!preferOg || isOgVersion(own)) return null
-  const ogSibling = group.find(isOgVersion)
+  const ogSibling = group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded))
   if (!ogSibling) return null
   return songToTrack(await apiFetch<JWApiSong>(`/songs/${ogSibling.songId}/`))
 }
@@ -722,10 +755,10 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   // ── Preferred-version swap ─────────────────────────────────────────────────
   _maybeSwapToPreferredVersion: (track) => {
     const preferOg = get().preferOgVersion
-    // Nothing could possibly swap — no per-song default anywhere and the
-    // global toggle off — so skip the version lookup rather than pay a
+    // Nothing could possibly swap - no per-song default, no exclusions, and
+    // the global toggle off - so skip the version lookup rather than pay a
     // /versions/ round trip on every track change for the common case.
-    if (!preferOg && !hasAnyDefaultVersion()) return
+    if (!preferOg && !hasAnyDefaultVersion() && !hasAnyExcludedVersion()) return
     resolveVersionSwap(track, preferOg)
       .then((swapped) => {
         if (!swapped) return

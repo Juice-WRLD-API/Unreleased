@@ -684,7 +684,7 @@ const SongRow = memo(function SongRow({
     <div
       className={`group flex items-center gap-3 px-3 py-2.5 md:py-2 hover:bg-surface-overlay active:bg-surface-overlay rounded-lg transition-colors cursor-default ${selected ? 'bg-accent/10' : ''}`}
       onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
     >
       {selectMode && (
@@ -854,7 +854,7 @@ const DetailedSongRow = memo(function DetailedSongRow({
     <div
       className={`group flex gap-3 px-3 py-2 h-full overflow-hidden rounded-lg border border-[var(--border)] hover:bg-surface-overlay active:bg-surface-overlay transition-colors cursor-default ${selected ? 'bg-accent/10' : ''}`}
       onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
     >
       {selectMode && (
@@ -1305,7 +1305,7 @@ const SongCard = memo(function SongCard({
     <div
       className={`group flex flex-col h-full overflow-hidden rounded-xl border bg-surface transition-colors ${selected ? 'border-accent bg-accent/10' : 'border-[var(--border)] hover:border-accent/40'}`}
       onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
     >
       {/* Cover */}
@@ -1690,7 +1690,7 @@ const LyricResultRow = memo(function LyricResultRow({
     <div
       className={`group flex items-start gap-3 px-3 py-3 hover:bg-surface-overlay active:bg-surface-overlay rounded-lg transition-colors cursor-default ${selected ? 'bg-accent/10' : ''}`}
       onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
     >
       {selectMode && (

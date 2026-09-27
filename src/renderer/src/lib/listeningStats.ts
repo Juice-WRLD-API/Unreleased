@@ -176,6 +176,7 @@ export function prefsFromEvents(events: ListeningPlayEvent[]): SongPreference[] 
       name: null,
       cover_url: null,
       default_version: null,
+      excluded_versions: [],
     }))
     .sort((a, b) => b.playcount - a.playcount)
 }
