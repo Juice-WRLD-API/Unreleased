@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, ArrowDown, ArrowUp, Check, Cloud, Music2, Pencil, Play, Plus, Shuffle, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowDown, ArrowUp, Check, Cloud, MoreVertical, Music2, Pencil, Play, Plus, Shuffle, Trash2, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { registerBackHandler } from '../lib/backHandlers'
@@ -14,6 +14,8 @@ import { DonorAudioTile } from './DonorFiles'
 import DonorContextMenu from './DonorContextMenu'
 import type { DonorMenuState } from './DonorContextMenu'
 import { fetchDonorFileBlob } from '../lib/donorFilesApi'
+import { PlayShuffleRow, appBarButton } from './mobile/DetailChrome'
+import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 
 // Playlists of donor cloud files. They sit on the Playlists page as a third
 // kind beside synced and on-device ones and use the same card + hero + track
@@ -229,6 +231,7 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
   const [renameVal, setRenameVal] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<DonorMenuState | null>(null)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const closeCtxMenu = useCallback(() => setCtxMenu(null), [])
 
   useEffect(() => registerBackHandler(() => { onBack(); return true }), [onBack])
@@ -237,7 +240,6 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
   if (!playlist) return <div />
 
   const tracks = files.map(donorFileToTrack)
-  const px = isMobile ? 'px-4' : 'px-6'
   const move = (fileId: string, delta: -1 | 1): void => {
     const ids = [...playlist.fileIds]
     const i = ids.indexOf(fileId)
@@ -250,16 +252,154 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
     if (renameVal.trim()) renameDonorPlaylist(playlist.id, renameVal.trim())
     setRenaming(false)
   }
+
+  const trackListNode = (
+    <>
+      {loading ? (
+        <p className="text-text-muted text-sm px-6 py-6">Loading files…</p>
+      ) : files.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 gap-2 text-center px-8">
+          <Music2 className="text-text-muted opacity-20" size={40} />
+          <p className="text-text-muted text-sm">This playlist is empty.</p>
+          <p className="text-text-muted text-xs">Add audio from Files &gt; My files.</p>
+        </div>
+      ) : (
+        <div className="px-2 pb-8">
+          {files.map((f, i) => {
+            const t = tracks[i]
+            const active = currentTrackId === t.id
+            return (
+              <div
+                key={f.file_id}
+                className={`group flex items-center gap-3 px-4 py-2 rounded-lg transition-colors select-none ${ctxMenu?.file.file_id === f.file_id ? 'bg-surface-raised' : 'hover:bg-surface-raised'}`}
+                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
+                onDoubleClick={isMobile ? undefined : () => playTrack(t, tracks)}
+              >
+                <button
+                  onClick={() => playTrack(t, tracks)}
+                  className={`w-7 shrink-0 text-center text-xs tabular-nums ${active ? 'text-accent' : 'text-text-muted'}`}
+                  title="Play"
+                >
+                  <span className="group-hover:hidden">{active ? '♪' : i + 1}</span>
+                  <Play size={14} fill="currentColor" className="hidden group-hover:inline text-text-primary" />
+                </button>
+                <DonorAudioTile fileId={f.file_id} filename={f.filename} size={40} />
+                <div className="min-w-0 flex-1" onClick={isMobile ? () => playTrack(t, tracks) : undefined}>
+                  <p className={`text-sm font-medium truncate ${active ? 'text-accent' : 'text-text-primary'}`} title={f.filename}>{t.title}</p>
+                  <p className="text-text-muted text-xs truncate">{formatBytes(f.size)}</p>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => move(f.file_id, -1)} disabled={i === 0} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move up"><ArrowUp size={13} /></button>
+                  <button onClick={() => move(f.file_id, 1)} disabled={i === files.length - 1} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move down"><ArrowDown size={13} /></button>
+                  <button onClick={() => removeFromDonorPlaylist(playlist.id, f.file_id)} className="p-1.5 rounded text-text-muted hover:text-red-400" title="Remove from playlist"><X size={13} /></button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {ctxMenu && (() => {
+        const f = ctxMenu.file
+        const t = tracks.find((x) => x.id === donorFileToTrack(f).id) ?? donorFileToTrack(f)
+        return (
+          <DonorContextMenu
+            key={f.file_id}
+            state={ctxMenu}
+            onClose={closeCtxMenu}
+            onPlay={() => playTrack(t, tracks)}
+            onDownload={() => void downloadFile(f)}
+            removeAction={{ label: 'Remove from this playlist', onClick: () => removeFromDonorPlaylist(playlist.id, f.file_id) }}
+          />
+        )
+      })()}
+    </>
+  )
+
+  if (isMobile) {
+    return (
+      <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+        <div className="relative shrink-0 flex items-center gap-1 px-2" style={{ paddingTop: 'max(0.25rem, var(--top-inset))' }}>
+          <button
+            onClick={onBack}
+            aria-label="Back"
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-surface-overlay text-text-primary"
+          ><ArrowLeft size={20} /></button>
+          <span className="flex-1 min-w-0 text-[15px] font-semibold truncate text-text-primary">{playlist.name}</span>
+          {appBarButton('Playlist options', <MoreVertical size={19} />, () => setOptionsOpen(true))}
+        </div>
+
+        <div className="relative flex-1 overflow-y-auto overscroll-contain pb-6">
+          <div className="relative px-4 pb-4 overflow-hidden">
+            <div className="relative flex flex-col items-center text-center pt-1 pb-4">
+              <div className="relative w-44 h-44 rounded-2xl overflow-hidden shadow-2xl bg-surface-overlay">
+                <DonorCover className="w-full h-full" />
+              </div>
+              <h1 className="text-[22px] font-bold leading-tight mt-4 line-clamp-2 text-text-primary">{playlist.name}</h1>
+              <p className="text-xs mt-1.5 text-text-muted flex items-center gap-1.5 justify-center">
+                <Cloud size={12} className="shrink-0" /> Donor files · {trackCount(files.length)}
+              </p>
+            </div>
+
+            <PlayShuffleRow
+              onPlay={() => playCollection(tracks)}
+              onShuffle={() => { const s = fisherYates(tracks); playTrack(s[0], s) }}
+              disabled={tracks.length === 0}
+            />
+          </div>
+
+          {trackListNode}
+        </div>
+
+        {optionsOpen && (
+          <Sheet onClose={() => setOptionsOpen(false)} title={playlist.name}>
+            <SheetItem
+              icon={Pencil}
+              label="Rename"
+              onClick={() => { setOptionsOpen(false); setRenameVal(playlist.name); setRenaming(true) }}
+            />
+            <SheetDivider />
+            <SheetItem
+              icon={Trash2}
+              label="Delete playlist"
+              danger
+              onClick={() => { setOptionsOpen(false); deleteDonorPlaylist(playlist.id); onBack() }}
+            />
+          </Sheet>
+        )}
+
+        {renaming && (
+          <Sheet onClose={() => setRenaming(false)} title="Rename playlist">
+            <div className="px-5 pt-2 pb-2 space-y-3">
+              <input
+                autoFocus
+                value={renameVal}
+                onChange={(e) => setRenameVal(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(false) }}
+                className="w-full h-12 bg-surface-overlay rounded-2xl px-4 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
+              />
+              <button
+                onClick={commitRename}
+                disabled={!renameVal.trim()}
+                className="w-full h-12 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-40 active:opacity-80"
+              >Save</button>
+            </div>
+          </Sheet>
+        )}
+      </div>
+    )
+  }
+
   const iconBtn = 'p-2.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors'
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
-      <div className={`${px} pt-5 pb-6 shrink-0`}>
+      <div className="px-6 pt-5 pb-6 shrink-0">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors">
           <ArrowLeft size={15} /> Playlists
         </button>
-        <div className={`flex gap-5 pt-5 ${isMobile ? 'flex-col items-start' : 'items-end'}`}>
-          <div className="shrink-0 rounded-xl shadow-2xl overflow-hidden" style={{ width: isMobile ? 140 : 180, height: isMobile ? 140 : 180 }}>
+        <div className="flex gap-5 pt-5 items-end">
+          <div className="shrink-0 rounded-xl shadow-2xl overflow-hidden" style={{ width: 180, height: 180 }}>
             <DonorCover className="w-full h-full" />
           </div>
           <div className="min-w-0 flex-1 pb-1 w-full">
@@ -318,66 +458,9 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
         </div>
       </div>
 
-      <div className={`border-t border-[var(--border)] ${isMobile ? 'mx-4' : 'mx-6'} mb-3 shrink-0`} />
+      <div className="border-t border-[var(--border)] mx-6 mb-3 shrink-0" />
 
-      {loading ? (
-        <p className="text-text-muted text-sm px-6 py-6">Loading files…</p>
-      ) : files.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-40 gap-2 text-center px-8">
-          <Music2 className="text-text-muted opacity-20" size={40} />
-          <p className="text-text-muted text-sm">This playlist is empty.</p>
-          <p className="text-text-muted text-xs">Add audio from Files &gt; My files.</p>
-        </div>
-      ) : (
-        <div className={`${isMobile ? 'px-2' : 'px-2'} pb-8`}>
-          {files.map((f, i) => {
-            const t = tracks[i]
-            const active = currentTrackId === t.id
-            return (
-              <div
-                key={f.file_id}
-                className={`group flex items-center gap-3 px-4 py-2 rounded-lg transition-colors select-none ${ctxMenu?.file.file_id === f.file_id ? 'bg-surface-raised' : 'hover:bg-surface-raised'}`}
-                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
-                onDoubleClick={isMobile ? undefined : () => playTrack(t, tracks)}
-              >
-                <button
-                  onClick={() => playTrack(t, tracks)}
-                  className={`w-7 shrink-0 text-center text-xs tabular-nums ${active ? 'text-accent' : 'text-text-muted'}`}
-                  title="Play"
-                >
-                  <span className="group-hover:hidden">{active ? '♪' : i + 1}</span>
-                  <Play size={14} fill="currentColor" className="hidden group-hover:inline text-text-primary" />
-                </button>
-                <DonorAudioTile fileId={f.file_id} filename={f.filename} size={40} />
-                <div className="min-w-0 flex-1" onClick={isMobile ? () => playTrack(t, tracks) : undefined}>
-                  <p className={`text-sm font-medium truncate ${active ? 'text-accent' : 'text-text-primary'}`} title={f.filename}>{t.title}</p>
-                  <p className="text-text-muted text-xs truncate">{formatBytes(f.size)}</p>
-                </div>
-                <div className="flex items-center gap-0.5 shrink-0 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => move(f.file_id, -1)} disabled={i === 0} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move up"><ArrowUp size={13} /></button>
-                  <button onClick={() => move(f.file_id, 1)} disabled={i === files.length - 1} className="p-1.5 rounded text-text-muted hover:text-text-primary disabled:opacity-30" title="Move down"><ArrowDown size={13} /></button>
-                  <button onClick={() => removeFromDonorPlaylist(playlist.id, f.file_id)} className="p-1.5 rounded text-text-muted hover:text-red-400" title="Remove from playlist"><X size={13} /></button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {ctxMenu && (() => {
-        const f = ctxMenu.file
-        const t = tracks.find((x) => x.id === donorFileToTrack(f).id) ?? donorFileToTrack(f)
-        return (
-          <DonorContextMenu
-            key={f.file_id}
-            state={ctxMenu}
-            onClose={closeCtxMenu}
-            onPlay={() => playTrack(t, tracks)}
-            onDownload={() => void downloadFile(f)}
-            removeAction={{ label: 'Remove from this playlist', onClick: () => removeFromDonorPlaylist(playlist.id, f.file_id) }}
-          />
-        )
-      })()}
+      {trackListNode}
     </div>
   )
 }
