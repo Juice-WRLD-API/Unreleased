@@ -1,4 +1,4 @@
-import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music, Search } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -78,6 +78,13 @@ export default function HomeViewMobile(): JSX.Element {
             : <User size={17} />}
         </button>
         <h1 className="flex-1 min-w-0 text-text-primary text-[26px] font-bold leading-tight">Home</h1>
+        <button
+          onClick={() => setActiveView('api-tracker')}
+          aria-label="Search the catalog"
+          className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
+        >
+          <Search size={19} />
+        </button>
         {account && userApi.showStaffProfile(account) && (
           <button
             onClick={openProfile}
