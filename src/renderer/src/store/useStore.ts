@@ -1302,7 +1302,28 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Which profile view depends on the account's roles, not on the caller �
     // staffProfileView is the same helper the sidebar/bottom-nav tabs label
     // themselves from, so the two can't drift apart.
-    const view = userApi.staffProfileView(get().account)
+    const s = get()
+    const account = s.account
+    const view = userApi.staffProfileView(account)
+    // The profile page's staff tiles are scoped to whichever channel is
+    // active - activeChannel is a single global setting shared with the
+    // Files tab, so it can easily be left on a channel where this account
+    // only holds the contributor role while their actual editor/manager
+    // standing is on a different one. Landing there then looks exactly like
+    // the contributor page instead of the staff dashboard the pill/tab
+    // promised. Steer to a channel where they actually have staff standing
+    // first, if the currently active one doesn't and one exists.
+    if (view === 'editor-profile' && account && !account.is_administrator) {
+      const { channels, activeChannel } = s
+      const isPrimary = (slug: string | null | undefined): boolean =>
+        channels.length === 0 ? true : !!channels.find((c) => c.slug === slug)?.is_primary
+      const hasStaffOn = (slug: string): boolean =>
+        userApi.isChannelEditor(account, slug, isPrimary(slug)) || userApi.isChannelManager(account, slug, isPrimary(slug))
+      if (!hasStaffOn(activeChannel)) {
+        const staffChannel = channels.find((c) => hasStaffOn(c.slug))
+        if (staffChannel) s.setActiveChannel(staffChannel.slug)
+      }
+    }
     if (IS_FLOAT_WINDOW) {
       // A pop-out asking for the profile with the pop-out disabled: it has no
       // router of its own, so the main window takes the navigation.
