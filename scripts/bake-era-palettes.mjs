@@ -8,44 +8,29 @@
 //
 // Rerun when an era image is added or changed, and commit the regenerated
 // src/renderer/src/lib/eraPalettes.ts. Needs Node 22.18+ (it imports palette.ts
-// directly) and Python with Pillow, which only decodes and downsizes the images;
-// the colour extraction itself is the app's own paletteFromPixels, so baked and
-// live palettes come from the same code. Set PYTHON to pick the interpreter.
+// directly) and the `sharp` devDependency, which only decodes and downsizes the
+// images; the colour extraction itself is the app's own paletteFromPixels, so
+// baked and live palettes come from the same code.
 
-import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import sharp from 'sharp'
 import { paletteFromPixels, PALETTE_SAMPLE } from '../src/renderer/src/lib/viz/palette.ts'
 
 // Mirrors JWAPI_BASE in juicewrldApi.ts (not imported: that module needs a browser).
 const SITE = 'https://juicewrldapi.com'
 const OUT = fileURLToPath(new URL('../src/renderer/src/lib/eraPalettes.ts', import.meta.url))
 
-const DECODE = `
-import io, sys
-from PIL import Image
-n = int(sys.argv[1])
-im = Image.open(io.BytesIO(sys.stdin.buffer.read())).convert('RGBA').resize((n, n), Image.BILINEAR)
-sys.stdout.buffer.write(im.tobytes())
-`
-
-function pickPython() {
-  const candidates = process.env.PYTHON ? [process.env.PYTHON] : ['python3', 'python']
-  for (const exe of candidates) {
-    const r = spawnSync(exe, ['-c', 'import PIL'], { encoding: 'utf8' })
-    if (r.status === 0) return exe
-  }
-  throw new Error('Python with Pillow not found - install it (pip install pillow) or set PYTHON')
+async function decode(bytes) {
+  const raw = await sharp(bytes)
+    .resize(PALETTE_SAMPLE, PALETTE_SAMPLE, { fit: 'fill' })
+    .ensureAlpha()
+    .raw()
+    .toBuffer()
+  if (raw.length !== PALETTE_SAMPLE * PALETTE_SAMPLE * 4) throw new Error(`decoded ${raw.length} bytes`)
+  return raw
 }
 
-function decode(python, bytes) {
-  const r = spawnSync(python, ['-c', DECODE, String(PALETTE_SAMPLE)], { input: bytes, maxBuffer: 1 << 20 })
-  if (r.status !== 0) throw new Error(r.stderr.toString().trim())
-  if (r.stdout.length !== PALETTE_SAMPLE * PALETTE_SAMPLE * 4) throw new Error(`decoded ${r.stdout.length} bytes`)
-  return r.stdout
-}
-
-const python = pickPython()
 const res = await fetch(`${SITE}/juicewrld/songs/?all=true`)
 if (!res.ok) throw new Error(`song list: HTTP ${res.status}`)
 const body = await res.json()
@@ -66,7 +51,7 @@ for (const path of paths) {
       missing.push(`${path} (served as ${type || 'unknown'})`)
       continue
     }
-    const pal = paletteFromPixels(decode(python, Buffer.from(await img.arrayBuffer())))
+    const pal = paletteFromPixels(await decode(Buffer.from(await img.arrayBuffer())))
     if (!pal) throw new Error('no usable pixels')
     palettes[path] = pal.map(({ r, g, b }) => ({ r: Math.round(r), g: Math.round(g), b: Math.round(b) }))
   } catch (e) {
