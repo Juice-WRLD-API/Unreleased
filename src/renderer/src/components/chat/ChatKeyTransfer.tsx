@@ -138,19 +138,21 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
     }
     setError(null)
     setScanning(true)
+    let stream: MediaStream | null = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      const live = stream
       const detector = new Detector({ formats: ['qr_code'] })
       let raf = 0
       const stop = (): void => {
         cancelAnimationFrame(raf)
-        stream.getTracks().forEach((t) => t.stop())
+        live.getTracks().forEach((t) => t.stop())
         stopScan.current = null
         setScanning(false)
       }
       stopScan.current = stop
       if (video.current) {
-        video.current.srcObject = stream
+        video.current.srcObject = live
         await video.current.play()
       }
       const tick = async (): Promise<void> => {
@@ -169,6 +171,9 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
       }
       void tick()
     } catch {
+      // play() can reject after the camera is already open - release it.
+      stream?.getTracks().forEach((t) => t.stop())
+      stopScan.current = null
       setError('Could not open the camera')
       setScanning(false)
     }

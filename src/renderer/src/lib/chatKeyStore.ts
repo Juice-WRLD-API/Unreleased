@@ -6,7 +6,9 @@ const META = 'meta'
 const ROOM_KEYS = 'roomKeys'
 
 interface StoredDevice {
-  id: 'device'
+  // `device:<userId>`; older builds kept one shared `device` row, which
+  // loadDevice still reads (see deviceRowId).
+  id: string
   userId: number
   deviceId: string
   publicKey: ArrayBuffer
@@ -52,13 +54,25 @@ function run<T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectStore)
 }
 
 // The wrapping key is non-extractable: script can use it to decrypt the
-// stored secrets but never read its bytes back out.
-async function wrappingKey(): Promise<CryptoKey> {
-  const existing = await run<{ id: string; key: CryptoKey } | undefined>(META, 'readonly', (s) => s.get('wrap'))
-  if (existing) return existing.key
-  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-  await run(META, 'readwrite', (s) => s.put({ id: 'wrap', key }))
-  return key
+// stored secrets but never read its bytes back out. Memoized so concurrent
+// first callers share one key - two racing generateKey()s would each seal
+// with their own and the losing one's secrets could never be opened again.
+let wrapPromise: Promise<CryptoKey> | null = null
+
+function wrappingKey(): Promise<CryptoKey> {
+  if (!wrapPromise) {
+    wrapPromise = (async () => {
+      const existing = await run<{ id: string; key: CryptoKey } | undefined>(META, 'readonly', (s) => s.get('wrap'))
+      if (existing) return existing.key
+      const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+      await run(META, 'readwrite', (s) => s.put({ id: 'wrap', key }))
+      return key
+    })().catch((err) => {
+      wrapPromise = null
+      throw err
+    })
+  }
+  return wrapPromise
 }
 
 async function seal(bytes: Uint8Array): Promise<{ data: ArrayBuffer; iv: ArrayBuffer }> {
@@ -78,8 +92,15 @@ export interface LocalDevice {
   registered: boolean
 }
 
+// One row per account: a single shared row meant signing a second account in
+// on this browser overwrote the first one's identity, while the server kept
+// that (now secretless) device as the first account's keyed primary.
+const LEGACY_DEVICE_ROW = 'device'
+const deviceRowId = (userId: number): string => `device:${userId}`
+
 export async function loadDevice(userId: number): Promise<LocalDevice | null> {
-  const row = await run<StoredDevice | undefined>(META, 'readonly', (s) => s.get('device'))
+  const row = await run<StoredDevice | undefined>(META, 'readonly', (s) => s.get(deviceRowId(userId)))
+    ?? await run<StoredDevice | undefined>(META, 'readonly', (s) => s.get(LEGACY_DEVICE_ROW))
   if (!row || row.userId !== userId) return null
   try {
     return {
@@ -99,7 +120,7 @@ export async function loadDevice(userId: number): Promise<LocalDevice | null> {
 export async function saveDevice(device: LocalDevice): Promise<void> {
   const { data, iv } = await seal(device.identity.secretKey)
   const row: StoredDevice = {
-    id: 'device',
+    id: deviceRowId(device.userId),
     userId: device.userId,
     deviceId: device.deviceId,
     publicKey: device.identity.publicKey.slice().buffer,
@@ -108,10 +129,15 @@ export async function saveDevice(device: LocalDevice): Promise<void> {
     registered: device.registered,
   }
   await run(META, 'readwrite', (s) => s.put(row))
+  // Migrated off the shared legacy row - drop it if it was ours, so another
+  // account's loadDevice can't fall back to it.
+  const legacy = await run<StoredDevice | undefined>(META, 'readonly', (s) => s.get(LEGACY_DEVICE_ROW))
+  if (legacy?.userId === device.userId) await run(META, 'readwrite', (s) => s.delete(LEGACY_DEVICE_ROW))
 }
 
-export async function clearDevice(): Promise<void> {
-  await run(META, 'readwrite', (s) => s.delete('device'))
+export async function clearDevice(userId: number): Promise<void> {
+  await run(META, 'readwrite', (s) => s.delete(deviceRowId(userId)))
+  await run(META, 'readwrite', (s) => s.delete(LEGACY_DEVICE_ROW))
   await run(ROOM_KEYS, 'readwrite', (s) => s.clear())
 }
 

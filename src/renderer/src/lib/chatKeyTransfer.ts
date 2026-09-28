@@ -98,6 +98,9 @@ export async function importKeys(userId: number, blob: string, passphrase: strin
     throw new Error('The export is damaged - copy it again in full')
   }
   if (payload.v !== 1 || !Array.isArray(payload.keys)) throw new Error('Unsupported export version')
+  // Rejected before anything is written - another account's keys must not
+  // land in (or overwrite keys in) this account's store.
+  if (payload.user !== userId) return { imported: 0, skipped: payload.keys.length, conversations: [], fromOtherAccount: true }
   const conversations = new Set<number>()
   let imported = 0
   let skipped = 0

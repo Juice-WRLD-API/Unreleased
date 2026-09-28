@@ -335,7 +335,9 @@ export const useChatStore = create<ChatState>((set, get) => {
     const decoded = msg.is_encrypted ? null : decodeModerationNotice(plainBody)
     // Same gate as the card itself: a forged payload must not get to phrase
     // someone's notification either.
-    const moderation = decoded && noticeAuthorMayModerate(get(), msg, decoded) ? decoded : null
+    // Strict: a notification fires once and can't be taken back once the
+    // member list arrives, so an unverifiable card must not phrase one.
+    const moderation = decoded && noticeAuthorMayModerate(get(), msg, decoded, true) ? decoded : null
     const body = msg.is_encrypted
       ? 'Sent a new message'
       : moderation
@@ -431,7 +433,22 @@ export const useChatStore = create<ChatState>((set, get) => {
       for (const [k, t] of Object.entries(s.threads)) {
         if (t.items.some((m) => m.id === messageId)) threads[Number(k)] = { ...t, items: t.items.map((m) => m.id === messageId ? fn(m) : m) }
       }
-      return { rooms: { ...s.rooms, ...rooms }, threads: { ...s.threads, ...threads } }
+      // Room/Home previews read lastMessage directly, so an edit or delete has
+      // to reach it too or the list keeps showing the old text.
+      const lastMessage: Record<string, ChatMessage> = {}
+      for (const [k, m] of Object.entries(s.lastMessage)) {
+        if (m.id === messageId) lastMessage[k] = fn(m)
+      }
+      return { rooms: { ...s.rooms, ...rooms }, threads: { ...s.threads, ...threads }, lastMessage: { ...s.lastMessage, ...lastMessage } }
+    })
+  }
+
+  const dropPlain = (id: number): void => {
+    set((st) => {
+      if (!(id in st.plain)) return {}
+      const plain = { ...st.plain }
+      delete plain[id]
+      return { plain }
     })
   }
 
@@ -486,16 +503,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       case 'message.unpinned':
         mapMessage(ev.message.id, (m) => ({ ...m, ...ev.message }))
         if (ev.message.is_encrypted && ev.type === 'message.updated') {
-          set((st) => {
-            const plain = { ...st.plain }
-            delete plain[ev.message.id]
-            return { plain }
-          })
+          dropPlain(ev.message.id)
           void decryptOne(ev.message)
         }
         return
       case 'message.deleted':
         mapMessage(ev.message_id, (m) => ({ ...m, content: '', ciphertext: '', nonce: '', attachments: [], deleted_at: new Date().toISOString() }))
+        dropPlain(ev.message_id)
         return
       case 'reaction.added':
       case 'reaction.removed': {
@@ -720,6 +734,21 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   }
 
+  // Whether anything has been said under the conversation's current key
+  // version - a key someone already used must never be replaced by a fresh
+  // one. Loaded rooms answer from their items; a primed-but-unopened room
+  // from lastMessage; anything else asks the server for its newest message.
+  const hasMessagesAtCurrentVersion = async (conv: Conversation): Promise<boolean> => {
+    const key = `d:${conv.id}`
+    let room = get().rooms[key]
+    if (!room?.loaded && !primedRooms.has(key)) {
+      const page = await api.listDmMessages(conv.id, { limit: 1 })
+      room = { ...emptyRoom(), items: page.results }
+    }
+    return (room?.items ?? []).some((x) => x.id > 0 && x.key_version === conv.current_key_version)
+      || get().lastMessage[key]?.key_version === conv.current_key_version
+  }
+
   const primeRoom = async (key: string): Promise<void> => {
     const ref = parseRoomKey(key)
     const meId = get().meId
@@ -832,6 +861,16 @@ export const useChatStore = create<ChatState>((set, get) => {
           if (status === 'open' && prev === 'reconnecting') {
             void catchUp().catch(() => undefined)
             void reconcileKeys().catch(() => undefined)
+            // catchUp only covers the open room - re-prime the rest so
+            // anything sent while we were disconnected still bumps unread
+            // and updates previews.
+            const active = get().active
+            const keys = [
+              ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
+              ...get().conversations.map((c) => `d:${c.id}`),
+            ].filter((k) => !active || k !== roomKey(active))
+            for (const k of keys) primedRooms.delete(k)
+            void pool(keys, 4, primeRoom)
           }
         },
       )
@@ -1061,6 +1100,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       else get().markRead(room)
     },
 
+
     loadOlder: async (room) => {
       const key = roomKey(room)
       const cur = get().rooms[key] ?? emptyRoom()
@@ -1157,8 +1197,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             const m = await e2e()
             const conv = get().conversations.find((c) => c.id === room.id)
             if (!conv) throw new Error('Conversation not found')
-            const hasMessages = (get().rooms[key]?.items ?? []).some((x) => x.id > 0 && x.key_version === conv.current_key_version)
-            const res = await m.resolveRoomKey(meId, conv, hasMessages)
+            const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv))
             if (res.state !== 'ready') throw new Error('Waiting for an encryption key')
             set((s) => ({ keyState: { ...s.keyState, [room.id]: 'ready' } }))
             const attachments: AttachmentInput[] = []
@@ -1277,6 +1316,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       await api.deleteMessage(message.id)
       mapMessage(message.id, (m) => ({ ...m, content: '', ciphertext: '', nonce: '', attachments: [], deleted_at: new Date().toISOString() }))
+      dropPlain(message.id)
     },
 
     togglePin: async (message) => {
@@ -1384,20 +1424,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           set((s) => ({ conversations: [conv!, ...s.conversations] }))
         }
         const m = await e2e()
-        const key = `d:${conversationId}`
-        let room = get().rooms[key]
-        // A primed room already told us its newest message (in lastMessage,
-        // checked below) or that it has none - no need to ask again on every
-        // pollKeys tick while the key is still missing.
-        if (!room?.loaded && !primedRooms.has(key)) {
-          const page = await api.listDmMessages(conversationId, { limit: 1 })
-          room = { ...emptyRoom(), items: page.results }
-        }
-        // Primed-but-unopened rooms skip the fetch above and have no room entry
-        // at all - their answer is in lastMessage.
-        const hasMessages = (room?.items ?? []).some((x) => x.id > 0 && x.key_version === conv!.current_key_version)
-          || get().lastMessage[key]?.key_version === conv.current_key_version
-        const res = await m.resolveRoomKey(meId, conv, hasMessages)
+        const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv))
         set((s) => ({ keyState: { ...s.keyState, [conversationId]: res.state } }))
         if (res.state === 'ready') void get().decryptRoom(conversationId)
       } catch (err) {
@@ -1554,6 +1581,8 @@ function noticeAuthorMayModerate(
   state: ChatState,
   message: Pick<UiMessage, 'channel' | 'author'>,
   payload: ModerationNoticePayload,
+  // Unknown (member list not loaded) counts as unverified instead of allowed.
+  strict = false,
 ): boolean {
   if (message.author.role === 'administrator') return true
   // Only a platform administrator can act site-wide.
@@ -1563,8 +1592,9 @@ function noticeAuthorMayModerate(
   if (!server) return false
   if (server.owner === message.author.id) return true
   const members = state.members[server.id]
-  // Roles haven't been fetched yet: can't judge, so don't accuse.
-  if (!members) return true
+  // Roles haven't been fetched yet: can't judge, so don't accuse - unless the
+  // caller can't revisit the answer later (strict).
+  if (!members) return !strict
   const member = members.find((m) => m.user.id === message.author.id)
   if (!member) return false
   const assigned = new Set(member.roles.map((r) => r.id))

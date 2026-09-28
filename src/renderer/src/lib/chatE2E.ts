@@ -214,8 +214,11 @@ export async function uploadEncryptedFile(file: File, key: Uint8Array, version: 
   }
 }
 
+// No svg: the name is sender-chosen, and a decrypted blob: URL is same-origin,
+// so an image/svg+xml blob opened as a document could run script in the app.
+// It falls back to octet-stream and shows as a plain download instead.
 const MIME_BY_EXT: Record<string, string> = {
-  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', svg: 'image/svg+xml',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4',
   mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', m4a: 'audio/mp4', ogg: 'audio/ogg', opus: 'audio/ogg', aac: 'audio/aac',
   pdf: 'application/pdf', txt: 'text/plain', json: 'application/json', zip: 'application/zip',

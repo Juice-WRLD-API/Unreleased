@@ -51,6 +51,13 @@ const Composer = forwardRef<ComposerHandle, {
   const announceModeration = useChatStore((s) => s.announceModeration)
   const sendTyping = useChatStore((s) => s.sendTyping)
   const meId = useChatStore((s) => s.meId)
+  // @everyone needs mention_everyone in a channel's server; a DM already
+  // notifies every participant, so it's harmless there.
+  const canMentionEveryone = useChatStore((s) => {
+    if (room.kind !== 'channel') return true
+    const server = s.servers.find((x) => x.channels.some((c) => c.id === room.id))
+    return !!server && chatApi.hasPermission(server.my_permissions, chatApi.CHAT_PERMISSIONS.mention_everyone)
+  })
   const replyPreview = useChatStore((s) => {
     if (!replyTo) return ''
     const raw = replyTo.is_encrypted
@@ -149,9 +156,9 @@ const Composer = forwardRef<ComposerHandle, {
     // room.kind === 'conversation' already notifies every participant on
     // every message, so @everyone only makes sense (and only matters) in a
     // shared channel with more than a couple of members.
-    if (room.kind === 'channel' && EVERYONE_HANDLE.startsWith(q)) return [EVERYONE_HANDLE as typeof EVERYONE_HANDLE, ...users].slice(0, 6)
+    if (room.kind === 'channel' && canMentionEveryone && EVERYONE_HANDLE.startsWith(q)) return [EVERYONE_HANDLE as typeof EVERYONE_HANDLE, ...users].slice(0, 6)
     return users
-  }, [mention, people, meId, room.kind])
+  }, [mention, people, meId, room.kind, canMentionEveryone])
 
   const updateMention = (value: string, caret: number): void => {
     const upto = value.slice(0, caret)
@@ -601,6 +608,9 @@ const Composer = forwardRef<ComposerHandle, {
     if (disabledReason || commandBusy) return
     let body = text.trim()
     if (!body && files.length === 0) return
+    // Mentions come from what was typed, not the reply envelope prepended
+    // below - its snippet quotes the original message, @mentions included.
+    const mentions = mentionIdsIn(body, people, canMentionEveryone)
     if (!replyTo && files.length === 0) {
       const cmd = parseChatCommand(body)
       if (cmd) { void runCommand(cmd); return }
@@ -627,7 +637,7 @@ const Composer = forwardRef<ComposerHandle, {
     drafts.delete(draftKey)
     stopTyping()
     onCancelReply?.()
-    send(room, { text: body, files: outgoing, parent, mentions: mentionIdsIn(body, people) })
+    send(room, { text: body, files: outgoing, parent, mentions })
       .catch((err) => toast(errorText(err, 'Message failed to send')))
   }
 
