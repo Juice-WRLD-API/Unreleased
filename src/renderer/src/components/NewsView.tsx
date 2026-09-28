@@ -14,12 +14,15 @@ import {
 } from '../lib/newsApi'
 import { isSubscribed, setSubscribed, ensureNotifyPermission } from '../lib/newsNotifications'
 import { errorMessage } from '../lib/format'
-import { hasChatAccess } from '../store/chatStore'
+import { hasChatAccess } from '../lib/chatAccess'
 import NewsComposeModal from './NewsComposeModal'
 import NewsChannelsModal from './NewsChannelsModal'
-import ShareNewsModal from './chat/ShareNewsModal'
+import { lazyOverlay } from '../lib/lazyView'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
+
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
 
 type NewsMode = 'news' | 'feed'
 

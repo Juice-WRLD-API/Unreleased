@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import StatsViewDesktop from './StatsView.desktop'
-import StatsViewMobile from './StatsView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function StatsView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <StatsViewMobile /> : <StatsViewDesktop />
-}
+export default responsiveView(() => import('./StatsView.desktop'), () => import('./StatsView.mobile'))

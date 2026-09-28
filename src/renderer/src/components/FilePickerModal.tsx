@@ -6,25 +6,15 @@ import {
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
+import { breadcrumbs, parentFolder } from '../lib/apiFilesShared'
 import { useStore } from '../store/useStore'
 import { errorMessage } from '../lib/format'
-
-function breadcrumbs(path: string): { label: string; path: string }[] {
-  if (!path) return []
-  const parts = path.split('/').filter(Boolean)
-  return parts.map((label, i) => ({ label, path: parts.slice(0, i + 1).join('/') }))
-}
 
 // Path join that tolerates a typed name with stray slashes or spaces.
 function joinFolder(base: string, name: string): string {
   const clean = name.trim().replace(/^\/+|\/+$/g, '')
   if (!clean) return base
   return base ? `${base}/${clean}` : clean
-}
-
-function parentFolder(path: string): string {
-  const i = path.lastIndexOf('/')
-  return i > 0 ? path.slice(0, i) : ''
 }
 
 // Directories first, then matching files, alphabetically within each - a picker

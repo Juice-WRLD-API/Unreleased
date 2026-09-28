@@ -93,6 +93,19 @@ function stripDevCsp() {
   }
 }
 
+// lucide-react ships one module per icon (~0.4 KB each), and every lazy view
+// uses its own mix of them - so Rollup's default splitting gave each distinct
+// "set of views that use this icon" a chunk of its own: ~60 sub-KB files, and
+// opening the mobile Tracker alone pulled ~30 of them. All icons go into one
+// chunk instead (~20 KB gzipped). It's modulepreloaded alongside the entry, so
+// it costs no extra round-trip, and every view after the first finds all its
+// icons already cached. (It can't be limited to the icons the entry doesn't
+// use: they're all re-exported through lucide's barrel module, so the module
+// graph can't tell which view actually uses which icon.)
+function iconChunk(id: string): string | undefined {
+  return id.includes('/node_modules/lucide-react/') ? 'icons' : undefined
+}
+
 export default defineConfig({
   plugins: [react(), stripDevCsp()],
   root: resolve(__dirname, 'src/renderer'),
@@ -106,6 +119,11 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: iconChunk,
+      },
+    },
   },
   server: {
     port: 5173,

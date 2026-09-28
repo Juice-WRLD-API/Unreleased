@@ -12,9 +12,12 @@ import { shareOrigin } from '../lib/platform'
 import { triggerDownload } from '../lib/apiFilesShared'
 import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
-import { hasChatAccess } from '../store/chatStore'
-import SharePlaylistModal from './chat/SharePlaylistModal'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
+
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
 
 // Self-contained context menu for an API playlist - usable from anywhere
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing

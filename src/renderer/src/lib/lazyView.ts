@@ -1,4 +1,5 @@
-import { lazy, ComponentType, LazyExoticComponent } from 'react'
+import { createElement, lazy, Suspense, ComponentType, LazyExoticComponent } from 'react'
+import { useIsMobile, isMobileViewport } from '../hooks/useIsMobile'
 
 // Lazy views load their chunk by hashed filename baked into the running bundle.
 // On the web that filename stops existing the moment the site redeploys, so a
@@ -43,4 +44,40 @@ export function lazyView<T extends ComponentType<any>>(
       throw err
     }
   })
+}
+
+/** lazyView for something opened on demand (a modal, a menu, a panel) rather
+ *  than a routed view. It brings its own empty <Suspense>, so a call site can
+ *  swap a static import for this without wrapping every render in a boundary,
+ *  and the brief load on first open never bubbles up to a view-level skeleton
+ *  (or, outside any boundary, suspends the whole root). */
+export function lazyOverlay<P extends object>(
+  factory: () => Promise<{ default: ComponentType<P> }>,
+): (props: P) => JSX.Element {
+  const Lazy = lazyView(factory) as unknown as ComponentType<P>
+  return (props: P) => createElement(Suspense, { fallback: null }, createElement(Lazy, props))
+}
+
+export type ResponsiveView<P> = ((props: P) => JSX.Element) & {
+  /** Start loading the half the current viewport would render. */
+  preload: () => Promise<unknown>
+}
+
+/** A view with one shell per breakpoint (X.desktop / X.mobile). Each half is
+ *  its own chunk, so a visitor only downloads the one their viewport renders -
+ *  importing both statically from a wrapper shipped every phone the whole
+ *  desktop layout (and vice versa), roughly doubling each view's download.
+ *  The returned wrapper is tiny and meant to be imported statically, so there
+ *  is no wrapper-chunk -> half-chunk waterfall; the half suspends to the
+ *  nearest <Suspense>. Crossing the breakpoint (resizing a desktop window)
+ *  loads the other half on demand. */
+export function responsiveView<P extends object>(
+  desktop: () => Promise<{ default: ComponentType<P> }>,
+  mobile: () => Promise<{ default: ComponentType<P> }>,
+): ResponsiveView<P> {
+  const Desktop = lazyView(desktop) as unknown as ComponentType<P>
+  const Mobile = lazyView(mobile) as unknown as ComponentType<P>
+  const View = (props: P): JSX.Element => createElement(useIsMobile() ? Mobile : Desktop, props)
+  View.preload = (): Promise<unknown> => (isMobileViewport() ? mobile : desktop)()
+  return View
 }

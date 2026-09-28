@@ -6,7 +6,7 @@
 // sheet after creating a skin).
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
-import { hasChatAccess } from '../store/chatStore'
+import { hasChatAccess } from '../lib/chatAccess'
 import { getSkin, createCustomSkin, parseSkinFile, type Skin } from '../lib/skins'
 import {
   orderedNavItems, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, type NavItemDef,

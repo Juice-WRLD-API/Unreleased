@@ -7,9 +7,13 @@ import { ViewType } from '../types'
 import { showStaffProfile, getToken } from '../lib/userApi'
 import { orderedNavItems, isNavItemVisible, orderedNavControls, isNavControlVisible, navTabFor, tabEntryView, type NavControlId } from '../lib/navItems'
 import { preloadView } from '../lib/lazyViews'
-import { hasChatAccess } from '../store/chatStore'
-import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { hasChatAccess } from '../lib/chatAccess'
+import type { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
 import { accountDisplayName, initial } from '../lib/format'
+
+// Right-click only - fetched on first open rather than with the app shell.
+const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
 
 const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'

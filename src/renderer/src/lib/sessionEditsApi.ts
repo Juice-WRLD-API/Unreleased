@@ -1,4 +1,5 @@
-import { apiFetch, parseBrowseEntries, normalizeSongTitle, loadAllSongs, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
+import { apiFetch, apiUrl, parseBrowseEntries, normalizeSongTitle, loadAllSongs, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
+import { apiRequest } from './apiClient'
 import { createTtlCache } from './ttlCache'
 import { setSessionEditLinksCache } from './sessionEditLinksMirror'
 
@@ -61,8 +62,18 @@ export interface SessionEditMatches {
   alt: Map<string, JWApiSong>
 }
 
+// Only recording_session songs can have a session-edit link, and the API
+// applies ?category= even with ?all=true: ~500 songs / ~1.2 MB instead of the
+// ~10 MB whole catalogue this used to pull (and JSON.parse) on every app
+// start. Deliberately not apiFetch - that would also persist the response to
+// the localStorage offline cache, a ~2.3 MB (UTF-16) synchronous write for
+// data that's useless offline, since session edits only ever stream.
+const loadSessionSongs = createTtlCache(5 * 60_000, () =>
+  apiRequest<JWApiSong[]>(apiUrl('/songs/', { category: 'recording_session', all: 'true' }), { cache: 'no-cache' }))
+
 async function fetchSessionEditMatches(): Promise<SessionEditMatches> {
-  const allSongs = await loadAllSongs()
+  // Reuse the whole catalogue if someone else already paid for it.
+  const allSongs = await (loadAllSongs.peek() ?? loadSessionSongs())
   const songById = new Map<number, JWApiSong>()
   const primaryBySongId = new Map<string, Set<number>>()
   const altBySongId = new Map<string, Set<number>>()

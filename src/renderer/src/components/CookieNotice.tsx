@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { Cookie } from 'lucide-react'
-import LegalModal from './LegalModal'
+import { lazyOverlay } from '../lib/lazyView'
 import { useSandboxStore } from './Modal'
+
+// The full policy text - only fetched if someone opens it from the notice.
+const LegalModal = lazyOverlay(() => import('./LegalModal'))
 
 const STORAGE_KEY = 'cookie-notice-ack'
 export const COOKIE_NOTICE_ACK_EVENT = 'cookie-notice-ack'

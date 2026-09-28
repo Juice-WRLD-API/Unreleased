@@ -119,10 +119,16 @@ export function useHomeData() {
   const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
   useEffect(() => {
     albumsApi.fetchAlbums()
-      .then((list) => setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? ''))))
-      .catch(() => undefined)
-    loadAllSongs()
-      .then((list) => setAlbumSongIndex(new Map(list.filter((s) => s.path).map((s) => [s.path as string, s]))))
+      .then((list) => {
+        setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? '')))
+        // The catalogue is ~10 MB of JSON, and Home is the desktop landing
+        // page - only pull it in when some album actually lists tracks to
+        // resolve. The public list can come back with none at all, and then
+        // the whole download bought nothing.
+        if (!list.some((a) => a.songs?.length)) return
+        return loadAllSongs()
+          .then((all) => setAlbumSongIndex(new Map(all.filter((s) => s.path).map((s) => [s.path as string, s]))))
+      })
       .catch(() => undefined)
   }, [])
 

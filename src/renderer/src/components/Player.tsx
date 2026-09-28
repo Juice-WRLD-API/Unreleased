@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Play,
@@ -32,7 +32,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
 import { IS_IOS } from '../lib/platform'
 import { FullTrack } from '../types'
-import SongContextMenu from './SongContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
 import EqualizerPanel from './EqualizerPanel'
 import { Sheet } from './mobile/Sheet'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -44,6 +44,10 @@ import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
 import { ensureDonorCover } from '../lib/donorCoverArt'
+
+// Only opened from the "more" button / right-click, so it loads on first use
+// instead of riding in the startup bundle with the player itself.
+const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
 
 // Donor cloud files can't be streamed by URL (the route needs the auth header),
 // so their `donor://` marker resolves to a fetched blob URL - or '' while that
@@ -1609,7 +1613,7 @@ export default function Player(): JSX.Element {
           sheet there instead of the desktop anchored popover. */}
       {showEqPanel && EFFECTS_SUPPORTED && (isMobile ? (
         <Sheet onClose={() => setShowEqPanel(false)} title="Equalizer">
-          <EqualizerPanel />
+          <Suspense fallback={null}><EqualizerPanel /></Suspense>
         </Sheet>
       ) : createPortal(
         <>
@@ -1621,7 +1625,7 @@ export default function Player(): JSX.Element {
             // instead of growing under the window controls.
             style={{ bottom: eqPos.bottom, right: eqPos.right, maxHeight: `calc(100vh - ${eqPos.bottom + 48}px)` }}
           >
-            <EqualizerPanel />
+            <Suspense fallback={null}><EqualizerPanel /></Suspense>
           </div>
         </>,
         document.body

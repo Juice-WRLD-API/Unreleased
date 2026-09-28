@@ -1,9 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import AdminPageDesktop from './AdminPage.desktop'
-import AdminPageMobile from './AdminPage.mobile'
-import type { AdminTab } from '../hooks/useAdminQueue'
+import { responsiveView } from '../lib/lazyView'
 
-export default function AdminPage(props: { embedded?: boolean; initialTab?: AdminTab; onExit?: () => void }): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <AdminPageMobile {...props} /> : <AdminPageDesktop {...props} />
-}
+export default responsiveView(() => import('./AdminPage.desktop'), () => import('./AdminPage.mobile'))

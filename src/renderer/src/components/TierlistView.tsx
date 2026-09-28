@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import TierlistViewDesktop from './TierlistView.desktop'
-import TierlistViewMobile from './TierlistView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function TierlistView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <TierlistViewMobile /> : <TierlistViewDesktop />
-}
+export default responsiveView(() => import('./TierlistView.desktop'), () => import('./TierlistView.mobile'))

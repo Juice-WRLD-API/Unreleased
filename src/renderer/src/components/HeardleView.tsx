@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import HeardleViewDesktop from './HeardleView.desktop'
-import HeardleViewMobile from './HeardleView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function HeardleView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <HeardleViewMobile /> : <HeardleViewDesktop />
-}
+export default responsiveView(() => import('./HeardleView.desktop'), () => import('./HeardleView.mobile'))

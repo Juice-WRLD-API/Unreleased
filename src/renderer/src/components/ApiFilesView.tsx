@@ -1,10 +1,12 @@
 import { Cloud } from 'lucide-react'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useStore } from '../store/useStore'
-import ApiFilesViewDesktop from './ApiFilesView.desktop'
-import ApiFilesViewMobile from './ApiFilesView.mobile'
-import DonorFiles from './DonorFiles'
+import { lazyView, responsiveView } from '../lib/lazyView'
+
+const ChannelBrowser = responsiveView(() => import('./ApiFilesView.desktop'), () => import('./ApiFilesView.mobile'))
+// Donor-only, so everyone else never downloads it.
+const DonorFiles = lazyView(() => import('./DonorFiles'))
 
 // Donors get a second location beside the comp channels: their own cloud
 // storage. It's a separate store with its own routes, so it swaps in as its
@@ -13,7 +15,7 @@ export default function ApiFilesView(): JSX.Element {
   const isMobile = useIsMobile()
   const isDonor = useStore((s) => !!s.account?.is_donor)
   const [mine, setMine] = useState(false)
-  const browser = isMobile ? <ApiFilesViewMobile /> : <ApiFilesViewDesktop />
+  const browser = <ChannelBrowser />
   if (!isDonor) return browser
 
   return (
@@ -37,9 +39,10 @@ export default function ApiFilesView(): JSX.Element {
             <Cloud size={18} className="text-text-muted shrink-0" />
             <h1 className="text-text-primary text-xl font-bold">My files</h1>
           </div>
-          <DonorFiles />
+          <Suspense fallback={null}><DonorFiles /></Suspense>
         </div>
       ) : browser}
     </div>
   )
 }
+ApiFilesView.preload = ChannelBrowser.preload

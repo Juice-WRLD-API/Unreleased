@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import ApiTrackerViewDesktop from './ApiTrackerView.desktop'
-import ApiTrackerViewMobile from './ApiTrackerView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function ApiTrackerView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <ApiTrackerViewMobile /> : <ApiTrackerViewDesktop />
-}
+export default responsiveView(() => import('./ApiTrackerView.desktop'), () => import('./ApiTrackerView.mobile'))

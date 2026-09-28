@@ -210,7 +210,7 @@ export function filterSearchResults(entries: JWApiFileEntry[], term: string): JW
 
 // Builds the same URL/cache key apiFetch uses, so apiPeek below can read the
 // exact entry apiFetch wrote for a given path+params.
-function apiUrl(path: string, params: Record<string, string | number | null | undefined> = {}): string {
+export function apiUrl(path: string, params: Record<string, string | number | null | undefined> = {}): string {
   const url = new URL(routeUrl(path))
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v))

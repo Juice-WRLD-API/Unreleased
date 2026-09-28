@@ -8,14 +8,22 @@ import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import * as userApi from '../lib/userApi'
-import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
-import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
+import type { SongContextMenuState } from './SongContextMenu'
+import type { PlaylistContextMenuState } from './PlaylistContextMenu'
 import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
-import { hasChatAccess } from '../store/chatStore'
-import HomeChatCard from './chat/HomeChatCard'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
+
+// Staff-only, and it reads the chat store - loading it lazily keeps the chat
+// client out of Home's chunk for everyone else.
+const HomeChatCard = lazyOverlay(() => import('./chat/HomeChatCard'))
+// Right-click only. Home is the desktop landing page, so anything it imports
+// statically is startup cost - these load on the first right-click instead.
+const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
+const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
 
 // The desktop landing screen - same sections, same data (useHomeData) and the
 // same Settings → Home screen toggles as the mobile shell, laid out as a bento

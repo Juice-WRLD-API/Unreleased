@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import DocsPageDesktop from './DocsPage.desktop'
-import DocsPageMobile from './DocsPage.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function DocsPage(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <DocsPageMobile /> : <DocsPageDesktop />
-}
+export default responsiveView(() => import('./DocsPage.desktop'), () => import('./DocsPage.mobile'))

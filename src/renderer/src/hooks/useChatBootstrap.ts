@@ -1,7 +1,14 @@
 import { useEffect } from 'react'
 import { useStorePick } from '../store/useStore'
-import { hasChatAccess, useChatStore } from '../store/chatStore'
+import { hasChatAccess } from '../lib/chatAccess'
 import { runWhenIdle } from '../lib/platform'
+
+// The chat client (store, API, socket, share codecs) is staff-only, so it's a
+// separate chunk loaded here on demand rather than part of everyone's startup
+// bundle. `loaded` means someone has pulled it in - the only case where a
+// teardown has anything to tear down.
+const loadChatStore = () => import('../store/chatStore')
+let loaded = false
 
 // Keeps the chat socket alive app-wide for staff, so unread badges and Home's
 // chat tile stay live without the chat view being open.
@@ -12,10 +19,13 @@ export function useChatBootstrap(): void {
 
   useEffect(() => {
     if (!account || !allowed) {
-      useChatStore.getState().teardown()
+      if (loaded) void loadChatStore().then((m) => m.useChatStore.getState().teardown())
       return
     }
-    return runWhenIdle(() => { void useChatStore.getState().init(account) }, 2500)
+    return runWhenIdle(() => {
+      loaded = true
+      void loadChatStore().then((m) => m.useChatStore.getState().init(account))
+    }, 2500)
     // Re-run only when the signed-in identity or its access changes, not on
     // every account payload refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps

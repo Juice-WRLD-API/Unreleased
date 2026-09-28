@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
-import ShareLyricsModal from './ShareLyricsModal'
+import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import CoverEditor from './CoverEditor'
@@ -29,6 +29,9 @@ import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
   usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
 } from '../hooks/useWrldCore'
+
+// Pulls in html-to-image for the export - only worth downloading once opened.
+const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
 
 export default function WrldView(): JSX.Element {
   const {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { MessagesSquare, Plus } from 'lucide-react'
 import { roomKey, useChatStore } from '../../store/chatStore'
+import { useChatUiStore } from '../../store/chatUiStore'
 import { useOpenModal } from './modalHost'
 import { ChannelList, DmList } from './Navigator'
 import RoomHeader, { type SidePanel } from './RoomHeader'
@@ -60,8 +61,8 @@ export default function ChatViewMobile(): JSX.Element {
   const activeServerId = useChatStore((s) => s.activeServerId)
   const threadRootId = useChatStore((s) => s.threadRootId)
   const openThread = useChatStore((s) => s.openThread)
-  const roomOpen = useChatStore((s) => s.mobileRoomOpen)
-  const setMobileRoomOpen = useChatStore((s) => s.setMobileRoomOpen)
+  const roomOpen = useChatUiStore((s) => s.mobileRoomOpen)
+  const setMobileRoomOpen = useChatUiStore((s) => s.setMobileRoomOpen)
   const openModal = useOpenModal()
   const [panel, setPanel] = useState<SidePanel>(null)
 

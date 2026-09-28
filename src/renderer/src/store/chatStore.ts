@@ -163,11 +163,7 @@ async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>
 
 const e2e = () => import('../lib/chatE2E')
 
-export function hasChatAccess(account: AccountUser | null): boolean {
-  if (!account) return false
-  const su = (account as AccountUser & { is_superuser?: boolean }).is_superuser
-  return !!(account.is_administrator || account.is_manager || su)
-}
+export { hasChatAccess } from '../lib/chatAccess'
 
 interface ChatState {
   status: SocketStatus
@@ -195,11 +191,8 @@ interface ChatState {
 
   activeServerId: number | null
   active: RoomRef | null
-  // Mobile-only: whether the room overlay (RoomPane) is currently covering
-  // the channel/DM list, i.e. the user is "in" a chat rather than browsing
-  // it. Lives here (not as local state in ChatView.mobile.tsx) so BottomNav
-  // can read it too, to hide itself the same way it already does for WRLD.
-  mobileRoomOpen: boolean
+  // (Whether a mobile room overlay is open lives in chatUiStore, not here, so
+  // BottomNav can read it without loading this store.)
   threadRootId: number | null
   threads: Record<number, { items: UiMessage[]; loading: boolean }>
   panel: 'members' | 'pins' | null
@@ -240,7 +233,6 @@ interface ChatState {
   removeLocalCategory: (serverId: number, name: string) => void
   renameLocalCategory: (serverId: number, from: string, to: string) => void
   openRoom: (room: RoomRef) => void
-  setMobileRoomOpen: (open: boolean) => void
   loadOlder: (room: RoomRef) => Promise<void>
   setPanel: (panel: 'members' | 'pins' | null) => void
   openThread: (rootId: number | null) => void
@@ -779,7 +771,6 @@ export const useChatStore = create<ChatState>((set, get) => {
     localCategories: {},
     activeServerId: null,
     active: null,
-    mobileRoomOpen: false,
     threadRootId: null,
     threads: {},
     panel: 'members',
@@ -1069,8 +1060,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (!existing?.loaded && !existing?.loading) void get().loadOlder(room)
       else get().markRead(room)
     },
-
-    setMobileRoomOpen: (open) => set({ mobileRoomOpen: open }),
 
     loadOlder: async (room) => {
       const key = roomKey(room)

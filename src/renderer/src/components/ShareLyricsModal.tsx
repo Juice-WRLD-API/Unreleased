@@ -7,10 +7,13 @@ import { parseLrc, isLrcFormat, getCurrentLineIndex, splitColorWords } from '../
 import { fetchImageDataUrl } from '../lib/coverImage'
 import { getAudioCurrentTime } from './Player'
 import { useStore } from '../store/useStore'
-import { hasChatAccess } from '../store/chatStore'
-import ShareLyricsCardModal from './chat/ShareLyricsCardModal'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
 import { FONTS, getFont } from '../lib/fonts'
 import logo from '../assets/logo.png'
+
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const ShareLyricsCardModal = lazyOverlay(() => import('./chat/ShareLyricsCardModal'))
 
 interface Props {
   title: string

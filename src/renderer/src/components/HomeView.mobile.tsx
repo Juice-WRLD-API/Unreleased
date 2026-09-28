@@ -5,9 +5,13 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
-import { hasChatAccess } from '../store/chatStore'
-import HomeChatCard from './chat/HomeChatCard'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
+
+// Staff-only, and it reads the chat store - loading it lazily keeps the chat
+// client out of Home's chunk for everyone else.
+const HomeChatCard = lazyOverlay(() => import('./chat/HomeChatCard'))
 
 // The mobile landing screen. All of its data comes from useHomeData, which the
 // desktop shell shares - this file is layout only: a stack of horizontally

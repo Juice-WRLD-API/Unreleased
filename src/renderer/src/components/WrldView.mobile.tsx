@@ -6,7 +6,7 @@ import {
   MoreHorizontal, Heart, ListMusic, Trash2, History, SlidersHorizontal,
   Mic2, Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, Share2,
 } from 'lucide-react'
-import ShareLyricsModal from './ShareLyricsModal'
+import { lazyOverlay } from '../lib/lazyView'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
@@ -38,6 +38,9 @@ import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
   usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
 } from '../hooks/useWrldCore'
+
+// Pulls in html-to-image for the export - only worth downloading once opened.
+const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WRLD - the full-screen player, and since the mini bar now expands into it,

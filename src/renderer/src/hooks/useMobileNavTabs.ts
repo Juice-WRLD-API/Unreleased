@@ -1,7 +1,7 @@
 import { useStorePick } from '../store/useStore'
 import { orderedNavItems, isNavItemVisible, splitMobileNavTabs, type NavItemDef } from '../lib/navItems'
 import type { ViewType } from '../types'
-import { hasChatAccess } from '../store/chatStore'
+import { hasChatAccess } from '../lib/chatAccess'
 
 // Games ('heardle' - see NAV_ITEMS) and Playlists: Home's own sections cover
 // both directly, so a tab here would just be a second, less complete route
