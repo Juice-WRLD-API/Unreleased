@@ -18,4 +18,13 @@ Disallow: /library
 Disallow: /playlists
 Disallow: /settings
 
+# Link-unfurling bots that honor robots.txt would otherwise skip /shared/
+# links entirely (no card at all) - server/social-preview.mjs serves them
+# per-item preview tags there. A named group replaces the * group for them.
+User-agent: Twitterbot
+User-agent: Slackbot
+User-agent: Slackbot-LinkExpanding
+Allow: /
+Disallow: /auth/
+
 Sitemap: https://player.juicewrldapi.com/sitemap.xml

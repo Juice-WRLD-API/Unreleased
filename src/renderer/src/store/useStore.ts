@@ -995,6 +995,11 @@ let _reportsFlushing = false
 // listening plays) into one combined PATCH instead of one request per field.
 // Failures are swallowed: state is local-first, and the next push - or the
 // next login's merge - re-sends everything anyway.
+// Last URL each path-param view was showing when it was navigated away from -
+// see setActiveView.
+const PATH_PARAM_VIEWS: ViewType[] = ['track', 'shared-playlist', 'public-profile']
+const lastPathParamUrl: Partial<Record<ViewType, string>> = {}
+
 const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
 let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
@@ -1313,11 +1318,17 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // instead of always resetting to the base /admin.
     const selectedPlaylistId = get().playlistsSelectedId
     const activeAdminTab = get().activeAdminTab
+    // Views whose identity lives in the URL path itself (/track/<id>,
+    // /shared/<id>, /u/<id>) have no fixed entry above - remember the URL
+    // they were left at so coming back (closing Settings, collapsing WRLD)
+    // restores it instead of falling back to /tracker.
+    const current = get().activeView
+    if (PATH_PARAM_VIEWS.includes(current)) lastPathParamUrl[current] = window.location.pathname
     const path = view === 'playlists' && selectedPlaylistId != null
       ? `/playlists?id=${selectedPlaylistId}`
       : view === 'admin' && activeAdminTab
         ? ADMIN_TAB_PATHS[activeAdminTab] ?? '/admin'
-        : paths[view] ?? '/tracker'
+        : paths[view] ?? lastPathParamUrl[view] ?? '/tracker'
     window.history.pushState({ view }, '', path)
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
   },

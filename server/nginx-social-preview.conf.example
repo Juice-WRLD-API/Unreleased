@@ -1,0 +1,47 @@
+# Bot-only social-preview routing for player.juicewrldapi.com.
+#
+# The site itself is a static SPA build served by nginx as-is. This snippet
+# adds ONE thing: requests from known link-unfurling bots (Discord, Twitter/X,
+# Slack, iMessage, ...) to /track/:id, /shared/:id and /news/:id are proxied
+# to the social-preview Node service (server/social-preview.mjs) instead of
+# the SPA's index.html, so those bots see real per-item og:/twitter: tags.
+# Every other request - including a real browser hitting the exact same URLs
+# - is completely unaffected and keeps getting the normal SPA build.
+#
+# This is NOT a copy-paste drop-in file; merge the two blocks below into your
+# actual server {} block for player.juicewrldapi.com (paths, root, etc. are
+# whatever your existing config already uses).
+
+# 1) Put this near the top of the http {} block (once, not per-server).
+map $http_user_agent $is_social_bot {
+    default 0;
+    "~*discordbot|twitterbot|facebookexternalhit|slackbot|telegrambot|whatsapp|linkedinbot|skypeuripreview|redditbot|vkshare|applebot|iframely|embedly|pinterest|discord" 1;
+}
+
+# 2) Inside the server {} block for player.juicewrldapi.com, ABOVE the
+#    existing `location / { try_files $uri /index.html; }` (or whatever your
+#    SPA fallback looks like) - order matters, nginx uses the first
+#    matching `location`.
+#
+#    The `if` + `error_page`/named-location dance below is the standard way
+#    to make a conditional proxy_pass in nginx without hitting the
+#    "if is evil" pitfalls of `if` directly wrapping `proxy_pass`.
+location ~ ^/(track|shared|news)/ {
+    error_page 418 = @social_preview;
+    recursive_error_pages on;
+    if ($is_social_bot) {
+        return 418;
+    }
+    try_files $uri /index.html;
+}
+
+location @social_preview {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# After editing your real config:
+#   sudo nginx -t && sudo systemctl reload nginx

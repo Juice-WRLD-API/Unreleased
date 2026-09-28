@@ -6,7 +6,8 @@
     "dev": "vite --port 5173 --strictPort --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "docs:check-drift": "node scripts/check-docs-drift.mjs"
+    "docs:check-drift": "node scripts/check-docs-drift.mjs",
+    "social-preview": "node server/social-preview.mjs"
   },
   "keywords": [],
   "author": "leanwrldd",

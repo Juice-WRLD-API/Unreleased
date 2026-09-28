@@ -50,6 +50,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/settings') return 'settings'
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
+  if (/^\/track\/\d+\/?$/.test(pathname)) return 'track'
   if (pathname.startsWith('/u/')) return 'public-profile'
   if (pathname === '/auth/discord/callback') return 'api-tracker'
   return 'not-found'
@@ -57,25 +58,21 @@ function getViewFromPath(pathname: string): ViewType {
 
 import Sidebar from './components/Sidebar'
 import BottomNav from './components/BottomNav'
-import ApiTrackerView from './components/ApiTrackerView'
 import RadioFmPlayer from './components/RadioFmPlayer'
 import RadioVotePopup from './components/RadioVotePopup'
 import LastfmScrobbler from './components/LastfmScrobbler'
 import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
-import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
-import BulkEditModal from './components/BulkEditModal'
 import InstallPrompt from './components/InstallPrompt'
 import CookieNotice from './components/CookieNotice'
 import DonationNotice from './components/DonationNotice'
-import { GlobalSongInfoHost } from './components/SongInfoModal'
 import Player from './components/Player'
 import NowPlaying from './components/NowPlaying'
 import QueuePanel from './components/QueuePanel'
-import UploadManager from './components/UploadManager'
 import ErrorBoundary from './components/ErrorBoundary'
+import { lazyOverlay } from './lib/lazyView'
 import SandboxNotch from './components/SandboxNotch'
 import MoreNavSheet from './components/MoreNavSheet'
 
@@ -86,17 +83,24 @@ import MoreNavSheet from './components/MoreNavSheet'
 // eager bundle. Definitions live in lib/lazyViews so the nav chrome can warm a
 // chunk on hover/tap without importing this file; preloadView is the warmer.
 import {
-  EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
+  ApiTrackerView, EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
   DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
   StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
-  LikedSongsView, DiagnosticsModal, ChatView, preloadView,
+  LikedSongsView, DiagnosticsModal, ChatView, TrackView, preloadView,
 } from './lib/lazyViews'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
 
+// Overlays that only mount while open - fetched on first open rather than
+// shipped to every visitor in the startup bundle.
+const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
+const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
+const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
+const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
+
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel')
+  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
   // wherever you were (Spotify-style "now playing" sheet), not a real nav
   // destination, so dragging it down should reveal that page like a curtain
@@ -278,6 +282,7 @@ export default function App(): JSX.Element {
               : bgView === 'liked' ? <LikedSongsView />
               : bgView === 'playlists' ? <PlaylistsView />
               : bgView === 'shared-playlist' ? <SharedPlaylistView />
+              : bgView === 'track' ? <TrackView />
               : bgView === 'public-profile' ? <PublicProfileView />
               : bgView === 'editor-profile' ? <EditorProfileView />
               : bgView === 'docs' ? <DocsPage />
@@ -368,11 +373,11 @@ export default function App(): JSX.Element {
         </ErrorBoundary>
       )}
       <ErrorBoundary variant="overlay"><ReportModal /></ErrorBoundary>
-      <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>
+      {bulkEdit && <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>
-      <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>
+      {infoSongId != null && <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>}
       <ErrorBoundary fallback={null}><SandboxNotch /></ErrorBoundary>
     </div>
   )

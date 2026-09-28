@@ -1,0 +1,24 @@
+# systemd unit for server/social-preview.mjs.
+#
+# Copy to /etc/systemd/system/social-preview.service (adjust User, WorkingDirectory
+# and the node path for your box), then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now social-preview
+
+[Unit]
+Description=unreleased social-preview (Discord/Twitter/Slack link unfurl server)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/path/to/music-player-web
+ExecStart=/usr/bin/node server/social-preview.mjs
+Environment=SOCIAL_PREVIEW_PORT=8788
+Environment=JWAPI_BASE=https://juicewrldapi.com/juicewrld
+Environment=SITE_ORIGIN=https://player.juicewrldapi.com
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
