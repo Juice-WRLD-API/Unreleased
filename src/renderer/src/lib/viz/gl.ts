@@ -5,7 +5,7 @@ import type { AudioFrame, RGB } from "./types";
 const UNIFORMS = [
   "u_res", "u_time", "u_bass", "u_mid", "u_treble", "u_energy", "u_beat",
   "u_p0", "u_p1", "u_p2", "u_p3", "u_focus", "u_prot", "u_protS",
-  "u_feather", "u_intensity", "u_oct", "u_spec",
+  "u_feather", "u_intensity", "u_oct", "u_spec", "u_rip",
 ] as const;
 
 interface Program {
@@ -26,6 +26,8 @@ export interface GLInput {
   feather: number;
   intensity: number;
   octaves: number;
+  /** Recent beats, 4 floats each: angle, distance from the focus (in focus radii), age in seconds, strength. */
+  ripples: Float32Array;
 }
 
 /** Shader-based renderer. `ok` is false if WebGL is unavailable. */
@@ -162,7 +164,7 @@ export class GLRenderer {
           const loc = {} as Program["loc"];
           for (const u of UNIFORMS) {
             // Arrays resolve via their first element.
-            loc[u] = gl.getUniformLocation(prog, u === "u_prot" || u === "u_protS" ? `${u}[0]` : u);
+            loc[u] = gl.getUniformLocation(prog, u === "u_prot" || u === "u_protS" || u === "u_rip" ? `${u}[0]` : u);
           }
           result = { prog, aPos: gl.getAttribLocation(prog, "a_pos"), loc };
         } else {
@@ -219,6 +221,7 @@ export class GLRenderer {
     gl.uniform1f(L.u_intensity, input.intensity);
     gl.uniform1i(L.u_oct, input.octaves);
     gl.uniform1i(L.u_spec, 0);
+    if (L.u_rip) gl.uniform4fv(L.u_rip, input.ripples); // only the modes that declare it
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
     gl.enableVertexAttribArray(p.aPos);

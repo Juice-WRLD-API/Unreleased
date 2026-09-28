@@ -10,9 +10,9 @@ import { hasEscapeLayer } from '../hooks/useEscapeToClose'
 import { useStore } from '../store/useStore'
 import { useVizStore } from '../store/vizStore'
 
-// Audio-reactive backdrop for WRLD's fullscreen view, plus its toolbar,
-// visualizer-only caption and keys. Mounted only while fullscreen is on screen:
-// the engine never renders off-screen.
+// Audio-reactive backdrop for the WRLD tab, plus its toolbar, keys and (in
+// fullscreen) the visualizer-only caption. WRLD only mounts while its tab is
+// open, so the engine never renders off-screen.
 
 const IDLE_MS = 2600
 const OSD_MS = 1400
@@ -88,8 +88,10 @@ function readLayout(root: HTMLElement | null, minimal: boolean): VizLayout {
 }
 
 interface Props {
-  /** The fullscreen portal root: scopes layout lookups and carries the idle state. */
+  /** WRLD's page root: scopes layout lookups and carries the idle state. */
   rootRef: React.RefObject<HTMLDivElement>
+  /** Visualizer-only, cursor hiding and exit exist only in fullscreen. */
+  fullscreen: boolean
   artUrl: string | null
   title: string
   artist: string
@@ -105,7 +107,7 @@ interface Props {
 }
 
 export default function WrldVisualizer({
-  rootRef, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, onExit,
+  rootRef, fullscreen, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, onExit,
 }: Props): JSX.Element {
   const isPlaying = useStore((s) => s.isPlaying)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
@@ -122,8 +124,12 @@ export default function WrldVisualizer({
   const vizRef = useRef<Visualizer | null>(null)
   const [glSupported, setGlSupported] = useState(true)
   // The layout provider outlives any one render, so it reads through a ref.
-  const minimalRef = useRef(immMinimal)
-  minimalRef.current = immMinimal
+  // Visualizer-only is a saved preference, but only applied in fullscreen: on
+  // the tab it would hide the player - and the button to undo it - every time
+  // WRLD opened.
+  const minimal = fullscreen && immMinimal
+  const minimalRef = useRef(minimal)
+  minimalRef.current = minimal
 
   // ── Engine lifetime ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -241,7 +247,8 @@ export default function WrldVisualizer({
   }, [rootRef, wake])
   // On the root rather than in state here, so the cursor and WRLD's own
   // chrome can fade with the toolbar without WRLD re-rendering.
-  useEffect(() => { rootRef.current?.toggleAttribute('data-viz-idle', idle) }, [rootRef, idle])
+  // Cursor hiding and the chrome fade are fullscreen-only; on the tab only the toolbar fades.
+  useEffect(() => { rootRef.current?.toggleAttribute('data-viz-idle', idle && fullscreen) }, [rootRef, idle, fullscreen])
 
   // ── Actions ────────────────────────────────────────────────────────────────
   // Everything the keys can reach reads the stores fresh, since the key
@@ -294,7 +301,7 @@ export default function WrldVisualizer({
       const combo = eventToCombo(e)
       if (combo === 'ArrowLeft') cycle(-1)
       else if (combo === 'ArrowRight') cycle(1)
-      else if (combo === 'V') toggleMinimal()
+      else if (combo === 'V' && fullscreen) toggleMinimal()
       else return
       e.preventDefault()
       e.stopPropagation()
@@ -302,7 +309,7 @@ export default function WrldVisualizer({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycle, toggleMinimal, wake])
+  }, [cycle, toggleMinimal, wake, fullscreen])
 
   // ── Auto-switch: a random mode per track or album, never saved ─────────────
   const prevTrack = useRef<string | null>(null)
@@ -358,31 +365,35 @@ export default function WrldVisualizer({
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
         <button
-          className={`${tool} ${lyricsVisible && !immMinimal ? toolOn : toolIdle}`}
+          className={`${tool} ${lyricsVisible && !minimal ? toolOn : toolIdle}`}
           onClick={toggleLyrics}
           title="Toggle lyrics"
           aria-label="Toggle lyrics"
           aria-pressed={lyricsVisible}
-          disabled={immMinimal}
+          disabled={minimal}
         >
           <TextQuote size={18} />
         </button>
-        <button
-          className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
-          onClick={toggleMinimal}
-          title="Visualizer only (V)"
-          aria-label="Visualizer only"
-          aria-pressed={immMinimal}
-        >
-          <AudioLines size={18} />
-        </button>
-        <span className="w-px h-5 mx-1 bg-white/10" />
-        <button className={`${tool} ${toolIdle}`} onClick={onExit} title="Exit fullscreen (Esc)" aria-label="Exit fullscreen">
-          <Minimize2 size={17} />
-        </button>
+        {fullscreen && (
+          <>
+            <button
+              className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
+              onClick={toggleMinimal}
+              title="Visualizer only (V)"
+              aria-label="Visualizer only"
+              aria-pressed={immMinimal}
+            >
+              <AudioLines size={18} />
+            </button>
+            <span className="w-px h-5 mx-1 bg-white/10" />
+            <button className={`${tool} ${toolIdle}`} onClick={onExit} title="Exit fullscreen (Esc)" aria-label="Exit fullscreen">
+              <Minimize2 size={17} />
+            </button>
+          </>
+        )}
       </div>
 
-      {immMinimal && (
+      {minimal && (
         <div
           data-viz="caption"
           className={`absolute z-20 max-w-[46vw] px-[4.5vw] py-[6vh] select-none pointer-events-none ${corner[immCaptionPos]}`}
