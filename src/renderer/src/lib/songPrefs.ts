@@ -139,6 +139,15 @@ export function serializeSongPref(p: SongPreference): WireSongPreference {
   return out
 }
 
+/** Whether pushing `local` would send exactly what `server` already holds:
+ *  the same rows (after the push's own cap) with the same wire values. Lets a
+ *  login merge that changed nothing skip re-uploading the whole array. */
+export function songPrefsMatchServer(local: SongPreference[], server: SongPreference[]): boolean {
+  const wire = (prefs: SongPreference[]): string =>
+    JSON.stringify(prefs.map(serializeSongPref).sort((a, b) => a.song - b.song))
+  return wire(capSongPrefs(local)) === wire(server)
+}
+
 /** Server-side cap on `user_preferences` rows (the profile-blob validator's
  *  limit). Local storage keeps everything; only the pushed copy is capped. */
 export const SERVER_PREFS_LIMIT = 500

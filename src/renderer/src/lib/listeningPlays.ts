@@ -41,6 +41,8 @@ export function capListeningPlays(events: ListeningPlayEvent[], max = SERVER_LIS
   return [...events].sort(newestFirst).slice(0, max)
 }
 
+const playKey = (event: ListeningPlayEvent): string => `${event.song}\0${timeOf(event)}`
+
 /** Union of this device's rows and the profile's, newest first. Dedupes on
  *  (song, parsed timestamp) rather than the literal string - see timeOf: a
  *  server that reformats timestamps would otherwise duplicate the entire
@@ -49,12 +51,22 @@ export function mergeListeningPlays(local: ListeningPlayEvent[], server: Listeni
   const seen = new Set<string>()
   const out: ListeningPlayEvent[] = []
   for (const event of [...local, ...server].sort(newestFirst)) {
-    const key = `${event.song}\0${timeOf(event)}`
+    const key = playKey(event)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(event)
   }
   return capListeningPlays(out)
+}
+
+/** Whether a merge result holds exactly the plays the profile already has -
+ *  nothing this device logged that the server is missing - so pushing it back
+ *  would only re-send the server's own rows. Same (song, parsed timestamp)
+ *  identity as the merge, so a server that reformats timestamps still counts
+ *  as in sync. */
+export function listeningPlaysMatchServer(merged: ListeningPlayEvent[], server: ListeningPlayEvent[]): boolean {
+  const serverKeys = new Set(server.map(playKey))
+  return merged.length === serverKeys.size && merged.every((event) => serverKeys.has(playKey(event)))
 }
 
 export function appendListeningPlay(events: ListeningPlayEvent[], songId: number, at = new Date()): ListeningPlayEvent[] {

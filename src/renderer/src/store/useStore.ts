@@ -16,7 +16,7 @@ import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
-  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref,
+  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { peekRotatedCover } from '../lib/coverRotation'
@@ -25,6 +25,7 @@ import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
+  listeningPlaysMatchServer,
   mergeListeningPlays,
   normalizeListeningPlayEvent,
   sortListeningPlays,
@@ -39,7 +40,7 @@ import type {
 import * as foldersApi from '../lib/foldersApi'
 import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
 import type { AdminTab } from '../hooks/useAdminQueue'
-import { newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
+import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
@@ -1004,6 +1005,32 @@ const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
 let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
 
+// loadAccount's sync* merges used to end by pushing the merged copy back
+// unconditionally - but on most logins the merge changes nothing, so every
+// app start re-uploaded the whole profile blob (~90 KB for an active
+// listener) just to write the server's own data back to it. Each merge now
+// checks whether its result matches what the server sent and, if so, calls
+// this instead of scheduling a push. It also cancels a push the merge's own
+// setters queued while adopting server values - safe, because the merge
+// already folded in every local change, so "matches the server" means no
+// local edit is waiting on that push.
+function dropProfilePush(field: keyof typeof _profilePushDirty): void {
+  _profilePushDirty[field] = false
+  if (_profilePushTimer && !Object.values(_profilePushDirty).some(Boolean)) {
+    clearTimeout(_profilePushTimer)
+    _profilePushTimer = null
+  }
+}
+
+// Key-order-insensitive JSON, so a nested settings object the merge rebuilt
+// (`{ ...local, ...server }`) doesn't read as changed just for key order.
+function stableJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v)
+}
+
 // Assembles the *entire* `user_settings` object from current state - every
 // push has to carry every known field (see UserSettings' doc comment: it's a
 // whole-object PATCH, so an omitted field reads as cleared on other devices).
@@ -1726,8 +1753,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   // Merges every field of the server's `user_settings` blob into local state,
-  // then schedules a push so the merge (and anything local-only that's never
-  // reached the server yet) makes it back up. Runs on login.
+  // then - if the result differs from what the server sent - schedules a push
+  // so the merge (and anything local-only that's never reached the server
+  // yet) makes it back up. Runs on login.
   //
   // muted_user_ids is unioned rather than "server wins" - muting someone
   // should stick regardless of which device did it. Everything else adopts
@@ -1823,7 +1851,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // loads its local copy. See chatStore's account effect.
 
     if (!get().account) return
-    get()._scheduleProfilePush(['userSettings'])
+    const built = buildUserSettings(get())
+    const inSync = (Object.keys(built) as (keyof UserSettings)[])
+      .every((k) => stableJson(built[k]) === stableJson(serverSettings[k]))
+    if (inSync) dropProfilePush('userSettings')
+    else get()._scheduleProfilePush(['userSettings'])
   },
 
   // ── Song preferences ──────────────────────────────────────────────────────
@@ -1942,6 +1974,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
         if (!merged[pref.song]) merged[pref.song] = pref
       }
       get()._setSongPrefs(merged)
+      if (songPrefsMatchServer(Object.values(merged), rows.map(normalizeSongPref))) {
+        dropProfilePush('songPrefs')
+        return
+      }
       // Goes through the shared debounced scheduler rather than pushing
       // immediately - loadAccount calls this alongside syncListeningPlays and
       // syncFolders right after, and routing all three through the same
@@ -1959,7 +1995,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
         .filter((row): row is ListeningPlayEvent => row != null)
       const merged = mergeListeningPlays(get().listeningPlays, serverRows)
       get()._setListeningPlays(merged)
-      get()._scheduleProfilePush(['listeningPlays'])
+      if (listeningPlaysMatchServer(merged, serverRows)) dropProfilePush('listeningPlays')
+      else get()._scheduleProfilePush(['listeningPlays'])
     } catch {}
   },
 
@@ -2157,7 +2194,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
         if (!serverIds.has(f.id) && hasLocal && !hasApi) merged.push(f)
       }
       get()._setFolders(merged)
-      get()._scheduleProfilePush(['folders'])
+      if (foldersMatchServer(merged, server)) dropProfilePush('folders')
+      else get()._scheduleProfilePush(['folders'])
     } catch {}
   },
 
