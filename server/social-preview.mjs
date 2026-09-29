@@ -391,7 +391,7 @@ function trackVideoSource(song) {
   const audio = `${JWAPI_BASE}/files/download/?path=${encodeURIComponent(file)}`
   const image = buildImageUrl(song.image_url) || `${DEFAULT_ORIGIN}/icon-512.png`
   const key = createHash('sha1').update(`${audio}\n${image}`).digest('hex').slice(0, 12)
-  return { audio, image, key, file: path.join(VIDEO_CACHE_DIR, `${Number(song.public_id ?? song.id)}-${key}.mp4`) }
+  return { audio, image, key, seconds, file: path.join(VIDEO_CACHE_DIR, `${Number(song.public_id ?? song.id)}-${key}.mp4`) }
 }
 
 const videoJobs = new Map()
@@ -422,42 +422,71 @@ function drainJobs() {
   }
 }
 
-function transcode({ audio, image, file }) {
-  const part = `${file}.${process.pid}.part`
-  const args = [
-    '-hide_banner', '-loglevel', 'error', '-y',
-    '-rw_timeout', '15000000', '-loop', '1', '-framerate', '1', '-i', image,
-    '-rw_timeout', '15000000', '-i', audio,
-    '-map', '0:v', '-map', '1:a',
-    '-vf', `scale=${VIDEO_SIZE}:${VIDEO_SIZE}:force_original_aspect_ratio=decrease,pad=${VIDEO_SIZE}:${VIDEO_SIZE}:(ow-iw)/2:(oh-ih)/2,format=yuv420p`,
-    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-r', '1',
-    '-c:a', 'aac', '-b:a', '160k',
-    '-shortest', '-movflags', '+faststart', '-f', 'mp4', part,
-  ]
+// Runs a tool to completion, resolving with its stdout.
+function run(cmd, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    const proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
     let stderr = ''
+    proc.stdout.on('data', (d) => { stdout += d })
     proc.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000) })
-    const timer = setTimeout(() => proc.kill('SIGKILL'), VIDEO_JOB_TIMEOUT_MS)
-    proc.on('error', reject)
+    const timer = setTimeout(() => proc.kill('SIGKILL'), timeoutMs)
+    proc.on('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
     proc.on('exit', (code) => {
       clearTimeout(timer)
-      if (code !== 0) {
-        fs.rm(part, { force: true }, () => {})
-        reject(new Error(`ffmpeg exited ${code}: ${stderr.trim()}`))
-        return
-      }
-      fs.renameSync(part, file)
-      pruneVideoCache()
-      resolve()
+      if (code === 0) resolve(stdout)
+      else reject(new Error(`${path.basename(cmd)} exited ${code}: ${stderr.trim()}`))
     })
   })
+}
+
+async function download(url, dest, timeoutMs) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+  if (!res.ok) throw new Error(`${res.status} fetching ${url}`)
+  await fs.promises.writeFile(dest, Buffer.from(await res.arrayBuffer()))
+}
+
+// ffprobe sits next to ffmpeg in every build that ships both.
+const FFPROBE = process.env.FFPROBE_PATH || FFMPEG.replace(/ffmpeg(\.exe)?$/i, (_, exe) => `ffprobe${exe || ''}`)
+
+// Inputs are downloaded first: ffmpeg reading the audio straight off HTTPS
+// took minutes for a 10MB file, versus ~2s to fetch it and ~4s to encode.
+// The video is cut to the audio's exact length with -t - at 1 fps x264's
+// frame buffering makes -shortest overshoot by half a minute.
+async function transcode({ audio, image, file, seconds }) {
+  const work = `${file}.${process.pid}`
+  const audioFile = `${work}.audio`
+  const imageFile = `${work}.image`
+  const part = `${work}.part.mp4`
+  try {
+    await Promise.all([download(audio, audioFile, 90_000), download(image, imageFile, 30_000)])
+    const probed = Number(await run(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audioFile], 30_000).catch(() => ''))
+    const duration = probed > 0 ? probed : seconds
+    await run(FFMPEG, [
+      '-hide_banner', '-loglevel', 'error', '-y',
+      '-loop', '1', '-framerate', '1', '-i', imageFile,
+      '-i', audioFile,
+      '-map', '0:v', '-map', '1:a',
+      '-vf', `scale=${VIDEO_SIZE}:${VIDEO_SIZE}:force_original_aspect_ratio=decrease,pad=${VIDEO_SIZE}:${VIDEO_SIZE}:(ow-iw)/2:(oh-ih)/2,format=yuv420p`,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-r', '1',
+      '-c:a', 'aac', '-b:a', '160k',
+      ...(duration ? ['-t', String(duration)] : ['-shortest']),
+      '-movflags', '+faststart', '-f', 'mp4', part,
+    ], VIDEO_JOB_TIMEOUT_MS)
+    await fs.promises.rename(part, file)
+    pruneVideoCache()
+  } finally {
+    for (const f of [audioFile, imageFile, part]) fs.rm(f, { force: true }, () => {})
+  }
 }
 
 function pruneVideoCache() {
   try {
     const files = fs.readdirSync(VIDEO_CACHE_DIR)
-      .filter((f) => f.endsWith('.mp4'))
+      .filter((f) => f.endsWith('.mp4') && !f.endsWith('.part.mp4'))
       .map((f) => ({ f: path.join(VIDEO_CACHE_DIR, f), t: fs.statSync(path.join(VIDEO_CACHE_DIR, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t)
     for (const { f } of files.slice(VIDEO_CACHE_MAX_FILES)) fs.rmSync(f, { force: true })
