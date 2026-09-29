@@ -3101,7 +3101,18 @@ function FeedsMediaTab() {
           once with ffmpeg, its cover art held over the audio at 640x640, cached on disk, and served from{' '}
           <Code>{'/track/{id}/video.mp4'}</Code>. The first request for a song waits on the transcode. Songs over
           20 minutes are skipped, at most two transcodes run at once, and without ffmpeg embeds simply stay
-          unplayable. Like the avatar route, this one is not bot-gated.
+          unplayable. Like the avatar route, this one is not bot-gated. ffmpeg and ffprobe are fixed to{' '}
+          <Code>/usr/bin/ffmpeg</Code> and <Code>/usr/bin/ffprobe</Code> (from PATH on Windows), never read from
+          the environment.
+        </p>
+        <p className="text-sm text-text-secondary leading-relaxed mt-2">
+          Because the video URL is public, rendering is fenced in. Only songs whose embed page was served in the
+          last 15 minutes can be rendered. At most 6 renders queue, and anything beyond that is refused. New
+          renders are budgeted per hour, 120 overall and 20 per client IP, and cache hits and joining a render
+          already in progress cost nothing. Audio downloads are capped at 60 MB. The cover image is fetched only
+          from HTTPS URLs on the API or site hosts, with no port or credentials, and redirects are refused. nginx
+          must pass <Code>X-Real-IP</Code> for the per-client limit, and the service only trusts that header from
+          loopback.
         </p>
         <p className="text-xs text-text-muted font-semibold mt-2">Service environment variables:</p>
         <Table
@@ -3112,10 +3123,9 @@ function FeedsMediaTab() {
             [<Code>JWAPI_BASE</Code>, <Code>https://juicewrldapi.com/juicewrld</Code>, 'API base the service reads from'],
             [<Code>SITE_ORIGIN</Code>, <Code>https://player.juicewrldapi.com</Code>, 'Default origin for canonical and og:url links'],
             [<Code>SITE_HOSTS</Code>, <Code>player + beta hosts</Code>, 'Comma-separated hosts links may point back to; the request Host picks the origin, anything else falls back to SITE_ORIGIN'],
-            [<Code>FFMPEG_PATH</Code>, <Code>ffmpeg</Code>, 'ffmpeg binary used for track videos'],
-            [<Code>FFPROBE_PATH</Code>, <Code>ffprobe next to ffmpeg</Code>, 'ffprobe binary used to read audio length'],
             [<Code>SOCIAL_PREVIEW_CACHE</Code>, <Code>OS temp dir</Code>, 'Directory for cached track videos'],
             [<Code>SOCIAL_PREVIEW_VIDEO</Code>, <Code>on</Code>, 'Set to 0 to turn playable track embeds off'],
+            [<Code>SOCIAL_PREVIEW_VIDEO_RENDERS_PER_HOUR</Code>, <Code>120</Code>, 'Overall cap on new video renders per hour'],
           ]}
         />
         <p className="text-sm text-text-secondary leading-relaxed mt-2">
