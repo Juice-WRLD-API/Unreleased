@@ -1625,7 +1625,7 @@ export default function Player(): JSX.Element {
           <div className="fixed inset-0 z-40" onClick={() => setShowEqPanel(false)} />
           <div
             onMouseDown={(e) => e.stopPropagation()}
-            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto"
+            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto slim-scroll"
             // Cap below the title bar so a full panel scrolls internally
             // instead of growing under the window controls.
             style={{ bottom: eqPos.bottom, top: eqPos.top, right: eqPos.right, maxHeight: `calc(100vh - ${(eqPos.bottom ?? eqPos.top ?? 0) + 48}px)` }}

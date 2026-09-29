@@ -1830,9 +1830,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
       set({ eqGains: serverSettings.eq_gains, eqPreset: serverSettings.eq_preset ?? 'custom' })
       ls.set('eqGains', serverSettings.eq_gains); ls.set('eqPreset', serverSettings.eq_preset ?? 'custom')
     }
-    if (serverSettings.eq_balance !== undefined && serverSettings.eq_balance !== s.eqBalance) s.setEqBalance(serverSettings.eq_balance)
+    if (serverSettings.eq_balance != null && serverSettings.eq_balance !== s.eqBalance) s.setEqBalance(serverSettings.eq_balance)
     if (serverSettings.eq_mono !== undefined && serverSettings.eq_mono !== s.eqMono) s.setEqMono(serverSettings.eq_mono)
-    if (serverSettings.eq_boost !== undefined && serverSettings.eq_boost !== s.eqBoost) s.setEqBoost(serverSettings.eq_boost)
+    if (serverSettings.eq_boost != null && serverSettings.eq_boost !== s.eqBoost) s.setEqBoost(serverSettings.eq_boost)
     if (serverSettings.skip_silence !== undefined && serverSettings.skip_silence !== s.skipSilence) s.setSkipSilence(serverSettings.skip_silence)
     if (serverSettings.reverb_enabled !== undefined && serverSettings.reverb_enabled !== s.reverbEnabled) s.setReverbEnabled(serverSettings.reverb_enabled)
     if (serverSettings.reverb_mix !== undefined && serverSettings.reverb_mix !== s.reverbMix) s.setReverbMix(serverSettings.reverb_mix)

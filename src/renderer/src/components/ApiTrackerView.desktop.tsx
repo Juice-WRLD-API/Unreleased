@@ -18,6 +18,7 @@ import {
   parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
 import { triggerDownload } from '../lib/apiFilesShared'
+import { preloadView } from '../lib/lazyViews'
 import { downloadFileSmart } from '../lib/cdn'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
@@ -1703,6 +1704,12 @@ function VersionTitlePromptModal({
 }
 
 // ─── Main view ────────────────────────────────────────────────────────────────
+function warmStatistics(): void {
+  preloadView('statistics')
+  apiFetch('/stats/').catch(() => undefined)
+  apiFetch('/plays/stats/').catch(() => undefined)
+}
+
 export default function ApiTrackerView(): JSX.Element {
   const {
     playTrack, startRadio, addToQueue, account, shuffle,
@@ -2757,6 +2764,10 @@ export default function ApiTrackerView(): JSX.Element {
           </button>
           <button
             onClick={() => setActiveView('statistics')}
+            // Warm the chunk and both endpoints so the first open doesn't
+            // flash the generic skeleton and then Statistics' own.
+            onPointerEnter={warmStatistics}
+            onFocus={warmStatistics}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
           >
             <BarChart3 size={11} /> Statistics
