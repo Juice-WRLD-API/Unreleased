@@ -18,9 +18,9 @@
 // Run: node server/social-preview.mjs
 // Env: SOCIAL_PREVIEW_PORT (default 8788), SOCIAL_PREVIEW_HOST (default
 // 127.0.0.1 - only nginx should reach this), JWAPI_BASE, SITE_ORIGIN,
-// SITE_HOSTS (comma-separated hosts links may point back to), FFMPEG_PATH
-// (default "ffmpeg"), SOCIAL_PREVIEW_CACHE (track video cache dir),
-// SOCIAL_PREVIEW_VIDEO=0 to turn playable track embeds off
+// SITE_HOSTS (comma-separated hosts links may point back to),
+// SOCIAL_PREVIEW_CACHE (track video cache dir), SOCIAL_PREVIEW_VIDEO=0 to
+// turn playable track embeds off
 
 import http from 'node:http'
 import fs from 'node:fs'
@@ -362,7 +362,10 @@ function lyricHook(lyrics) {
 // cached on disk, and served from /track/:id/video.mp4. Needs ffmpeg on the
 // box; without it embeds just stay unplayable.
 const VIDEO_ENABLED = process.env.SOCIAL_PREVIEW_VIDEO !== '0'
-const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
+// Fixed binaries, never taken from the environment: the distro's ffmpeg on
+// the server (apt install ffmpeg), the PATH one when developing on Windows.
+const FFMPEG = process.platform === 'win32' ? 'ffmpeg.exe' : '/usr/bin/ffmpeg'
+const FFPROBE = process.platform === 'win32' ? 'ffprobe.exe' : '/usr/bin/ffprobe'
 const VIDEO_CACHE_DIR = process.env.SOCIAL_PREVIEW_CACHE || path.join(os.tmpdir(), 'social-preview-video')
 const VIDEO_CACHE_MAX_FILES = 300
 const VIDEO_MAX_JOBS = 2
@@ -393,6 +396,21 @@ if (VIDEO_ENABLED) {
   })
 }
 
+// A song's image_url is editor-set and buildImageUrl passes absolute (and
+// data:) URLs through untouched. That's fine for og:image, which Discord
+// fetches, but this process downloads the video's cover itself - so only
+// HTTPS URLs on the API's own host or the site's hosts are ever fetched,
+// never an internal address or anything else an editor typed in.
+const FETCHABLE_IMAGE_HOSTS = new Set([new URL(JWAPI_BASE).host, new URL(DEFAULT_ORIGIN).host, ...SITE_HOSTS])
+function fetchableImageUrl(url) {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && !u.username && !u.password && !u.port && FETCHABLE_IMAGE_HOSTS.has(u.host) ? u.toString() : null
+  } catch {
+    return null
+  }
+}
+
 // What a song's video is built from, and a key that changes when either
 // input does - it versions the URL too, so Discord's cache never serves a
 // video made from an old cover or file.
@@ -401,7 +419,7 @@ function trackVideoSource(song) {
   const seconds = parseLength(song.length)
   if (!VIDEO_ENABLED || !ffmpegReady || !file || (seconds && seconds > VIDEO_MAX_SECONDS)) return null
   const audio = `${JWAPI_BASE}/files/download/?path=${encodeURIComponent(file)}`
-  const image = buildImageUrl(song.image_url) || `${DEFAULT_ORIGIN}/icon-512.png`
+  const image = fetchableImageUrl(buildImageUrl(song.image_url)) || `${DEFAULT_ORIGIN}/icon-512.png`
   const key = createHash('sha1').update(`${audio}\n${image}`).digest('hex').slice(0, 12)
   return { audio, image, key, seconds, file: path.join(VIDEO_CACHE_DIR, `${Number(song.public_id ?? song.id)}-${key}.mp4`) }
 }
@@ -487,7 +505,9 @@ function run(cmd, args, timeoutMs) {
 }
 
 async function download(url, dest, timeoutMs, maxBytes) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+  // No redirects: an allowed host must not be able to bounce the request on
+  // to one that isn't.
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' })
   if (!res.ok) throw new Error(`${res.status} fetching ${url}`)
   if (Number(res.headers.get('content-length')) > maxBytes) throw new Error(`${url} is over ${maxBytes} bytes`)
   const chunks = []
@@ -499,9 +519,6 @@ async function download(url, dest, timeoutMs, maxBytes) {
   }
   await fs.promises.writeFile(dest, Buffer.concat(chunks))
 }
-
-// ffprobe sits next to ffmpeg in every build that ships both.
-const FFPROBE = process.env.FFPROBE_PATH || FFMPEG.replace(/ffmpeg(\.exe)?$/i, (_, exe) => `ffprobe${exe || ''}`)
 
 // Inputs are downloaded first: ffmpeg reading the audio straight off HTTPS
 // took minutes for a 10MB file, versus ~2s to fetch it and ~4s to encode.
@@ -1084,7 +1101,12 @@ async function renderProfile(userId) {
 }
 
 const server = http.createServer((req, res) => {
-  const ip = String(req.headers['x-real-ip'] || req.socket.remoteAddress || 'unknown')
+  // X-Real-IP is only believed from nginx on this box. If the service is
+  // ever bound beyond loopback, direct callers are budgeted by their real
+  // address instead of whatever header they send.
+  const peer = req.socket.remoteAddress || 'unknown'
+  const fromLocalProxy = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1'
+  const ip = String((fromLocalProxy && req.headers['x-real-ip']) || peer)
   requestOrigin.run(originForHost(req.headers.host), () => requestIp.run(ip, () => handle(req, res)))
 })
 
