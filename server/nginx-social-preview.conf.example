@@ -35,6 +35,15 @@ location ~ ^/u/\d+/avatar\.(jpg|png|webp|gif)$ {
     proxy_set_header Host $host;
 }
 
+# Playable track embeds: the service renders each song once as an MP4 (cover
+# + audio, needs ffmpeg on this box) that Discord plays inline. Not bot-gated
+# either, and the first request for a song can wait on the transcode.
+location ~ ^/track/\d+/video\.mp4$ {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_read_timeout 180s;
+}
+
 # One block for every previewable route: the /track, /shared, /news and /u
 # prefixes, plus the exact pages / , /home and /playlists (the site card, and
 # /playlists?id=:id&view=shared public playlists - nginx locations never see
@@ -42,7 +51,7 @@ location ~ ^/u/\d+/avatar\.(jpg|png|webp|gif)$ {
 # `location @social_preview` block below existing in the SAME server {} -
 # without it nginx -t still passes, but every bot request 500s at runtime
 # with "could not find named location".
-location ~ ^/((track|shared|news|u)/|(home|playlists)/?$|$) {
+location ~ ^/((track|shared|news|u)/|(home|playlists|statistics)/?$|$) {
     error_page 418 = @social_preview;
     recursive_error_pages on;
     if ($is_social_bot) {

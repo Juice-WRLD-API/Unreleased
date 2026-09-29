@@ -18,9 +18,15 @@
 // Run: node server/social-preview.mjs
 // Env: SOCIAL_PREVIEW_PORT (default 8788), SOCIAL_PREVIEW_HOST (default
 // 127.0.0.1 - only nginx should reach this), JWAPI_BASE, SITE_ORIGIN,
-// SITE_HOSTS (comma-separated hosts links may point back to)
+// SITE_HOSTS (comma-separated hosts links may point back to), FFMPEG_PATH
+// (default "ffmpeg"), SOCIAL_PREVIEW_CACHE (track video cache dir),
+// SOCIAL_PREVIEW_VIDEO=0 to turn playable track embeds off
 
 import http from 'node:http'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 import { URL } from 'node:url'
@@ -241,9 +247,16 @@ function playlistName(data) {
   return null
 }
 
-function renderPage({ title, description, image, imageAlt, url, componentEmbed }) {
+function renderPage({ title, description, image, imageAlt, url, componentEmbed, video }) {
   const fullTitle = title.includes(SITE) ? title : `${title} · ${SITE}`
   const safeImage = image || null
+  const videoTags = video
+    ? `<meta property="og:video" content="${escapeHtml(video)}" />
+<meta property="og:video:secure_url" content="${escapeHtml(video)}" />
+<meta property="og:video:type" content="video/mp4" />
+<meta property="og:video:width" content="${VIDEO_SIZE}" />
+<meta property="og:video:height" content="${VIDEO_SIZE}" />`
+    : ''
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -259,6 +272,7 @@ function renderPage({ title, description, image, imageAlt, url, componentEmbed }
 <meta property="og:description" content="${escapeHtml(description)}" />
 ${safeImage ? `<meta property="og:image" content="${escapeHtml(safeImage)}" />
 <meta property="og:image:alt" content="${escapeHtml(imageAlt || fullTitle)}" />` : ''}
+${videoTags}
 
 <meta name="twitter:card" content="${safeImage ? 'summary_large_image' : 'summary'}" />
 <meta name="twitter:title" content="${escapeHtml(fullTitle)}" />
@@ -342,6 +356,163 @@ function lyricHook(lyrics) {
   return best ? best.lines.map((l) => truncate(l, 90)) : null
 }
 
+// Playable track embeds. Discord never plays audio from a link embed
+// (og:audio is ignored), but it does play an MP4 inline - so each song is
+// rendered once as its cover art held for the whole song over its audio,
+// cached on disk, and served from /track/:id/video.mp4. Needs ffmpeg on the
+// box; without it embeds just stay unplayable.
+const VIDEO_ENABLED = process.env.SOCIAL_PREVIEW_VIDEO !== '0'
+const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg'
+const VIDEO_CACHE_DIR = process.env.SOCIAL_PREVIEW_CACHE || path.join(os.tmpdir(), 'social-preview-video')
+const VIDEO_CACHE_MAX_FILES = 300
+const VIDEO_MAX_JOBS = 2
+const VIDEO_JOB_TIMEOUT_MS = 180_000
+// Long session dumps and compilations aren't worth transcoding for a preview.
+const VIDEO_MAX_SECONDS = 20 * 60
+const VIDEO_SIZE = 640
+
+let ffmpegReady = false
+if (VIDEO_ENABLED) {
+  const probe = spawn(FFMPEG, ['-version'], { stdio: 'ignore' })
+  probe.on('error', () => console.warn(`social-preview: ${FFMPEG} not found - track embeds won't be playable`))
+  probe.on('exit', (code) => {
+    ffmpegReady = code === 0
+    if (ffmpegReady) fs.mkdirSync(VIDEO_CACHE_DIR, { recursive: true })
+  })
+}
+
+// What a song's video is built from, and a key that changes when either
+// input does - it versions the URL too, so Discord's cache never serves a
+// video made from an old cover or file.
+function trackVideoSource(song) {
+  const file = songField(song.path)
+  const seconds = parseLength(song.length)
+  if (!VIDEO_ENABLED || !ffmpegReady || !file || (seconds && seconds > VIDEO_MAX_SECONDS)) return null
+  const audio = `${JWAPI_BASE}/files/download/?path=${encodeURIComponent(file)}`
+  const image = buildImageUrl(song.image_url) || `${DEFAULT_ORIGIN}/icon-512.png`
+  const key = createHash('sha1').update(`${audio}\n${image}`).digest('hex').slice(0, 12)
+  return { audio, image, key, file: path.join(VIDEO_CACHE_DIR, `${Number(song.public_id ?? song.id)}-${key}.mp4`) }
+}
+
+const videoJobs = new Map()
+let runningJobs = 0
+const jobQueue = []
+
+function ensureTrackVideo(source) {
+  if (fs.existsSync(source.file)) return Promise.resolve(source.file)
+  if (!videoJobs.has(source.file)) {
+    const job = new Promise((resolve, reject) => jobQueue.push({ source, resolve, reject }))
+      .finally(() => videoJobs.delete(source.file))
+    videoJobs.set(source.file, job)
+    drainJobs()
+  }
+  return videoJobs.get(source.file)
+}
+
+function drainJobs() {
+  while (runningJobs < VIDEO_MAX_JOBS && jobQueue.length) {
+    const { source, resolve, reject } = jobQueue.shift()
+    runningJobs++
+    transcode(source)
+      .then(() => resolve(source.file), reject)
+      .finally(() => {
+        runningJobs--
+        drainJobs()
+      })
+  }
+}
+
+function transcode({ audio, image, file }) {
+  const part = `${file}.${process.pid}.part`
+  const args = [
+    '-hide_banner', '-loglevel', 'error', '-y',
+    '-rw_timeout', '15000000', '-loop', '1', '-framerate', '1', '-i', image,
+    '-rw_timeout', '15000000', '-i', audio,
+    '-map', '0:v', '-map', '1:a',
+    '-vf', `scale=${VIDEO_SIZE}:${VIDEO_SIZE}:force_original_aspect_ratio=decrease,pad=${VIDEO_SIZE}:${VIDEO_SIZE}:(ow-iw)/2:(oh-ih)/2,format=yuv420p`,
+    '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-r', '1',
+    '-c:a', 'aac', '-b:a', '160k',
+    '-shortest', '-movflags', '+faststart', '-f', 'mp4', part,
+  ]
+  return new Promise((resolve, reject) => {
+    const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    proc.stderr.on('data', (d) => { stderr = (stderr + d).slice(-2000) })
+    const timer = setTimeout(() => proc.kill('SIGKILL'), VIDEO_JOB_TIMEOUT_MS)
+    proc.on('error', reject)
+    proc.on('exit', (code) => {
+      clearTimeout(timer)
+      if (code !== 0) {
+        fs.rm(part, { force: true }, () => {})
+        reject(new Error(`ffmpeg exited ${code}: ${stderr.trim()}`))
+        return
+      }
+      fs.renameSync(part, file)
+      pruneVideoCache()
+      resolve()
+    })
+  })
+}
+
+function pruneVideoCache() {
+  try {
+    const files = fs.readdirSync(VIDEO_CACHE_DIR)
+      .filter((f) => f.endsWith('.mp4'))
+      .map((f) => ({ f: path.join(VIDEO_CACHE_DIR, f), t: fs.statSync(path.join(VIDEO_CACHE_DIR, f)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)
+    for (const { f } of files.slice(VIDEO_CACHE_MAX_FILES)) fs.rmSync(f, { force: true })
+  } catch (err) {
+    console.error('social-preview: video cache prune failed:', err)
+  }
+}
+
+async function serveTrackVideo(req, res, songId) {
+  const song = await fetchJson(`${JWAPI_BASE}/songs/${encodeURIComponent(songId)}/`)
+  const source = song && trackVideoSource(song)
+  if (!source) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Not found')
+    return
+  }
+  let file
+  try {
+    file = await ensureTrackVideo(source)
+  } catch (err) {
+    console.error(`social-preview: video for track ${songId} failed:`, err.message)
+    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Video unavailable')
+    return
+  }
+  serveFile(req, res, file, 'video/mp4')
+}
+
+// Plain file response with single-range support - video players (and
+// Discord's media proxy) seek with Range requests.
+function serveFile(req, res, file, type) {
+  const { size } = fs.statSync(file)
+  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=86400' }
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '')
+  let start = 0
+  let end = size - 1
+  if (range && (range[1] || range[2])) {
+    start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]))
+    end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1
+    if (start > end || start >= size) {
+      res.writeHead(416, { 'Content-Range': `bytes */${size}` })
+      res.end()
+      return
+    }
+    res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 })
+  } else {
+    res.writeHead(200, { ...headers, 'Content-Length': size })
+  }
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  fs.createReadStream(file, { start, end }).pipe(res)
+}
+
 async function renderTrack(songId) {
   const url = `${origin()}/track/${songId}`
   const song = await fetchJson(`${JWAPI_BASE}/songs/${encodeURIComponent(songId)}/`)
@@ -391,10 +562,20 @@ async function renderTrack(songId) {
   const hook = lyricHook(song.lyrics)
   const info = songField(song.additional_information)
 
+  // Start rendering the video now - Discord's media proxy asks for it right
+  // after reading this page, and a warm cache answers that immediately.
+  const videoSource = trackVideoSource(song)
+  const video = videoSource && `${url}/video.mp4?v=${videoSource.key}`
+  if (videoSource) ensureTrackVideo(videoSource).catch((err) => console.error(`social-preview: video for track ${songId} failed:`, err.message))
+
   const componentEmbed = fitComponentEmbed(
     ({ withCredits, withHook, withInfo }) =>
       container([
-        section([text(`### [${md(title)}](${url})`), text(md(artists)), text(`-# ${meta || md(SITE)}`)], thumbnail(image, title)),
+        // The playable video already shows the cover, so it replaces the
+        // thumbnail rather than sitting next to it.
+        ...(video
+          ? [text(`### [${md(title)}](${url})`), text(md(artists)), text(`-# ${meta || md(SITE)}`), gallery([{ url: video, description: title }])]
+          : [section([text(`### [${md(title)}](${url})`), text(md(artists)), text(`-# ${meta || md(SITE)}`)], thumbnail(image, title))]),
         ...(withCredits && credits.length ? [separator(), text(credits.join('\n'))] : []),
         ...(withHook && hook ? [text(hook.map((l) => `> *${md(l)}*`).join('\n'))] : []),
         ...(withInfo && info ? [text(`-# ${md(truncate(oneLine(info), 240))}`)] : []),
@@ -409,7 +590,7 @@ async function renderTrack(songId) {
     ],
   )
 
-  return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
+  return renderPage({ title, description, image, imageAlt: title, url, componentEmbed, video })
 }
 
 // Anonymous share links (/shared/:id) and a signed-in user's public library
@@ -623,6 +804,73 @@ async function renderHome() {
   return renderPage({ title, description: HOME_DESCRIPTION, image: defaultImage(), imageAlt: title, url, componentEmbed })
 }
 
+// Same two sources as useStatisticsData.ts: /stats/ counts catalog rows,
+// /plays/stats/ counts plays across every listener.
+async function renderStatistics() {
+  const url = `${origin()}/statistics`
+  const title = 'Statistics'
+  const [stats, plays] = await Promise.all([fetchJson(`${JWAPI_BASE}/stats/`), fetchJson(`${JWAPI_BASE}/plays/stats/`)])
+
+  const md = escapeDiscordMarkdown
+  const n = (value) => (Number.isFinite(value) ? value.toLocaleString('en-US') : null)
+  const compact = (value) => new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+  const totalPlays = Number.isFinite(plays?.total_plays) ? plays.total_plays : null
+
+  const headline = [
+    totalPlays != null && `**${n(totalPlays)}** plays`,
+    n(plays?.total_songs_with_plays) && `**${n(plays.total_songs_with_plays)}** songs played`,
+    n(stats?.total_songs) && `**${n(stats.total_songs)}** in the catalog`,
+  ].filter(Boolean).join(' · ')
+  const byCategory = totalPlays
+    ? (Array.isArray(plays?.category_breakdown) ? plays.category_breakdown : [])
+      .filter((r) => Number.isFinite(r?.count) && r.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .map((r) => `${compact(r.count)} ${(r.category === 'recording_session' ? 'sessions' : (CATEGORY_LABELS[r.category] || r.category)).toLowerCase()} (${r.count / totalPlays < 0.01 ? '<1' : Math.round((r.count / totalPlays) * 100)}%)`)
+      .join(' · ')
+    : ''
+
+  const topSongs = (Array.isArray(plays?.top_songs) ? plays.top_songs : []).filter((s) => s?.id != null && s.name)
+  const topEras = (Array.isArray(plays?.top_eras) ? plays.top_eras : []).filter((e) => e?.name && Number.isFinite(e.play_count))
+  const latest = Array.isArray(plays?.recent_plays) ? plays.recent_plays.find((p) => p?.song_id != null && p.title) : null
+  const latestAt = latest?.played_at ? Date.parse(latest.played_at) : NaN
+
+  // Text bars scaled to the top era - Discord has no chart component.
+  const bar = (value, max, width = 10) => {
+    const filled = Math.max(1, Math.round((value / max) * width))
+    return `\`${'█'.repeat(filled)}${'░'.repeat(width - filled)}\``
+  }
+
+  const description = [headline.replace(/\*\*/g, ''), topSongs[0] && `Most played: ${topSongs[0].name}`].filter(Boolean).join(' · ')
+    || 'Catalog-wide listening statistics on unreleased.'
+
+  const componentEmbed = fitComponentEmbed(
+    ({ songCount, eraCount, withLatest }) => {
+      const songLines = topSongs.slice(0, songCount).map((s, i) =>
+        `${i + 1}. [${md(truncate(s.name, 50))}](${origin()}/track/${s.id})${s.era_name ? ` · ${md(s.era_name)}` : ''} · ${compact(s.play_count)} plays`)
+      const eraLines = topEras.slice(0, eraCount).map((e) => `${bar(e.play_count, topEras[0].play_count)} ${md(e.name)} · ${compact(e.play_count)}`)
+      return container([
+        section(
+          [text(`### [${title}](${url})`), text('-# Listening across everyone on unreleased'), ...(headline ? [text([headline, byCategory && `-# ${byCategory}`].filter(Boolean).join('\n'))] : [])],
+          thumbnail(defaultImage(), SITE),
+        ),
+        ...(songLines.length ? [separator(), text(['**Top songs**', ...songLines].join('\n'))] : []),
+        ...(eraLines.length ? [separator(), text(['**Top eras**', ...eraLines].join('\n'))] : []),
+        ...(withLatest && latest ? [separator(), text(`🕒 **Just played** [${md(truncate(latest.title, 60))}](${origin()}/track/${latest.song_id})${Number.isFinite(latestAt) ? ` · <t:${Math.floor(latestAt / 1000)}:R>` : ''}`)] : []),
+        separator(),
+        linkButtons({ label: 'View statistics', url, emoji: '📊' }),
+      ])
+    },
+    [
+      { songCount: 5, eraCount: 5, withLatest: true },
+      { songCount: 5, eraCount: 3, withLatest: true },
+      { songCount: 3, eraCount: 3, withLatest: false },
+      { songCount: 0, eraCount: 0, withLatest: false },
+    ],
+  )
+
+  return renderPage({ title, description, image: defaultImage(), imageAlt: title, url, componentEmbed })
+}
+
 // Profile avatars are stored inline as base64 data: URLs, which crawlers
 // can't fetch - this service re-serves the decoded bytes at
 // /u/:id/avatar.<ext> (see the nginx snippet) so embeds get a real image URL.
@@ -753,6 +1001,9 @@ async function handle(req, res) {
 
     if ((match = pathname.match(/^\/track\/(\d+)\/?$/))) {
       html = await renderTrack(match[1])
+    } else if ((match = pathname.match(/^\/track\/(\d+)\/video\.mp4$/))) {
+      await serveTrackVideo(req, res, match[1])
+      return
     } else if ((match = pathname.match(/^\/shared\/([^/]+)\/?$/))) {
       html = await renderSharedPlaylist(match[1])
     } else if ((match = pathname.match(/^\/news\/(\d+)\/?$/))) {
@@ -764,6 +1015,8 @@ async function handle(req, res) {
       return
     } else if ((match = pathname.match(/^\/u\/(\d+)\/?$/))) {
       html = await renderProfile(match[1])
+    } else if (/^\/statistics\/?$/.test(pathname)) {
+      html = await renderStatistics()
     } else if (pathname === '/' || /^\/(home|playlists)\/?$/.test(pathname)) {
       html = await renderHome()
     }
