@@ -76,13 +76,18 @@ function escapeDiscordMarkdown(value) {
 }
 
 // Components V2 builders - only the subset component embeds allow.
+const ACCENT_COLOR = 0x1db954 // index.css --accent
 const text = (content) => ({ type: 10, content })
-const thumbnail = (url, description) => ({ type: 11, media: { url }, ...(description ? { description } : {}) })
-const gallery = (url, description) => ({ type: 12, items: [{ media: { url }, ...(description ? { description } : {}) }] })
+const mediaItem = (url, description) => ({ media: { url }, ...(description ? { description: String(description).slice(0, 256) } : {}) })
+const thumbnail = (url, description) => ({ type: 11, ...mediaItem(url, description) })
+const gallery = (items) => ({ type: 12, items: items.map(({ url, description }) => mediaItem(url, description)) })
 const separator = () => ({ type: 14, divider: true, spacing: 1 })
-const linkButtons = (...buttons) => ({ type: 1, components: buttons.map(({ label, url }) => ({ type: 2, style: 5, label, url })) })
+const linkButtons = (...buttons) => ({
+  type: 1,
+  components: buttons.map(({ label, url, emoji }) => ({ type: 2, style: 5, label, url, ...(emoji ? { emoji: { name: emoji } } : {}) })),
+})
 const section = (texts, accessory) => ({ type: 9, components: texts, accessory })
-const container = (components) => ({ component: { type: 17, components } })
+const container = (components) => ({ component: { type: 17, accent_color: ACCENT_COLOR, components } })
 
 // Discord rejects payloads over 3000 bytes. Serialized with <, > and & as
 // \u escapes so no API string can close the <script> element early.
@@ -94,6 +99,55 @@ function serializeComponentEmbed(payload) {
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026')
   return Buffer.byteLength(json, 'utf8') <= COMPONENT_EMBED_MAX_BYTES ? json : null
+}
+
+// Returns the richest variant that fits: `build` is called with each option
+// set in turn (most detailed first) until one serializes under the cap.
+function fitComponentEmbed(build, optionSets) {
+  for (const options of optionSets) {
+    const json = serializeComponentEmbed(build(options))
+    if (json) return json
+  }
+  return null
+}
+
+// "3:12" / "1:02:03" -> seconds; null when unparseable.
+function parseLength(value) {
+  if (typeof value !== 'string' || !/^\d+(:\d{1,2}){1,2}$/.test(value.trim())) return null
+  return value.trim().split(':').reduce((acc, part) => acc * 60 + Number(part), 0)
+}
+
+function formatTotalLength(seconds) {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.round((seconds % 3600) / 60)
+  return h ? `${h} hr ${m} min` : `${m} min`
+}
+
+// News bodies are editor-written markdown, which Discord mostly renders as
+// is. Images move out to the media gallery, #### and deeper (unsupported)
+// become bold lines, and the cut lands on a line boundary so no link or
+// emphasis is split - an unclosed code fence gets closed.
+function newsBodyToDiscordMarkdown(body, max) {
+  const images = []
+  const md = String(body || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g, (_, alt, src) => {
+      images.push({ url: ensureHttpsMediaUrl(src), description: alt })
+      return ''
+    })
+    .replace(/^#{4,}\s+(.+)$/gm, '**$1**')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  if (md.length <= max) return { markdown: md, images }
+  let out = ''
+  for (const line of md.split('\n')) {
+    if (out.length + line.length + 1 > max) break
+    out += (out ? '\n' : '') + line
+  }
+  out = out.trimEnd() || escapeDiscordMarkdown(truncate(stripMarkdown(md), max))
+  if ((out.match(/^\s*```/gm) || []).length % 2) out += '\n```'
+  return { markdown: `${out}\n…`, images }
 }
 
 // Mirrors newsApi.ts's ensureHttpsMediaUrl - some hosted URLs were saved back
@@ -172,7 +226,6 @@ function playlistName(data) {
 function renderPage({ title, description, image, imageAlt, url, componentEmbed }) {
   const fullTitle = title.includes(SITE) ? title : `${title} · ${SITE}`
   const safeImage = image || null
-  const componentJson = serializeComponentEmbed(componentEmbed)
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -193,7 +246,7 @@ ${safeImage ? `<meta property="og:image" content="${escapeHtml(safeImage)}" />
 <meta name="twitter:title" content="${escapeHtml(fullTitle)}" />
 <meta name="twitter:description" content="${escapeHtml(description)}" />
 ${safeImage ? `<meta name="twitter:image" content="${escapeHtml(safeImage)}" />` : ''}
-${componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : ''}
+${componentEmbed ? `<script id="discord:component-embed" type="application/json">${componentEmbed}</script>` : ''}
 </head>
 <body>
 <p><a href="${escapeHtml(url)}">${escapeHtml(fullTitle)}</a></p>
@@ -234,11 +287,15 @@ async function renderTrack(songId) {
     akas.length && `**AKA** ${md(akas.join(', '))}`,
   ].filter(Boolean)
 
-  const componentEmbed = container([
-    section([text(`### [${md(title)}](${url})`), text(`-# ${eraLine || md(SITE)}`), ...(credits.length ? [text(credits.join('\n'))] : [])], thumbnail(image, title)),
-    separator(),
-    linkButtons({ label: 'Play on unreleased', url }),
-  ])
+  const componentEmbed = fitComponentEmbed(
+    ({ withCredits }) =>
+      container([
+        section([text(`### [${md(title)}](${url})`), text(`-# ${eraLine || md(SITE)}`), ...(withCredits && credits.length ? [text(credits.join('\n'))] : [])], thumbnail(image, title)),
+        separator(),
+        linkButtons({ label: 'Play on unreleased', url, emoji: '▶️' }),
+      ]),
+    [{ withCredits: true }, { withCredits: false }],
+  )
 
   return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
@@ -267,18 +324,52 @@ async function renderSharedPlaylist(shareId) {
     : 'A playlist shared from unreleased.'
 
   const md = escapeDiscordMarkdown
-  const preview = tracks
-    .slice(0, 5)
-    .map((t) => (t && typeof t === 'object' ? (t.song?.name ?? t.name) : null) || trackPath(t)?.split('/').pop()?.replace(/\.[^.]+$/, ''))
-    .filter(Boolean)
-    .map((n, i) => `${i + 1}. ${md(truncate(n, 60))}`)
-  if (tracks.length > preview.length && preview.length) preview.push(`-# +${tracks.length - preview.length} more`)
+  const entries = tracks.map((t) => {
+    const song = t && typeof t === 'object' ? (t.song && typeof t.song === 'object' ? t.song : t) : null
+    const path = trackPath(t)
+    return {
+      name: song?.name || path?.split('/').pop()?.replace(/\.[^.]+$/, '') || null,
+      length: typeof song?.length === 'string' ? song.length : null,
+      cover: buildImageUrl(song?.image_url) || (path ? `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(path)}&size=512` : null),
+    }
+  })
+  const totalSeconds = entries.reduce((sum, e) => sum + (parseLength(e.length) ?? 0), 0)
+  const meta = [
+    'Shared playlist',
+    tracks.length ? `${tracks.length} track${tracks.length === 1 ? '' : 's'}` : null,
+    totalSeconds >= 60 ? formatTotalLength(totalSeconds) : null,
+  ].filter(Boolean).join(' · ')
+  const about = [data.description, data.playlist?.description].find((d) => typeof d === 'string' && d.trim())?.trim()
+  // Distinct covers only - many songs share the same placeholder art.
+  const covers = [...new Set(entries.map((e) => e.cover).filter(Boolean))]
 
-  const componentEmbed = container([
-    section([text(`### [${md(name)}](${url})`), text(`-# Shared playlist · ${description}`), ...(preview.length ? [text(preview.join('\n'))] : [])], thumbnail(image, name)),
-    separator(),
-    linkButtons({ label: 'Open playlist', url }),
-  ])
+  const componentEmbed = fitComponentEmbed(
+    ({ listed, mosaic, withAbout }) => {
+      const list = entries
+        .slice(0, listed)
+        .filter((e) => e.name)
+        .map((e, i) => `${i + 1}. ${md(truncate(e.name, 60))}${e.length ? ` · \`${e.length}\`` : ''}`)
+      if (list.length && tracks.length > list.length) list.push(`-# +${tracks.length - list.length} more`)
+      const heading = [text(`### [${md(name)}](${url})`), text(`-# ${meta}`), ...(withAbout && about ? [text(md(truncate(about, 200)))] : [])]
+      // A 2x2 cover mosaic reads as "playlist" at a glance; with fewer than
+      // four distinct covers it falls back to a single thumbnail.
+      return container([
+        ...(mosaic && covers.length >= 4
+          ? [...heading, gallery(covers.slice(0, 4).map((u) => ({ url: u })))]
+          : [section(heading, thumbnail(image, name))]),
+        ...(list.length ? [separator(), text(list.join('\n'))] : []),
+        separator(),
+        linkButtons({ label: 'Open playlist', url, emoji: '🎧' }),
+      ])
+    },
+    [
+      { listed: 10, mosaic: true, withAbout: true },
+      { listed: 6, mosaic: true, withAbout: true },
+      { listed: 6, mosaic: false, withAbout: true },
+      { listed: 3, mosaic: false, withAbout: false },
+      { listed: 0, mosaic: false, withAbout: false },
+    ],
+  )
 
   return renderPage({ title: name, description, image, imageAlt: name, url, componentEmbed })
 }
@@ -303,20 +394,47 @@ async function renderNewsPost(postId) {
   const image = postImage || DEFAULT_IMAGE
   const title = item.title || 'News'
 
-  // Body stays plain text (escaped): truncating real markdown mid-link would
-  // break the rendering. The generic icon only shows as a small thumbnail -
-  // a full-width gallery is reserved for posts with their own image.
+  // The generic icon only shows as a small thumbnail - a full-width gallery
+  // is reserved for posts with real images (lead, attachments, inline).
   const md = escapeDiscordMarkdown
   const dateRaw = item.published_at ?? item.created_at
   const date = dateRaw ? new Date(dateRaw) : null
-  const meta = ['News', date && !Number.isNaN(date.getTime()) ? `<t:${Math.floor(date.getTime() / 1000)}:D>` : null].filter(Boolean).join(' · ')
-  const heading = [text(`### [${md(title)}](${url})`), text(`-# ${meta}`)]
-  const body = text(md(summary || truncate(plainBody, 700) || description))
-  const componentEmbed = container([
-    ...(postImage ? [...heading, body, gallery(postImage, title)] : [section(heading, thumbnail(DEFAULT_IMAGE, SITE)), body]),
-    separator(),
-    linkButtons({ label: 'Read on unreleased', url }),
-  ])
+  const channel = typeof item.channel === 'string' && item.channel
+    ? item.channel.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase())
+    : 'News'
+  const meta = [
+    md([channel, item.category].filter(Boolean).join(' / ')),
+    item.author ? `by ${md(item.author)}` : null,
+    date && !Number.isNaN(date.getTime()) ? `<t:${Math.floor(date.getTime() / 1000)}:D>` : null,
+  ].filter(Boolean).join(' · ')
+  const attachments = Array.isArray(item.attachments) ? item.attachments.filter((a) => a?.url) : []
+  const imageAttachments = attachments
+    .filter((a) => String(a.mime || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|avif)$/i.test(a.name || a.url))
+    .map((a) => ({ url: ensureHttpsMediaUrl(a.url), description: a.name }))
+  const otherAttachments = attachments.length - imageAttachments.length
+
+  const componentEmbed = fitComponentEmbed(
+    ({ bodyMax, maxImages }) => {
+      const { markdown, images } = newsBodyToDiscordMarkdown(item.body, bodyMax)
+      // Lead image first, then attachments, then images pulled from the body.
+      const media = [...(postImage ? [{ url: postImage, description: title }] : []), ...imageAttachments, ...images]
+        .filter((m, i, all) => /^https?:\/\//.test(m.url || '') && all.findIndex((o) => o.url === m.url) === i)
+        .slice(0, maxImages)
+      const heading = [text(`### [${md(title)}](${url})`), text(`-# ${meta}`)]
+      return container([
+        ...(media.length ? heading : [section(heading, thumbnail(DEFAULT_IMAGE, SITE))]),
+        ...(summary && markdown ? [text(`**${md(summary)}**`)] : []),
+        text(markdown || md(description)),
+        ...(media.length ? [gallery(media)] : []),
+        ...(otherAttachments > 0 ? [text(`-# 📎 ${otherAttachments} attachment${otherAttachments === 1 ? '' : 's'}`)] : []),
+        separator(),
+        linkButtons({ label: 'Read on unreleased', url, emoji: '📰' }, { label: 'All news', url: `${ORIGIN}/news` }),
+      ])
+    },
+    [1600, 1200, 900, 600, 350]
+      .flatMap((bodyMax) => [4, 1].map((maxImages) => ({ bodyMax, maxImages })))
+      .concat([{ bodyMax: 200, maxImages: 0 }]),
+  )
 
   return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
