@@ -171,6 +171,9 @@ export default function WrldView(): JSX.Element {
   // The portal root, so the Escape handler below can tell "the fullscreen view
   // is the top layer" from "a modal/popover is stacked on top of it".
   const fsOverlayRef = useRef<HTMLDivElement>(null)
+  // The page itself, in the tab or inside the fullscreen portal - where the
+  // visualizer measures its layout from.
+  const pageRef = useRef<HTMLDivElement>(null)
 
   const enterFullscreen = (): void => {
     document.documentElement.requestFullscreen?.().catch(() => {})
@@ -699,7 +702,7 @@ export default function WrldView(): JSX.Element {
   // ── Render ────────────────────────────────────────────────────────────────────
 
   const inner = (
-    <div className="relative flex flex-col md:flex-row flex-1 h-full w-full overflow-hidden">
+    <div ref={pageRef} className="relative flex flex-col md:flex-row flex-1 h-full w-full overflow-hidden">
 
       {/* 999 FM toggle + fullscreen toggle, grouped together so they move as
           one unit - 999FM sits top-right on mobile, top-left on desktop
@@ -772,9 +775,9 @@ export default function WrldView(): JSX.Element {
             )}
           </div>
 
-          {fullscreen && (
-            <WrldVisualizer
-              rootRef={fsOverlayRef}
+          <WrldVisualizer
+              rootRef={pageRef}
+              fullscreen={fullscreen}
               artUrl={artSrc && !artError ? artSrc : null}
               title={displayTitle ?? ''}
               artist={displayArtist ?? ''}
@@ -785,7 +788,6 @@ export default function WrldView(): JSX.Element {
               txtSec={txtSec}
               onExit={exitFullscreen}
             />
-          )}
 
           {/* Mobile layout */}
           <div className="md:hidden relative z-10 flex flex-col h-full min-h-0" style={hideForViz}>

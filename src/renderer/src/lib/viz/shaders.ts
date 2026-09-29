@@ -193,6 +193,203 @@ void main() {
 }
 `;
 
+/**
+ * Solar corona: flame tongues licking out from the artwork's edge. Each
+ * direction follows a slice of the spectrum, bass pushes the whole corona
+ * outward and beats throw off flares. Everything is sized off the cover's
+ * clearance radius, so it scales with the layout.
+ */
+const CORONA = `
+void main() {
+  vec2 p = gl_FragCoord.xy - u_focus.xy;
+  float R = max(u_focus.z, 20.0);
+  float r = length(p);
+  float a = atan(p.y, p.x);
+  float an = abs(a) / PI;                         // mirrored, so the spectrum wraps without a seam
+  vec2 dir = p / max(r, 1.0);                     // the angle as a point on the circle, for seamless noise
+  float x = r / R - 1.0;                          // 0 at the cover's clearance radius, growing outward
+  float t = u_time * 0.3;
+
+  float s = spec(an * 0.85);
+  // Turbulence sampled on the circle and scrolled along the radius, so the
+  // tongues keep drifting away from the cover.
+  float n = fbm(dir * 2.2 + vec2(0.0, x * 2.0 - t));
+  float n2 = fbm(dir * 4.8 + vec2(3.7, x * 3.2 - t * 1.7));
+
+  float reach = 0.22 + s * 0.8 + u_bass * 0.25 + u_beat * 0.3;
+  float edge = max(reach * (0.45 + 1.1 * n), 0.02);  // ragged outer boundary
+  float inner = smoothstep(-0.04, 0.01, x);
+  float past = smoothstep(0.0, edge, x);
+  float tongues = clamp(n2 * 1.6 - 0.35, 0.0, 1.0);
+  float flame = inner * (1.0 - past) * (0.55 + 1.5 * tongues);
+  float wisps = inner * tongues * exp(-max(x, 0.0) / (edge * 1.6 + 0.05)) * 0.9;
+
+  float k = x / 0.035;
+  float rim = inner * exp(-k * k) * (0.8 + s);
+
+  // Integer multiples of the angle, so these wrap cleanly at +-PI.
+  float spokes = pow(0.5 + 0.5 * cos(a * 6.0 + t * 1.3), 24.0);
+  float flare = spokes * u_beat * inner * exp(-max(x, 0.0) / (0.4 + s * 0.8)) * 1.6;
+  float glow = inner * exp(-max(x, 0.0) / (0.5 + 0.4 * u_bass)) * 0.18;
+
+  // Layered additively rather than mix()ed between two palette colours, which
+  // averages toward grey (see NEBULA).
+  vec3 c1 = pal(an * 0.7 + t * 0.04);
+  vec3 c2 = pal(an * 0.7 + 0.5 + t * 0.04);
+  vec3 col = c1 * flame + c2 * wisps + mix(c1, vec3(1.0), 0.4) * rim
+           + mix(c1, vec3(1.0), 0.25) * flare + c2 * glow;
+  col *= 0.75 + 0.5 * u_energy;
+  gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * Drops on a pond: every beat starts a ring at a random spot around the
+ * artwork, and rings from different drops cross and interfere. A shader only
+ * sees one frame, so the engine keeps the recent beats in u_rip.
+ */
+const RIPPLES = `
+uniform vec4 u_rip[8];   // angle, distance (focus radii), age (s), strength (0 = unused)
+
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float h = 0.0;                                   // summed wave height, where rings interfere
+  vec3 col = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    vec4 d = u_rip[i];
+    if (d.w <= 0.0) continue;
+    vec2 o = u_focus.xy + vec2(cos(d.x), sin(d.x)) * d.y * R;
+    float age = d.z;
+    float rr = age * R * 0.85;                     // travels ~0.85 radii per second
+    float w = R * (0.028 + 0.04 * age);            // and spreads as it goes
+    float k = (length(frag - o) - rr) / w;
+    float wave = exp(-k * k) * cos(k * 2.6);       // a crest with a trough either side
+    float amp = d.w * exp(-age * 0.7) * smoothstep(0.0, 0.08, age);
+    h += wave * amp;
+    col += pal(d.x / (2.0 * PI) + u_time * 0.02) * max(wave, 0.0) * amp;
+  }
+  // Where crests from different drops stack, the surface catches the light.
+  float glint = pow(max(h - 0.4, 0.0), 1.5) * 2.2;
+  col = col * 1.7 + pal(u_time * 0.03 + 0.5) * glint;
+  // A faint still surface around the cover, so quiet passages aren't empty.
+  float rc = length(frag - u_focus.xy) / R;
+  col += pal(u_time * 0.02) * exp(-abs(rc - 1.05) * 6.0) * 0.08 * (0.6 + u_energy);
+  col *= 0.8 + 0.4 * u_energy;
+  gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * A storm on each beat: bolts crack in from the edges of the screen - mostly
+ * the top, sometimes a side - heading down and inward, forking more on bigger
+ * hits, with a sheet flash behind them. Reuses
+ * the beat memory Ripples reads (u_rip): each recent beat is a bolt for about
+ * a second, and big hits throw a second one somewhere else.
+ */
+const LIGHTNING = `
+uniform vec4 u_rip[8];   // recent beats: angle, distance (unused here), age (s), strength (0 = unused)
+
+// A line through random heights at whole-number x, straight in between: sharp
+// corners at uneven heights, which reads as lightning where a regular zig-zag
+// reads as a sawtooth. (fract is safe here - it interpolates between vertices
+// rather than repeating a lookup, so there's no seam.)
+float jag(float x, float seed) {
+  float i = floor(x);
+  return mix(hash(vec2(i, seed)), hash(vec2(i + 1.0, seed)), fract(x)) - 0.5;
+}
+
+// Sideways offset of a bolt at distance u along it, in focus radii. Vertices
+// are unevenly spaced (noise-warped x) and layered at three scales, and the
+// whole path wanders further off course the longer it runs.
+float pathOff(float u, float seed) {
+  float x = u * 4.0 + noise(vec2(u * 1.7, seed)) * 1.6;
+  float off = jag(x, seed) * 0.32 + jag(x * 2.6 + 3.1, seed + 7.0) * 0.12 + jag(x * 6.9, seed + 13.0) * 0.045;
+  off += (noise(vec2(u * 0.7, seed + 2.0)) - 0.5) * 0.6 * u;
+  return off * smoothstep(0.0, 0.2, u);
+}
+
+// Distance from q (bolt space: x along the bolt, y across) to a bolt of length len.
+float bolt(vec2 q, float len, float seed) {
+  float u = clamp(q.x, 0.0, len);
+  return length(vec2(q.x - u, q.y - pathOff(u, seed)));
+}
+
+void main() {
+  float R = max(u_focus.z, 20.0);
+  vec2 p = (gl_FragCoord.xy - u_focus.xy) / R;   // in focus radii, relative to the cover
+  vec3 col = vec3(0.0);
+  float flash = 0.0;
+  for (int i = 0; i < 8; i++) {
+    vec4 d = u_rip[i];
+    if (d.w <= 0.0 || d.z > 1.1) continue;
+    float amp = d.w * exp(-d.z * 3.2) * (0.75 + 0.25 * sin(d.z * 60.0 + d.x * 5.0));
+    flash += d.w * exp(-d.z * 7.0);
+
+    for (int k = 0; k < 2; k++) {
+      if (k == 1 && d.w < 0.75) break;             // big hits throw a second bolt
+      float seed = fract(d.x * 7.13) * 10.0 + float(k) * 4.7;
+      // Every bolt enters from just past an edge - mostly the top, sometimes a
+      // side - so it cracks in from outside rather than appearing mid-screen.
+      float edge = hash(vec2(seed, 9.0));
+      float along = hash(vec2(seed, 3.0));
+      float spread = hash(vec2(seed, 5.0)) - 0.5;
+      vec2 sp;
+      float ang;
+      if (edge < 0.6) {
+        sp = vec2(along * u_res.x, u_res.y + 10.0);
+        ang = -PI * 0.5 + spread * 1.0;           // down
+      } else if (edge < 0.8) {
+        sp = vec2(-10.0, mix(0.4, 1.0, along) * u_res.y);
+        ang = -PI * 0.2 + spread * 0.8;           // in from the left, falling
+      } else {
+        sp = vec2(u_res.x + 10.0, mix(0.4, 1.0, along) * u_res.y);
+        ang = -PI * 0.8 + spread * 0.8;           // in from the right, falling
+      }
+      vec2 start = (sp - u_focus.xy) / R;
+      float len = 2.2 + d.w * 3.0;
+      vec2 dir = vec2(cos(ang), sin(ang));
+      vec2 rel = p - start;
+      vec2 q = vec2(dot(rel, dir), dot(rel, vec2(-dir.y, dir.x)));
+      // Most of the screen is nowhere near a given bolt; skip it cheaply.
+      if (abs(q.y) > len * 0.7 + 0.5 || q.x < -0.5 || q.x > len + 0.5) continue;
+
+      float w = 0.02 + 0.016 * d.w;
+      float taper = smoothstep(len, len * 0.45, q.x);
+      float db = bolt(q, len, seed);
+      float core = exp(-db / w) * taper;
+      float glow = exp(-db / (w * 7.0)) * taper;
+
+      // Forks: more of them, and longer, on bigger hits.
+      for (int b = 0; b < 3; b++) {
+        float fb = float(b);
+        if (fb >= 1.0 + d.w * 2.0) break;
+        float at = len * (0.22 + 0.2 * fb + 0.1 * hash(vec2(seed, fb + 20.0)));
+        float fang = (mod(fb, 2.0) * 2.0 - 1.0) * (0.35 + 0.35 * hash(vec2(seed, fb)));
+        vec2 r = q - vec2(at, pathOff(at, seed));
+        float c = cos(fang);
+        float s = sin(fang);
+        vec2 qf = vec2(c * r.x + s * r.y, -s * r.x + c * r.y);
+        float flen = len * (0.3 + 0.12 * d.w);
+        float df = bolt(qf, flen, seed + fb * 3.3);
+        float ft = smoothstep(flen, flen * 0.35, qf.x);
+        core += exp(-df / (w * 0.7)) * 0.75 * ft;
+        glow += exp(-df / (w * 5.0)) * 0.5 * ft;
+      }
+
+      vec3 tint = pal(seed * 0.1 + u_time * 0.02);
+      col += (mix(tint, vec3(1.0), 0.75) * core * 1.6 + tint * glow * 0.55) * amp;
+    }
+  }
+  float rc = length(p);
+  col += pal(u_time * 0.02) * flash * 0.06;                                  // sheet flash across the sky
+  col += pal(u_time * 0.02) * flash * exp(-max(rc - 1.0, 0.0) * 2.5) * 0.15;
+  col += pal(u_time * 0.02 + 0.5) * exp(-abs(rc - 1.03) * 20.0) * 0.06;      // faint charge on the rim
+  col *= 0.9 + 0.35 * u_energy;
+  gl_FragColor = finish(col);
+}
+`;
+
 /** Polar swirl spiralling out from the artwork. */
 const VORTEX = `
 void main() {
@@ -277,6 +474,9 @@ export const FRAGMENTS: Record<string, string> = {
   nebula: PRELUDE + NEBULA,
   silk: PRELUDE + SILK,
   halo: PRELUDE + HALO,
+  corona: PRELUDE + CORONA,
+  ripples: PRELUDE + RIPPLES,
+  lightning: PRELUDE + LIGHTNING,
   vortex: PRELUDE + VORTEX,
   gooey: PRELUDE + GOOEY,
 };

@@ -99,7 +99,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'Fullscreen visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, fullscreen layout, artwork colors' },
   { tab: 'appearance', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'appearance', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
   { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
@@ -383,8 +383,8 @@ function VizSettings(): JSX.Element {
           <AudioLines size={13} className="text-white" strokeWidth={2.25} />
         </div>
         <div className="min-w-0 flex-1">
-          <span className="text-text-primary text-sm">Fullscreen visualizer</span>
-          <p className="text-text-muted text-[11px]">Plays behind WRLD in fullscreen - ← → switches visualizer, V toggles visualizer only</p>
+          <span className="text-text-primary text-sm">WRLD visualizer</span>
+          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → switches visualizer, V toggles visualizer only in fullscreen</p>
         </div>
         <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -439,7 +439,7 @@ function VizSettings(): JSX.Element {
             ]}
           />
         ))}
-        {line('Layout', (
+        {line('Fullscreen', (
           <Pills<'player' | 'minimal'>
             value={s.immMinimal ? 'minimal' : 'player'}
             onChange={(v) => s.setImmMinimal(v === 'minimal')}

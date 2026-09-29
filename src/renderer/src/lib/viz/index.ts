@@ -2,7 +2,7 @@ import { AudioEngine, listAudioInputs, type Boost } from "./audio";
 import { Canvas2DRenderer, type PxRect } from "./canvas2d";
 import { GLRenderer } from "./gl";
 import { extractPalette, paletteFromAccent, parseColor } from "./palette";
-import { QUALITY, type Quality, type RGB, type VizLayout } from "./types";
+import { QUALITY, type AudioFrame, type Quality, type RGB, type VizLayout } from "./types";
 
 export { listAudioInputs };
 export type { Boost, Quality, VizLayout };
@@ -29,6 +29,9 @@ export const VISUALIZERS: VisualizerOption[] = [
   { id: "nebula", name: "Nebula", group: "shader", engine: "gl" },
   { id: "silk", name: "Silk", group: "shader", engine: "gl" },
   { id: "halo", name: "Halo", group: "shader", engine: "gl" },
+  { id: "corona", name: "Corona", group: "shader", engine: "gl" },
+  { id: "ripples", name: "Ripples", group: "shader", engine: "gl" },
+  { id: "lightning", name: "Lightning", group: "shader", engine: "gl" },
   { id: "vortex", name: "Vortex", group: "shader", engine: "gl" },
   { id: "gooey", name: "Gooey", group: "shader", engine: "gl" },
 ];
@@ -41,6 +44,12 @@ export function normalizeMode(id: string): string {
 
 const LAYOUT_REFRESH_MS = 100;
 const GL_RESTORE_TIMEOUT_MS = 3000;
+/** Beats remembered for the Ripples and Lightning shaders (matches the u_rip array size). */
+const RIPPLE_SLOTS = 8;
+/** Seconds a ripple is kept; the shader has faded it out well before this. */
+const RIPPLE_LIFE = 4;
+/** Seconds without a beat before a softer drop falls on its own. */
+const RIPPLE_LULL = 1.1;
 
 export class Visualizer {
   private audio = new AudioEngine();
@@ -64,6 +73,10 @@ export class Visualizer {
   private layoutProvider: (() => VizLayout) | null = null;
   private layout: VizLayout = { focus: null, protect: [], intensity: 1 };
   private layoutAt = 0;
+
+  private prevBeat = 0;
+  private drops: { born: number; angle: number; dist: number; strength: number }[] = [];
+  private ripples = new Float32Array(RIPPLE_SLOTS * 4);
 
   constructor(canvas2d: HTMLCanvasElement, canvasGl: HTMLCanvasElement) {
     this.c2d = new Canvas2DRenderer(canvas2d);
@@ -218,6 +231,7 @@ export class Visualizer {
     const dt = Math.min(0.05, elapsed / 1000); // clamp after stalls
     this.time += dt;
     const frame = this.audio.analyze(dt, this.playing);
+    this.trackRipples(frame);
     this.stepPalette(dt);
 
     if (this.layoutProvider && now - this.layoutAt > LAYOUT_REFRESH_MS) {
@@ -254,6 +268,7 @@ export class Visualizer {
         feather: 110 * scale,
         intensity: this.layout.intensity,
         octaves: q.octaves,
+        ripples: this.ripples,
       });
     } else {
       this.showEngine("2d");
@@ -275,6 +290,33 @@ export class Visualizer {
       });
     }
   };
+
+  /**
+   * Remembers recent beats for the Ripples and Lightning shaders, which only see
+   * the current frame. Each onset drops a ring at a random spot around the focus; spots are
+   * kept relative to it (angle, distance in focus radii) so rings follow the
+   * layout if it moves.
+   */
+  private trackRipples(frame: AudioFrame) {
+    // beat jumps to 1 on an onset and decays after, so a jump marks a new one.
+    const onset = frame.beat > this.prevBeat + 0.3;
+    // Beats only come from bass onsets, so an intro or breakdown with no low
+    // end would leave the pond still. After a pause a softer drop falls anyway.
+    const last = this.drops.length ? this.drops[this.drops.length - 1].born : -Infinity;
+    if (onset || this.time - last > RIPPLE_LULL) {
+      this.drops.push({
+        born: this.time,
+        angle: Math.random() * Math.PI * 2,
+        dist: 0.9 + Math.random() * 0.5,
+        strength: onset ? Math.min(1.3, 0.45 + frame.bass * 0.9) : 0.3 + frame.energy * 0.6,
+      });
+      if (this.drops.length > RIPPLE_SLOTS) this.drops.shift();
+    }
+    this.prevBeat = frame.beat;
+    while (this.drops.length && this.time - this.drops[0].born > RIPPLE_LIFE) this.drops.shift();
+    this.ripples.fill(0); // unused slots have zero strength
+    this.drops.forEach((d, i) => this.ripples.set([d.angle, d.dist, this.time - d.born, d.strength], i * 4));
+  }
 
   /** Cover centre in canvas px, or screen centre when there's no artwork shown. */
   private focusPx(box: DOMRect, scale: number, w: number, h: number) {
