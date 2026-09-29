@@ -75,6 +75,12 @@ is also handled: the service reads `/library/playlists/public/{id}/`, and the
 nginx snippet has an exact-match `location = /playlists` block for bots. Add
 that block to the real config or these links keep the generic site card.
 
+## Site card
+
+The bare origin (`/`, `/home`, and `/playlists` without a shared id) gets a
+site-wide card with live catalog stats and the latest news post. It needs the
+`location ~ ^/(home)?$` block from the nginx snippet.
+
 ## Nothing else required from the API/backend side
 
 The service only ever does read-only `GET` calls against endpoints that
