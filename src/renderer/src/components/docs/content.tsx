@@ -3068,6 +3068,51 @@ function FeedsMediaTab() {
           ]}
         />
       </Section>
+
+      <Section title="Link Previews (Discord & Social)">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          The player is a client-rendered SPA, so Discord, Twitter, Slack and iMessage crawlers, which don't run
+          JS, would only ever see the generic site card. A small standalone Node service prerenders per-item
+          Open Graph tags (plus a Discord component embed) for these links. nginx sends only known bot
+          user-agents to it; regular visitors get the normal SPA. It only makes read-only, anonymous{' '}
+          <Code>GET</Code> calls to this API, so no extra endpoints or auth are involved.
+        </p>
+        <Table
+          headers={['Link', 'Card', 'API source']}
+          rows={[
+            [<Code>{'/track/{id}'}</Code>, 'Song: cover art, era, credits, AKAs', <Code>{'/songs/{id}/'}</Code>],
+            [<Code>{'/shared/{share_id}'}</Code>, 'Anonymous shared playlist', <Code>{'/playlists/shared/{id}/'}</Code>],
+            [<Code>{'/playlists?id={id}&view=shared'}</Code>, "A signed-in user's public library playlist", <Code>{'/library/playlists/public/{id}/'}</Code>],
+            [<Code>{'/news/{id}'}</Code>, 'News post: body as Discord markdown, images in a gallery', <Code>{'/news/{id}/'}</Code>],
+            [<Code>{'/u/{id}'}</Code>, 'Profile: badges, bio, listening stats, public playlists', 'Profile and library endpoints'],
+            [<Code>/</Code>, 'Site card: live catalog stats and the latest news post (also /home and /playlists)', 'Stats and news endpoints'],
+          ]}
+        />
+        <p className="text-sm text-text-secondary leading-relaxed mt-2">
+          A missing or invalid id falls back to the generic site card rather than erroring. Profile avatars are
+          base64 in the API, so the service re-serves them as real images at{' '}
+          <Code>{'/u/{id}/avatar.{jpg|png|webp|gif}'}</Code>. That route is not bot-gated because Discord's media
+          proxy fetches it. Discord component embeds are capped at 3000 bytes, so the service builds the richest
+          variant that fits.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-2">Service environment variables:</p>
+        <Table
+          headers={['Var', 'Default', 'Purpose']}
+          rows={[
+            [<Code>SOCIAL_PREVIEW_PORT</Code>, <Code>8788</Code>, "Listen port; must match nginx's proxy_pass"],
+            [<Code>SOCIAL_PREVIEW_HOST</Code>, <Code>127.0.0.1</Code>, 'Bind interface; keep it loopback so only nginx reaches it'],
+            [<Code>JWAPI_BASE</Code>, <Code>https://juicewrldapi.com/juicewrld</Code>, 'API base the service reads from'],
+            [<Code>SITE_ORIGIN</Code>, <Code>https://player.juicewrldapi.com</Code>, 'Default origin for canonical and og:url links'],
+            [<Code>SITE_HOSTS</Code>, <Code>player + beta hosts</Code>, 'Comma-separated hosts links may point back to; the request Host picks the origin, anything else falls back to SITE_ORIGIN'],
+          ]}
+        />
+        <p className="text-sm text-text-secondary leading-relaxed mt-2">
+          nginx routes every bot-facing path through one location that hands bots to a named{' '}
+          <Code>@social_preview</Code> location. Define that named location in the same <Code>server</Code> block:{' '}
+          <Code>nginx -t</Code> won't catch a missing one, but every bot request then 500s. Test with a spoofed
+          bot user-agent, e.g. <Code>curl -A "Discordbot/2.0" https://player.juicewrldapi.com/track/1</Code>.
+        </p>
+      </Section>
     </div>
   )
 }
