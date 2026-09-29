@@ -399,6 +399,10 @@ interface AppState {
   // source of truth; this exists so StatsView can answer "last 7/30 days" and
   // show a recent-plays timeline, which absolute counters can't.
   listeningPlays: ListeningPlayEvent[]
+  /** Bumped whenever _backfillRecentTracks rewrites the localStorage ring, so
+   *  an already-mounted Home re-reads it (the backfill lands after sign-in,
+   *  usually well after Home has mounted). */
+  recentTracksRev: number
 
   // In-app reports (feedback + song issue reports). `pendingReports` is a
   // persisted outbox: a report is queued locally on submit and delivered when
@@ -1861,6 +1865,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // ── Song preferences ──────────────────────────────────────────────────────
   songPrefs: hydrateSongPrefs(),
   listeningPlays: hydrateListeningPlays(),
+  recentTracksRev: 0,
 
   // Every write lands in three places: Zustand state (so React re-renders),
   // localStorage (so overrides survive a restart and work logged out), and
@@ -2010,6 +2015,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       const songs = await getSongsByIds(missing)
       const resolved = new Map(songs.map((s) => [s.id, songToTrack(s)]))
       backfillRecentTracks(orderedIds, resolved)
+      set({ recentTracksRev: get().recentTracksRev + 1 })
     } catch {}
   },
 

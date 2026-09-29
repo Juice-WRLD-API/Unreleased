@@ -67,12 +67,12 @@ export function useHomeData() {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
     listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
-    homeSectionVisibility, refreshPlaylists, setIsPlaying,
+    homeSectionVisibility, refreshPlaylists, setIsPlaying, recentTracksRev,
   } = useStorePick(
     'account', 'playlists', 'guestPlaylists', 'followedPlaylists', 'likedTrackIds',
     'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
     'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
-    'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying',
+    'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying', 'recentTracksRev',
   )
 
   const showSection = (id: string): boolean => isHomeSectionVisible(id, homeSectionVisibility)
@@ -92,7 +92,9 @@ export function useHomeData() {
   // localStorage-backed, so read once per mount rather than per render. Home is
   // remounted on every visit (it's a route), which is exactly when this should
   // refresh - a song played while you were on another tab shows up on return.
-  const recent = useMemo(() => loadRecentTracks(), [])
+  // recentTracksRev also re-reads it when the post-sign-in backfill lands.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const recent = useMemo(() => loadRecentTracks(), [recentTracksRev])
 
   // Same stale-while-revalidate pattern as NewsView: paint the last cached
   // page instantly, then let the network response replace it.
