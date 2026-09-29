@@ -303,7 +303,7 @@ export class Visualizer {
     // Beats only come from bass onsets, so an intro or breakdown with no low
     // end would leave the pond still. After a pause a softer drop falls anyway.
     const last = this.drops.length ? this.drops[this.drops.length - 1].born : -Infinity;
-    if (onset || this.time - last > RIPPLE_LULL) {
+    if (onset || (this.playing && this.time - last > RIPPLE_LULL)) {
       this.drops.push({
         born: this.time,
         angle: Math.random() * Math.PI * 2,

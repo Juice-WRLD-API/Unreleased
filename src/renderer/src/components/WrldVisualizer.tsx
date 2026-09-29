@@ -299,9 +299,10 @@ export default function WrldVisualizer({
       // A dialog or menu open over the fullscreen view owns the keyboard.
       if (hasEscapeLayer()) return
       const combo = eventToCombo(e)
+      if (!fullscreen) return
       if (combo === 'ArrowLeft') cycle(-1)
       else if (combo === 'ArrowRight') cycle(1)
-      else if (combo === 'V' && fullscreen) toggleMinimal()
+      else if (combo === 'V') toggleMinimal()
       else return
       e.preventDefault()
       e.stopPropagation()
@@ -348,7 +349,7 @@ export default function WrldVisualizer({
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
 
       <div
-        className={`absolute top-4 right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
+        className={`absolute ${fullscreen ? 'top-4' : 'top-16 md:top-4'} right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
           idle ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
