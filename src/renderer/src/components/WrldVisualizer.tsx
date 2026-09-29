@@ -107,7 +107,7 @@ interface Props {
   txtSec: string
   /** 999 FM toggle, shown in the toolbar. */
   fm: { active: boolean; live: boolean; label: string; disabled: boolean; toggle: () => void
-    /** Which panel the FM column shows; the tabs live in the toolbar. */
+    /** Which panel the FM column shows. */
     tab: 'radio' | 'lyrics'; setTab: (t: 'radio' | 'lyrics') => void }
   onEnter: () => void
   onExit: () => void
@@ -284,15 +284,22 @@ export default function WrldVisualizer({
   }, [announce])
 
   // Lyrics are toggled by the app's own "Toggle lyrics" hotkey as well as the
-  // toolbar, so the state follows the stores rather than the button. Outside FM
-  // the button cycles off -> lyrics -> queue; FM has no queue, so it's on/off.
+  // toolbar, so the state follows the stores rather than the button. The button
+  // cycles off -> lyrics -> queue, or off -> radio -> lyrics during FM.
   const showQueue = useStore((s) => s.showQueue)
   const lyricsVisible = fm.active ? !lyricsOverride : hasLyrics !== lyricsOverride
-  const panel: 'off' | 'lyrics' | 'queue' = !fm.active && showQueue ? 'queue' : lyricsVisible ? 'lyrics' : 'off'
+  const panel: 'off' | 'lyrics' | 'queue' | 'radio' = fm.active
+    ? (lyricsVisible ? fm.tab : 'off')
+    : showQueue ? 'queue' : lyricsVisible ? 'lyrics' : 'off'
 
   const toggleLyrics = (): void => {
     const s = useStore.getState()
-    if (fm.active) { s.setLyricsOverride(!s.lyricsOverride); return }
+    if (fm.active) {
+      if (panel === 'off') { fm.setTab('radio'); s.setLyricsOverride(false) }
+      else if (panel === 'radio') fm.setTab('lyrics')
+      else s.setLyricsOverride(true)
+      return
+    }
     // Lyrics show when hasLyrics !== override, so these pick the override that
     // hides or shows them for the current track.
     if (panel === 'off') { s.setShowQueue(false); s.setLyricsOverride(!hasLyrics) }
@@ -304,9 +311,8 @@ export default function WrldVisualizer({
   useEffect(() => {
     if (seenPanel.current === panel) return
     seenPanel.current = panel
-    announce(panel === 'queue' ? 'Queue' : panel === 'lyrics' ? 'Lyrics on' : 'Lyrics off')
+    announce(panel === 'queue' ? 'Queue' : panel === 'radio' ? 'Radio' : panel === 'lyrics' ? 'Lyrics' : 'Panel off')
   }, [panel, announce])
-
   // ←/→ and V. Capture phase so these run before the Player's document-level
   // hotkeys and stop them for the keys handled here; anything else (Space,
   // L to like, the lyrics toggle) falls through to the app as usual.
@@ -384,17 +390,6 @@ export default function WrldVisualizer({
           <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
           <span>{fm.label}</span>
         </button>
-        {fm.active && (['radio', 'lyrics'] as const).map((t) => (
-          <button
-            key={t}
-            className={`h-9 px-2.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${lyricsVisible && fm.tab === t ? toolOn : toolIdle}`}
-            onClick={() => { fm.setTab(t); useStore.getState().setLyricsOverride(false) }}
-            disabled={minimal}
-            aria-pressed={lyricsVisible && fm.tab === t}
-          >
-            {t}
-          </button>
-        ))}
         <span className="w-px h-5 mx-1 bg-white/10" />
         <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
           <ChevronLeft size={19} />
@@ -409,12 +404,12 @@ export default function WrldVisualizer({
         <button
           className={`${tool} ${panel !== 'off' && !minimal ? toolOn : toolIdle}`}
           onClick={toggleLyrics}
-          title={fm.active ? "Toggle lyrics" : "Cycle: off / lyrics / queue"}
+          title={fm.active ? "Cycle: off / radio / lyrics" : "Cycle: off / lyrics / queue"}
           aria-label="Toggle lyrics"
           aria-pressed={panel !== 'off'}
           disabled={minimal}
         >
-          {panel === 'queue' ? <ListMusic size={18} /> : <TextQuote size={18} />}
+          {panel === 'queue' ? <ListMusic size={18} /> : panel === 'radio' ? <Radio size={18} /> : <TextQuote size={18} />}
         </button>
         <button
           className={`${tool} ${immMinimal ? toolOn : toolIdle}`}

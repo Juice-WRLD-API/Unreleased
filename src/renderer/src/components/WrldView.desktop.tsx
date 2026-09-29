@@ -1006,16 +1006,6 @@ export default function WrldView(): JSX.Element {
                     {displayArtist && <p className="text-sm mt-0.5 truncate" style={{ color: txtSec }}>{displayArtist}</p>}
                     {radioFmActive && !radioFmNowPlaying && <p className="text-sm mt-0.5" style={{ color: txtTer }}>Tuning in…</p>}
                   </div>
-                  {!radioFmActive && (
-                    <button
-                      onClick={() => setShowQueue(!showQueue)}
-                      title="Playing Next"
-                      className="p-1.5 rounded-full transition-colors hover:bg-white/10"
-                      style={{ color: showQueue ? 'var(--accent)' : (textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)') }}
-                    >
-                      <ListMusic size={18} />
-                    </button>
-                  )}
                   {rawLyrics && (
                     <button
                       onClick={() => setShowShareLyrics(true)}
@@ -1024,16 +1014,6 @@ export default function WrldView(): JSX.Element {
                       style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
                     >
                       <MicVocal size={16} />
-                    </button>
-                  )}
-                  {rawLyrics && (
-                    <button
-                      onClick={() => setShowLyricsSettings(true)}
-                      title="Customize lyrics"
-                      className="p-1.5 rounded-full transition-colors hover:bg-white/10"
-                      style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
-                    >
-                      <Settings2 size={16} />
                     </button>
                   )}
                   <FmLikeButton light={textIsDark} />
