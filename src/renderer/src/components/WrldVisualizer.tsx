@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronLeft, ChevronRight, TextQuote, AudioLines, Minimize2, Maximize2, Radio, Settings2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, TextQuote, ListMusic, AudioLines, Minimize2, Maximize2, Radio, Settings2 } from 'lucide-react'
 import { Visualizer, VISUALIZERS, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
@@ -10,6 +10,7 @@ import { hasEscapeLayer, useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useStore } from '../store/useStore'
 import { useVizStore } from '../store/vizStore'
 import VizControls from './VizControls'
+import LyricsControls from './LyricsControls'
 
 // Audio-reactive backdrop for the WRLD tab, plus its toolbar, keys and (in
 // fullscreen) the visualizer-only caption. WRLD only mounts while its tab is
@@ -105,7 +106,9 @@ interface Props {
   txtPri: string
   txtSec: string
   /** 999 FM toggle, shown in the toolbar. */
-  fm: { active: boolean; live: boolean; label: string; disabled: boolean; toggle: () => void }
+  fm: { active: boolean; live: boolean; label: string; disabled: boolean; toggle: () => void
+    /** Which panel the FM column shows; the tabs live in the toolbar. */
+    tab: 'radio' | 'lyrics'; setTab: (t: 'radio' | 'lyrics') => void }
   onEnter: () => void
   onExit: () => void
 }
@@ -280,20 +283,29 @@ export default function WrldVisualizer({
     announce(cur ? 'Player' : 'Visualizer only')
   }, [announce])
 
+  // Lyrics are toggled by the app's own "Toggle lyrics" hotkey as well as the
+  // toolbar, so the state follows the stores rather than the button. Outside FM
+  // the button cycles off -> lyrics -> queue; FM has no queue, so it's on/off.
+  const showQueue = useStore((s) => s.showQueue)
+  const lyricsVisible = fm.active ? !lyricsOverride : hasLyrics !== lyricsOverride
+  const panel: 'off' | 'lyrics' | 'queue' = !fm.active && showQueue ? 'queue' : lyricsVisible ? 'lyrics' : 'off'
+
   const toggleLyrics = (): void => {
     const s = useStore.getState()
-    s.setLyricsOverride(!s.lyricsOverride)
+    if (fm.active) { s.setLyricsOverride(!s.lyricsOverride); return }
+    // Lyrics show when hasLyrics !== override, so these pick the override that
+    // hides or shows them for the current track.
+    if (panel === 'off') { s.setShowQueue(false); s.setLyricsOverride(!hasLyrics) }
+    else if (panel === 'lyrics') s.setShowQueue(true)
+    else { s.setShowQueue(false); s.setLyricsOverride(hasLyrics) }
   }
 
-  // Lyrics are toggled by the app's own "Toggle lyrics" hotkey as well as the
-  // toolbar, so the label follows the setting rather than the button.
-  const lyricsVisible = hasLyrics !== lyricsOverride
-  const seenOverride = useRef(lyricsOverride)
+  const seenPanel = useRef(panel)
   useEffect(() => {
-    if (seenOverride.current === lyricsOverride) return
-    seenOverride.current = lyricsOverride
-    announce(lyricsVisible ? 'Lyrics on' : 'Lyrics off')
-  }, [lyricsOverride, lyricsVisible, announce])
+    if (seenPanel.current === panel) return
+    seenPanel.current = panel
+    announce(panel === 'queue' ? 'Queue' : panel === 'lyrics' ? 'Lyrics on' : 'Lyrics off')
+  }, [panel, announce])
 
   // ←/→ and V. Capture phase so these run before the Player's document-level
   // hotkeys and stop them for the keys handled here; anything else (Space,
@@ -372,6 +384,17 @@ export default function WrldVisualizer({
           <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
           <span>{fm.label}</span>
         </button>
+        {fm.active && (['radio', 'lyrics'] as const).map((t) => (
+          <button
+            key={t}
+            className={`h-9 px-2.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${lyricsVisible && fm.tab === t ? toolOn : toolIdle}`}
+            onClick={() => { fm.setTab(t); useStore.getState().setLyricsOverride(false) }}
+            disabled={minimal}
+            aria-pressed={lyricsVisible && fm.tab === t}
+          >
+            {t}
+          </button>
+        ))}
         <span className="w-px h-5 mx-1 bg-white/10" />
         <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
           <ChevronLeft size={19} />
@@ -384,14 +407,14 @@ export default function WrldVisualizer({
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
         <button
-          className={`${tool} ${lyricsVisible && !minimal ? toolOn : toolIdle}`}
+          className={`${tool} ${panel !== 'off' && !minimal ? toolOn : toolIdle}`}
           onClick={toggleLyrics}
-          title="Toggle lyrics"
+          title={fm.active ? "Toggle lyrics" : "Cycle: off / lyrics / queue"}
           aria-label="Toggle lyrics"
-          aria-pressed={lyricsVisible}
+          aria-pressed={panel !== 'off'}
           disabled={minimal}
         >
-          <TextQuote size={18} />
+          {panel === 'queue' ? <ListMusic size={18} /> : <TextQuote size={18} />}
         </button>
         <button
           className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
@@ -432,6 +455,8 @@ export default function WrldVisualizer({
             className="absolute top-full right-0 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl"
           >
             <VizControls />
+            <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
+            <LyricsControls />
           </div>
         )}
       </div>

@@ -332,7 +332,9 @@ export default function App(): JSX.Element {
             {!isMobile && showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
             {queueEverOpened && (
               <ErrorBoundary>
-                <div style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
+                {/* flex so QueuePanel stretches to the full height; a plain
+                    block wrapper let it collapse to its content height. */}
+                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
                   <QueuePanel />
                 </div>
               </ErrorBoundary>
