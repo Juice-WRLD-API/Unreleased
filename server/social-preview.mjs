@@ -369,7 +369,19 @@ const VIDEO_MAX_JOBS = 2
 const VIDEO_JOB_TIMEOUT_MS = 180_000
 // Long session dumps and compilations aren't worth transcoding for a preview.
 const VIDEO_MAX_SECONDS = 20 * 60
+const VIDEO_MAX_AUDIO_BYTES = 60 * 1024 * 1024
 const VIDEO_SIZE = 640
+
+// The video URL is public, so rendering is fenced in: only songs whose embed
+// page was just served can be rendered, renders beyond the queue cap are
+// refused rather than queued, and new renders are budgeted per hour - both
+// overall and per client IP (nginx's X-Real-IP; the service only listens on
+// loopback). Cache hits and joining an in-flight render cost nothing.
+const VIDEO_MAX_QUEUED = 6
+const VIDEO_RENDERS_PER_HOUR = Number(process.env.SOCIAL_PREVIEW_VIDEO_RENDERS_PER_HOUR || 120)
+const VIDEO_RENDERS_PER_IP_PER_HOUR = 20
+const VIDEO_WANTED_TTL_MS = 15 * 60 * 1000
+const requestIp = new AsyncLocalStorage()
 
 let ffmpegReady = false
 if (VIDEO_ENABLED) {
@@ -398,9 +410,40 @@ const videoJobs = new Map()
 let runningJobs = 0
 const jobQueue = []
 
+// Video keys whose embed page was served recently -> expiry.
+const wantedVideos = new Map()
+function markVideoWanted(key) {
+  const now = Date.now()
+  if (wantedVideos.size > 5000) for (const [k, exp] of wantedVideos) if (exp < now) wantedVideos.delete(k)
+  wantedVideos.set(key, now + VIDEO_WANTED_TTL_MS)
+}
+const videoWanted = (key) => (wantedVideos.get(key) ?? 0) > Date.now()
+
+const renderLog = []
+const renderLogByIp = new Map()
+// Returns why a new render is refused, or null after recording it.
+function admitRender(ip) {
+  const now = Date.now()
+  const cutoff = now - 60 * 60 * 1000
+  while (renderLog.length && renderLog[0] < cutoff) renderLog.shift()
+  const mine = (renderLogByIp.get(ip) ?? []).filter((t) => t >= cutoff)
+  if (jobQueue.length >= VIDEO_MAX_QUEUED) return 'render queue full'
+  if (renderLog.length >= VIDEO_RENDERS_PER_HOUR) return 'hourly render budget spent'
+  if (mine.length >= VIDEO_RENDERS_PER_IP_PER_HOUR) return 'client render budget spent'
+  renderLog.push(now)
+  mine.push(now)
+  renderLogByIp.set(ip, mine)
+  if (renderLogByIp.size > 10000) for (const [k, list] of renderLogByIp) if (!list.some((t) => t >= cutoff)) renderLogByIp.delete(k)
+  return null
+}
+
+class RenderRefused extends Error {}
+
 function ensureTrackVideo(source) {
   if (fs.existsSync(source.file)) return Promise.resolve(source.file)
   if (!videoJobs.has(source.file)) {
+    const refused = admitRender(requestIp.getStore() ?? 'unknown')
+    if (refused) return Promise.reject(new RenderRefused(refused))
     const job = new Promise((resolve, reject) => jobQueue.push({ source, resolve, reject }))
       .finally(() => videoJobs.delete(source.file))
     videoJobs.set(source.file, job)
@@ -443,10 +486,18 @@ function run(cmd, args, timeoutMs) {
   })
 }
 
-async function download(url, dest, timeoutMs) {
+async function download(url, dest, timeoutMs, maxBytes) {
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
   if (!res.ok) throw new Error(`${res.status} fetching ${url}`)
-  await fs.promises.writeFile(dest, Buffer.from(await res.arrayBuffer()))
+  if (Number(res.headers.get('content-length')) > maxBytes) throw new Error(`${url} is over ${maxBytes} bytes`)
+  const chunks = []
+  let size = 0
+  for await (const chunk of res.body) {
+    size += chunk.length
+    if (size > maxBytes) throw new Error(`${url} is over ${maxBytes} bytes`)
+    chunks.push(chunk)
+  }
+  await fs.promises.writeFile(dest, Buffer.concat(chunks))
 }
 
 // ffprobe sits next to ffmpeg in every build that ships both.
@@ -462,7 +513,7 @@ async function transcode({ audio, image, file, seconds }) {
   const imageFile = `${work}.image`
   const part = `${work}.part.mp4`
   try {
-    await Promise.all([download(audio, audioFile, 90_000), download(image, imageFile, 30_000)])
+    await Promise.all([download(audio, audioFile, 90_000, VIDEO_MAX_AUDIO_BYTES), download(image, imageFile, 30_000, 20 * 1024 * 1024)])
     const probed = Number(await run(FFPROBE, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', audioFile], 30_000).catch(() => ''))
     const duration = probed > 0 ? probed : seconds
     await run(FFMPEG, [
@@ -495,10 +546,12 @@ function pruneVideoCache() {
   }
 }
 
-async function serveTrackVideo(req, res, songId) {
+// Only the exact URL an embed page handed out (?v=<key>) resolves, and an
+// uncached video only renders while that page view is recent.
+async function serveTrackVideo(req, res, songId, version) {
   const song = await fetchJson(`${JWAPI_BASE}/songs/${encodeURIComponent(songId)}/`)
   const source = song && trackVideoSource(song)
-  if (!source) {
+  if (!source || version !== source.key || (!fs.existsSync(source.file) && !videoWanted(source.key))) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
     res.end('Not found')
     return
@@ -507,6 +560,11 @@ async function serveTrackVideo(req, res, songId) {
   try {
     file = await ensureTrackVideo(source)
   } catch (err) {
+    if (err instanceof RenderRefused) {
+      res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': '120' })
+      res.end('Busy')
+      return
+    }
     console.error(`social-preview: video for track ${songId} failed:`, err.message)
     res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' })
     res.end('Video unavailable')
@@ -595,7 +653,12 @@ async function renderTrack(songId) {
   // after reading this page, and a warm cache answers that immediately.
   const videoSource = trackVideoSource(song)
   const video = videoSource && `${url}/video.mp4?v=${videoSource.key}`
-  if (videoSource) ensureTrackVideo(videoSource).catch((err) => console.error(`social-preview: video for track ${songId} failed:`, err.message))
+  if (videoSource) {
+    markVideoWanted(videoSource.key)
+    ensureTrackVideo(videoSource).catch((err) => {
+      if (!(err instanceof RenderRefused)) console.error(`social-preview: video for track ${songId} failed:`, err.message)
+    })
+  }
 
   const componentEmbed = fitComponentEmbed(
     ({ withCredits, withHook, withInfo }) =>
@@ -1020,7 +1083,10 @@ async function renderProfile(userId) {
   return renderPage({ title: name, description, image, imageAlt: name, url, componentEmbed })
 }
 
-const server = http.createServer((req, res) => requestOrigin.run(originForHost(req.headers.host), () => handle(req, res)))
+const server = http.createServer((req, res) => {
+  const ip = String(req.headers['x-real-ip'] || req.socket.remoteAddress || 'unknown')
+  requestOrigin.run(originForHost(req.headers.host), () => requestIp.run(ip, () => handle(req, res)))
+})
 
 async function handle(req, res) {
   try {
@@ -1031,7 +1097,7 @@ async function handle(req, res) {
     if ((match = pathname.match(/^\/track\/(\d+)\/?$/))) {
       html = await renderTrack(match[1])
     } else if ((match = pathname.match(/^\/track\/(\d+)\/video\.mp4$/))) {
-      await serveTrackVideo(req, res, match[1])
+      await serveTrackVideo(req, res, match[1], searchParams.get('v'))
       return
     } else if ((match = pathname.match(/^\/shared\/([^/]+)\/?$/))) {
       html = await renderSharedPlaylist(match[1])
