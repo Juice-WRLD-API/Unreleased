@@ -3085,7 +3085,8 @@ function FeedsMediaTab() {
             [<Code>{'/playlists?id={id}&view=shared'}</Code>, "A signed-in user's public library playlist", <Code>{'/library/playlists/public/{id}/'}</Code>],
             [<Code>{'/news/{id}'}</Code>, 'News post: body as Discord markdown, images in a gallery', <Code>{'/news/{id}/'}</Code>],
             [<Code>{'/u/{id}'}</Code>, 'Profile: badges, bio, listening stats, public playlists', 'Profile and library endpoints'],
-            [<Code>/</Code>, 'Site card: live catalog stats and the latest news post (also /home and /playlists)', 'Stats and news endpoints'],
+            [<Code>/</Code>, 'Site card: live catalog stats and the latest news post (also /home, /playlists and /statistics)', 'Stats and news endpoints'],
+            [<Code>{'/track/{id}/video.mp4'}</Code>, 'Playable embed video for a song (not bot-gated)', 'Song audio and cover art'],
           ]}
         />
         <p className="text-sm text-text-secondary leading-relaxed mt-2">
@@ -3094,6 +3095,13 @@ function FeedsMediaTab() {
           <Code>{'/u/{id}/avatar.{jpg|png|webp|gif}'}</Code>. That route is not bot-gated because Discord's media
           proxy fetches it. Discord component embeds are capped at 3000 bytes, so the service builds the richest
           variant that fits.
+        </p>
+        <p className="text-sm text-text-secondary leading-relaxed mt-2">
+          Discord never plays audio from a link embed, but it does play an MP4 inline. So each song is rendered
+          once with ffmpeg, its cover art held over the audio at 640x640, cached on disk, and served from{' '}
+          <Code>{'/track/{id}/video.mp4'}</Code>. The first request for a song waits on the transcode. Songs over
+          20 minutes are skipped, at most two transcodes run at once, and without ffmpeg embeds simply stay
+          unplayable. Like the avatar route, this one is not bot-gated.
         </p>
         <p className="text-xs text-text-muted font-semibold mt-2">Service environment variables:</p>
         <Table
@@ -3104,6 +3112,10 @@ function FeedsMediaTab() {
             [<Code>JWAPI_BASE</Code>, <Code>https://juicewrldapi.com/juicewrld</Code>, 'API base the service reads from'],
             [<Code>SITE_ORIGIN</Code>, <Code>https://player.juicewrldapi.com</Code>, 'Default origin for canonical and og:url links'],
             [<Code>SITE_HOSTS</Code>, <Code>player + beta hosts</Code>, 'Comma-separated hosts links may point back to; the request Host picks the origin, anything else falls back to SITE_ORIGIN'],
+            [<Code>FFMPEG_PATH</Code>, <Code>ffmpeg</Code>, 'ffmpeg binary used for track videos'],
+            [<Code>FFPROBE_PATH</Code>, <Code>ffprobe next to ffmpeg</Code>, 'ffprobe binary used to read audio length'],
+            [<Code>SOCIAL_PREVIEW_CACHE</Code>, <Code>OS temp dir</Code>, 'Directory for cached track videos'],
+            [<Code>SOCIAL_PREVIEW_VIDEO</Code>, <Code>on</Code>, 'Set to 0 to turn playable track embeds off'],
           ]}
         />
         <p className="text-sm text-text-secondary leading-relaxed mt-2">
