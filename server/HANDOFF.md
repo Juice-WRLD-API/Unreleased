@@ -71,22 +71,25 @@ is the deploy/infra half only** - nothing below touches application code.
 ## Library playlist links
 
 `/playlists?id=<id>&view=shared` (a signed-in user's public library playlist)
-is also handled: the service reads `/library/playlists/public/{id}/`, and the
-nginx snippet has an exact-match `location = /playlists` block for bots. Add
-that block to the real config or these links keep the generic site card.
+is also handled: the service reads `/library/playlists/public/{id}/`. nginx
+routes it through the single previewable-routes block (see below).
 
 ## Site card
 
 The bare origin (`/`, `/home`, and `/playlists` without a shared id) gets a
-site-wide card with live catalog stats and the latest news post. It needs the
-`location ~ ^/(home)?$` block from the nginx snippet.
+site-wide card with live catalog stats and the latest news post.
+
+All bot-routed paths share ONE nginx location,
+`location ~ ^/((track|shared|news|u)/|(home|playlists)/?$|$)`. The earlier
+separate `location = /playlists` and `location ~ ^/(home)?$` blocks returned
+nginx 500s on beta - remove them if they are in the live config.
 
 ## Profiles
 
 `/u/:id` gets a profile card (badges, bio, listening stats, public
 playlists). Avatars are base64 in the API, so the service also serves
 `/u/:id/avatar.<ext>` - that nginx block is NOT bot-gated (Discord's media
-proxy fetches it) and must sit above the `^/(track|shared|news|u)/` block.
+proxy fetches it) and must sit above that shared block.
 
 ## Nothing else required from the API/backend side
 

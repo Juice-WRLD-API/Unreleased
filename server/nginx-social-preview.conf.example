@@ -35,29 +35,13 @@ location ~ ^/u/\d+/avatar\.(jpg|png|webp|gif)$ {
     proxy_set_header Host $host;
 }
 
-location ~ ^/(track|shared|news|u)/ {
-    error_page 418 = @social_preview;
-    recursive_error_pages on;
-    if ($is_social_bot) {
-        return 418;
-    }
-    try_files $uri /index.html;
-}
-
-# /playlists?id=:id&view=shared is a query-param route on a page the SPA also
-# serves to everyone else, so it gets its own exact-match location.
-location = /playlists {
-    error_page 418 = @social_preview;
-    recursive_error_pages on;
-    if ($is_social_bot) {
-        return 418;
-    }
-    try_files $uri /index.html;
-}
-
-# The bare origin (and /home) get the site-wide card with live catalog stats.
-# Exact matches only - every other path keeps the normal SPA fallback.
-location ~ ^/(home)?$ {
+# One block for every previewable route: the /track, /shared, /news and /u
+# prefixes, plus the exact pages / , /home and /playlists (the site card, and
+# /playlists?id=:id&view=shared public playlists - nginx locations never see
+# the query string, the service reads it). Keep these in ONE location: the
+# separate `location = /playlists` / `location ~ ^/(home)?$` blocks this
+# snippet used to have 500'd on beta while this one worked.
+location ~ ^/((track|shared|news|u)/|(home|playlists)/?$|$) {
     error_page 418 = @social_preview;
     recursive_error_pages on;
     if ($is_social_bot) {
