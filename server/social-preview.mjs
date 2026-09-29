@@ -55,9 +55,45 @@ function stripMarkdown(md) {
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[#>*_~`-]/g, ' ')
+    // Only list-bullet dashes - a bare "-" mid-sentence is punctuation.
+    .replace(/^\s*[-*+]\s+/gm, ' ')
+    .replace(/[#>*_~`]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function truncate(text, max) {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s.,;:-]+$/, '')}…`
+}
+
+// Discord Component Embeds (<script id="discord:component-embed">) render
+// text as Discord markdown, so API-sourced strings must be escaped.
+function escapeDiscordMarkdown(value) {
+  return String(value).replace(/([\\*_~`|>#\[\]<])/g, '\\$1')
+}
+
+// Components V2 builders - only the subset component embeds allow.
+const text = (content) => ({ type: 10, content })
+const thumbnail = (url, description) => ({ type: 11, media: { url }, ...(description ? { description } : {}) })
+const gallery = (url, description) => ({ type: 12, items: [{ media: { url }, ...(description ? { description } : {}) }] })
+const separator = () => ({ type: 14, divider: true, spacing: 1 })
+const linkButtons = (...buttons) => ({ type: 1, components: buttons.map(({ label, url }) => ({ type: 2, style: 5, label, url })) })
+const section = (texts, accessory) => ({ type: 9, components: texts, accessory })
+const container = (components) => ({ component: { type: 17, components } })
+
+// Discord rejects payloads over 3000 bytes. Serialized with <, > and & as
+// \u escapes so no API string can close the <script> element early.
+const COMPONENT_EMBED_MAX_BYTES = 3000
+function serializeComponentEmbed(payload) {
+  if (!payload) return null
+  const json = JSON.stringify(payload)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+  return Buffer.byteLength(json, 'utf8') <= COMPONENT_EMBED_MAX_BYTES ? json : null
 }
 
 // Mirrors newsApi.ts's ensureHttpsMediaUrl - some hosted URLs were saved back
@@ -133,9 +169,10 @@ function playlistName(data) {
   return null
 }
 
-function renderPage({ title, description, image, imageAlt, url }) {
+function renderPage({ title, description, image, imageAlt, url, componentEmbed }) {
   const fullTitle = title.includes(SITE) ? title : `${title} · ${SITE}`
   const safeImage = image || null
+  const componentJson = serializeComponentEmbed(componentEmbed)
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -156,6 +193,7 @@ ${safeImage ? `<meta property="og:image" content="${escapeHtml(safeImage)}" />
 <meta name="twitter:title" content="${escapeHtml(fullTitle)}" />
 <meta name="twitter:description" content="${escapeHtml(description)}" />
 ${safeImage ? `<meta name="twitter:image" content="${escapeHtml(safeImage)}" />` : ''}
+${componentJson ? `<script id="discord:component-embed" type="application/json">${componentJson}</script>` : ''}
 </head>
 <body>
 <p><a href="${escapeHtml(url)}">${escapeHtml(fullTitle)}</a></p>
@@ -184,7 +222,25 @@ async function renderTrack(songId) {
     .join(' · ') || 'Stream this Juice WRLD song free on unreleased.'
   const image = buildImageUrl(song.image_url) || DEFAULT_IMAGE
 
-  return renderPage({ title, description, image, imageAlt: title, url })
+  const md = escapeDiscordMarkdown
+  const akas = (song.track_titles || []).filter((t) => t && t !== title).slice(0, 3)
+  const eraLine = [categoryLabel, song.era?.name && (song.era.description ? `${song.era.name} (${song.era.description})` : song.era.name), song.length]
+    .filter(Boolean)
+    .map(md)
+    .join(' · ')
+  const credits = [
+    song.credited_artists && `**Artists** ${md(song.credited_artists)}`,
+    song.producers && `**Prod.** ${md(truncate(song.producers, 120))}`,
+    akas.length && `**AKA** ${md(akas.join(', '))}`,
+  ].filter(Boolean)
+
+  const componentEmbed = container([
+    section([text(`### [${md(title)}](${url})`), text(`-# ${eraLine || md(SITE)}`), ...(credits.length ? [text(credits.join('\n'))] : [])], thumbnail(image, title)),
+    separator(),
+    linkButtons({ label: 'Play on unreleased', url }),
+  ])
+
+  return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
 
 async function renderSharedPlaylist(shareId) {
@@ -210,7 +266,21 @@ async function renderSharedPlaylist(shareId) {
     ? `${tracks.length} track${tracks.length === 1 ? '' : 's'} - listen free on unreleased.`
     : 'A playlist shared from unreleased.'
 
-  return renderPage({ title: name, description, image, imageAlt: name, url })
+  const md = escapeDiscordMarkdown
+  const preview = tracks
+    .slice(0, 5)
+    .map((t) => (t && typeof t === 'object' ? (t.song?.name ?? t.name) : null) || trackPath(t)?.split('/').pop()?.replace(/\.[^.]+$/, ''))
+    .filter(Boolean)
+    .map((n, i) => `${i + 1}. ${md(truncate(n, 60))}`)
+  if (tracks.length > preview.length && preview.length) preview.push(`-# +${tracks.length - preview.length} more`)
+
+  const componentEmbed = container([
+    section([text(`### [${md(name)}](${url})`), text(`-# Shared playlist · ${description}`), ...(preview.length ? [text(preview.join('\n'))] : [])], thumbnail(image, name)),
+    separator(),
+    linkButtons({ label: 'Open playlist', url }),
+  ])
+
+  return renderPage({ title: name, description, image, imageAlt: name, url, componentEmbed })
 }
 
 async function renderNewsPost(postId) {
@@ -227,11 +297,28 @@ async function renderNewsPost(postId) {
   }
 
   const summary = typeof item.summary === 'string' ? item.summary.trim() : ''
-  const description = summary || stripMarkdown(item.body || '').slice(0, 300) || 'Juice WRLD news and announcements.'
-  const image = ensureHttpsMediaUrl(item.image_url) || DEFAULT_IMAGE
+  const plainBody = stripMarkdown(item.body || '')
+  const description = summary || truncate(plainBody, 300) || 'Juice WRLD news and announcements.'
+  const postImage = ensureHttpsMediaUrl(item.image_url)
+  const image = postImage || DEFAULT_IMAGE
   const title = item.title || 'News'
 
-  return renderPage({ title, description, image, imageAlt: title, url })
+  // Body stays plain text (escaped): truncating real markdown mid-link would
+  // break the rendering. The generic icon only shows as a small thumbnail -
+  // a full-width gallery is reserved for posts with their own image.
+  const md = escapeDiscordMarkdown
+  const dateRaw = item.published_at ?? item.created_at
+  const date = dateRaw ? new Date(dateRaw) : null
+  const meta = ['News', date && !Number.isNaN(date.getTime()) ? `<t:${Math.floor(date.getTime() / 1000)}:D>` : null].filter(Boolean).join(' · ')
+  const heading = [text(`### [${md(title)}](${url})`), text(`-# ${meta}`)]
+  const body = text(md(summary || truncate(plainBody, 700) || description))
+  const componentEmbed = container([
+    ...(postImage ? [...heading, body, gallery(postImage, title)] : [section(heading, thumbnail(DEFAULT_IMAGE, SITE)), body]),
+    separator(),
+    linkButtons({ label: 'Read on unreleased', url }),
+  ])
+
+  return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
 
 const server = http.createServer(async (req, res) => {
