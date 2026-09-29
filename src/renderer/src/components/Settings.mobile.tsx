@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
@@ -112,9 +112,9 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
   )
 }
 
-type Tab = 'account' | 'appearance' | 'playback' | 'feedback' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'feedback' | 'about'
 
-const SECTION_IDS: Tab[] = ['account', 'appearance', 'playback', 'feedback', 'about']
+const SECTION_IDS: Tab[] = ['account', 'appearance', 'preferences', 'playback', 'feedback', 'about']
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. Only lists rows that actually
@@ -134,10 +134,12 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits' },
-  { tab: 'appearance', label: 'Menu items', sub: 'Reorder or hide nav tabs' },
-  { tab: 'appearance', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
-  { tab: 'appearance', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
+  // Preferences
+  { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits' },
+  { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide nav tabs' },
+  { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
@@ -644,7 +646,8 @@ export default function Settings(): JSX.Element {
   // tint, matching the iOS-Settings idiom the Row primitive already uses.
   const tabs: { id: Tab; label: string; icon: ElementType; color: string; sub: string }[] = [
     { id: 'account', label: 'Account', icon: User, color: '#1d4ed8', sub: account ? accountDisplayName(account) : 'Not signed in' },
-    { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, layout' },
+    { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, lyrics' },
+    { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal, color: '#0d9488', sub: 'Navigation, home screen, eras' },
     { id: 'playback', label: 'Playback', icon: Volume2, color: '#2563eb', sub: 'Output, crossfade, lyrics' },
     { id: 'feedback', label: 'Feedback', icon: MessageCircle, color: '#db2777', sub: 'Report a problem or idea' },
     { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, legal' },
@@ -946,7 +949,7 @@ export default function Settings(): JSX.Element {
 
         {/* The drilled-into section - one category owns the whole screen. */}
         {inSection && (
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
+          <div key={tab} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
 
             {/* ── Account ── */}
             {tab === 'account' && (
@@ -1366,6 +1369,14 @@ export default function Settings(): JSX.Element {
                       />
                     </div>
                   </Block>
+                </SettingsCard>
+              </div>
+            )}
+
+            {/* ── Preferences ── */}
+            {!settingsQueryTrimmed && tab === 'preferences' && (
+              <div>
+                <SettingsCard title="General">
                   <Row
                     icon={BookOpen}
                     iconColor="#0891b2"

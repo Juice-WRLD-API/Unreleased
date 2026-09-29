@@ -6,7 +6,7 @@ import {
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
-  AudioLines,
+  AudioLines, SlidersHorizontal,
 } from 'lucide-react'
 import { VISUALIZERS, type Boost, type Quality } from '../lib/viz'
 import { useVizStore, type CaptionPos, type VizCycle } from '../store/vizStore'
@@ -70,7 +70,7 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'account' | 'appearance' | 'playback' | 'shortcuts' | 'feedback' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'feedback' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `devOnly` mirrors the same gate
@@ -100,12 +100,13 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
   { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, fullscreen layout, artwork colors' },
-  { tab: 'appearance', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
-  { tab: 'appearance', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
-  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
-  { tab: 'appearance', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
-  { tab: 'appearance', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
-  { tab: 'appearance', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
+  // Preferences
+  { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
+  { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
+  { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
+  { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
@@ -384,7 +385,7 @@ function VizSettings(): JSX.Element {
         </div>
         <div className="min-w-0 flex-1">
           <span className="text-text-primary text-sm">WRLD visualizer</span>
-          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → switches visualizer, V toggles visualizer only in fullscreen</p>
+          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → and V work in fullscreen: ← → switches visualizer, V toggles visualizer only</p>
         </div>
         <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -696,6 +697,7 @@ export default function Settings(): JSX.Element {
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     { id: 'feedback', label: 'Feedback', icon: MessageCircle },
@@ -815,7 +817,7 @@ export default function Settings(): JSX.Element {
             ))}
           </div>
 
-          <div className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -1381,21 +1383,6 @@ export default function Settings(): JSX.Element {
                     </div>
                   )}
                 </Row>
-                <Row
-                  icon={BookOpen}
-                  iconColor="#0891b2"
-                  label="Full era names"
-                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
-                />
-                <Row
-                  icon={FlaskConical}
-                  iconColor="#f59e0b"
-                  label="Sandbox"
-                  sub="Dock modals into a collapsible pill at the top of the window instead of a centered popup. Off restores the plain popup for every modal."
-                >
-                  <Toggle on={sandboxEnabled} onClick={() => setSandboxEnabled(!sandboxEnabled)} />
-                </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#9333ea' }}>
@@ -1424,6 +1411,28 @@ export default function Settings(): JSX.Element {
                   </div>
                 </div>
                 <VizSettings />
+              </div>
+            )}
+
+            {/* ── Preferences ── */}
+            {!settingsQueryTrimmed && tab === 'preferences' && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-4">Preferences</h3>
+                <Row
+                  icon={BookOpen}
+                  iconColor="#0891b2"
+                  label="Full era names"
+                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
+                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
+                />
+                <Row
+                  icon={FlaskConical}
+                  iconColor="#f59e0b"
+                  label="Sandbox"
+                  sub="Dock modals into a collapsible pill at the top of the window instead of a centered popup. Off restores the plain popup for every modal."
+                >
+                  <Toggle on={sandboxEnabled} onClick={() => setSandboxEnabled(!sandboxEnabled)} />
+                </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
