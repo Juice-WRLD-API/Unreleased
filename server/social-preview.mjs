@@ -17,18 +17,36 @@
 //
 // Run: node server/social-preview.mjs
 // Env: SOCIAL_PREVIEW_PORT (default 8788), SOCIAL_PREVIEW_HOST (default
-// 127.0.0.1 - only nginx should reach this), JWAPI_BASE, SITE_ORIGIN
+// 127.0.0.1 - only nginx should reach this), JWAPI_BASE, SITE_ORIGIN,
+// SITE_HOSTS (comma-separated hosts links may point back to)
 
 import http from 'node:http'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash } from 'node:crypto'
 import { URL } from 'node:url'
 
 const PORT = Number(process.env.SOCIAL_PREVIEW_PORT || 8788)
 const HOST = process.env.SOCIAL_PREVIEW_HOST || '127.0.0.1'
 const JWAPI_BASE = process.env.JWAPI_BASE || 'https://juicewrldapi.com/juicewrld'
-const ORIGIN = process.env.SITE_ORIGIN || 'https://player.juicewrldapi.com'
+const DEFAULT_ORIGIN = process.env.SITE_ORIGIN || 'https://player.juicewrldapi.com'
 const SITE = 'unreleased'
 const FETCH_TIMEOUT_MS = 5000
-const DEFAULT_IMAGE = `${ORIGIN}/icon-512.png`
+
+// The SPA builds share links from its own origin (platform.ts's shareOrigin),
+// so a link copied on beta must unfurl with beta links. The Host nginx
+// forwards picks the origin, limited to known hosts so a spoofed Host header
+// can't point the embed anywhere else.
+const SITE_HOSTS = new Set(
+  (process.env.SITE_HOSTS || `${new URL(DEFAULT_ORIGIN).host},beta.juicewrldapi.com`)
+    .split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
+)
+const requestOrigin = new AsyncLocalStorage()
+function originForHost(host) {
+  const h = String(host || '').trim().toLowerCase()
+  return SITE_HOSTS.has(h) ? `https://${h}` : DEFAULT_ORIGIN
+}
+const origin = () => requestOrigin.getStore() ?? DEFAULT_ORIGIN
+const defaultImage = () => `${origin()}/icon-512.png`
 
 // Same category labels as juicewrldApi.ts's CATEGORY_LABELS - kept in sync
 // manually since this process never imports the client bundle.
@@ -325,14 +343,14 @@ function lyricHook(lyrics) {
 }
 
 async function renderTrack(songId) {
-  const url = `${ORIGIN}/track/${songId}`
+  const url = `${origin()}/track/${songId}`
   const song = await fetchJson(`${JWAPI_BASE}/songs/${encodeURIComponent(songId)}/`)
 
   if (!song) {
     return renderPage({
       title: 'Track',
       description: 'A Juice WRLD song on unreleased.',
-      image: DEFAULT_IMAGE,
+      image: defaultImage(),
       url,
     })
   }
@@ -347,7 +365,7 @@ async function renderTrack(songId) {
   const description = [categoryLabel, project, length, artists, producers && `prod. ${oneLine(producers)}`]
     .filter(Boolean)
     .join(' · ') || 'Stream this Juice WRLD song free on unreleased.'
-  const image = buildImageUrl(song.image_url) || DEFAULT_IMAGE
+  const image = buildImageUrl(song.image_url) || defaultImage()
 
   const md = escapeDiscordMarkdown
   const akas = [...new Set((song.track_titles || []).filter((t) => t && t !== title))].slice(0, 3)
@@ -398,14 +416,14 @@ async function renderTrack(songId) {
 // playlist (/playlists?id=:id&view=shared) return the same kind of payload.
 function renderSharedPlaylist(shareId) {
   return renderPlaylistPreview(
-    `${ORIGIN}/shared/${encodeURIComponent(shareId)}`,
+    `${origin()}/shared/${encodeURIComponent(shareId)}`,
     `${JWAPI_BASE}/playlists/shared/${encodeURIComponent(shareId)}/`,
   )
 }
 
 function renderPublicPlaylist(id) {
   return renderPlaylistPreview(
-    `${ORIGIN}/playlists?id=${encodeURIComponent(id)}&view=shared`,
+    `${origin()}/playlists?id=${encodeURIComponent(id)}&view=shared`,
     `${JWAPI_BASE}/library/playlists/public/${encodeURIComponent(id)}/`,
   )
 }
@@ -417,7 +435,7 @@ async function renderPlaylistPreview(url, apiUrl) {
     return renderPage({
       title: 'Shared playlist',
       description: 'A playlist shared from unreleased.',
-      image: DEFAULT_IMAGE,
+      image: defaultImage(),
       url,
     })
   }
@@ -429,7 +447,7 @@ async function renderPlaylistPreview(url, apiUrl) {
   // which crawlers can't fetch - only the hosted cover_image_url is usable).
   const playlistCover = buildImageUrl(data.cover_image_url ?? data.playlist?.cover_image_url)
   const image = (playlistCover && /^https?:\/\//.test(playlistCover) ? playlistCover : null)
-    || (firstPath ? `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(firstPath)}&size=1024` : DEFAULT_IMAGE)
+    || (firstPath ? `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(firstPath)}&size=1024` : defaultImage())
   const description = tracks.length
     ? `${tracks.length} track${tracks.length === 1 ? '' : 's'} - listen free on unreleased.`
     : 'A playlist shared from unreleased.'
@@ -487,14 +505,14 @@ async function renderPlaylistPreview(url, apiUrl) {
 }
 
 async function renderNewsPost(postId) {
-  const url = `${ORIGIN}/news/${postId}`
+  const url = `${origin()}/news/${postId}`
   const item = await fetchJson(`${JWAPI_BASE}/news/${encodeURIComponent(postId)}/`)
 
   if (!item) {
     return renderPage({
       title: 'News',
       description: 'Juice WRLD news and announcements.',
-      image: DEFAULT_IMAGE,
+      image: defaultImage(),
       url,
     })
   }
@@ -503,7 +521,7 @@ async function renderNewsPost(postId) {
   const plainBody = stripMarkdown(item.body || '')
   const description = summary || truncate(plainBody, 300) || 'Juice WRLD news and announcements.'
   const postImage = ensureHttpsMediaUrl(item.image_url)
-  const image = postImage || DEFAULT_IMAGE
+  const image = postImage || defaultImage()
   const title = item.title || 'News'
 
   // The generic icon only shows as a small thumbnail - a full-width gallery
@@ -534,13 +552,13 @@ async function renderNewsPost(postId) {
         .slice(0, maxImages)
       const heading = [text(`### [${md(title)}](${url})`), text(`-# ${meta}`)]
       return container([
-        ...(media.length ? heading : [section(heading, thumbnail(DEFAULT_IMAGE, SITE))]),
+        ...(media.length ? heading : [section(heading, thumbnail(defaultImage(), SITE))]),
         ...(summary && markdown ? [text(`**${md(summary)}**`)] : []),
         text(markdown || md(description)),
         ...(media.length ? [gallery(media)] : []),
         ...(otherAttachments > 0 ? [text(`-# 📎 ${otherAttachments} attachment${otherAttachments === 1 ? '' : 's'}`)] : []),
         separator(),
-        linkButtons({ label: 'Read on unreleased', url, emoji: '📰' }, { label: 'All news', url: `${ORIGIN}/news` }),
+        linkButtons({ label: 'Read on unreleased', url, emoji: '📰' }, { label: 'All news', url: `${origin()}/news` }),
       ])
     },
     [1600, 1200, 900, 600, 350]
@@ -557,7 +575,7 @@ async function renderNewsPost(postId) {
 const HOME_DESCRIPTION = "Stream Juice WRLD's full catalog - every released and unreleased song - free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics."
 
 async function renderHome() {
-  const url = `${ORIGIN}/`
+  const url = `${origin()}/`
   const title = `${SITE} - Juice WRLD music player`
   const [stats, eras, news] = await Promise.all([
     fetchJson(`${JWAPI_BASE}/stats/`),
@@ -580,7 +598,7 @@ async function renderHome() {
   const latest = Array.isArray(news?.results) ? news.results[0] : null
   const latestDate = latest?.published_at ? new Date(latest.published_at) : null
   const latestLine = latest?.id != null && latest.title
-    ? `📰 **Latest** [${md(truncate(latest.title, 80))}](${ORIGIN}/news/${latest.id})${latestDate && !Number.isNaN(latestDate.getTime()) ? ` · <t:${Math.floor(latestDate.getTime() / 1000)}:R>` : ''}`
+    ? `📰 **Latest** [${md(truncate(latest.title, 80))}](${origin()}/news/${latest.id})${latestDate && !Number.isNaN(latestDate.getTime()) ? ` · <t:${Math.floor(latestDate.getTime() / 1000)}:R>` : ''}`
     : null
 
   const componentEmbed = fitComponentEmbed(
@@ -588,24 +606,146 @@ async function renderHome() {
       container([
         section(
           [text(`## [${SITE}](${url})`), text('-# Juice WRLD music player · free, in your browser'), text(md(HOME_DESCRIPTION))],
-          thumbnail(DEFAULT_IMAGE, SITE),
+          thumbnail(defaultImage(), SITE),
         ),
         ...(headline ? [separator(), text([headline, breakdown && `-# ${breakdown}`].filter(Boolean).join('\n'))] : []),
         ...(withLatest && latestLine ? [separator(), text(latestLine)] : []),
         separator(),
         linkButtons(
           { label: 'Start listening', url, emoji: '🎧' },
-          { label: '999 FM', url: `${ORIGIN}/radio`, emoji: '📻' },
-          { label: 'News', url: `${ORIGIN}/news`, emoji: '📰' },
+          { label: '999 FM', url: `${origin()}/radio`, emoji: '📻' },
+          { label: 'News', url: `${origin()}/news`, emoji: '📰' },
         ),
       ]),
     [{ withLatest: true }, { withLatest: false }],
   )
 
-  return renderPage({ title, description: HOME_DESCRIPTION, image: DEFAULT_IMAGE, imageAlt: title, url, componentEmbed })
+  return renderPage({ title, description: HOME_DESCRIPTION, image: defaultImage(), imageAlt: title, url, componentEmbed })
 }
 
-const server = http.createServer(async (req, res) => {
+// Profile avatars are stored inline as base64 data: URLs, which crawlers
+// can't fetch - this service re-serves the decoded bytes at
+// /u/:id/avatar.<ext> (see the nginx snippet) so embeds get a real image URL.
+const AVATAR_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }
+
+function decodeAvatar(avatar) {
+  const m = typeof avatar === 'string' && avatar.match(/^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=\s]+)$/)
+  if (!m || !AVATAR_TYPES[m[1]]) return null
+  return { mime: m[1], ext: AVATAR_TYPES[m[1]], bytes: Buffer.from(m[2], 'base64') }
+}
+
+function avatarUrl(profile) {
+  if (typeof profile?.avatar === 'string' && /^https?:\/\//.test(profile.avatar)) return profile.avatar
+  const decoded = decodeAvatar(profile?.avatar)
+  if (!decoded) return null
+  // Content hash as a cache-buster, so a changed avatar isn't stuck behind
+  // Discord's media-proxy cache.
+  const v = createHash('sha1').update(decoded.bytes).digest('hex').slice(0, 10)
+  return `${origin()}/u/${profile.id}/avatar.${decoded.ext}?v=${v}`
+}
+
+async function serveAvatar(res, userId) {
+  const decoded = decodeAvatar((await fetchJson(`${JWAPI_BASE}/accounts/profile/${userId}/`))?.avatar)
+  if (!decoded) {
+    res.writeHead(302, { Location: defaultImage(), 'Cache-Control': 'public, max-age=300' })
+    res.end()
+    return
+  }
+  res.writeHead(200, { 'Content-Type': decoded.mime, 'Content-Length': decoded.bytes.length, 'Cache-Control': 'public, max-age=3600' })
+  res.end(decoded.bytes)
+}
+
+async function renderProfile(userId) {
+  const url = `${origin()}/u/${userId}`
+  const [profile, np] = await Promise.all([
+    fetchJson(`${JWAPI_BASE}/accounts/profile/${userId}/`),
+    fetchJson(`${JWAPI_BASE}/accounts/profile/${userId}/np/`),
+  ])
+
+  if (!profile) {
+    return renderPage({ title: 'Profile', description: 'A listener on unreleased.', image: defaultImage(), url })
+  }
+
+  const md = escapeDiscordMarkdown
+  const name = (profile.display_name || profile.username || 'Listener').trim()
+  const image = avatarUrl(profile) || defaultImage()
+  const bio = typeof profile.bio === 'string' ? profile.bio.trim() : ''
+
+  const donorSince = profile.donor_since ? new Date(profile.donor_since) : null
+  const badges = [
+    profile.is_editor && 'Editor',
+    profile.is_contributor && 'Contributor',
+    profile.is_donor && (donorSince && !Number.isNaN(donorSince.getTime()) ? `Donor since <t:${Math.floor(donorSince.getTime() / 1000)}:D>` : 'Donor'),
+  ].filter(Boolean)
+  // Discord-linked accounts get a "discord_<snowflake>" username - not worth showing.
+  const handle = profile.username && profile.username !== name && !/^discord_\d+$/.test(profile.username) ? `@${md(profile.username)}` : null
+  const subline = [handle, ...badges].filter(Boolean).join(' · ') || 'Listener on unreleased'
+
+  // Listening stats straight from the public play history (all-time).
+  const plays = profile.public_play_history && Array.isArray(profile.play_history) ? profile.play_history : []
+  const counts = new Map()
+  for (const p of plays) if (p?.song != null) counts.set(p.song, (counts.get(p.song) ?? 0) + 1)
+  const topIds = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  const lastPlayed = plays.reduce((max, p) => Math.max(max, Date.parse(p?.played_at) || 0), 0)
+
+  const nowPlaying = profile.public_now_playing ? np?.now_playing : null
+  const songIds = [...new Set([...(nowPlaying?.song != null ? [nowPlaying.song] : []), ...topIds.map(([id]) => id)])]
+  const songs = new Map(
+    (await Promise.all(songIds.map((id) => fetchJson(`${JWAPI_BASE}/songs/${encodeURIComponent(id)}/`))))
+      .filter((s) => s?.id != null)
+      .map((s) => [s.id, s]),
+  )
+  const songLink = (id) => {
+    const song = songs.get(id)
+    return song?.name ? `[${md(truncate(song.name, 60))}](${origin()}/track/${id})` : null
+  }
+
+  const nowLine = nowPlaying && songLink(nowPlaying.song) ? `🎧 **Listening now** ${songLink(nowPlaying.song)}` : null
+  const statsLine = plays.length
+    ? [`**${plays.length.toLocaleString('en-US')}** plays`, `**${counts.size.toLocaleString('en-US')}** songs`, lastPlayed ? `last played <t:${Math.floor(lastPlayed / 1000)}:R>` : null].filter(Boolean).join(' · ')
+    : null
+  const topLines = topIds
+    .map(([id, count], i) => songLink(id) && `${i + 1}. ${songLink(id)} · ${count.toLocaleString('en-US')} play${count === 1 ? '' : 's'}`)
+    .filter(Boolean)
+
+  const publicPlaylists = profile.public_playlists && Array.isArray(profile.playlists)
+    ? profile.playlists.filter((p) => p?.is_public && p.id != null && p.name)
+    : []
+
+  const description = [bio && truncate(bio, 200), statsLine && `${plays.length.toLocaleString('en-US')} plays`, publicPlaylists.length && `${publicPlaylists.length} public playlist${publicPlaylists.length === 1 ? '' : 's'}`]
+    .filter(Boolean)
+    .join(' · ') || `${name} on unreleased.`
+
+  const componentEmbed = fitComponentEmbed(
+    ({ listedPlaylists, withTop }) => {
+      const playlistLines = publicPlaylists
+        .slice(0, listedPlaylists)
+        .map((p) => `[${md(truncate(p.name, 50))}](${origin()}/playlists?id=${p.id}&view=shared)${Number.isFinite(p.track_count) ? ` · ${p.track_count} tracks` : ''}`)
+      if (playlistLines.length && publicPlaylists.length > playlistLines.length) playlistLines.push(`-# +${publicPlaylists.length - playlistLines.length} more`)
+      const heading = [text(`### [${md(name)}](${url})`), text(`-# ${subline}`), ...(bio ? [text(md(truncate(bio, 200)))] : [])]
+      const listening = [nowLine, statsLine, ...(withTop && topLines.length ? ['**Most played**', ...topLines] : [])].filter(Boolean)
+      return container([
+        section(heading, thumbnail(image, name)),
+        ...(listening.length ? [separator(), text(listening.join('\n'))] : []),
+        ...(playlistLines.length ? [separator(), text(['**Playlists**', ...playlistLines].join('\n'))] : []),
+        separator(),
+        linkButtons({ label: 'View profile', url, emoji: '👤' }),
+      ])
+    },
+    [
+      { listedPlaylists: 5, withTop: true },
+      { listedPlaylists: 3, withTop: true },
+      { listedPlaylists: 3, withTop: false },
+      { listedPlaylists: 0, withTop: false },
+    ],
+  )
+
+  return renderPage({ title: name, description, image, imageAlt: name, url, componentEmbed })
+}
+
+const server = http.createServer((req, res) => requestOrigin.run(originForHost(req.headers.host), () => handle(req, res)))
+
+async function handle(req, res) {
   try {
     const { pathname, searchParams } = new URL(req.url, 'http://localhost')
     let html = null
@@ -619,6 +759,11 @@ const server = http.createServer(async (req, res) => {
       html = await renderNewsPost(match[1])
     } else if (/^\/playlists\/?$/.test(pathname) && searchParams.get('view') === 'shared' && /^\d+$/.test(searchParams.get('id') || '')) {
       html = await renderPublicPlaylist(searchParams.get('id'))
+    } else if ((match = pathname.match(/^\/u\/(\d+)\/avatar\.(jpg|png|webp|gif)$/))) {
+      await serveAvatar(res, match[1])
+      return
+    } else if ((match = pathname.match(/^\/u\/(\d+)\/?$/))) {
+      html = await renderProfile(match[1])
     } else if (pathname === '/' || /^\/(home|playlists)\/?$/.test(pathname)) {
       html = await renderHome()
     }
@@ -638,8 +783,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
     res.end('Internal error')
   }
-})
+}
 
 server.listen(PORT, HOST, () => {
-  console.log(`social-preview listening on ${HOST}:${PORT} (JWAPI_BASE=${JWAPI_BASE}, ORIGIN=${ORIGIN})`)
+  console.log(`social-preview listening on ${HOST}:${PORT} (JWAPI_BASE=${JWAPI_BASE}, ORIGIN=${origin()})`)
 })

@@ -81,6 +81,13 @@ The bare origin (`/`, `/home`, and `/playlists` without a shared id) gets a
 site-wide card with live catalog stats and the latest news post. It needs the
 `location ~ ^/(home)?$` block from the nginx snippet.
 
+## Profiles
+
+`/u/:id` gets a profile card (badges, bio, listening stats, public
+playlists). Avatars are base64 in the API, so the service also serves
+`/u/:id/avatar.<ext>` - that nginx block is NOT bot-gated (Discord's media
+proxy fetches it) and must sit above the `^/(track|shared|news|u)/` block.
+
 ## Nothing else required from the API/backend side
 
 The service only ever does read-only `GET` calls against endpoints that

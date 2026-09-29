@@ -2,7 +2,7 @@
 #
 # The site itself is a static SPA build served by nginx as-is. This snippet
 # adds ONE thing: requests from known link-unfurling bots (Discord, Twitter/X,
-# Slack, iMessage, ...) to /track/:id, /shared/:id and /news/:id are proxied
+# Slack, iMessage, ...) to /track/:id, /shared/:id, /news/:id and /u/:id are proxied
 # to the social-preview Node service (server/social-preview.mjs) instead of
 # the SPA's index.html, so those bots see real per-item og:/twitter: tags.
 # Every other request - including a real browser hitting the exact same URLs
@@ -26,7 +26,16 @@ map $http_user_agent $is_social_bot {
 #    The `if` + `error_page`/named-location dance below is the standard way
 #    to make a conditional proxy_pass in nginx without hitting the
 #    "if is evil" pitfalls of `if` directly wrapping `proxy_pass`.
-location ~ ^/(track|shared|news)/ {
+# Profile avatars are stored as base64 in the API; the service re-serves
+# them as real images for embeds. Not bot-gated - Discord's media proxy
+# fetches it, and the SPA has no such path. Must come before the block below
+# (regex locations match in file order).
+location ~ ^/u/\d+/avatar\.(jpg|png|webp|gif)$ {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+}
+
+location ~ ^/(track|shared|news|u)/ {
     error_page 418 = @social_preview;
     recursive_error_pages on;
     if ($is_social_bot) {
