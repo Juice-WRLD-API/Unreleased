@@ -35,6 +35,28 @@ location ~ ^/(track|shared|news)/ {
     try_files $uri /index.html;
 }
 
+# /playlists?id=:id&view=shared is a query-param route on a page the SPA also
+# serves to everyone else, so it gets its own exact-match location.
+location = /playlists {
+    error_page 418 = @social_preview;
+    recursive_error_pages on;
+    if ($is_social_bot) {
+        return 418;
+    }
+    try_files $uri /index.html;
+}
+
+# The bare origin (and /home) get the site-wide card with live catalog stats.
+# Exact matches only - every other path keeps the normal SPA fallback.
+location ~ ^/(home)?$ {
+    error_page 418 = @social_preview;
+    recursive_error_pages on;
+    if ($is_social_bot) {
+        return 418;
+    }
+    try_files $uri /index.html;
+}
+
 location @social_preview {
     proxy_pass http://127.0.0.1:8788;
     proxy_set_header Host $host;

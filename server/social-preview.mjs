@@ -254,6 +254,76 @@ ${componentEmbed ? `<script id="discord:component-embed" type="application/json"
 </html>`
 }
 
+// Song metadata fields are free-form spreadsheet text: "N/A"/"Unknown"
+// placeholders, "[?]" gaps, and label lines ("Recorded\nJune 13, 2017.",
+// "Juice's Vocals\n...") mixed in with the value.
+const PLACEHOLDERS = new Set(['', 'n/a', 'unknown', 'null', 'none', '?', '[?]'])
+function songField(value) {
+  if (typeof value !== 'string') return null
+  const v = value.replace(/\r\n?/g, '\n').trim()
+  return PLACEHOLDERS.has(v.toLowerCase()) ? null : v
+}
+
+function oneLine(value) {
+  return value.replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+// First line carrying a date, minus its "Surfaced"/"Recorded"-style label.
+function songDate(value) {
+  const v = songField(value)
+  const line = v?.split('\n').map((l) => l.trim()).find((l) => /\d/.test(l))
+  if (!line) return null
+  return line
+    .replace(/^(first\s+)?(surfaced|released|recorded|leaked|previewed|teased)\s*:?\s*/i, '')
+    .replace(/\s*\[\?\],?/g, '')
+    .replace(/\.$/, '')
+    .trim() || null
+}
+
+// Location lines are the ones with commas; label lines ("Juice's Vocals")
+// have none. Unknown parts ("[?], [?], Chicago, IL.") are dropped, and
+// "Studio, Neighborhood, City, ST" is cut to "Studio, City, ST".
+function songLocation(value) {
+  const v = songField(value)
+  if (!v) return null
+  const places = [...new Set(v.split('\n')
+    .filter((l) => l.includes(','))
+    .map((l) => {
+      const parts = l.replace(/\[\?\],?\s*/g, '').replace(/\.$/, '').split(',').map((p) => p.trim()).filter(Boolean)
+      return (parts.length > 3 ? [parts[0], ...parts.slice(-2)] : parts).join(', ')
+    })
+    .filter(Boolean))]
+  return places.slice(0, 2).join(' / ') || null
+}
+
+// The most repeated pair of consecutive lines is usually the hook - a better
+// teaser than the intro ad-libs at the top. Lines that are all ad-lib
+// ("Uh-uh, uh, uh") or bracketed section markers never count.
+function lyricHook(lyrics) {
+  const v = songField(lyrics)
+  if (!v) return null
+  const lines = v.split('\n').map((l) => l.trim())
+  const norm = (l) => l.toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9' ]/g, ' ').replace(/\s+/g, ' ').trim()
+  const usable = (l) => {
+    if (!l || /^[([]/.test(l)) return false
+    const words = norm(l).split(' ')
+    return words.length >= 3 && new Set(words.filter((w) => w.length > 2)).size >= 2
+  }
+  const counts = new Map()
+  let best = null
+  for (let i = 0; i < lines.length; i++) {
+    if (!usable(lines[i])) continue
+    const pair = usable(lines[i + 1])
+    const key = pair ? `${norm(lines[i])}\n${norm(lines[i + 1])}` : norm(lines[i])
+    const n = (counts.get(key) || 0) + 1
+    counts.set(key, n)
+    // Pairs outrank a lone line at the same count; ties keep the earliest.
+    const score = n * 2 + (pair ? 1 : 0)
+    if (!best || score > best.score) best = { score, lines: pair ? [lines[i], lines[i + 1]] : [lines[i]] }
+  }
+  return best ? best.lines.map((l) => truncate(l, 90)) : null
+}
+
 async function renderTrack(songId) {
   const url = `${ORIGIN}/track/${songId}`
   const song = await fetchJson(`${JWAPI_BASE}/songs/${encodeURIComponent(songId)}/`)
@@ -268,41 +338,80 @@ async function renderTrack(songId) {
   }
 
   const title = song.name || 'Track'
+  const released = song.category === 'released'
   const categoryLabel = CATEGORY_LABELS[song.category] || song.category || ''
-  const era = song.era?.name
-  const description = [categoryLabel, era, song.credited_artists || 'Juice WRLD']
+  const project = songField(song.album) || songField(song.era?.description) || songField(song.era?.name)
+  const artists = songField(song.credited_artists) || 'Juice WRLD'
+  const producers = songField(song.producers)
+  const length = parseLength(song.length) ? song.length.trim() : null
+  const description = [categoryLabel, project, length, artists, producers && `prod. ${oneLine(producers)}`]
     .filter(Boolean)
     .join(' · ') || 'Stream this Juice WRLD song free on unreleased.'
   const image = buildImageUrl(song.image_url) || DEFAULT_IMAGE
 
   const md = escapeDiscordMarkdown
-  const akas = (song.track_titles || []).filter((t) => t && t !== title).slice(0, 3)
-  const eraLine = [categoryLabel, song.era?.name && (song.era.description ? `${song.era.name} (${song.era.description})` : song.era.name), song.length]
-    .filter(Boolean)
-    .map(md)
-    .join(' · ')
+  const akas = [...new Set((song.track_titles || []).filter((t) => t && t !== title))].slice(0, 3)
+  const meta = [categoryLabel, project, length].filter(Boolean).map(md).join(' · ')
+
+  const recorded = [songDate(song.record_dates), songLocation(song.recording_locations)].filter(Boolean)
+  // Released songs show their release date; everything else shows when it
+  // surfaced (or was first teased) plus the leak type ("Throwaway Track").
+  const leakType = !released && songField(song.leak_type)
+  const statusDate = released
+    ? songDate(song.release_date)
+    : songDate(song.date_leaked) || songDate(song.dates)
+  const teased = !statusDate && songDate(song.preview_date)
+  const status = [statusDate || teased, leakType && oneLine(leakType)].filter(Boolean)
+  const statusLabel = released ? 'Released' : statusDate ? 'Surfaced' : teased ? 'First teased' : 'Status'
+
   const credits = [
-    song.credited_artists && `**Artists** ${md(song.credited_artists)}`,
-    song.producers && `**Prod.** ${md(truncate(song.producers, 120))}`,
-    akas.length && `**AKA** ${md(akas.join(', '))}`,
+    producers && `**Produced by** ${md(truncate(oneLine(producers), 120))}`,
+    recorded.length && `**Recorded** ${md(truncate(recorded.join(' · '), 140))}`,
+    status.length && `**${statusLabel}** ${md(truncate(status.join(' · '), 120))}`,
+    akas.length && `**Also known as** ${md(akas.join(', '))}`,
   ].filter(Boolean)
+  const hook = lyricHook(song.lyrics)
+  const info = songField(song.additional_information)
 
   const componentEmbed = fitComponentEmbed(
-    ({ withCredits }) =>
+    ({ withCredits, withHook, withInfo }) =>
       container([
-        section([text(`### [${md(title)}](${url})`), text(`-# ${eraLine || md(SITE)}`), ...(withCredits && credits.length ? [text(credits.join('\n'))] : [])], thumbnail(image, title)),
+        section([text(`### [${md(title)}](${url})`), text(md(artists)), text(`-# ${meta || md(SITE)}`)], thumbnail(image, title)),
+        ...(withCredits && credits.length ? [separator(), text(credits.join('\n'))] : []),
+        ...(withHook && hook ? [text(hook.map((l) => `> *${md(l)}*`).join('\n'))] : []),
+        ...(withInfo && info ? [text(`-# ${md(truncate(oneLine(info), 240))}`)] : []),
         separator(),
         linkButtons({ label: 'Play on unreleased', url, emoji: '▶️' }),
       ]),
-    [{ withCredits: true }, { withCredits: false }],
+    [
+      { withCredits: true, withHook: true, withInfo: true },
+      { withCredits: true, withHook: true, withInfo: false },
+      { withCredits: true, withHook: false, withInfo: false },
+      { withCredits: false, withHook: false, withInfo: false },
+    ],
   )
 
   return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
 
-async function renderSharedPlaylist(shareId) {
-  const url = `${ORIGIN}/shared/${encodeURIComponent(shareId)}`
-  const data = await fetchJson(`${JWAPI_BASE}/playlists/shared/${encodeURIComponent(shareId)}/`)
+// Anonymous share links (/shared/:id) and a signed-in user's public library
+// playlist (/playlists?id=:id&view=shared) return the same kind of payload.
+function renderSharedPlaylist(shareId) {
+  return renderPlaylistPreview(
+    `${ORIGIN}/shared/${encodeURIComponent(shareId)}`,
+    `${JWAPI_BASE}/playlists/shared/${encodeURIComponent(shareId)}/`,
+  )
+}
+
+function renderPublicPlaylist(id) {
+  return renderPlaylistPreview(
+    `${ORIGIN}/playlists?id=${encodeURIComponent(id)}&view=shared`,
+    `${JWAPI_BASE}/library/playlists/public/${encodeURIComponent(id)}/`,
+  )
+}
+
+async function renderPlaylistPreview(url, apiUrl) {
+  const data = await fetchJson(apiUrl)
 
   if (!data) {
     return renderPage({
@@ -316,9 +425,11 @@ async function renderSharedPlaylist(shareId) {
   const tracks = firstTrackArray(data) ?? []
   const name = playlistName(data) || 'Shared Playlist'
   const firstPath = tracks.length ? trackPath(tracks[0]) : null
-  const image = firstPath
-    ? `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(firstPath)}&size=1024`
-    : DEFAULT_IMAGE
+  // Library playlists carry their own cover (cover_image is inline base64,
+  // which crawlers can't fetch - only the hosted cover_image_url is usable).
+  const playlistCover = buildImageUrl(data.cover_image_url ?? data.playlist?.cover_image_url)
+  const image = (playlistCover && /^https?:\/\//.test(playlistCover) ? playlistCover : null)
+    || (firstPath ? `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(firstPath)}&size=1024` : DEFAULT_IMAGE)
   const description = tracks.length
     ? `${tracks.length} track${tracks.length === 1 ? '' : 's'} - listen free on unreleased.`
     : 'A playlist shared from unreleased.'
@@ -334,8 +445,9 @@ async function renderSharedPlaylist(shareId) {
     }
   })
   const totalSeconds = entries.reduce((sum, e) => sum + (parseLength(e.length) ?? 0), 0)
+  const owner = [data.owner_display_name, data.playlist?.owner_display_name].find((o) => typeof o === 'string' && o.trim())?.trim()
   const meta = [
-    'Shared playlist',
+    owner ? `Playlist by ${escapeDiscordMarkdown(owner)}` : 'Shared playlist',
     tracks.length ? `${tracks.length} track${tracks.length === 1 ? '' : 's'}` : null,
     totalSeconds >= 60 ? formatTotalLength(totalSeconds) : null,
   ].filter(Boolean).join(' · ')
@@ -439,9 +551,63 @@ async function renderNewsPost(postId) {
   return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
 
+// Site-wide card for the bare origin (and /playlists without a shared id).
+// Same copy as index.html's static tags, plus live catalog numbers and the
+// latest news post - all optional, so an API outage still yields the card.
+const HOME_DESCRIPTION = "Stream Juice WRLD's full catalog - every released and unreleased song - free in your browser. Search by era, producer or engineer, build playlists, listen to 999 FM radio, and read synced lyrics."
+
+async function renderHome() {
+  const url = `${ORIGIN}/`
+  const title = `${SITE} - Juice WRLD music player`
+  const [stats, eras, news] = await Promise.all([
+    fetchJson(`${JWAPI_BASE}/stats/`),
+    fetchJson(`${JWAPI_BASE}/eras/?page_size=1`),
+    fetchJson(`${JWAPI_BASE}/news/?page_size=1`),
+  ])
+
+  const n = (value) => (Number.isFinite(value) ? value.toLocaleString('en-US') : null)
+  const cats = stats?.category_stats && typeof stats.category_stats === 'object' ? stats.category_stats : {}
+  const headline = [
+    n(stats?.total_songs) && `**${n(stats.total_songs)}** songs`,
+    n(eras?.count) && `**${n(eras.count)}** eras`,
+  ].filter(Boolean).join(' · ')
+  const breakdown = Object.entries(CATEGORY_LABELS)
+    .map(([key, label]) => n(cats[key]) && `${n(cats[key])} ${key === 'recording_session' ? 'sessions' : label.toLowerCase()}`)
+    .filter(Boolean)
+    .join(' · ')
+
+  const md = escapeDiscordMarkdown
+  const latest = Array.isArray(news?.results) ? news.results[0] : null
+  const latestDate = latest?.published_at ? new Date(latest.published_at) : null
+  const latestLine = latest?.id != null && latest.title
+    ? `📰 **Latest** [${md(truncate(latest.title, 80))}](${ORIGIN}/news/${latest.id})${latestDate && !Number.isNaN(latestDate.getTime()) ? ` · <t:${Math.floor(latestDate.getTime() / 1000)}:R>` : ''}`
+    : null
+
+  const componentEmbed = fitComponentEmbed(
+    ({ withLatest }) =>
+      container([
+        section(
+          [text(`## [${SITE}](${url})`), text('-# Juice WRLD music player · free, in your browser'), text(md(HOME_DESCRIPTION))],
+          thumbnail(DEFAULT_IMAGE, SITE),
+        ),
+        ...(headline ? [separator(), text([headline, breakdown && `-# ${breakdown}`].filter(Boolean).join('\n'))] : []),
+        ...(withLatest && latestLine ? [separator(), text(latestLine)] : []),
+        separator(),
+        linkButtons(
+          { label: 'Start listening', url, emoji: '🎧' },
+          { label: '999 FM', url: `${ORIGIN}/radio`, emoji: '📻' },
+          { label: 'News', url: `${ORIGIN}/news`, emoji: '📰' },
+        ),
+      ]),
+    [{ withLatest: true }, { withLatest: false }],
+  )
+
+  return renderPage({ title, description: HOME_DESCRIPTION, image: DEFAULT_IMAGE, imageAlt: title, url, componentEmbed })
+}
+
 const server = http.createServer(async (req, res) => {
   try {
-    const { pathname } = new URL(req.url, 'http://localhost')
+    const { pathname, searchParams } = new URL(req.url, 'http://localhost')
     let html = null
     let match
 
@@ -451,6 +617,10 @@ const server = http.createServer(async (req, res) => {
       html = await renderSharedPlaylist(match[1])
     } else if ((match = pathname.match(/^\/news\/(\d+)\/?$/))) {
       html = await renderNewsPost(match[1])
+    } else if (/^\/playlists\/?$/.test(pathname) && searchParams.get('view') === 'shared' && /^\d+$/.test(searchParams.get('id') || '')) {
+      html = await renderPublicPlaylist(searchParams.get('id'))
+    } else if (pathname === '/' || /^\/(home|playlists)\/?$/.test(pathname)) {
+      html = await renderHome()
     }
 
     if (!html) {

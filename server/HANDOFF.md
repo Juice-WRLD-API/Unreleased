@@ -68,16 +68,12 @@ is the deploy/infra half only** - nothing below touches application code.
 | `JWAPI_BASE` | `https://juicewrldapi.com/juicewrld` | API base the service fetches song/playlist/news data from. |
 | `SITE_ORIGIN` | `https://player.juicewrldapi.com` | Used to build canonical/og:url links back to the SPA. |
 
-## Known limitation / heads-up
+## Library playlist links
 
-There is a **second, separate playlist-sharing mechanism** already live in
-the app: `/playlists?id=<id>&view=shared` (a logged-in user's public library
-playlist, distinct from the anonymous `/playlists/share/` -> `/shared/:id`
-flow this covers). It is **not** handled by `social-preview.mjs` or the nginx
-rule yet - those links will still unfurl with the generic site-wide card. Flag
-to product/frontend if that needs covering too; it's a query-param route on
-`/playlists`, not a clean path prefix, so the nginx match and the service's
-routing would both need a small extension.
+`/playlists?id=<id>&view=shared` (a signed-in user's public library playlist)
+is also handled: the service reads `/library/playlists/public/{id}/`, and the
+nginx snippet has an exact-match `location = /playlists` block for bots. Add
+that block to the real config or these links keep the generic site card.
 
 ## Nothing else required from the API/backend side
 
