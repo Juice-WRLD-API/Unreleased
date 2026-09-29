@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useResizablePanel } from '../hooks/useResizablePanel'
-import { X, Music, ChevronUp, ChevronDown, Pencil, Info, Share2 } from 'lucide-react'
+import { X, Music, ChevronUp, ChevronDown, Pencil, Info, MicVocal } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import LyricsDisplay from './LyricsDisplay'
 import { lazyOverlay } from '../lib/lazyView'
@@ -83,7 +83,7 @@ export default function NowPlaying(): JSX.Element {
                 className="text-text-muted hover:text-text-primary transition-colors"
                 title="Share lyrics"
               >
-                <Share2 size={16} />
+                <MicVocal size={16} />
               </button>
             )}
             {jwMatch && (

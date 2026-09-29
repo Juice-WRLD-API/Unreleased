@@ -25,6 +25,7 @@ import {
 import { useStore, useStorePick } from '../store/useStore'
 import { eventToCombo, resolveAction, registerHotkeyDispatch } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
+import { takeEqAnchor } from '../lib/eqAnchor'
 import { getSongById, smallCoverUrl } from '../lib/juicewrldApi'
 import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
 import { rememberRecentTrack } from '../lib/recentTracks'
@@ -1524,15 +1525,19 @@ export default function Player(): JSX.Element {
   const { showEqPanel, setShowEqPanel, toggleEqPanel } = useStorePick('showEqPanel', 'setShowEqPanel', 'toggleEqPanel')
   const isMobile = useIsMobile()
   const eqBtnRef = useRef<HTMLButtonElement>(null)
-  const [eqPos, setEqPos] = useState({ bottom: 0, right: 0 })
-  // Anchor above the bar button when it's on screen; openers without an
-  // anchor (hotkey, WRLD tab, collapsed bar) get a fixed bottom-right spot.
+  const [eqPos, setEqPos] = useState<{ bottom?: number; top?: number; right: number }>({ bottom: 0, right: 0 })
+  // Anchor to the button that opened it (bar or WRLD tab); openers without an
+  // anchor (hotkey, collapsed bar) get a fixed bottom-right spot.
   useEffect(() => {
     if (!showEqPanel) return
-    const btn = eqBtnRef.current
+    const taken = takeEqAnchor()
+    const btn = taken?.isConnected ? taken : eqBtnRef.current
     if (btn?.isConnected) {
       const r = btn.getBoundingClientRect()
-      setEqPos({ bottom: window.innerHeight - r.top + 8, right: Math.max(8, window.innerWidth - r.right - 170) })
+      // Panel is 340px wide, centred on the button, clamped inside the window.
+      const right = Math.min(Math.max(8, window.innerWidth - r.right - 170), Math.max(8, window.innerWidth - 348))
+      if (r.top > window.innerHeight / 2) setEqPos({ bottom: window.innerHeight - r.top + 8, right })
+      else setEqPos({ top: r.bottom + 8, right })
     } else {
       setEqPos({ bottom: 104, right: 16 })
     }
@@ -1623,7 +1628,7 @@ export default function Player(): JSX.Element {
             className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto"
             // Cap below the title bar so a full panel scrolls internally
             // instead of growing under the window controls.
-            style={{ bottom: eqPos.bottom, right: eqPos.right, maxHeight: `calc(100vh - ${eqPos.bottom + 48}px)` }}
+            style={{ bottom: eqPos.bottom, top: eqPos.top, right: eqPos.right, maxHeight: `calc(100vh - ${(eqPos.bottom ?? eqPos.top ?? 0) + 48}px)` }}
           >
             <Suspense fallback={null}><EqualizerPanel /></Suspense>
           </div>

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronLeft, ChevronRight, TextQuote, AudioLines, Minimize2, Maximize2, Radio } from 'lucide-react'
+import { ChevronLeft, ChevronRight, TextQuote, AudioLines, Minimize2, Maximize2, Radio, Settings2 } from 'lucide-react'
 import { Visualizer, VISUALIZERS, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
 import { ERA_PALETTES } from '../lib/eraPalettes'
 import { eventToCombo } from '../lib/hotkeys'
-import { hasEscapeLayer } from '../hooks/useEscapeToClose'
+import { hasEscapeLayer, useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useStore } from '../store/useStore'
 import { useVizStore } from '../store/vizStore'
+import VizControls from './VizControls'
 
 // Audio-reactive backdrop for the WRLD tab, plus its toolbar, keys and (in
 // fullscreen) the visualizer-only caption. WRLD only mounts while its tab is
@@ -128,13 +129,17 @@ export default function WrldVisualizer({
   const [glSupported, setGlSupported] = useState(true)
   // The layout provider outlives any one render, so it reads through a ref.
   const minimal = immMinimal
+  // "Off" tears the engine down entirely - no canvases, audio tap or frame loop.
+  const off = activeMode === 'none'
+  const [showSettings, setShowSettings] = useState(false)
+  useEscapeToClose(() => setShowSettings(false), showSettings)
   const minimalRef = useRef(minimal)
   minimalRef.current = minimal
 
   // ── Engine lifetime ────────────────────────────────────────────────────────
   useEffect(() => {
     const host = hostRef.current
-    if (!host) return
+    if (!host || off) return
     // React owns only the host div. If a lost GL context never comes back the
     // engine swaps its canvas for a fresh clone, and doing that to a
     // React-managed node would pull it out from under the reconciler.
@@ -165,11 +170,11 @@ export default function WrldVisualizer({
       vizRef.current = null
       host.replaceChildren()
     }
-  }, [rootRef])
+  }, [rootRef, off])
 
-  useEffect(() => { vizRef.current?.setQuality(vizQuality) }, [vizQuality])
-  useEffect(() => { vizRef.current?.setBoost(vizBoost) }, [vizBoost])
-  useEffect(() => { vizRef.current?.setUsePalette(vizUseArtwork) }, [vizUseArtwork])
+  useEffect(() => { vizRef.current?.setQuality(vizQuality) }, [vizQuality, off])
+  useEffect(() => { vizRef.current?.setBoost(vizBoost) }, [vizBoost, off])
+  useEffect(() => { vizRef.current?.setUsePalette(vizUseArtwork) }, [vizUseArtwork, off])
   useEffect(() => {
     const viz = vizRef.current
     if (!viz) return
@@ -178,7 +183,7 @@ export default function WrldVisualizer({
     if (era) viz.setArtworkPalette(ERA_PALETTES[era] ?? null)
     // Sampled at 48px, so the degraded cover is all it needs.
     else void viz.setArtwork(artUrl ? (smallCoverUrl(artUrl) ?? artUrl) : '')
-  }, [artUrl])
+  }, [artUrl, off])
 
   useEffect(() => {
     const viz = vizRef.current
@@ -190,7 +195,7 @@ export default function WrldVisualizer({
       const tap = getAnalysisTap()
       if (tap) viz.enableAudioNode(tap.ctx, tap.node)
     }
-  }, [isPlaying])
+  }, [isPlaying, off])
 
   useEffect(() => {
     const viz = vizRef.current
@@ -202,7 +207,7 @@ export default function WrldVisualizer({
     }
     viz.syncAccent()
     viz.start()
-  }, [activeMode])
+  }, [activeMode, off])
 
   // --accent is written to <html>'s inline style by several paths (accent
   // picker, skins, the chat /theme command), so follow the style itself rather
@@ -259,10 +264,11 @@ export default function WrldVisualizer({
     VISUALIZERS.filter((v) => v.id !== 'none' && (v.engine !== 'gl' || glRef.current)).map((v) => v.id)
 
   const cycle = useCallback((dir: 1 | -1): void => {
-    const ids = usableModes()
+    // Unlike auto-switch, the arrows also stop on "Off".
+    const ids = VISUALIZERS.filter((v) => v.engine !== 'gl' || glRef.current).map((v) => v.id)
     const { activeMode: cur, selectMode } = useVizStore.getState()
     let i = ids.indexOf(cur)
-    if (i < 0) i = dir > 0 ? -1 : 0 // coming from "Off"
+    if (i < 0) i = dir > 0 ? -1 : 0
     const next = ids[(i + dir + ids.length) % ids.length]
     selectMode(next, true)
     announce(vizName(next))
@@ -350,7 +356,7 @@ export default function WrldVisualizer({
 
       <div
         className={`absolute top-4 right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
-          idle ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
+          idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
         onMouseLeave={() => { overToolbar.current = false; wake() }}
@@ -396,6 +402,15 @@ export default function WrldVisualizer({
         >
           <AudioLines size={18} />
         </button>
+        <button
+          className={`${tool} ${showSettings ? toolOn : toolIdle}`}
+          onClick={() => setShowSettings((v) => !v)}
+          title="Visualizer settings"
+          aria-label="Visualizer settings"
+          aria-expanded={showSettings}
+        >
+          <Settings2 size={17} />
+        </button>
         {fullscreen && (
           <>
             <span className="w-px h-5 mx-1 bg-white/10" />
@@ -411,6 +426,13 @@ export default function WrldVisualizer({
               <Maximize2 size={16} />
             </button>
           </>
+        )}
+        {showSettings && (
+          <div
+            className="absolute top-full right-0 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl"
+          >
+            <VizControls />
+          </div>
         )}
       </div>
 

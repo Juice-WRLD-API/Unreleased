@@ -684,7 +684,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 <button
                   onClick={handleDownload}
                   disabled={busy !== null || selectedLines.length === 0}
-                  className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+                  className="flex-1 min-w-0 flex items-center justify-center gap-2 h-10 px-3 whitespace-nowrap rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-sm font-semibold transition-colors"
                 >
                   {busy === 'download' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Save image
                 </button>
@@ -703,7 +703,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   <button
                     onClick={handleShare}
                     disabled={busy !== null || selectedLines.length === 0}
-                    className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl bg-surface-overlay hover:bg-surface-highest disabled:opacity-50 text-text-primary text-sm font-semibold transition-colors"
+                    className="flex-1 min-w-0 flex items-center justify-center gap-2 h-10 px-3 whitespace-nowrap rounded-xl bg-surface-overlay hover:bg-surface-highest disabled:opacity-50 text-text-primary text-sm font-semibold transition-colors"
                   >
                     {busy === 'share' ? <Loader2 size={15} className="animate-spin" /> : <Share2 size={15} />} Share
                   </button>

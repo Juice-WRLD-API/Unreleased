@@ -4,7 +4,7 @@ import {
   Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, Play, Pause,
   SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX,
   MoreHorizontal, Heart, ListMusic, Trash2, History, SlidersHorizontal,
-  Mic2, Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, Share2,
+  Mic2, Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, MicVocal,
 } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { useStore, useStorePick } from '../store/useStore'
@@ -1561,7 +1561,7 @@ function LyricsScreen({
             aria-label="Share lyrics"
             className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
             style={{ color: txtTer }}
-          ><Share2 size={18} /></button>
+          ><MicVocal size={18} /></button>
         )}
         {/* Lyric display settings (size, alignment, blur, colors, sync
             offset) shown right here as a sheet instead of sending the user

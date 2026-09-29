@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
@@ -9,6 +9,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
+import { setEqAnchor } from '../lib/eqAnchor'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
 import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource, loadAllSongs } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
@@ -792,7 +793,7 @@ export default function WrldView(): JSX.Element {
                     className="p-1.5 rounded-full transition-colors hover:bg-white/10"
                     style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
                   >
-                    <Share2 size={16} />
+                    <MicVocal size={16} />
                   </button>
                 )}
                 {rawLyrics && (
@@ -894,7 +895,7 @@ export default function WrldView(): JSX.Element {
               <div className="flex items-center gap-2.5">
                 {EFFECTS_SUPPORTED && (
                   <button
-                    onClick={toggleEqPanel}
+                    onClick={(e) => { setEqAnchor(e.currentTarget); toggleEqPanel() }}
                     title="Equalizer"
                     className="shrink-0 transition-opacity hover:opacity-70"
                     style={{ color: eqFxActive ? 'var(--accent)' : txtTer }}
@@ -1019,7 +1020,7 @@ export default function WrldView(): JSX.Element {
                       className="p-1.5 rounded-full transition-colors hover:bg-white/10"
                       style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
                     >
-                      <Share2 size={16} />
+                      <MicVocal size={16} />
                     </button>
                   )}
                   {rawLyrics && (
@@ -1113,7 +1114,7 @@ export default function WrldView(): JSX.Element {
                 <div className="flex items-center gap-2.5">
                   {EFFECTS_SUPPORTED && (
                     <button
-                      onClick={toggleEqPanel}
+                      onClick={(e) => { setEqAnchor(e.currentTarget); toggleEqPanel() }}
                       title="Equalizer"
                       className="shrink-0 transition-opacity hover:opacity-70"
                       style={{ color: eqFxActive ? 'var(--accent)' : txtTer }}
