@@ -79,61 +79,63 @@ export default function TrackView(): JSX.Element {
     } catch {}
   }
 
+  const btnSecondary = 'flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold hover:bg-surface-highest transition-colors'
+
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
-      <button
-        onClick={() => setActiveView('api-tracker')}
-        className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
-      >
-        <ChevronLeft size={15} /> Back to app
-      </button>
-
-      <div className="flex items-center gap-4 mb-6">
-        <div className="w-24 h-24 rounded-xl overflow-hidden bg-surface-overlay shrink-0">
-          <AlbumArtThumbnail track={track} fill className="w-full h-full" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-text-muted text-xs uppercase tracking-widest font-semibold mb-1">{categoryLabel}</p>
-          <h1 className="text-text-primary text-2xl font-bold truncate" title={track.title}>{track.title}</h1>
-          <p className="text-text-muted text-sm truncate">{track.artist}{song.era?.name ? ` · ${song.era.name}` : ''}{duration !== '0:00' ? ` · ${duration}` : ''}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-3 mb-6">
-        {canPlay && (
-          <button
-            onClick={() => playTrack(track, [track])}
-            className="flex items-center gap-2 px-6 py-3 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform shadow-lg"
-          >
-            <Play size={17} fill="currentColor" /> Play
-          </button>
-        )}
+    <div className="flex-1 flex flex-col items-center justify-center min-h-0 overflow-y-auto px-4 py-8">
+      <div className="w-full max-w-sm">
         <button
-          onClick={handleShare}
-          className="flex items-center gap-2 px-4 py-3 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold hover:bg-surface-raised transition-colors"
+          onClick={() => setActiveView('api-tracker')}
+          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mb-3"
         >
-          {copied ? <Check size={15} /> : <Share2 size={15} />} {copied ? 'Copied' : 'Copy link'}
+          <ChevronLeft size={15} /> Back to app
         </button>
-        {canPlay && (
-          <a
-            href={track.streamUrl ?? buildStreamUrl(track.path)}
-            download={`${track.title}.mp3`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-3 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold hover:bg-surface-raised transition-colors"
-          >
-            <Download size={15} /> Download
-          </a>
-        )}
-      </div>
 
-      {(song.album || song.producers || song.engineers) && (
-        <div className="space-y-2 text-sm">
-          {song.album && <p><span className="text-text-muted">Album: </span><span className="text-text-primary">{song.album}</span></p>}
-          {song.producers && <p><span className="text-text-muted">Producers: </span><span className="text-text-primary">{song.producers}</span></p>}
-          {song.engineers && <p><span className="text-text-muted">Engineers: </span><span className="text-text-primary">{song.engineers}</span></p>}
+        <div className="rounded-2xl border border-[var(--border)] bg-surface-raised p-5 shadow-2xl">
+          <div className="aspect-square w-full rounded-xl overflow-hidden bg-surface-overlay mb-4">
+            <AlbumArtThumbnail track={track} fill className="w-full h-full" />
+          </div>
+
+          <p className="text-text-muted text-[11px] uppercase tracking-widest font-semibold mb-1">{categoryLabel}</p>
+          <h1 className="text-text-primary text-xl font-bold truncate" title={track.title}>{track.title}</h1>
+          <p className="text-text-muted text-sm truncate">{track.artist}{song.era?.name ? ` · ${song.era.name}` : ''}{duration !== '0:00' ? ` · ${duration}` : ''}</p>
+
+          {(song.album || song.producers || song.engineers) && (
+            <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-1 text-xs">
+              {song.album && <p className="truncate"><span className="text-text-muted">Album: </span><span className="text-text-primary">{song.album}</span></p>}
+              {song.producers && <p className="truncate"><span className="text-text-muted">Producers: </span><span className="text-text-primary">{song.producers}</span></p>}
+              {song.engineers && <p className="truncate"><span className="text-text-muted">Engineers: </span><span className="text-text-primary">{song.engineers}</span></p>}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 mt-5">
+            {canPlay && (
+              <button
+                onClick={() => playTrack(track, [track])}
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-accent text-black text-sm font-bold hover:scale-[1.02] active:scale-95 transition-transform shadow-lg"
+              >
+                <Play size={17} fill="currentColor" /> Play
+              </button>
+            )}
+            <div className="flex gap-2">
+              <button onClick={handleShare} className={btnSecondary}>
+                {copied ? <Check size={15} /> : <Share2 size={15} />} {copied ? 'Copied' : 'Copy link'}
+              </button>
+              {canPlay && (
+                <a
+                  href={track.streamUrl ?? buildStreamUrl(track.path)}
+                  download={`${track.title}.mp3`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={btnSecondary}
+                >
+                  <Download size={15} /> Download
+                </a>
+              )}
+            </div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }

@@ -276,6 +276,9 @@ const LIST_POLL_MS = 30_000
 // for this: an empty room never gets an entry there, so it was re-primed
 // (another limit=1 fetch) on every tick, forever.
 const primedRooms = new Set<string>()
+// primeRoom calls still in flight, so the startup prime pool and the key
+// check (reconcileKeys -> resolveKey) share one limit=1 fetch per room.
+const primesInFlight = new Map<string, Promise<void>>()
 let initPromise: Promise<void> | null = null
 const rerunResolve = new Set<number>()
 // Last room open per server (-1 for DMs), so switching back lands where you were.
@@ -736,20 +739,24 @@ export const useChatStore = create<ChatState>((set, get) => {
 
   // Whether anything has been said under the conversation's current key
   // version - a key someone already used must never be replaced by a fresh
-  // one. Loaded rooms answer from their items; a primed-but-unopened room
-  // from lastMessage; anything else asks the server for its newest message.
+  // one. Loaded rooms answer from their items; anything else is primed (or
+  // joins the prime already in flight) and answers from lastMessage.
   const hasMessagesAtCurrentVersion = async (conv: Conversation): Promise<boolean> => {
     const key = `d:${conv.id}`
-    let room = get().rooms[key]
-    if (!room?.loaded && !primedRooms.has(key)) {
-      const page = await api.listDmMessages(conv.id, { limit: 1 })
-      room = { ...emptyRoom(), items: page.results }
-    }
-    return (room?.items ?? []).some((x) => x.id > 0 && x.key_version === conv.current_key_version)
+    if (!get().rooms[key]?.loaded && !primedRooms.has(key)) await primeRoom(key)
+    return (get().rooms[key]?.items ?? []).some((x) => x.id > 0 && x.key_version === conv.current_key_version)
       || get().lastMessage[key]?.key_version === conv.current_key_version
   }
 
-  const primeRoom = async (key: string): Promise<void> => {
+  const primeRoom = (key: string): Promise<void> => {
+    const pending = primesInFlight.get(key)
+    if (pending) return pending
+    const p = fetchPrime(key).finally(() => primesInFlight.delete(key))
+    primesInFlight.set(key, p)
+    return p
+  }
+
+  const fetchPrime = async (key: string): Promise<void> => {
     const ref = parseRoomKey(key)
     const meId = get().meId
     const page = ref.kind === 'channel'

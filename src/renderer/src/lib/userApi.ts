@@ -540,13 +540,14 @@ export async function getPlaylistCover(id: number): Promise<PlaylistCoverEntry> 
   if (cached) return cached
   // getPlaylist's cached detail carries the same cover fields this needs -
   // reuse it instead of firing a second near-duplicate /playlists/{id}/
-  // request for the same playlist (prefetchPlaylistDetails calls both back
-  // to back for every playlist on startup, which used to double the network
-  // traffic for no benefit). Only skipped if that cache entry came back from
-  // the omit_cover_image=true fetch and genuinely lacks the fields.
-  const peeked = peekPlaylistDetail(id)
-  const d = peeked && ('cover_image_url' in peeked || 'cover_image' in peeked)
-    ? peeked
+  // request for the same playlist. With nothing cached it goes through
+  // getPlaylist too, so the Playlists grid's cover loader and the startup
+  // prefetch share one fetch instead of racing a full + an omit_cover_image
+  // request for every playlist. Only falls back to the full fetch if that
+  // response genuinely lacks the cover fields.
+  const detail = peekPlaylistDetail(id) ?? await getPlaylist(id)
+  const d = 'cover_image_url' in detail || 'cover_image' in detail
+    ? detail
     : await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/`)
   const trackImages = (d.items ?? []).slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
   // cover_image_url/cover_image can be a site-relative pointer (the same
@@ -616,12 +617,19 @@ export function peekPlaylistDetail(id: number): PlaylistDetail | undefined {
 // mutations below so offline reads never show a stale-past-the-last-edit copy.
 const playlistDetailUrl = (id: number): string => `${LIBRARY_BASE}/playlists/${id}/?omit_cover_image=true`
 
-// Single request - tracks + cover in one response
-export async function getPlaylist(id: number): Promise<PlaylistDetail> {
+const playlistDetailInFlight = new Map<number, Promise<PlaylistDetail>>()
+
+// Single request - tracks + cover in one response. Concurrent callers for the
+// same id share the in-flight request.
+export function getPlaylist(id: number): Promise<PlaylistDetail> {
+  const pending = playlistDetailInFlight.get(id)
+  if (pending) return pending
   const url = playlistDetailUrl(id)
-  const result = await request<PlaylistDetail>(url, {}, true, url)
-  playlistDetailCache.set(id, result)
-  return result
+  const p = request<PlaylistDetail>(url, {}, true, url)
+    .then((result) => { playlistDetailCache.set(id, result); return result })
+    .finally(() => playlistDetailInFlight.delete(id))
+  playlistDetailInFlight.set(id, p)
+  return p
 }
 
 export async function renamePlaylist(id: number, name: string): Promise<PlaylistDetail> {
