@@ -79,10 +79,12 @@ routes it through the single previewable-routes block (see below).
 The bare origin (`/`, `/home`, and `/playlists` without a shared id) gets a
 site-wide card with live catalog stats and the latest news post.
 
-All bot-routed paths share ONE nginx location,
-`location ~ ^/((track|shared|news|u)/|(home|playlists)/?$|$)`. The earlier
-separate `location = /playlists` and `location ~ ^/(home)?$` blocks returned
-nginx 500s on beta - remove them if they are in the live config.
+All bot-routed paths share one nginx location,
+`location ~ ^/((track|shared|news|u)/|(home|playlists)/?$|$)`, which hands
+bots to `location @social_preview`. That named location must be defined in
+the same `server {}` block: `nginx -t` doesn't catch a missing one, but every
+bot request then 500s with `could not find named location "@social_preview"`
+in error.log (what happened on beta for `/`, `/home` and `/playlists`).
 
 ## Profiles
 
