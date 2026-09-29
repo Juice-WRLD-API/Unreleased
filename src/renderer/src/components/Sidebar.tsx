@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, Upload, ArrowLeft, Info, Check, EyeOff } from 'lucide-react'
+import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, Upload, Info, Check, EyeOff } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
@@ -158,34 +158,6 @@ export default function Sidebar(): JSX.Element {
   const iconWrap = 'w-6 h-6 flex items-center justify-center shrink-0'
   const labelCls = `truncate transition-opacity duration-200 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
 
-  const returnToApiVertical = (
-    <a
-      key="return-api"
-      href="https://juicewrldapi.com"
-      target="_blank"
-      rel="noopener noreferrer"
-      title={collapsed ? 'Return to API' : undefined}
-      className={rowCls}
-    >
-      <span className={iconWrap}><ArrowLeft size={18} /></span>
-      <span aria-hidden={collapsed} className={labelCls}>Return to API</span>
-    </a>
-  )
-
-  const returnToApiHorizontal = (
-    <a
-      key="return-api"
-      href="https://juicewrldapi.com"
-      target="_blank"
-      rel="noopener noreferrer"
-      title="Return to API"
-      className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded text-sm font-medium whitespace-nowrap text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-    >
-      <span className="w-6 h-6 shrink-0 flex items-center justify-center"><ArrowLeft size={18} /></span>
-      <span>Return to API</span>
-    </a>
-  )
-
   // Full-width control row for the vertical (left/right) side menu.
   const activeUploadCount = uploads.filter((u) => u.state === 'downloading').length
 
@@ -285,7 +257,6 @@ export default function Sidebar(): JSX.Element {
       <aside className={`app-sidebar hidden md:flex flex-col w-full bg-sidebar shrink-0 border-[var(--border)] ${sidebarPosition === 'top' ? 'border-b' : 'border-t'}`}>
         <div className="flex items-center gap-1 px-3 py-1.5 min-w-0">
           <nav className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
-            {returnToApiHorizontal}
             {items.map(({ icon, label, view }, idx) => (
               <button
                 key={view}
@@ -350,7 +321,6 @@ export default function Sidebar(): JSX.Element {
 
       {/* Nav items */}
       <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto px-3">
-        {returnToApiVertical}
         {items.map(({ icon, label, view }, idx) => (
           <div
             key={view}

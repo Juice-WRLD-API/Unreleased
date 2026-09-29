@@ -35,10 +35,10 @@ export default function StatisticsViewDesktop(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Header */}
-      <div className="flex-shrink-0 px-4 md:px-5 pt-5 pb-4 border-b border-[var(--border)]">
-        <h1 className="text-text-primary text-xl font-bold">Statistics</h1>
+      <div className="flex-shrink-0 px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-[var(--border)]">
+        <h1 className="text-text-primary text-xl font-bold mb-1">Statistics</h1>
 
-        <div className="flex items-center gap-0.5 mt-2 bg-surface-overlay rounded-md p-0.5 overflow-x-auto no-scrollbar w-fit max-w-full">
+        <div className="flex items-center gap-0.5 bg-surface-overlay rounded-md p-0.5 overflow-x-auto no-scrollbar w-fit max-w-full">
           {tabBtn(<Music2 size={11} />, 'Songs', () => openTrackerTab('songs'))}
           {tabBtn(<Mic2 size={11} />, 'Lyrics', () => openTrackerTab('lyrics'))}
           {tabBtn(<CalendarDays size={11} />, 'Overview', () => openTrackerTab('calendar'))}

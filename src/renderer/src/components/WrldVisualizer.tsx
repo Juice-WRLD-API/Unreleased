@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronLeft, ChevronRight, TextQuote, AudioLines, Minimize2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, TextQuote, AudioLines, Minimize2, Maximize2, Radio } from 'lucide-react'
 import { Visualizer, VISUALIZERS, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
@@ -90,7 +90,7 @@ function readLayout(root: HTMLElement | null, minimal: boolean): VizLayout {
 interface Props {
   /** WRLD's page root: scopes layout lookups and carries the idle state. */
   rootRef: React.RefObject<HTMLDivElement>
-  /** Visualizer-only, cursor hiding and exit exist only in fullscreen. */
+  /** Cursor hiding, the chrome fade, the hotkeys and exit exist only in fullscreen. */
   fullscreen: boolean
   artUrl: string | null
   title: string
@@ -103,11 +103,14 @@ interface Props {
   /** The page's own art-derived text colours, so the caption matches it. */
   txtPri: string
   txtSec: string
+  /** 999 FM toggle, shown in the toolbar. */
+  fm: { active: boolean; live: boolean; label: string; disabled: boolean; toggle: () => void }
+  onEnter: () => void
   onExit: () => void
 }
 
 export default function WrldVisualizer({
-  rootRef, fullscreen, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, onExit,
+  rootRef, fullscreen, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, fm, onEnter, onExit,
 }: Props): JSX.Element {
   const isPlaying = useStore((s) => s.isPlaying)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
@@ -124,10 +127,7 @@ export default function WrldVisualizer({
   const vizRef = useRef<Visualizer | null>(null)
   const [glSupported, setGlSupported] = useState(true)
   // The layout provider outlives any one render, so it reads through a ref.
-  // Visualizer-only is a saved preference, but only applied in fullscreen: on
-  // the tab it would hide the player - and the button to undo it - every time
-  // WRLD opened.
-  const minimal = fullscreen && immMinimal
+  const minimal = immMinimal
   const minimalRef = useRef(minimal)
   minimalRef.current = minimal
 
@@ -349,12 +349,24 @@ export default function WrldVisualizer({
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
 
       <div
-        className={`absolute ${fullscreen ? 'top-4' : 'top-16 md:top-4'} right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
+        className={`absolute top-4 right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
           idle ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
         onMouseLeave={() => { overToolbar.current = false; wake() }}
       >
+        <button
+          className={`h-9 px-2.5 flex items-center gap-1.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${fm.active ? (fm.live ? 'text-red-400 bg-red-500/15' : toolOn) : toolIdle}`}
+          onClick={fm.toggle}
+          disabled={fm.disabled}
+          title={fm.active ? 'Turn off 999 FM' : 'Turn on 999 FM'}
+          aria-label={fm.active ? 'Turn off 999 FM' : 'Turn on 999 FM'}
+          aria-pressed={fm.active}
+        >
+          <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
+          <span>{fm.label}</span>
+        </button>
+        <span className="w-px h-5 mx-1 bg-white/10" />
         <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
           <ChevronLeft size={19} />
         </button>
@@ -375,20 +387,28 @@ export default function WrldVisualizer({
         >
           <TextQuote size={18} />
         </button>
+        <button
+          className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
+          onClick={toggleMinimal}
+          title={fullscreen ? 'Visualizer only (V)' : 'Visualizer only'}
+          aria-label="Visualizer only"
+          aria-pressed={immMinimal}
+        >
+          <AudioLines size={18} />
+        </button>
         {fullscreen && (
           <>
-            <button
-              className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
-              onClick={toggleMinimal}
-              title="Visualizer only (V)"
-              aria-label="Visualizer only"
-              aria-pressed={immMinimal}
-            >
-              <AudioLines size={18} />
-            </button>
             <span className="w-px h-5 mx-1 bg-white/10" />
             <button className={`${tool} ${toolIdle}`} onClick={onExit} title="Exit fullscreen (Esc)" aria-label="Exit fullscreen">
               <Minimize2 size={17} />
+            </button>
+          </>
+        )}
+        {!fullscreen && (
+          <>
+            <span className="w-px h-5 mx-1 bg-white/10" />
+            <button className={`${tool} ${toolIdle}`} onClick={onEnter} title="Fullscreen" aria-label="Fullscreen">
+              <Maximize2 size={16} />
             </button>
           </>
         )}

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, Maximize2, Minimize2, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, Share2, Loader2, Settings2, AlignLeft, AlignCenter } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
@@ -216,7 +216,7 @@ export default function WrldView(): JSX.Element {
   // display rather than unmounted, so toggling back doesn't restart the lyric
   // scroll or refetch anything.
   const immMinimal = useVizStore(s => s.immMinimal)
-  const vizMinimal = fullscreen && immMinimal
+  const vizMinimal = immMinimal
   const hideForViz = vizMinimal ? { display: 'none' } : undefined
 
   const {
@@ -704,35 +704,6 @@ export default function WrldView(): JSX.Element {
   const inner = (
     <div ref={pageRef} className="relative flex flex-col md:flex-row flex-1 h-full w-full overflow-hidden">
 
-      {/* 999 FM toggle + fullscreen toggle, grouped together so they move as
-          one unit - 999FM sits top-right on mobile, top-left on desktop
-          (md:), and fullscreen now rides along right next to it instead of
-          living in its own corner. */}
-      <div className="absolute z-30 flex items-center gap-2 top-3 right-3 md:top-4 md:left-4 md:right-auto" style={hideForViz} data-viz-fade>
-        <button
-          onClick={toggleFm}
-          disabled={fmDisabled}
-          className={`flex items-center gap-2 text-xs font-medium rounded-full px-3 py-1.5 transition-all disabled:opacity-40
-            ${radioFmActive && radioFmIsLive
-              ? 'bg-red-600/80 text-white backdrop-blur-sm ring-1 ring-red-400/50'
-              : radioFmActive
-              ? 'bg-white/10 text-white/50 backdrop-blur-sm'
-              : 'bg-white/60 dark:bg-black/25 border border-black/10 dark:border-white/10 text-black/70 dark:text-white/50 hover:text-black dark:hover:text-white/90 hover:bg-white/80 dark:hover:bg-black/50 backdrop-blur-sm shadow-sm'}`}
-          title={radioFmActive ? 'Turn off 999 FM' : 'Turn on 999 FM'}
-        >
-          <Radio size={13} className={radioFmActive && radioFmIsLive ? 'animate-pulse' : ''} />
-          <span>{fmLabel}</span>
-        </button>
-
-        <button
-          onClick={() => (fullscreen ? exitFullscreen() : enterFullscreen())}
-          className="w-8 h-8 flex items-center justify-center rounded-full transition-all border bg-white/60 dark:bg-black/25 border-black/10 dark:border-white/10 text-black/70 dark:text-white/50 hover:text-black dark:hover:text-white/90 hover:bg-white/80 dark:hover:bg-black/50 backdrop-blur-sm shadow-sm"
-          title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-        >
-          {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={13} />}
-        </button>
-      </div>
-
       <>
           {/* Background - the cover's blurred art, or (Settings ▸ Appearance)
               the app's own surface color, which also skips the darkening wash
@@ -786,6 +757,8 @@ export default function WrldView(): JSX.Element {
               hasLyrics={!!rawLyrics}
               txtPri={txtPri}
               txtSec={txtSec}
+              fm={{ active: radioFmActive, live: radioFmIsLive === true, label: fmLabel, disabled: fmDisabled, toggle: toggleFm }}
+              onEnter={enterFullscreen}
               onExit={exitFullscreen}
             />
 
