@@ -10,15 +10,7 @@
 // time (see juicewrldApi.ts), so a change here only takes effect on next
 // load - the setters reload for that reason.
 
-const PROD_JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
-const STAGING_JWAPI_BASE = 'https://staging.juicewrldapi.com/juicewrld'
-
-// The beta site talks to staging out of the box; every other host (player,
-// desktop app, localhost) gets production. A saved Settings override still
-// wins over either.
-const IS_BETA_HOST = typeof location !== 'undefined' && location.hostname === 'beta.juicewrldapi.com'
-
-export const DEFAULT_JWAPI_BASE = IS_BETA_HOST ? STAGING_JWAPI_BASE : PROD_JWAPI_BASE
+export const DEFAULT_JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
 
 const MAIN_KEY = 'jwapi_base_override'
 const RULES_KEY = 'jwapi_route_rules'
