@@ -724,6 +724,12 @@ export const useChatStore = create<ChatState>((set, get) => {
         }).catch((err) => console.warn('[chat] to-device inbox failed', err))
         return
       }
+      case 'link.requested':
+        // One of my devices just asked to be linked: LinkApprovals refetches
+        // the pending list whenever the trust epoch moves, so the approve
+        // prompt shows up now instead of on its next poll.
+        set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+        return
       case 'link.claimed':
       case 'backup.updated':
         return

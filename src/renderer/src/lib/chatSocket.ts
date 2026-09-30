@@ -39,6 +39,7 @@ export type ChatEvent =
   | { type: 'identity.changed'; conversation?: number; user_id: number }
   | { type: 'todevice.available'; device_id: string }
   | { type: 'link.claimed'; session_id: string }
+  | { type: 'link.requested'; device_id: string; label: string; expires_at: string }
   | { type: 'backup.updated' }
   | { type: 'role.created' | 'role.updated'; server: number; role: ServerRoleDef }
   | { type: 'role.deleted'; server: number; role_id: number }

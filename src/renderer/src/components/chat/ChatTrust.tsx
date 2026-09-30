@@ -104,7 +104,8 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
   return banners.length ? <>{banners}</> : null
 }
 
-const POLL_MS = 10_000
+// Fallback only: link.requested pushes a refetch over the chat socket.
+const POLL_MS = 60_000
 const DISMISSED_KEY = 'unrlsd-link-dismissed'
 
 function readDismissed(): string[] {
