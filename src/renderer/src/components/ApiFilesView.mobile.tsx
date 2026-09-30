@@ -34,6 +34,8 @@ import { useTrackerMatches } from '../hooks/useTrackerMatches'
 import { useAddFileToPlaylist } from '../hooks/useAddFileToPlaylist'
 import { usePlayFileEntry } from '../hooks/usePlayFileEntry'
 import { useFileLightbox } from '../hooks/useFileLightbox'
+import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
+import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import MediaLightbox from './MediaLightbox'
@@ -392,6 +394,14 @@ export default function ApiFilesView(): JSX.Element {
     [sortedEntries, typeFilter]
   )
 
+  // The user's own pending comp proposals, as ghost rows in the folder they'd
+  // land in - same type filter as the real entries.
+  const { ghosts, pendingFor } = usePendingCompGhosts({ enabled: canPropose, activeChannel, currentPath, entries, isSearching })
+  const visibleGhosts = useMemo(
+    () => typeFilter === 'all' ? ghosts : ghosts.filter((g) => g.type === 'directory' || getMediaType(g.name) === typeFilter),
+    [ghosts, typeFilter]
+  )
+
   const folderCount = useMemo(() => filteredEntries.filter((e) => e.type === 'directory').length, [filteredEntries])
   const crumbs = breadcrumbs(currentPath)
   const busy = isSearching ? searchLoading : loading
@@ -460,6 +470,7 @@ export default function ApiFilesView(): JSX.Element {
           </p>
           <p className="text-text-muted text-xs truncate mt-0.5">{metaLine(entry, isSearching)}</p>
         </div>
+        {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
         {isLiked && <Heart size={14} fill="currentColor" className="text-accent shrink-0" />}
         {isCurrent && <EqBars paused={!isPlaying} />}
         {selectMode ? (
@@ -692,7 +703,7 @@ export default function ApiFilesView(): JSX.Element {
                 className="h-10 px-5 rounded-full bg-accent text-white text-sm font-semibold active:opacity-80"
               >Try again</button>
             </div>
-          ) : filteredEntries.length === 0 ? (
+          ) : filteredEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 gap-3 px-8 text-center">
               <div className="w-14 h-14 rounded-full bg-surface-overlay flex items-center justify-center">
                 {isSearching ? <Search size={24} className="text-text-muted" />
@@ -725,10 +736,15 @@ export default function ApiFilesView(): JSX.Element {
                   {renderRow(entry)}
                 </div>
               ))}
+              {visibleGhosts.length > 0 && (
+                <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Pending review</p>
+              )}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="row" mobile />)}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 px-4 pt-1">
               {filteredEntries.map(renderTile)}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="tile" mobile />)}
             </div>
           )}
         </div>

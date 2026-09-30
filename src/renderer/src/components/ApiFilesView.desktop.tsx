@@ -38,6 +38,8 @@ import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
 import { basename } from '../lib/compStagedChanges'
 import { queueCompUploads } from '../lib/compUploads'
+import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
+import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
 import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } from '../lib/droppedFiles'
 import { ClampedMenu } from './ClampedMenu'
 import { Track } from '../types'
@@ -346,6 +348,14 @@ export default function ApiFilesView(): JSX.Element {
       ? sortedEntries
       : sortedEntries.filter((e) => e.type === 'directory' || getMediaType(e.name) === typeFilter),
     [sortedEntries, typeFilter]
+  )
+
+  // The user's own pending comp proposals, as ghost rows in the folder they'd
+  // land in - same type filter as the real entries.
+  const { ghosts, pendingFor } = usePendingCompGhosts({ enabled: canPropose, activeChannel, currentPath, entries, isSearching })
+  const visibleGhosts = useMemo(
+    () => typeFilter === 'all' ? ghosts : ghosts.filter((g) => g.type === 'directory' || getMediaType(g.name) === typeFilter),
+    [ghosts, typeFilter]
   )
 
   // Multi-select - select mode, the selected-paths Map, Escape-to-exit, and
@@ -770,12 +780,12 @@ export default function ApiFilesView(): JSX.Element {
               <p className="text-text-muted text-sm">{error}</p>
               <button onClick={() => navigate(currentPath, false)} className="text-accent text-sm underline">Retry</button>
             </div>
-          ) : sortedEntries.length === 0 ? (
+          ) : sortedEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Music2 size={32} className="text-text-muted opacity-30" />
               <p className="text-text-muted text-sm">{isSearching ? `No files match "${debouncedSearch.trim()}"` : 'Nothing here'}</p>
             </div>
-          ) : filteredEntries.length === 0 ? (
+          ) : filteredEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Filter size={32} className="text-text-muted opacity-30" />
               <p className="text-text-muted text-sm">No {typeFilter} files here</p>
@@ -881,6 +891,7 @@ export default function ApiFilesView(): JSX.Element {
                       )}
                     </span>
                     {stagedBadge(entry.path)}
+                    {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
                     {isLiked && (
                       <button
                         className="shrink-0 p-1 text-accent disabled:opacity-40"
@@ -911,6 +922,7 @@ export default function ApiFilesView(): JSX.Element {
                   </div>
                 )
               })}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="row" />)}
             </div>
           ) : (
             /* ── Grid view ────────────────────────────────────────────────────── */
@@ -1049,6 +1061,7 @@ export default function ApiFilesView(): JSX.Element {
                         {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
                       </div>
                       {stagedBadge(entry.path)}
+                      {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
                       {/* Same visible context-menu trigger as the list rows -
                           right-click/long-press aren't discoverable on touch. */}
                       {!selectMode && (
@@ -1064,6 +1077,7 @@ export default function ApiFilesView(): JSX.Element {
                   </div>
                 )
               })}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="tile" />)}
             </div>
           )}
         </div>
