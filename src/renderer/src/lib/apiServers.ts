@@ -10,7 +10,15 @@
 // time (see juicewrldApi.ts), so a change here only takes effect on next
 // load - the setters reload for that reason.
 
-export const DEFAULT_JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
+const PROD_JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
+const STAGING_JWAPI_BASE = 'https://staging.juicewrldapi.com/juicewrld'
+
+// The beta site talks to staging out of the box; every other host (player,
+// desktop app, localhost) gets production. A saved Settings override still
+// wins over either.
+const IS_BETA_HOST = typeof location !== 'undefined' && location.hostname === 'beta.juicewrldapi.com'
+
+export const DEFAULT_JWAPI_BASE = IS_BETA_HOST ? STAGING_JWAPI_BASE : PROD_JWAPI_BASE
 
 const MAIN_KEY = 'jwapi_base_override'
 const RULES_KEY = 'jwapi_route_rules'
@@ -38,7 +46,8 @@ export const KNOWN_ROUTE_PREFIXES: { prefix: string; label: string }[] = [
   { prefix: '/feedback', label: 'Feedback' },
   { prefix: '/files', label: 'Files' },
   { prefix: '/heardle', label: 'Heardle' },
-  { prefix: '/library', label: 'Playlists & favorites' },
+  { prefix: '/library', label: 'Playlists, favorites & tier lists' },
+  { prefix: '/library/tierlists', label: 'Tier lists' },
   { prefix: '/news', label: 'News' },
   { prefix: '/radio', label: 'Radio' },
   { prefix: '/reports', label: 'Reports' },
