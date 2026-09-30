@@ -903,7 +903,7 @@ async function renderHome() {
         separator(),
         linkButtons(
           { label: 'Start listening', url, emoji: '🎧' },
-          { label: '999 FM', url: `${origin()}/radio`, emoji: '📻' },
+          { label: '999 FM', url: `${origin()}/wrld`, emoji: '📻' },
           { label: 'News', url: `${origin()}/news`, emoji: '📰' },
         ),
       ]),
@@ -978,6 +978,81 @@ async function renderStatistics() {
   )
 
   return renderPage({ title, description, image: defaultImage(), imageAlt: title, url, componentEmbed })
+}
+
+// 999 FM (/wrld). Same /radio/live/ snapshot the RADIO view polls - an embed
+// is frozen once Discord unfurls it, so the card says when it was taken.
+const RADIO_DESCRIPTION = 'A 24/7 Juice WRLD radio station. See what everyone is listening to in real time, vote to skip, suggest the next song, and preview the upcoming queue.'
+
+async function renderRadio() {
+  const url = `${origin()}/wrld`
+  const title = '999 FM - live Juice WRLD radio'
+  const live = await fetchJson(`${JWAPI_BASE}/radio/live/`)
+
+  const md = escapeDiscordMarkdown
+  const now = live?.is_live ? live.now_playing : null
+  const next = live?.is_live ? live.up_next : null
+  const trackLine = (t, withAlbum = true) => {
+    const name = md(truncate(t.title || t.display || 'Unknown', 70))
+    const linked = t.song_id != null ? `[${name}](${origin()}/track/${Number(t.song_id)})` : `**${name}**`
+    const artist = t.artist && t.artist !== 'Juice WRLD' ? ` · ${md(t.artist)}` : ''
+    return `${linked}${artist}${withAlbum && t.album ? `\n-# ${md(truncate(t.album, 80))}` : ''}`
+  }
+
+  const listeners = Number.isFinite(live?.total_listeners) ? live.total_listeners : null
+  const status = !live
+    ? 'Juice WRLD radio · 24/7'
+    : [
+      live.is_live ? (live.state === 'dj_talking' ? '🔴 Live · DJ on air' : '🔴 Live') : 'Off air',
+      listeners != null && `${listeners.toLocaleString('en-US')} listening`,
+      `<t:${Math.floor(Date.now() / 1000)}:R>`,
+    ].filter(Boolean).join(' · ')
+
+  // queue_preview is "Artist — Title" display strings; up_next is its head.
+  const queue = (Array.isArray(live?.queue_preview) ? live.queue_preview : [])
+    .filter((q) => typeof q === 'string' && q.trim())
+    .map((q) => q.replace(/^Juice WRLD\s+—\s+/, '').trim())
+  const later = next ? queue.slice(1) : queue
+  const image = buildImageUrl(now?.image_url) || defaultImage()
+
+  const description = [
+    now && `Now playing: ${now.title || now.display}`,
+    listeners != null && `${listeners.toLocaleString('en-US')} listening`,
+  ].filter(Boolean).join(' · ') || RADIO_DESCRIPTION
+
+  const componentEmbed = fitComponentEmbed(
+    ({ queued, withAbout }) => {
+      const queueLines = later.slice(0, queued).map((q, i) => `${i + 2}. ${md(truncate(q, 60))}`)
+      return container([
+        section(
+          [
+            text(`### [999 FM](${url})`),
+            text(`-# ${status}`),
+            ...(now ? [text(`🎧 **Now playing**\n${trackLine(now)}`)] : withAbout ? [text(md(RADIO_DESCRIPTION))] : []),
+          ],
+          thumbnail(image, now?.title || '999 FM'),
+        ),
+        ...(next || queueLines.length
+          ? [separator(), text([
+            '**Up next**',
+            ...(next ? [`1. ${trackLine(next, false)}`] : []),
+            ...queueLines,
+          ].join('\n'))]
+          : []),
+        ...(withAbout && now ? [text(`-# ${md(RADIO_DESCRIPTION)}`)] : []),
+        separator(),
+        linkButtons({ label: 'Tune in', url, emoji: '📻' }),
+      ])
+    },
+    [
+      { queued: 4, withAbout: true },
+      { queued: 4, withAbout: false },
+      { queued: 2, withAbout: false },
+      { queued: 0, withAbout: false },
+    ],
+  )
+
+  return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
 
 // Profile avatars are stored inline as base64 data: URLs, which crawlers
@@ -1132,6 +1207,8 @@ async function handle(req, res) {
       return
     } else if ((match = pathname.match(/^\/u\/(\d+)\/?$/))) {
       html = await renderProfile(match[1])
+    } else if (/^\/wrld\/?$/.test(pathname)) {
+      html = await renderRadio()
     } else if (/^\/statistics\/?$/.test(pathname)) {
       html = await renderStatistics()
     } else if (pathname === '/' || /^\/(home|playlists)\/?$/.test(pathname)) {

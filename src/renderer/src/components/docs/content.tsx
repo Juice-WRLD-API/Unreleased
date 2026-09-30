@@ -3085,6 +3085,7 @@ function FeedsMediaTab() {
             [<Code>{'/playlists?id={id}&view=shared'}</Code>, "A signed-in user's public library playlist", <Code>{'/library/playlists/public/{id}/'}</Code>],
             [<Code>{'/news/{id}'}</Code>, 'News post: body as Discord markdown, images in a gallery', <Code>{'/news/{id}/'}</Code>],
             [<Code>{'/u/{id}'}</Code>, 'Profile: badges, bio, listening stats, public playlists', 'Profile and library endpoints'],
+            [<Code>/wrld</Code>, '999 FM: live status, now playing, up next, listener count', <Code>/radio/live/</Code>],
             [<Code>/</Code>, 'Site card: live catalog stats and the latest news post (also /home, /playlists and /statistics)', 'Stats and news endpoints'],
             [<Code>{'/track/{id}/video.mp4'}</Code>, 'Playable embed video for a song (not bot-gated)', 'Song audio and cover art'],
           ]}
