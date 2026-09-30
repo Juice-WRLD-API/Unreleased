@@ -132,8 +132,27 @@ export default function MessageBody({ message, people, room }: { message: UiMess
       </p>
     )
   }
-  if (!decrypted.text) return null
-  const decryptedAfterReply = splitReplyRef(decrypted.text).body
+  const content = decryptedContent(decrypted.text, people, meId)
+  if (!decrypted.unverified) return content
+  return <>{content}<UnverifiedBadge /></>
+}
+
+// A v2 message whose sender signature, sender device or attachment list
+// didn't check out. Shown rather than hidden, so nothing silently vanishes.
+function UnverifiedBadge(): JSX.Element {
+  return (
+    <p
+      className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400"
+      title="The sender's signature on this message could not be verified. It may not be from the device it claims."
+    >
+      <ShieldAlert size={10} />Couldn&apos;t verify sender
+    </p>
+  )
+}
+
+function decryptedContent(text: string, people: ChatUserBrief[], meId: number | null): JSX.Element | null {
+  if (!text) return null
+  const decryptedAfterReply = splitReplyRef(text).body
   const decryptedBody = splitForwardRef(decryptedAfterReply).body
   if (!decryptedBody) return null
   const decryptedSong = decodeSongShare(decryptedBody)

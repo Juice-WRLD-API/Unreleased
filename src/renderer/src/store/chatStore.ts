@@ -44,7 +44,12 @@ export interface RoomMessages {
 }
 
 export type KeyState = 'unknown' | 'resolving' | 'ready' | 'waiting' | 'error'
-export type Decrypted = { text: string } | { error: 'missing-key' | 'failed' }
+// `unverified`: a v2 message whose signature, sender device or attachment
+// list didn't check out - still shown, with a "couldn't verify" badge.
+export type Decrypted = { text: string; unverified?: boolean } | { error: 'missing-key' | 'failed' }
+// E2E v2 status of this device: 'disabled' until the identity phase is on,
+// 'needs-link' when another of our devices holds the security key.
+export type IdentityState = 'unknown' | 'disabled' | 'ready' | 'needs-link'
 
 const PAGE = 40
 const TYPING_TTL_MS = 6000
@@ -217,6 +222,14 @@ interface ChatState {
 
   keyState: Record<number, KeyState>
   plain: Record<number, Decrypted>
+  identity: IdentityState
+  // Bumped whenever someone's security key or device list may have changed,
+  // so trust banners re-check.
+  trustEpoch: number
+  // A key request went unanswered and a backup exists: offer the code.
+  offerRestore: boolean
+  refreshIdentity: () => Promise<void>
+  dismissRestoreOffer: () => void
 
   init: (account: AccountUser) => Promise<void>
   teardown: () => void
@@ -281,6 +294,10 @@ const primedRooms = new Set<string>()
 const primesInFlight = new Map<string, Promise<void>>()
 let initPromise: Promise<void> | null = null
 const rerunResolve = new Set<number>()
+// (user, list_version) pairs already handled - devices.updated fans out once
+// per shared conversation.
+const seenDeviceLists = new Set<string>()
+let stopToDevice: (() => void) | null = null
 // Last room open per server (-1 for DMs), so switching back lands where you were.
 const lastRoomBySpace = new Map<number, RoomRef>()
 
@@ -302,8 +319,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     const existing = get().plain[msg.id]
     if (existing && 'text' in existing && !msg.edited_at) return
     try {
-      const { decryptMessage } = await e2e()
-      setPlain(msg.id, { text: await decryptMessage(meId, msg) })
+      const { decryptMessageFull } = await e2e()
+      setPlain(msg.id, await decryptMessageFull(meId, msg))
     } catch (err) {
       setPlain(msg.id, { error: String((err as Error)?.message) === 'missing-key' ? 'missing-key' : 'failed' })
     }
@@ -424,6 +441,19 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
     if (msg.is_encrypted) void decryptOne(msg)
     if (isNew) bumpUnread(msg)
+  }
+
+  const findMessage = (messageId: number): ChatMessage | undefined => {
+    const s = get()
+    for (const r of Object.values(s.rooms)) {
+      const hit = r.items.find((m) => m.id === messageId)
+      if (hit) return hit
+    }
+    for (const t of Object.values(s.threads)) {
+      const hit = t.items.find((m) => m.id === messageId)
+      if (hit) return hit
+    }
+    return undefined
   }
 
   const mapMessage = (messageId: number, fn: (m: UiMessage) => UiMessage): void => {
@@ -657,6 +687,46 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
+      case 'key.committed':
+        void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
+          .then(() => get().resolveKey(ev.conversation))
+        return
+      case 'devices.updated': {
+        // Sent once per shared conversation (and once to the user's own
+        // devices), so act on the first copy of each list version only.
+        const meId = s.meId
+        const seen = `${ev.user_id}:${ev.list_version}`
+        if (!meId || seenDeviceLists.has(seen)) return
+        seenDeviceLists.add(seen)
+        void e2e().then((m) => m.onDevicesUpdated(meId, ev.user_id, ev.dropped, get().conversations))
+          .catch((err) => console.warn('[chat] device list update failed', err))
+          .then(() => {
+            set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+            if (ev.user_id === meId) void get().refreshIdentity()
+          })
+        return
+      }
+      case 'identity.changed': {
+        const meId = s.meId
+        if (!meId) return
+        void import('../lib/chatIdentity').then((m) => m.invalidateTrust(meId, ev.user_id))
+          .then(() => set((st) => ({ trustEpoch: st.trustEpoch + 1 })))
+        if (ev.user_id === meId) void get().refreshIdentity()
+        return
+      }
+      case 'todevice.available': {
+        const meId = s.meId
+        if (!meId) return
+        void e2e().then(async (m) => {
+          if (ev.device_id !== await m.localDeviceId(meId)) return
+          const td = await import('../lib/chatToDevice')
+          await td.processInbox(meId)
+        }).catch((err) => console.warn('[chat] to-device inbox failed', err))
+        return
+      }
+      case 'link.claimed':
+      case 'backup.updated':
+        return
       case 'role.created':
       case 'role.updated':
         set((st) => {
@@ -823,6 +893,24 @@ export const useChatStore = create<ChatState>((set, get) => {
     readEnabled: loadFlag(READ_KEY),
     keyState: {},
     plain: {},
+    identity: 'unknown',
+    trustEpoch: 0,
+    offerRestore: false,
+
+    refreshIdentity: async () => {
+      const meId = get().meId
+      if (!meId) return
+      const m = await e2e()
+      const { resetIdentity } = await import('../lib/chatIdentity')
+      resetIdentity()
+      try {
+        set({ identity: await m.identityStatus(meId) })
+      } catch (err) {
+        console.warn('[chat] identity check failed', err)
+      }
+    },
+
+    dismissRestoreOffer: () => set({ offerRestore: false }),
 
     init: (account) => {
       if (get().meId === account.id && initPromise) return initPromise
@@ -911,6 +999,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           return pool(keys, 4, primeRoom)
         }).catch(() => undefined)
         void pollKeys().catch(() => undefined)
+        const meId = get().meId
+        if (meId) void import('../lib/chatToDevice').then((td) => td.processInbox(meId)).catch(() => undefined)
       }, LIST_POLL_MS)
 
       initPromise = (async () => {
@@ -922,7 +1012,25 @@ export const useChatStore = create<ChatState>((set, get) => {
             ...get().conversations.map((c) => `d:${c.id}`),
           ]
           void pool(keys, 6, primeRoom)
-          void e2e().then((m) => m.ensureDevice(account.id)).catch((err) => console.warn('[chat] device setup failed', err))
+          void e2e().then(async (m) => {
+            await m.ensureDevice(account.id)
+            set({ identity: await m.identityStatus(account.id) })
+            const td = await import('../lib/chatToDevice')
+            stopToDevice?.()
+            stopToDevice = td.onToDeviceEvent((ev) => {
+              if (get().meId !== account.id) return
+              if (ev.type === 'key-arrived') {
+                void get().resolveKey(ev.conversation).then(() => get().decryptRoom(ev.conversation))
+              } else if (ev.type === 'linked') {
+                void get().refreshIdentity().then(() => {
+                  for (const c of get().conversations) void get().resolveKey(c.id).then(() => get().decryptRoom(c.id))
+                })
+              } else if (ev.type === 'offer-restore') {
+                set({ offerRestore: true })
+              }
+            })
+            await td.processInbox(account.id)
+          }).catch((err) => console.warn('[chat] device setup failed', err))
           void reconcileKeys().catch(() => undefined)
         } catch (err) {
           set({ initialized: true, loadError: (err as Error).message || 'Could not load chat' })
@@ -938,6 +1046,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         socket = null
         void e2e().then((m) => m.resetDevice())
       }
+      stopToDevice?.()
+      stopToDevice = null
+      seenDeviceLists.clear()
       if (typingTimer !== null) window.clearInterval(typingTimer)
       typingTimer = null
       if (listPollTimer !== null) window.clearInterval(listPollTimer)
@@ -953,6 +1064,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         servers: [], members: {}, roles: {}, bans: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], localCategories: {}, activeServerId: null, active: null,
         threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
         mentions: {}, receipts: {}, typing: {}, online: {}, nowPlaying: {}, keyState: {}, plain: {},
+        identity: 'unknown', offerRestore: false,
       })
     },
 
@@ -1192,6 +1304,10 @@ export const useChatStore = create<ChatState>((set, get) => {
         patchRoom(key, (r) => ({ items: r.items.map((m) => m.id === temp.parent ? { ...m, reply_count: m.reply_count + 1 } : m) }))
       }
 
+      // Stable across retries, so a send that landed but whose response was
+      // lost comes back as the same message rather than a duplicate.
+      const clientId = crypto.randomUUID()
+
       const attempt = async (): Promise<void> => {
         place((items) => items.map((m) => m.id === tempId ? { ...m, sendState: 'sending' } : m))
         try {
@@ -1204,16 +1320,31 @@ export const useChatStore = create<ChatState>((set, get) => {
             const m = await e2e()
             const conv = get().conversations.find((c) => c.id === room.id)
             if (!conv) throw new Error('Conversation not found')
-            const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv))
+            const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv), { forSend: true })
             if (res.state !== 'ready') throw new Error('Waiting for an encryption key')
             set((s) => ({ keyState: { ...s.keyState, [room.id]: 'ready' } }))
             const attachments: AttachmentInput[] = []
-            for (const f of input.files) attachments.push(await m.uploadEncryptedFile(f, res.key, res.version))
-            const sealed = text ? await m.encryptForSend(text, res.key) : null
-            created = await api.createDmMessage(room.id, {
-              ciphertext: sealed?.ciphertext, nonce: sealed?.nonce, key_version: res.version,
-              parent: input.parent ?? null, mentions: input.mentions, attachments,
-            })
+            if (await m.sendsV2()) {
+              const manifest: import('../lib/chatE2E').AttachmentManifest[] = []
+              for (const [i, f] of input.files.entries()) {
+                const up = await m.uploadEncryptedFileV2(f, res.key, room.id, res.version, clientId, i)
+                attachments.push(up.input)
+                manifest.push(up.manifest)
+              }
+              const parentMsg = input.parent != null ? findMessage(input.parent) : undefined
+              const sealed = await m.sealMessageV2(meId, {
+                conversationId: room.id, key: res.key, version: res.version, text, mentions: input.mentions ?? [],
+                clientId, editSeq: 0, replyTo: m.clientIdOf(parentMsg), att: manifest,
+              })
+              created = await api.createDmMessage(room.id, { ...sealed, parent: input.parent ?? null, attachments })
+            } else {
+              for (const f of input.files) attachments.push(await m.uploadEncryptedFile(f, res.key, res.version))
+              const sealed = text ? await m.encryptForSend(text, res.key) : null
+              created = await api.createDmMessage(room.id, {
+                ciphertext: sealed?.ciphertext, nonce: sealed?.nonce, key_version: res.version,
+                parent: input.parent ?? null, mentions: input.mentions, attachments,
+              })
+            }
             setPlain(created.id, { text })
           }
           // Replace in place rather than re-sorting by id: if two messages are
@@ -1295,8 +1426,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         if (!conv) return
         const res = await m.resolveRoomKey(meId, conv, true)
         if (res.state !== 'ready') throw new Error('Waiting for an encryption key')
-        const sealed = await m.encryptForSend(text, res.key)
-        const updated = await api.editMessage(message.id, { ...sealed, key_version: res.version })
+        const updated = message.format === 2
+          ? await api.editMessage(message.id, await m.sealEditV2(meId, message, text, res.key, res.version))
+          : await api.editMessage(message.id, { ...await m.encryptForSend(text, res.key), key_version: res.version })
         setPlain(updated.id, { text })
         mapMessage(updated.id, (x) => ({ ...x, ...updated }))
       } else {

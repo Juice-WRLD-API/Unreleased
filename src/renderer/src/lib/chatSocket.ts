@@ -33,6 +33,13 @@ export type ChatEvent =
   | { type: 'key.rotated'; conversation: number; key_version: number }
   | { type: 'device.added'; conversation: number; user_id: number }
   | { type: 'envelope.available'; conversation: number; key_version: number }
+  // E2E v2 (lib/chatIdentity, lib/chatToDevice)
+  | { type: 'key.committed'; conversation: number; key_version: number }
+  | { type: 'devices.updated'; conversation?: number; user_id: number; list_version: number; dropped: boolean }
+  | { type: 'identity.changed'; conversation?: number; user_id: number }
+  | { type: 'todevice.available'; device_id: string }
+  | { type: 'link.claimed'; session_id: string }
+  | { type: 'backup.updated' }
   | { type: 'role.created' | 'role.updated'; server: number; role: ServerRoleDef }
   | { type: 'role.deleted'; server: number; role_id: number }
   | { type: 'channel.override.updated'; server: number; channel: number; override: ChannelOverride }

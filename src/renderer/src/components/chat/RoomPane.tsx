@@ -4,6 +4,7 @@ import { conversationTitle, displayName, roomKey, useChatStore, useMyPostingRest
 import Composer, { type ComposerHandle } from './Composer'
 import MessageList from './MessageList'
 import { useRoomPeople } from './people'
+import { TrustBanners } from './ChatTrust'
 import { ChatAvatar } from './ui'
 
 function TypingIndicator({ room }: { room: RoomRef }): JSX.Element {
@@ -124,6 +125,8 @@ export default function RoomPane({ room, header, enterSends = true }: {
   const keyState = useChatStore((s) => (room.kind === 'conversation' ? s.keyState[room.id] : undefined))
   const resolveKey = useChatStore((s) => s.resolveKey)
   const meId = useChatStore((s) => s.meId)
+  const identity = useChatStore((s) => s.identity)
+  const participants = useChatStore((s) => (room.kind === 'conversation' ? s.conversations.find((c) => c.id === room.id)?.participants : undefined))
   // Server-side mute/timeout on our own membership - the API would 403 the
   // send anyway, so lock the composer instead of letting it fail.
   const restriction = useMyPostingRestriction(room)
@@ -200,13 +203,16 @@ export default function RoomPane({ room, header, enterSends = true }: {
           <span className="flex-1">{restriction}. You can still read this channel.</span>
         </div>
       )}
-      {room.kind === 'conversation' && (keyState === 'waiting' || keyState === 'error') && (
+      {participants && <TrustBanners participants={participants.map((p) => p.user)} />}
+      {room.kind === 'conversation' && (keyState === 'waiting' || keyState === 'error') && identity !== 'needs-link' && (
         <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
           <KeyRound size={16} className="shrink-0 text-amber-400" />
           <span className="flex-1">
-            {keyState === 'waiting'
-              ? 'This device doesn’t have the key for this conversation. Keys go to one device per person, so either wait for a participant to come online, or export them from your keyed device in Settings › Chat devices and import them here.'
-              : 'Couldn’t set up encryption for this conversation.'}
+            {keyState !== 'waiting'
+              ? 'Couldn’t set up encryption for this conversation.'
+              : identity === 'ready'
+                ? 'This device doesn’t have the key for this conversation yet. Your other devices were asked for it automatically; it arrives when one of them, or a participant, is online.'
+                : 'This device doesn’t have the key for this conversation. Keys go to one device per person, so either wait for a participant to come online, or export them from your keyed device in Settings › Chat devices and import them here.'}
           </span>
           <button onClick={() => void resolveKey(room.id)} className="shrink-0 font-semibold text-amber-300 hover:underline">Retry</button>
         </div>

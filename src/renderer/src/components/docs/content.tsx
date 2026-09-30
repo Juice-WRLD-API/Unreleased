@@ -3217,7 +3217,7 @@ function ChatTab() {
             ['400', 'Validation error'],
             ['401 / 403', 'Missing/invalid token / authenticated but not allowed'],
             ['404', 'Not found or not visible to you'],
-            ['409', 'Conflict (e.g. member already exists)'],
+            ['409', 'Conflict (e.g. member already exists, or a stale E2E v2 version — the body carries the current value)'],
             ['429', 'Throttled'],
           ]}
         />
@@ -3239,6 +3239,7 @@ function ChatTab() {
   "content": "hello team",
   "is_encrypted": false,
   "ciphertext": "", "nonce": "", "key_version": null,
+  "format": 1, "client_id": "", "sender_device": "", "edit_seq": 0, "signature": "",
   "parent": null,
   "mentions": [15, 16],
   "attachments": [
@@ -3253,8 +3254,11 @@ function ChatTab() {
 }`}</Pre>
         <p className="text-xs text-text-muted">
           For DM messages, <Code>is_encrypted</Code> is <Code>true</Code>, <Code>content</Code> is empty, and{' '}
-          <Code>ciphertext</Code>/<Code>nonce</Code>/<Code>key_version</Code> are populated instead. Deleted
-          messages come back with empty <Code>content</Code>/<Code>ciphertext</Code>/<Code>nonce</Code>/
+          <Code>ciphertext</Code>/<Code>nonce</Code>/<Code>key_version</Code> are populated instead. E2E v2 DM
+          messages have <Code>format: 2</Code> and fill <Code>client_id</Code>/<Code>sender_device</Code>/
+          <Code>edit_seq</Code>/<Code>signature</Code> (see End-to-End Encryption v2); everything else has{' '}
+          <Code>format: 1</Code> and leaves them blank. Deleted messages come back with empty{' '}
+          <Code>content</Code>/<Code>ciphertext</Code>/<Code>nonce</Code>/<Code>signature</Code>/
           <Code>attachments</Code> and <Code>deleted_at</Code> set.
         </p>
       </Section>
@@ -3764,7 +3768,7 @@ function ChatTab() {
   "parent": null,
   "mentions": [15],
   "attachments": [
-    { "name": "blob.bin", "url": "chat/attachments/xx_blob.bin", "mime": "application/octet-stream",
+    { "name": "attachment.bin", "url": "chat/attachments/xx_attachment.bin", "mime": "application/octet-stream",
       "size": 1024, "encrypted_name": "base64...", "nonce": "base64...", "key_version": 1 }
   ]
 }`}</Pre>
@@ -3773,6 +3777,35 @@ function ChatTab() {
           is required. Attachments must be encrypted client-side before upload, each with its own{' '}
           <Code>nonce</Code>/<Code>key_version</Code> and optional <Code>encrypted_name</Code>.
         </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">v2 message (<Code>format: 2</Code>)</p>
+        <Pre>{`{
+  "format": 2,
+  "client_id": "01J9Z4...",            // client-generated, unique per conversation
+  "sender_device": "uuid-per-device",  // your device_id string, not the row id
+  "edit_seq": 0,
+  "signature": "base64 Ed25519 detached signature",
+  "ciphertext": "base64...", "nonce": "base64...", "key_version": 3,
+  "parent": null,
+  "mentions": [15],
+  "attachments": [ { "name": "attachment.bin", "url": "chat/attachments/xx_attachment.bin", "mime": "application/octet-stream", "size": 1024 } ]
+}`}</Pre>
+        <Table
+          headers={['Rule', 'Server behaviour']}
+          rows={[
+            [<Code>format</Code>, 'Omitted, null, "" or 1 is a v1 message and ignores the v2 fields. Anything other than 1 or 2 → 400 "format must be 1 or 2."'],
+            [<><Code>client_id</Code> + <Code>signature</Code></>, 'Both required (client_id truncated to 64 chars) → 400 "v2 messages require client_id and signature."'],
+            [<Code>sender_device</Code>, 'Must be one of your non-revoked device_ids → 400 "sender_device must be one of your devices."'],
+            [<Code>edit_seq</Code>, 'Must be 0 (or omitted) on send → 400 "edit_seq must be 0 on send."'],
+            [<Code>ciphertext</Code>, 'Required even with attachments — the attachment manifest lives in the encrypted body → 400 "v2 messages require ciphertext."'],
+            ['Retry with the same client_id', "Idempotent: if you already sent it, the existing message comes back (201, no second message.created). If another user holds that client_id in the conversation → 409 \"client_id is already in use.\""],
+            ['Attachment order', 'Attachments are stored in request order, so att[i] in the encrypted manifest pairs with attachments[i] in the response (ascending id)'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          The server doesn&apos;t verify the signature — recipients check it against the sender device&apos;s{' '}
+          <Code>sign_pub</Code> from its owner&apos;s signed device list. The ciphertext&apos;s associated data binds{' '}
+          <Code>client_id</Code>, <Code>sender_device</Code>, <Code>edit_seq</Code> and the mentions.
+        </p>
       </Section>
 
       <Section title="Message Actions (channels and DMs)">
@@ -3780,7 +3813,7 @@ function ChatTab() {
           headers={['Method', 'Path', 'Description']}
           rows={[
             ['GET', '/messages/{id}/', 'Fetch a message'],
-            ['PATCH', '/messages/{id}/', 'Author only. Plaintext: { content }. Encrypted: { ciphertext, nonce, key_version }. Sets edited_at, broadcasts message.updated'],
+            ['PATCH', '/messages/{id}/', 'Author only. Plaintext: { content }. Encrypted: { ciphertext, nonce, key_version }. v2 (format 2): see below. Sets edited_at, broadcasts message.updated'],
             ['DELETE', '/messages/{id}/', 'Soft delete (author, server owner/admin, or platform admin); broadcasts message.deleted'],
             ['POST / DELETE', '/messages/{id}/pin/', 'Pin / unpin; broadcasts message.pinned / message.unpinned'],
             ['POST', '/messages/{id}/reactions/', '{ emoji } — add a reaction; broadcasts reaction.added'],
@@ -3789,6 +3822,30 @@ function ChatTab() {
           ]}
         />
         <p className="text-xs text-text-muted mt-2">Create a reply by posting a normal message with <Code>parent</Code> set.</p>
+        <p className="text-xs text-text-muted font-semibold mt-3">Editing a v2 message</p>
+        <Pre>{`PATCH /messages/{id}/
+{
+  "format": 2, "client_id": "01J9Z4...", "sender_device": "uuid-per-device",
+  "edit_seq": 1, "signature": "base64...",
+  "ciphertext": "base64...", "nonce": "base64...", "key_version": 3,
+  "mentions": [15]
+}`}</Pre>
+        <Table
+          headers={['Status', 'detail', 'Cause']}
+          rows={[
+            ['400', 'v2 messages can only be edited as v2.', 'format omitted or 1 on a format 2 message'],
+            ['400', 'client_id cannot change.', 'client_id differs from the stored one'],
+            ['400', 'Edits require ciphertext, nonce and key_version.', 'Any of the three missing'],
+            ['400', 'sender_device must be one of your devices.', 'Same device check as on send (it may be a different device of yours)'],
+            ['409', 'edit_seq must go up.', <>edit_seq ≤ the stored one; the body also carries the current <Code>edit_seq</Code></>],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          <Code>ciphertext</Code>/<Code>nonce</Code>/<Code>key_version</Code>/<Code>sender_device</Code>/
+          <Code>edit_seq</Code>/<Code>signature</Code> are replaced together, and <Code>mentions</Code> is
+          replaced too (mentions are bound into the associated data, so every edit restates them — omit it and
+          they&apos;re cleared). v1 messages keep the v1 edit rules.
+        </p>
       </Section>
 
       <Section title="Read State">
@@ -3882,6 +3939,12 @@ function ChatTab() {
             [<Code>key.rotated</Code>, 'conversation, key_version'],
             [<Code>device.added</Code>, 'conversation, user_id'],
             [<Code>envelope.available</Code>, 'conversation, key_version'],
+            [<Code>key.committed</Code>, 'conversation, key_version (v2 — a commitment was established)'],
+            [<Code>devices.updated</Code>, 'user_id, list_version, dropped, conversation (v2 — sent once per shared conversation, plus once to the user without conversation)'],
+            [<Code>identity.changed</Code>, 'user_id, conversation (v2 — identity reset; same fan-out as devices.updated)'],
+            [<Code>todevice.available</Code>, 'device_id (v2 — to the recipient user only; fetch if it names this device)'],
+            [<Code>link.claimed</Code>, 'session_id (v2 — to the linking user only)'],
+            [<Code>backup.updated</Code>, '(no payload) (v2 — to the backup owner only)'],
             [<Code>role.created</Code> + ' / ' + <Code>role.updated</Code>, 'server, role'],
             [<Code>role.deleted</Code>, 'server, role_id'],
             [<Code>channel.override.updated</Code>, 'server, channel, override'],
@@ -3891,7 +3954,11 @@ function ChatTab() {
         <p className="text-xs text-text-muted mt-2">
           Recommended pattern: render optimistic UI from your own REST responses, reconcile/append via these
           events for other users&apos; activity. On <Code>key.rotated</Code>, <Code>device.added</Code>, or{' '}
-          <Code>envelope.available</Code>, refetch envelopes for that conversation.
+          <Code>envelope.available</Code>, refetch envelopes for that conversation. For v2: on{' '}
+          <Code>key.committed</Code> refetch <Code>{'/dms/{id}/keys/'}</Code>; on <Code>devices.updated</Code>{' '}
+          or <Code>identity.changed</Code> refetch <Code>{'/keys/users/{id}/'}</Code> (an identity change means
+          the pinned master key no longer matches — surface it before trusting that user again); on{' '}
+          <Code>todevice.available</Code> drain <Code>/keys/to-device/</Code>.
         </p>
         <p className="text-xs text-text-muted">
           Override changes also trigger a <Code>resync</Code> to affected members so their channel list
@@ -3917,7 +3984,12 @@ function ChatTab() {
         <p className="text-xs text-text-muted font-semibold mt-3">1. Register a device key</p>
         <Pre>{`POST /keys/devices/
 { "device_id": "uuid-per-device", "public_key": "base64 X25519 pub", "algorithm": "x25519", "label": "Chrome on Win" }`}</Pre>
-        <p className="text-xs text-text-muted"><Code>GET /keys/devices/</Code> lists your devices, <Code>{'DELETE /keys/devices/{device_id}/'}</Code> revokes one.</p>
+        <p className="text-xs text-text-muted">
+          <Code>GET /keys/devices/</Code> lists your devices, <Code>{'DELETE /keys/devices/{device_id}/'}</Code>{' '}
+          revokes one. An optional <Code>sign_pub</Code> (Ed25519) may be sent too; device objects now include{' '}
+          <Code>sign_pub</Code> and <Code>format</Code> (2 once the device has been published in a signed
+          device list).
+        </p>
 
         <p className="text-xs text-text-muted font-semibold mt-3">2. Establish a room key for a DM</p>
         <p className="text-xs text-text-muted">
@@ -3942,8 +4014,9 @@ function ChatTab() {
         <Pre>{`GET /dms/{id}/envelopes/              // all versions wrapped for your devices
 GET /dms/{id}/envelopes/?key_version=1`}</Pre>
         <p className="text-xs text-text-muted">
-          Each result has <Code>encrypted_key</Code>, <Code>key_version</Code>, <Code>recipient_device</Code>.
-          Open the sealed box with your device secret key and cache the room key by{' '}
+          Each result has <Code>encrypted_key</Code>, <Code>key_version</Code>, <Code>recipient_device</Code>{' '}
+          (plus <Code>recipient_device_id</Code>, <Code>format</Code>, <Code>sender_device_id</Code>,{' '}
+          <Code>signature</Code> — see v2 below). Open the sealed box with your device secret key and cache the room key by{' '}
           <Code>(conversation_id, key_version)</Code>.
         </p>
 
@@ -3967,6 +4040,286 @@ GET /dms/{id}/envelopes/?key_version=1`}</Pre>
         </p>
       </Section>
 
+      <Section title="End-to-End Encryption v2 (DMs)">
+        <p className="text-sm text-text-secondary leading-relaxed">
+          v2 adds a per-user master signing key (MSK) that signs the user&apos;s device list, per-device Ed25519
+          signing keys, signed messages and envelopes, key commitments, compare-and-set key rotation,
+          device-to-device messages (QR/code linking, key requests), and an encrypted key backup unlocked by a
+          recovery code. It sits beside v1: every v1 endpoint still works, and v1 and v2 messages can coexist
+          in one conversation.
+        </p>
+        <p className="text-sm text-text-secondary leading-relaxed mt-2">
+          The server never verifies a v2 signature — clients do, against the MSK they pinned for each user.
+          What the server enforces is ordering (every version bump is a compare-and-set, answered with{' '}
+          <Code>409</Code> and the current value when you lose) and ownership (you only write your own identity,
+          device list and backup, and only send from your own devices). All endpoints below are staff-only,
+          like DMs.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Rollout flags</p>
+        <MethodPath method="GET" path="/keys/features/" />
+        <Pre>{`{ "send": false, "identity": false, "linking": false, "backup": false }`}</Pre>
+        <Table
+          headers={['Flag', 'Env var', 'Phase']}
+          rows={[
+            [<Code>send</Code>, <Code>CHAT_E2E_V2_SEND</Code>, '1 — send messages as format 2'],
+            [<Code>identity</Code>, <Code>CHAT_E2E_V2_IDENTITY</Code>, '2 — MSK, signed device lists, fan-out to every listed device'],
+            [<Code>linking</Code>, <Code>CHAT_E2E_V2_LINKING</Code>, '3 — QR/code device linking, key requests'],
+            [<Code>backup</Code>, <Code>CHAT_E2E_V2_BACKUP</Code>, '4 — recovery code backup, rotation policy'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Each flag is off unless its env var is set to a true value (anything other than{' '}
+          <Code>0</Code>/<Code>false</Code>/<Code>no</Code>/empty). A phase
+          is switched on only once web, Android and iOS all ship read/verify support for it. The flags are
+          advisory: the server accepts v2 requests whatever they say, so clients must always be able to read
+          and verify v2 data, and keep <em>sending</em> v1 until their flag is on.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Key material</p>
+        <Table
+          headers={['Key', 'Use']}
+          rows={[
+            ['MSK (per user)', <>Ed25519. Published as <Code>msk_pub</Code>; signs the device list and the backup key. Pin it per user on first sight</>],
+            ['Device enc key', <>X25519 (<Code>enc_pub</Code>, stored as the device&apos;s <Code>public_key</Code>). Envelopes and to-device payloads are sealed to it</>],
+            ['Device sign key', <>Ed25519 (<Code>sign_pub</Code>). Signs messages, envelopes, commitments and to-device messages</>],
+            ['Room key', 'Per conversation and key_version, as in v1, plus a published commitment to it'],
+            ['Backup key', <>X25519 derived from the recovery code (<Code>backup_pub</Code>, signed by the MSK). Seals the MSK and each room key in the backup</>],
+          ]}
+        />
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Reading a user&apos;s keys</p>
+        <MethodPath method="GET" path="/keys/users/{id}/" />
+        <MethodPath method="GET" path="/keys/users/?ids=12,15,16" className="mt-1" />
+        <Pre>{`{
+  "user_id": 15,
+  "msk_pub": "base64 Ed25519 pub",
+  "list_version": 4,
+  "devices": [ { "device_id": "uuid-a", "enc_pub": "base64", "sign_pub": "base64" } ],
+  "list_sig": "base64 MSK signature",
+  "server_devices": [
+    { "id": 7, "device_id": "uuid-a", "public_key": "base64", "sign_pub": "base64", "format": 2, "revoked": false }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>devices</Code> + <Code>list_sig</Code> is the signed list — verify it with the pinned{' '}
+          <Code>msk_pub</Code> and never accept a <Code>list_version</Code> lower than one you&apos;ve seen.{' '}
+          <Code>server_devices</Code> is every device row (revoked ones included) so you can map a listed{' '}
+          <Code>device_id</Code> to the row <Code>id</Code> that envelopes and to-device messages address;
+          ignore rows that aren&apos;t in the signed list. A user who hasn&apos;t published an identity comes
+          back with empty <Code>msk_pub</Code>, <Code>list_version: 0</Code> and <Code>devices: []</Code> (not
+          404). The batch form takes up to 200 comma-separated ids and returns{' '}
+          <Code>{'{ results: [...] }'}</Code> in request order. Your own record also includes{' '}
+          <Code>backup_pub</Code> and <Code>backup_sig</Code>.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Publishing an identity</p>
+        <MethodPath method="PUT" path="/keys/identity/" />
+        <Pre>{`{ "msk_pub": "base64 Ed25519 pub", "reset": false }
+// optional header on reset:  X-Device-Id: uuid-of-this-device`}</Pre>
+        <Table
+          headers={['Case', 'Result']}
+          rows={[
+            ['No identity yet', '200 — stored; returns your keys record (list empty until you PUT a device list)'],
+            ['Same msk_pub again', '200 — no-op, returns the record'],
+            ['Different msk_pub, no reset', <>409 &quot;An identity is already set. Pass reset: true to replace it.&quot; with the current <Code>msk_pub</Code></>],
+            ['reset: true', <>200 — replaces the MSK; clears the signed list, <Code>list_sig</Code> and the backup (<Code>backup_pub</Code>/<Code>backup_sig</Code>/<Code>sealed_msk</Code> and every backup entry); revokes every device from the old list except the one named by <Code>X-Device-Id</Code>; broadcasts <Code>identity.changed</Code></>],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          <Code>list_version</Code> is not reset — it keeps counting so no client ever accepts an older list
+          again. After a reset, publish <Code>current + 1</Code> signed by the new MSK.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Publishing the signed device list</p>
+        <MethodPath method="PUT" path="/keys/devices/list/" />
+        <Pre>{`X-Device-Id: uuid-a   (required when this list claims a link session; the publishing device)
+{
+  "list_version": 5,
+  "list_sig": "base64 MSK signature over the list",
+  "devices": [
+    { "device_id": "uuid-a", "enc_pub": "base64 X25519", "sign_pub": "base64 Ed25519" },
+    { "device_id": "uuid-b", "enc_pub": "base64 X25519", "sign_pub": "base64 Ed25519" }
+  ]
+}`}</Pre>
+        <Table
+          headers={['Rule', 'Server behaviour']}
+          rows={[
+            ['Shape', '1–50 devices, each with non-empty device_id (≤64), enc_pub and sign_pub, no duplicate device_ids → otherwise 400'],
+            ['Identity first', <>409 &quot;Publish an identity before a device list.&quot; (with <Code>list_version</Code>) if no MSK is set</>],
+            ['Compare-and-set', <><Code>list_version</Code> must be exactly current + 1, else 409 &quot;Stale device list version.&quot; with the current <Code>list_version</Code>. Two devices publishing at once can&apos;t both win — refetch, merge, re-sign, retry</>],
+            ['Device rows', <>Each listed device is created or updated (<Code>public_key</Code> = enc_pub, <Code>sign_pub</Code>, <Code>format: 2</Code>, un-revoked). A new row takes its label from a pending link session for that device_id</>],
+            ['Dropped devices', 'Devices in the previous list but not this one are revoked'],
+            ['Link sessions', <>Unexpired, unclaimed link sessions whose device_id is in the list (other than the publishing device&apos;s own) are claimed by the device named in <Code>X-Device-Id</Code> → <Code>link.claimed</Code>. Missing header when a session would be claimed → 400</>],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Returns your keys record and broadcasts <Code>devices.updated</Code>{' '}
+          (<Code>{'{ user_id, list_version, dropped }'}</Code>) to every conversation you&apos;re in and to you.
+          When <Code>dropped</Code> is true, conversations containing you should rotate their room key.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Conversation keys: commitment and rotation</p>
+        <MethodPath method="GET" path="/dms/{id}/keys/?key_version={n}" />
+        <Pre>{`{
+  "current_key_version": 3,
+  "results": [ device, ... ],
+  "key_version": 3,
+  "commitment": {
+    "conversation": 20, "key_version": 3, "key_commitment": "base64",
+    "creator_user": 12, "creator_device": "uuid-a", "commit_sig": "base64", "created_at": "..."
+  },
+  "message_count": 41,
+  "members": [ { "user_id": 12, "list_version": 5 }, { "user_id": 15, "list_version": 2 } ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          The v1 fields are unchanged. <Code>key_version</Code> defaults to the current version; pass it to
+          check an older envelope. <Code>commitment</Code> is <Code>null</Code> until that version is
+          established. <Code>message_count</Code> (messages sent under that version) feeds the client&apos;s
+          rotation policy. <Code>members[].list_version</Code> tells you whose signed list is newer than your
+          cached one.
+        </p>
+        <MethodPath method="POST" path="/dms/{id}/keys/establish/" className="mt-3" />
+        <Pre>{`{ "key_version": 3, "key_commitment": "base64", "creator_device": "uuid-a", "commit_sig": "base64" }`}</Pre>
+        <Table
+          headers={['Status', 'Meaning']}
+          rows={[
+            ['201', <>Commitment stored and returned; broadcasts <Code>key.committed</Code></>],
+            ['400', 'A field is missing, or creator_device is not one of your non-revoked devices'],
+            ['404', 'Not a participant'],
+            ['409', <>&quot;This key version is already established.&quot; — first write wins; the body carries the winning <Code>commitment</Code>. Discard your key and adopt that version&apos;s key from its envelopes</>],
+            ['409', <>&quot;Only the current key version can be established.&quot; with <Code>current_key_version</Code></>],
+          ]}
+        />
+        <MethodPath method="POST" path="/dms/{id}/keys/rotate/" className="mt-3" />
+        <Pre>{`{ "expected_version": 3 }   ->   200 { "current_key_version": 4 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Compare-and-set bump of <Code>current_key_version</Code>; broadcasts <Code>key.rotated</Code>. If
+          someone rotated first → 409 &quot;The key version has already moved on.&quot; with{' '}
+          <Code>current_key_version</Code> — don&apos;t rotate again, just use theirs. The winner then
+          establishes the new version and posts v2 envelopes for it.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">v2 envelopes</p>
+        <Pre>{`POST /dms/{id}/envelopes/
+{
+  "envelopes": [
+    { "format": 2, "recipient_device": 7, "key_version": 3, "encrypted_key": "base64 sealed box",
+      "sender_device": "uuid-a", "signature": "base64" }
+  ]
+}`}</Pre>
+        <Table
+          headers={['Rule', 'Server behaviour']}
+          rows={[
+            ['Committed only', 'Skipped unless that key_version has a commitment and is ≤ current_key_version'],
+            ['Sender', 'Skipped unless sender_device is one of your non-revoked device_ids and signature is non-empty'],
+            ['No version bump', 'v2 envelopes never move current_key_version — rotation is its own compare-and-set'],
+            ['First write wins', 'If a format 2 envelope already exists for (conversation, key_version, recipient), it is kept and returned as-is, so a later member can\'t overwrite a good envelope with one the recipient would reject'],
+            ['v1 vs v2', 'A v2 envelope replaces an existing v1 one; a v1 post never overwrites a v2 envelope'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Invalid items are skipped silently; 400 only if none survive. v1 and v2 items can share one request.
+          Envelope objects now carry <Code>recipient_device_id</Code> and <Code>sender_device_id</Code> (the
+          device_id strings the signature covers) plus <Code>format</Code> and <Code>signature</Code>;{' '}
+          <Code>sender_device_id</Code> is <Code>null</Code> on v1 envelopes.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">To-device messages</p>
+        <p className="text-xs text-text-muted">
+          A signed mailbox between devices, used for linking bundles and key requests/shares. Both{' '}
+          <Code>GET</Code> and <Code>POST</Code> need an <Code>X-Device-Id</Code> header naming one of your
+          non-revoked devices (the recipient on GET, the sender on POST), else 400.
+        </p>
+        <Pre>{`POST /keys/to-device/
+X-Device-Id: uuid-a
+{
+  "messages": [
+    { "recipient_device": 9, "type": "key_request", "payload": "base64 sealed...", "signature": "base64" }
+  ]
+}
+-> 201 { "sent": 1 }`}</Pre>
+        <Table
+          headers={['Rule', 'Server behaviour']}
+          rows={[
+            [<Code>type</Code>, <><Code>link_bundle</Code>, <Code>key_request</Code>, <Code>key_share</Code> or <Code>key_request_cancel</Code></>],
+            ['Batch', '1–60 messages; payload a non-empty string ≤ 1,000,000 chars (a 512 KB chunk, sealed and base64\'d); signature required → otherwise 400'],
+            ['Recipients', <>Row <Code>id</Code>s of your own non-revoked devices — linking and key requests never cross accounts. Any other → 403 &quot;Unknown recipient device.&quot; and nothing is sent</>],
+            ['Rate', '60 messages per sender device per minute → 429 "Too many to-device messages; slow down."'],
+            ['Notify', <><Code>todevice.available</Code> (<Code>{'{ device_id }'}</Code>) to each recipient device&apos;s owner</>],
+          ]}
+        />
+        <MethodPath method="GET" path="/keys/to-device/" className="mt-3" />
+        <Pre>{`{ "results": [
+  { "id": 88, "type": "key_request", "sender_device": "uuid-a", "sender_user": 12,
+    "payload": "base64...", "signature": "base64", "created_at": "..." }
+] }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Up to 100, oldest first. Messages stay until acknowledged, or expire after 14 days.{' '}
+          <Code>sender_device</Code> is the device_id string — verify <Code>signature</Code> with that
+          device&apos;s <Code>sign_pub</Code> from the sender&apos;s signed list.
+        </p>
+        <MethodPath method="POST" path="/keys/to-device/ack/" className="mt-3" />
+        <Pre>{`{ "ids": [88, 89] }   ->   200 { "deleted": 2 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Up to 500 ids; only messages addressed to one of your devices are deleted. No{' '}
+          <Code>X-Device-Id</Code> needed. Keep fetching until a page comes back empty.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Linking a new device</p>
+        <MethodPath method="POST" path="/keys/link-sessions/" />
+        <Pre>{`{ "device_id": "uuid-new", "enc_pub": "base64", "sign_pub": "base64", "label": "Pixel 9" }
+-> 201 { "session_id": "7K3QM9XA", "expires_at": "..." }`}</Pre>
+        <MethodPath method="GET" path="/keys/link-sessions/{code}/" className="mt-2" />
+        <Pre>{`{ "session_id": "7K3QM9XA", "device_id": "uuid-new", "enc_pub": "base64", "sign_pub": "base64",
+  "label": "Pixel 9", "expires_at": "...", "claimed": false, "claimed_by": null }
+// once claimed: "claimed": true, "claimed_by": { "device_id": "uuid-a", "sign_pub": "base64" }`}</Pre>
+        <ol className="text-xs text-text-muted list-decimal pl-5 space-y-1">
+          <li>The new device, signed in to the same account, creates a session and shows the 8-character code (Crockford base32) as a QR code or text. Sessions last 10 minutes; a 503 means no free code could be allocated.</li>
+          <li>An existing device looks the code up. Lookup uppercases it, strips dashes and spaces, and maps I/L → 1 and O → 0, so a typed code survives. Only your own unexpired sessions are visible; anything else → 404 &quot;Link code not found or expired.&quot;</li>
+          <li>The existing device adds the new one to its signed list and <Code>PUT</Code>s <Code>/keys/devices/list/</Code> with its own <Code>X-Device-Id</Code>. That claims the session in its name and sends <Code>link.claimed</Code> (<Code>{'{ session_id }'}</Code>) to the account&apos;s sockets.</li>
+          <li>It then sends the new device a <Code>link_bundle</Code> — the MSK secret, <Code>backup_pub</Code> and every room key it holds, sealed to the new device and split across several to-device messages when large — which the new device drains from <Code>/keys/to-device/</Code>. The new device accepts a bundle only while it doesn&apos;t yet hold the MSK, and only from the session&apos;s <Code>claimed_by.device_id</Code>.</li>
+        </ol>
+
+        <p className="text-xs text-text-muted font-semibold mt-3">Key backup</p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/keys/backup/', '{ backup_pub, backup_sig, sealed_msk }, or 404 "No backup."'],
+            ['PUT', '/keys/backup/', 'Set up or replace the backup (below); broadcasts backup.updated to you'],
+            ['GET', '/keys/backup/entries/?after={id}', '{ results: [{ id, conversation, key_version, sealed }], next } — 500 per page; next is the last id when the page is full, else null'],
+            ['POST', '/keys/backup/entries/', '{ backup_pub?, entries: [...] } — add room keys, ≤ 500 per call → 201 { accepted }'],
+          ]}
+        />
+        <Pre>{`PUT /keys/backup/
+{
+  "backup_pub": "base64 X25519 pub",
+  "backup_sig": "base64 MSK signature",
+  "sealed_msk": "base64",
+  "expected_backup_pub": "base64 (only when replacing)",
+  "entries": [ { "conversation": 20, "key_version": 3, "sealed": "base64 (≤ 1024 chars)" } ]
+}
+-> 200 { "backup_pub": "...", "backup_sig": "..." }`}</Pre>
+        <Table
+          headers={['Case', 'Result']}
+          rows={[
+            ['No identity', '409 "Publish an identity before a backup."'],
+            ['First setup, or same backup_pub', <>Stores <Code>backup_pub</Code>/<Code>backup_sig</Code>/<Code>sealed_msk</Code>; any <Code>entries</Code> are added</>],
+            ['Different backup_pub (new recovery code)', <>Compare-and-set: <Code>expected_backup_pub</Code> must equal the current key, else 409 &quot;The backup key has changed since you read it.&quot; with <Code>backup_pub</Code>. <Code>entries</Code> must be sent (every entry re-sealed to the new key, any size) else 409 &quot;Replacing the backup key requires every entry re-sealed to it.&quot; Old entries are deleted and the new ones land atomically with the key swap</>],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Entries for conversations you&apos;re not in are silently dropped, and each{' '}
+          <Code>(conversation, key_version)</Code> is first-write-wins — a duplicate is ignored rather than
+          overwriting the stored one. On <Code>POST /keys/backup/entries/</Code>, pass the{' '}
+          <Code>backup_pub</Code> you sealed to: if it has since been replaced → 409 &quot;The backup key has
+          changed.&quot; with the current <Code>backup_pub</Code> (entries sealed to the old key would be
+          unreadable with the new code). No backup yet → 409 &quot;No backup is set up.&quot;{' '}
+          <Code>accepted</Code> counts entries kept after the membership filter, including ones ignored as
+          duplicates. An identity reset wipes the backup.
+        </p>
+      </Section>
+
       <Section title="Deployment Notes">
         <p className="text-sm text-text-secondary">
           The channel layer uses Redis (<Code>channels_redis</Code>) at{' '}
@@ -3983,8 +4336,14 @@ GET /dms/{id}/envelopes/?key_version=1`}</Pre>
           rows={[
             [<Code>chat.0002_server_roles_and_public</Code>, <>Adds <Code>is_public</Code>, <Code>ServerRole</Code>, <Code>ChannelPermissionOverride</Code>, member <Code>roles</Code> M2M</>],
             [<Code>chat.0003_backfill_default_roles</Code>, <>Creates <Code>@everyone</Code> + <Code>Admin</Code> roles for existing servers and assigns <Code>Admin</Code> to existing owners/admins</>],
+            [<Code>chat.0005_e2e_v2</Code>, <>E2E v2: device <Code>sign_pub</Code>/<Code>format</Code>, envelope <Code>format</Code>/<Code>sender_device</Code>/<Code>signature</Code>, message v2 fields (unique <Code>client_id</Code> per conversation), and the <Code>UserKeys</Code>, <Code>KeyCommitment</Code>, <Code>ToDeviceMessage</Code>, <Code>LinkSession</Code>, <Code>BackupEntry</Code> tables</>],
           ]}
         />
+        <p className="text-xs text-text-muted mt-2">
+          E2E v2 phases are switched on with <Code>CHAT_E2E_V2_SEND</Code>, <Code>CHAT_E2E_V2_IDENTITY</Code>,{' '}
+          <Code>CHAT_E2E_V2_LINKING</Code> and <Code>CHAT_E2E_V2_BACKUP</Code> (all off by default) — see{' '}
+          <Code>GET /keys/features/</Code>.
+        </p>
       </Section>
     </div>
   )

@@ -182,6 +182,12 @@ export interface ChatMessage {
   ciphertext: string
   nonce: string
   key_version: number | null
+  // E2E v2 (format 2): see lib/chatE2E. Absent on older servers.
+  format?: number
+  client_id?: string
+  sender_device?: string
+  edit_seq?: number
+  signature?: string
   parent: number | null
   mentions: number[]
   attachments: ChatAttachment[]
@@ -217,17 +223,121 @@ export interface ChatDevice {
   id: number
   device_id: string
   public_key: string
+  sign_pub?: string
+  format?: number
   algorithm: string
   label: string
-  owner: number
+  // The server sends a user brief here; older code treated it as an id.
+  owner: number | ChatUserBrief
   created_at?: string
 }
+
+export const deviceOwnerId = (d: ChatDevice): number => (typeof d.owner === 'number' ? d.owner : d.owner.id)
 
 export interface Envelope {
   id?: number
   recipient_device: number
+  recipient_device_id?: string
   key_version: number
   encrypted_key: string
+  format?: number
+  sender_device?: string
+  sender_device_id?: string | null
+  signature?: string
+  created_by?: number
+}
+
+export interface ListDeviceEntry {
+  device_id: string
+  enc_pub: string
+  sign_pub: string
+}
+
+export interface ServerDeviceRow {
+  id: number
+  device_id: string
+  public_key: string
+  sign_pub: string
+  format: number
+  revoked: boolean
+}
+
+export interface UserKeysInfo {
+  user_id: number
+  msk_pub: string
+  list_version: number
+  devices: ListDeviceEntry[]
+  list_sig: string
+  server_devices: ServerDeviceRow[]
+  backup_pub?: string
+  backup_sig?: string
+}
+
+export interface KeyCommitmentInfo {
+  conversation: number
+  key_version: number
+  key_commitment: string
+  creator_user: number
+  creator_device: string
+  commit_sig: string
+  created_at: string
+}
+
+export interface ConversationKeys {
+  current_key_version: number
+  results: ChatDevice[]
+  key_version?: number
+  commitment?: KeyCommitmentInfo | null
+  message_count?: number
+  members?: { user_id: number; list_version: number }[]
+}
+
+export interface E2EFeatures {
+  send: boolean
+  identity: boolean
+  linking: boolean
+  backup: boolean
+}
+
+export interface ToDeviceOut {
+  recipient_device: number
+  type: string
+  payload: string
+  signature: string
+}
+
+export interface ToDeviceIn extends Omit<ToDeviceOut, 'recipient_device'> {
+  id: number
+  sender_device: string
+  sender_user: number
+  created_at: string
+}
+
+export interface LinkSessionInfo {
+  session_id: string
+  device_id: string
+  enc_pub: string
+  sign_pub: string
+  label: string
+  expires_at: string
+  claimed: boolean
+  // The existing device that signed this one in; null until claimed.
+  claimed_by: { device_id: string; sign_pub: string } | null
+}
+
+export interface BackupEntryIn {
+  id: number
+  conversation: number
+  key_version: number
+  sealed: string
+}
+
+export interface V2MessageFields {
+  format: 2
+  client_id: string
+  sender_device: string
+  edit_seq: number
+  signature: string
 }
 
 export interface UploadedFile {
@@ -258,6 +368,24 @@ const json = (method: string, body?: unknown): RequestInit => ({
   method,
   body: body === undefined ? undefined : JSON.stringify(body),
 })
+
+// For the v2 compare-and-set endpoints, where a 409 is an expected answer
+// whose body the caller needs (the winning commitment, the current version).
+export interface Outcome<T> { ok: boolean; status: number; data: T }
+
+async function requestOutcome<T>(path: string, init: RequestInit = {}, headers: Record<string, string> = {}): Promise<Outcome<T>> {
+  const res = await fetch(`${CHAT_BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()), ...headers },
+  })
+  let data: unknown = null
+  try { data = await res.json() } catch {}
+  if (!res.ok && res.status !== 409) {
+    const detail = (data as { detail?: string } | null)?.detail
+    throw Object.assign(new Error(detail || `Request failed (${res.status})`), { status: res.status })
+  }
+  return { ok: res.ok, status: res.status, data: data as T }
+}
 
 function pageQuery(opts: { limit?: number; before?: number; after?: number }): string {
   const qs = new URLSearchParams()
@@ -394,13 +522,13 @@ export const createDmMessage = (id: number, body: {
   parent?: number | null
   mentions?: number[]
   attachments?: AttachmentInput[]
-}) => request<ChatMessage>(`/dms/${id}/messages/`, json('POST', body))
+} & Partial<V2MessageFields>) => request<ChatMessage>(`/dms/${id}/messages/`, json('POST', body))
 export const markDmRead = (id: number, messageId?: number) =>
   request<void>(`/dms/${id}/read/`, json('POST', messageId ? { message_id: messageId } : {}))
 
 // Message actions
 export const getMessage = (id: number) => request<ChatMessage>(`/messages/${id}/`)
-export const editMessage = (id: number, body: { content: string } | { ciphertext: string; nonce: string; key_version: number }) =>
+export const editMessage = (id: number, body: { content: string } | ({ ciphertext: string; nonce: string; key_version: number; mentions?: number[] } & Partial<V2MessageFields>)) =>
   request<ChatMessage>(`/messages/${id}/`, json('PATCH', body))
 export const deleteMessage = (id: number) => request<void>(`/messages/${id}/`, json('DELETE'))
 export const pinMessage = (id: number) => request<ChatMessage>(`/messages/${id}/pin/`, json('POST'))
@@ -417,17 +545,57 @@ export const getPresence = () => request<{ online: number[] }>('/presence/').the
 
 // Keys
 export const listMyDevices = () => request<Results<ChatDevice>>('/keys/devices/').then((r) => r.results)
-export const registerDevice = (body: { device_id: string; public_key: string; algorithm: 'x25519'; label: string }) =>
+export const registerDevice = (body: { device_id: string; public_key: string; sign_pub?: string; algorithm: 'x25519'; label: string }) =>
   request<ChatDevice>('/keys/devices/', json('POST', body))
 export const revokeDevice = (deviceId: string) =>
   request<void>(`/keys/devices/${encodeURIComponent(deviceId)}/`, json('DELETE'))
-export const listConversationDevices = (id: number) =>
-  request<{ current_key_version: number; results: ChatDevice[] }>(`/dms/${id}/keys/`)
+export const listConversationDevices = (id: number, keyVersion?: number) =>
+  request<ConversationKeys>(`/dms/${id}/keys/${keyVersion ? `?key_version=${keyVersion}` : ''}`)
 export const postEnvelopes = (id: number, envelopes: Envelope[]) =>
   request<unknown>(`/dms/${id}/envelopes/`, json('POST', { envelopes }))
 export const listEnvelopes = (id: number, keyVersion?: number) =>
   request<Results<Envelope>>(`/dms/${id}/envelopes/${keyVersion ? `?key_version=${keyVersion}` : ''}`)
     .then((r) => r.results)
+
+// E2E v2 keys. The server stores and orders these; it never checks a
+// signature - lib/chatIdentity and lib/chatE2E do.
+export const getE2EFeatures = () => request<E2EFeatures>('/keys/features/')
+export const getUserKeys = (userId: number) => request<UserKeysInfo>(`/keys/users/${userId}/`)
+export const getUsersKeys = (ids: number[]) =>
+  request<Results<UserKeysInfo>>(`/keys/users/?ids=${ids.join(',')}`).then((r) => r.results)
+export const putIdentity = (body: { msk_pub: string; reset?: boolean }, deviceId?: string) =>
+  requestOutcome<UserKeysInfo & { detail?: string }>('/keys/identity/', json('PUT', body), deviceId ? { 'X-Device-Id': deviceId } : {})
+// deviceId: the publishing device, which the server records as the claimer
+// of any link session the new list completes.
+export const putDeviceList = (body: { list_version: number; devices: ListDeviceEntry[]; list_sig: string }, deviceId?: string) =>
+  requestOutcome<UserKeysInfo & { detail?: string }>('/keys/devices/list/', json('PUT', body), deviceId ? { 'X-Device-Id': deviceId } : {})
+export const establishKey = (id: number, body: { key_version: number; key_commitment: string; creator_device: string; commit_sig: string }) =>
+  requestOutcome<KeyCommitmentInfo & { commitment?: KeyCommitmentInfo; current_key_version?: number }>(`/dms/${id}/keys/establish/`, json('POST', body))
+export const rotateKey = (id: number, expectedVersion: number) =>
+  requestOutcome<{ current_key_version: number }>(`/dms/${id}/keys/rotate/`, json('POST', { expected_version: expectedVersion }))
+export const createLinkSession = (body: { device_id: string; enc_pub: string; sign_pub: string; label: string }) =>
+  request<{ session_id: string; expires_at: string }>('/keys/link-sessions/', json('POST', body))
+export const getLinkSession = (sessionId: string) =>
+  request<LinkSessionInfo>(`/keys/link-sessions/${encodeURIComponent(sessionId)}/`)
+export const sendToDevice = (deviceId: string, messages: ToDeviceOut[]) =>
+  request<{ sent: number }>('/keys/to-device/', { ...json('POST', { messages }), headers: { 'X-Device-Id': deviceId } })
+export const fetchToDevice = (deviceId: string) =>
+  request<Results<ToDeviceIn>>('/keys/to-device/', { headers: { 'X-Device-Id': deviceId } }).then((r) => r.results)
+export const ackToDevice = (ids: number[]) => request<{ deleted: number }>('/keys/to-device/ack/', json('POST', { ids }))
+export const getBackup = () => requestOutcome<{ backup_pub: string; backup_sig: string; sealed_msk: string }>('/keys/backup/')
+  .then((o) => o.data)
+  .catch((err: { status?: number }) => { if (err.status === 404) return null; throw err })
+export const putBackup = (body: {
+  backup_pub: string
+  backup_sig: string
+  sealed_msk: string
+  expected_backup_pub?: string
+  entries?: { conversation: number; key_version: number; sealed: string }[]
+}) => requestOutcome<{ backup_pub: string; detail?: string }>('/keys/backup/', json('PUT', body))
+export const postBackupEntries = (backupPub: string, entries: { conversation: number; key_version: number; sealed: string }[]) =>
+  requestOutcome<{ accepted?: number; detail?: string }>('/keys/backup/entries/', json('POST', { backup_pub: backupPub, entries }))
+export const listBackupEntries = (after?: number) =>
+  request<{ results: BackupEntryIn[]; next: number | null }>(`/keys/backup/entries/${after ? `?after=${after}` : ''}`)
 
 // Uploads
 export async function uploadChatFile(file: Blob, name: string): Promise<UploadedFile> {

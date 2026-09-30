@@ -1,4 +1,5 @@
 import type { IdentityKeyPair } from './chatCrypto'
+import type { SigningKeyPair } from './chatV2Crypto'
 
 const DB_NAME = 'unreleased-chat'
 const DB_VERSION = 1
@@ -15,6 +16,10 @@ interface StoredDevice {
   secretKey: ArrayBuffer
   iv: ArrayBuffer
   registered: boolean
+  // v2 device signing key (Ed25519); absent on devices set up before v2.
+  signPublicKey?: ArrayBuffer
+  signSecretKey?: ArrayBuffer
+  signIv?: ArrayBuffer
 }
 
 interface StoredRoomKey {
@@ -89,6 +94,7 @@ export interface LocalDevice {
   userId: number
   deviceId: string
   identity: IdentityKeyPair
+  signing?: SigningKeyPair
   registered: boolean
 }
 
@@ -111,6 +117,9 @@ export async function loadDevice(userId: number): Promise<LocalDevice | null> {
         publicKey: new Uint8Array(row.publicKey),
         secretKey: await unseal(row.secretKey, row.iv),
       },
+      signing: row.signPublicKey && row.signSecretKey && row.signIv
+        ? { publicKey: new Uint8Array(row.signPublicKey), secretKey: await unseal(row.signSecretKey, row.signIv) }
+        : undefined,
     }
   } catch {
     return null
@@ -128,6 +137,12 @@ export async function saveDevice(device: LocalDevice): Promise<void> {
     iv,
     registered: device.registered,
   }
+  if (device.signing) {
+    const signed = await seal(device.signing.secretKey)
+    row.signPublicKey = device.signing.publicKey.slice().buffer
+    row.signSecretKey = signed.data
+    row.signIv = signed.iv
+  }
   await run(META, 'readwrite', (s) => s.put(row))
   // Migrated off the shared legacy row - drop it if it was ours, so another
   // account's loadDevice can't fall back to it.
@@ -137,6 +152,7 @@ export async function saveDevice(device: LocalDevice): Promise<void> {
 
 export async function clearDevice(userId: number): Promise<void> {
   await run(META, 'readwrite', (s) => s.delete(deviceRowId(userId)))
+  await run(META, 'readwrite', (s) => s.delete(mskRowId(userId)))
   await run(META, 'readwrite', (s) => s.delete(LEGACY_DEVICE_ROW))
   await run(ROOM_KEYS, 'readwrite', (s) => s.clear())
 }
@@ -181,4 +197,64 @@ export async function putRoomKey(conversationId: number, version: number, key: U
   roomKeyCache.set(id, key)
   const { data, iv } = await seal(key)
   await run(ROOM_KEYS, 'readwrite', (s) => s.put({ id, key: data, iv } satisfies StoredRoomKey))
+}
+
+export async function hasRoomKey(conversationId: number, version: number): Promise<boolean> {
+  return (await getRoomKey(conversationId, version)) !== null
+}
+
+// --- E2E v2 ---------------------------------------------------------------------
+// The master signing key, and what this account has learned about everyone
+// else's: the MSK it pinned on first sight, the highest device-list version it
+// has seen (so the server can't replay an older list that still had a revoked
+// device in it), and whether the person compared safety numbers.
+
+interface StoredSecret {
+  id: string
+  data: ArrayBuffer
+  iv: ArrayBuffer
+}
+
+const mskRowId = (userId: number): string => `msk:${userId}`
+
+export async function loadMsk(userId: number): Promise<Uint8Array | null> {
+  const row = await run<StoredSecret | undefined>(META, 'readonly', (s) => s.get(mskRowId(userId)))
+  if (!row) return null
+  try {
+    return await unseal(row.data, row.iv)
+  } catch {
+    return null
+  }
+}
+
+export async function saveMsk(userId: number, secret: Uint8Array): Promise<void> {
+  const { data, iv } = await seal(secret)
+  await run(META, 'readwrite', (s) => s.put({ id: mskRowId(userId), data, iv } satisfies StoredSecret))
+}
+
+export async function clearMsk(userId: number): Promise<void> {
+  await run(META, 'readwrite', (s) => s.delete(mskRowId(userId)))
+}
+
+export interface TrustRecord {
+  // base64 MSK public key pinned for this user; '' until first seen.
+  mskPub: string
+  listVersion: number
+  verified: boolean
+  // Set when the server shows a different MSK than the pinned one; cleared
+  // when the viewer accepts it (which re-pins and drops `verified`).
+  changedTo?: string
+}
+
+const trustRowId = (me: number, them: number): string => `trust:${me}:${them}`
+
+export async function getTrust(me: number, them: number): Promise<TrustRecord | null> {
+  const row = await run<({ id: string } & TrustRecord) | undefined>(META, 'readonly', (s) => s.get(trustRowId(me, them)))
+  if (!row) return null
+  const { id: _id, ...rest } = row
+  return rest
+}
+
+export async function putTrust(me: number, them: number, record: TrustRecord): Promise<void> {
+  await run(META, 'readwrite', (s) => s.put({ id: trustRowId(me, them), ...record }))
 }
