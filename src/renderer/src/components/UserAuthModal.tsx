@@ -55,8 +55,10 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
     } catch (err) {
       const msg = errorMessage(err, 'Something went wrong. Try again.')
       if (mode === 'login' && /otp/i.test(msg)) {
+        // First pass has no code, so this just means "step 2"; a rejected code is a real error.
+        setError(otp.trim() ? 'That code was not accepted. Try again.' : null)
         setNeedsOtp(true)
-        setError(otp.trim() ? 'That code was not accepted. Try again.' : 'Enter the 6-digit code from your authenticator app.')
+        setOtp('')
       } else {
         setError(msg)
       }
@@ -110,39 +112,48 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
           )}
 
           <form onSubmit={submitPassword} className="space-y-2.5">
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Username"
-              autoComplete="username"
-              autoCapitalize="none"
-              spellCheck={false}
-              disabled={loading}
-              className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              disabled={loading}
-              className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
-            />
-            {needsOtp && mode === 'login' && (
-              <input
-                type="text"
-                inputMode="numeric"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                placeholder="Authenticator code"
-                autoComplete="one-time-code"
-                maxLength={8}
-                autoFocus
-                disabled={loading}
-                className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
-              />
+            {needsOtp ? (
+              <>
+                <p className="text-xs text-text-secondary">
+                  Two-factor is on for <span className="text-text-primary font-medium">{username.trim()}</span>.
+                  Enter the 6-digit code from your authenticator app.
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  placeholder="Authenticator code"
+                  autoComplete="one-time-code"
+                  maxLength={8}
+                  autoFocus
+                  disabled={loading}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Username"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  disabled={loading}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+                />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  disabled={loading}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+                />
+              </>
             )}
             <button
               type="submit"
@@ -150,10 +161,20 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               className="w-full py-2.5 rounded-xl bg-accent hover:opacity-90 text-white text-sm font-semibold transition-opacity flex items-center justify-center gap-2 disabled:opacity-60"
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
-              {mode === 'signup' ? 'Create account' : 'Log in'}
+              {needsOtp ? 'Verify' : mode === 'signup' ? 'Create account' : 'Log in'}
             </button>
+            {needsOtp && (
+              <button
+                type="button"
+                onClick={() => { setNeedsOtp(false); setOtp(''); setPassword(''); setError(null) }}
+                className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
+              >
+                Back
+              </button>
+            )}
           </form>
 
+          {!needsOtp && (<>
           <div className="text-center text-xs text-text-muted">
             {mode === 'signup' ? 'Already have an account?' : "Don't have an account?"}{' '}
             <button
@@ -185,6 +206,7 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
             )}
             Continue with Discord
           </button>
+          </>)}
         </div>
       </div>
       )}
