@@ -117,6 +117,9 @@ export async function pushChanges(io: SyncIO, accountId: number): Promise<SyncRe
     io.apply((lib) => ({ ...lib, pendingDeletes: lib.pendingDeletes.filter((id) => id !== serverId) }))
   }
 
+  // A list the server rejects (400/413 - failed validation) shouldn't hold
+  // up the rest: skip it, keep going, and report the failure at the end.
+  let rejected: TierlistApiError | null = null
   for (const l of io.get().lists.filter(isDirty)) {
     if (l.ownerId !== undefined && l.ownerId !== accountId) continue
     // The blank list every empty library gets isn't worth an account row
@@ -133,6 +136,9 @@ export async function pushChanges(io: SyncIO, accountId: number): Promise<SyncRe
       if (l.serverId !== undefined && err instanceof TierlistApiError && err.status === 404) {
         // Deleted on another device mid-edit: re-create rather than lose it.
         saved = await createTierlist(body)
+      } else if (err instanceof TierlistApiError && (err.status === 400 || err.status === 413)) {
+        rejected = err
+        continue
       } else {
         if (isUnsupported(err)) return 'unsupported'
         throw err
@@ -151,5 +157,6 @@ export async function pushChanges(io: SyncIO, accountId: number): Promise<SyncRe
       }),
     }))
   }
+  if (rejected) throw rejected
   return 'ok'
 }

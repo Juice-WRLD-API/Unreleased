@@ -13,7 +13,7 @@ import { smallCoverUrl } from '../lib/juicewrldApi'
 import { TIER_COLOR_PRESETS } from '../lib/tierlist'
 import type { Tier, DropPosition } from '../lib/tierlist'
 import { GameSwitcher, GameBackdrop } from './gameShell'
-import { useTierlistData } from '../hooks/useTierlistData'
+import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
 import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
@@ -375,7 +375,9 @@ export default function TierlistView(): JSX.Element {
 
           <button
             onClick={addTier}
-            className="w-full mb-8 py-2.5 rounded-xl border border-dashed border-[var(--border)] text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
+            disabled={tiers.length >= MAX_TIERS}
+            title={tiers.length >= MAX_TIERS ? `A tier list can have at most ${MAX_TIERS} tiers` : undefined}
+            className="w-full mb-8 py-2.5 rounded-xl disabled:opacity-40 border border-dashed border-[var(--border)] text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
           >
             <Plus size={14} /> Add tier
           </button>

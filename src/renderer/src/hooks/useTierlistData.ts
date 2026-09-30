@@ -9,7 +9,7 @@ import { loadPools, poolAgeMs, refreshPool, poolEras } from '../lib/heardle'
 import type { HeardleSong, PoolId } from '../lib/heardle'
 import {
   loadTierlistLibrary, saveTierlistLibrary, newTierlist, newTierId, placeSong as placeInRows,
-  albumMatcher, matchesSearch, TIER_COLOR_PRESETS,
+  albumMatcher, albumKey, matchesSearch, TIER_COLOR_PRESETS,
 } from '../lib/tierlist'
 import type { Tier, Tierlist, TierlistFilters, TierlistLibrary, DropPosition } from '../lib/tierlist'
 import { isDirty } from '../lib/tierlist'
@@ -21,6 +21,8 @@ import { shareOrigin } from '../lib/platform'
 import { fetchAlbums } from '../lib/albumsApi'
 import type { Album } from '../lib/albumsApi'
 import { getAllVersionGroups } from '../lib/versionsApi'
+import { loadEraFullNames, listEras } from '../lib/eras'
+import type { JWApiEra } from '../lib/juicewrldApi'
 import { resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import { peekRotatedCover } from '../lib/coverRotation'
 import { useStorePick } from '../store/useStore'
@@ -39,6 +41,11 @@ const REVALIDATE_AFTER_MS = 10 * 60 * 1000
 // Edits are pushed this long after the last one, so a burst of drags goes up
 // as one request per list rather than one per drop.
 const PUSH_DEBOUNCE_MS = 1500
+
+// Server-side limits (Chicken-Dinner library/tierlists.py) - anything past
+// these is rejected with a 400, so the UI stops short of them.
+export const MAX_TIERS = 30
+const MAX_LISTS = 200
 
 export type SyncState = 'signed-out' | 'syncing' | 'synced' | 'error' | 'unsupported'
 
@@ -81,6 +88,7 @@ export function useTierlistData() {
   const [refreshing, setRefreshing] = useState(false)
   const [albums, setAlbums] = useState<Album[]>([])
   const [groupOf, setGroupOf] = useState<Map<number, number>>(new Map())
+  const [eraList, setEraList] = useState<JWApiEra[]>(() => listEras())
   const [search, setSearch] = useState('')
   const [selectedSongId, setSelectedSongId] = useState<number | null>(null)
   const [editingTier, setEditingTier] = useState<Tier | null>(null)
@@ -125,6 +133,10 @@ export function useTierlistData() {
     getAllVersionGroups()
       .then((rows) => { if (!cancelled) setGroupOf(new Map(rows.map((r) => [r.songId, r.groupId]))) })
       .catch(() => {})
+    // Rejects only after ingesting what it could - use whatever came back.
+    loadEraFullNames()
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setEraList(listEras()) })
     return () => { cancelled = true }
   }, [refreshSongs])
 
@@ -214,7 +226,15 @@ export function useTierlistData() {
     setSearch('')
   }
 
+  // The account holds at most MAX_LISTS; past that every upload would 400.
+  const roomForList = (): boolean => {
+    if (libRef.current.lists.length < MAX_LISTS) return true
+    window.alert(`You can have at most ${MAX_LISTS} tier lists. Delete one to make room.`)
+    return false
+  }
+
   const createList = (name: string, albumId: number | null): void => {
+    if (!roomForList()) return
     const created = newTierlist(name.trim() || 'Untitled tier list', {
       ...filters,
       albumId,
@@ -236,7 +256,7 @@ export function useTierlistData() {
 
   const duplicateList = (id: string): void => {
     const src = library.lists.find((l) => l.id === id)
-    if (!src) return
+    if (!src || !roomForList()) return
     const copy: Tierlist = {
       ...newTierlist(`${src.name} (copy)`, src.filters),
       tiers: src.tiers.map((t) => ({ ...t })),
@@ -300,7 +320,7 @@ export function useTierlistData() {
 
   /** Copies the list being viewed into your own library, to edit freely. */
   const saveViewingCopy = (): void => {
-    if (viewing?.status !== 'ready') return
+    if (viewing?.status !== 'ready' || !roomForList()) return
     const src = fromServer(viewing.list, undefined)
     if (!src) return
     const copy: Tierlist = {
@@ -353,7 +373,9 @@ export function useTierlistData() {
     if (filters.albumId !== null) {
       // Albums still loading: show nothing rather than the whole catalogue.
       if (!album) return []
-      const match = albumMatcher(album, pool, groupOf)
+      const key = albumKey(album.title)
+      const albumEras = new Set(eraList.filter((e) => albumKey(e.description) === key).map((e) => e.name))
+      const match = albumMatcher(album, pool, groupOf, albumEras)
       const hits: { song: HeardleSong; order: number; kind: number }[] = []
       for (const song of pool) {
         const m = match(song)
@@ -366,7 +388,7 @@ export function useTierlistData() {
     }
     const eras = new Set(filters.eras)
     return pool.filter((s) => cats.has(s.category as PoolId) && (eras.size === 0 || (!!s.era && eras.has(s.era))))
-  }, [pool, filters, album, groupOf])
+  }, [pool, filters, album, groupOf, eraList])
 
   const visiblePool = useMemo(
     () => filteredPool.filter((s) => !ranked.has(s.id) && matchesSearch(s, search)),
@@ -406,6 +428,7 @@ export function useTierlistData() {
 
   const addTier = (): void => {
     updateList((l) => {
+      if (l.tiers.length >= MAX_TIERS) return l
       const id = newTierId()
       return {
         ...l,

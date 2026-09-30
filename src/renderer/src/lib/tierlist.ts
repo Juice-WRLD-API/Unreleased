@@ -241,21 +241,48 @@ export interface AlbumMatch {
   order: number
 }
 
+/** Loose key for matching album titles against era descriptions and songs'
+ *  `album` text - "JuiceWRLD 9 9 9" and "Juice WRLD 999" come out the same. */
+export function albumKey(title: string | null | undefined): string {
+  return title ? normalizeTitle(title).replace(/ /g, '') : ''
+}
+
 /** Whether `song` is one of `album`'s tracks or another version of one -
  *  linked through the /versions/ table (`groupOf`: songId -> groupId), or
  *  failing that sharing a base title with a track. Versions only ever come
  *  from the unreleased catalogue: a released song that merely shares a
- *  title (a remix, a deluxe cut) isn't part of the album. */
+ *  title (a remix, a deluxe cut) isn't part of the album.
+ *
+ *  Which released songs are the album's tracks: the album's own tracklist
+ *  when it has one - but the live /albums/ rows all come back with `songs: []`
+ *  (checked 2026-09-30) - so also any released song whose `album` names it,
+ *  or whose era is the album's era (`albumEras`: era names whose description
+ *  is the album title; for released songs the era *is* the album - "DRFL" /
+ *  "Death Race For Love"). */
 export function albumMatcher(
   album: Album,
   pool: HeardleSong[],
   groupOf: Map<number, number>,
+  albumEras: Set<string>,
 ): (song: HeardleSong) => AlbumMatch | null {
   const orderByPath = new Map(album.songs.map((s) => [s.path, s.order]))
+  const key = albumKey(album.title)
+  // Tracks found without a tracklist are numbered in pool order, after any
+  // listed ones, so each still gets its own slot for its versions to follow.
+  let nextOrder = Math.max(0, ...orderByPath.values()) + 1
+  const trackOrder = new Map<number, number>()
+  for (const s of pool) {
+    const listed = orderByPath.get(s.path)
+    if (listed !== undefined) trackOrder.set(s.id, listed)
+    else if (s.category === 'released' && ((!!s.album && albumKey(s.album) === key) || (!!s.era && albumEras.has(s.era)))) {
+      trackOrder.set(s.id, nextOrder++)
+    }
+  }
+
   const orderByGroup = new Map<number, number>()
   const orderByTitle = new Map<string, number>()
   for (const t of pool) {
-    const order = orderByPath.get(t.path)
+    const order = trackOrder.get(t.id)
     if (order === undefined) continue
     const g = groupOf.get(t.id)
     if (g !== undefined && !orderByGroup.has(g)) orderByGroup.set(g, order)
@@ -265,7 +292,7 @@ export function albumMatcher(
     }
   }
   return (song) => {
-    const own = orderByPath.get(song.path)
+    const own = trackOrder.get(song.id)
     if (own !== undefined) return { kind: 'track', order: own }
     if (song.category === 'released') return null
     const g = groupOf.get(song.id)

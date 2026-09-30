@@ -16,7 +16,7 @@ import { TIER_COLOR_PRESETS } from '../lib/tierlist'
 import type { Tier, DropPosition } from '../lib/tierlist'
 import { Sheet } from './mobile/Sheet'
 import { GameSwitcher, GameBackdrop } from './gameShell'
-import { useTierlistData } from '../hooks/useTierlistData'
+import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
 import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 
 // Drop-zone id used for the "Unranked" pool, since tier ids are already
@@ -418,7 +418,9 @@ export default function TierlistView(): JSX.Element {
 
           <button
             onClick={addTier}
-            className="w-full mb-8 h-11 rounded-xl border border-dashed border-[var(--border)] text-text-muted active:text-text-primary active:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
+            disabled={tiers.length >= MAX_TIERS}
+            title={tiers.length >= MAX_TIERS ? `A tier list can have at most ${MAX_TIERS} tiers` : undefined}
+            className="w-full mb-8 h-11 rounded-xl disabled:opacity-40 border border-dashed border-[var(--border)] text-text-muted active:text-text-primary active:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
           >
             <Plus size={14} /> Add tier
           </button>
