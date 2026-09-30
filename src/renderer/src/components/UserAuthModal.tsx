@@ -19,6 +19,9 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  // Shown only after the server says this account has 2FA on.
+  const [needsOtp, setNeedsOtp] = useState(false)
+  const [otp, setOtp] = useState('')
 
   const start = async (): Promise<void> => {
     setError(null)
@@ -46,11 +49,17 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       if (mode === 'signup') {
         await signupWithPassword(name, password)
       } else {
-        await loginWithPassword(name, password)
+        await loginWithPassword(name, password, otp.trim() || undefined)
       }
       onClose()
     } catch (err) {
-      setError(errorMessage(err, 'Something went wrong. Try again.'))
+      const msg = errorMessage(err, 'Something went wrong. Try again.')
+      if (mode === 'login' && /otp/i.test(msg)) {
+        setNeedsOtp(true)
+        setError(otp.trim() ? 'That code was not accepted. Try again.' : 'Enter the 6-digit code from your authenticator app.')
+      } else {
+        setError(msg)
+      }
     } finally {
       setLoading(false)
     }
@@ -121,6 +130,20 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               disabled={loading}
               className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
             />
+            {needsOtp && mode === 'login' && (
+              <input
+                type="text"
+                inputMode="numeric"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                placeholder="Authenticator code"
+                autoComplete="one-time-code"
+                maxLength={8}
+                autoFocus
+                disabled={loading}
+                className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+              />
+            )}
             <button
               type="submit"
               disabled={loading}

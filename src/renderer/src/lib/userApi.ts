@@ -389,6 +389,8 @@ export async function registerAccount(payload: {
 export async function passwordLogin(payload: {
   username: string
   password: string
+  // Required by the server once the account has 2FA enabled (staff).
+  otp_token?: string
 }): Promise<{ token: string; user: AccountUser }> {
   return request(`${ACCOUNT_BASE}/auth/login/`, {
     method: 'POST',

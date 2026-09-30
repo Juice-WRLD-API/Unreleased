@@ -785,7 +785,7 @@ interface AppActions {
   loginWithDiscord: () => Promise<void>
   completeDiscordLogin: (code: string, state: string) => Promise<void>
   signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
-  loginWithPassword: (username: string, password: string) => Promise<void>
+  loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
@@ -2365,8 +2365,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
     await get().loadAccount()
   },
 
-  loginWithPassword: async (username, password) => {
-    const { token, user } = await userApi.passwordLogin({ username, password })
+  loginWithPassword: async (username, password, otpToken) => {
+    const { token, user } = await userApi.passwordLogin({
+      username,
+      password,
+      ...(otpToken ? { otp_token: otpToken } : {}),
+    })
     userApi.setToken(token)
     set({ account: user })
     await get().loadAccount()
