@@ -7,7 +7,7 @@ import { peekPlaylistCover } from '../lib/userApi'
 import { loadRecentPlaylistIds } from '../lib/recentPlaylists'
 import { loadStats as loadHeardleStats, todayKey as heardleToday } from '../lib/heardle'
 import { loadStats as loadWordleStats, todayKey as wordleToday } from '../lib/wordle'
-import { loadTierlistState } from '../lib/tierlist'
+import { loadTierlistLibrary, rankedCount as tierlistRankedCount } from '../lib/tierlist'
 import { ALL_CHANNEL, fetchNews, peekNews, type NewsItem } from '../lib/newsApi'
 import { isHomeSectionVisible } from '../lib/homeSections'
 import { getActiveRadioClient } from '../lib/radioSocketService'
@@ -155,11 +155,15 @@ export function useHomeData() {
   const games = useMemo((): GameCard[] => {
     const heardle = loadHeardleStats('daily')
     const wordle = loadWordleStats()
-    const rankedCount = Object.keys(loadTierlistState().assignments).length
+    const tierlists = loadTierlistLibrary().lists
+    const rankedCount = tierlists.reduce((n, l) => n + tierlistRankedCount(l), 0)
+    const tierSub = rankedCount === 0
+      ? 'Rank your songs'
+      : tierlists.length > 1 ? `${tierlists.length} lists · ${rankedCount} ranked` : `${rankedCount} ranked`
     return [
       { view: 'heardle', label: 'Heardle', kind: 'daily', streak: heardle.currentStreak, done: heardle.lastDay === heardleToday() },
       { view: 'wordle', label: 'Wordle', kind: 'daily', streak: wordle.currentStreak, done: wordle.lastDay === wordleToday() },
-      { view: 'tierlist', label: 'Tier List', kind: 'freeform', sub: rankedCount > 0 ? `${rankedCount} ranked` : 'Rank your songs' },
+      { view: 'tierlist', label: 'Tier List', kind: 'freeform', sub: tierSub },
     ]
   }, [])
 

@@ -368,6 +368,23 @@ export async function loadPool(category: PoolId): Promise<HeardleSong[]> {
   return songs
 }
 
+/** How old the cached copy of a pool is, in ms (Infinity when there's none). */
+export function poolAgeMs(category: PoolId): number {
+  const cached = lsGet<CachedPool>(`pool:v2:${category}`)
+  return cached?.ts ? Date.now() - cached.ts : Infinity
+}
+
+/** Refetches a pool regardless of cache and replaces both cached copies.
+ *  For callers where freshness matters more than a pool that holds still
+ *  (the Tier List picks up edited covers this way) - Heardle never calls it
+ *  mid-round. */
+export async function refreshPool(category: PoolId): Promise<HeardleSong[]> {
+  const songs = await fetchPool(category)
+  memoryPool.set(category, songs)
+  lsSet(`pool:v2:${category}`, { ts: Date.now(), songs } as CachedPool)
+  return songs
+}
+
 /** Every pool in `categories`, concatenated. */
 export async function loadPools(categories: PoolId[]): Promise<HeardleSong[]> {
   const pools = await Promise.all(categories.map(loadPool))

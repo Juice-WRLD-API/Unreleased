@@ -19,7 +19,7 @@ import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
-import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, type RouteRule } from '../lib/apiServers'
+import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
 import { lastfmConfigured } from '../lib/lastfm'
 import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
@@ -376,6 +376,11 @@ function RouteRulesEditor(): JSX.Element {
   return (
     <div className="py-3">
       <p className="text-text-primary text-[13px] font-medium mb-1.5">Route rules</p>
+      <datalist id="route-prefix-options">
+        {KNOWN_ROUTE_PREFIXES.map((o) => (
+          <option key={o.prefix} value={o.prefix}>{o.label}</option>
+        ))}
+      </datalist>
       <div className="flex flex-col gap-3">
         {draft.map((rule, i) => (
           <div key={i} className="flex flex-col gap-1.5">
@@ -385,6 +390,7 @@ function RouteRulesEditor(): JSX.Element {
                 value={rule.prefix}
                 onChange={(e) => update(i, { prefix: e.target.value })}
                 placeholder="/cdn"
+                list="route-prefix-options"
                 spellCheck={false}
                 className={SERVER_INPUT_CLASS}
               />

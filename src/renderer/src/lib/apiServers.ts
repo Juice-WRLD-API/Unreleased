@@ -28,7 +28,24 @@ export interface RouteRule {
   base: string
 }
 
-const stripSlash = (s: string): string => s.trim().replace(/\/+$/, '')
+/** Prefixes the app actually requests, offered as suggestions in the route
+ *  rules editor. Any other prefix can still be typed by hand. */
+export const KNOWN_ROUTE_PREFIXES: { prefix: string; label: string }[] = [
+  { prefix: '/accounts', label: 'Accounts, auth, admin' },
+  { prefix: '/cdn', label: 'P2P CDN' },
+  { prefix: '/cdn/admin', label: 'CDN admin' },
+  { prefix: '/chat', label: 'Staff chat' },
+  { prefix: '/feedback', label: 'Feedback' },
+  { prefix: '/files', label: 'Files' },
+  { prefix: '/heardle', label: 'Heardle' },
+  { prefix: '/library', label: 'Playlists & favorites' },
+  { prefix: '/news', label: 'News' },
+  { prefix: '/radio', label: 'Radio' },
+  { prefix: '/reports', label: 'Reports' },
+  { prefix: '/songs', label: 'Songs' },
+]
+
+const stripSlash =(s: string): string => s.trim().replace(/\/+$/, '')
 
 // Bases are fed to `new URL()` at import time (JWAPI_HOST, cdnWebrtc's
 // WS_BASE), so a stored value without a scheme - `staging.example.com` -

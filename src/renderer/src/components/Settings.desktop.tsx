@@ -22,7 +22,7 @@ import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIB
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
-import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, type RouteRule } from '../lib/apiServers'
+import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
 import { lastfmConfigured } from '../lib/lastfm'
 import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
@@ -276,6 +276,11 @@ function RouteRulesEditor(): JSX.Element {
   return (
     <div className="mt-2.5 pt-2.5 border-t border-[var(--border)]">
       <p className="text-text-muted text-[11px] font-medium mb-1">Route rules</p>
+      <datalist id="route-prefix-options">
+        {KNOWN_ROUTE_PREFIXES.map((o) => (
+          <option key={o.prefix} value={o.prefix}>{o.label}</option>
+        ))}
+      </datalist>
       <div className="flex flex-col gap-1.5">
         {draft.map((rule, i) => (
           <div key={i} className="flex gap-2">
@@ -284,6 +289,7 @@ function RouteRulesEditor(): JSX.Element {
               value={rule.prefix}
               onChange={(e) => update(i, { prefix: e.target.value })}
               placeholder="/cdn"
+              list="route-prefix-options"
               spellCheck={false}
               className={`w-32 ${SERVER_INPUT_CLASS}`}
             />

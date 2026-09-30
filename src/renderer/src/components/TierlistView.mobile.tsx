@@ -5,18 +5,19 @@
 // it's a personal ranking, persisted locally (see lib/tierlist) with no
 // server round-trip.
 import { useCallback, useEffect, useRef, useState, useId } from 'react'
+import type { ReactNode } from 'react'
 import {
-  ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Check,
+  ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Disc3, Library,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
-import { POOL_LABELS } from '../lib/heardle'
-import type { HeardleSong, PoolId } from '../lib/heardle'
+import type { HeardleSong } from '../lib/heardle'
 import { smallCoverUrl } from '../lib/juicewrldApi'
 import { TIER_COLOR_PRESETS } from '../lib/tierlist'
-import type { Tier } from '../lib/tierlist'
+import type { Tier, DropPosition } from '../lib/tierlist'
 import { Sheet } from './mobile/Sheet'
 import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData } from '../hooks/useTierlistData'
+import { ListsPanelBody, FiltersPanelBody } from './TierlistPanels'
 
 // Drop-zone id used for the "Unranked" pool, since tier ids are already
 // unique strings and null can't be stuffed into a DOM dataset attribute.
@@ -28,10 +29,12 @@ const DRAG_THRESHOLD = 8
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 
-function SongChip({ song, selected, dragging, onClick, onPointerDown }: {
+function SongChip({ song, selected, dragging, dropSide, onClick, onPointerDown }: {
   song: HeardleSong
   selected: boolean
   dragging?: boolean
+  /** Where a drop on this chip would land, for the insertion marker. */
+  dropSide?: DropPosition['side'] | null
   onClick: () => void
   onPointerDown: (e: React.PointerEvent) => void
 }): JSX.Element {
@@ -39,9 +42,17 @@ function SongChip({ song, selected, dragging, onClick, onPointerDown }: {
     <div
       onClick={onClick}
       onPointerDown={onPointerDown}
+      data-song-id={song.id}
       title={song.name}
-      className={`shrink-0 w-16 cursor-pointer touch-none ${dragging ? 'opacity-30' : ''}`}
+      className={`relative shrink-0 w-16 cursor-pointer touch-none ${dragging ? 'opacity-30' : ''}`}
     >
+      {dropSide && (
+        <span
+          className={`absolute top-0 h-16 w-1 rounded-full bg-accent pointer-events-none ${
+            dropSide === 'before' ? '-left-[5px]' : '-right-[5px]'
+          }`}
+        />
+      )}
       <div
         className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
           selected ? 'border-accent ring-2 ring-accent/50 scale-95' : 'border-[var(--border)]'
@@ -62,20 +73,17 @@ function SongChip({ song, selected, dragging, onClick, onPointerDown }: {
   )
 }
 
-function TierRow({ tier, songs, isFirst, isLast, selectedSongId, draggedSongId, isDropTarget, onClickRow, onSelectSong, onSongPointerDown, onMoveUp, onMoveDown, onEdit }: {
+function TierRow({ tier, isFirst, isLast, selectedSongId, isDropTarget, onClickRow, onMoveUp, onMoveDown, onEdit, children }: {
   tier: Tier
-  songs: HeardleSong[]
   isFirst: boolean
   isLast: boolean
   selectedSongId: number | null
-  draggedSongId: number | null
   isDropTarget: boolean
   onClickRow: () => void
-  onSelectSong: (id: number) => void
-  onSongPointerDown: (song: HeardleSong) => (e: React.PointerEvent) => void
   onMoveUp: () => void
   onMoveDown: () => void
   onEdit: () => void
+  children: ReactNode
 }): JSX.Element {
   return (
     <div className="flex rounded-xl overflow-hidden border border-[var(--border)]">
@@ -94,16 +102,7 @@ function TierRow({ tier, songs, isFirst, isLast, selectedSongId, draggedSongId, 
           selectedSongId !== null ? 'cursor-copy' : ''
         } ${isDropTarget ? 'bg-accent/20 outline outline-2 outline-accent/60 -outline-offset-2' : ''}`}
       >
-        {songs.map((s) => (
-          <SongChip
-            key={s.id}
-            song={s}
-            selected={selectedSongId === s.id}
-            dragging={draggedSongId === s.id}
-            onClick={() => onSelectSong(s.id)}
-            onPointerDown={onSongPointerDown(s)}
-          />
-        ))}
+        {children}
       </div>
       <div className="w-9 shrink-0 flex flex-col border-l border-[var(--border)]">
         <button
@@ -188,36 +187,55 @@ export default function TierlistView(): JSX.Element {
     return () => setHeroBleedTop(false)
   }, [setHeroBleedTop])
 
+  const data = useTierlistData()
   const {
-    tiers, categories, poolLoading, poolError, search, setSearch,
+    list, tiers, album, filters, poolLoading, poolError, search, setSearch,
     selectedSongId, setSelectedSongId, editingTier, setEditingTier, showFilters, setShowFilters,
-    visiblePool, songsInTier, assignSong, clickRow, moveTier, addTier, updateTier, deleteTier,
-    toggleCategory, handleReset,
-  } = useTierlistData()
+    showLists, setShowLists, visiblePool, songsInTier, placeSong, clickRow, moveTier, addTier,
+    updateTier, deleteTier, handleReset, filteredCount, rankedInFilter,
+  } = data
 
   // Touch drag: a floating copy of the chip follows the pointer while
   // `drag` is set; `dropTarget` mirrors whichever `[data-drop-zone]` is
-  // currently under it, for the highlight. Actual pointermove/up listeners
-  // live on window (added on pointerdown) so the drag tracks past the
-  // chip's own bounds; `pointerState` is a ref rather than state since it's
-  // read/written on every move and shouldn't trigger re-renders itself.
+  // currently under it, for the highlight, and `dropHint` the ranked chip
+  // it would land next to. Actual pointermove/up listeners live on window
+  // (added on pointerdown) so the drag tracks past the chip's own bounds;
+  // `pointerState` is a ref rather than state since it's read/written on
+  // every move and shouldn't trigger re-renders itself.
   const [drag, setDrag] = useState<{ song: HeardleSong; x: number; y: number } | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [dropHint, setDropHint] = useState<DropPosition | null>(null)
   const pointerState = useRef<{ song: HeardleSong; startX: number; startY: number; dragging: boolean } | null>(null)
   const suppressClickRef = useRef(false)
 
   // Chip selection is routed through here (rather than straight to
   // setSelectedSongId) so a drag's trailing click - fired by the browser
-  // right after pointerup - doesn't also toggle selection.
-  const handleChipClick = (songId: number): void => {
+  // right after pointerup - doesn't also toggle selection. `tierId` is set
+  // for ranked chips: tapping one while another song is picked up drops
+  // the picked one in right before it.
+  const handleChipClick = (songId: number, tierId?: string): void => {
     if (suppressClickRef.current) { suppressClickRef.current = false; return }
+    if (tierId && selectedSongId !== null && selectedSongId !== songId) {
+      placeSong(selectedSongId, tierId, { targetId: songId, side: 'before' })
+      return
+    }
     setSelectedSongId((cur) => (cur === songId ? null : songId))
   }
 
-  const zoneUnderPoint = useCallback((x: number, y: number): string | null => {
+  // The drop zone under the pointer and, inside a tier, the chip it's over
+  // (with which half), so a drop can land between two ranked songs.
+  const dropUnderPoint = useCallback((x: number, y: number): { zone: string | null; at: DropPosition | null } => {
     const el = document.elementFromPoint(x, y)
     const zoneEl = el instanceof Element ? el.closest<HTMLElement>('[data-drop-zone]') : null
-    return zoneEl?.dataset.dropZone ?? null
+    const zone = zoneEl?.dataset.dropZone ?? null
+    if (!zone || zone === POOL_DROP_ZONE) return { zone, at: null }
+    const chip = el instanceof Element ? el.closest<HTMLElement>('[data-song-id]') : null
+    if (!chip) return { zone, at: null }
+    const rect = chip.getBoundingClientRect()
+    return {
+      zone,
+      at: { targetId: Number(chip.dataset.songId), side: x < rect.left + rect.width / 2 ? 'before' : 'after' },
+    }
   }, [])
 
   const handleSongPointerMove = useCallback((e: PointerEvent): void => {
@@ -229,12 +247,19 @@ export default function TierlistView(): JSX.Element {
     if (ps.dragging) {
       e.preventDefault()
       setDrag({ song: ps.song, x: e.clientX, y: e.clientY })
-      setDropTarget(zoneUnderPoint(e.clientX, e.clientY))
+      // The floating copy has pointer-events: none, so elementFromPoint
+      // sees straight through it to what's underneath.
+      const { zone, at } = dropUnderPoint(e.clientX, e.clientY)
+      setDropTarget(zone)
+      setDropHint((prev) => {
+        const next = at && at.targetId !== ps.song.id ? at : null
+        return prev?.targetId === next?.targetId && prev?.side === next?.side ? prev : next
+      })
     }
-  }, [zoneUnderPoint])
+  }, [dropUnderPoint])
 
   // These stay stable across renders (via the useCallback chain down to
-  // assignSong/zoneUnderPoint, which have no deps) so that the add/remove
+  // placeSong/dropUnderPoint, which have stable deps) so that the add/remove
   // pairs in handleSongPointerDown and the unmount cleanup below always
   // refer to the same function identity - addEventListener/removeEventListener
   // only match on identity, so a handler that changed shape between the
@@ -247,12 +272,13 @@ export default function TierlistView(): JSX.Element {
     pointerState.current = null
     if (ps?.dragging) {
       suppressClickRef.current = true
-      const zone = zoneUnderPoint(e.clientX, e.clientY)
-      if (zone) assignSong(ps.song.id, zone === POOL_DROP_ZONE ? null : zone)
+      const { zone, at } = dropUnderPoint(e.clientX, e.clientY)
+      if (zone) placeSong(ps.song.id, zone === POOL_DROP_ZONE ? null : zone, at)
     }
     setDrag(null)
     setDropTarget(null)
-  }, [assignSong, zoneUnderPoint, handleSongPointerMove])
+    setDropHint(null)
+  }, [placeSong, dropUnderPoint, handleSongPointerMove])
 
   const handleSongPointerDown = useCallback((song: HeardleSong) => (e: React.PointerEvent): void => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -267,6 +293,10 @@ export default function TierlistView(): JSX.Element {
     window.removeEventListener('pointerup', handleSongPointerUp)
     window.removeEventListener('pointercancel', handleSongPointerUp)
   }, [handleSongPointerMove, handleSongPointerUp])
+
+  const poolLabel = album
+    ? album.title
+    : filters.eras.length ? filters.eras.join(', ') : null
 
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
@@ -295,6 +325,13 @@ export default function TierlistView(): JSX.Element {
         style={{ top: ownsTopInset ? 'calc(var(--top-inset) + 0.5rem)' : '0.5rem' }}
       >
         <button
+          onClick={() => setShowLists(true)}
+          aria-label="Your tier lists"
+          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+        >
+          <Library size={18} />
+        </button>
+        <button
           onClick={() => setShowFilters(true)}
           aria-label="Song pool"
           className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
@@ -303,7 +340,7 @@ export default function TierlistView(): JSX.Element {
         </button>
         <button
           onClick={handleReset}
-          aria-label="Clear tier list"
+          aria-label="Clear this tier list's rankings"
           className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
         >
           <RotateCcw size={18} />
@@ -323,10 +360,20 @@ export default function TierlistView(): JSX.Element {
 
           <div className="text-center mb-5">
             <h1 className="text-text-primary text-3xl font-black tracking-tight">Tier List</h1>
+            <button
+              onClick={() => setShowLists(true)}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 h-9 rounded-full border border-[var(--border)] bg-[var(--surface-raised)]/60 active:border-accent/40 transition-colors max-w-full"
+            >
+              <span className="text-sm font-semibold text-text-primary truncate">{list.name}</span>
+              {!poolLoading && (
+                <span className="text-xs text-text-muted shrink-0">{rankedInFilter}/{filteredCount}</span>
+              )}
+              <ChevronDown size={14} className="text-text-muted shrink-0" />
+            </button>
             <p className="text-text-muted text-xs mt-2">
               {selectedSongId !== null
-                ? 'Tap a row to place it - tap the song again to cancel.'
-                : 'Drag a song into a row, or tap it and then tap a row.'}
+                ? 'Tap a row to place it, or a ranked song to put it before that one.'
+                : 'Drag a song into a row, or onto another song to put it next to it.'}
             </p>
           </div>
 
@@ -341,19 +388,27 @@ export default function TierlistView(): JSX.Element {
               <TierRow
                 key={tier.id}
                 tier={tier}
-                songs={songsInTier(tier.id)}
                 isFirst={i === 0}
                 isLast={i === tiers.length - 1}
                 selectedSongId={selectedSongId}
-                draggedSongId={drag?.song.id ?? null}
                 isDropTarget={dropTarget === tier.id}
                 onClickRow={clickRow(tier.id)}
-                onSelectSong={handleChipClick}
-                onSongPointerDown={handleSongPointerDown}
                 onMoveUp={() => moveTier(i, -1)}
                 onMoveDown={() => moveTier(i, 1)}
                 onEdit={() => setEditingTier(tier)}
-              />
+              >
+                {songsInTier(tier.id).map((s) => (
+                  <SongChip
+                    key={s.id}
+                    song={s}
+                    selected={selectedSongId === s.id}
+                    dragging={drag?.song.id === s.id}
+                    dropSide={dropHint?.targetId === s.id ? dropHint.side : null}
+                    onClick={() => handleChipClick(s.id, tier.id)}
+                    onPointerDown={handleSongPointerDown(s)}
+                  />
+                ))}
+              </TierRow>
             ))}
           </div>
 
@@ -369,15 +424,33 @@ export default function TierlistView(): JSX.Element {
               <Music2 size={14} className="text-text-muted shrink-0" />
               <span className="text-xs font-bold uppercase tracking-widest text-text-muted">Unranked</span>
               <span className="text-xs text-text-muted">({visiblePool.length})</span>
+              {poolLabel && (
+                <button
+                  onClick={() => setShowFilters(true)}
+                  className="ml-auto flex items-center gap-1 px-2 h-7 rounded-full border border-accent/30 bg-accent/10 text-[11px] text-text-primary min-w-0"
+                >
+                  {album && <Disc3 size={11} className="shrink-0" />}
+                  <span className="truncate">{poolLabel}</span>
+                </button>
+              )}
             </div>
             <div className="relative mb-3">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search songs"
-                className="w-full pl-8 pr-3 py-2 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                placeholder="Search songs or eras"
+                className="w-full pl-8 pr-9 py-2 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
               />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  className="absolute right-0 top-0 h-full w-9 flex items-center justify-center text-text-muted"
+                >
+                  <X size={13} />
+                </button>
+              )}
             </div>
             <div
               onClick={clickRow(null)}
@@ -390,7 +463,11 @@ export default function TierlistView(): JSX.Element {
                 <span className="text-xs text-text-muted py-4">Loading songs…</span>
               ) : visiblePool.length === 0 ? (
                 <span className="text-xs text-text-muted py-4">
-                  {search ? 'No songs match that search.' : 'Every song has been ranked.'}
+                  {search
+                    ? 'No songs match that search.'
+                    : filters.albumId !== null && !album
+                      ? 'Loading album…'
+                      : filteredCount === 0 ? 'No songs match this pool - check the filters.' : 'Every song has been ranked.'}
                 </span>
               ) : (
                 visiblePool.map((s) => (
@@ -426,23 +503,18 @@ export default function TierlistView(): JSX.Element {
         </div>
       )}
 
+      {showLists && (
+        <Sheet onClose={() => setShowLists(false)} title="Your tier lists">
+          <div className="px-5 pb-2">
+            <ListsPanelBody data={data} touch onDone={() => setShowLists(false)} />
+          </div>
+        </Sheet>
+      )}
+
       {showFilters && (
         <Sheet onClose={() => setShowFilters(false)} title="Song pool">
-          <div className="px-5 pb-2 flex flex-col gap-2">
-            {(['released', 'unreleased'] as PoolId[]).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => toggleCategory(cat)}
-                className={`flex items-center justify-between px-4 h-12 rounded-xl border text-sm transition-colors ${
-                  categories.includes(cat)
-                    ? 'border-accent/40 bg-accent/10 text-text-primary'
-                    : 'border-[var(--border)] text-text-muted'
-                }`}
-              >
-                {POOL_LABELS[cat]}
-                {categories.includes(cat) && <Check size={14} className="text-accent" />}
-              </button>
-            ))}
+          <div className="px-5 pb-2">
+            <FiltersPanelBody data={data} touch />
           </div>
         </Sheet>
       )}
