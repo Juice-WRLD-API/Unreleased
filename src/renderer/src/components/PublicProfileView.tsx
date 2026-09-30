@@ -181,7 +181,10 @@ export default function PublicProfileView(): JSX.Element {
   const showPlayHistory = isOwnProfile || !!profile?.public_play_history
   const showPlaylists = isOwnProfile || !!profile?.public_playlists
   const effectivePlayHistory = isOwnProfile ? account?.listening_plays : profile?.play_history
-  const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists
+  // The server's profile serializer currently returns *every* playlist once
+  // public_playlists is on, private ones included (docs promise is_public
+  // only) - filter here too so a private playlist's name never shows.
+  const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists?.filter((p) => p.is_public)
   const publicTierlists = profile?.tierlists ?? []
 
   // The tier list view picks up ?id= on mount and opens that list read-only
