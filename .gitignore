@@ -79,4 +79,4 @@ ios/App/App/public/
 
 # Generated API docs export
 docs/api-docs/
-server/HANDOFF.md
+HANDOFF*.md
