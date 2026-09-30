@@ -5,7 +5,7 @@ import {
   FolderOpen,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
-import { buildImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication } from '../lib/userApi'
 import { versionsEnabled } from '../lib/versionsApi'
@@ -1061,7 +1061,7 @@ export default function EditorPage({ initialSongId = null }: {
           kind="image"
           songTitle={name || song?.name}
           altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
-          onSelect={p => { setImageUrl(p); setPickingImage(false) }}
+          onSelect={p => { setImageUrl(toSiteRelativeImageUrl(p)); setPickingImage(false) }}
           onClose={() => setPickingImage(false)}
         />
       )}

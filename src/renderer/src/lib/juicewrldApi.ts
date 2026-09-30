@@ -512,6 +512,19 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
   return `https://${JWAPI_HOST}${rel}`
 }
 
+/** The inverse of buildImageUrl: strips the API host off an absolute URL so
+ *  it's stored site-relative ("/juicewrld/files/download/?path=…"), the same
+ *  shape a song's own `image_url` uses ("/assets/wod.jpg"). URLs on any other
+ *  host (a custom server override included) stay absolute, since
+ *  buildImageUrl would otherwise resolve them against the wrong host. */
+export function toSiteRelativeImageUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'https:' && u.hostname === JWAPI_HOST) return u.pathname + u.search
+  } catch {}
+  return url
+}
+
 /** Resolves a preference's `cover_url` - a user's chosen cover, pointing into
  *  the API's own storage - to a loadable URL.
  *

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import { useStore, useStorePick } from '../store/useStore'
-import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { invalidateLyricsCache } from './Player'
@@ -795,7 +795,7 @@ export default function EditorPage({ initialSongId = null }: {
           kind="image"
           songTitle={name || song?.name}
           altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
-          onSelect={p => { setImageUrl(p); setPickingImage(false) }}
+          onSelect={p => { setImageUrl(toSiteRelativeImageUrl(p)); setPickingImage(false) }}
           onClose={() => setPickingImage(false)}
         />
       )}
