@@ -41,7 +41,7 @@ export default function ChatDevicesV2({ userId, status, features, onChanged }: {
     <div>
       {status === 'needs-link' ? (
         <>
-          <p className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-200 mb-3">
+          <p className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200 mb-3">
             <ShieldAlert size={14} className="shrink-0 mt-0.5 text-amber-400" />
             This device isn&apos;t verified yet. Link it from a device that already has your security key, or restore with your recovery code.
           </p>
@@ -156,6 +156,7 @@ function LinkThisDevice({ userId, onLinked }: { userId: number; onLinked: () => 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
+  const [ownSas, setOwnSas] = useState<string | null>(null)
 
   const start = async (): Promise<void> => {
     setBusy(true)
@@ -169,6 +170,14 @@ function LinkThisDevice({ userId, onLinked }: { userId: number; onLinked: () => 
       setBusy(false)
     }
   }
+
+  // Show the code straight away: the session is what lets this device accept
+  // keys, and the number is what the other device's approve prompt asks about.
+  useEffect(() => {
+    void start()
+    void linking().then((m) => m.ownDeviceSas(userId)).then(setOwnSas).catch(() => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
 
   // Settings can be open without the chat socket, so poll the inbox too.
   useEffect(() => {
@@ -197,7 +206,12 @@ function LinkThisDevice({ userId, onLinked }: { userId: number; onLinked: () => 
     <div className="flex gap-4 items-start">
       <img src={pending.img} alt="Device link QR code" width={200} height={200} className="rounded bg-white p-1 shrink-0" />
       <div className="text-xs text-text-secondary space-y-2">
-        <p>On a device that already has your security key, open Settings › Chat devices › Link a new device and scan this code.</p>
+        {ownSas && (
+          <p>
+            Your other device will ask you to approve this one. Approve it only if it shows <span className="font-mono text-sm text-text-primary">{ownSas}</span>.
+          </p>
+        )}
+        <p>Or, on a device that already has your security key, open Settings › Chat devices › Link a new device and scan this code.</p>
         <p>No camera? Type <span className="font-mono text-sm text-text-primary">{formatCode(pending.sessionId)}</span> there instead, then check that both screens show <span className="font-mono text-sm text-text-primary">{pending.sas}</span>.</p>
         <p className="text-text-muted">{left > 0 ? `Expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : 'Expired.'}</p>
         {left === 0 && <button onClick={() => void start()} className={btn}>New code</button>}

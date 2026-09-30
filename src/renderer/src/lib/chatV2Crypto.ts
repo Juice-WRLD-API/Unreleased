@@ -206,6 +206,12 @@ export async function linkSas(sessionId: string, encPub: Uint8Array, signPub: Ui
   return String(n).padStart(6, '0')
 }
 
+// The approve-prompt flow has no session code, so the number is bound to the
+// device's own keys instead.
+export async function deviceSas(deviceId: string, encPub: Uint8Array, signPub: Uint8Array): Promise<string> {
+  return linkSas(`device:${deviceId}`, encPub, signPub)
+}
+
 // --- safety numbers -----------------------------------------------------------------
 
 export async function safetyFingerprint(

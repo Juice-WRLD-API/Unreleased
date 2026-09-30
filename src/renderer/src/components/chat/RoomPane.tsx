@@ -198,15 +198,15 @@ export default function RoomPane({ room, header, enterSends = true }: {
       {header}
 
       {restriction && (
-        <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-200">
-          <MicOff size={16} className="shrink-0 text-red-400" />
+        <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-900 dark:text-red-200">
+          <MicOff size={16} className="shrink-0 text-red-600 dark:text-red-400" />
           <span className="flex-1">{restriction}. You can still read this channel.</span>
         </div>
       )}
       {participants && <TrustBanners participants={participants.map((p) => p.user)} />}
       {room.kind === 'conversation' && (keyState === 'waiting' || keyState === 'error') && identity !== 'needs-link' && (
-        <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
-          <KeyRound size={16} className="shrink-0 text-amber-400" />
+        <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-200">
+          <KeyRound size={16} className="shrink-0 text-amber-600 dark:text-amber-400" />
           <span className="flex-1">
             {keyState !== 'waiting'
               ? 'Couldn’t set up encryption for this conversation.'
@@ -214,7 +214,7 @@ export default function RoomPane({ room, header, enterSends = true }: {
                 ? 'This device doesn’t have the key for this conversation yet. Your other devices were asked for it automatically; it arrives when one of them, or a participant, is online.'
                 : 'This device doesn’t have the key for this conversation. Keys go to one device per person, so either wait for a participant to come online, or export them from your keyed device in Settings › Chat devices and import them here.'}
           </span>
-          <button onClick={() => void resolveKey(room.id)} className="shrink-0 font-semibold text-amber-300 hover:underline">Retry</button>
+          <button onClick={() => void resolveKey(room.id)} className="shrink-0 font-semibold text-amber-800 dark:text-amber-300 hover:underline">Retry</button>
         </div>
       )}
       {room.kind === 'conversation' && keyState === 'resolving' && (

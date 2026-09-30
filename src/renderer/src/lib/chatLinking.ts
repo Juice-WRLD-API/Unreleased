@@ -6,7 +6,7 @@
 import * as api from './chatApi'
 import type { LinkSessionInfo } from './chatApi'
 import { loadMsk } from './chatKeyStore'
-import { b64, b64url, linkSas, unb64, unb64url, bytesEqual } from './chatV2Crypto'
+import { b64, b64url, deviceSas, linkSas, unb64, unb64url, bytesEqual } from './chatV2Crypto'
 import { invalidateTrust, loadUserTrust, publishDeviceList } from './chatIdentity'
 import { deviceLabel, ensureDevice, ownKeys } from './chatE2E'
 import { buildLinkBundle, expectLinkBundle, sendLinkBundle } from './chatToDevice'
@@ -20,6 +20,12 @@ export interface PendingLink {
   expiresAt: string
   qr: string
   sas: string
+}
+
+// The number the new device shows for the approve prompt on its other devices.
+export async function ownDeviceSas(userId: number): Promise<string> {
+  const device = await ensureDevice(userId)
+  return deviceSas(device.deviceId, device.identity.publicKey, device.signing.publicKey)
 }
 
 export async function startLink(userId: number): Promise<PendingLink> {
@@ -70,6 +76,24 @@ export async function lookupLink(input: { qr?: string; code?: string }): Promise
   }
   if (session.claimed) throw new Error('That code was already used.')
   return { session, viaQr: !!scanned, sas: await linkSas(session.session_id, encPub, signPub) }
+}
+
+// Devices on this account that registered but aren't in the signed list, as
+// approval candidates. The keys come from the server, so the person must
+// compare `sas` with the number the new device shows (see PendingApproval).
+export async function pendingDevices(userId: number): Promise<LinkCandidate[]> {
+  const [rows, trust, own] = await Promise.all([api.listMyDevices(), loadUserTrust(userId, userId), ensureDevice(userId)])
+  if (trust.state !== 'ok') return []
+  const listed = new Set(trust.devices.map((d) => d.deviceId))
+  const fresh = rows.filter((r) => r.sign_pub && r.device_id !== own.deviceId && !listed.has(r.device_id))
+  return Promise.all(fresh.map(async (r) => ({
+    session: {
+      session_id: '', device_id: r.device_id, enc_pub: r.public_key, sign_pub: r.sign_pub!, label: r.label,
+      expires_at: '', claimed: false, claimed_by: null,
+    },
+    viaQr: false,
+    sas: await deviceSas(r.device_id, await unb64(r.public_key), await unb64(r.sign_pub!)),
+  })))
 }
 
 export async function approveLink(userId: number, candidate: LinkCandidate): Promise<void> {

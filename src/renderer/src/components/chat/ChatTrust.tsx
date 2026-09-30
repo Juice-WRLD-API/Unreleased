@@ -3,6 +3,7 @@ import { KeyRound, Loader2, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-
 import QRCode from 'qrcode'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import type { UserTrust } from '../../lib/chatIdentity'
+import type { LinkCandidate } from '../../lib/chatLinking'
 import { displayName, useChatStore } from '../../store/chatStore'
 
 const identity = () => import('../../lib/chatIdentity')
@@ -58,11 +59,12 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
   }
 
   const banners: JSX.Element[] = []
+  if (status === 'ready') banners.push(<LinkApprovals key="approve" />)
   if (status === 'needs-link') {
     banners.push(
       <Banner key="link" tone="amber" icon={<Smartphone size={16} className="shrink-0 text-amber-400" />}>
         <span className="flex-1">
-          <b>Verify this device.</b> Link it from one of your other devices, or restore with your recovery code, in Settings › Chat devices.
+          <b>Verify this device.</b> Open Settings › Chat devices to show its number, then approve it from your other device. You can also restore with your recovery code.
         </span>
       </Banner>,
     )
@@ -71,7 +73,7 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
     banners.push(
       <Banner key="restore" tone="amber" icon={<KeyRound size={16} className="shrink-0 text-amber-400" />}>
         <span className="flex-1">None of your other devices answered with the missing key. You can restore it with your recovery code in Settings › Chat devices.</span>
-        <button onClick={dismissRestore} className="shrink-0 font-semibold text-amber-300 hover:underline">Dismiss</button>
+        <button onClick={dismissRestore} className="shrink-0 font-semibold text-amber-800 dark:text-amber-300 hover:underline">Dismiss</button>
       </Banner>,
     )
   }
@@ -86,7 +88,7 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
               ? 'You had verified them. Compare safety numbers again before trusting new messages; keys are not sent to them until you accept.'
               : 'This happens when they reset their identity. Keys are not sent to them until you accept.'}
           </span>
-          <button onClick={() => void accept(user.id)} disabled={busy === user.id} className={`shrink-0 font-semibold hover:underline ${t.verified ? 'text-red-300' : 'text-amber-300'}`}>
+          <button onClick={() => void accept(user.id)} disabled={busy === user.id} className={`shrink-0 font-semibold hover:underline ${t.verified ? 'text-red-700 dark:text-red-300' : 'text-amber-800 dark:text-amber-300'}`}>
             {busy === user.id ? <Loader2 size={12} className="animate-spin" /> : t.verified ? 'Accept anyway' : 'Accept'}
           </button>
         </Banner>,
@@ -102,10 +104,84 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
   return banners.length ? <>{banners}</> : null
 }
 
+const POLL_MS = 10_000
+const DISMISSED_KEY = 'unrlsd-link-dismissed'
+
+function readDismissed(): string[] {
+  try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? '[]') as string[] } catch { return [] }
+}
+
+// A device of yours that signed in but isn't verified yet. The server can't
+// vouch for its keys, so approving means checking the number it shows.
+function LinkApprovals(): JSX.Element | null {
+  const meId = useChatStore((s) => s.meId)
+  const epoch = useChatStore((s) => s.trustEpoch)
+  const [cands, setCands] = useState<LinkCandidate[]>([])
+  const [dismissed, setDismissed] = useState<string[]>(readDismissed)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!meId) return
+    let cancelled = false
+    const poll = (): void => {
+      if (document.hidden) return
+      void import('../../lib/chatIdentity').then((m) => m.getFeatures())
+        .then((f) => (f.linking ? import('../../lib/chatLinking').then((l) => l.pendingDevices(meId)) : []))
+        .then((list) => { if (!cancelled) setCands(list) })
+        .catch(() => undefined)
+    }
+    poll()
+    const timer = window.setInterval(poll, POLL_MS)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [meId, epoch])
+
+  const dismiss = (id: string): void => {
+    const next = [...dismissed, id]
+    setDismissed(next)
+    try { localStorage.setItem(DISMISSED_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+  }
+
+  const approve = async (c: LinkCandidate): Promise<void> => {
+    if (!meId) return
+    setBusy(c.session.device_id)
+    setError(null)
+    try {
+      await (await import('../../lib/chatLinking')).approveLink(meId, c)
+      setCands((l) => l.filter((x) => x.session.device_id !== c.session.device_id))
+      bump()
+    } catch (err) {
+      setError((err as Error)?.message || 'Could not link that device.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const shown = cands.filter((c) => !dismissed.includes(c.session.device_id))
+  if (!shown.length) return null
+  return (
+    <>
+      {shown.map((c) => (
+        <Banner key={c.session.device_id} tone="amber" icon={<Smartphone size={16} className="shrink-0 text-amber-400" />}>
+          <span className="flex-1">
+            <b>Link {c.session.label || 'a new device'}?</b> Approve only if it shows{' '}
+            <span className="font-mono text-sm">{c.sas}</span>. If you didn&apos;t just sign in somewhere, decline: someone may have your password.
+            {error && <span className="block text-red-400">{error}</span>}
+          </span>
+          <button onClick={() => dismiss(c.session.device_id)} className="shrink-0 hover:underline">Not now</button>
+          <button onClick={() => void approve(c)} disabled={busy === c.session.device_id} className="shrink-0 font-semibold text-amber-800 dark:text-amber-300 hover:underline">
+            {busy === c.session.device_id ? <Loader2 size={12} className="animate-spin" /> : 'Approve'}
+          </button>
+        </Banner>
+      ))}
+    </>
+  )
+}
+
 function Banner({ tone, icon, children }: { tone: 'amber' | 'red'; icon: JSX.Element; children: React.ReactNode }): JSX.Element {
   const cls = tone === 'red'
-    ? 'border-red-500/30 bg-red-500/10 text-red-200'
-    : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+    ? 'border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-200'
+    : 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200'
   return <div className={`mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border px-3 py-2.5 text-xs ${cls}`}>{icon}{children}</div>
 }
 
