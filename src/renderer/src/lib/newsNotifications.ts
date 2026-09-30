@@ -136,6 +136,17 @@ function setLastSeenId(id: number): void {
   } catch {}
 }
 
+// A post pushed over the notifications socket. Returns it if it should raise a
+// notification (subscribed channel, notifications on, not already shown), and
+// advances the high-water mark so the catch-up fetch won't refire it.
+export function acceptPushedPost(item: NewsItem): NewsItem | null {
+  if (!NEWS_ENABLED || !notificationsEnabled()) return null
+  const lastSeen = getLastSeenId()
+  if (lastSeen !== null && item.id <= lastSeen) return null
+  setLastSeenId(item.id)
+  return getSubscriptions().includes(item.channel) ? item : null
+}
+
 // Polls the latest feed and returns posts in subscribed channels that are newer
 // than anything we've shown before. Advances the high-water mark to the newest
 // id seen (any channel) so nothing re-fires. On the very first run it just
