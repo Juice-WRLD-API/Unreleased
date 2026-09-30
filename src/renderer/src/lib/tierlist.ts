@@ -51,11 +51,31 @@ export interface Tierlist {
    *  anything absent is still in the unranked pool. */
   rows: Record<string, number[]>
   filters: TierlistFilters
+  /** Anyone with the link (and visitors to the owner's profile) can view it.
+   *  Only meaningful once the list is on the account. */
+  isPublic: boolean
+  // ─── Account sync (see lib/tierlistSync) ───
+  /** The list's id on the account, once uploaded. */
+  serverId?: number
+  /** Account the list was uploaded to - lists from another account are
+   *  dropped locally when a different one signs in (they're safe on theirs). */
+  ownerId?: number
+  /** `updatedAt` as of the last successful sync; differs = unsynced edits. */
+  syncedAt?: number
+  /** Server `updated_at` as of the last sync, to spot edits from elsewhere. */
+  serverUpdatedAt?: string
 }
 
 export interface TierlistLibrary {
   activeId: string
   lists: Tierlist[]
+  /** Server ids of lists deleted here whose DELETE hasn't gone through yet. */
+  pendingDeletes: number[]
+}
+
+/** Has edits the account doesn't have yet. */
+export function isDirty(l: Tierlist): boolean {
+  return l.serverId === undefined || l.syncedAt !== l.updatedAt
 }
 
 const DEFAULT_FILTERS: TierlistFilters = { categories: ['released', 'unreleased'], eras: [], albumId: null }
@@ -80,6 +100,7 @@ export function newTierlist(name: string, filters: TierlistFilters = DEFAULT_FIL
     tiers,
     rows: Object.fromEntries(tiers.map((t) => [t.id, []])),
     filters: { ...filters, categories: [...filters.categories], eras: [...filters.eras] },
+    isPublic: false,
   }
 }
 
@@ -89,7 +110,7 @@ const LS_KEY = 'unreleased:tierlist:v2'
 // The single-list format this replaced: { tiers, assignments: songId -> tierId }.
 const LS_KEY_V1 = 'unreleased:tierlist:v1'
 
-function sanitizeList(raw: Partial<Tierlist>): Tierlist | null {
+export function sanitizeList(raw: Partial<Tierlist>): Tierlist | null {
   if (!raw || typeof raw.id !== 'string' || !Array.isArray(raw.tiers) || raw.tiers.length === 0) return null
   const rows: Record<string, number[]> = {}
   const seen = new Set<number>()
@@ -113,6 +134,11 @@ function sanitizeList(raw: Partial<Tierlist>): Tierlist | null {
       eras: Array.isArray(f.eras) ? f.eras : [],
       albumId: typeof f.albumId === 'number' ? f.albumId : null,
     },
+    isPublic: raw.isPublic === true,
+    serverId: typeof raw.serverId === 'number' ? raw.serverId : undefined,
+    ownerId: typeof raw.ownerId === 'number' ? raw.ownerId : undefined,
+    syncedAt: typeof raw.syncedAt === 'number' ? raw.syncedAt : undefined,
+    serverUpdatedAt: typeof raw.serverUpdatedAt === 'string' ? raw.serverUpdatedAt : undefined,
   }
 }
 
@@ -136,7 +162,7 @@ function migrateV1(): Tierlist | null {
 
 function defaultLibrary(): TierlistLibrary {
   const list = migrateV1() ?? newTierlist('My tier list')
-  return { activeId: list.id, lists: [list] }
+  return { activeId: list.id, lists: [list], pendingDeletes: [] }
 }
 
 export function loadTierlistLibrary(): TierlistLibrary {
@@ -147,7 +173,8 @@ export function loadTierlistLibrary(): TierlistLibrary {
     const lists = (parsed.lists ?? []).map(sanitizeList).filter((l): l is Tierlist => l !== null)
     if (lists.length === 0) return defaultLibrary()
     const activeId = lists.some((l) => l.id === parsed.activeId) ? parsed.activeId as string : lists[0].id
-    return { activeId, lists }
+    const pendingDeletes = (parsed.pendingDeletes ?? []).filter((id): id is number => typeof id === 'number')
+    return { activeId, lists, pendingDeletes }
   } catch {
     return defaultLibrary()
   }

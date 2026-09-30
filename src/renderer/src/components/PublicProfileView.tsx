@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
@@ -24,6 +24,7 @@ import {
 import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { clickable } from '../lib/a11y'
+import { initial } from '../lib/format'
 
 // Recent plays render actual track info, but the profile payload only carries
 // {song, played_at} - resolving every row would mean one fetch per play, so
@@ -181,6 +182,14 @@ export default function PublicProfileView(): JSX.Element {
   const showPlaylists = isOwnProfile || !!profile?.public_playlists
   const effectivePlayHistory = isOwnProfile ? account?.listening_plays : profile?.play_history
   const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists
+  const publicTierlists = profile?.tierlists ?? []
+
+  // The tier list view picks up ?id= on mount and opens that list read-only
+  // (or, for your own, straight into editing).
+  function openTierlist(id: number): void {
+    setActiveView('tierlist')
+    window.history.replaceState({ view: 'tierlist' }, '', `/tierlist?id=${id}`)
+  }
 
   useEffect(() => {
     if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
@@ -459,7 +468,7 @@ export default function PublicProfileView(): JSX.Element {
         <div className="w-16 h-16 rounded-full bg-surface-overlay flex items-center justify-center shrink-0 overflow-hidden ring-2 ring-[var(--border)]">
           {profile.avatar
             ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
-            : <User size={26} className="text-text-muted" />}
+            : <div className="w-full h-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{initial(profile.display_name || profile.username)}</div>}
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
@@ -603,7 +612,7 @@ export default function PublicProfileView(): JSX.Element {
         </div>
       )}
 
-      {!showPlayHistory && !showPlaylists && (
+      {!showPlayHistory && !showPlaylists && publicTierlists.length === 0 && (
         <div className="flex flex-col items-center justify-center gap-2 text-text-muted mt-16">
           <Lock size={28} className="opacity-30" />
           <p className="text-sm">This profile is private.</p>
@@ -611,7 +620,7 @@ export default function PublicProfileView(): JSX.Element {
       )}
 
       {/* Recently played, Wrapped, Playlists - side by side on wide screens to cut down on scrolling */}
-      {(showPlayHistory || showPlaylists) && (
+      {(showPlayHistory || showPlaylists || publicTierlists.length > 0) && (
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch auto-rows-fr">
 
       {/* Recently played */}
@@ -746,6 +755,31 @@ export default function PublicProfileView(): JSX.Element {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Public tier lists - each list is opted in on its own (is_public),
+          so there's no profile-wide flag gating this card. */}
+      {publicTierlists.length > 0 && (
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
+            <Rows3 size={15} /> Tier lists
+          </h2>
+          <div className="overflow-y-auto max-h-[420px] -mx-1 px-1 space-y-1">
+            {publicTierlists.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => openTierlist(t.id)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-overlay text-left transition-colors"
+              >
+                <Rows3 size={16} className="text-text-muted shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-text-primary text-sm truncate">{t.name}</span>
+                  <span className="block text-text-muted text-xs">{t.ranked_count} ranked</span>
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

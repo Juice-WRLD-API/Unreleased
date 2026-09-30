@@ -14,7 +14,7 @@ import { TIER_COLOR_PRESETS } from '../lib/tierlist'
 import type { Tier, DropPosition } from '../lib/tierlist'
 import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData } from '../hooks/useTierlistData'
-import { ListsPanelBody, FiltersPanelBody } from './TierlistPanels'
+import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 
@@ -305,6 +305,10 @@ export default function TierlistView(): JSX.Element {
         <div className="mx-auto w-full max-w-3xl">
           <GameSwitcher current="tierlist" />
 
+          {data.viewing ? (
+            <TierlistViewer data={data} touch={false} />
+          ) : (
+          <>
           <div className="text-center mb-6">
             <h1 className="text-text-primary text-4xl sm:text-5xl font-black tracking-tight">Tier List</h1>
             <button
@@ -440,6 +444,8 @@ export default function TierlistView(): JSX.Element {
               )}
             </div>
           </div>
+          </>
+          )}
         </div>
       </div>
 

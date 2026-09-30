@@ -2,11 +2,14 @@
 // song-pool filters. Each view supplies its own chrome around them (a centered
 // modal on desktop, a bottom Sheet on mobile); `touch` only scales hit areas.
 import { useState } from 'react'
-import { Check, Copy, Pencil, Plus, RefreshCw, Trash2, Disc3, ListOrdered } from 'lucide-react'
+import {
+  Check, Copy, Pencil, Plus, RefreshCw, Trash2, Disc3, ListOrdered, Globe, Lock, Link, Cloud, CloudOff, Music2,
+} from 'lucide-react'
 import { POOL_LABELS } from '../lib/heardle'
-import type { PoolId } from '../lib/heardle'
+import type { HeardleSong, PoolId } from '../lib/heardle'
 import { rankedCount } from '../lib/tierlist'
 import type { Tierlist } from '../lib/tierlist'
+import { smallCoverUrl } from '../lib/juicewrldApi'
 import type { Album } from '../lib/albumsApi'
 import type { TierlistData } from '../hooks/useTierlistData'
 
@@ -51,8 +54,23 @@ export function ListsPanelBody({ data, touch, onDone }: {
   touch: boolean
   onDone: () => void
 }): JSX.Element {
-  const { lists, list: active, albums, switchList, createList, renameList, duplicateList, deleteList } = data
+  const {
+    lists, list: active, albums, switchList, createList, renameList, duplicateList, deleteList,
+    setListPublic, shareUrl, syncState, signedIn, retrySync,
+  } = data
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const canShare = signedIn && syncState !== 'unsupported'
+
+  const copyLink = async (l: Tierlist): Promise<void> => {
+    const url = shareUrl(l)
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedId(l.id)
+      window.setTimeout(() => setCopiedId((cur) => (cur === l.id ? null : cur)), 1500)
+    } catch {}
+  }
   const [renameValue, setRenameValue] = useState('')
   const [newName, setNewName] = useState('')
   const [newAlbum, setNewAlbum] = useState<number | null>(null)
@@ -74,6 +92,7 @@ export function ListsPanelBody({ data, touch, onDone }: {
 
   return (
     <div className="flex flex-col gap-4">
+      <SyncBanner state={syncState} onRetry={retrySync} />
       <div className="flex flex-col gap-1.5">
         {[...lists].sort((a, b) => b.updatedAt - a.updatedAt).map((l) => {
           const isActive = l.id === active.id
@@ -107,8 +126,30 @@ export function ListsPanelBody({ data, touch, onDone }: {
                     {isActive && <Check size={13} className="text-accent shrink-0" />}
                   </div>
                   <div className="text-[11px] text-text-muted truncate">
+                    {l.isPublic && canShare && <Globe size={10} className="inline -mt-0.5 mr-1 text-accent" />}
                     {rankedCount(l)} ranked · {filterSummary(l, albums)}
                   </div>
+                </button>
+              )}
+              {canShare && (
+                <button
+                  onClick={() => setListPublic(l.id, !l.isPublic)}
+                  title={l.isPublic ? 'Public - anyone with the link can view. Click to make private.' : 'Private. Click to let others view it.'}
+                  aria-label={l.isPublic ? 'Make private' : 'Make public'}
+                  className={`${iconBtn} ${l.isPublic ? '!text-accent' : ''}`}
+                >
+                  {l.isPublic ? <Globe size={14} /> : <Lock size={14} />}
+                </button>
+              )}
+              {canShare && l.isPublic && (
+                <button
+                  onClick={() => void copyLink(l)}
+                  disabled={!shareUrl(l)}
+                  title={shareUrl(l) ? 'Copy share link' : 'Saving to your account…'}
+                  aria-label="Copy share link"
+                  className={`${iconBtn} disabled:opacity-40`}
+                >
+                  {copiedId === l.id ? <Check size={14} className="text-accent" /> : <Link size={14} />}
                 </button>
               )}
               <button
@@ -153,6 +194,124 @@ export function ListsPanelBody({ data, touch, onDone }: {
           <Plus size={14} /> Create
         </button>
       </div>
+    </div>
+  )
+}
+
+function SyncBanner({ state, onRetry }: { state: TierlistData['syncState']; onRetry: () => void }): JSX.Element {
+  const base = 'flex items-center gap-2 rounded-lg px-3 py-2 text-[11px]'
+  switch (state) {
+    case 'signed-out':
+      return (
+        <div className={`${base} border border-[var(--border)] text-text-muted`}>
+          <CloudOff size={13} className="shrink-0" />
+          Saved on this device. Sign in to keep your tier lists on your account and share them.
+        </div>
+      )
+    case 'unsupported':
+      return (
+        <div className={`${base} border border-[var(--border)] text-text-muted`}>
+          <CloudOff size={13} className="shrink-0" />
+          Account saving isn't available on this server yet - lists are saved on this device.
+        </div>
+      )
+    case 'error':
+      return (
+        <div className={`${base} border border-red-500/30 bg-red-500/10 text-red-400`}>
+          <CloudOff size={13} className="shrink-0" />
+          <span className="flex-1">Couldn't save to your account. Your lists are still on this device.</span>
+          <button onClick={onRetry} className="font-semibold underline shrink-0">Retry</button>
+        </div>
+      )
+    default:
+      return (
+        <div className={`${base} text-text-muted`}>
+          {state === 'syncing'
+            ? <RefreshCw size={13} className="shrink-0 animate-spin" />
+            : <Cloud size={13} className="shrink-0 text-accent" />}
+          {state === 'syncing' ? 'Saving to your account…' : 'Saved to your account'}
+        </div>
+      )
+  }
+}
+
+// ─── Someone else's list (read-only) ─────────────────────────────────────────
+
+function ViewerChip({ song }: { song: HeardleSong }): JSX.Element {
+  return (
+    <div title={song.name} className="shrink-0 w-14 sm:w-16">
+      <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-lg overflow-hidden border-2 border-[var(--border)]">
+        {song.imageUrl ? (
+          <img src={smallCoverUrl(song.imageUrl)} alt="" draggable={false} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full bg-[var(--surface-overlay)] flex items-center justify-center">
+            <Music2 size={18} className="text-text-muted" />
+          </div>
+        )}
+      </div>
+      <div className="mt-1 text-[9px] leading-tight text-text-muted text-center line-clamp-2 break-words">
+        {song.name}
+      </div>
+    </div>
+  )
+}
+
+export function TierlistViewer({ data, touch }: { data: TierlistData; touch: boolean }): JSX.Element | null {
+  const { viewing, closeViewing, saveViewingCopy, viewingSongsInTier, poolLoading } = data
+  if (!viewing) return null
+  const btn = `${touch ? 'h-11' : 'py-2'} px-4 rounded-xl text-sm font-semibold transition-colors`
+
+  if (viewing.status !== 'ready') {
+    return (
+      <div className="text-center py-16">
+        <p className="text-sm text-text-muted mb-4">
+          {viewing.status === 'loading' ? 'Loading tier list…' : viewing.message}
+        </p>
+        {viewing.status === 'error' && (
+          <button onClick={closeViewing} className={`${btn} border border-[var(--border)] text-text-primary`}>
+            Go to my tier lists
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const { list } = viewing
+  return (
+    <div>
+      <div className="text-center mb-5">
+        <h2 className="text-text-primary text-xl font-bold">{list.name}</h2>
+        <p className="text-xs text-text-muted mt-1">
+          {list.owner?.display_name ? `by ${list.owner.display_name} · ` : ''}{list.ranked_count} ranked
+        </p>
+        <div className="flex items-center justify-center gap-2 mt-3">
+          <button onClick={saveViewingCopy} className={`${btn} bg-accent/15 border border-accent/40 text-text-primary hover:bg-accent/25`}>
+            Save a copy
+          </button>
+          <button onClick={closeViewing} className={`${btn} border border-[var(--border)] text-text-muted hover:text-text-primary`}>
+            My tier lists
+          </button>
+        </div>
+      </div>
+      {poolLoading ? (
+        <p className="text-xs text-text-muted text-center py-6">Loading songs…</p>
+      ) : (
+        <div className="space-y-1.5">
+          {(list.data?.tiers ?? []).map((tier) => (
+            <div key={tier.id} className="flex rounded-xl overflow-hidden border border-[var(--border)]">
+              <div
+                className="w-16 sm:w-20 shrink-0 flex items-center justify-center text-center px-1.5 py-3 font-black text-sm leading-tight"
+                style={{ background: tier.color, color: 'rgba(0,0,0,0.75)' }}
+              >
+                {tier.label}
+              </div>
+              <div className="flex-1 min-h-[5.5rem] bg-[var(--surface-overlay)]/30 p-1.5 flex flex-wrap gap-1.5 content-start">
+                {viewingSongsInTier(tier.id).map((s) => <ViewerChip key={s.id} song={s} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

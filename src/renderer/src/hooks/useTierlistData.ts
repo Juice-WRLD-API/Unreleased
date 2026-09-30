@@ -2,8 +2,9 @@
 // native HTML5 drag-and-drop, mobile uses a hand-rolled Pointer Events drag
 // (see TierlistView.mobile.tsx's own comments) - those drag mechanics are
 // genuinely different and stay local to each view. Everything else (saved
-// lists, pool loading, filters, persistence, tier CRUD, search) lives here.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// lists, account sync, sharing, pool loading, filters, persistence, tier
+// CRUD, search) lives here.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadPools, poolAgeMs, refreshPool, poolEras } from '../lib/heardle'
 import type { HeardleSong, PoolId } from '../lib/heardle'
 import {
@@ -11,6 +12,12 @@ import {
   albumMatcher, matchesSearch, TIER_COLOR_PRESETS,
 } from '../lib/tierlist'
 import type { Tier, Tierlist, TierlistFilters, TierlistLibrary, DropPosition } from '../lib/tierlist'
+import { isDirty } from '../lib/tierlist'
+import { fullSync, pushChanges, fromServer } from '../lib/tierlistSync'
+import type { SyncIO, SyncResult } from '../lib/tierlistSync'
+import { getPublicTierlist } from '../lib/tierlistApi'
+import type { ServerTierlist } from '../lib/tierlistApi'
+import { shareOrigin } from '../lib/platform'
 import { fetchAlbums } from '../lib/albumsApi'
 import type { Album } from '../lib/albumsApi'
 import { getAllVersionGroups } from '../lib/versionsApi'
@@ -29,8 +36,45 @@ const ALL_POOLS: PoolId[] = ['released', 'unreleased']
 // without waiting out the pool's day-long cache.
 const REVALIDATE_AFTER_MS = 10 * 60 * 1000
 
+// Edits are pushed this long after the last one, so a burst of drags goes up
+// as one request per list rather than one per drop.
+const PUSH_DEBOUNCE_MS = 1500
+
+export type SyncState = 'signed-out' | 'syncing' | 'synced' | 'error' | 'unsupported'
+
+/** Someone's public list opened from a /tierlist?id= link. */
+export type ViewingState =
+  | { status: 'loading'; id: number }
+  | { status: 'error'; id: number; message: string }
+  | { status: 'ready'; id: number; list: ServerTierlist }
+
+function sharedIdFromUrl(): number | null {
+  const raw = new URLSearchParams(window.location.search).get('id')
+  const id = raw && /^\d+$/.test(raw) ? Number(raw) : NaN
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function clearSharedIdFromUrl(): void {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('id')) return
+  url.searchParams.delete('id')
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}`)
+}
+
 export function useTierlistData() {
-  const [library, setLibrary] = useState<TierlistLibrary>(() => loadTierlistLibrary())
+  const [library, setLibraryState] = useState<TierlistLibrary>(() => loadTierlistLibrary())
+  // The ref is the source of truth for writes: sync reads it between awaits
+  // and must see its own earlier writes immediately, not after a re-render.
+  // Saving happens here too rather than in an effect, so a sync result that
+  // lands after the view unmounted (a list's new server id) still persists.
+  const libRef = useRef(library)
+  const setLibrary = useCallback((fn: (prev: TierlistLibrary) => TierlistLibrary): void => {
+    const next = fn(libRef.current)
+    if (next === libRef.current) return
+    libRef.current = next
+    saveTierlistLibrary(next)
+    setLibraryState(next)
+  }, [])
   const [rawPool, setRawPool] = useState<HeardleSong[]>([])
   const [poolLoading, setPoolLoading] = useState(true)
   const [poolError, setPoolError] = useState<string | null>(null)
@@ -42,7 +86,13 @@ export function useTierlistData() {
   const [editingTier, setEditingTier] = useState<Tier | null>(null)
   const [showFilters, setShowFilters] = useState(false)
   const [showLists, setShowLists] = useState(false)
-  const { songPrefs, eraCovers } = useStorePick('songPrefs', 'eraCovers')
+  const { songPrefs, eraCovers, account } = useStorePick('songPrefs', 'eraCovers', 'account')
+  const accountId = account?.id ?? null
+  const [syncState, setSyncState] = useState<SyncState>(accountId ? 'syncing' : 'signed-out')
+  const [viewing, setViewing] = useState<ViewingState | null>(() => {
+    const id = sharedIdFromUrl()
+    return id !== null ? { status: 'loading', id } : null
+  })
 
   const refreshSongs = useCallback(async (): Promise<void> => {
     setRefreshing(true)
@@ -78,7 +128,48 @@ export function useTierlistData() {
     return () => { cancelled = true }
   }, [refreshSongs])
 
-  useEffect(() => { saveTierlistLibrary(library) }, [library])
+  // ─── Account sync ─────────────────────────────────────────────────────────
+
+  const io = useMemo<SyncIO>(() => ({ get: () => libRef.current, apply: setLibrary }), [setLibrary])
+  // One sync at a time; a change that arrives mid-sync queues exactly one more.
+  const syncing = useRef<Promise<void> | null>(null)
+  const syncAgain = useRef(false)
+  const unsupported = useRef(false)
+
+  const runSync = useCallback((kind: 'full' | 'push'): void => {
+    if (accountId === null || unsupported.current) return
+    if (syncing.current) { syncAgain.current = true; return }
+    setSyncState('syncing')
+    const job = kind === 'full' ? fullSync(io, accountId) : pushChanges(io, accountId)
+    syncing.current = job
+      .then((res: SyncResult) => {
+        if (res === 'unsupported') { unsupported.current = true; setSyncState('unsupported') }
+        else setSyncState('synced')
+      })
+      .catch(() => setSyncState('error'))
+      .finally(() => {
+        syncing.current = null
+        if (syncAgain.current) { syncAgain.current = false; runSync('push') }
+      })
+  }, [accountId, io])
+
+  useEffect(() => {
+    unsupported.current = false
+    if (accountId === null) { setSyncState('signed-out'); return }
+    runSync('full')
+  }, [accountId, runSync])
+
+  const needsPush = library.pendingDeletes.length > 0 || library.lists.some(isDirty)
+  useEffect(() => {
+    if (!needsPush || accountId === null) return
+    const t = window.setTimeout(() => runSync('push'), PUSH_DEBOUNCE_MS)
+    return () => window.clearTimeout(t)
+  }, [library, needsPush, accountId, runSync])
+
+  // Leaving the view mid-debounce shouldn't strand the last edit locally.
+  const pushOnLeave = useRef(() => {})
+  pushOnLeave.current = () => { if (needsPush) runSync('push') }
+  useEffect(() => () => pushOnLeave.current(), [])
 
   // Songs as the rest of the app shows them: the user's own name and cover
   // for a song win, then a rotated suggestion, then their era cover (not for
@@ -129,7 +220,7 @@ export function useTierlistData() {
       albumId,
       eras: albumId !== null ? [] : filters.eras,
     })
-    setLibrary((prev) => ({ activeId: created.id, lists: [...prev.lists, created] }))
+    setLibrary((prev) => ({ ...prev, activeId: created.id, lists: [...prev.lists, created] }))
     setSelectedSongId(null)
     setSearch('')
   }
@@ -151,8 +242,19 @@ export function useTierlistData() {
       tiers: src.tiers.map((t) => ({ ...t })),
       rows: Object.fromEntries(Object.entries(src.rows).map(([k, v]) => [k, [...v]])),
     }
-    setLibrary((prev) => ({ activeId: copy.id, lists: [...prev.lists, copy] }))
+    setLibrary((prev) => ({ ...prev, activeId: copy.id, lists: [...prev.lists, copy] }))
   }
+
+  const setListPublic = (id: string, isPublic: boolean): void => {
+    setLibrary((prev) => ({
+      ...prev,
+      lists: prev.lists.map((l) => (l.id === id ? { ...l, isPublic, updatedAt: Date.now() } : l)),
+    }))
+  }
+
+  /** The list's share link, once it's on the account. */
+  const shareUrl = (l: Tierlist): string | null =>
+    l.serverId !== undefined ? `${shareOrigin()}/tierlist?id=${l.serverId}` : null
 
   const deleteList = (id: string): void => {
     const target = library.lists.find((l) => l.id === id)
@@ -160,12 +262,54 @@ export function useTierlistData() {
     if (!window.confirm(`Delete "${target.name}"? Its rankings can't be recovered.`)) return
     setLibrary((prev) => {
       const remaining = prev.lists.filter((l) => l.id !== id)
+      const pendingDeletes = target.serverId !== undefined ? [...prev.pendingDeletes, target.serverId] : prev.pendingDeletes
       if (remaining.length === 0) {
         const fresh = newTierlist('My tier list')
-        return { activeId: fresh.id, lists: [fresh] }
+        return { activeId: fresh.id, lists: [fresh], pendingDeletes }
       }
-      return { activeId: prev.activeId === id ? remaining[0].id : prev.activeId, lists: remaining }
+      return { activeId: prev.activeId === id ? remaining[0].id : prev.activeId, lists: remaining, pendingDeletes }
     })
+  }
+
+  // ─── Viewing someone's shared list ────────────────────────────────────────
+
+  const viewingId = viewing?.id ?? null
+  useEffect(() => {
+    if (viewingId === null) return
+    // One of your own: just open it for editing.
+    const own = libRef.current.lists.find((l) => l.serverId === viewingId)
+    if (own) {
+      setLibrary((prev) => ({ ...prev, activeId: own.id }))
+      setViewing(null)
+      clearSharedIdFromUrl()
+      return
+    }
+    let cancelled = false
+    getPublicTierlist(viewingId)
+      .then((l) => { if (!cancelled) setViewing({ status: 'ready', id: viewingId, list: l }) })
+      .catch((err) => {
+        if (!cancelled) setViewing({ status: 'error', id: viewingId, message: errorMessage(err, "This tier list isn't available.") })
+      })
+    return () => { cancelled = true }
+  }, [viewingId, setLibrary])
+
+  const closeViewing = (): void => {
+    setViewing(null)
+    clearSharedIdFromUrl()
+  }
+
+  /** Copies the list being viewed into your own library, to edit freely. */
+  const saveViewingCopy = (): void => {
+    if (viewing?.status !== 'ready') return
+    const src = fromServer(viewing.list, undefined)
+    if (!src) return
+    const copy: Tierlist = {
+      ...newTierlist(viewing.list.name, src.filters),
+      tiers: src.tiers,
+      rows: src.rows,
+    }
+    setLibrary((prev) => ({ ...prev, activeId: copy.id, lists: [...prev.lists, copy] }))
+    closeViewing()
   }
 
   // ─── Filters ──────────────────────────────────────────────────────────────
@@ -291,8 +435,15 @@ export function useTierlistData() {
     setSelectedSongId(null)
   }
 
+  const viewingSongsInTier = (tierId: string): HeardleSong[] =>
+    viewing?.status === 'ready'
+      ? (viewing.list.data?.rows?.[tierId] ?? []).map((id) => songById.get(id)).filter((s): s is HeardleSong => !!s)
+      : []
+
   return {
     lists: library.lists, list, switchList, createList, renameList, duplicateList, deleteList,
+    setListPublic, shareUrl, syncState, signedIn: accountId !== null, retrySync: () => runSync('full'),
+    viewing, closeViewing, saveViewingCopy, viewingSongsInTier,
     showLists, setShowLists,
     tiers, filters, album, albums, eraOptions, toggleCategory, toggleEra, clearEras, setAlbum,
     pool, poolLoading, poolError, refreshing, refreshSongs,

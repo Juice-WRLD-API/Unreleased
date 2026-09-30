@@ -11,6 +11,7 @@ import { apiRequest, authedRequest, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
+import type { TierlistSummary } from './tierlistApi'
 
 const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
@@ -273,6 +274,9 @@ export interface PublicProfile {
   public_now_playing: boolean
   play_history?: ListeningPlayEvent[]
   playlists?: PlaylistSummary[]
+  /** The user's tier lists with is_public === true (absent on servers
+   *  without /library/tierlists/). */
+  tierlists?: TierlistSummary[]
 }
 
 export interface NowPlayingResponse {

@@ -17,7 +17,7 @@ import type { Tier, DropPosition } from '../lib/tierlist'
 import { Sheet } from './mobile/Sheet'
 import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData } from '../hooks/useTierlistData'
-import { ListsPanelBody, FiltersPanelBody } from './TierlistPanels'
+import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 
 // Drop-zone id used for the "Unranked" pool, since tier ids are already
 // unique strings and null can't be stuffed into a DOM dataset attribute.
@@ -358,6 +358,10 @@ export default function TierlistView(): JSX.Element {
             <GameSwitcher current="tierlist" />
           </div>
 
+          {data.viewing ? (
+            <TierlistViewer data={data} touch />
+          ) : (
+          <>
           <div className="text-center mb-5">
             <h1 className="text-text-primary text-3xl font-black tracking-tight">Tier List</h1>
             <button
@@ -483,6 +487,8 @@ export default function TierlistView(): JSX.Element {
               )}
             </div>
           </div>
+          </>
+          )}
         </div>
       </div>
 
