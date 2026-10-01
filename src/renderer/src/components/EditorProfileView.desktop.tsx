@@ -1,3 +1,4 @@
+import { useOpenUserCard } from './chat/UserCard'
 import { useRef } from 'react'
 import {
   Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
@@ -54,6 +55,7 @@ function LeaderboardRows({ entries, myUsername }: {
   entries: ReturnType<typeof useLeaderboard>['leaderboard']
   myUsername: string | undefined
 }): JSX.Element {
+  const openUserCard = useOpenUserCard()
   return (
     <div className="space-y-1">
       {entries.map((entry) => {
@@ -62,7 +64,8 @@ function LeaderboardRows({ entries, myUsername }: {
         return (
           <div
             key={entry.user_id}
-            className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
+            onClick={(e) => openUserCard({ id: entry.user_id, username: entry.discord_username || entry.username, display_name: entry.username || entry.discord_username, avatar: entry.discord_avatar, role: '' }, e)}
+            className={`cursor-pointer flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
               isMe ? 'bg-accent/8 ring-1 ring-accent/20' : 'hover:bg-surface-overlay'
             }`}
           >

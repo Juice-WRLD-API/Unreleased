@@ -93,6 +93,7 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 
 // Overlays that only mount while open - fetched on first open rather than
 // shipped to every visitor in the startup bundle.
+import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
@@ -233,6 +234,7 @@ export default function App(): JSX.Element {
   useEffect(() => { useStore.getState()._flushReports() }, [])
 
   return (
+    <UserCardHost>
     <div className="app-shell flex flex-col bg-surface overflow-hidden">
       {/* Sidebar stays first in the DOM; reverse variants place it visually
           on the right/bottom without reordering focus/tab order. */}
@@ -382,5 +384,6 @@ export default function App(): JSX.Element {
       {infoSongId != null && <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>}
       <ErrorBoundary fallback={null}><SandboxNotch /></ErrorBoundary>
     </div>
+    </UserCardHost>
   )
 }
