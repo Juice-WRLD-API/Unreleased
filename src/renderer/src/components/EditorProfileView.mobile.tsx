@@ -12,6 +12,7 @@ import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
 import ProposalListItem from './ProposalListItem'
+import BroadcastModal from './BroadcastModal'
 import AddSongModal from './AddSongModal.mobile'
 import { useLeaderboard } from '../hooks/useLeaderboard'
 import { useEditorProfileView, PROPOSAL_FILTER_TABS } from '../hooks/useEditorProfileView'
@@ -127,6 +128,7 @@ export default function EditorProfileView(): JSX.Element {
   // which read as a cramped "tile" for a wide layout like the Users
   // master/detail view.
   const [mode, setMode] = useState<ViewMode>(managerOnly ? 'admin' : 'grid')
+  const [showBroadcast, setShowBroadcast] = useState(false)
   const exitAdmin = (): void => setMode('grid')
   const openAdminTab = (tab: AdminTab): void => openAdmin(tab)
 
@@ -499,6 +501,7 @@ export default function EditorProfileView(): JSX.Element {
                         <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdminTab('channels')} />
                         <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdminTab('eras')} />
                         <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdminTab('cdn-nodes')} />
+                        <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                       </>
                     )}
                     {isAdmin && (
@@ -540,6 +543,8 @@ export default function EditorProfileView(): JSX.Element {
 
         </div>
       </div>
+
+      {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
 
       {showAddSong && (
         <AddSongModal

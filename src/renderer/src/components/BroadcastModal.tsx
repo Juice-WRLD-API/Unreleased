@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Loader2, AlertCircle, Check, Megaphone } from 'lucide-react'
+import { Loader2, AlertCircle, Check, Megaphone, X } from 'lucide-react'
+import { ModalOverlay, LockToggle } from './Modal'
 import { sendBroadcast, BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, BROADCAST_MAX_TITLE, type BroadcastLevel } from '../lib/broadcastApi'
 import { errorMessage } from '../lib/format'
 
@@ -10,10 +11,10 @@ const LEVEL_STYLE: Record<BroadcastLevel, string> = {
   error: 'bg-red-500/15 text-red-400 border-red-500/30',
 }
 
-// Admin-only: pushes one message to everyone connected right now. Nothing is
+// Admin-only popup: pushes one message to everyone connected right now. Nothing is
 // stored server-side, so people who are offline never see it - say so before
 // the admin sends, and confirm before sending since it can't be recalled.
-export default function BroadcastTab(): JSX.Element {
+export default function BroadcastModal({ onClose }: { onClose: () => void }): JSX.Element {
   const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
   const [level, setLevel] = useState<BroadcastLevel>('info')
@@ -41,14 +42,33 @@ export default function BroadcastTab(): JSX.Element {
   const inputCls = 'w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm focus:outline-none focus:border-accent/50'
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="max-w-lg space-y-4">
-        <div>
-          <h2 className="text-text-primary text-base font-bold flex items-center gap-2"><Megaphone size={16} /> Broadcast a message</h2>
-          <p className="text-text-muted text-xs mt-1.5 leading-relaxed">
-            Shows as a banner for everyone using the app right now. It isn't saved, so people who are offline won't see it later.
-          </p>
+    <ModalOverlay
+      onClose={onClose}
+      zIndexClassName="z-[170]"
+      panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md max-h-[92svh]"
+      minWidth={360} minHeight={380}
+    >
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div className="bg-surface w-full h-full overflow-y-auto">
+        <div
+          className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 cursor-grab active:cursor-grabbing"
+          onMouseDown={onHandleMouseDown}
+        >
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">
+            <Megaphone size={15} className="text-accent" /> Broadcast a message
+          </h2>
+          <div className="flex items-center gap-1">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={onClose} title="Close" disabled={sending} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+              <X size={18} />
+            </button>
+          </div>
         </div>
+        <div className="px-5 py-4 space-y-4">
+
+        <p className="text-text-muted text-xs leading-relaxed">
+          Shows as a banner for everyone using the app right now. It isn't saved, so people who are offline won't see it later.
+        </p>
 
         <label className="block">
           <span className="block text-xs font-semibold text-text-muted mb-1.5">Title <span className="font-normal">(optional)</span></span>
@@ -107,7 +127,9 @@ export default function BroadcastTab(): JSX.Element {
             <Megaphone size={14} /> Broadcast
           </button>
         )}
+        </div>
       </div>
-    </div>
+      )}
+    </ModalOverlay>
   )
 }

@@ -1,5 +1,5 @@
 import { useOpenUserCard } from './chat/UserCard'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import {
   Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
   Pencil, Check,
@@ -11,6 +11,7 @@ import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
 import ProposalListItem from './ProposalListItem'
+import BroadcastModal from './BroadcastModal'
 import AddSongModal from './AddSongModal.desktop'
 import { useLeaderboard } from '../hooks/useLeaderboard'
 import { useEditorProfileView, PROPOSAL_FILTER_TABS } from '../hooks/useEditorProfileView'
@@ -101,6 +102,7 @@ function LeaderboardRows({ entries, myUsername }: {
 }
 
 export default function EditorProfileView(): JSX.Element {
+  const [showBroadcast, setShowBroadcast] = useState(false)
   const {
     account, setActiveView, activeChannel, channels, setActiveChannel,
     editingName, nameInput, setNameInput, savingName, nameError, startEditName, saveDisplayName, cancelEditName,
@@ -531,6 +533,7 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
                             <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
                             <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdmin('cdn-nodes')} />
+                            <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                           </>
                         )}
                         {isAdmin && (
@@ -575,6 +578,8 @@ export default function EditorProfileView(): JSX.Element {
 
         </div>
       </div>
+
+      {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
 
       {showAddSong && (
         <AddSongModal
