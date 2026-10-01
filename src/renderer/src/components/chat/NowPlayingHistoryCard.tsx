@@ -7,15 +7,16 @@ import LocalNoticeFrame from './LocalNoticeFrame'
 
 // Rendered for /np -h's local notice - your own listening log, so it stays on
 // this device unless you pass -s to post it to the room.
-export default function NowPlayingHistoryCard({ room, messageId, items, total, capped }: {
+export default function NowPlayingHistoryCard({ room, messageId, items, total, capped, user }: {
   room?: RoomRef
   messageId?: number
   items: { song: number; name: string; played_at: string }[]
   total: number
   capped: boolean
+  user?: string
 }): JSX.Element {
   return (
-    <LocalNoticeFrame room={room} messageId={messageId} title="Recently played">
+    <LocalNoticeFrame room={room} messageId={messageId} title={user ? `${user}'s recent plays` : 'Recently played'}>
       {items.length === 0 ? (
         <p className="mt-2 text-xs text-text-muted">No listening history yet.</p>
       ) : (

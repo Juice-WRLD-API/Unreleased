@@ -12,7 +12,7 @@ import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeCommandCard, encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { getSongsByIds, resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
-import { sortListeningPlays } from '../../lib/listeningPlays'
+import { sortListeningPlays, type ListeningPlayEvent } from '../../lib/listeningPlays'
 import { allSkins, getSkin } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
@@ -290,6 +290,13 @@ const Composer = forwardRef<ComposerHandle, {
     else postLocalNotice(room, encodeLocalNotice(payload))
   }
 
+  // A command's plain answer ("Muted X", "Theme set to Y"): a card only the
+  // sender sees, or with `-s` the same card in the room. Errors and usage
+  // hints stay toasts - they're a problem with the command, not its result.
+  const report = (title: string, text: string, share: boolean): void => {
+    void deliverNotice({ kind: 'result', title, text }, share).catch((err) => toast(errorText(err, 'Message failed to send')))
+  }
+
   const applyThemeCommand = (args: string, share: boolean): void => {
     if (!args) { void deliverNotice({ kind: 'themeList' }, share).catch((err) => toast(errorText(err, 'Message failed to send'))); return }
     const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
@@ -297,7 +304,7 @@ const Composer = forwardRef<ComposerHandle, {
     const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
     if (!match) { toast(`Unknown theme "${args}"`); return }
     useStore.getState().setTheme(match.id)
-    toast(`Theme set to ${match.name}`, 'ok')
+    report('Theme', `Theme set to ${match.name}`, share)
   }
 
   // Posts a card listing every command (HelpCard reads CHAT_COMMANDS itself,
@@ -309,16 +316,17 @@ const Composer = forwardRef<ComposerHandle, {
     void deliverNotice({ kind: 'help' }, share).catch((err) => toast(errorText(err, 'Message failed to send')))
   }
 
-  const runMuteCommand = (args: string, usage: '/mute' | '/unmute'): void => {
+  const runMuteCommand = (rawArgs: string, usage: '/mute' | '/unmute'): void => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
     const uname = args.replace(/^@/, '').trim()
     if (!uname) { toast(`Usage: ${usage} @username`); return }
     const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
     if (!target) { toast(`No one named "${uname}" here`); return }
     if (target.id === meId) { toast("You can't mute yourself"); return }
     const wasMuted = useStore.getState().mutedUserIds.includes(target.id)
-    if (usage === '/unmute' && !wasMuted) { toast(`${displayName(target)} isn't muted`); return }
+    if (usage === '/unmute' && !wasMuted) { report('Unmute', `${displayName(target)} isn't muted`, share); return }
     useStore.getState().toggleMuteUser(target.id)
-    toast(wasMuted ? `Unmuted ${displayName(target)}` : `Muted ${displayName(target)} - their channel/server messages are hidden for you`, 'ok')
+    report(wasMuted ? 'Unmuted' : 'Muted', wasMuted ? `Unmuted ${displayName(target)}` : `Muted ${displayName(target)} - their channel/server messages are hidden for you`, share)
   }
 
   // "Now playing" card shares the exact Track the player has queued, so it
@@ -462,13 +470,14 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Unbanned ${displayName(ban.user)}`, 'ok')
   }
 
-  const runBansCommand = async (): Promise<void> => {
+  const runBansCommand = async (args: string): Promise<void> => {
+    const { share } = splitShareFlag(args)
     if (room.kind !== 'channel') throw new Error('That only works in a server channel')
     const cs = useChatStore.getState()
     const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
     if (!server) throw new Error("Could not find this channel's server")
     const bans = await cs.loadBans(server.id, true)
-    toast(bans.length === 0 ? 'No one is banned from this server' : `Banned: ${bans.map((b) => displayName(b.user)).join(', ')}`, 'ok')
+    report('Bans', bans.length === 0 ? 'No one is banned from this server' : `Banned: ${bans.map((b) => displayName(b.user)).join(', ')}`, share)
   }
 
   // Site-wide variants. The target doesn't have to be in this room (or in any
@@ -559,43 +568,48 @@ const Composer = forwardRef<ComposerHandle, {
       : role === 'manager' ? { manager_enabled: on }
       : { news_enabled: on }
 
-  const setSiteRole = async (handle: string, roleWord: string, on: boolean, usage: string): Promise<void> => {
+  const setSiteRole = async (handle: string, roleWord: string, on: boolean, usage: string, share: boolean): Promise<void> => {
     const role = resolveSiteRole(roleWord)
     if (!handle || !role) throw new Error(`Usage: ${usage}`)
     const { user, label } = await loadSiteUser(handle)
     if (user.role === 'administrator') throw new Error(`${label} is a platform administrator - their roles can't be changed here`)
-    if (hasSiteRole(user, role) === on) { toast(`${label} is ${on ? 'already' : 'not'} ${SITE_ROLE_LABEL[role]}`); return }
+    const title = on ? 'Role granted' : 'Role removed'
+    if (hasSiteRole(user, role) === on) { report(title, `${label} is ${on ? 'already' : 'not'} ${SITE_ROLE_LABEL[role]}`, share); return }
     await adminUpdateUser(user.user_id, siteRolePayload(role, on))
-    toast(on ? `${label} is now ${SITE_ROLE_LABEL[role]}` : `${label} is no longer ${SITE_ROLE_LABEL[role]}`, 'ok')
+    report(title, on ? `${label} is now ${SITE_ROLE_LABEL[role]}` : `${label} is no longer ${SITE_ROLE_LABEL[role]}`, share)
   }
 
-  const runPromoteCommand = async (args: string): Promise<void> => {
+  const runPromoteCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
     const { first, rest } = splitTarget(args)
     // A role word means a site-wide role; without one, /promote keeps its
     // original meaning of making someone an admin of this server.
-    if (rest) { await setSiteRole(first, rest, true, '/promote @username <editor|contributor|manager|news>'); return }
+    if (rest) { await setSiteRole(first, rest, true, '/promote @username <editor|contributor|manager|news>', share); return }
     const { server, target, member } = moderationTarget(args, '/promote @username', 'manage')
-    if (member?.server_role === 'admin') { toast(`${displayName(target)} is already an admin`); return }
+    if (member?.server_role === 'admin') { report('Promote', `${displayName(target)} is already an admin`, share); return }
     await chatApi.updateMember(server.id, target.id, { server_role: 'admin' })
     await refreshMembers(server.id)
-    toast(`Promoted ${displayName(target)} to admin`, 'ok')
+    report('Promoted', `Promoted ${displayName(target)} to admin`, share)
   }
 
-  const runDemoteCommand = async (args: string): Promise<void> => {
+  const runDemoteCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
     const { first, rest } = splitTarget(args)
-    await setSiteRole(first, rest, false, '/demote @username <editor|contributor|manager|news>')
+    await setSiteRole(first, rest, false, '/demote @username <editor|contributor|manager|news>', share)
   }
 
-  const runRoleCommand = async (args: string): Promise<void> => {
+  const runRoleCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
     if (!args.trim()) throw new Error('Usage: /role @username')
     const { user, label } = await loadSiteUser(args)
     const roles = roleLabels(user)
     const approve = (['auto_approve_proposals', 'auto_approve_comp_proposals'] as const)
       .filter((f) => user[f]).map((f) => APPROVE_LABEL[f])
-    toast(`${label}: ${roles.length ? roles.join(', ') : 'standard user'}${approve.length ? ` · auto-approve ${approve.join(' + ')}` : ''}${user.is_active ? '' : ' · account disabled'}`, 'ok')
+    report('Roles', `${label}: ${roles.length ? roles.join(', ') : 'standard user'}${approve.length ? ` · auto-approve ${approve.join(' + ')}` : ''}${user.is_active ? '' : ' · account disabled'}`, share)
   }
 
-  const setAutoApprove = async (args: string, on: boolean): Promise<void> => {
+  const setAutoApprove = async (rawArgs: string, on: boolean): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
     const usage = `/${on ? 'allow' : 'disallow'} @username <edits|comp>`
     const { first, rest } = splitTarget(args)
     const flag = resolveAutoApproveFlag(rest)
@@ -606,19 +620,51 @@ const Composer = forwardRef<ComposerHandle, {
     // editors, comp auto-approve to contributors.
     if (on && flag === 'auto_approve_proposals' && user.role !== 'editor') throw new Error(`${label} isn't an editor, so edit auto-approve doesn't apply`)
     if (on && flag === 'auto_approve_comp_proposals' && !user.contributor_enabled) throw new Error(`${label} isn't a contributor, so comp auto-approve doesn't apply`)
-    if (!!user[flag] === on) { toast(`Auto-approve for ${kind} proposals is already ${on ? 'on' : 'off'} for ${label}`); return }
+    if (!!user[flag] === on) { report('Auto-approve', `Auto-approve for ${kind} proposals is already ${on ? 'on' : 'off'} for ${label}`, share); return }
     await adminUpdateUser(user.user_id, { [flag]: on })
-    toast(`Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, 'ok')
+    report('Auto-approve', `Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, share)
+  }
+
+  // A typed `@name` (or numeric id) to someone in this room - the lookup
+  // /seen and /np @user share.
+  const resolveRoomUser = (uname: string): { id: number; label: string } => {
+    const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!match && !/^\d+$/.test(uname)) throw new Error(`No one named "${uname}" here - use their numeric user id instead`)
+    return match ? { id: match.id, label: displayName(match) } : { id: Number(uname), label: `user #${uname}` }
   }
 
   // `/np -h [count]`: newest-first slice of the merged listening log, titles
   // resolved through the (cached) song lookup. Shown as a local card.
+  //
+  // `@user` looks at someone else's instead: what they're playing now, or with
+  // `-h` their recent plays - both only what they've made public on their
+  // profile. Same count cap as your own log, and `-s` posts it to the room.
   const runNowPlayingCommand = async (args: string): Promise<void> => {
     const { share, rest } = splitShareFlag(args)
     const np = parseNpArgs(rest)
-    if (!np.history) { await shareNowPlayingCommand(); return }
     if ('error' in np) throw new Error(np.error)
-    const log = sortListeningPlays(useStore.getState().listeningPlays)
+    const target = np.user ? resolveRoomUser(np.user) : null
+    const other = target && target.id !== meId ? target : null
+    if (!np.history && !other) { await shareNowPlayingCommand(); return }
+
+    if (other && !np.history) {
+      const state = (await getNowPlaying(other.id)).now_playing
+      if (!state) { toast(`${other.label} isn't sharing what they're playing right now`); return }
+      const [song] = await getSongsByIds([state.song])
+      await deliverNotice({ kind: 'npNow', user: other.label, song: state.song, name: song?.name ?? `Song #${state.song}`, updated_at: state.updated_at }, share)
+      return
+    }
+
+    if (!np.history) return
+    let plays: ListeningPlayEvent[]
+    if (other) {
+      const profile = await getPublicProfile(other.id)
+      if (!profile.public_play_history) { toast(`${other.label} keeps their play history private`); return }
+      plays = profile.play_history ?? []
+    } else {
+      plays = useStore.getState().listeningPlays
+    }
+    const log = sortListeningPlays(plays)
     const recent = log.slice(0, np.count)
     const songs = await getSongsByIds(recent.map((p) => p.song))
     const names = new Map(songs.map((s) => [s.id, s.name]))
@@ -627,6 +673,7 @@ const Composer = forwardRef<ComposerHandle, {
       items: recent.map((p) => ({ song: p.song, name: names.get(p.song) ?? `Song #${p.song}`, played_at: p.played_at })),
       total: log.length,
       capped: np.capped,
+      user: other?.label,
     }, share)
   }
 
@@ -635,16 +682,14 @@ const Composer = forwardRef<ComposerHandle, {
   // of the user's messages in rooms this client has loaded, their public
   // now-playing/play history (only if they've made those public), and - for
   // administrators - the account's last login.
-  const runSeenCommand = async (args: string): Promise<void> => {
+  const runSeenCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
     const uname = args.replace(/^@/, '').trim()
     if (!uname) throw new Error('Usage: /seen @username')
     const cs = useChatStore.getState()
-    const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
-    if (!match && !/^\d+$/.test(uname)) throw new Error(`No one named "${uname}" here - use their numeric user id instead`)
-    const id = match ? match.id : Number(uname)
-    const label = match ? displayName(match) : `user #${id}`
-    if (id === meId) { toast('You’re online right now', 'ok'); return }
-    if (cs.presenceEnabled && cs.online[id]) { toast(`${label} is online now`, 'ok'); return }
+    const { id, label } = resolveRoomUser(uname)
+    if (id === meId) { report('Last seen', 'You’re online right now', share); return }
+    if (cs.presenceEnabled && cs.online[id]) { report('Last seen', `${label} is online now`, share); return }
 
     const seen: { at: number; what: string }[] = []
     const note = (iso: string | null | undefined, what: string): void => {
@@ -667,7 +712,7 @@ const Composer = forwardRef<ComposerHandle, {
 
     const latest = seen.sort((a, b) => b.at - a.at)[0]
     if (!latest) { toast(`No recent activity visible for ${label} - they may keep it private`); return }
-    toast(`${label} was last seen ${relativeTime(new Date(latest.at).toISOString())} (${latest.what})`, 'ok')
+    report('Last seen', `${label} was last seen ${relativeTime(new Date(latest.at).toISOString())} (${latest.what})`, share)
   }
 
   const runChangelogCommand = async (args: string): Promise<void> => {
@@ -692,7 +737,7 @@ const Composer = forwardRef<ComposerHandle, {
     const level = parsed.level ?? 'info'
     if (!window.confirm(`Send this ${level} broadcast to everyone connected? It can't be recalled.\n\n${parsed.message}`)) return
     await sendBroadcast({ message: parsed.message, level })
-    toast('Broadcast sent to everyone connected', 'ok')
+    report('Broadcast', `Broadcast sent to everyone connected (${level}): ${parsed.message}`, parsed.share)
   }
 
   // Every command in CHAT_COMMANDS (sharing, /theme, the moderation set, and
@@ -768,7 +813,7 @@ const Composer = forwardRef<ComposerHandle, {
       } else if (cmd.command === 'unban') {
         await runUnbanCommand(cmd.args)
       } else if (cmd.command === 'bans') {
-        await runBansCommand()
+        await runBansCommand(cmd.args)
       } else if (cmd.command === 'siteban') {
         await runSiteBanCommand(cmd.args)
       } else if (cmd.command === 'sitemute') {

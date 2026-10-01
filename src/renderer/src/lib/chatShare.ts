@@ -365,7 +365,10 @@ export type LocalNoticePayload =
   | { kind: 'feedbackSent'; message: string }
   | { kind: 'broadcastHistory'; items: BroadcastMessage[]; total: number }
   | { kind: 'changelog'; status: ChangelogStatus }
-  | { kind: 'npHistory'; items: { song: number; name: string; played_at: string }[]; total: number; capped: boolean }
+  | { kind: 'npHistory'; items: { song: number; name: string; played_at: string }[]; total: number; capped: boolean; user?: string }
+  | { kind: 'npNow'; user: string; song: number; name: string; updated_at: string }
+  // A command's plain answer ("Muted X", "Theme set to Y") as a card.
+  | { kind: 'result'; title: string; text: string }
 
 export function encodeLocalNotice(payload: LocalNoticePayload): string {
   return `${LOCAL_NOTICE_PREFIX}${JSON.stringify(payload)}`
@@ -392,6 +395,7 @@ export const COMMAND_CARD_PREFIX = 'unreleased:cmdcard:'
 export type SharedCommandCard = Exclude<LocalNoticePayload, { kind: 'feedbackSent' }>
 
 const MAX_CARD_ITEMS = 25
+const MAX_RESULT_TEXT = 1000
 
 function clip(value: unknown, max = MAX_TEXT_FIELD_LENGTH): string | null {
   return typeof value === 'string' ? value.slice(0, max) : null
@@ -432,11 +436,15 @@ export function encodeCommandCard(payload: LocalNoticePayload): string | null {
     case 'npHistory': {
       const items = payload.items.slice(0, MAX_CARD_ITEMS).map((p) => ({ ...p, name: p.name.slice(0, MAX_TEXT_FIELD_LENGTH) }))
       for (let n = items.length; n >= 0; n--) {
-        const out = fits({ kind: 'npHistory', items: items.slice(0, n), total: payload.total, capped: payload.capped })
+        const out = fits({ kind: 'npHistory', items: items.slice(0, n), total: payload.total, capped: payload.capped, user: payload.user })
         if (out) return out
       }
       return null
     }
+    case 'result':
+      return fits({ kind: 'result', title: payload.title.slice(0, 100), text: payload.text.slice(0, MAX_RESULT_TEXT) })
+    case 'npNow':
+      return fits({ ...payload, user: payload.user.slice(0, 100), name: payload.name.slice(0, MAX_TEXT_FIELD_LENGTH) })
     default:
       return null
   }
@@ -466,7 +474,19 @@ export function decodeCommandCard(content: string): SharedCommandCard | null {
         items.push({ song: it.song as number, name, played_at: it.played_at })
       }
       if (!Number.isInteger(p.total) || (p.total as number) < 0 || typeof p.capped !== 'boolean') return null
-      return { kind: 'npHistory', items, total: p.total as number, capped: p.capped }
+      if (p.user !== undefined && typeof p.user !== 'string') return null
+      return { kind: 'npHistory', items, total: p.total as number, capped: p.capped, user: clip(p.user, 100) || undefined }
+    }
+    case 'result': {
+      const title = clip(p.title, 100)
+      const text = clip(p.text, MAX_RESULT_TEXT)
+      return title && text ? { kind: 'result', title, text } : null
+    }
+    case 'npNow': {
+      const user = clip(p.user, 100)
+      const name = clip(p.name)
+      if (!user || !name || !Number.isInteger(p.song) || (p.song as number) <= 0 || !isIsoDate(p.updated_at)) return null
+      return { kind: 'npNow', user, song: p.song as number, name, updated_at: p.updated_at }
     }
     case 'broadcastHistory': {
       if (!Array.isArray(p.items) || p.items.length > MAX_CARD_ITEMS) return null

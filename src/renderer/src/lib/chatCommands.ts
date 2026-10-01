@@ -65,21 +65,28 @@ export function splitShareFlag(args: string): { share: boolean; rest: string } {
 export const NP_HISTORY_DEFAULT = 10
 export const NP_HISTORY_MAX = 25
 
-export type NpArgs =
+export type NpArgs = { user: string | null } & (
   | { history: false }
   | { history: true; count: number; capped: boolean }
   | { history: true; error: string }
+)
 
-// `/np -h [count]` (also `--history`, and `-h5`; `-s` merges in as `-hs`, see
-// splitShareFlag, which runs first). Anything else after /np is
-// ignored, same as before the flag existed - bare /np just shares the track.
+// `/np [@user] [-h [count]]` (`-h` also as `--history` or `-h5`; `-s` merges in
+// as `-hs`, see splitShareFlag, which runs first). The `@user` token can sit
+// anywhere and is pulled out first. Anything else after /np is ignored, same as
+// before the flags existed - bare /np just shares the track. The count is
+// capped at NP_HISTORY_MAX whoever's log it is.
 export function parseNpArgs(args: string): NpArgs {
-  const m = /^(?:-h|--history)\s*(\S*)\s*$/i.exec(args.trim())
-  if (!m) return { history: false }
-  if (!m[1]) return { history: true, count: NP_HISTORY_DEFAULT, capped: false }
-  if (!/^\d+$/.test(m[1]) || Number(m[1]) < 1) return { history: true, error: `Usage: /np -h [count] (1-${NP_HISTORY_MAX})` }
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  const at = tokens.findIndex((t) => t.startsWith('@') && t.length > 1)
+  const user = at >= 0 ? tokens[at].slice(1) : null
+  if (at >= 0) tokens.splice(at, 1)
+  const m = /^(?:-h|--history)\s*(\S*)\s*$/i.exec(tokens.join(' '))
+  if (!m) return { user, history: false }
+  if (!m[1]) return { user, history: true, count: NP_HISTORY_DEFAULT, capped: false }
+  if (!/^\d+$/.test(m[1]) || Number(m[1]) < 1) return { user, history: true, error: `Usage: /np [@user] -h [count] (1-${NP_HISTORY_MAX})` }
   const n = Number(m[1])
-  return { history: true, count: Math.min(n, NP_HISTORY_MAX), capped: n > NP_HISTORY_MAX }
+  return { user, history: true, count: Math.min(n, NP_HISTORY_MAX), capped: n > NP_HISTORY_MAX }
 }
 
 export interface BroadcastArgs {
@@ -175,28 +182,28 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'song', usage: '/song <title>', description: 'Share a song from the library', params: ['title'] },
   { name: 'search', usage: '/search <title>', description: 'Search the library and pick a result', params: ['title'] },
   { name: 'info', usage: '/info <title>', description: 'Show a song’s era, category, length and credits', params: ['title'] },
-  { name: 'np', usage: '/np  ·  /np -h [count] [-s]  ·  /np -hs [count]', description: 'Share what you’re currently playing, or -h to see your recent plays (-s posts them to the room)', aliases: ['nowplaying'], params: ['-h count'] },
-  { name: 'theme', usage: '/theme <name>  ·  /theme [-s]', description: 'Change your app theme, or list them with no name (-s posts the list to the room)', params: ['name'] },
+  { name: 'np', usage: '/np  ·  /np [@user] -h [count] [-s]', description: 'Share what you’re playing, or -h for recent plays. Add @user to look at someone else’s (if they share it); -s posts it to the room', aliases: ['nowplaying'], params: ['@user -h count'] },
+  { name: 'theme', usage: '/theme <name> [-s]  ·  /theme [-s]', description: 'Change your app theme, or list them with no name (-s posts the answer to the room)', params: ['name'] },
   { name: 'sharetheme', usage: '/sharetheme', description: 'Share your current theme so others can apply it', params: [] },
-  { name: 'mute', usage: '/mute @user', description: 'Hide a user’s messages for you', params: ['user'] },
-  { name: 'unmute', usage: '/unmute @user', description: 'Unhide a previously muted user', params: ['user'] },
-  { name: 'promote', usage: '/promote @user [editor|contributor|manager|news]', description: 'Make a member a server admin, or (site admins) grant a site role', params: ['user', 'role'] },
-  { name: 'demote', usage: '/demote @user <editor|contributor|manager|news>', description: 'Admins: remove a site role from a user', params: ['user', 'role'] },
-  { name: 'role', usage: '/role @user', description: 'Admins: show a user’s site roles and auto-approve settings', aliases: ['roles'], params: ['user'] },
-  { name: 'allow', usage: '/allow @user <edits|comp>', description: 'Admins: turn on auto-approve for a user’s edit or comp proposals', params: ['user', 'type'] },
-  { name: 'disallow', usage: '/disallow @user <edits|comp>', description: 'Admins: turn auto-approve back off', aliases: ['deny'], params: ['user', 'type'] },
+  { name: 'mute', usage: '/mute @user [-s]', description: 'Hide a user’s messages for you', params: ['user'] },
+  { name: 'unmute', usage: '/unmute @user [-s]', description: 'Unhide a previously muted user', params: ['user'] },
+  { name: 'promote', usage: '/promote @user [editor|contributor|manager|news] [-s]', description: 'Make a member a server admin, or (site admins) grant a site role', params: ['user', 'role'] },
+  { name: 'demote', usage: '/demote @user <editor|contributor|manager|news> [-s]', description: 'Admins: remove a site role from a user', params: ['user', 'role'] },
+  { name: 'role', usage: '/role @user [-s]', description: 'Admins: show a user’s site roles and auto-approve settings', aliases: ['roles'], params: ['user'] },
+  { name: 'allow', usage: '/allow @user <edits|comp> [-s]', description: 'Admins: turn on auto-approve for a user’s edit or comp proposals', params: ['user', 'type'] },
+  { name: 'disallow', usage: '/disallow @user <edits|comp> [-s]', description: 'Admins: turn auto-approve back off', aliases: ['deny'], params: ['user', 'type'] },
   { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server (they can rejoin)', params: ['user'] },
   { name: 'timeout', usage: '/timeout @user <minutes>', description: 'Temporarily stop a member from posting', aliases: ['to'], params: ['user', 'minutes'] },
   { name: 'untimeout', usage: '/untimeout @user', description: 'Lift a member’s timeout early', aliases: ['unto'], params: ['user'] },
   { name: 'ban', usage: '/ban @user [reason]', description: 'Ban a user from this server', params: ['user', 'reason'] },
   { name: 'unban', usage: '/unban @user', description: 'Lift a server ban so they can rejoin', params: ['user'] },
-  { name: 'bans', usage: '/bans', description: 'List everyone banned from this server', params: [] },
+  { name: 'bans', usage: '/bans [-s]', description: 'List everyone banned from this server', params: [] },
   { name: 'siteban', usage: '/siteban @user [reason]', description: 'Admins: ban a user from all chat and DMs', params: ['user', 'reason'] },
   { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
   { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
-  { name: 'broadcast', usage: '/broadcast [-l level] <message>  ·  /broadcast -h [count] [-s]', description: 'Admins: push a banner to everyone online, or -h [count] to see past broadcasts (-s posts them to the room)', aliases: ['bc'], params: ['message'] },
+  { name: 'broadcast', usage: '/broadcast [-s] [-l level] <message>  ·  /broadcast -h [count] [-s]', description: 'Admins: push a banner to everyone online, or -h [count] to see past broadcasts (-s posts them to the room)', aliases: ['bc'], params: ['message'] },
   { name: 'changelog', usage: '/changelog [-s]', description: 'Show the latest commit and whether it’s built and live yet (-s posts it to the room)', aliases: ['commit'], params: [] },
-  { name: 'seen', usage: '/seen @user', description: 'Show when a user was last online or active', aliases: ['lastseen'], params: ['user'] },
+  { name: 'seen', usage: '/seen @user [-s]', description: 'Show when a user was last online or active', aliases: ['lastseen'], params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help [-s]', description: 'List available commands (-s posts the list to the room)', params: [] },
 ]
