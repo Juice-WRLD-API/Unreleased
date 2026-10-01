@@ -16,10 +16,13 @@ import BroadcastHistoryCard from './BroadcastHistoryCard'
 import ChangelogCard from './ChangelogCard'
 import FeedbackSentCard from './FeedbackSentCard'
 import HelpCard from './HelpCard'
+import LinkPreviewCard from './LinkPreviewCard'
 import { linkMentions } from './people'
 import { useOpenUserCard } from './UserCard'
 import NewsShareCard from './NewsShareCard'
 import NowPlayingHistoryCard from './NowPlayingHistoryCard'
+import NowPlayingNowCard from './NowPlayingNowCard'
+import ResultCard from './ResultCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
@@ -93,7 +96,9 @@ function CommandCard({ card, room, messageId }: { card: SharedCommandCard; room?
     case 'themeList': return <ThemeListCard room={room} messageId={messageId} />
     case 'broadcastHistory': return <BroadcastHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} />
     case 'changelog': return <ChangelogCard room={room} messageId={messageId} status={card.status} />
-    case 'npHistory': return <NowPlayingHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} capped={card.capped} />
+    case 'npHistory': return <NowPlayingHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} capped={card.capped} user={card.user} />
+    case 'result': return <ResultCard room={room} messageId={messageId} title={card.title} text={card.text} />
+    case 'npNow': return <NowPlayingNowCard room={room} messageId={messageId} user={card.user} song={card.song} name={card.name} updatedAt={card.updated_at} />
     default: return null
   }
 }
@@ -131,7 +136,13 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (theme) return <ThemeShareCard theme={theme} />
     const command = decodeCommandCard(body)
     if (command) return <CommandCard card={command} />
-    return moderation ? <ModerationCard notice={moderation} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (moderation) return <ModerationCard notice={moderation} />
+    // Channel messages only. A preview is fetched through our server, which
+    // would see the URL - fine for a room it already relays in plaintext, not
+    // for a DM, so DMs (and anything encrypted, below) never get one.
+    return message.channel != null
+      ? <><MemoMarkdown text={body} people={people} meId={meId} /><LinkPreviewCard text={body} /></>
+      : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null

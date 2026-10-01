@@ -11,6 +11,7 @@
 - Optionally share what you're listening to. You can also turn off presence and read receipts.
 - Mute a person's messages in shared channels.
 - Mention anyone with `@`, or use `@everyone` in a channel. Mentions open that person's profile.
+- Links posted in a channel show a preview card with the page's title, description and image. DMs never fetch previews.
 - Share songs, playlists, news posts, lyrics cards and themes right into a chat.
 - Slash commands: `/song`, `/search`, `/mute`, `/unmute`, `/theme`, `/np`, `/promote`, `/info`, `/kick`, `/help`, `/feedback`, `/sharetheme`. They autocomplete and show hints for what to type next.
 - Roles and permissions, public servers you can browse and join, and moderation tools (timeout, ban, and site-wide restrictions).

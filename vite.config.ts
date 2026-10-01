@@ -145,11 +145,14 @@ export default defineConfig({
     strictPort: true,
     host: true,
     allowedHosts: ['.juicewrldapi.com', 'player.juicewrldapi.com', 'localhost', '127.0.0.1'],
+    // Chat link previews; run `npm run social-preview` alongside to get them.
+    proxy: { '/unfurl': 'http://127.0.0.1:8788' },
   },
   preview: {
     port: 5173,
     strictPort: true,
     host: true,
     allowedHosts: ['.juicewrldapi.com', 'player.juicewrldapi.com', 'localhost', '127.0.0.1'],
+    proxy: { '/unfurl': 'http://127.0.0.1:8788' },
   },
 })

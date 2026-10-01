@@ -46,6 +46,18 @@ location ~ ^/track/\d+/video\.mp4$ {
     proxy_read_timeout 180s;
 }
 
+# Chat link previews: the SPA asks GET /unfurl?url=<link> (same origin, so no
+# CORS) and the service fetches that page's og: tags on its behalf - see the
+# SSRF notes above serveUnfurl() in social-preview.mjs. Not bot-gated; real
+# browsers call it. nginx keeps the query string when proxy_pass has no URI.
+# X-Real-IP feeds the per-client fetch budget.
+location = /unfurl {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 15s;
+}
+
 # One block for every previewable route: the /track, /shared, /news and /u
 # prefixes, plus the exact pages / , /home, /playlists, /statistics and /wrld
 # (the site card, 999 FM, and /playlists?id=:id&view=shared public

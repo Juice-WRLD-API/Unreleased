@@ -20,9 +20,14 @@
 // 127.0.0.1 - only nginx should reach this), JWAPI_BASE, SITE_ORIGIN,
 // SITE_HOSTS (comma-separated hosts links may point back to),
 // SOCIAL_PREVIEW_CACHE (track video cache dir), SOCIAL_PREVIEW_VIDEO=0 to
-// turn playable track embeds off
+// turn playable track embeds off, SOCIAL_PREVIEW_UNFURL=0 to turn the chat
+// link-preview endpoint (GET /unfurl?url=) off
 
 import http from 'node:http'
+import https from 'node:https'
+import dns from 'node:dns'
+import net from 'node:net'
+import zlib from 'node:zlib'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -1175,6 +1180,275 @@ async function renderProfile(userId) {
   return renderPage({ title: name, description, image, imageAlt: name, url, componentEmbed })
 }
 
+// Chat link previews: GET /unfurl?url=<https url> -> { url, title, description?,
+// image?, siteName }. The browser can't read another site's og: tags (CORS),
+// and fetching from the viewer's machine would hand their IP to every linked
+// site, so the chat client asks this service instead. Unlike everything above,
+// the URL here is chosen by an arbitrary chat member, which makes this an
+// SSRF surface - so the fetch is fenced in: http(s) on the default ports only,
+// every resolved address (checked again at connect time, so DNS rebinding
+// can't swap one in) must be public, redirects are followed by hand and each
+// hop re-checked, only the first stretch of an HTML response is read, and
+// callers are budgeted. Only the parsed metadata is ever returned, never the
+// fetched body.
+const UNFURL_ENABLED = process.env.SOCIAL_PREVIEW_UNFURL !== '0'
+const UNFURL_TIMEOUT_MS = 6000
+// YouTube buries its og: tags ~710 KB in, behind a huge inline script.
+const UNFURL_MAX_BYTES = 1536 * 1024
+const UNFURL_MAX_REDIRECTS = 4
+const UNFURL_MAX_CONCURRENT = 8
+const UNFURL_FETCHES_PER_MIN_PER_IP = 30
+const UNFURL_HIT_TTL_MS = 60 * 60 * 1000
+const UNFURL_MISS_TTL_MS = 10 * 60 * 1000
+const UNFURL_CACHE_MAX = 1000
+
+const privateRanges = new net.BlockList()
+for (const [addr, prefix] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
+  ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
+  ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 3],
+]) privateRanges.addSubnet(addr, prefix, 'ipv4')
+for (const [addr, prefix] of [
+  ['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8],
+  // Ranges that embed an IPv4 address (NAT64, 6to4) or are documentation-only.
+  ['64:ff9b::', 96], ['2002::', 16], ['2001:db8::', 32],
+]) privateRanges.addSubnet(addr, prefix, 'ipv6')
+
+// BlockList.check treats an IPv4-mapped IPv6 address (::ffff:127.0.0.1) as the
+// IPv4 address it wraps, so those can't be used to get around the v4 ranges.
+const isPublicAddress = (address) => {
+  const family = net.isIP(address)
+  return family !== 0 && !privateRanges.check(address, family === 4 ? 'ipv4' : 'ipv6')
+}
+
+// Used as the request's `lookup`, so the address that is validated is the one
+// that is connected to. One private answer among several rejects the lot.
+function safeLookup(hostname, options, callback) {
+  dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) return callback(err)
+    if (!addresses.length || !addresses.every((a) => isPublicAddress(a.address))) {
+      return callback(new Error(`${hostname} does not resolve to a public address`))
+    }
+    return options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family)
+  })
+}
+
+// null when the URL isn't one a preview may be fetched for.
+function unfurlTarget(raw) {
+  if (typeof raw !== 'string' || raw.length > 2000) return null
+  let u
+  try {
+    u = new URL(raw)
+  } catch {
+    return null
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+  if (u.username || u.password) return null
+  if (u.port && u.port !== (u.protocol === 'https:' ? '443' : '80')) return null
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (!host || (net.isIP(host) && !isPublicAddress(host))) return null
+  // The site's own pages only ever carry the generic tags, and the SPA doesn't
+  // need to unfurl itself.
+  if (SITE_HOSTS.has(u.host.toLowerCase())) return null
+  u.hash = ''
+  return u
+}
+
+function getOnce(u) {
+  return new Promise((resolve, reject) => {
+    const lib = u.protocol === 'https:' ? https : http
+    const req = lib.request(u, {
+      method: 'GET',
+      lookup: safeLookup,
+      agent: false,
+      timeout: UNFURL_TIMEOUT_MS,
+      signal: AbortSignal.timeout(UNFURL_TIMEOUT_MS),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; unreleased-linkpreview/1.0; +https://player.juicewrldapi.com)',
+        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
+        'Accept-Language': 'en',
+        'Accept-Encoding': 'gzip, deflate, br',
+      },
+    }, resolve)
+    req.on('timeout', () => req.destroy(new Error('timeout')))
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+// Resolves to { url, headers, html } for an HTML page, null for anything else.
+async function fetchHtml(start) {
+  let u = start
+  for (let hop = 0; hop <= UNFURL_MAX_REDIRECTS; hop++) {
+    const res = await getOnce(u)
+    // Destroying the stream early (or a dropped connection) emits 'error'; with
+    // no listener that would take the whole process down.
+    res.on('error', () => {})
+    const status = res.statusCode ?? 0
+    if (status >= 300 && status < 400 && res.headers.location) {
+      res.resume()
+      const next = unfurlTarget(new URL(res.headers.location, u).toString())
+      if (!next) return null
+      u = next
+      continue
+    }
+    const type = String(res.headers['content-type'] || '')
+    if (status < 200 || status >= 300 || !/^(text\/html|application\/xhtml\+xml)/i.test(type)) {
+      res.resume()
+      return null
+    }
+    const encoding = String(res.headers['content-encoding'] || '').toLowerCase()
+    const decoder = encoding === 'gzip' || encoding === 'x-gzip' ? zlib.createGunzip()
+      : encoding === 'deflate' ? zlib.createInflate()
+      : encoding === 'br' ? zlib.createBrotliDecompress()
+      : null
+    if (decoder) res.pipe(decoder)
+    const body = decoder ?? res
+    const chunks = []
+    let size = 0
+    let tail = ''
+    try {
+      for await (const chunk of body) {
+        chunks.push(chunk)
+        size += chunk.length
+        const text = chunk.toString('latin1')
+        if (size >= UNFURL_MAX_BYTES || (tail + text).toLowerCase().includes('</head>')) break
+        tail = text.slice(-7)
+      }
+    } finally {
+      res.destroy()
+      decoder?.destroy()
+    }
+    const bytes = Buffer.concat(chunks)
+    const label = /charset\s*=\s*["']?([\w-]+)/i.exec(type)?.[1] ?? /<meta[^>]+charset\s*=\s*["']?([\w-]+)/i.exec(bytes.toString('latin1', 0, 4096))?.[1] ?? 'utf-8'
+    let html
+    try {
+      html = new TextDecoder(label).decode(bytes)
+    } catch {
+      html = bytes.toString('utf8')
+    }
+    return { url: u, html }
+  }
+  return null
+}
+
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ndash: '–', mdash: '—', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“' }
+function decodeEntities(value) {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, body) => {
+    if (body[0] === '#') {
+      const code = body[1].toLowerCase() === 'x' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10)
+      try {
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole
+      } catch {
+        return whole
+      }
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? whole
+  })
+}
+
+const cleanText = (value, max) => {
+  const text = decodeEntities(String(value ?? '')).replace(/\s+/g, ' ').trim()
+  return text ? truncate(text, max) : null
+}
+
+// og:/twitter:/standard tags out of a page's <head>. Regex rather than a parser
+// is enough here: only <meta> and <title> are read, and a malformed page just
+// yields fewer fields.
+function parseMetadata(html, pageUrl) {
+  const head = html.split(/<\/head>/i)[0]
+  const meta = new Map()
+  for (const tag of head.match(/<meta\s[^>]*>/gi) ?? []) {
+    const attrs = {}
+    for (const m of tag.matchAll(/([a-z_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
+      attrs[m[1].toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? ''
+    }
+    const key = (attrs.property || attrs.name || '').toLowerCase()
+    if (key && attrs.content !== undefined && !meta.has(key)) meta.set(key, attrs.content)
+  }
+  const pick = (...keys) => keys.map((k) => meta.get(k)).find((v) => v && v.trim())
+  const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head)?.[1]
+
+  const title = cleanText(pick('og:title', 'twitter:title') ?? titleTag, 150)
+  if (!title) return null
+
+  // The client only loads https images (its CSP blocks the rest).
+  let image = null
+  const rawImage = pick('og:image:secure_url', 'og:image', 'og:image:url', 'twitter:image', 'twitter:image:src')
+  if (rawImage) {
+    try {
+      const resolved = new URL(decodeEntities(rawImage.trim()), pageUrl)
+      if (resolved.protocol === 'https:' && !resolved.username && !resolved.password && resolved.href.length <= 500) image = resolved.href
+    } catch {}
+  }
+  return {
+    url: pageUrl.href,
+    title,
+    description: cleanText(pick('og:description', 'twitter:description', 'description'), 300) ?? undefined,
+    image: image ?? undefined,
+    siteName: cleanText(pick('og:site_name'), 60) ?? pageUrl.hostname.replace(/^www\./, ''),
+  }
+}
+
+const unfurlCache = new Map() // href -> { expires, value }
+const unfurlInflight = new Map()
+const unfurlLog = new Map() // ip -> timestamps of uncached fetches
+let unfurlRunning = 0
+
+// Returns why a new fetch is refused, or null after recording it.
+function admitUnfurl(ip) {
+  const now = Date.now()
+  const cutoff = now - 60_000
+  const mine = (unfurlLog.get(ip) ?? []).filter((t) => t >= cutoff)
+  if (unfurlRunning >= UNFURL_MAX_CONCURRENT) return 'busy'
+  if (mine.length >= UNFURL_FETCHES_PER_MIN_PER_IP) return 'rate limited'
+  mine.push(now)
+  unfurlLog.set(ip, mine)
+  if (unfurlLog.size > 10000) for (const [k, list] of unfurlLog) if (!list.some((t) => t >= cutoff)) unfurlLog.delete(k)
+  return null
+}
+
+function rememberUnfurl(href, value) {
+  if (unfurlCache.size >= UNFURL_CACHE_MAX) unfurlCache.delete(unfurlCache.keys().next().value)
+  unfurlCache.set(href, { expires: Date.now() + (value ? UNFURL_HIT_TTL_MS : UNFURL_MISS_TTL_MS), value })
+}
+
+// Resolves to the preview, null (nothing to show), or 'refused' when the
+// caller is over budget - which is deliberately not cached.
+async function unfurl(target) {
+  const cached = unfurlCache.get(target.href)
+  if (cached && cached.expires > Date.now()) return cached.value
+  if (unfurlInflight.has(target.href)) return unfurlInflight.get(target.href)
+  if (admitUnfurl(requestIp.getStore() ?? 'unknown')) return 'refused'
+
+  unfurlRunning++
+  const job = fetchHtml(target)
+    .then((page) => (page ? parseMetadata(page.html, page.url) : null))
+    .catch(() => null)
+    .then((value) => {
+      rememberUnfurl(target.href, value)
+      return value
+    })
+    .finally(() => {
+      unfurlRunning--
+      unfurlInflight.delete(target.href)
+    })
+  unfurlInflight.set(target.href, job)
+  return job
+}
+
+async function serveUnfurl(res, rawUrl) {
+  const json = (status, body, cache = 'no-store') => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': cache })
+    res.end(JSON.stringify(body))
+  }
+  const target = UNFURL_ENABLED ? unfurlTarget(rawUrl) : null
+  if (!target) return json(404, {}, 'public, max-age=600')
+  const result = await unfurl(target)
+  if (result === 'refused') return json(429, {})
+  return result ? json(200, result, 'public, max-age=3600') : json(404, {}, 'public, max-age=600')
+}
+
 const server = http.createServer((req, res) => {
   // X-Real-IP is only believed from nginx on this box. If the service is
   // ever bound beyond loopback, direct callers are budgeted by their real
@@ -1191,7 +1465,10 @@ async function handle(req, res) {
     let html = null
     let match
 
-    if ((match = pathname.match(/^\/track\/(\d+)\/?$/))) {
+    if (pathname === '/unfurl') {
+      await serveUnfurl(res, searchParams.get('url'))
+      return
+    } else if ((match = pathname.match(/^\/track\/(\d+)\/?$/))) {
       html = await renderTrack(match[1])
     } else if ((match = pathname.match(/^\/track\/(\d+)\/video\.mp4$/))) {
       await serveTrackVideo(req, res, match[1], searchParams.get('v'))
