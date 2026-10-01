@@ -18,6 +18,7 @@ import HelpCard from './HelpCard'
 import { linkMentions } from './people'
 import { useOpenUserCard } from './UserCard'
 import NewsShareCard from './NewsShareCard'
+import NowPlayingHistoryCard from './NowPlayingHistoryCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
@@ -100,6 +101,7 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (notice?.kind === 'feedbackSent') return <FeedbackSentCard room={room} messageId={message.id} message={notice.message} />
     if (notice?.kind === 'broadcastHistory') return <BroadcastHistoryCard room={room} messageId={message.id} items={notice.items} total={notice.total} />
     if (notice?.kind === 'changelog') return <ChangelogCard room={room} messageId={message.id} status={notice.status} />
+    if (notice?.kind === 'npHistory') return <NowPlayingHistoryCard room={room} messageId={message.id} items={notice.items} total={notice.total} capped={notice.capped} />
     return null
   }
 

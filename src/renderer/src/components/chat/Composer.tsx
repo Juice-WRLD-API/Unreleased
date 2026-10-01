@@ -2,15 +2,17 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
+import { noticeToText } from '../../lib/chatNoticeText'
 import { fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
-import { CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
+import { CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, parseNpArgs, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
 import { adminGetUser, adminUpdateUser, type AdminUser } from '../../lib/userApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
-import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare } from '../../lib/chatShare'
+import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
-import { resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
+import { getSongsByIds, resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
+import { sortListeningPlays } from '../../lib/listeningPlays'
 import { allSkins, getSkin } from '../../lib/skins'
 import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
@@ -279,8 +281,17 @@ const Composer = forwardRef<ComposerHandle, {
   // commandBusy/toast('ok') the way the async ones below do. The list/help
   // cases post a local notice (see chatStore's postLocalNotice) instead of a
   // toast - a nicer, dismissible list that only this device ever sees.
-  const applyThemeCommand = (args: string): void => {
-    if (!args) { postLocalNotice(room, encodeLocalNotice({ kind: 'themeList' })); return }
+  // Commands that answer with a card only the sender sees can take `-s` to
+  // post the same answer to the room instead (see chatNoticeText) - one place
+  // decides which, so each command just hands over its payload.
+  const deliverNotice = async (payload: LocalNoticePayload, share: boolean): Promise<void> => {
+    const text = share ? noticeToText(payload) : null
+    if (text) await send(room, { text, files: [] })
+    else postLocalNotice(room, encodeLocalNotice(payload))
+  }
+
+  const applyThemeCommand = (args: string, share: boolean): void => {
+    if (!args) { void deliverNotice({ kind: 'themeList' }, share).catch((err) => toast(errorText(err, 'Message failed to send'))); return }
     const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
     const wanted = norm(args)
     const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
@@ -294,8 +305,8 @@ const Composer = forwardRef<ComposerHandle, {
   // server - postLocalNotice only ever writes into this device's own room
   // items - so it's visible only to the person who ran /help, and they can
   // dismiss it from the card itself.
-  const runHelpCommand = (): void => {
-    postLocalNotice(room, encodeLocalNotice({ kind: 'help' }))
+  const runHelpCommand = (share: boolean): void => {
+    void deliverNotice({ kind: 'help' }, share).catch((err) => toast(errorText(err, 'Message failed to send')))
   }
 
   const runMuteCommand = (args: string, usage: '/mute' | '/unmute'): void => {
@@ -600,8 +611,27 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, 'ok')
   }
 
-  const runChangelogCommand = async (): Promise<void> => {
-    postLocalNotice(room, encodeLocalNotice({ kind: 'changelog', status: await fetchChangelogStatus() }))
+  // `/np -h [count]`: newest-first slice of the merged listening log, titles
+  // resolved through the (cached) song lookup. Shown as a local card.
+  const runNowPlayingCommand = async (args: string): Promise<void> => {
+    const { share, rest } = splitShareFlag(args)
+    const np = parseNpArgs(rest)
+    if (!np.history) { await shareNowPlayingCommand(); return }
+    if ('error' in np) throw new Error(np.error)
+    const log = sortListeningPlays(useStore.getState().listeningPlays)
+    const recent = log.slice(0, np.count)
+    const songs = await getSongsByIds(recent.map((p) => p.song))
+    const names = new Map(songs.map((s) => [s.id, s.name]))
+    await deliverNotice({
+      kind: 'npHistory',
+      items: recent.map((p) => ({ song: p.song, name: names.get(p.song) ?? `Song #${p.song}`, played_at: p.played_at })),
+      total: log.length,
+      capped: np.capped,
+    }, share)
+  }
+
+  const runChangelogCommand = async (args: string): Promise<void> => {
+    await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus() }, splitShareFlag(args).share)
   }
 
   // `-h` lists past broadcasts as a local card (only this admin sees it);
@@ -612,7 +642,7 @@ const Composer = forwardRef<ComposerHandle, {
     const parsed = parseBroadcastArgs(args)
     if (parsed.history) {
       const { count, results } = await fetchBroadcastHistory(10)
-      postLocalNotice(room, encodeLocalNotice({ kind: 'broadcastHistory', items: results, total: count }))
+      await deliverNotice({ kind: 'broadcastHistory', items: results, total: count }, parsed.share)
       return
     }
     if (parsed.badLevel !== null) throw new Error(`Level must be one of: ${BROADCAST_LEVELS.join(', ')}`)
@@ -639,10 +669,14 @@ const Composer = forwardRef<ComposerHandle, {
     drafts.delete(draftKey)
     stopTyping()
 
-    if (cmd.command === 'theme') { applyThemeCommand(cmd.args); return }
+    if (cmd.command === 'theme') {
+      const { share, rest } = splitShareFlag(cmd.args)
+      applyThemeCommand(rest, share)
+      return
+    }
     if (cmd.command === 'mute') { runMuteCommand(cmd.args, '/mute'); return }
     if (cmd.command === 'unmute') { runMuteCommand(cmd.args, '/unmute'); return }
-    if (cmd.command === 'help') { runHelpCommand(); return }
+    if (cmd.command === 'help') { runHelpCommand(splitShareFlag(cmd.args).share); return }
 
     setCommandBusy(cmd.command)
     try {
@@ -663,7 +697,7 @@ const Composer = forwardRef<ComposerHandle, {
       } else if (cmd.command === 'info') {
         await runInfoCommand(cmd.args)
       } else if (cmd.command === 'np') {
-        await shareNowPlayingCommand()
+        await runNowPlayingCommand(cmd.args)
       } else if (cmd.command === 'sharetheme') {
         await runShareThemeCommand()
       } else if (cmd.command === 'promote') {
@@ -679,7 +713,7 @@ const Composer = forwardRef<ComposerHandle, {
       } else if (cmd.command === 'broadcast') {
         await runBroadcastCommand(cmd.args)
       } else if (cmd.command === 'changelog') {
-        await runChangelogCommand()
+        await runChangelogCommand(cmd.args)
       } else if (cmd.command === 'kick') {
         await runKickCommand(cmd.args)
       } else if (cmd.command === 'timeout') {

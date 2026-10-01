@@ -365,6 +365,7 @@ export type LocalNoticePayload =
   | { kind: 'feedbackSent'; message: string }
   | { kind: 'broadcastHistory'; items: BroadcastMessage[]; total: number }
   | { kind: 'changelog'; status: ChangelogStatus }
+  | { kind: 'npHistory'; items: { song: number; name: string; played_at: string }[]; total: number; capped: boolean }
 
 export function encodeLocalNotice(payload: LocalNoticePayload): string {
   return `${LOCAL_NOTICE_PREFIX}${JSON.stringify(payload)}`
