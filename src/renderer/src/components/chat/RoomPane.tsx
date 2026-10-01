@@ -6,6 +6,7 @@ import MessageList from './MessageList'
 import { useRoomPeople } from './people'
 import { TrustBanners } from './ChatTrust'
 import { ChatAvatar } from './ui'
+import { useOpenUserCard } from './UserCard'
 
 function TypingIndicator({ room }: { room: RoomRef }): JSX.Element {
   const typing = useChatStore((s) => s.typing[roomKey(room)])
@@ -46,6 +47,7 @@ export function useRoomInfo(room: RoomRef | null): {
   const meId = useChatStore((s) => s.meId)
   const me = useChatStore((s) => s.me)
   const online = useChatStore((s) => s.online)
+  const openUserCard = useOpenUserCard()
   return useMemo(() => {
     const platformAdmin = me?.role === 'administrator'
     if (!room) return { title: '', subtitle: '', icon: null, canModerate: false, encrypted: false }
@@ -69,12 +71,12 @@ export function useRoomInfo(room: RoomRef | null): {
       title: conv ? conversationTitle(conv, meId) : 'Direct message',
       subtitle,
       icon: others.length === 1 && !conv?.is_group
-        ? <ChatAvatar user={others[0].user} size={26} presence />
+        ? <ChatAvatar user={others[0].user} size={26} presence onClick={(e) => openUserCard(others[0].user, e)} />
         : <AtSign size={18} />,
       canModerate: platformAdmin,
       encrypted: true,
     }
-  }, [room, servers, conversations, meId, me, online])
+  }, [room, servers, conversations, meId, me, online, openUserCard])
 }
 
 function ChannelIntro({ room, title }: { room: RoomRef; title: string }): JSX.Element {
