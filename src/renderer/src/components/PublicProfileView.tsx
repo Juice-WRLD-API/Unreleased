@@ -551,21 +551,21 @@ export default function PublicProfileView(): JSX.Element {
             <div className="grid grid-cols-2 gap-2">
               {adminUser.role === 'editor' ? (
                 <button onClick={() => void doAdminUpdate({ role: 'applicant' })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Editor</button>
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">Editor</button>
               ) : (
                 <button onClick={() => void doAdminUpdate({ role: 'editor' })}
                   className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Editor</button>
               )}
               {adminUser.contributor_enabled ? (
                 <button onClick={() => void doAdminUpdate({ contributor_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Contrib</button>
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">Contributor</button>
               ) : (
                 <button onClick={() => void doAdminUpdate({ contributor_enabled: true })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Contrib</button>
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Contributor</button>
               )}
               {adminUser.manager_enabled ? (
                 <button onClick={() => void doAdminUpdate({ manager_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Manager</button>
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">Manager</button>
               ) : (
                 <button onClick={() => void doAdminUpdate({ manager_enabled: true })}
                   className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Manager</button>
