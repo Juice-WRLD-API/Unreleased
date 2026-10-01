@@ -111,8 +111,10 @@ export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) =>
     icon: item.image_url,
     onOpen: () => { focusAppWindow(); onOpen(item) },
   })
-  if (!notificationsSupported() || Notification.permission !== 'granted') return
+  // Chime goes with the banner, not the OS notification, so it plays even when
+  // OS permission was never granted (same as chat).
   playNotificationSound()
+  if (!notificationsSupported() || Notification.permission !== 'granted') return
   try {
     const n = new Notification(item.title, {
       body,

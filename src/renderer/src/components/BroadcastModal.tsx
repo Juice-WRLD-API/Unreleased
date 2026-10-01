@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2, AlertCircle, Check, Megaphone, X } from 'lucide-react'
 import { ModalOverlay, LockToggle } from './Modal'
-import { sendBroadcast, BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, BROADCAST_MAX_TITLE, type BroadcastLevel } from '../lib/broadcastApi'
+import { sendBroadcast, fetchBroadcastHistory, BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, BROADCAST_MAX_TITLE, type BroadcastLevel, type BroadcastMessage } from '../lib/broadcastApi'
 import { errorMessage } from '../lib/format'
+import { relativeTime } from './adminShared'
 
 const LEVEL_STYLE: Record<BroadcastLevel, string> = {
   info: 'bg-accent/15 text-accent border-accent/30',
@@ -11,9 +12,10 @@ const LEVEL_STYLE: Record<BroadcastLevel, string> = {
   error: 'bg-red-500/15 text-red-400 border-red-500/30',
 }
 
-// Admin-only popup: pushes one message to everyone connected right now. Nothing is
-// stored server-side, so people who are offline never see it - say so before
-// the admin sends, and confirm before sending since it can't be recalled.
+// Admin-only popup: pushes one message to everyone connected right now. People
+// who are offline pick it up from the server's 24h catch-up list when they next
+// connect, and it can't be recalled - so confirm before sending. Past
+// broadcasts are listed underneath.
 export default function BroadcastModal({ onClose }: { onClose: () => void }): JSX.Element {
   const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
@@ -22,6 +24,18 @@ export default function BroadcastModal({ onClose }: { onClose: () => void }): JS
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
+  const [history, setHistory] = useState<BroadcastMessage[] | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+
+  const loadHistory = useCallback(async (): Promise<void> => {
+    try {
+      setHistory((await fetchBroadcastHistory(20)).results)
+      setHistoryError(null)
+    } catch (e) {
+      setHistoryError(errorMessage(e, 'Failed to load history'))
+    }
+  }, [])
+  useEffect(() => { void loadHistory() }, [loadHistory])
 
   const trimmed = message.trim()
 
@@ -31,6 +45,7 @@ export default function BroadcastModal({ onClose }: { onClose: () => void }): JS
       await sendBroadcast({ message: trimmed, title: title.trim() || undefined, level })
       setSent(true)
       setTitle(''); setMessage('')
+      void loadHistory()
     } catch (e) {
       setError(errorMessage(e, 'Failed to send broadcast'))
     } finally {
@@ -67,7 +82,7 @@ export default function BroadcastModal({ onClose }: { onClose: () => void }): JS
         <div className="px-5 py-4 space-y-4">
 
         <p className="text-text-muted text-xs leading-relaxed">
-          Shows as a banner for everyone using the app right now. It isn't saved, so people who are offline won't see it later.
+          Shows as a banner for everyone using the app right now. People who are offline will see it when they next connect, if that's within 24 hours.
         </p>
 
         <label className="block">
@@ -127,6 +142,31 @@ export default function BroadcastModal({ onClose }: { onClose: () => void }): JS
             <Megaphone size={14} /> Broadcast
           </button>
         )}
+
+        <div className="pt-2 border-t border-[var(--border)]">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-2">Recent broadcasts</p>
+          {historyError ? (
+            <p className="text-xs text-red-400">{historyError}</p>
+          ) : history === null ? (
+            <Loader2 size={14} className="animate-spin text-text-muted" />
+          ) : history.length === 0 ? (
+            <p className="text-xs text-text-muted">Nothing sent yet.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {history.map((b) => (
+                <li key={b.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2">
+                  <div className="flex items-center gap-2 text-[10px] text-text-muted">
+                    <span className={`px-1.5 py-px rounded border font-semibold capitalize ${LEVEL_STYLE[b.level] ?? LEVEL_STYLE.info}`}>{b.level}</span>
+                    <span className="truncate">{b.sender}</span>
+                    <span className="ml-auto shrink-0">{relativeTime(b.sent_at)}</span>
+                  </div>
+                  {b.title && <p className="text-xs font-semibold text-text-primary mt-1 break-words">{b.title}</p>}
+                  <p className="text-xs text-text-secondary mt-0.5 break-words whitespace-pre-wrap">{b.message}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         </div>
       </div>
       )}
