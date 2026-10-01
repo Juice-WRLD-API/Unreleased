@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { hasChatAccess } from '../lib/chatAccess'
+import { showStaffProfile } from '../lib/userApi'
 import { getSkin, createCustomSkin, parseSkinFile, type Skin } from '../lib/skins'
 import {
   orderedNavItems, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, type NavItemDef,
@@ -93,7 +94,7 @@ export function useSettingsAppearance(opts?: {
   // (alwaysVisible) are listed too - they reorder like any other row - but
   // render without an eye on the calling side, since isNavItemVisible
   // short-circuits on them.
-  const allNavRows = orderedNavItems(navOrder, hasChatAccess(account))
+  const allNavRows = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account))
   const navRows = opts?.filterNavRows ? allNavRows.filter(opts.filterNavRows) : allNavRows
   const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
   const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
@@ -117,7 +118,7 @@ export function useSettingsAppearance(opts?: {
   // even when a web user rearranges the visible ones.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder, true).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true, true).map((i) => i.view)
     const dragView = navRows[fromRow].view
     const targetView = navRows[toRow].view
     const from = full.indexOf(dragView)
