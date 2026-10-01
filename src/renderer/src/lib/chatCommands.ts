@@ -6,7 +6,7 @@ import { BROADCAST_LEVELS, type BroadcastLevel } from './broadcastApi'
 // alone and sent as normal text, same as before this feature existed.
 export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick'
   | 'timeout' | 'untimeout' | 'ban' | 'unban' | 'bans' | 'siteban' | 'sitemute' | 'siteunban'
-  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'feedback' | 'help'
+  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'changelog' | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -19,7 +19,7 @@ export interface ParsedChatCommand {
 const KNOWN_COMMANDS = new Set<string>([
   'song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick',
   'timeout', 'untimeout', 'ban', 'unban', 'bans', 'siteban', 'sitemute', 'siteunban',
-  'demote', 'role', 'allow', 'disallow', 'broadcast', 'feedback', 'help',
+  'demote', 'role', 'allow', 'disallow', 'broadcast', 'changelog', 'feedback', 'help',
 ])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
@@ -38,6 +38,7 @@ const ALIASES: Record<string, ChatCommandName> = {
   roles: 'role',
   deny: 'disallow',
   bc: 'broadcast',
+  commit: 'changelog',
 }
 
 export interface BroadcastArgs {
@@ -137,6 +138,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
   { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
   { name: 'broadcast', usage: '/broadcast [-l level] <message>  ·  /broadcast -h', description: 'Admins: push a banner to everyone online, or -h to see past broadcasts', aliases: ['bc'], params: ['message'] },
+  { name: 'changelog', usage: '/changelog', description: 'Show the latest commit and whether it’s built and live yet', aliases: ['commit'], params: [] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help', description: 'List available commands', params: [] },
 ]

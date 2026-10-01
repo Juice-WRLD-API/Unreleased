@@ -1,3 +1,4 @@
+import type { ChangelogStatus } from './appVersion'
 import type { BroadcastMessage } from './broadcastApi'
 import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
 
@@ -363,6 +364,7 @@ export type LocalNoticePayload =
   | { kind: 'themeList' }
   | { kind: 'feedbackSent'; message: string }
   | { kind: 'broadcastHistory'; items: BroadcastMessage[]; total: number }
+  | { kind: 'changelog'; status: ChangelogStatus }
 
 export function encodeLocalNotice(payload: LocalNoticePayload): string {
   return `${LOCAL_NOTICE_PREFIX}${JSON.stringify(payload)}`

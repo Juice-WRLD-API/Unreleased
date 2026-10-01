@@ -12,6 +12,7 @@ import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
 import rehypeChatEmoji from './emojiRehype'
 import BroadcastHistoryCard from './BroadcastHistoryCard'
+import ChangelogCard from './ChangelogCard'
 import FeedbackSentCard from './FeedbackSentCard'
 import HelpCard from './HelpCard'
 import { linkMentions } from './people'
@@ -98,6 +99,7 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (notice?.kind === 'themeList') return <ThemeListCard room={room} messageId={message.id} />
     if (notice?.kind === 'feedbackSent') return <FeedbackSentCard room={room} messageId={message.id} message={notice.message} />
     if (notice?.kind === 'broadcastHistory') return <BroadcastHistoryCard room={room} messageId={message.id} items={notice.items} total={notice.total} />
+    if (notice?.kind === 'changelog') return <ChangelogCard room={room} messageId={message.id} status={notice.status} />
     return null
   }
 

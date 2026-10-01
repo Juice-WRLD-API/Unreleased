@@ -53,7 +53,15 @@ async function fetchDeployedCommit(): Promise<string | null> {
   }
 }
 
-async function fetchBranchTip(): Promise<string> {
+export interface BranchTip {
+  sha: string
+  message: string
+  author: string
+  date: string
+  url: string
+}
+
+async function fetchBranchTipCommit(): Promise<BranchTip> {
   const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${BUILD_BRANCH}`, {
     headers: { Accept: 'application/vnd.github+json' },
     // Our own `cached` module var already governs staleness (see CACHE_MS
@@ -63,9 +71,48 @@ async function fetchBranchTip(): Promise<string> {
     cache: 'no-store',
   })
   if (!res.ok) throw new Error(String(res.status))
-  const data = (await res.json()) as { sha?: string }
+  const data = (await res.json()) as {
+    sha?: string
+    html_url?: string
+    commit?: { message?: string; author?: { name?: string; date?: string }; committer?: { date?: string } }
+  }
   if (!data.sha) throw new Error('no sha')
-  return data.sha
+  return {
+    sha: data.sha,
+    message: data.commit?.message ?? '',
+    author: data.commit?.author?.name ?? 'unknown',
+    date: data.commit?.committer?.date ?? data.commit?.author?.date ?? '',
+    url: data.html_url ?? `https://github.com/${REPO}/commit/${data.sha}`,
+  }
+}
+
+async function fetchBranchTip(): Promise<string> {
+  return (await fetchBranchTipCommit()).sha
+}
+
+// 'live'      the site is serving the branch's latest commit
+// 'building'  the site is still serving an older commit (not built/deployed yet)
+// 'unknown'   the site's version.json couldn't be read (dev server, Electron,
+//             offline), so the best we can say is whether *this* build matches
+export interface ChangelogStatus {
+  branch: string
+  tip: BranchTip
+  deployed: string | null
+  running: string
+  built: 'live' | 'building' | 'unknown'
+  // This tab booted from an older build than the one now live - a reload runs it.
+  needsReload: boolean
+}
+
+// Backs /changelog: the newest commit on this build's branch, and whether the
+// deployed site has caught up to it - same two sources (`version.json`, the
+// GitHub branch tip) as the About page's freshness bulb above.
+export async function fetchChangelogStatus(): Promise<ChangelogStatus> {
+  if (BUILD_BRANCH === 'unknown') throw new Error("This build doesn't know which branch it came from")
+  const [tip, deployed] = await Promise.all([fetchBranchTipCommit(), fetchDeployedCommit()])
+  const built = deployed === null ? 'unknown' : tip.sha.startsWith(deployed) ? 'live' : 'building'
+  const needsReload = built === 'live' && COMMIT_HASH !== 'dev' && COMMIT_HASH !== 'unknown' && !tip.sha.startsWith(COMMIT_HASH)
+  return { branch: BUILD_BRANCH, tip, deployed, running: COMMIT_HASH, built, needsReload }
 }
 
 // Works out whether this build is up to date, in order of what a reload can fix:

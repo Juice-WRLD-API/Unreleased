@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
+import { fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
 import { CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
 import { adminGetUser, adminUpdateUser, type AdminUser } from '../../lib/userApi'
@@ -599,6 +600,10 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, 'ok')
   }
 
+  const runChangelogCommand = async (): Promise<void> => {
+    postLocalNotice(room, encodeLocalNotice({ kind: 'changelog', status: await fetchChangelogStatus() }))
+  }
+
   // `-h` lists past broadcasts as a local card (only this admin sees it);
   // otherwise it pushes a new one to everyone online. A broadcast can't be
   // recalled, so sending asks first, same as the profile page's modal.
@@ -673,6 +678,8 @@ const Composer = forwardRef<ComposerHandle, {
         await setAutoApprove(cmd.args, false)
       } else if (cmd.command === 'broadcast') {
         await runBroadcastCommand(cmd.args)
+      } else if (cmd.command === 'changelog') {
+        await runChangelogCommand()
       } else if (cmd.command === 'kick') {
         await runKickCommand(cmd.args)
       } else if (cmd.command === 'timeout') {
