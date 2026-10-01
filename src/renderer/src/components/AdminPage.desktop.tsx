@@ -131,32 +131,40 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className={`shrink-0 flex items-center gap-3 pb-0 border-b border-[var(--border)] ${embedded ? 'px-4' : 'px-6'}`}
-        style={{ paddingTop: embedded ? 4 : 16 }}>
+      <div className={`shrink-0 flex items-center gap-3 py-1.5 ${nav.length > 1 ? '' : 'border-b border-[var(--border)]'} ${embedded ? 'px-4' : 'px-6'}`}>
         {embedded && onExit ? (
           <button onClick={onExit}
-            className="flex items-center gap-1.5 p-1.5 -ml-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary mb-3 text-xs font-semibold">
+            className="flex items-center gap-1.5 p-1.5 -ml-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary text-xs font-semibold">
             <ChevronLeft size={16} /> Dashboard
           </button>
         ) : !embedded ? (
           <button onClick={() => go('api-tracker')}
-            className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary mb-3">
+            className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary">
             <ChevronLeft size={16} />
           </button>
         ) : null}
-        <div className="mb-3 min-w-0 flex-1">
+        <div className="min-w-0 flex-1 truncate">
           <span className="text-text-primary font-bold text-sm">{activeNavItem?.label ?? (isFullAdmin ? 'Admin' : 'Manager')}</span>
           {!embedded && account?.discord_username && (
             <span className="text-text-muted text-xs ml-2">{account.discord_username}</span>
           )}
         </div>
+        {/* A tab's data loads once per visit (see the sig comment in
+            useAdminQueue) rather than refetching every time it's reselected -
+            this is the explicit way back to fresh data instead. */}
+        {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+          <button onClick={() => refresh()} disabled={loading} title="Refresh"
+            className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          </button>
+        )}
       </div>
 
       {nav.length > 1 && (
         <div className={`shrink-0 flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] scrollbar-none ${embedded ? 'px-4' : 'px-6'}`}>
           {nav.map(item => (
             <button key={item.id} onClick={() => switchTab(item.id)}
-              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 my-1 rounded-lg text-[11px] font-semibold transition-colors ${
+              className={`shrink-0 flex items-center gap-1.5 px-2 py-1 my-0.5 rounded-lg text-[11px] font-semibold transition-colors ${
                 tab === item.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
               }`}>
               {item.label}
@@ -165,18 +173,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               )}
             </button>
           ))}
-        </div>
-      )}
-
-      {/* A tab's data loads once per visit (see the sig comment in
-          useAdminQueue) rather than refetching every time it's reselected -
-          this is the explicit way back to fresh data instead. */}
-      {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
-        <div className={`shrink-0 flex items-center justify-end border-b border-[var(--border)] ${embedded ? 'px-4' : 'px-6'} py-1.5`}>
-          <button onClick={() => refresh()} disabled={loading} title="Refresh"
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-accent hover:text-accent/80 transition-colors disabled:opacity-40">
-            <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
-          </button>
         </div>
       )}
 

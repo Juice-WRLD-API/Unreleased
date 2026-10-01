@@ -138,7 +138,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         <div className="flex items-center gap-1">
           {embedded && onExit ? (
             <button onClick={onExit} title="Back"
-              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
+              className="w-10 h-10 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
               <ChevronLeft size={20} />
             </button>
           ) : !embedded ? (
@@ -148,9 +148,18 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
             </button>
           ) : null}
           <div className="flex-1 min-w-0 pl-1.5">
-            <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">{activeNavItem?.label ?? (managerOnly ? 'Manager' : 'Admin')}</h1>
+            <h1 className="text-text-primary text-[17px] font-bold leading-tight truncate">{activeNavItem?.label ?? (managerOnly ? 'Manager' : 'Admin')}</h1>
             {!embedded && account?.discord_username && <p className="text-text-muted text-xs truncate">{account.discord_username}</p>}
           </div>
+          {/* A tab's data loads once per visit (see the sig comment in
+              useAdminQueue) rather than refetching every time it's reselected -
+              this is the explicit way back to fresh data instead. */}
+          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+            <button onClick={() => refresh()} disabled={loading} title="Refresh"
+              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-accent active:bg-surface-overlay transition-colors disabled:opacity-40">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -158,7 +167,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         <div className="shrink-0 flex items-center gap-1 overflow-x-auto px-2 pb-1.5 scrollbar-none">
           {nav.map(item => (
             <button key={item.id} onClick={() => switchTab(item.id)}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
                 tab === item.id ? 'bg-accent/15 text-accent' : 'text-text-muted active:bg-surface-overlay'
               }`}>
               {item.label}
@@ -167,18 +176,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               )}
             </button>
           ))}
-        </div>
-      )}
-
-      {/* A tab's data loads once per visit (see the sig comment in
-          useAdminQueue) rather than refetching every time it's reselected -
-          this is the explicit way back to fresh data instead. */}
-      {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
-        <div className="shrink-0 flex items-center justify-end px-3 pb-1.5">
-          <button onClick={() => refresh()} disabled={loading} title="Refresh"
-            className="flex items-center gap-1.5 text-xs font-semibold text-accent active:text-accent/80 transition-colors disabled:opacity-40">
-            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          </button>
         </div>
       )}
 
