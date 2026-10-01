@@ -548,6 +548,28 @@ export default function PublicProfileView(): JSX.Element {
           ) : adminUser.role === 'administrator' ? (
             <p className="text-text-muted text-xs italic">Administrators can only be modified from the admin console.</p>
           ) : (
+            <>
+            {(adminUser.role === 'editor' || adminUser.contributor_enabled) && (
+              <div className="space-y-1.5 mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                {adminUser.role === 'editor' && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Song edit proposals
+                    <input type="checkbox" checked={adminUser.auto_approve_proposals}
+                      onChange={(e) => void doAdminUpdate({ auto_approve_proposals: e.target.checked })}
+                      className="w-4 h-4 accent-[var(--accent)]" />
+                  </label>
+                )}
+                {adminUser.contributor_enabled && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Comp file proposals
+                    <input type="checkbox" checked={adminUser.auto_approve_comp_proposals}
+                      onChange={(e) => void doAdminUpdate({ auto_approve_comp_proposals: e.target.checked })}
+                      className="w-4 h-4 accent-[var(--accent)]" />
+                  </label>
+                )}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               {adminUser.role === 'editor' ? (
                 <button onClick={() => void doAdminUpdate({ role: 'applicant' })}
@@ -575,6 +597,7 @@ export default function PublicProfileView(): JSX.Element {
                 {adminUser.is_active ? 'Disable account' : 'Enable account'}
               </button>
             </div>
+            </>
           )}
         </div>
       )}
