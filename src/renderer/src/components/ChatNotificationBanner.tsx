@@ -10,6 +10,13 @@ interface BannerToast extends ChatNotificationPayload {
 
 const AUTO_DISMISS_MS = 6000
 
+const LEVEL_BORDER: Record<NonNullable<ChatNotificationPayload['level']>, string> = {
+  info: 'border-accent/50',
+  success: 'border-emerald-500/50',
+  warning: 'border-amber-500/60',
+  error: 'border-red-500/60',
+}
+
 // Mounted once in the main window (App), next to NewsNotifier. Shows a
 // Discord-style in-app banner whenever a chat notification fires, so new
 // messages are visible even while browsing somewhere else in the app.
@@ -20,7 +27,7 @@ export default function ChatNotificationBanner(): JSX.Element | null {
   useEffect(() => onChatNotificationBanner((payload) => {
     const toastId = nextId.current++
     setToasts((t) => [...t.slice(-2), { ...payload, toastId }])
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.toastId !== toastId)), AUTO_DISMISS_MS)
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.toastId !== toastId)), payload.autoDismissMs ?? AUTO_DISMISS_MS)
   }), [])
 
   if (toasts.length === 0) return null
@@ -39,7 +46,7 @@ export default function ChatNotificationBanner(): JSX.Element | null {
         <div
           key={t.toastId}
           {...clickable(() => { t.onOpen(); dismiss(t.toastId) })}
-          className="animate-slide-in-right pointer-events-auto cursor-pointer flex items-start gap-2.5 p-3 rounded-xl border border-[var(--border)] bg-surface shadow-2xl"
+          className={`animate-slide-in-right pointer-events-auto cursor-pointer flex items-start gap-2.5 p-3 rounded-xl border bg-surface shadow-2xl ${t.level ? LEVEL_BORDER[t.level] : 'border-[var(--border)]'}`}
         >
           {t.icon ? (
             <img src={t.icon} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />

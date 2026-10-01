@@ -16,6 +16,8 @@ import { apiRequest, authHeaders } from './apiClient'
 import { fetchNews, NEWS_ENABLED, type NewsItem } from './newsApi'
 import { notificationsSupported, notificationPermission, ensureNotifyPermission, focusAppWindow, playNotificationSound } from './notifications'
 
+import { showNotificationBanner } from './chatNotifications'
+
 export { notificationsSupported, notificationPermission, ensureNotifyPermission }
 
 const SUBS_KEY = 'unreleased:newsSubscriptions'
@@ -100,10 +102,18 @@ export function setNotificationsEnabled(on: boolean): void {
 // Fires a single OS notification for a post. Clicking it focuses the app (in
 // Electron) and routes to News via the callback.
 export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) => void): void {
+  const body = item.summary?.trim() || item.body?.trim().slice(0, 140) || ''
+  // In-app banner shows regardless of OS permission.
+  showNotificationBanner({
+    id: item.id,
+    title: item.title,
+    body,
+    icon: item.image_url,
+    onOpen: () => { focusAppWindow(); onOpen(item) },
+  })
   if (!notificationsSupported() || Notification.permission !== 'granted') return
   playNotificationSound()
   try {
-    const body = item.summary?.trim() || item.body?.trim().slice(0, 140) || ''
     const n = new Notification(item.title, {
       body,
       icon: item.image_url ?? undefined,

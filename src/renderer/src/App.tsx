@@ -63,6 +63,7 @@ import RadioVotePopup from './components/RadioVotePopup'
 import LastfmScrobbler from './components/LastfmScrobbler'
 import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
+import BroadcastNotifier from './components/BroadcastNotifier'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import ReportModal from './components/ReportModal'
 import InstallPrompt from './components/InstallPrompt'
@@ -358,6 +359,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       <ErrorBoundary fallback={null}><MoreNavSheet /></ErrorBoundary>

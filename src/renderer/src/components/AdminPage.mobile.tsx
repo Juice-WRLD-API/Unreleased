@@ -22,6 +22,7 @@ import CompProposalsTab from './CompProposalsTab.mobile'
 import ChannelsTab from './ChannelsTab.mobile'
 import EraTab from './EraTab.mobile'
 import CdnNodesTab from './CdnNodesTab.mobile'
+import BroadcastTab from './BroadcastTab'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
@@ -154,7 +155,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'broadcast' && tab !== 'security' && (
             <button onClick={() => refresh()} disabled={loading} title="Refresh"
               className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-accent active:bg-surface-overlay transition-colors disabled:opacity-40">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -240,6 +241,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('cdn-nodes') && (
           <div className={tab === 'cdn-nodes' ? 'h-full' : 'hidden'}>
             <CdnNodesTab />
+          </div>
+        )}
+        {visited.has('broadcast') && (
+          <div className={tab === 'broadcast' ? 'h-full' : 'hidden'}>
+            <BroadcastTab />
           </div>
         )}
         {visited.has('security') && (
@@ -992,35 +998,23 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                         </div>
                       )}
 
+                      <div className="space-y-1.5 mb-3">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+                        {([
+                          ['Editor', u.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
+                          ['Contributor', !!u.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
+                          ['Manager', !!u.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
+                          ['News', !!u.news_enabled, (on: boolean) => ({ news_enabled: on })],
+                        ] as const).map(([label, checked, payload]) => (
+                          <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                            {label}
+                            <input type="checkbox" checked={checked}
+                              onChange={e => doUpdate(u.user_id, payload(e.target.checked))}
+                              className="w-4 h-4 accent-[var(--accent)]" />
+                          </label>
+                        ))}
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
-                        {u.role === 'editor' ? (
-                          <button onClick={() => doUpdate(u.user_id, { role: 'applicant' })}
-                            className="h-9 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 active:bg-red-500/15 transition-colors">−Editor</button>
-                        ) : (
-                          <button onClick={() => doUpdate(u.user_id, { role: 'editor' })}
-                            className="h-9 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/15 transition-colors">+Editor</button>
-                        )}
-                        {u.contributor_enabled ? (
-                          <button onClick={() => doUpdate(u.user_id, { contributor_enabled: false })}
-                            className="h-9 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 active:bg-red-500/15 transition-colors">−Contrib</button>
-                        ) : (
-                          <button onClick={() => doUpdate(u.user_id, { contributor_enabled: true })}
-                            className="h-9 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/15 transition-colors">+Contrib</button>
-                        )}
-                        {u.manager_enabled ? (
-                          <button onClick={() => doUpdate(u.user_id, { manager_enabled: false })}
-                            className="h-9 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 active:bg-red-500/15 transition-colors">−Manager</button>
-                        ) : (
-                          <button onClick={() => doUpdate(u.user_id, { manager_enabled: true })}
-                            className="h-9 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/15 transition-colors">+Manager</button>
-                        )}
-                        {u.news_enabled ? (
-                          <button onClick={() => doUpdate(u.user_id, { news_enabled: false })}
-                            className="h-9 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 active:bg-red-500/15 transition-colors">−News</button>
-                        ) : (
-                          <button onClick={() => doUpdate(u.user_id, { news_enabled: true })}
-                            className="h-9 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/15 transition-colors">+News</button>
-                        )}
                         <button onClick={() => doUpdate(u.user_id, { is_active: !u.is_active })}
                           className="col-span-2 h-9 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay active:bg-surface-raised transition-colors">
                           {u.is_active ? 'Disable account' : 'Enable account'}

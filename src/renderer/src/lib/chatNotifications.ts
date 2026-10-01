@@ -30,6 +30,10 @@ export interface ChatNotificationPayload {
   body: string
   icon?: string | null
   onOpen: () => void
+  /** Banner lifetime; the toast default applies when omitted. */
+  autoDismissMs?: number
+  /** Tints the banner (admin broadcasts); plain toast when omitted. */
+  level?: 'info' | 'success' | 'warning' | 'error'
 }
 
 // In-app banner (Discord-style toast) subscribers - kept separate from the OS
@@ -41,6 +45,12 @@ const bannerListeners = new Set<BannerListener>()
 export function onChatNotificationBanner(listener: BannerListener): () => void {
   bannerListeners.add(listener)
   return () => bannerListeners.delete(listener)
+}
+
+/** Shows the in-app banner only (no sound, no OS notification) - for other
+ *  notification sources such as news that reuse the same toast. */
+export function showNotificationBanner(payload: ChatNotificationPayload): void {
+  for (const listener of bannerListeners) listener(payload)
 }
 
 // Fires a chat notification: plays the chime, shows the in-app banner, and -

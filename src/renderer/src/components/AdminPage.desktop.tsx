@@ -19,6 +19,7 @@ import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
+import BroadcastTab from './BroadcastTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
@@ -152,7 +153,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+        {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'broadcast' && tab !== 'security' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -251,6 +252,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('cdn-nodes') && (
           <div className={tab === 'cdn-nodes' ? 'h-full' : 'hidden'}>
             <CdnNodesTab />
+          </div>
+        )}
+        {visited.has('broadcast') && (
+          <div className={tab === 'broadcast' ? 'h-full' : 'hidden'}>
+            <BroadcastTab />
           </div>
         )}
         {visited.has('security') && (
@@ -1108,35 +1114,23 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
 
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-2">Role & status</p>
+                  <div className="space-y-1.5 mb-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+                    {([
+                      ['Editor', selected.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
+                      ['Contributor', !!selected.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
+                      ['Manager', !!selected.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
+                      ['News', !!selected.news_enabled, (on: boolean) => ({ news_enabled: on })],
+                    ] as const).map(([label, checked, payload]) => (
+                      <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                        {label}
+                        <input type="checkbox" checked={checked}
+                          onChange={e => doUpdate(selected.user_id, payload(e.target.checked))}
+                          className="w-4 h-4 accent-[var(--accent)]" />
+                      </label>
+                    ))}
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
-                    {selected.role === 'editor' ? (
-                      <button onClick={() => doUpdate(selected.user_id, { role: 'applicant' })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Editor</button>
-                    ) : (
-                      <button onClick={() => doUpdate(selected.user_id, { role: 'editor' })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Editor</button>
-                    )}
-                    {selected.contributor_enabled ? (
-                      <button onClick={() => doUpdate(selected.user_id, { contributor_enabled: false })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Contrib</button>
-                    ) : (
-                      <button onClick={() => doUpdate(selected.user_id, { contributor_enabled: true })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Contrib</button>
-                    )}
-                    {selected.manager_enabled ? (
-                      <button onClick={() => doUpdate(selected.user_id, { manager_enabled: false })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Manager</button>
-                    ) : (
-                      <button onClick={() => doUpdate(selected.user_id, { manager_enabled: true })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Manager</button>
-                    )}
-                    {selected.news_enabled ? (
-                      <button onClick={() => doUpdate(selected.user_id, { news_enabled: false })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−News</button>
-                    ) : (
-                      <button onClick={() => doUpdate(selected.user_id, { news_enabled: true })}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+News</button>
-                    )}
                     <button onClick={() => doUpdate(selected.user_id, { is_active: !selected.is_active })}
                       className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
                       {selected.is_active ? 'Disable account' : 'Enable account'}
