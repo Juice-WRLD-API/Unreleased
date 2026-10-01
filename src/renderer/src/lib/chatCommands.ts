@@ -6,7 +6,7 @@ import { BROADCAST_LEVELS, type BroadcastLevel } from './broadcastApi'
 // alone and sent as normal text, same as before this feature existed.
 export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick'
   | 'timeout' | 'untimeout' | 'ban' | 'unban' | 'bans' | 'siteban' | 'sitemute' | 'siteunban'
-  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'changelog' | 'feedback' | 'help'
+  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'changelog' | 'seen' | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -19,7 +19,7 @@ export interface ParsedChatCommand {
 const KNOWN_COMMANDS = new Set<string>([
   'song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick',
   'timeout', 'untimeout', 'ban', 'unban', 'bans', 'siteban', 'sitemute', 'siteunban',
-  'demote', 'role', 'allow', 'disallow', 'broadcast', 'changelog', 'feedback', 'help',
+  'demote', 'role', 'allow', 'disallow', 'broadcast', 'changelog', 'seen', 'feedback', 'help',
 ])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
@@ -39,6 +39,7 @@ const ALIASES: Record<string, ChatCommandName> = {
   deny: 'disallow',
   bc: 'broadcast',
   commit: 'changelog',
+  lastseen: 'seen',
 }
 
 // `-s` / `--share` on a command that normally answers with a card only the
@@ -169,6 +170,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
   { name: 'broadcast', usage: '/broadcast [-l level] <message>  ·  /broadcast -h [-s]', description: 'Admins: push a banner to everyone online, or -h to see past broadcasts (-s posts them to the room)', aliases: ['bc'], params: ['message'] },
   { name: 'changelog', usage: '/changelog [-s]', description: 'Show the latest commit and whether it’s built and live yet (-s posts it to the room)', aliases: ['commit'], params: [] },
+  { name: 'seen', usage: '/seen @user', description: 'Show when a user was last online or active', aliases: ['lastseen'], params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help [-s]', description: 'List available commands (-s posts the list to the room)', params: [] },
 ]

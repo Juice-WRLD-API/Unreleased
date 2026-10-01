@@ -6,7 +6,8 @@ import { noticeToText } from '../../lib/chatNoticeText'
 import { fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
 import { CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, parseNpArgs, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
-import { adminGetUser, adminUpdateUser, type AdminUser } from '../../lib/userApi'
+import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, type AdminUser } from '../../lib/userApi'
+import { relativeTime } from '../adminShared'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
@@ -630,6 +631,46 @@ const Composer = forwardRef<ComposerHandle, {
     }, share)
   }
 
+  // The API has no general "last seen" field, so this reports the freshest
+  // signal available and says what it came from: live presence, then the newest
+  // of the user's messages in rooms this client has loaded, their public
+  // now-playing/play history (only if they've made those public), and - for
+  // administrators - the account's last login.
+  const runSeenCommand = async (args: string): Promise<void> => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) throw new Error('Usage: /seen @username')
+    const cs = useChatStore.getState()
+    const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!match && !/^\d+$/.test(uname)) throw new Error(`No one named "${uname}" here - use their numeric user id instead`)
+    const id = match ? match.id : Number(uname)
+    const label = match ? displayName(match) : `user #${id}`
+    if (id === meId) { toast('You’re online right now', 'ok'); return }
+    if (cs.presenceEnabled && cs.online[id]) { toast(`${label} is online now`, 'ok'); return }
+
+    const seen: { at: number; what: string }[] = []
+    const note = (iso: string | null | undefined, what: string): void => {
+      const at = iso ? Date.parse(iso) : NaN
+      if (Number.isFinite(at)) seen.push({ at, what })
+    }
+    for (const msg of [...Object.values(cs.rooms).flatMap((r) => r.items), ...Object.values(cs.lastMessage)]) {
+      if (msg.author.id === id && !msg.deleted_at && !(msg as UiMessage).local) note(msg.created_at, 'sent a message')
+    }
+    const [profile, np, admin] = await Promise.allSettled([
+      getPublicProfile(id),
+      getNowPlaying(id),
+      cs.me?.role === 'administrator' ? adminGetUser(id) : Promise.reject(new Error('not admin')),
+    ])
+    if (profile.status === 'fulfilled') {
+      note(sortListeningPlays(profile.value.play_history ?? [])[0]?.played_at, 'played a song')
+    }
+    if (np.status === 'fulfilled') note(np.value.now_playing?.updated_at, 'was listening')
+    if (admin.status === 'fulfilled') note(admin.value.last_login, 'logged in')
+
+    const latest = seen.sort((a, b) => b.at - a.at)[0]
+    if (!latest) { toast(`No recent activity visible for ${label} - they may keep it private`); return }
+    toast(`${label} was last seen ${relativeTime(new Date(latest.at).toISOString())} (${latest.what})`, 'ok')
+  }
+
   const runChangelogCommand = async (args: string): Promise<void> => {
     await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus() }, splitShareFlag(args).share)
   }
@@ -712,6 +753,8 @@ const Composer = forwardRef<ComposerHandle, {
         await setAutoApprove(cmd.args, false)
       } else if (cmd.command === 'broadcast') {
         await runBroadcastCommand(cmd.args)
+      } else if (cmd.command === 'seen') {
+        await runSeenCommand(cmd.args)
       } else if (cmd.command === 'changelog') {
         await runChangelogCommand(cmd.args)
       } else if (cmd.command === 'kick') {
