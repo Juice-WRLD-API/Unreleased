@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, type ChatCommandInfo, type ParsedChatCommand } from '../../lib/chatCommands'
+import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
+import { adminGetUser, adminUpdateUser, type AdminUser } from '../../lib/userApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare } from '../../lib/chatShare'
@@ -390,14 +391,6 @@ const Composer = forwardRef<ComposerHandle, {
 
   const refreshMembers = (serverId: number): Promise<unknown> => useChatStore.getState().loadMembers(serverId, true)
 
-  const runPromoteCommand = async (args: string): Promise<void> => {
-    const { server, target, member } = moderationTarget(args, '/promote @username', 'manage')
-    if (member?.server_role === 'admin') { toast(`${displayName(target)} is already an admin`); return }
-    await chatApi.updateMember(server.id, target.id, { server_role: 'admin' })
-    await refreshMembers(server.id)
-    toast(`Promoted ${displayName(target)} to admin`, 'ok')
-  }
-
   const runKickCommand = async (args: string): Promise<void> => {
     const { server, target } = moderationTarget(args, '/kick @username', 'kick')
     await chatApi.removeMember(server.id, target.id)
@@ -468,10 +461,10 @@ const Composer = forwardRef<ComposerHandle, {
   // Site-wide variants. The target doesn't have to be in this room (or in any
   // server), so these resolve against the room roster first and fall back to a
   // numeric user id, and they're gated purely on platform-admin.
-  const siteTarget = (handle: string): { id: number; label: string } => {
+  const siteTarget = (handle: string, adminOnlyMessage = 'Site-wide moderation is administrators only'): { id: number; label: string } => {
     const uname = handle.replace(/^@/, '').trim()
     if (!uname) throw new Error('Name a user')
-    if (useChatStore.getState().me?.role !== 'administrator') throw new Error('Site-wide moderation is administrators only')
+    if (useChatStore.getState().me?.role !== 'administrator') throw new Error(adminOnlyMessage)
     const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
     if (match) return { id: match.id, label: displayName(match) }
     if (/^\d+$/.test(uname)) return { id: Number(uname), label: `user #${uname}` }
@@ -518,6 +511,93 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Revoked ${mine.length} site-wide action${mine.length === 1 ? '' : 's'} for ${label}`, 'ok')
   }
 
+  // Site roles and auto-approve flags - the same PATCH the admin console's
+  // Manage panel sends. Every one of them re-reads the account first so the
+  // reply can say what actually changed ("already an editor") and so a
+  // platform administrator, whose role these toggles can't change, is refused
+  // up front instead of being silently downgraded.
+  const SITE_ROLE_LABEL: Record<SiteRole, string> = { editor: 'an editor', contributor: 'a contributor', manager: 'a manager', news: 'a news poster' }
+  const APPROVE_LABEL: Record<AutoApproveFlag, string> = { auto_approve_proposals: 'edit', auto_approve_comp_proposals: 'comp' }
+  const ADMIN_ONLY = 'Site roles are administrators only'
+
+  const roleLabels = (u: AdminUser): string[] => [
+    ...(u.role === 'administrator' ? ['administrator'] : []),
+    ...(u.role === 'editor' ? ['editor'] : []),
+    ...(u.contributor_enabled ? ['contributor'] : []),
+    ...(u.manager_enabled ? ['manager'] : []),
+    ...(u.news_enabled ? ['news'] : []),
+  ]
+
+  const loadSiteUser = async (handle: string): Promise<{ user: AdminUser; label: string }> => {
+    const { id, label } = siteTarget(handle, ADMIN_ONLY)
+    const user = await adminGetUser(id)
+    return { user, label: label.startsWith('user #') ? user.username || label : label }
+  }
+
+  const hasSiteRole = (u: AdminUser, role: SiteRole): boolean =>
+    role === 'editor' ? u.role === 'editor'
+      : role === 'contributor' ? !!u.contributor_enabled
+      : role === 'manager' ? !!u.manager_enabled
+      : !!u.news_enabled
+
+  const siteRolePayload = (role: SiteRole, on: boolean): Parameters<typeof adminUpdateUser>[1] =>
+    role === 'editor' ? { role: on ? 'editor' : 'applicant' }
+      : role === 'contributor' ? { contributor_enabled: on }
+      : role === 'manager' ? { manager_enabled: on }
+      : { news_enabled: on }
+
+  const setSiteRole = async (handle: string, roleWord: string, on: boolean, usage: string): Promise<void> => {
+    const role = resolveSiteRole(roleWord)
+    if (!handle || !role) throw new Error(`Usage: ${usage}`)
+    const { user, label } = await loadSiteUser(handle)
+    if (user.role === 'administrator') throw new Error(`${label} is a platform administrator - their roles can't be changed here`)
+    if (hasSiteRole(user, role) === on) { toast(`${label} is ${on ? 'already' : 'not'} ${SITE_ROLE_LABEL[role]}`); return }
+    await adminUpdateUser(user.user_id, siteRolePayload(role, on))
+    toast(on ? `${label} is now ${SITE_ROLE_LABEL[role]}` : `${label} is no longer ${SITE_ROLE_LABEL[role]}`, 'ok')
+  }
+
+  const runPromoteCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    // A role word means a site-wide role; without one, /promote keeps its
+    // original meaning of making someone an admin of this server.
+    if (rest) { await setSiteRole(first, rest, true, '/promote @username <editor|contributor|manager|news>'); return }
+    const { server, target, member } = moderationTarget(args, '/promote @username', 'manage')
+    if (member?.server_role === 'admin') { toast(`${displayName(target)} is already an admin`); return }
+    await chatApi.updateMember(server.id, target.id, { server_role: 'admin' })
+    await refreshMembers(server.id)
+    toast(`Promoted ${displayName(target)} to admin`, 'ok')
+  }
+
+  const runDemoteCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    await setSiteRole(first, rest, false, '/demote @username <editor|contributor|manager|news>')
+  }
+
+  const runRoleCommand = async (args: string): Promise<void> => {
+    if (!args.trim()) throw new Error('Usage: /role @username')
+    const { user, label } = await loadSiteUser(args)
+    const roles = roleLabels(user)
+    const approve = (['auto_approve_proposals', 'auto_approve_comp_proposals'] as const)
+      .filter((f) => user[f]).map((f) => APPROVE_LABEL[f])
+    toast(`${label}: ${roles.length ? roles.join(', ') : 'standard user'}${approve.length ? ` · auto-approve ${approve.join(' + ')}` : ''}${user.is_active ? '' : ' · account disabled'}`, 'ok')
+  }
+
+  const setAutoApprove = async (args: string, on: boolean): Promise<void> => {
+    const usage = `/${on ? 'allow' : 'disallow'} @username <edits|comp>`
+    const { first, rest } = splitTarget(args)
+    const flag = resolveAutoApproveFlag(rest)
+    if (!first || !flag) throw new Error(`Usage: ${usage}`)
+    const { user, label } = await loadSiteUser(first)
+    const kind = APPROVE_LABEL[flag]
+    // Same visibility rule as the Manage panel: edit auto-approve belongs to
+    // editors, comp auto-approve to contributors.
+    if (on && flag === 'auto_approve_proposals' && user.role !== 'editor') throw new Error(`${label} isn't an editor, so edit auto-approve doesn't apply`)
+    if (on && flag === 'auto_approve_comp_proposals' && !user.contributor_enabled) throw new Error(`${label} isn't a contributor, so comp auto-approve doesn't apply`)
+    if (!!user[flag] === on) { toast(`Auto-approve for ${kind} proposals is already ${on ? 'on' : 'off'} for ${label}`); return }
+    await adminUpdateUser(user.user_id, { [flag]: on })
+    toast(`Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, 'ok')
+  }
+
   // Every command in CHAT_COMMANDS (sharing, /theme, the moderation set, and
   // so on) is recognized only when it is the entire message
   // (no reply-in-progress, no attachments) - anything else starting with "/"
@@ -562,6 +642,14 @@ const Composer = forwardRef<ComposerHandle, {
         await runShareThemeCommand()
       } else if (cmd.command === 'promote') {
         await runPromoteCommand(cmd.args)
+      } else if (cmd.command === 'demote') {
+        await runDemoteCommand(cmd.args)
+      } else if (cmd.command === 'role') {
+        await runRoleCommand(cmd.args)
+      } else if (cmd.command === 'allow') {
+        await setAutoApprove(cmd.args, true)
+      } else if (cmd.command === 'disallow') {
+        await setAutoApprove(cmd.args, false)
       } else if (cmd.command === 'kick') {
         await runKickCommand(cmd.args)
       } else if (cmd.command === 'timeout') {

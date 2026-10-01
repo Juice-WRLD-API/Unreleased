@@ -4,7 +4,7 @@
 // alone and sent as normal text, same as before this feature existed.
 export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick'
   | 'timeout' | 'untimeout' | 'ban' | 'unban' | 'bans' | 'siteban' | 'sitemute' | 'siteunban'
-  | 'feedback' | 'help'
+  | 'demote' | 'role' | 'allow' | 'disallow' | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -17,7 +17,7 @@ export interface ParsedChatCommand {
 const KNOWN_COMMANDS = new Set<string>([
   'song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick',
   'timeout', 'untimeout', 'ban', 'unban', 'bans', 'siteban', 'sitemute', 'siteunban',
-  'feedback', 'help',
+  'demote', 'role', 'allow', 'disallow', 'feedback', 'help',
 ])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
@@ -33,6 +33,36 @@ const ALIASES: Record<string, ChatCommandName> = {
   siteunmute: 'siteunban',
   siteuntimeout: 'siteunban',
   unsiteban: 'siteunban',
+  roles: 'role',
+  deny: 'disallow',
+}
+
+// Site-wide staff roles an administrator can grant from chat - the same four
+// toggles as the admin console's Manage panel. `editor` is a role string on
+// the account; the rest are flags layered on top of it (see adminUpdateUser).
+export type SiteRole = 'editor' | 'contributor' | 'manager' | 'news'
+export type AutoApproveFlag = 'auto_approve_proposals' | 'auto_approve_comp_proposals'
+
+const normalizeWord = (s: string): string => s.toLowerCase().replace(/[^a-z]/g, '')
+
+export function resolveSiteRole(word: string): SiteRole | null {
+  switch (normalizeWord(word)) {
+    case 'editor': case 'editors': case 'edit': return 'editor'
+    case 'contributor': case 'contributors': case 'contrib': return 'contributor'
+    case 'manager': case 'managers': case 'mod': return 'manager'
+    case 'news': case 'newsposter': case 'newswriter': return 'news'
+    default: return null
+  }
+}
+
+// Accepts the short forms ("edits", "comp") as well as the console's own
+// labels ("auto-approve-edits"), so whichever the admin remembers works.
+export function resolveAutoApproveFlag(word: string): AutoApproveFlag | null {
+  switch (normalizeWord(word).replace(/^autoapprove/, '')) {
+    case 'edits': case 'edit': case 'proposals': case 'proposal': return 'auto_approve_proposals'
+    case 'comp': case 'comps': case 'compproposals': case 'compproposal': return 'auto_approve_comp_proposals'
+    default: return null
+  }
 }
 
 // Drives the Composer's slash-command autocomplete popup - purely
@@ -58,7 +88,11 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'sharetheme', usage: '/sharetheme', description: 'Share your current theme so others can apply it', params: [] },
   { name: 'mute', usage: '/mute @user', description: 'Hide a user’s messages for you', params: ['user'] },
   { name: 'unmute', usage: '/unmute @user', description: 'Unhide a previously muted user', params: ['user'] },
-  { name: 'promote', usage: '/promote @user', description: 'Promote a member to server admin', params: ['user'] },
+  { name: 'promote', usage: '/promote @user [editor|contributor|manager|news]', description: 'Make a member a server admin, or (site admins) grant a site role', params: ['user', 'role'] },
+  { name: 'demote', usage: '/demote @user <editor|contributor|manager|news>', description: 'Admins: remove a site role from a user', params: ['user', 'role'] },
+  { name: 'role', usage: '/role @user', description: 'Admins: show a user’s site roles and auto-approve settings', aliases: ['roles'], params: ['user'] },
+  { name: 'allow', usage: '/allow @user <edits|comp>', description: 'Admins: turn on auto-approve for a user’s edit or comp proposals', params: ['user', 'type'] },
+  { name: 'disallow', usage: '/disallow @user <edits|comp>', description: 'Admins: turn auto-approve back off', aliases: ['deny'], params: ['user', 'type'] },
   { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server (they can rejoin)', params: ['user'] },
   { name: 'timeout', usage: '/timeout @user <minutes>', description: 'Temporarily stop a member from posting', aliases: ['to'], params: ['user', 'minutes'] },
   { name: 'untimeout', usage: '/untimeout @user', description: 'Lift a member’s timeout early', aliases: ['unto'], params: ['user'] },
