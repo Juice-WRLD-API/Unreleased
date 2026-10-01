@@ -79,6 +79,21 @@ function branchName() {
   }
 }
 
+// Emits `version.json` next to index.html with the commit this build was made
+// from. The running app fetches it (uncached) to learn what the *site* is
+// serving right now, which GitHub's branch tip can't tell it: a commit can land
+// on GitHub before its deploy finishes, and a deploy can finish while a tab is
+// still running the previous build.
+function emitVersionFile() {
+  return {
+    name: 'emit-version-file',
+    apply: 'build' as const,
+    generateBundle(this: { emitFile: (f: { type: 'asset'; fileName: string; source: string }) => void }) {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ commit: commitHash() }) })
+    },
+  }
+}
+
 // The production CSP (style-src 'self', see index.html) blocks the inline
 // <style> tags Vite's dev server injects for HMR, so every view renders
 // unstyled under `npm run dev`. The meta tag is only meaningful in the built
@@ -107,7 +122,7 @@ function iconChunk(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), stripDevCsp()],
+  plugins: [react(), stripDevCsp(), emitVersionFile()],
   root: resolve(__dirname, 'src/renderer'),
   envDir: resolve(__dirname, '.'),
   base: './',

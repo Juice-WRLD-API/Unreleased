@@ -30,7 +30,7 @@ const REPO = 'Juice-WRLD-API/Unreleased'
 // failure (offline, DNS, 5xx); we can't reliably tell those apart from the
 // network layer alone (a 403 also fires for a private/missing repo), and
 // "couldn't check" is the honest signal to show either way.
-type CommitFreshness = 'checking' | 'latest' | 'outdated' | 'error' | 'unknown'
+type CommitFreshness = 'checking' | 'latest' | 'refresh-needed' | 'outdated' | 'error' | 'unknown'
 
 // Module-level memo so every Settings mount (desktop/mobile, closing and
 // reopening the About tab) doesn't re-hit the GitHub API - it's a plain
@@ -38,9 +38,43 @@ type CommitFreshness = 'checking' | 'latest' | 'outdated' | 'error' | 'unknown'
 let cached: { freshness: CommitFreshness; ts: number } | undefined
 const CACHE_MS = 5 * 60 * 1000
 
-// Compares the running build's COMMIT_HASH against the latest commit on
-// DEPLOY_BRANCH to tell whether this build is up to date. `refresh()` forces
-// a re-check, bypassing the cache TTL - used when the bulb is clicked.
+// The commit the site is serving right now, from the `version.json` the build
+// emits (see emitVersionFile in vite.config.ts). null when it can't be read -
+// dev server, Electron, offline, or a host that answers unknown paths with
+// index.html - in which case the caller falls back to GitHub alone.
+async function fetchDeployedCommit(): Promise<string | null> {
+  try {
+    const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' })
+    if (!res.ok) return null
+    const data = (await res.json()) as { commit?: unknown }
+    return typeof data.commit === 'string' && data.commit ? data.commit : null
+  } catch {
+    return null
+  }
+}
+
+async function fetchBranchTip(): Promise<string> {
+  const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${BUILD_BRANCH}`, {
+    headers: { Accept: 'application/vnd.github+json' },
+    // Our own `cached` module var already governs staleness (see CACHE_MS
+    // above) - the browser's HTTP cache doing the same thing underneath it
+    // is what makes refresh() look like a no-op, since a plain GET here is
+    // otherwise a normal cacheable request the browser is free to reuse.
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(String(res.status))
+  const data = (await res.json()) as { sha?: string }
+  if (!data.sha) throw new Error('no sha')
+  return data.sha
+}
+
+// Works out whether this build is up to date, in order of what a reload can fix:
+//  1. the site is serving a different commit than this tab booted with ->
+//     'refresh-needed' (a reload gets it; no need to ask GitHub)
+//  2. otherwise this tab matches the site, so compare against the branch tip on
+//     GitHub: a newer commit there means it isn't live yet -> 'outdated'
+// `refresh()` forces a re-check, bypassing the cache TTL - used when the bulb
+// is clicked.
 function useCommitFreshness(): [CommitFreshness, () => void] {
   const [freshness, setFreshness] = useState<CommitFreshness>(cached?.ts && Date.now() - cached.ts < CACHE_MS ? cached.freshness : 'checking')
   // Bumped by refresh() to force the effect below to re-run and skip the
@@ -58,18 +92,15 @@ function useCommitFreshness(): [CommitFreshness, () => void] {
     }
     setFreshness('checking')
     let cancelled = false
-    fetch(`https://api.github.com/repos/${REPO}/commits/${BUILD_BRANCH}`, {
-      headers: { Accept: 'application/vnd.github+json' },
-      // Our own `cached` module var already governs staleness (see CACHE_MS
-      // above) - the browser's HTTP cache doing the same thing underneath it
-      // is what makes refresh() look like a no-op, since a plain GET here is
-      // otherwise a normal cacheable request the browser is free to reuse.
-      cache: 'no-store',
-    })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
-      .then((data: { sha?: string }) => {
+    const check = async (): Promise<CommitFreshness> => {
+      const deployed = await fetchDeployedCommit()
+      if (deployed && deployed !== COMMIT_HASH) return 'refresh-needed'
+      const tip = await fetchBranchTip()
+      return tip.startsWith(COMMIT_HASH) ? 'latest' : 'outdated'
+    }
+    check()
+      .then((result) => {
         if (cancelled) return
-        const result: CommitFreshness = data.sha?.startsWith(COMMIT_HASH) ? 'latest' : 'outdated'
         cached = { freshness: result, ts: Date.now() }
         setFreshness(result)
       })
@@ -109,12 +140,13 @@ function useServiceWorkerUpdated(): boolean {
 
 export type CommitStatus = 'checking' | 'latest' | 'refresh-needed' | 'outdated' | 'error' | 'unknown'
 
-// Combines the GitHub-vs-COMMIT_HASH check with the service-worker signal
+// Combines the deployed-site/GitHub check with the service-worker signal
 // above into the single status the About bulb renders:
-//  - 'outdated'      (red)    a newer commit has been deployed - reload to get it
-//  - 'refresh-needed' (yellow) this build IS the latest commit, but a new
-//                              service worker already took over underneath
-//                              this tab - reload to actually run it
+//  - 'outdated'      (red)    GitHub has a newer commit than this build, and
+//                              the site isn't serving it yet - a reload won't help
+//  - 'refresh-needed' (yellow) the site is already serving a newer build (or a
+//                              new service worker took over underneath this
+//                              tab) - reload to actually run it
 //  - 'latest'        (green)  this build is current, nothing pending
 //  - 'error'         (blue)   couldn't check (rate-limited or offline)
 //  - 'checking'      (gray)   a check (initial or user-triggered) is in flight

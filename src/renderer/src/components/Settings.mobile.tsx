@@ -491,10 +491,9 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Elem
   )
 }
 
-// Green when this build's commit is the latest on the deploy branch, red
-// when a newer commit has shipped since. Nothing rendered while checking or
-// if the check fails (offline, rate-limited) - a wrong-looking indicator is
-// worse than no indicator.
+// Green when this build's commit is the latest on the deploy branch, yellow
+// when the site is already serving a newer build (reload to get it), red when
+// GitHub has a newer commit that isn't live yet.
 function CommitFreshnessBulb(): JSX.Element | null {
   const [status, refresh] = useCommitStatus()
   if (status === 'unknown') return null
@@ -507,8 +506,8 @@ function CommitFreshnessBulb(): JSX.Element | null {
   }[status]
   const label = checking ? 'Checking for updates…' : {
     latest: 'Running the latest commit',
-    'refresh-needed': 'On the latest commit, but a newer version loaded in the background - refresh to run it',
-    outdated: 'A newer commit has been deployed',
+    'refresh-needed': 'A newer version is already live - refresh to run it',
+    outdated: 'A newer commit exists but is not live on the site yet',
     error: "Couldn't check for updates (rate-limited or offline)",
   }[status]
   return (
