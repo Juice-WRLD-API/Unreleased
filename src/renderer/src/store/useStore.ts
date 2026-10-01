@@ -2898,7 +2898,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   updateFollowedPlaylistMeta: (id, meta) => {
     const existing = get().followedPlaylists
-    if (!existing.some((f) => f.id === id)) return
+    const cur = existing.find((f) => f.id === id)
+    if (!cur) return
+    // No-op when nothing changed - callers run this from an effect that also
+    // depends on followedPlaylists, so a fresh array every call would loop.
+    if (cur.name === meta.name && cur.trackCount === meta.trackCount && cur.coverUrl === meta.coverUrl) return
     const next = existing.map((f) => f.id === id ? { ...f, ...meta } : f)
     set({ followedPlaylists: next })
     ls.set('followedPlaylists', next)
