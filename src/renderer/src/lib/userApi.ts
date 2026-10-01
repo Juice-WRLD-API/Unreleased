@@ -873,6 +873,7 @@ export interface AdminUser {
   role: string
   contributor_enabled: boolean
   manager_enabled?: boolean
+  news_enabled?: boolean
   discord_id: string
   discord_username: string
   discord_avatar: string
@@ -1077,6 +1078,7 @@ export async function adminUpdateUser(userId: number, payload: {
   role?: 'editor' | 'contributor' | 'manager' | 'applicant'
   contributor_enabled?: boolean
   manager_enabled?: boolean
+  news_enabled?: boolean
   is_active?: boolean
   auto_approve_proposals?: boolean
   auto_approve_comp_proposals?: boolean

@@ -8,7 +8,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
 import {
   getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
-  adminGetUser, adminUpdateUser,
+  adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
 } from '../lib/userApi'
 import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser } from '../lib/userApi'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
@@ -25,6 +25,78 @@ import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { clickable } from '../lib/a11y'
 import { initial } from '../lib/format'
+import { relativeTime } from './adminShared'
+
+type ProposalRow = { key: string; kind: 'edit' | 'comp'; title: string; status: string; created_at: string }
+
+const PROPOSAL_STATUS_STYLE: Record<string, string> = {
+  pending: 'text-amber-400 bg-amber-500/15',
+  approved: 'text-emerald-400 bg-emerald-500/15',
+  rejected: 'text-red-400 bg-red-500/15',
+  reversed: 'text-text-muted bg-surface-raised',
+}
+
+const PROPOSAL_HISTORY_LIMIT = 8
+
+// Manage panel's per-user proposal history. The admin list endpoints have no
+// per-user filter, so both queues are fetched and narrowed by id here.
+function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
+  const [rows, setRows] = useState<ProposalRow[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([adminListProposals(), adminListCompProposals().catch(() => [])])
+      .then(([edits, comps]) => {
+        if (!alive) return
+        const merged: ProposalRow[] = [
+          ...edits.filter((p) => p.editor_id === userId).map((p): ProposalRow => ({
+            key: `e${p.id}`, kind: 'edit', title: p.title || `${p.change_type} song`, status: p.status, created_at: p.created_at,
+          })),
+          ...comps.filter((p) => p.contributor_id === userId).map((p): ProposalRow => ({
+            key: `c${p.id}`, kind: 'comp', title: p.file_path, status: p.status, created_at: p.created_at,
+          })),
+        ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+        setRows(merged)
+      })
+      .catch(() => { if (alive) setError(true) })
+    return () => { alive = false }
+  }, [userId])
+
+  const count = (st: string): number => rows?.filter((r) => r.status === st).length ?? 0
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Proposals</p>
+      {error ? (
+        <p className="text-text-muted text-xs italic">Couldn't load proposals.</p>
+      ) : !rows ? (
+        <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+      ) : rows.length === 0 ? (
+        <p className="text-text-muted text-xs italic">No proposals yet.</p>
+      ) : (
+        <>
+          <p className="text-xs text-text-muted">
+            <span className="text-amber-400 font-semibold">{count('pending')} pending</span> · {count('approved')} approved · {count('rejected')} rejected
+            {count('reversed') > 0 && <> · {count('reversed')} reversed</>}
+          </p>
+          <ul className="space-y-1">
+            {rows.slice(0, PROPOSAL_HISTORY_LIMIT).map((r) => (
+              <li key={r.key} className="flex items-center gap-2 text-xs">
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${PROPOSAL_STATUS_STYLE[r.status] ?? 'text-text-muted bg-surface-raised'}`}>{r.status}</span>
+                <span className="min-w-0 flex-1 truncate text-text-secondary">{r.kind === 'comp' && <span className="text-text-muted">Comp · </span>}{r.title}</span>
+                <span className="shrink-0 text-text-muted">{relativeTime(r.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+          {rows.length > PROPOSAL_HISTORY_LIMIT && (
+            <p className="text-[11px] text-text-muted">+{rows.length - PROPOSAL_HISTORY_LIMIT} older</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
 // Recent plays render actual track info, but the profile payload only carries
 // {song, played_at} - resolving every row would mean one fetch per play, so
@@ -592,11 +664,19 @@ export default function PublicProfileView(): JSX.Element {
                 <button onClick={() => void doAdminUpdate({ manager_enabled: true })}
                   className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Manager</button>
               )}
+              {adminUser.news_enabled ? (
+                <button onClick={() => void doAdminUpdate({ news_enabled: false })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−News</button>
+              ) : (
+                <button onClick={() => void doAdminUpdate({ news_enabled: true })}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+News</button>
+              )}
               <button onClick={() => void doAdminUpdate({ is_active: !adminUser.is_active })}
                 className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
                 {adminUser.is_active ? 'Disable account' : 'Enable account'}
               </button>
             </div>
+            <AdminProposalHistory userId={adminUser.user_id} />
             </>
           )}
         </div>

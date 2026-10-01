@@ -1014,6 +1014,13 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                           <button onClick={() => doUpdate(u.user_id, { manager_enabled: true })}
                             className="h-9 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/15 transition-colors">+Manager</button>
                         )}
+                        {u.news_enabled ? (
+                          <button onClick={() => doUpdate(u.user_id, { news_enabled: false })}
+                            className="h-9 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 active:bg-red-500/15 transition-colors">−News</button>
+                        ) : (
+                          <button onClick={() => doUpdate(u.user_id, { news_enabled: true })}
+                            className="h-9 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 active:bg-emerald-500/15 transition-colors">+News</button>
+                        )}
                         <button onClick={() => doUpdate(u.user_id, { is_active: !u.is_active })}
                           className="col-span-2 h-9 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay active:bg-surface-raised transition-colors">
                           {u.is_active ? 'Disable account' : 'Enable account'}
