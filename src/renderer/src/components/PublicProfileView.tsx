@@ -642,35 +642,23 @@ export default function PublicProfileView(): JSX.Element {
                 )}
               </div>
             )}
+            <div className="space-y-1.5 mb-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+              {([
+                ['Editor', adminUser.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
+                ['Contributor', !!adminUser.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
+                ['Manager', !!adminUser.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
+                ['News', !!adminUser.news_enabled, (on: boolean) => ({ news_enabled: on })],
+              ] as const).map(([label, checked, payload]) => (
+                <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                  {label}
+                  <input type="checkbox" checked={checked}
+                    onChange={(e) => void doAdminUpdate(payload(e.target.checked))}
+                    className="w-4 h-4 accent-[var(--accent)]" />
+                </label>
+              ))}
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              {adminUser.role === 'editor' ? (
-                <button onClick={() => void doAdminUpdate({ role: 'applicant' })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">Editor</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ role: 'editor' })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Editor</button>
-              )}
-              {adminUser.contributor_enabled ? (
-                <button onClick={() => void doAdminUpdate({ contributor_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">Contributor</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ contributor_enabled: true })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Contributor</button>
-              )}
-              {adminUser.manager_enabled ? (
-                <button onClick={() => void doAdminUpdate({ manager_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">Manager</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ manager_enabled: true })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Manager</button>
-              )}
-              {adminUser.news_enabled ? (
-                <button onClick={() => void doAdminUpdate({ news_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−News</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ news_enabled: true })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+News</button>
-              )}
               <button onClick={() => void doAdminUpdate({ is_active: !adminUser.is_active })}
                 className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
                 {adminUser.is_active ? 'Disable account' : 'Enable account'}
