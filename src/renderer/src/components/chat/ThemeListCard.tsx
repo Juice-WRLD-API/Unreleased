@@ -6,7 +6,7 @@ import LocalNoticeFrame from './LocalNoticeFrame'
 
 // Rendered for /theme (no args)'s local notice - lists every theme and lets
 // you click one to apply it directly, same as typing "/theme <name>" would.
-export default function ThemeListCard({ room, messageId }: { room: RoomRef; messageId: number }): JSX.Element {
+export default function ThemeListCard({ room, messageId }: { room?: RoomRef; messageId?: number }): JSX.Element {
   const current = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
   return (

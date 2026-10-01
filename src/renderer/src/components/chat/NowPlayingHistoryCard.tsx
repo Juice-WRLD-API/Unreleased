@@ -6,10 +6,10 @@ import { relativeTime } from '../adminShared'
 import LocalNoticeFrame from './LocalNoticeFrame'
 
 // Rendered for /np -h's local notice - your own listening log, so it stays on
-// this device rather than going to the room (play history can be private).
+// this device unless you pass -s to post it to the room.
 export default function NowPlayingHistoryCard({ room, messageId, items, total, capped }: {
-  room: RoomRef
-  messageId: number
+  room?: RoomRef
+  messageId?: number
   items: { song: number; name: string; played_at: string }[]
   total: number
   capped: boolean

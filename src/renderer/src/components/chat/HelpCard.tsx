@@ -5,7 +5,7 @@ import LocalNoticeFrame from './LocalNoticeFrame'
 // Rendered for /help's local notice (see chatStore's postLocalNotice) - this
 // card only ever exists in the requester's own client, never on the server,
 // so no one else in the room can see it.
-export default function HelpCard({ room, messageId }: { room: RoomRef; messageId: number }): JSX.Element {
+export default function HelpCard({ room, messageId }: { room?: RoomRef; messageId?: number }): JSX.Element {
   const commands = CHAT_COMMANDS.filter((c) => c.name !== 'help')
   return (
     <LocalNoticeFrame room={room} messageId={messageId} title="Commands">

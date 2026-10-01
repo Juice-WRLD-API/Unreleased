@@ -44,11 +44,22 @@ const ALIASES: Record<string, ChatCommandName> = {
 
 // `-s` / `--share` on a command that normally answers with a card only the
 // sender sees: post the same answer to the room instead. Standalone tokens
-// anywhere in the args are removed; the rest comes back untouched.
+// anywhere in the args are removed; the rest comes back untouched. Short flags
+// can be merged (`-hs`, `-sh5`): the `s` is taken out of a group made only of
+// `h`/`s` (plus an optional count) and whatever is left stays in place for the
+// command's own parser, so `/np -hs 5` reads as `/np -h 5`.
 export function splitShareFlag(args: string): { share: boolean; rest: string } {
-  const tokens = args.trim().split(/\s+/).filter(Boolean)
-  const rest = tokens.filter((t) => !/^(?:-s|--share)$/i.test(t))
-  return { share: rest.length !== tokens.length, rest: rest.join(' ') }
+  let share = false
+  const rest: string[] = []
+  for (const t of args.trim().split(/\s+/).filter(Boolean)) {
+    if (/^--share$/i.test(t)) { share = true; continue }
+    const m = /^-([hs]+)(\d*)$/i.exec(t)
+    if (!m || !/s/i.test(m[1])) { rest.push(t); continue }
+    share = true
+    const letters = m[1].replace(/s/gi, '')
+    if (letters) rest.push(`-${letters}${m[2]}`)
+  }
+  return { share, rest: rest.join(' ') }
 }
 
 export const NP_HISTORY_DEFAULT = 10
@@ -59,7 +70,8 @@ export type NpArgs =
   | { history: true; count: number; capped: boolean }
   | { history: true; error: string }
 
-// `/np -h [count]` (also `--history`, and `-h5`). Anything else after /np is
+// `/np -h [count]` (also `--history`, and `-h5`; `-s` merges in as `-hs`, see
+// splitShareFlag, which runs first). Anything else after /np is
 // ignored, same as before the flag existed - bare /np just shares the track.
 export function parseNpArgs(args: string): NpArgs {
   const m = /^(?:-h|--history)\s*(\S*)\s*$/i.exec(args.trim())
@@ -77,21 +89,31 @@ export interface BroadcastArgs {
   // Set when `-l` was given something that isn't a level, so the caller can
   // say so instead of silently sending as "info".
   badLevel: string | null
+  // `-h` only: how many past broadcasts to show (`/broadcast -h 1` is just the
+  // latest). Null when absent or not a positive number.
+  count: number | null
   message: string
 }
 
-// Leading flags only (`-h`, `-l <level>`), then the rest of the line is the
-// message verbatim - so a "-h" later in the text is just text.
+export const BROADCAST_HISTORY_DEFAULT = 10
+export const BROADCAST_HISTORY_MAX = 25
+
+// Leading flags only (`-h`, `-s`, `-l <level>`), then the rest of the line is
+// the message verbatim - so a "-h" later in the text is just text. Short flags
+// can be merged (`-hs`, `-sl warning`); the one that takes a value (`l`) is
+// handled last, so `-ls warning` works the same as `-sl warning`.
 export function parseBroadcastArgs(args: string): BroadcastArgs {
-  const out: BroadcastArgs = { history: false, share: false, level: null, badLevel: null, message: '' }
+  const out: BroadcastArgs = { history: false, share: false, level: null, badLevel: null, count: null, message: '' }
   let rest = args.trim()
   for (;;) {
-    const m = /^(-h|--history|-s|--share|-l|--level)(?:\s+|$)/i.exec(rest)
+    const m = /^(--history|--share|--level|-[hsl]+)(?:\s+|$)/i.exec(rest)
     if (!m) break
-    const flag = m[1].toLowerCase()
     rest = rest.slice(m[0].length)
-    if (flag === '-h' || flag === '--history') { out.history = true; continue }
-    if (flag === '-s' || flag === '--share') { out.share = true; continue }
+    const flag = m[1].toLowerCase()
+    const letters = flag.startsWith('--') ? [flag === '--history' ? 'h' : flag === '--share' ? 's' : 'l'] : [...new Set(flag.slice(1))]
+    if (letters.includes('h')) out.history = true
+    if (letters.includes('s')) out.share = true
+    if (!letters.includes('l')) continue
     const word = /^(\S+)(?:\s+|$)/.exec(rest)
     if (!word) { out.badLevel = ''; break }
     rest = rest.slice(word[0].length)
@@ -100,6 +122,10 @@ export function parseBroadcastArgs(args: string): BroadcastArgs {
     else out.badLevel = word[1]
   }
   out.message = rest.trim()
+  if (out.history && /^\d+$/.test(out.message) && Number(out.message) >= 1) {
+    out.count = Math.min(Number(out.message), BROADCAST_HISTORY_MAX)
+    out.message = ''
+  }
   return out
 }
 
@@ -149,7 +175,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'song', usage: '/song <title>', description: 'Share a song from the library', params: ['title'] },
   { name: 'search', usage: '/search <title>', description: 'Search the library and pick a result', params: ['title'] },
   { name: 'info', usage: '/info <title>', description: 'Show a song’s era, category, length and credits', params: ['title'] },
-  { name: 'np', usage: '/np  ·  /np -h [count] [-s]', description: 'Share what you’re currently playing, or -h to see your recent plays (-s posts them to the room)', aliases: ['nowplaying'], params: ['-h count'] },
+  { name: 'np', usage: '/np  ·  /np -h [count] [-s]  ·  /np -hs [count]', description: 'Share what you’re currently playing, or -h to see your recent plays (-s posts them to the room)', aliases: ['nowplaying'], params: ['-h count'] },
   { name: 'theme', usage: '/theme <name>  ·  /theme [-s]', description: 'Change your app theme, or list them with no name (-s posts the list to the room)', params: ['name'] },
   { name: 'sharetheme', usage: '/sharetheme', description: 'Share your current theme so others can apply it', params: [] },
   { name: 'mute', usage: '/mute @user', description: 'Hide a user’s messages for you', params: ['user'] },
@@ -168,7 +194,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'siteban', usage: '/siteban @user [reason]', description: 'Admins: ban a user from all chat and DMs', params: ['user', 'reason'] },
   { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
   { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
-  { name: 'broadcast', usage: '/broadcast [-l level] <message>  ·  /broadcast -h [-s]', description: 'Admins: push a banner to everyone online, or -h to see past broadcasts (-s posts them to the room)', aliases: ['bc'], params: ['message'] },
+  { name: 'broadcast', usage: '/broadcast [-l level] <message>  ·  /broadcast -h [count] [-s]', description: 'Admins: push a banner to everyone online, or -h [count] to see past broadcasts (-s posts them to the room)', aliases: ['bc'], params: ['message'] },
   { name: 'changelog', usage: '/changelog [-s]', description: 'Show the latest commit and whether it’s built and live yet (-s posts it to the room)', aliases: ['commit'], params: [] },
   { name: 'seen', usage: '/seen @user', description: 'Show when a user was last online or active', aliases: ['lastseen'], params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },

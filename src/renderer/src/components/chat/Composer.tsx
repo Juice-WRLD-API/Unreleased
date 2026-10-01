@@ -2,15 +2,14 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { noticeToText } from '../../lib/chatNoticeText'
 import { fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
-import { CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, parseNpArgs, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
+import { BROADCAST_HISTORY_DEFAULT, BROADCAST_HISTORY_MAX, CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, parseNpArgs, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
 import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, type AdminUser } from '../../lib/userApi'
 import { relativeTime } from '../adminShared'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
-import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
+import { encodeCommandCard, encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { getSongsByIds, resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
 import { sortListeningPlays } from '../../lib/listeningPlays'
@@ -283,10 +282,10 @@ const Composer = forwardRef<ComposerHandle, {
   // cases post a local notice (see chatStore's postLocalNotice) instead of a
   // toast - a nicer, dismissible list that only this device ever sees.
   // Commands that answer with a card only the sender sees can take `-s` to
-  // post the same answer to the room instead (see chatNoticeText) - one place
+  // post the same card to the room instead (see encodeCommandCard) - one place
   // decides which, so each command just hands over its payload.
   const deliverNotice = async (payload: LocalNoticePayload, share: boolean): Promise<void> => {
-    const text = share ? noticeToText(payload) : null
+    const text = share ? encodeCommandCard(payload) : null
     if (text) await send(room, { text, files: [] })
     else postLocalNotice(room, encodeLocalNotice(payload))
   }
@@ -682,7 +681,8 @@ const Composer = forwardRef<ComposerHandle, {
     if (useChatStore.getState().me?.role !== 'administrator') throw new Error('Broadcasts are administrators only')
     const parsed = parseBroadcastArgs(args)
     if (parsed.history) {
-      const { count, results } = await fetchBroadcastHistory(10)
+      if (parsed.message) throw new Error(`Usage: /broadcast -h [count] [-s] (1-${BROADCAST_HISTORY_MAX})`)
+      const { count, results } = await fetchBroadcastHistory(parsed.count ?? BROADCAST_HISTORY_DEFAULT)
       await deliverNotice({ kind: 'broadcastHistory', items: results, total: count }, parsed.share)
       return
     }

@@ -6,7 +6,8 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeLocalNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
+import { decodeCommandCard, decodeLocalNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
+import type { SharedCommandCard } from '../../lib/chatShare'
 import { useChatStore, useModerationNotice, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
@@ -83,6 +84,20 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
 
 const MemoMarkdown = memo(MarkdownText)
 
+// One renderer for a command's card whether it's the private local notice
+// (room + messageId given, so it can be dismissed) or the same card posted to
+// the chat with `-s` (neither given).
+function CommandCard({ card, room, messageId }: { card: SharedCommandCard; room?: RoomRef; messageId?: number }): JSX.Element | null {
+  switch (card.kind) {
+    case 'help': return <HelpCard room={room} messageId={messageId} />
+    case 'themeList': return <ThemeListCard room={room} messageId={messageId} />
+    case 'broadcastHistory': return <BroadcastHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} />
+    case 'changelog': return <ChangelogCard room={room} messageId={messageId} status={card.status} />
+    case 'npHistory': return <NowPlayingHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} capped={card.capped} />
+    default: return null
+  }
+}
+
 export default function MessageBody({ message, people, room }: { message: UiMessage; people: ChatUserBrief[]; room?: RoomRef }): JSX.Element | null {
   const meId = useChatStore((s) => s.meId)
   const decrypted = useChatStore((s) => (message.is_encrypted ? s.plain[message.id] : undefined))
@@ -96,13 +111,8 @@ export default function MessageBody({ message, people, room }: { message: UiMess
 
   if (message.local && room) {
     const notice = decodeLocalNotice(message.content)
-    if (notice?.kind === 'help') return <HelpCard room={room} messageId={message.id} />
-    if (notice?.kind === 'themeList') return <ThemeListCard room={room} messageId={message.id} />
     if (notice?.kind === 'feedbackSent') return <FeedbackSentCard room={room} messageId={message.id} message={notice.message} />
-    if (notice?.kind === 'broadcastHistory') return <BroadcastHistoryCard room={room} messageId={message.id} items={notice.items} total={notice.total} />
-    if (notice?.kind === 'changelog') return <ChangelogCard room={room} messageId={message.id} status={notice.status} />
-    if (notice?.kind === 'npHistory') return <NowPlayingHistoryCard room={room} messageId={message.id} items={notice.items} total={notice.total} capped={notice.capped} />
-    return null
+    return notice ? <CommandCard card={notice} room={room} messageId={message.id} /> : null
   }
 
   if (!message.is_encrypted) {
@@ -119,6 +129,8 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (info) return <SongInfoCard info={info} />
     const theme = decodeThemeShare(body)
     if (theme) return <ThemeShareCard theme={theme} />
+    const command = decodeCommandCard(body)
+    if (command) return <CommandCard card={command} />
     return moderation ? <ModerationCard notice={moderation} /> : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
@@ -171,5 +183,7 @@ function decryptedContent(text: string, people: ChatUserBrief[], meId: number | 
   if (decryptedInfo) return <SongInfoCard info={decryptedInfo} />
   const decryptedTheme = decodeThemeShare(decryptedBody)
   if (decryptedTheme) return <ThemeShareCard theme={decryptedTheme} />
+  const decryptedCommand = decodeCommandCard(decryptedBody)
+  if (decryptedCommand) return <CommandCard card={decryptedCommand} />
   return <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

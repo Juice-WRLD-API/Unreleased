@@ -12,7 +12,7 @@ const BUILT = {
 
 // Rendered for /changelog's local notice - a snapshot taken when the command
 // ran, so it doesn't update if the deploy lands afterwards.
-export default function ChangelogCard({ room, messageId, status }: { room: RoomRef; messageId: number; status: ChangelogStatus }): JSX.Element {
+export default function ChangelogCard({ room, messageId, status }: { room?: RoomRef; messageId?: number; status: ChangelogStatus }): JSX.Element {
   const { tip, built, deployed, running, branch, needsReload } = status
   const { Icon, cls, text } = BUILT[built]
   const [subject, ...body] = tip.message.split('\n')

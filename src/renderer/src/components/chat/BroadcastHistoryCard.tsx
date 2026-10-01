@@ -7,8 +7,8 @@ import LocalNoticeFrame from './LocalNoticeFrame'
 // Rendered for /broadcast -h's local notice - the list is fetched once when
 // the command runs, so it's a snapshot rather than a live feed.
 export default function BroadcastHistoryCard({ room, messageId, items, total }: {
-  room: RoomRef
-  messageId: number
+  room?: RoomRef
+  messageId?: number
   items: BroadcastMessage[]
   total: number
 }): JSX.Element {

@@ -1,5 +1,5 @@
 import type { ChangelogStatus } from './appVersion'
-import type { BroadcastMessage } from './broadcastApi'
+import { BROADCAST_LEVELS, type BroadcastLevel, type BroadcastMessage } from './broadcastApi'
 import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
 
 // A song share rides in a chat message's plain `content` (or, for DMs, the
@@ -380,6 +380,144 @@ export function decodeLocalNotice(content: string): LocalNoticePayload | null {
   }
 }
 
+// A command card posted to the room with `-s` (/help -s, /np -h -s, ...). It's
+// the same card the sender would have seen privately, carried as a message so
+// everyone renders it. Same "prefix + JSON in plain chat text" scheme as the
+// shares above and the same rule on decode: any member could hand-craft this
+// text, so every field is re-validated and clamped, and nothing here is trusted
+// beyond "the author says so" - the card sits in the normal message frame.
+// help/themeList carry no data at all; each client renders its own lists.
+export const COMMAND_CARD_PREFIX = 'unreleased:cmdcard:'
+
+export type SharedCommandCard = Exclude<LocalNoticePayload, { kind: 'feedbackSent' }>
+
+const MAX_CARD_ITEMS = 25
+
+function clip(value: unknown, max = MAX_TEXT_FIELD_LENGTH): string | null {
+  return typeof value === 'string' ? value.slice(0, max) : null
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 64 && !Number.isNaN(Date.parse(value))
+}
+
+// Drops trailing list items until the JSON fits a message, so a long history
+// degrades to a shorter one rather than failing to send.
+export function encodeCommandCard(payload: LocalNoticePayload): string | null {
+  const fits = (p: SharedCommandCard): string | null => {
+    const out = `${COMMAND_CARD_PREFIX}${JSON.stringify(p)}`
+    return out.length <= MAX_SHARE_CONTENT_LENGTH ? out : null
+  }
+  switch (payload.kind) {
+    case 'help':
+    case 'themeList':
+      return fits(payload)
+    case 'changelog':
+      return fits({
+        kind: 'changelog',
+        status: {
+          ...payload.status,
+          tip: { ...payload.status.tip, message: payload.status.tip.message.slice(0, MAX_TEXT_FIELD_LENGTH) },
+          needsReload: false,
+        },
+      })
+    case 'broadcastHistory': {
+      const items = payload.items.slice(0, MAX_CARD_ITEMS).map((b) => ({ ...b, message: b.message.slice(0, MAX_TEXT_FIELD_LENGTH) }))
+      for (let n = items.length; n >= 0; n--) {
+        const out = fits({ kind: 'broadcastHistory', items: items.slice(0, n), total: payload.total })
+        if (out) return out
+      }
+      return null
+    }
+    case 'npHistory': {
+      const items = payload.items.slice(0, MAX_CARD_ITEMS).map((p) => ({ ...p, name: p.name.slice(0, MAX_TEXT_FIELD_LENGTH) }))
+      for (let n = items.length; n >= 0; n--) {
+        const out = fits({ kind: 'npHistory', items: items.slice(0, n), total: payload.total, capped: payload.capped })
+        if (out) return out
+      }
+      return null
+    }
+    default:
+      return null
+  }
+}
+
+export function decodeCommandCard(content: string): SharedCommandCard | null {
+  if (!content.startsWith(COMMAND_CARD_PREFIX) || content.length > MAX_SHARE_CONTENT_LENGTH) return null
+  let raw: unknown
+  try {
+    raw = JSON.parse(content.slice(COMMAND_CARD_PREFIX.length))
+  } catch {
+    return null
+  }
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+
+  switch (p.kind) {
+    case 'help':
+    case 'themeList':
+      return { kind: p.kind }
+    case 'npHistory': {
+      if (!Array.isArray(p.items) || p.items.length > MAX_CARD_ITEMS) return null
+      const items: { song: number; name: string; played_at: string }[] = []
+      for (const it of p.items as Record<string, unknown>[]) {
+        const name = clip(it?.name)
+        if (!it || !Number.isInteger(it.song) || (it.song as number) <= 0 || !name || !isIsoDate(it.played_at)) return null
+        items.push({ song: it.song as number, name, played_at: it.played_at })
+      }
+      if (!Number.isInteger(p.total) || (p.total as number) < 0 || typeof p.capped !== 'boolean') return null
+      return { kind: 'npHistory', items, total: p.total as number, capped: p.capped }
+    }
+    case 'broadcastHistory': {
+      if (!Array.isArray(p.items) || p.items.length > MAX_CARD_ITEMS) return null
+      const items: BroadcastMessage[] = []
+      for (const it of p.items as Record<string, unknown>[]) {
+        const message = clip(it?.message)
+        const sender = clip(it?.sender)
+        if (!it || !Number.isInteger(it.id) || !message || !sender || !isIsoDate(it.sent_at)) return null
+        if (!BROADCAST_LEVELS.includes(it.level as BroadcastLevel)) return null
+        if (it.title !== undefined && it.title !== null && typeof it.title !== 'string') return null
+        items.push({
+          id: it.id as number,
+          title: clip(it.title) ?? '',
+          message,
+          level: it.level as BroadcastLevel,
+          sender,
+          sent_at: it.sent_at,
+        })
+      }
+      if (!Number.isInteger(p.total) || (p.total as number) < 0) return null
+      return { kind: 'broadcastHistory', items, total: p.total as number }
+    }
+    case 'changelog': {
+      const st = p.status as Record<string, unknown> | undefined
+      const tip = st?.tip as Record<string, unknown> | undefined
+      if (!st || !tip) return null
+      const branch = clip(st.branch, 100)
+      const sha = typeof tip.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(tip.sha) ? tip.sha : null
+      const message = clip(tip.message)
+      const author = clip(tip.author)
+      // The card links the commit, so it has to be a plain https URL.
+      const url = typeof tip.url === 'string' && tip.url.length <= 300 && /^https:\/\//.test(tip.url) ? tip.url : null
+      if (!branch || !sha || message === null || !author || !url || !isIsoDate(tip.date)) return null
+      if (st.built !== 'live' && st.built !== 'building' && st.built !== 'unknown') return null
+      return {
+        kind: 'changelog',
+        status: {
+          branch,
+          tip: { sha, message, author, date: tip.date, url },
+          deployed: clip(st.deployed, 64),
+          running: clip(st.running, 64) ?? 'unknown',
+          built: st.built,
+          needsReload: false,
+        },
+      }
+    }
+    default:
+      return null
+  }
+}
+
 // Plain-text summary for surfaces that can't render the rich card (notification
 // banners, OS notifications) - falls through the three share types before
 // treating the content as a regular message.
@@ -390,6 +528,7 @@ export function shareSummaryText(content: string): string | null {
   const news = decodeNewsShare(content)
   if (news) return `Shared a news post: ${news.title}`
   if (decodeSongInfoShare(content)) return 'Shared song info'
+  if (decodeCommandCard(content)) return 'Shared a command card'
   const theme = decodeThemeShare(content)
   if (theme) return `Shared a theme: ${theme.name}`
   // Moderation cards deliberately aren't summarized here: phrasing one
