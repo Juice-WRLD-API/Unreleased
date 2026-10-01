@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { CHAT_COMMANDS, currentParamIndex, parseChatCommand, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
+import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
+import { CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
 import { adminGetUser, adminUpdateUser, type AdminUser } from '../../lib/userApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
@@ -598,6 +599,26 @@ const Composer = forwardRef<ComposerHandle, {
     toast(`Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, 'ok')
   }
 
+  // `-h` lists past broadcasts as a local card (only this admin sees it);
+  // otherwise it pushes a new one to everyone online. A broadcast can't be
+  // recalled, so sending asks first, same as the profile page's modal.
+  const runBroadcastCommand = async (args: string): Promise<void> => {
+    if (useChatStore.getState().me?.role !== 'administrator') throw new Error('Broadcasts are administrators only')
+    const parsed = parseBroadcastArgs(args)
+    if (parsed.history) {
+      const { count, results } = await fetchBroadcastHistory(10)
+      postLocalNotice(room, encodeLocalNotice({ kind: 'broadcastHistory', items: results, total: count }))
+      return
+    }
+    if (parsed.badLevel !== null) throw new Error(`Level must be one of: ${BROADCAST_LEVELS.join(', ')}`)
+    if (!parsed.message) throw new Error('Usage: /broadcast [-l level] <message>  (or /broadcast -h for history)')
+    if (parsed.message.length > BROADCAST_MAX_MESSAGE) throw new Error(`Broadcasts are limited to ${BROADCAST_MAX_MESSAGE} characters`)
+    const level = parsed.level ?? 'info'
+    if (!window.confirm(`Send this ${level} broadcast to everyone connected? It can't be recalled.\n\n${parsed.message}`)) return
+    await sendBroadcast({ message: parsed.message, level })
+    toast('Broadcast sent to everyone connected', 'ok')
+  }
+
   // Every command in CHAT_COMMANDS (sharing, /theme, the moderation set, and
   // so on) is recognized only when it is the entire message
   // (no reply-in-progress, no attachments) - anything else starting with "/"
@@ -650,6 +671,8 @@ const Composer = forwardRef<ComposerHandle, {
         await setAutoApprove(cmd.args, true)
       } else if (cmd.command === 'disallow') {
         await setAutoApprove(cmd.args, false)
+      } else if (cmd.command === 'broadcast') {
+        await runBroadcastCommand(cmd.args)
       } else if (cmd.command === 'kick') {
         await runKickCommand(cmd.args)
       } else if (cmd.command === 'timeout') {

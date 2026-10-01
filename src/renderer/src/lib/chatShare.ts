@@ -1,3 +1,4 @@
+import type { BroadcastMessage } from './broadcastApi'
 import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
 
 // A song share rides in a chat message's plain `content` (or, for DMs, the
@@ -361,6 +362,7 @@ export type LocalNoticePayload =
   | { kind: 'help' }
   | { kind: 'themeList' }
   | { kind: 'feedbackSent'; message: string }
+  | { kind: 'broadcastHistory'; items: BroadcastMessage[]; total: number }
 
 export function encodeLocalNotice(payload: LocalNoticePayload): string {
   return `${LOCAL_NOTICE_PREFIX}${JSON.stringify(payload)}`

@@ -1,10 +1,12 @@
+import { BROADCAST_LEVELS, type BroadcastLevel } from './broadcastApi'
+
 // Chat slash commands, typed as a message's *entire* body, are intercepted
 // by Composer before send - they never reach the room as literal text.
 // Anything else starting with "/" (a URL, an unrecognized word, etc.) is left
 // alone and sent as normal text, same as before this feature existed.
 export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick'
   | 'timeout' | 'untimeout' | 'ban' | 'unban' | 'bans' | 'siteban' | 'sitemute' | 'siteunban'
-  | 'demote' | 'role' | 'allow' | 'disallow' | 'feedback' | 'help'
+  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'feedback' | 'help'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -17,7 +19,7 @@ export interface ParsedChatCommand {
 const KNOWN_COMMANDS = new Set<string>([
   'song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick',
   'timeout', 'untimeout', 'ban', 'unban', 'bans', 'siteban', 'sitemute', 'siteunban',
-  'demote', 'role', 'allow', 'disallow', 'feedback', 'help',
+  'demote', 'role', 'allow', 'disallow', 'broadcast', 'feedback', 'help',
 ])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
@@ -35,6 +37,38 @@ const ALIASES: Record<string, ChatCommandName> = {
   unsiteban: 'siteunban',
   roles: 'role',
   deny: 'disallow',
+  bc: 'broadcast',
+}
+
+export interface BroadcastArgs {
+  history: boolean
+  level: BroadcastLevel | null
+  // Set when `-l` was given something that isn't a level, so the caller can
+  // say so instead of silently sending as "info".
+  badLevel: string | null
+  message: string
+}
+
+// Leading flags only (`-h`, `-l <level>`), then the rest of the line is the
+// message verbatim - so a "-h" later in the text is just text.
+export function parseBroadcastArgs(args: string): BroadcastArgs {
+  const out: BroadcastArgs = { history: false, level: null, badLevel: null, message: '' }
+  let rest = args.trim()
+  for (;;) {
+    const m = /^(-h|--history|-l|--level)(?:\s+|$)/i.exec(rest)
+    if (!m) break
+    const flag = m[1].toLowerCase()
+    rest = rest.slice(m[0].length)
+    if (flag === '-h' || flag === '--history') { out.history = true; continue }
+    const word = /^(\S+)(?:\s+|$)/.exec(rest)
+    if (!word) { out.badLevel = ''; break }
+    rest = rest.slice(word[0].length)
+    const level = word[1].toLowerCase()
+    if ((BROADCAST_LEVELS as readonly string[]).includes(level)) out.level = level as BroadcastLevel
+    else out.badLevel = word[1]
+  }
+  out.message = rest.trim()
+  return out
 }
 
 // Site-wide staff roles an administrator can grant from chat - the same four
@@ -102,6 +136,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'siteban', usage: '/siteban @user [reason]', description: 'Admins: ban a user from all chat and DMs', params: ['user', 'reason'] },
   { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
   { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
+  { name: 'broadcast', usage: '/broadcast [-l level] <message>  ·  /broadcast -h', description: 'Admins: push a banner to everyone online, or -h to see past broadcasts', aliases: ['bc'], params: ['message'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help', description: 'List available commands', params: [] },
 ]
