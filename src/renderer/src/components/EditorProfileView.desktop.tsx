@@ -238,7 +238,7 @@ export default function EditorProfileView(): JSX.Element {
                           </h1>
                         )}
                         {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
-                        <div className="mt-1">
+                        <div className="mt-1 flex flex-wrap gap-1.5">
                           <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={!!account?.is_editor} isContributor={isContributor} />
                         </div>
                       </div>
