@@ -17,6 +17,9 @@
 import { downloadZip } from 'client-zip'
 import cdnService from './cdn'
 import { triggerDownload } from './apiFilesShared'
+import { errorMessage } from './format'
+import { useStore } from '../store/useStore'
+import { isMobileViewport } from '../hooks/useIsMobile'
 
 export interface ZipItem {
   /** Path inside the archive - may contain '/' for subfolders. */
@@ -28,10 +31,10 @@ export interface ZipItem {
 }
 
 export interface ZipProgress { done: number; total: number }
-export interface ZipResult { saved: number; failed: number }
+export interface ZipResult { saved: number; failed: number; cancelled?: boolean }
 
 export type ZipTarget =
-  | { kind: 'disk'; handle: FileSystemFileHandle }
+  | { kind: 'disk'; handle: FileSystemFileHandle; filename: string }
   | { kind: 'memory'; filename: string }
 
 export class ZipTooLargeError extends Error {
@@ -61,7 +64,7 @@ export async function openZipTarget(baseName: string): Promise<ZipTarget | null>
       suggestedName: filename,
       types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }],
     })
-    return { kind: 'disk', handle }
+    return { kind: 'disk', handle, filename: handle.name }
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') return null
     // SecurityError (activation lapsed) or anything else - memory still works.
@@ -72,12 +75,13 @@ export async function openZipTarget(baseName: string): Promise<ZipTarget | null>
 /** Fetches every item into one ZIP and saves it to `target`. Items that fail
  *  to fetch are left out and counted in `failed`. Throws ZipTooLargeError
  *  (before writing anything, when sizes are known up front) if a memory
- *  target would exceed the cap. */
+ *  target would exceed the cap, and AbortError if `signal` fires. */
 export async function writeZip(
   target: ZipTarget,
   items: ZipItem[],
-  onProgress?: (p: ZipProgress) => void
+  opts: { signal?: AbortSignal; onProgress?: (p: ZipProgress) => void; onBytes?: (bytes: number) => void } = {}
 ): Promise<ZipResult> {
+  const { signal, onProgress, onBytes } = opts
   if (target.kind === 'memory') {
     const known = items.reduce((sum, i) => sum + (i.size ?? 0), 0)
     if (known > MEMORY_ZIP_LIMIT) throw new ZipTooLargeError()
@@ -86,23 +90,35 @@ export async function writeZip(
   const result: ZipResult = { saved: 0, failed: 0 }
   const total = items.length
   onProgress?.({ done: 0, total })
-  const entries = zipEntries(dedupeNames(items), result, (done) => onProgress?.({ done, total }))
-  const body = downloadZip(entries).body
-  if (!body) throw new Error('ZIP stream unavailable')
+  const entries = zipEntries(dedupeNames(items), result, (done) => onProgress?.({ done, total }), signal)
+  const zip = downloadZip(entries).body
+  if (!zip) throw new Error('ZIP stream unavailable')
+
+  let bytes = 0
+  const body = zip.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      bytes += chunk.byteLength
+      onBytes?.(bytes)
+      controller.enqueue(chunk)
+    },
+  }))
 
   if (target.kind === 'disk') {
-    // On failure pipeTo aborts the writable, which discards the partial file.
-    await body.pipeTo(await target.handle.createWritable())
+    // On failure or abort pipeTo aborts the writable, which discards the
+    // partial file.
+    await body.pipeTo(await target.handle.createWritable(), { signal })
     return result
   }
 
   const chunks: Uint8Array[] = []
-  let bytes = 0
   const reader = body.getReader()
   for (;;) {
+    if (signal?.aborted) {
+      await reader.cancel()
+      throw new DOMException('Cancelled', 'AbortError')
+    }
     const { done, value } = await reader.read()
     if (done) break
-    bytes += value.byteLength
     if (bytes > MEMORY_ZIP_LIMIT) {
       await reader.cancel()
       throw new ZipTooLargeError()
@@ -115,19 +131,97 @@ export async function writeZip(
   return result
 }
 
-/** writeZip, falling back to individual downloads when an in-memory ZIP
- *  would be too large. The usual entry point for a bulk "Download". */
+const zipAborts = new Map<string, AbortController>()
+
+export function isZipTaskId(id: string): boolean {
+  return id.startsWith('zip-')
+}
+
+export function cancelZipTask(id: string): void {
+  zipAborts.get(id)?.abort()
+}
+
+/** The usual entry point for a bulk "Download": writeZip, tracked as a task
+ *  in the Uploads panel (progress, size, speed, cancel), falling back to
+ *  individual downloads when an in-memory ZIP would be too large. A
+ *  cancelled ZIP resolves with `cancelled: true` rather than throwing. */
 export async function saveItems(
   target: ZipTarget,
   items: ZipItem[],
   onProgress?: (p: ZipProgress) => void
 ): Promise<ZipResult> {
+  const id = `zip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const ctrl = new AbortController()
+  zipAborts.set(id, ctrl)
+  const { addUpload, updateUpload, setShowUploadManager } = useStore.getState()
+
+  // The archive is barely bigger than its files (stored, not deflated), so
+  // their summed size is a good enough total when every size is known.
+  const knownTotal = items.every((i) => i.size != null)
+    ? items.reduce((sum, i) => sum + (i.size ?? 0), 0) || undefined
+    : undefined
+  const fileCount = items.length
+  let done = 0
+  let bytes = 0
+  let sample = { bytes: 0, time: Date.now() }
+  let lastPush = 0
+  const push = (force = false): void => {
+    const now = Date.now()
+    if (!force && now - lastPush < 250) return
+    lastPush = now
+    let speedBps: number | undefined
+    const dt = (now - sample.time) / 1000
+    if (dt >= 0.4) {
+      speedBps = Math.max(0, (bytes - sample.bytes) / dt)
+      sample = { bytes, time: now }
+    }
+    const fraction = knownTotal ? bytes / knownTotal : done / fileCount
+    updateUpload(id, {
+      percent: Math.min(99, Math.round(fraction * 100)),
+      received: bytes,
+      bytesReceived: bytes,
+      detail: `${done} / ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+      ...(speedBps !== undefined ? { speedBps } : {}),
+    })
+  }
+
+  addUpload({
+    id, filename: target.filename, type: 'zip', state: 'downloading',
+    percent: 0, received: 0, total: knownTotal, detail: `0 / ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+  })
+  // The panel is anchored to the desktop sidebar; mobile views show their
+  // own inline progress instead.
+  if (!isMobileViewport()) setShowUploadManager(true)
+
   try {
-    return await writeZip(target, items, onProgress)
+    const result = await writeZip(target, items, {
+      signal: ctrl.signal,
+      onProgress: (p) => { done = p.done; onProgress?.(p); push() },
+      onBytes: (b) => { bytes = b; push() },
+    })
+    updateUpload(id, {
+      state: result.saved > 0 ? 'done' : 'error',
+      percent: 100,
+      speedBps: undefined,
+      detail: `${result.saved} file${result.saved === 1 ? '' : 's'}${result.failed ? ` · ${result.failed} failed` : ''}`,
+      error: result.saved > 0 ? undefined : 'No files could be downloaded',
+    })
+    return result
   } catch (err) {
-    if (!(err instanceof ZipTooLargeError)) throw err
-    await downloadItemsIndividually(items)
-    return { saved: items.length, failed: 0 }
+    if (err instanceof ZipTooLargeError) {
+      updateUpload(id, { state: 'downloading', percent: 0, speedBps: undefined, detail: 'Too big to zip here - downloading files separately' })
+      await downloadItemsIndividually(items)
+      updateUpload(id, { state: 'done', percent: 100, detail: `${fileCount} separate download${fileCount === 1 ? '' : 's'}` })
+      return { saved: fileCount, failed: 0 }
+    }
+    if (ctrl.signal.aborted) {
+      updateUpload(id, { state: 'cancelled', speedBps: undefined, error: 'Cancelled' })
+      return { saved: 0, failed: 0, cancelled: true }
+    }
+    updateUpload(id, { state: 'error', speedBps: undefined, error: errorMessage(err, 'ZIP failed') })
+    throw err
+  } finally {
+    zipAborts.delete(id)
   }
 }
 
@@ -143,15 +237,17 @@ export async function downloadItemsIndividually(items: ZipItem[]): Promise<void>
 async function* zipEntries(
   items: ZipItem[],
   result: ZipResult,
-  onDone: (done: number) => void
+  onDone: (done: number) => void,
+  signal?: AbortSignal
 ): AsyncGenerator<{ name: string; input: Response | Blob; lastModified?: Date }> {
   const pending = items.map(() => null as Promise<Response | Blob | null> | null)
   const start = (i: number): void => {
-    if (i < items.length && !pending[i]) pending[i] = fetchItem(items[i])
+    if (i < items.length && !pending[i]) pending[i] = fetchItem(items[i], signal)
   }
   for (let i = 0; i < Math.min(PREFETCH, items.length); i++) start(i)
 
   for (let i = 0; i < items.length; i++) {
+    signal?.throwIfAborted()
     start(i)
     const input = await pending[i]
     pending[i] = null
@@ -166,13 +262,13 @@ async function* zipEntries(
   }
 }
 
-async function fetchItem(item: ZipItem): Promise<Response | Blob | null> {
+async function fetchItem(item: ZipItem, signal?: AbortSignal): Promise<Response | Blob | null> {
   if (item.cdnPath) {
     const cdn = await cdnService.tryDownload(item.cdnPath).catch(() => null)
     if (cdn) return cdn.blob
   }
   try {
-    const res = await fetch(item.url, { credentials: 'omit' })
+    const res = await fetch(item.url, { credentials: 'omit', signal })
     return res.ok ? res : null
   } catch {
     return null

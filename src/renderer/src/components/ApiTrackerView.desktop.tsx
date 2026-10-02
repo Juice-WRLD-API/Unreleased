@@ -2649,11 +2649,12 @@ export default function ApiTrackerView(): JSX.Element {
     try {
       // CDN only for the primary channel - see handleDownload's comment above.
       const useCdn = isPrimaryChannelSlug(channels, activeChannel)
-      const { failed } = await saveItems(target, paths.map(path => ({
+      const { failed, cancelled } = await saveItems(target, paths.map(path => ({
         name: path.split('/').pop() || path,
         url: buildStreamUrl(path, activeChannel || undefined),
         cdnPath: useCdn ? path : undefined,
       })))
+      if (cancelled) { setBulkZipStatus('idle'); return }
       skipped += failed
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')

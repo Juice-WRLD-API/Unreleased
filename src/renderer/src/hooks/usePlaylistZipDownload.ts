@@ -27,7 +27,8 @@ export function usePlaylistZipDownload(): {
         name: t.path.split('/').pop() || t.title,
         url: t.streamUrl ?? buildStreamUrl(t.path),
       }))
-      const { saved } = items.length ? await saveItems(target, items) : { saved: 0 }
+      const { saved, cancelled } = items.length ? await saveItems(target, items) : { saved: 0, cancelled: false }
+      if (cancelled) { setZipState('idle'); return }
       setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
     setTimeout(() => setZipState('idle'), 3000)

@@ -117,10 +117,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
       const d = await userApi.getPlaylist(playlist.id)
       const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
       if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      const { saved } = await saveItems(target, tracks.map(t => ({
+      const { saved, cancelled } = await saveItems(target, tracks.map(t => ({
         name: t.path.split('/').pop() || t.title,
         url: t.streamUrl ?? buildStreamUrl(t.path),
       })))
+      if (cancelled) { setZipState('idle'); return }
       setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
     setTimeout(() => setZipState('idle'), 2500)

@@ -53,7 +53,8 @@ export function useApiFilesZip(opts: { activeChannel: string; getSelectedEntries
       }
       if (items.length === 0) { setZipStatus('idle'); return }
       setZipStatus('zipping')
-      const { saved } = await saveItems(target, items, setZipProgress)
+      const { saved, cancelled } = await saveItems(target, items, setZipProgress)
+      if (cancelled) { setZipStatus('idle'); setZipProgress(null); return }
       finish(saved > 0 ? 'done' : 'error')
     } catch {
       finish('error')
