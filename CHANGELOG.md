@@ -14,7 +14,7 @@
 - Links posted in a channel show a preview card with the page's title, description and image. DMs never fetch previews.
 - Share songs, playlists, news posts, lyrics cards and themes right into a chat.
 - Slash commands: `/song`, `/search`, `/mute`, `/unmute`, `/theme`, `/np`, `/promote`, `/info`, `/kick`, `/help`, `/feedback`, `/sharetheme`. They autocomplete and show hints for what to type next.
-- Administrators get a full-screen Terminal in chat (the `>_` button in the room header): a black, Linux-style console that runs the same slash commands as the chat box, with or without the slash. `cd` and `ls` move between channels and DMs, `cd files` opens the Files tab as a folder tree (`cd`, `ls`, and `get` to download a file, or a folder as a ZIP), Tab completes names and paths, and the arrow keys recall past commands.
+- Administrators get a full-screen Terminal in chat (the `>_` button in the room header): a black, Linux-style console that runs the same slash commands as the chat box, with or without the slash. `cd` and `ls` move between channels and DMs, `cd files` opens the Files tab as a folder tree (`cd`, `ls`, and `get` to download a file, or a folder as a ZIP), Tab completes names and paths, and the arrow keys recall past commands. Beyond the chat commands it can drive the rest of the app: playback and the queue (`play`, `seek`, `volume`, `queue`, `find`), playlists, any setting (`set theme dark`), `open` any page, and the admin review queues (`proposals`, `approve`, `reject`, `users`, `sitebans`). `help` lists them.
 - Roles and permissions, public servers you can browse and join, and moderation tools (timeout, ban, and site-wide restrictions).
 
 ### Profiles

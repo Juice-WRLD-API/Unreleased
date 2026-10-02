@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { CHAT_COMMANDS } from '../../lib/chatCommands'
 import { findChatCommand } from '../../lib/chatHelp'
+import { findTermCommand, TERM_COMMAND_WORDS, TERM_COMMANDS, TERM_GROUPS, type TermCommand } from '../../lib/terminal'
 import { commandCardText } from '../../lib/commandCardText'
 import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { defaultFilesCwd, downloadPath, FILES_ROOT, filesPathString, formatListing, listDir, resolveDir, splitTyped, unquote, type FilesCwd } from '../../lib/terminalFiles'
@@ -40,6 +41,7 @@ const BUILTINS = ['cd', 'ls', 'get', 'pwd', 'whoami', 'clear', 'exit']
 const COMPLETIONS = [...new Set([
   ...CHAT_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]),
   ...BUILTINS,
+  ...TERM_COMMAND_WORDS,
 ])].sort()
 
 const slug = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, '-')
@@ -55,20 +57,36 @@ function stripMarkdown(text: string): string {
     .replace(/^- /gm, '  ')
 }
 
+const SHELL_NAMES = ['cd', 'ls', 'get', 'pwd', 'whoami', 'clear', 'exit']
+
+// `help` alone is an index (there are a lot of commands now); `help <group>`
+// lists one group in full and `help <command>` explains one.
 function helpText(): string {
-  const rows = CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => `  ${c.usage}\n      ${c.description}`)
+  const chat = CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => c.name).join('  ')
+  const groups = TERM_GROUPS
+    .map((g) => ({ g, names: TERM_COMMANDS.filter((c) => c.group === g).map((c) => c.name) }))
+    .filter((x) => x.names.length > 0)
+  const width = Math.max(...groups.map((x) => x.g.length), 'Chat'.length, 'Shell'.length) + 2
+  const row = (label: string, names: string): string => `  ${label.padEnd(width)}${names}`
   return [
-    'Chat commands (the slash is optional here):',
-    ...rows,
+    'Commands (the slash is optional here):',
+    row('Chat', chat),
+    ...groups.map((x) => row(x.g, x.names.join('  '))),
+    row('Shell', SHELL_NAMES.join('  ')),
     '',
-    'Terminal:',
-    '  cd <channel|@dm>   switch the room commands run in',
-    '  cd files           browse the Files tab (then cd, ls, get <file|folder>)',
-    '  ls                 list channels (or DMs, or files)',
-    '  get <path>         download a file, or a folder as a ZIP',
-    '  pwd  whoami  clear  exit',
-    '  Tab completes · ↑ ↓ history · Ctrl+L clear · Ctrl+C cancel line',
+    'help <command> explains one · help <group> lists a group in full (chat, player, library, navigation, settings, admin, app, shell)',
+    'Tab completes names and arguments · ↑ ↓ history · Ctrl+L clear · Ctrl+C cancel line',
   ].join('\n')
+}
+
+function groupHelp(word: string): string | null {
+  const w = word.trim().toLowerCase()
+  const entry = (usage: string, description: string): string => `  ${usage}\n      ${description}`
+  if (w === 'chat') return ['Chat commands (the slash is optional here):', ...CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => entry(c.usage, c.description))].join('\n')
+  if (w === 'shell') return ['Shell:', ...SHELL_NAMES.map((n) => BUILTIN_HELP[n] ?? n)].join('\n')
+  const group = TERM_GROUPS.find((g) => g.toLowerCase() === w)
+  if (!group) return null
+  return [`${group}:`, ...TERM_COMMANDS.filter((c) => c.group === group).map((c) => entry(c.usage, c.description))].join('\n')
 }
 
 const BUILTIN_HELP: Record<string, string> = {
@@ -86,6 +104,13 @@ const BUILTIN_HELP: Record<string, string> = {
 function commandHelp(word: string): string | null {
   const name = word.replace(/^\//, '').toLowerCase()
   if (BUILTIN_HELP[name]) return BUILTIN_HELP[name]
+  const grouped = groupHelp(name)
+  if (grouped) return grouped
+  const term = findTermCommand(name)
+  if (term) {
+    const termAliases = term.aliases?.length ? `\n      aliases: ${term.aliases.join(', ')}` : ''
+    return `${term.usage}\n      ${term.description}${termAliases}`
+  }
   const info = findChatCommand(name)
   if (!info) return null
   const aliases = info.aliases?.length ? `\n      aliases: ${info.aliases.map((a) => `/${a}`).join(', ')}` : ''
@@ -219,6 +244,11 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     return true
   }
 
+  const runTerm = (command: TermCommand, arg: string): Promise<boolean> =>
+    Promise.resolve()
+      .then(() => command.run(arg, { print, history: () => sessionFor(key).history }))
+      .then(() => true)
+
   // Shell-ish commands that never leave this panel. A promise means it needs the
   // network (the file tree); false means "not mine, hand it to the chat runner".
   const builtin = (line: string): boolean | Promise<boolean> => {
@@ -249,7 +279,10 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         else print(`help: no help for "${topic}"`, 'error')
         return true
       }
-      default: return false
+      default: {
+        const term = findTermCommand(word)
+        return term ? runTerm(term, arg) : false
+      }
     }
   }
 
@@ -376,6 +409,11 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       finishCompletion(head, sigil, pool.map((r) => r.name), token.slice(sigil.length), false)
     } else if (word === 'help' && !token.startsWith('-')) {
       finishCompletion(head, token.startsWith('/') ? '/' : '', COMPLETIONS, token.replace(/^\//, ''), false)
+    } else if (findTermCommand(word)?.complete) {
+      const command = findTermCommand(word)!
+      const tokens = input.slice(input.search(/\s/)).trim().split(/\s+/).filter(Boolean)
+      const partial = /\s$/.test(input) ? '' : tokens.pop() ?? ''
+      finishCompletion(input.slice(0, input.length - partial.length), '', command.complete!(tokens, partial), partial, true)
     } else if (token.startsWith('@')) {
       finishCompletion(head, '@', people.map((p) => p.username), token.slice(1), true)
     }
