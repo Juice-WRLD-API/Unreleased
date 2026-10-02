@@ -34,6 +34,8 @@ export interface ChatNotificationPayload {
   autoDismissMs?: number
   /** Tints the banner (admin broadcasts); plain toast when omitted. */
   level?: 'info' | 'success' | 'warning' | 'error'
+  /** OS notification tag; defaults to `chat-<id>`. */
+  tag?: string
 }
 
 // In-app banner (Discord-style toast) subscribers - kept separate from the OS
@@ -66,7 +68,7 @@ export function fireChatNotification(payload: ChatNotificationPayload): void {
     const n = new Notification(payload.title, {
       body: payload.body,
       icon: payload.icon ?? undefined,
-      tag: `chat-${payload.id}`, // dedupes if the same event somehow fires twice
+      tag: payload.tag ?? `chat-${payload.id}`, // dedupes if the same event somehow fires twice
     })
     n.onclick = () => {
       focusAppWindow()

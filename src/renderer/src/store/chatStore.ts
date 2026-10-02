@@ -338,6 +338,34 @@ export const useChatStore = create<ChatState>((set, get) => {
     return !!server && get().mutedServers.includes(server.id)
   }
 
+  // A new sign-in on this account wants keys. Only a device that can approve
+  // (identity ready) alerts, and not for a device "Not now" already hid.
+  const notifyLinkRequest = (deviceId: string, label: string): void => {
+    const meId = get().meId
+    if (!meId || get().identity !== 'ready') return
+    try {
+      if ((JSON.parse(localStorage.getItem('unrlsd-link-dismissed') ?? '[]') as string[]).includes(deviceId)) return
+    } catch { /* ignore */ }
+    void e2e().then(async (m) => {
+      if (deviceId === await m.localDeviceId(meId)) return
+      fireChatNotification({
+        id: 0,
+        tag: `chat-link-${deviceId}`,
+        title: 'New device wants to link',
+        body: `${label || 'A new device'} signed in to your account. Open chat to compare its number and approve. If this wasn't you, decline.`,
+        level: 'warning',
+        onOpen: () => {
+          useStore.setState({ activeView: 'chat' })
+          // The approve prompt lives in the room pane, so make sure one is open.
+          if (!get().active) {
+            const conv = get().conversations[0]
+            if (conv) get().openRoom({ kind: 'conversation', id: conv.id })
+          }
+        },
+      })
+    }).catch(() => undefined)
+  }
+
   const notifyNewMessage = (key: string, msg: ChatMessage): void => {
     const room = parseRoomKey(key)
     let title: string
@@ -729,6 +757,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         // the pending list whenever the trust epoch moves, so the approve
         // prompt shows up now instead of on its next poll.
         set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+        notifyLinkRequest(ev.device_id, ev.label)
         return
       case 'link.claimed':
       case 'backup.updated':
