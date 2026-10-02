@@ -172,6 +172,14 @@ export interface ChatReaction {
   me: boolean
 }
 
+// What the server puts in a message's `card`. Songs travel as ids and are looked
+// up for display, so a card never carries a title someone could have chosen.
+export type ServerCard =
+  | { kind: 'help' }
+  | { kind: 'npNow'; user: ChatUserBrief; song: number; updated_at: string }
+  | { kind: 'npHistory'; user: ChatUserBrief | null; items: { song: number; played_at: string }[]; total: number; capped: boolean }
+  | { kind: 'broadcastHistory'; items: { id: number; title: string; message: string; level: string; sender: string; sent_at: string }[]; total: number }
+
 export interface ChatMessage {
   id: number
   channel: number | null
@@ -188,6 +196,10 @@ export interface ChatMessage {
   sender_device?: string
   edit_seq?: number
   signature?: string
+  // Server-built command card (see createChannelCard); null on ordinary
+  // messages, absent on older servers. The only place a card is read from -
+  // never from `content`.
+  card?: ServerCard | null
   parent: number | null
   mentions: number[]
   attachments: ChatAttachment[]
@@ -498,6 +510,17 @@ export const createChannelMessage = (id: number, body: {
   mentions?: number[]
   attachments?: AttachmentInput[]
 }) => request<ChatMessage>(`/channels/${id}/messages/`, json('POST', body))
+
+// Posts a command's answer to a channel as a card. The client only names the
+// command; the server builds the card from its own data and the poster's
+// standing, which is what makes a card something no one can forge with text.
+export type CardCommand =
+  | { name: 'help' }
+  | { name: 'np'; user_id?: number }
+  | { name: 'np_history'; user_id?: number; count?: number }
+  | { name: 'broadcast_history'; count?: number }
+export const createChannelCard = (id: number, command: CardCommand) =>
+  request<ChatMessage>(`/channels/${id}/messages/`, json('POST', { command }))
 export const markChannelRead = (id: number, messageId?: number) =>
   request<void>(`/channels/${id}/read/`, json('POST', messageId ? { message_id: messageId } : {}))
 
@@ -530,7 +553,8 @@ export const markDmRead = (id: number, messageId?: number) =>
 export const getMessage = (id: number) => request<ChatMessage>(`/messages/${id}/`)
 export const editMessage = (id: number, body: { content: string } | ({ ciphertext: string; nonce: string; key_version: number; mentions?: number[] } & Partial<V2MessageFields>)) =>
   request<ChatMessage>(`/messages/${id}/`, json('PATCH', body))
-export const deleteMessage = (id: number) => request<void>(`/messages/${id}/`, json('DELETE'))
+/** `purge` hard-deletes the row (no "deleted" placeholder in history) instead of soft-deleting it. */
+export const deleteMessage = (id: number, purge = false) => request<void>(`/messages/${id}/${purge ? '?purge=1' : ''}`, json('DELETE'))
 export const pinMessage = (id: number) => request<ChatMessage>(`/messages/${id}/pin/`, json('POST'))
 export const unpinMessage = (id: number) => request<ChatMessage>(`/messages/${id}/pin/`, json('DELETE'))
 export const addReaction = (id: number, emoji: string) =>

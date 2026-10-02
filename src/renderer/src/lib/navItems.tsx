@@ -183,7 +183,7 @@ export interface NavControlDef {
 
 export const NAV_CONTROLS: NavControlDef[] = [
   { id: 'profile', label: 'Profile', icon: <User size={18} /> },
-  { id: 'uploads', label: 'Uploads', icon: <Upload size={18} /> },
+  { id: 'uploads', label: 'Transfers', icon: <Upload size={18} /> },
   { id: 'diagnostics', label: 'Diagnostics', icon: <Info size={18} /> },
   { id: 'download', label: 'Download app', icon: <Download size={18} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },

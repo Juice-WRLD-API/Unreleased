@@ -6,8 +6,8 @@ import { KeyRound, ShieldAlert } from 'lucide-react'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
-import { decodeCommandCard, decodeLocalNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
-import type { SharedCommandCard } from '../../lib/chatShare'
+import { decodeLocalNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
+import type { CommandCardPayload } from '../../lib/chatShare'
 import { useChatStore, useModerationNotice, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
@@ -23,6 +23,7 @@ import NewsShareCard from './NewsShareCard'
 import NowPlayingHistoryCard from './NowPlayingHistoryCard'
 import NowPlayingNowCard from './NowPlayingNowCard'
 import ResultCard from './ResultCard'
+import ServerCommandCard, { isKnownServerCard } from './ServerCommandCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
@@ -87,10 +88,9 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
 
 const MemoMarkdown = memo(MarkdownText)
 
-// One renderer for a command's card whether it's the private local notice
-// (room + messageId given, so it can be dismissed) or the same card posted to
-// the chat with `-s` (neither given).
-export function CommandCard({ card, room, messageId }: { card: SharedCommandCard; room?: RoomRef; messageId?: number }): JSX.Element | null {
+// A command's card. These only ever come from this client's own local notices
+// (see postLocalNotice) - never from chat text, which anyone could write.
+export function CommandCard({ card, room, messageId }: { card: CommandCardPayload; room?: RoomRef; messageId?: number }): JSX.Element | null {
   switch (card.kind) {
     case 'help': return <HelpCard room={room} messageId={messageId} />
     case 'themeList': return <ThemeListCard room={room} messageId={messageId} />
@@ -120,6 +120,10 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     return notice ? <CommandCard card={notice} room={room} messageId={message.id} /> : null
   }
 
+  // A command card posted to the room. It comes from the message's own `card`
+  // field, which only the server can set - never decoded out of `content`.
+  if (!message.is_encrypted && isKnownServerCard(message.card)) return <ServerCommandCard card={message.card} />
+
   if (!message.is_encrypted) {
     const afterReply = splitReplyRef(message.content).body
     const body = splitForwardRef(afterReply).body
@@ -134,8 +138,6 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (info) return <SongInfoCard info={info} />
     const theme = decodeThemeShare(body)
     if (theme) return <ThemeShareCard theme={theme} />
-    const command = decodeCommandCard(body)
-    if (command) return <CommandCard card={command} />
     if (moderation) return <ModerationCard notice={moderation} />
     // Channel messages only. A preview is fetched through our server, which
     // would see the URL - fine for a room it already relays in plaintext, not
@@ -194,7 +196,5 @@ function decryptedContent(text: string, people: ChatUserBrief[], meId: number | 
   if (decryptedInfo) return <SongInfoCard info={decryptedInfo} />
   const decryptedTheme = decodeThemeShare(decryptedBody)
   if (decryptedTheme) return <ThemeShareCard theme={decryptedTheme} />
-  const decryptedCommand = decodeCommandCard(decryptedBody)
-  if (decryptedCommand) return <CommandCard card={decryptedCommand} />
   return <MemoMarkdown text={decryptedBody} people={people} meId={meId} />
 }

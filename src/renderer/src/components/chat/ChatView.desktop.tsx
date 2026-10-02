@@ -67,13 +67,13 @@ export default function ChatViewDesktop(): JSX.Element {
 
   const serverId = active?.kind === 'channel' ? activeServerId : null
   const showThread = !!active && threadRootId !== null
-  const sideOpen = showThread || panel !== null
+  const sideOpen = showThread || (panel !== null && panel !== 'terminal')
   const sideClassName = compact
     ? 'flex h-full absolute inset-y-0 right-0 z-30 shadow-2xl'
     : 'flex h-full'
 
   return (
-    <div className="flex-1 min-w-0 h-full flex bg-surface overflow-hidden" style={{ ['--chat-rail' as string]: 'var(--sidebar, var(--surface))' }}>
+    <div className="relative flex-1 min-w-0 h-full flex bg-surface overflow-hidden" style={{ ['--chat-rail' as string]: 'var(--sidebar, var(--surface))' }}>
       <ServerRail />
       <div className="w-[264px] shrink-0 min-h-0 flex flex-col bg-surface-raised/30 border-r border-[var(--border)]">
         {activeServerId === null ? <DmList /> : <ChannelList serverId={activeServerId} />}
@@ -91,7 +91,6 @@ export default function ChatViewDesktop(): JSX.Element {
         {sideOpen && (
           <div className={sideClassName}>
             {active && showThread && <ThreadPanel room={active} rootId={threadRootId!} onClose={() => openThread(null)} />}
-            {active && !showThread && panel === 'terminal' && <TerminalPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'pins' && <PinsPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'members' && serverId !== null && (
               <MembersPanel serverId={serverId} onClose={() => setPanel(null)} onAddMembers={() => openModal({ kind: 'add-members', serverId })} />
@@ -102,6 +101,7 @@ export default function ChatViewDesktop(): JSX.Element {
           </div>
         )}
       </main>
+      {active && panel === 'terminal' && <TerminalPanel room={active} onClose={() => setPanel(null)} />}
     </div>
   )
 }

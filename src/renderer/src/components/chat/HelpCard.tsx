@@ -9,11 +9,11 @@ export default function HelpCard({ room, messageId }: { room?: RoomRef; messageI
   const commands = CHAT_COMMANDS.filter((c) => c.name !== 'help')
   return (
     <LocalNoticeFrame room={room} messageId={messageId} title="Commands">
-      <dl className="mt-2 space-y-1.5">
+      <dl className="mt-2 space-y-2">
         {commands.map((c) => (
-          <div key={c.name} className="flex gap-2 text-xs">
-            <dt className="shrink-0 font-mono text-accent">{c.usage}</dt>
-            <dd className="text-text-secondary min-w-0">{c.description}</dd>
+          <div key={c.name} className="text-xs min-w-0">
+            <dt className="font-mono text-accent break-words [overflow-wrap:anywhere]">{c.usage}</dt>
+            <dd className="mt-0.5 text-text-secondary break-words [overflow-wrap:anywhere]">{c.description}</dd>
           </div>
         ))}
       </dl>

@@ -61,6 +61,11 @@ export interface BranchTip {
   url: string
 }
 
+// A commit's page on GitHub, built from its sha alone. Anything that renders a
+// commit it didn't fetch itself (a card pasted into chat) links this, never a
+// URL carried in the payload.
+export const commitUrl = (sha: string): string => `https://github.com/${REPO}/commit/${sha}`
+
 interface GithubCommit {
   sha?: string
   html_url?: string
@@ -74,7 +79,7 @@ function toBranchTip(data: GithubCommit): BranchTip {
     message: data.commit?.message ?? '',
     author: data.commit?.author?.name ?? 'unknown',
     date: data.commit?.committer?.date ?? data.commit?.author?.date ?? '',
-    url: data.html_url ?? `https://github.com/${REPO}/commit/${data.sha}`,
+    url: commitUrl(data.sha),
   }
 }
 

@@ -14,7 +14,7 @@
 - Links posted in a channel show a preview card with the page's title, description and image. DMs never fetch previews.
 - Share songs, playlists, news posts, lyrics cards and themes right into a chat.
 - Slash commands: `/song`, `/search`, `/mute`, `/unmute`, `/theme`, `/np`, `/promote`, `/info`, `/kick`, `/help`, `/feedback`, `/sharetheme`. They autocomplete and show hints for what to type next.
-- Administrators get a Terminal in every chat (the `>_` button in the room header). It runs the same slash commands as the chat box, with or without the slash, and shows the results in a console instead of cards in the room. Tab completes, the arrow keys recall past commands.
+- Administrators get a full-screen Terminal in chat (the `>_` button in the room header): a black, Linux-style console that runs the same slash commands as the chat box, with or without the slash. `cd` and `ls` move between channels and DMs, Tab completes, and the arrow keys recall past commands.
 - Roles and permissions, public servers you can browse and join, and moderation tools (timeout, ban, and site-wide restrictions).
 
 ### Profiles

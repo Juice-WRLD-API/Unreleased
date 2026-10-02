@@ -251,11 +251,16 @@ interface ChatState {
   openThread: (rootId: number | null) => void
 
   send: (room: RoomRef, input: { text: string; files: File[]; parent?: number | null; mentions?: number[] }) => Promise<void>
+  // Posts a command's answer as a server-built card. Not an optimistic send: the
+  // server may refuse it (privacy, administrators only), and that's an error to
+  // show, not a failed message to retry.
+  sendCommandCard: (room: RoomRef, command: api.CardCommand) => Promise<void>
   postLocalNotice: (room: RoomRef, content: string) => void
   announceModeration: (serverId: number | null, payload: ModerationNoticePayload) => void
   dismissLocalNotice: (room: RoomRef, id: number) => void
   edit: (message: ChatMessage, text: string) => Promise<void>
-  remove: (message: ChatMessage) => Promise<void>
+  /** `purge` also drops the message from the room list instead of leaving a "deleted" placeholder. */
+  remove: (message: ChatMessage, opts?: { purge?: boolean }) => Promise<void>
   togglePin: (message: ChatMessage) => Promise<void>
   toggleReaction: (message: ChatMessage, emoji: string) => Promise<void>
   markRead: (room: RoomRef) => void
@@ -484,6 +489,42 @@ export const useChatStore = create<ChatState>((set, get) => {
     return undefined
   }
 
+  // Removes a hard-deleted (purged) message outright instead of leaving a
+  // "deleted" placeholder, and keeps the thread reply count and the room
+  // preview (lastMessage) consistent.
+  const dropMessage = (messageId: number): void => {
+    set((s) => {
+      const rooms: Record<string, RoomMessages> = {}
+      const lastMessage = { ...s.lastMessage }
+      let parentId: number | null = null
+      for (const [k, r] of Object.entries(s.rooms)) {
+        const hit = r.items.find((m) => m.id === messageId)
+        if (!hit) { rooms[k] = r; continue }
+        parentId = hit.parent ?? parentId
+        const items = r.items.filter((m) => m.id !== messageId)
+        rooms[k] = { ...r, items }
+        if (lastMessage[k]?.id === messageId) {
+          const prev = items.filter((m) => m.id > 0 && !m.parent).slice(-1)[0]
+          if (prev) lastMessage[k] = prev
+          else delete lastMessage[k]
+        }
+      }
+      const threads: ChatState['threads'] = {}
+      for (const [k, t] of Object.entries(s.threads)) {
+        const hit = t.items.find((m) => m.id === messageId)
+        if (hit) parentId = hit.parent ?? parentId
+        threads[Number(k)] = hit ? { ...t, items: t.items.filter((m) => m.id !== messageId) } : t
+      }
+      if (parentId != null) {
+        for (const [k, r] of Object.entries(rooms)) {
+          if (r.items.some((m) => m.id === parentId)) rooms[k] = { ...r, items: r.items.map((m) => m.id === parentId ? { ...m, reply_count: Math.max(0, m.reply_count - 1) } : m) }
+        }
+      }
+      return { rooms, threads, lastMessage }
+    })
+    dropPlain(messageId)
+  }
+
   const mapMessage = (messageId: number, fn: (m: UiMessage) => UiMessage): void => {
     set((s) => {
       const rooms: Record<string, RoomMessages> = {}
@@ -567,6 +608,9 @@ export const useChatStore = create<ChatState>((set, get) => {
           dropPlain(ev.message.id)
           void decryptOne(ev.message)
         }
+        return
+      case 'message.purged':
+        dropMessage(ev.message_id)
         return
       case 'message.deleted':
         mapMessage(ev.message_id, (m) => ({ ...m, content: '', ciphertext: '', nonce: '', attachments: [], deleted_at: new Date().toISOString() }))
@@ -1302,6 +1346,13 @@ export const useChatStore = create<ChatState>((set, get) => {
         .catch(() => set((s) => ({ threads: { ...s.threads, [rootId]: { items: s.threads[rootId]?.items ?? [], loading: false } } })))
     },
 
+    sendCommandCard: async (room, command) => {
+      if (room.kind !== 'channel') throw new Error('Command cards only work in server channels')
+      const created = await api.createChannelCard(room.id, command)
+      applyMessage(created, false)
+      get().markRead(room)
+    },
+
     send: async (room, input) => {
       const key = roomKey(room)
       const meId = get().meId
@@ -1472,7 +1523,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
     },
 
-    remove: async (message) => {
+    remove: async (message, opts) => {
       if (message.id < 0) {
         set((s) => {
           const rooms: Record<string, RoomMessages> = {}
@@ -1488,7 +1539,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         })
         return
       }
-      await api.deleteMessage(message.id)
+      await api.deleteMessage(message.id, !!opts?.purge)
+      if (opts?.purge) { dropMessage(message.id); return }
       mapMessage(message.id, (m) => ({ ...m, content: '', ciphertext: '', nonce: '', attachments: [], deleted_at: new Date().toISOString() }))
       dropPlain(message.id)
     },

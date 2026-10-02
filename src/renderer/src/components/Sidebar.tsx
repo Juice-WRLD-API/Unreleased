@@ -181,7 +181,7 @@ export default function Sidebar(): JSX.Element {
         )
       case 'uploads':
         return (
-          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} title={collapsed ? 'Uploads' : undefined} className={rowCls}>
+          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
             <span className={`${iconWrap} relative`}>
               <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
               {activeUploadCount > 0 && (
@@ -190,7 +190,7 @@ export default function Sidebar(): JSX.Element {
                 </span>
               )}
             </span>
-            <span aria-hidden={collapsed} className={labelCls}>Uploads</span>
+            <span aria-hidden={collapsed} className={labelCls}>Transfers</span>
           </button>
         )
       case 'diagnostics':
@@ -233,7 +233,7 @@ export default function Sidebar(): JSX.Element {
         )
       case 'uploads':
         return (
-          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} title="Uploads" className={`${barIconBtn} relative`}>
+          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} title="Transfers" className={`${barIconBtn} relative`}>
             <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
             {activeUploadCount > 0 && (
               <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">

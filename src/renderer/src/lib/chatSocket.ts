@@ -11,7 +11,7 @@ export type ChatEvent =
   | { type: 'pong' }
   | { type: 'resynced' }
   | { type: 'message.created' | 'message.updated' | 'message.pinned' | 'message.unpinned'; message: ChatMessage }
-  | { type: 'message.deleted'; message_id: number; channel: number | null; conversation: number | null }
+  | { type: 'message.deleted' | 'message.purged'; message_id: number; channel: number | null; conversation: number | null }
   | { type: 'reaction.added' | 'reaction.removed'; message_id: number; emoji: string; user_id: number; channel: number | null; conversation: number | null }
   | { type: 'read.receipt'; user_id: number; last_read_message_id: number | null; channel?: number; conversation?: number }
   | { type: 'typing'; user_id: number; active: boolean; kind: RoomKind; id: number }

@@ -62,9 +62,11 @@ import { runWhenIdle } from '../lib/platform'
 export interface UploadItem {
   id: string
   filename: string
-  // Comp file proposal uploads (see lib/compUploads) - the only kind of
-  // transfer in the Uploads panel.
-  type: 'upload'
+  // 'upload': comp/donor file uploads (lib/compUploads, lib/donorUploads).
+  // 'zip': a ZIP being built client-side for download (lib/clientZip).
+  type: 'upload' | 'zip'
+  /** Secondary status line, e.g. "12 / 40 files" for a ZIP. */
+  detail?: string
   state: 'downloading' | 'done' | 'error' | 'cancelled'
   percent: number
   received?: number
