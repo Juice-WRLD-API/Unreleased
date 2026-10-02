@@ -49,7 +49,7 @@
 
 - Drag and drop in Files to reorganize. Drag files or folders in from your computer to upload.
 - Right-click empty space in Files to refresh, upload, or make a folder.
-- Files download one at a time when zip is off.
+- Downloading several files, a folder, a playlist or a Tracker selection saves one ZIP built in your browser. Big ZIPs fall back to one file at a time on browsers that can't stream to disk.
 - New Statistics page with catalog-wide breakdowns, play stats for the whole site, and a timeline of eras. Its tabs link into the Tracker.
 
 ### Downloads

@@ -239,7 +239,7 @@ export default function ApiFilesView(): JSX.Element {
   const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
-  const { zipStatus, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
+  const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
     getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
   })
@@ -792,7 +792,7 @@ export default function ApiFilesView(): JSX.Element {
               disabled={selectedPaths.size === 0 || zipBusy}
               className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-50 active:opacity-80"
             >
-              {zipBusy ? <><Loader2 size={17} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Downloading…'}</>
+              {zipBusy ? <><Loader2 size={17} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Downloading…'}</>
                 : zipStatus === 'done' ? <><Check size={17} /> Downloaded</>
                 : zipStatus === 'error' ? <><X size={17} /> Failed</>
                 : <><PackageOpen size={17} /> Download</>}
@@ -817,7 +817,7 @@ export default function ApiFilesView(): JSX.Element {
           className="fixed left-1/2 -translate-x-1/2 z-[75] flex items-center gap-2 px-4 py-2.5 rounded-full bg-surface-highest text-text-primary text-[13px] shadow-2xl animate-slide-up"
           style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 92px)' }}
         >
-          {zipBusy ? <><Loader2 size={14} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : 'Downloading folder…'}</>
+          {zipBusy ? <><Loader2 size={14} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Downloading folder…'}</>
             : zipStatus === 'done' ? <><Check size={14} className="text-accent" /> Download started</>
             : <><X size={14} className="text-red-400" /> Download failed</>}
         </div>

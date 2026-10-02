@@ -17,7 +17,7 @@ import {
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
   parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
-import { triggerDownload } from '../lib/apiFilesShared'
+import { openZipTarget, saveItems } from '../lib/clientZip'
 import { preloadView } from '../lib/lazyViews'
 import { downloadFileSmart } from '../lib/cdn'
 import { fisherYates } from '../store/queueSlice'
@@ -2631,28 +2631,30 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
-  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - downloads
-  // every selected song's file individually instead, spaced out so the
-  // browser doesn't treat them as a popup flood.
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
+  // built client-side instead (lib/clientZip). Songs whose file fails to
+  // fetch are counted with the ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
     const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
-    const skipped = selectedSongs.length - paths.length
+    let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
       setBulkZipStatus('none')
       setTimeout(() => setBulkZipStatus('idle'), 4000)
       return
     }
+    const target = await openZipTarget(paths.length === 1 ? (paths[0].split('/').pop() || 'Song').replace(/\.[^.]+$/, '') : `Songs (${paths.length})`)
+    if (!target) return
     setBulkZipStatus('zipping')
     try {
-      for (const path of paths) {
-        const name = path.split('/').pop() || path
-        const streamUrl = buildStreamUrl(path, activeChannel || undefined)
-        // CDN only for the primary channel - see handleDownload's comment above.
-        if (!isPrimaryChannelSlug(channels, activeChannel)) triggerDownload(streamUrl, name)
-        else await downloadFileSmart(path, name, streamUrl)
-        await new Promise((r) => setTimeout(r, 350))
-      }
+      // CDN only for the primary channel - see handleDownload's comment above.
+      const useCdn = isPrimaryChannelSlug(channels, activeChannel)
+      const { failed } = await saveItems(target, paths.map(path => ({
+        name: path.split('/').pop() || path,
+        url: buildStreamUrl(path, activeChannel || undefined),
+        cdnPath: useCdn ? path : undefined,
+      })))
+      skipped += failed
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
     } catch {

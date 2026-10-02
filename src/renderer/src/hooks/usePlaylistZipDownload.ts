@@ -1,30 +1,34 @@
 // Shared "download all" flow for PlaylistsView desktop/mobile.
 //
 // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED in
-// juicewrldApi.ts) - downloads every track's file individually instead,
-// spaced out so the browser doesn't treat them as a popup flood.
+// juicewrldApi.ts) - the ZIP is built client-side instead (lib/clientZip).
+// Tracks can be passed as a loader so the save dialog opens straight off the
+// click, before the playlist fetch eats the user activation it needs.
 import { useCallback, useState } from 'react'
-import { triggerDownload } from '../lib/apiFilesShared'
+import { openZipTarget, saveItems } from '../lib/clientZip'
 import { buildStreamUrl } from '../lib/juicewrldApi'
 import type { Track } from '../types'
 
 export function usePlaylistZipDownload(): {
   zipState: 'idle' | 'loading' | 'done' | 'error'
-  handleZipDownload: (trackList: Track[], name: string) => Promise<void>
+  handleZipDownload: (trackList: Track[] | (() => Promise<Track[]>), name: string) => Promise<void>
 } {
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
 
-  const handleZipDownload = useCallback(async (trackList: Track[], name: string) => {
+  const handleZipDownload = useCallback(async (trackList: Track[] | (() => Promise<Track[]>), name: string) => {
     if (zipState === 'loading') return
-    const tracks = trackList.filter(t => t.path)
-    if (!tracks.length) return
+    if (Array.isArray(trackList) && !trackList.some(t => t.path)) return
+    const target = await openZipTarget(name)
+    if (!target) return
     setZipState('loading')
     try {
-      for (const t of tracks) {
-        triggerDownload(t.streamUrl ?? buildStreamUrl(t.path), t.path.split('/').pop() || t.title)
-        await new Promise((r) => setTimeout(r, 350))
-      }
-      setZipState('done')
+      const all = Array.isArray(trackList) ? trackList : await trackList()
+      const items = all.filter(t => t.path).map(t => ({
+        name: t.path.split('/').pop() || t.title,
+        url: t.streamUrl ?? buildStreamUrl(t.path),
+      }))
+      const { saved } = items.length ? await saveItems(target, items) : { saved: 0 }
+      setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
     setTimeout(() => setZipState('idle'), 3000)
   }, [zipState])

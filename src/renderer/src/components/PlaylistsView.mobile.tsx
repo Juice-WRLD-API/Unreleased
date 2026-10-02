@@ -1900,10 +1900,10 @@ export default function PlaylistsView(): JSX.Element {
             <SheetItem
               icon={Archive}
               label="Download all"
-              onClick={async () => {
+              onClick={() => {
                 closeSheet()
-                const d = await userApi.getPlaylist((target.playlist as PlaylistSummary).id).catch(() => null)
-                if (d) handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), pl.name)
+                const id = (target.playlist as PlaylistSummary).id
+                handleZipDownload(async () => (await userApi.getPlaylist(id)).items.map(i => userApi.liteSongToTrack(i.song)), pl.name)
               }}
             />
           </>

@@ -381,7 +381,7 @@ export default function ApiFilesView(): JSX.Element {
   // above, as a second way into select mode alongside Ctrl/Cmd+click.
   const mouseLongPress = useLongPress()
 
-  const { zipStatus, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
+  const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
     getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
   })
@@ -1126,7 +1126,7 @@ export default function ApiFilesView(): JSX.Element {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
             >
               {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Downloading…'}</>
+                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Downloading…'}</>
               ) : zipStatus === 'done' ? (
                 <><Check size={13} /> Done</>
               ) : zipStatus === 'error' ? (
@@ -1164,7 +1164,7 @@ export default function ApiFilesView(): JSX.Element {
       {!selectMode && zipStatus !== 'idle' && (
         <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-            <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : 'Downloading folder…'}</>
+            <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Downloading folder…'}</>
           ) : zipStatus === 'done' ? (
             <><Check size={13} className="text-accent" /> Downloaded</>
           ) : (

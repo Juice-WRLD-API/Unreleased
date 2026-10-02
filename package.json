@@ -16,6 +16,7 @@
   "dependencies": {
     "@types/qrcode": "^1.5.6",
     "browser-id3-writer": "^6.4.0",
+    "client-zip": "^2.5.1",
     "jsmediatags": "^3.9.7",
     "music-metadata": "^11.13.0",
     "node-id3": "^0.2.9",

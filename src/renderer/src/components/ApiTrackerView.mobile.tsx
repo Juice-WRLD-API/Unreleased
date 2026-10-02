@@ -17,7 +17,7 @@ import {
   apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, buildStreamUrl,
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
 } from '../lib/juicewrldApi'
-import { downloadFileSmart } from '../lib/cdn'
+import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -1367,25 +1367,28 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
-  // Backend ZIP jobs are disabled - downloads every selected song's file
-  // individually instead, spaced out so the browser doesn't treat them as a
-  // popup flood.
+  // Backend ZIP jobs are disabled - the ZIP is built client-side instead
+  // (lib/clientZip). Songs whose file fails to fetch are counted with the
+  // ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
     const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
-    const skipped = selectedSongs.length - paths.length
+    let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
       setBulkZipStatus('none')
       setTimeout(() => setBulkZipStatus('idle'), 4000)
       return
     }
+    const target = await openZipTarget(paths.length === 1 ? (paths[0].split('/').pop() || 'Song').replace(/\.[^.]+$/, '') : `Songs (${paths.length})`)
+    if (!target) return
     setBulkZipStatus('zipping')
     try {
-      for (const path of paths) {
-        const name = path.split('/').pop() || path
-        await downloadFileSmart(path, name, buildStreamUrl(path))
-        await new Promise((r) => setTimeout(r, 350))
-      }
+      const { failed } = await saveItems(target, paths.map(path => ({
+        name: path.split('/').pop() || path,
+        url: buildStreamUrl(path),
+        cdnPath: path,
+      })))
+      skipped += failed
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
     } catch {
@@ -1901,7 +1904,7 @@ export default function ApiTrackerView(): JSX.Element {
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
               {bulkZipStatus === 'none'
                 ? "None of the selected songs have a file available yet."
-                : `${bulkZipSkipped} of ${selected.size} song${selected.size === 1 ? '' : 's'} had no file and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the download.`}
+                : `${bulkZipSkipped} of ${selected.size} song${selected.size === 1 ? '' : 's'} had no file or failed to download and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the download.`}
             </div>
           )}
           <div className="flex items-stretch px-2 py-1.5">

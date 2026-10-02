@@ -1322,11 +1322,10 @@ export default function PlaylistsView(): JSX.Element {
           <MenuItem
             icon={Archive}
             label="Download all"
-            onClick={async () => {
-              const name = cardMenu.playlist.name
-              const d = await userApi.getPlaylist(cardMenu.playlist.id)
+            onClick={() => {
+              const { id, name } = cardMenu.playlist
               setCardMenu(null)
-              handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), name)
+              handleZipDownload(async () => (await userApi.getPlaylist(id)).items.map(i => userApi.liteSongToTrack(i.song)), name)
             }}
           />
           <div className="border-t border-[var(--border)] my-1" />

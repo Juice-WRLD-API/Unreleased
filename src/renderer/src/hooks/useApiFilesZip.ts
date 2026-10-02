@@ -5,53 +5,69 @@
 // use different selection models.
 //
 // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED in juicewrldApi.ts),
-// so this downloads every file individually instead: directories are expanded
-// recursively via listFilesRecursive, then each file is downloaded one at a
-// time through the browser's normal download mechanism.
+// so the archive is built client-side instead (lib/clientZip): directories are
+// expanded recursively via listFilesRecursive, keeping their folder structure
+// inside the ZIP. If the browser can only build it in memory and it's too big,
+// falls back to downloading each file individually.
 import { useState } from 'react'
 import { buildStreamUrl, JWApiFileEntry, listFilesRecursive } from '../lib/juicewrldApi'
-import { triggerDownload, ZipStatus } from '../lib/apiFilesShared'
-
-// Spacing consecutive downloads out - firing them all in the same tick makes
-// Chrome silently block everything past the first few as a popup/download flood.
-const DOWNLOAD_SPACING_MS = 350
+import { ZipStatus } from '../lib/apiFilesShared'
+import { openZipTarget, saveItems, ZipItem, ZipProgress } from '../lib/clientZip'
 
 export function useApiFilesZip(opts: { activeChannel: string; getSelectedEntries: () => JWApiFileEntry[] }): {
   zipStatus: ZipStatus
+  zipProgress: ZipProgress | null
   resetZip: () => void
   downloadZip: () => Promise<void>
   downloadFolder: (entry: { path: string; name: string }) => Promise<void>
 } {
   const { activeChannel, getSelectedEntries } = opts
   const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
+  const [zipProgress, setZipProgress] = useState<ZipProgress | null>(null)
 
-  const downloadEntries = async (entries: JWApiFileEntry[]): Promise<void> => {
+  const finish = (status: ZipStatus): void => {
+    setZipStatus(status)
+    setZipProgress(null)
+    setTimeout(() => setZipStatus('idle'), 3000)
+  }
+
+  const downloadEntries = async (entries: JWApiFileEntry[], archiveName: string): Promise<void> => {
     if (entries.length === 0) return
+    // Before any await - the save dialog needs the click's user activation.
+    const target = await openZipTarget(archiveName)
+    if (!target) return
     setZipStatus('starting')
+    const items: ZipItem[] = []
     try {
-      const files: JWApiFileEntry[] = []
       for (const entry of entries) {
-        if (entry.type === 'file') files.push(entry)
-        else files.push(...await listFilesRecursive(entry.path, activeChannel))
+        if (entry.type === 'file') {
+          items.push({ name: entry.name, url: buildStreamUrl(entry.path, activeChannel), size: entry.size })
+          continue
+        }
+        // Keep the folder's own name and layout inside the archive.
+        const prefix = entry.path.replace(/\/+$/, '') + '/'
+        for (const file of await listFilesRecursive(entry.path, activeChannel)) {
+          const rel = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.name
+          items.push({ name: `${entry.name}/${rel}`, url: buildStreamUrl(file.path, activeChannel), size: file.size })
+        }
       }
-      if (files.length === 0) { setZipStatus('idle'); return }
+      if (items.length === 0) { setZipStatus('idle'); return }
       setZipStatus('zipping')
-      for (const file of files) {
-        triggerDownload(buildStreamUrl(file.path, activeChannel), file.name)
-        await new Promise((r) => setTimeout(r, DOWNLOAD_SPACING_MS))
-      }
-      setZipStatus('done')
-      setTimeout(() => setZipStatus('idle'), 3000)
+      const { saved } = await saveItems(target, items, setZipProgress)
+      finish(saved > 0 ? 'done' : 'error')
     } catch {
-      setZipStatus('error')
-      setTimeout(() => setZipStatus('idle'), 3000)
+      finish('error')
     }
   }
 
-  const downloadZip = (): Promise<void> => downloadEntries(getSelectedEntries())
+  const downloadZip = (): Promise<void> => {
+    const entries = getSelectedEntries()
+    const name = entries.length === 1 ? entries[0].name.replace(/\.[^.]+$/, '') : 'Selected files'
+    return downloadEntries(entries, name)
+  }
 
   const downloadFolder = (entry: { path: string; name: string }): Promise<void> =>
-    downloadEntries([{ ...entry, type: 'directory' }])
+    downloadEntries([{ ...entry, type: 'directory' }], entry.name)
 
-  return { zipStatus, resetZip: () => setZipStatus('idle'), downloadZip, downloadFolder }
+  return { zipStatus, zipProgress, resetZip: () => setZipStatus('idle'), downloadZip, downloadFolder }
 }

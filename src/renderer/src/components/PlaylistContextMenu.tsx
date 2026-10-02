@@ -9,7 +9,7 @@ import * as userApi from '../lib/userApi'
 import type { PlaylistSummary } from '../lib/userApi'
 import { buildStreamUrl } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
-import { triggerDownload } from '../lib/apiFilesShared'
+import { openZipTarget, saveItems } from '../lib/clientZip'
 import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
@@ -105,21 +105,23 @@ export default function PlaylistContextMenu({ state, onClose }: {
     onClose()
   }
 
-  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - downloads
-  // every track's file individually instead, spaced out so the browser
-  // doesn't treat them as a popup flood.
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
+  // built client-side instead (lib/clientZip). The save dialog opens before
+  // the playlist fetch, while the click's user activation is still live.
   const downloadZip = async (): Promise<void> => {
     if (zipState === 'loading') return
+    const target = await openZipTarget(playlist.name)
+    if (!target) return
     setZipState('loading')
     try {
       const d = await userApi.getPlaylist(playlist.id)
       const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
       if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      for (const t of tracks) {
-        triggerDownload(t.streamUrl ?? buildStreamUrl(t.path), t.path.split('/').pop() || t.title)
-        await new Promise((r) => setTimeout(r, 350))
-      }
-      setZipState('done')
+      const { saved } = await saveItems(target, tracks.map(t => ({
+        name: t.path.split('/').pop() || t.title,
+        url: t.streamUrl ?? buildStreamUrl(t.path),
+      })))
+      setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
     setTimeout(() => setZipState('idle'), 2500)
   }
