@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { CHAT_COMMANDS } from '../../lib/chatCommands'
+import { findChatCommand } from '../../lib/chatHelp'
 import { commandCardText } from '../../lib/commandCardText'
 import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
+import { defaultFilesCwd, downloadPath, FILES_ROOT, filesPathString, formatListing, listDir, resolveDir, splitTyped, unquote, type FilesCwd } from '../../lib/terminalFiles'
 import { getTerminalRunner, type TerminalSearchResult, type TerminalSink } from '../../lib/chatTerminalBridge'
 import { conversationTitle, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
 import { useRoomPeople } from './people'
@@ -28,7 +30,13 @@ function sessionFor(key: string): Session {
   return s
 }
 
-const BUILTINS = ['cd', 'ls', 'pwd', 'whoami', 'clear', 'exit']
+// Where the shell is standing. In `chat` mode cd moves between rooms (which is
+// where chat commands run); in `files` mode it walks the Files tab's tree and
+// `get` downloads from it. Chat commands work in both. Kept at module level so
+// the position survives closing the terminal.
+const shell: { mode: 'chat' | 'files'; cwd: FilesCwd } = { mode: 'chat', cwd: FILES_ROOT }
+
+const BUILTINS = ['cd', 'ls', 'get', 'pwd', 'whoami', 'clear', 'exit']
 const COMPLETIONS = [...new Set([
   ...CHAT_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]),
   ...BUILTINS,
@@ -55,15 +63,18 @@ function helpText(): string {
     '',
     'Terminal:',
     '  cd <channel|@dm>   switch the room commands run in',
-    '  ls                 list channels (or DMs)',
+    '  cd files           browse the Files tab (then cd, ls, get <file|folder>)',
+    '  ls                 list channels (or DMs, or files)',
+    '  get <path>         download a file, or a folder as a ZIP',
     '  pwd  whoami  clear  exit',
     '  Tab completes · ↑ ↓ history · Ctrl+L clear · Ctrl+C cancel line',
   ].join('\n')
 }
 
 const BUILTIN_HELP: Record<string, string> = {
-  cd: 'cd <channel | server/channel | @dm>\n      Switch the room commands run in. Tab completes names.',
-  ls: 'ls\n      List the channels in this server, or your DMs.',
+  cd: 'cd <channel | server/channel | @dm>\n      Switch the room commands run in. Tab completes names.\ncd files\n      Browse the Files tab. Inside it: cd <folder>, cd .., cd / (channels), cd ~ (back to chat).',
+  ls: 'ls [folder]\n      List the channels in this server, or your DMs. In the file tree, list a folder (size, name).',
+  get: 'get <file | folder | *>\n      In the file tree: download a file, a folder as a ZIP (structure kept), or * for the whole current folder.',
   pwd: 'pwd\n      Show which room commands run in.',
   whoami: 'whoami\n      Show who you are signed in as.',
   clear: 'clear\n      Wipe the screen (Ctrl+L).',
@@ -75,7 +86,7 @@ const BUILTIN_HELP: Record<string, string> = {
 function commandHelp(word: string): string | null {
   const name = word.replace(/^\//, '').toLowerCase()
   if (BUILTIN_HELP[name]) return BUILTIN_HELP[name]
-  const info = CHAT_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name))
+  const info = findChatCommand(name)
   if (!info) return null
   const aliases = info.aliases?.length ? `\n      aliases: ${info.aliases.map((a) => `/${a}`).join(', ')}` : ''
   return `${info.usage}\n      ${info.description}${aliases}`
@@ -97,7 +108,7 @@ const MONO = "'JetBrains Mono', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Dej
 // view (the room underneath stays mounted - that's where the commands run).
 export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClose: () => void }): JSX.Element | null {
   const me = useChatStore((s) => s.me)
-  const path = useChatStore((s) => {
+  const chatPath = useChatStore((s) => {
     if (room.kind === 'channel') {
       const server = s.servers.find((x) => x.channels.some((c) => c.id === room.id))
       const channel = server?.channels.find((c) => c.id === room.id)
@@ -106,6 +117,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     const conv = s.conversations.find((c) => c.id === room.id)
     return `~/dm/${slug(conv ? conversationTitle(conv, s.meId) : 'chat')}`
   })
+  const path = shell.mode === 'files' ? filesPathString(shell.cwd) : chatPath
   const people = useRoomPeople(room)
   const key = roomKey(room)
   const session = sessionFor(key)
@@ -173,8 +185,43 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     print(names.length ? names.join('  ') : '(empty)', names.length ? 'plain' : 'dim')
   }
 
-  // Shell-ish commands that never leave this panel. Returns true when handled.
-  const builtin = (line: string): boolean => {
+  const enterFiles = async (sub: string): Promise<boolean> => {
+    let cwd = await defaultFilesCwd()
+    if (sub) cwd = await resolveDir(cwd, sub)
+    shell.mode = 'files'
+    shell.cwd = cwd
+    bump((n) => n + 1)
+    return true
+  }
+
+  const changeDir = (arg: string): boolean | Promise<boolean> => {
+    const target = unquote(arg)
+    if (shell.mode === 'chat') {
+      const files = /^(?:~\/|\/)?files(?:\/(.*))?$/i.exec(target)
+      if (files) return enterFiles(files[1] ?? '')
+      changeRoom(arg)
+      return true
+    }
+    // In the file tree `~` is home: back to chat (and a #channel / @dm goes
+    // straight to that room).
+    if (target === '~' || /^\/?chat\/?$/i.test(target) || /^[#@]/.test(target)) {
+      shell.mode = 'chat'
+      bump((n) => n + 1)
+      if (/^[#@]/.test(target)) changeRoom(arg)
+      return true
+    }
+    return resolveDir(shell.cwd, target || '/').then((cwd) => { shell.cwd = cwd; bump((n) => n + 1); return true })
+  }
+
+  const listFiles = async (arg: string): Promise<boolean> => {
+    const dir = arg ? await resolveDir(shell.cwd, arg) : shell.cwd
+    print(formatListing(await listDir(dir, true), dir), 'plain')
+    return true
+  }
+
+  // Shell-ish commands that never leave this panel. A promise means it needs the
+  // network (the file tree); false means "not mine, hand it to the chat runner".
+  const builtin = (line: string): boolean | Promise<boolean> => {
     const [word, ...rest] = line.split(/\s+/)
     const arg = rest.join(' ')
     switch (word.toLowerCase()) {
@@ -182,8 +229,15 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       case 'exit': case 'quit': case 'logout': onClose(); return true
       case 'pwd': print(path); return true
       case 'whoami': print(user); return true
-      case 'ls': listRooms(); return true
-      case 'cd': changeRoom(arg); return true
+      case 'ls': case 'dir':
+        if (shell.mode === 'files') return listFiles(arg)
+        listRooms()
+        return true
+      case 'cd': return changeDir(arg)
+      case 'get': case 'download': case 'dl': {
+        if (shell.mode !== 'files') { print('get: only works in the file tree (try: cd files)', 'error'); return true }
+        return downloadPath(shell.cwd, arg).then((r) => { print(r.message, r.message === 'cancelled' ? 'dim' : 'ok'); return true })
+      }
       case 'help': case '/help': {
         // -s means "post the full list to the room", which only the real
         // command does; anything else after help names a command to look up.
@@ -210,7 +264,17 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
 
     // `clear` leaves nothing behind, like the real thing.
     if (!/^(clear|cls)$/i.test(line)) push({ kind: 'cmd', prompt: { user, path }, text: line })
-    if (builtin(line)) return
+    const handled = builtin(line)
+    if (handled !== false) {
+      if (typeof handled !== 'boolean') {
+        setBusy(true)
+        try { await handled } catch (err) { print(errorText(err, 'Command failed'), 'error') } finally {
+          setBusy(false)
+          requestAnimationFrame(() => field.current?.focus())
+        }
+      }
+      return
+    }
 
     // A bare number after a /search listing picks that result.
     if (/^\d+$/.test(line) && s.search.length > 0) {
@@ -254,6 +318,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       for (const c of server.channels) out.push({ name: `${prefix}${slug(c.name)}`, dm: false })
     }
     for (const c of cs.conversations) out.push({ name: slug(conversationTitle(c, cs.meId)), dm: true })
+    out.push({ name: 'files', dm: false })
     return out
   }
 
@@ -266,6 +331,24 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     for (const h of hits) while (!h.toLowerCase().startsWith(prefix.toLowerCase())) prefix = prefix.slice(0, -1)
     if (prefix.length > typed.length) setLine(`${head}${sigil}${prefix}`)
     else print(hits.map((h) => `${sigil}${h}`).join('  '), 'dim')
+  }
+
+  // Paths in the file tree: the folder part of what's typed is listed, then the
+  // rest filters it. Names can hold spaces, so the whole argument counts, not
+  // just the last word. Folders get a trailing slash so Tab can keep walking.
+  const completeFiles = async (word: string): Promise<void> => {
+    const m = /^(\s*\S+\s+)([\s\S]*)$/.exec(input)
+    if (!m) return
+    const typed = m[2].replace(/^["']/, '')
+    const { dirPart, prefix } = splitTyped(typed)
+    try {
+      const dir = dirPart ? await resolveDir(shell.cwd, dirPart) : shell.cwd
+      const names = (await listDir(dir))
+        .filter((e) => word === 'get' || e.type === 'directory')
+        .map((e) => e.name + (e.type === 'directory' ? '/' : ''))
+      if (field.current?.value !== input) return
+      finishCompletion(m[1] + dirPart, '', names, prefix, false)
+    } catch { /* a bad folder just means nothing to complete */ }
   }
 
   const complete = (): void => {
@@ -285,7 +368,9 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     const word = input.trim().split(/\s+/)[0].replace(/^\//, '').toLowerCase()
     const token = /\S*$/.exec(input)?.[0] ?? ''
     const head = input.slice(0, input.length - token.length)
-    if (word === 'cd') {
+    if (shell.mode === 'files' && (word === 'cd' || word === 'ls' || word === 'get') && !/^[#@]/.test(token)) {
+      void completeFiles(word)
+    } else if (word === 'cd') {
       const sigil = /^[#@]/.exec(token)?.[0] ?? ''
       const pool = roomCandidates().filter((r) => (sigil === '@' ? r.dm : sigil === '#' ? !r.dm : true))
       finishCompletion(head, sigil, pool.map((r) => r.name), token.slice(sigil.length), false)

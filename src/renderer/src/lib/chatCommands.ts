@@ -244,7 +244,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'changelog', usage: '/changelog [count] [-s]', description: `Show the latest commit and whether it’s built and live yet. Add a count (up to ${CHANGELOG_MAX}) for recent commit history (-s posts it to the room)`, aliases: ['commit'], params: ['count'] },
   { name: 'seen', usage: '/seen @user [-s]', description: 'Show when a user was last online or active', aliases: ['lastseen'], params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
-  { name: 'help', usage: '/help [-s]', description: 'List available commands (-s posts the list to the room)', params: [] },
+  { name: 'help', usage: '/help [command] [-s]', description: 'List available commands, or show just one (-s posts it to the room)', params: ['command'] },
 ]
 
 // Which of a command's params the user is currently typing, given the raw

@@ -11,6 +11,7 @@ import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { commandCardText } from '../../lib/commandCardText'
 import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
+import { chatCommandHelp, findChatCommand } from '../../lib/chatHelp'
 import { registerTerminalRunner, type TerminalRunner, type TerminalSink } from '../../lib/chatTerminalBridge'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { getSongsByIds, resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
@@ -333,7 +334,17 @@ const Composer = forwardRef<ComposerHandle, {
   // server - postLocalNotice only ever writes into this device's own room
   // items - so it's visible only to the person who ran /help, and they can
   // dismiss it from the card itself.
-  const runHelpCommand = (share: boolean): void => {
+  //
+  // `/help <command>` (a name or alias, slash optional) answers with just that
+  // command's usage instead of the whole list.
+  const runHelpCommand = (topic: string, share: boolean): void => {
+    if (topic) {
+      const info = findChatCommand(topic)
+      if (!info) { toast(`No command called "${topic}" - /help lists them all`); return }
+      const { title, text } = chatCommandHelp(info)
+      report(title, text, share)
+      return
+    }
     void deliverNotice({ kind: 'help' }, share, { name: 'help' }).catch((err) => toast(errorText(err, 'Message failed to send')))
   }
 
@@ -833,7 +844,11 @@ const Composer = forwardRef<ComposerHandle, {
     }
     if (cmd.command === 'mute') { runMuteCommand(cmd.args, '/mute'); return }
     if (cmd.command === 'unmute') { runMuteCommand(cmd.args, '/unmute'); return }
-    if (cmd.command === 'help') { runHelpCommand(splitShareFlag(cmd.args).share); return }
+    if (cmd.command === 'help') {
+      const { share, rest } = splitShareFlag(cmd.args)
+      runHelpCommand(rest, share)
+      return
+    }
 
     setCommandBusy(cmd.command)
     try {
