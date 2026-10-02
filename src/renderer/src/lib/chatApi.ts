@@ -3,7 +3,9 @@ import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
 export const CHAT_BASE = `${CHAT_API_BASE}/chat`
-export const MAX_CHAT_UPLOAD_BYTES = 25 * 1024 * 1024
+export const CHAT_CHUNK_THRESHOLD = 25 * 1024 * 1024
+// Matches the server's CHAT_CHUNK_UPLOAD_MAX_SIZE.
+export const MAX_CHAT_UPLOAD_BYTES = 1024 * 1024 * 1024
 
 export type StaffRole = 'administrator' | 'manager' | string
 
@@ -628,10 +630,13 @@ export const listBackupEntries = (after?: number) =>
   request<{ results: BackupEntryIn[]; next: number | null }>(`/keys/backup/entries/${after ? `?after=${after}` : ''}`)
 
 // Uploads
+// Files up to the threshold go in one request; anything larger is sent as
+// chunks, each retried on its own so a flaky connection doesn't restart it.
 export async function uploadChatFile(file: Blob, name: string): Promise<UploadedFile> {
   if (file.size > MAX_CHAT_UPLOAD_BYTES) {
-    throw new Error(`"${name}" is larger than 25 MB`)
+    throw new Error(`"${name}" is larger than ${MAX_CHAT_UPLOAD_BYTES / (1024 * 1024)} MB`)
   }
+  if (file.size > CHAT_CHUNK_THRESHOLD) return uploadChatFileChunked(file, name)
   const form = new FormData()
   form.append('file', file, name)
   return apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/`, {
@@ -639,6 +644,45 @@ export async function uploadChatFile(file: Blob, name: string): Promise<Uploaded
     headers: authHeaders(getToken()),
     body: form,
   })
+}
+
+const CHUNK_RETRIES = 3
+
+async function withChunkRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run()
+    } catch (err) {
+      // A thrown Error from apiRequest is an HTTP rejection (bad chunk, expired
+      // upload) and won't improve on retry; only a network-level TypeError will.
+      if (!(err instanceof TypeError) || attempt >= CHUNK_RETRIES) throw err
+      await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt))
+    }
+  }
+}
+
+export async function uploadChatFileChunked(file: Blob, name: string): Promise<UploadedFile> {
+  const init = await withChunkRetry(() => apiRequest<{ upload_id: string; chunk_size: number; total_chunks: number }>(
+    `${CHAT_BASE}/uploads/chunked/init/`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
+      body: JSON.stringify({ filename: name, total_size: file.size, mime: file.type }) },
+  ))
+  const chunkSize = init.chunk_size
+  for (let i = 0; i < init.total_chunks; i++) {
+    await withChunkRetry(() => {
+      const form = new FormData()
+      form.append('upload_id', init.upload_id)
+      form.append('chunk_index', String(i))
+      form.append('chunk', file.slice(i * chunkSize, Math.min(file.size, (i + 1) * chunkSize)), `${name}.part.${i}`)
+      return apiRequest(`${CHAT_BASE}/uploads/chunked/chunk/`, {
+        method: 'POST', headers: authHeaders(getToken()), body: form,
+      })
+    })
+  }
+  return withChunkRetry(() => apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/chunked/complete/`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
+    body: JSON.stringify({ upload_id: init.upload_id }),
+  }))
 }
 
 export function chatAttachmentUrl(id: number, opts: { download?: boolean } = {}): string {

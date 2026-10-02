@@ -124,7 +124,7 @@ const Composer = forwardRef<ComposerHandle, {
   const addFiles = (incoming: File[]): void => {
     const accepted: PendingFile[] = []
     for (const file of incoming) {
-      if (file.size > MAX_CHAT_UPLOAD_BYTES) { toast(`"${file.name}" is over 25 MB`); continue }
+      if (file.size > MAX_CHAT_UPLOAD_BYTES) { toast(`"${file.name}" is over ${MAX_CHAT_UPLOAD_BYTES / (1024 * 1024)} MB`); continue }
       if (BLOCKED_EXT.test(file.name)) { toast(`"${file.name}" can't be sent - executable files are blocked`); continue }
       accepted.push({
         id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
