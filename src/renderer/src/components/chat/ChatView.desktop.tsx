@@ -6,6 +6,7 @@ import { ChannelList, DmList, ServerRail } from './Navigator'
 import RoomHeader, { type SidePanel } from './RoomHeader'
 import RoomPane from './RoomPane'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './SidePanels'
+import TerminalPanel from './TerminalPanel'
 
 function EmptyMain(): JSX.Element {
   const activeServerId = useChatStore((s) => s.activeServerId)
@@ -90,6 +91,7 @@ export default function ChatViewDesktop(): JSX.Element {
         {sideOpen && (
           <div className={sideClassName}>
             {active && showThread && <ThreadPanel room={active} rootId={threadRootId!} onClose={() => openThread(null)} />}
+            {active && !showThread && panel === 'terminal' && <TerminalPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'pins' && <PinsPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'members' && serverId !== null && (
               <MembersPanel serverId={serverId} onClose={() => setPanel(null)} onAddMembers={() => openModal({ kind: 'add-members', serverId })} />

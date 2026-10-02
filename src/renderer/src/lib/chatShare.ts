@@ -1,4 +1,4 @@
-import type { ChangelogStatus } from './appVersion'
+import type { BranchTip, ChangelogStatus } from './appVersion'
 import { BROADCAST_LEVELS, type BroadcastLevel, type BroadcastMessage } from './broadcastApi'
 import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
 
@@ -396,6 +396,7 @@ export type SharedCommandCard = Exclude<LocalNoticePayload, { kind: 'feedbackSen
 
 const MAX_CARD_ITEMS = 25
 const MAX_RESULT_TEXT = 1000
+const MAX_HISTORY_SUBJECT = 120
 
 function clip(value: unknown, max = MAX_TEXT_FIELD_LENGTH): string | null {
   return typeof value === 'string' ? value.slice(0, max) : null
@@ -403,6 +404,19 @@ function clip(value: unknown, max = MAX_TEXT_FIELD_LENGTH): string | null {
 
 function isIsoDate(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 64 && !Number.isNaN(Date.parse(value))
+}
+
+// A commit as carried by the changelog card. The card links the commit, so the
+// url has to be a plain https URL.
+function commitFrom(value: unknown): BranchTip | null {
+  if (!value || typeof value !== 'object') return null
+  const c = value as Record<string, unknown>
+  const sha = typeof c.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(c.sha) ? c.sha : null
+  const message = clip(c.message)
+  const author = clip(c.author)
+  const url = typeof c.url === 'string' && c.url.length <= 300 && /^https:\/\//.test(c.url) ? c.url : null
+  if (!sha || message === null || !author || !url || !isIsoDate(c.date)) return null
+  return { sha, message, author, date: c.date, url }
 }
 
 // Drops trailing list items until the JSON fits a message, so a long history
@@ -416,15 +430,18 @@ export function encodeCommandCard(payload: LocalNoticePayload): string | null {
     case 'help':
     case 'themeList':
       return fits(payload)
-    case 'changelog':
-      return fits({
-        kind: 'changelog',
-        status: {
-          ...payload.status,
-          tip: { ...payload.status.tip, message: payload.status.tip.message.slice(0, MAX_TEXT_FIELD_LENGTH) },
-          needsReload: false,
-        },
-      })
+    case 'changelog': {
+      const { history, ...status } = payload.status
+      const tip = { ...status.tip, message: status.tip.message.slice(0, MAX_TEXT_FIELD_LENGTH) }
+      // Older commits are shown as a one-line subject each; like the other
+      // lists, trailing ones are dropped until the card fits a message.
+      const older = (history ?? []).slice(0, MAX_CARD_ITEMS).map((c) => ({ ...c, message: (c.message.split('\n')[0] ?? '').slice(0, MAX_HISTORY_SUBJECT) }))
+      for (let n = older.length; n >= 0; n--) {
+        const out = fits({ kind: 'changelog', status: { ...status, tip, needsReload: false, ...(n ? { history: older.slice(0, n) } : {}) } })
+        if (out) return out
+      }
+      return null
+    }
     case 'broadcastHistory': {
       const items = payload.items.slice(0, MAX_CARD_ITEMS).map((b) => ({ ...b, message: b.message.slice(0, MAX_TEXT_FIELD_LENGTH) }))
       for (let n = items.length; n >= 0; n--) {
@@ -511,25 +528,31 @@ export function decodeCommandCard(content: string): SharedCommandCard | null {
     }
     case 'changelog': {
       const st = p.status as Record<string, unknown> | undefined
-      const tip = st?.tip as Record<string, unknown> | undefined
+      const tip = commitFrom(st?.tip)
       if (!st || !tip) return null
       const branch = clip(st.branch, 100)
-      const sha = typeof tip.sha === 'string' && /^[0-9a-f]{7,40}$/i.test(tip.sha) ? tip.sha : null
-      const message = clip(tip.message)
-      const author = clip(tip.author)
-      // The card links the commit, so it has to be a plain https URL.
-      const url = typeof tip.url === 'string' && tip.url.length <= 300 && /^https:\/\//.test(tip.url) ? tip.url : null
-      if (!branch || !sha || message === null || !author || !url || !isIsoDate(tip.date)) return null
+      if (!branch) return null
       if (st.built !== 'live' && st.built !== 'building' && st.built !== 'unknown') return null
+      let history: BranchTip[] | undefined
+      if (st.history !== undefined) {
+        if (!Array.isArray(st.history) || st.history.length > MAX_CARD_ITEMS) return null
+        history = []
+        for (const it of st.history) {
+          const c = commitFrom(it)
+          if (!c) return null
+          history.push(c)
+        }
+      }
       return {
         kind: 'changelog',
         status: {
           branch,
-          tip: { sha, message, author, date: tip.date, url },
+          tip,
           deployed: clip(st.deployed, 64),
           running: clip(st.running, 64) ?? 'unknown',
           built: st.built,
           needsReload: false,
+          ...(history?.length ? { history } : {}),
         },
       }
     }

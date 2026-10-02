@@ -1,3 +1,4 @@
+import { CHANGELOG_MAX } from './appVersion'
 import { BROADCAST_LEVELS, type BroadcastLevel } from './broadcastApi'
 
 // Chat slash commands, typed as a message's *entire* body, are intercepted
@@ -6,7 +7,7 @@ import { BROADCAST_LEVELS, type BroadcastLevel } from './broadcastApi'
 // alone and sent as normal text, same as before this feature existed.
 export type ChatCommandName = 'song' | 'search' | 'info' | 'mute' | 'unmute' | 'theme' | 'sharetheme' | 'np' | 'promote' | 'kick'
   | 'timeout' | 'untimeout' | 'ban' | 'unban' | 'bans' | 'siteban' | 'sitemute' | 'siteunban'
-  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'changelog' | 'seen' | 'feedback' | 'help'
+  | 'demote' | 'role' | 'allow' | 'disallow' | 'broadcast' | 'changelog' | 'seen' | 'feedback' | 'help' | 'purge'
 
 export interface ParsedChatCommand {
   command: ChatCommandName
@@ -19,7 +20,7 @@ export interface ParsedChatCommand {
 const KNOWN_COMMANDS = new Set<string>([
   'song', 'search', 'info', 'mute', 'unmute', 'theme', 'sharetheme', 'np', 'promote', 'kick',
   'timeout', 'untimeout', 'ban', 'unban', 'bans', 'siteban', 'sitemute', 'siteunban',
-  'demote', 'role', 'allow', 'disallow', 'broadcast', 'changelog', 'seen', 'feedback', 'help',
+  'demote', 'role', 'allow', 'disallow', 'broadcast', 'changelog', 'seen', 'feedback', 'help', 'purge',
 ])
 
 // Alternate spellings that resolve to a canonical command before dispatch -
@@ -40,6 +41,7 @@ const ALIASES: Record<string, ChatCommandName> = {
   bc: 'broadcast',
   commit: 'changelog',
   lastseen: 'seen',
+  prune: 'purge',
 }
 
 // `-s` / `--share` on a command that normally answers with a card only the
@@ -87,6 +89,42 @@ export function parseNpArgs(args: string): NpArgs {
   if (!/^\d+$/.test(m[1]) || Number(m[1]) < 1) return { user, history: true, error: `Usage: /np [@user] -h [count] (1-${NP_HISTORY_MAX})` }
   const n = Number(m[1])
   return { user, history: true, count: Math.min(n, NP_HISTORY_MAX), capped: n > NP_HISTORY_MAX }
+}
+
+// `/changelog [count]` (`-s` is taken out first, see splitShareFlag). No count
+// is just the latest commit; a count above CHANGELOG_MAX is clamped to it.
+export type ChangelogArgs = { error: string } | { count: number; capped: boolean }
+
+export function parseChangelogArgs(args: string): ChangelogArgs {
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return { count: 1, capped: false }
+  if (tokens.length > 1 || !/^\d+$/.test(tokens[0]) || Number(tokens[0]) < 1) return { error: `Usage: /changelog [count] [-s] (1-${CHANGELOG_MAX})` }
+  const n = Number(tokens[0])
+  return { count: Math.min(n, CHANGELOG_MAX), capped: n > CHANGELOG_MAX }
+}
+
+export const PURGE_DEFAULT = 10
+export const PURGE_MAX = 50
+
+export type PurgeArgs =
+  | { error: string }
+  | { user: string | null; count: number; capped: boolean }
+
+// `/purge [@user] [count]` (`-s` is taken out first, see splitShareFlag). Both
+// tokens can come in either order. Count defaults to PURGE_DEFAULT and is
+// clamped to PURGE_MAX - an over-the-cap number purges the max rather than
+// failing, and `capped` lets the caller say so.
+export function parsePurgeArgs(args: string): PurgeArgs {
+  const usage = `Usage: /purge [@user] [count] [-s] (1-${PURGE_MAX})`
+  const tokens = args.trim().split(/\s+/).filter(Boolean)
+  const at = tokens.findIndex((t) => t.startsWith('@') && t.length > 1)
+  const user = at >= 0 ? tokens[at].slice(1) : null
+  if (at >= 0) tokens.splice(at, 1)
+  if (tokens.length > 1) return { error: usage }
+  if (tokens.length === 0) return { user, count: PURGE_DEFAULT, capped: false }
+  if (!/^\d+$/.test(tokens[0]) || Number(tokens[0]) < 1) return { error: usage }
+  const n = Number(tokens[0])
+  return { user, count: Math.min(n, PURGE_MAX), capped: n > PURGE_MAX }
 }
 
 export interface BroadcastArgs {
@@ -192,6 +230,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'role', usage: '/role @user [-s]', description: 'Admins: show a user’s site roles and auto-approve settings', aliases: ['roles'], params: ['user'] },
   { name: 'allow', usage: '/allow @user <edits|comp> [-s]', description: 'Admins: turn on auto-approve for a user’s edit or comp proposals', params: ['user', 'type'] },
   { name: 'disallow', usage: '/disallow @user <edits|comp> [-s]', description: 'Admins: turn auto-approve back off', aliases: ['deny'], params: ['user', 'type'] },
+  { name: 'purge', usage: '/purge [@user] [count] [-s]', description: `Delete the latest messages in this room, up to ${PURGE_MAX} (default ${PURGE_DEFAULT}). Add @user to only delete theirs. Moderators only, except for your own`, aliases: ['prune'], params: ['@user count'] },
   { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server (they can rejoin)', params: ['user'] },
   { name: 'timeout', usage: '/timeout @user <minutes>', description: 'Temporarily stop a member from posting', aliases: ['to'], params: ['user', 'minutes'] },
   { name: 'untimeout', usage: '/untimeout @user', description: 'Lift a member’s timeout early', aliases: ['unto'], params: ['user'] },
@@ -202,7 +241,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'sitemute', usage: '/sitemute @user [minutes]', description: 'Admins: silence a user everywhere', params: ['user', 'minutes'] },
   { name: 'siteunban', usage: '/siteunban @user', description: 'Admins: revoke every site-wide action on a user (ban, mute or timeout)', aliases: ['siteunmute', 'siteuntimeout'], params: ['user'] },
   { name: 'broadcast', usage: '/broadcast [-s] [-l level] <message>  ·  /broadcast -h [count] [-s]', description: 'Admins: push a banner to everyone online, or -h [count] to see past broadcasts (-s posts them to the room)', aliases: ['bc'], params: ['message'] },
-  { name: 'changelog', usage: '/changelog [-s]', description: 'Show the latest commit and whether it’s built and live yet (-s posts it to the room)', aliases: ['commit'], params: [] },
+  { name: 'changelog', usage: '/changelog [count] [-s]', description: `Show the latest commit and whether it’s built and live yet. Add a count (up to ${CHANGELOG_MAX}) for recent commit history (-s posts it to the room)`, aliases: ['commit'], params: ['count'] },
   { name: 'seen', usage: '/seen @user [-s]', description: 'Show when a user was last online or active', aliases: ['lastseen'], params: ['user'] },
   { name: 'feedback', usage: '/feedback <message>', description: 'Send feedback to the developers', params: ['message'] },
   { name: 'help', usage: '/help [-s]', description: 'List available commands (-s posts the list to the room)', params: [] },

@@ -2,14 +2,15 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type ChatUserBrief } from '../../lib/chatApi'
-import { fetchChangelogStatus } from '../../lib/appVersion'
+import { CHANGELOG_MAX, fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
-import { BROADCAST_HISTORY_DEFAULT, BROADCAST_HISTORY_MAX, CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChatCommand, parseNpArgs, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
+import { BROADCAST_HISTORY_DEFAULT, BROADCAST_HISTORY_MAX, CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChangelogArgs, parseChatCommand, parseNpArgs, parsePurgeArgs, PURGE_MAX, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
 import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, type AdminUser } from '../../lib/userApi'
 import { relativeTime } from '../adminShared'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
 import { encodeCommandCard, encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
+import { registerTerminalRunner, type TerminalRunner, type TerminalSink } from '../../lib/chatTerminalBridge'
 import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
 import { getSongsByIds, resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
 import { sortListeningPlays, type ListeningPlayEvent } from '../../lib/listeningPlays'
@@ -72,7 +73,12 @@ const Composer = forwardRef<ComposerHandle, {
     const body = splitForwardRef(afterReply).body
     return body || (ref ? ref.snippet : raw)
   })
-  const toast = useChatToast()
+  const chatToast = useChatToast()
+  // Set only while the admin terminal is running a command through this
+  // composer (see chatTerminalBridge): everything a command would show in the
+  // chat - toasts, notice cards, the /search picker - goes to the terminal.
+  const sink = useRef<TerminalSink | null>(null)
+  const toast = (text: string, tone?: 'error' | 'ok'): void => (sink.current ? sink.current.toast(text, tone) : chatToast(text, tone))
   const draftKey = `${roomKey(room)}:${parent ?? 'root'}`
 
   const [text, setText] = useState(() => drafts.get(draftKey) ?? '')
@@ -287,6 +293,11 @@ const Composer = forwardRef<ComposerHandle, {
   const deliverNotice = async (payload: LocalNoticePayload, share: boolean): Promise<void> => {
     const text = share ? encodeCommandCard(payload) : null
     if (text) await send(room, { text, files: [] })
+    else showNotice(payload)
+  }
+
+  const showNotice = (payload: LocalNoticePayload): void => {
+    if (sink.current) sink.current.notice(payload)
     else postLocalNotice(room, encodeLocalNotice(payload))
   }
 
@@ -357,7 +368,7 @@ const Composer = forwardRef<ComposerHandle, {
   const runFeedbackCommand = async (args: string): Promise<void> => {
     if (!args) { toast('Usage: /feedback <message>'); return }
     await useStore.getState().submitFeedback('other', args)
-    postLocalNotice(room, encodeLocalNotice({ kind: 'feedbackSent', message: args }))
+    showNotice({ kind: 'feedbackSent', message: args })
   }
 
   const runInfoCommand = async (args: string): Promise<void> => {
@@ -478,6 +489,41 @@ const Composer = forwardRef<ComposerHandle, {
     if (!server) throw new Error("Could not find this channel's server")
     const bans = await cs.loadBans(server.id, true)
     report('Bans', bans.length === 0 ? 'No one is banned from this server' : `Banned: ${bans.map((b) => displayName(b.user)).join(', ')}`, share)
+  }
+
+  // `/purge [@user] [count]`: deletes the newest messages already loaded in
+  // this room, newest first, capped at PURGE_MAX and optionally only one
+  // user's. Deleting someone else's messages takes the same standing as the
+  // message menu's Delete (platform admin, server owner/admin, or
+  // manage_messages in a channel); your own are always fair game. Each delete
+  // is its own request, so a partial failure reports what did go through.
+  const runPurgeCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest } = splitShareFlag(rawArgs)
+    const parsed = parsePurgeArgs(rest)
+    if ('error' in parsed) throw new Error(parsed.error)
+    const target = parsed.user ? resolveRoomUser(parsed.user) : null
+
+    const cs = useChatStore.getState()
+    const server = room.kind === 'channel' ? cs.servers.find((s) => s.channels.some((c) => c.id === room.id)) : undefined
+    const canModerate = cs.me?.role === 'administrator'
+      || server?.my_role === 'owner' || server?.my_role === 'admin'
+      || (!!server && chatApi.hasPermission(server.my_permissions, chatApi.CHAT_PERMISSIONS.manage_messages))
+    if (!canModerate && target?.id !== meId) throw new Error("You don't have permission to delete other people's messages here")
+
+    const victims = (cs.rooms[roomKey(room)]?.items ?? [])
+      .filter((m) => m.id > 0 && !m.deleted_at && !(m as UiMessage).local && (target ? m.author.id === target.id : true))
+      .slice(-parsed.count)
+      .reverse()
+    const whose = target ? `${target.label}'s` : 'the latest'
+    if (victims.length === 0) { toast(target ? `No loaded messages from ${target.label} in this room` : 'No messages to delete here'); return }
+    if (!window.confirm(`Delete ${victims.length} of ${whose} message${victims.length === 1 ? '' : 's'} in this room? This can't be undone.`)) return
+
+    let removed = 0
+    for (const m of victims) {
+      try { await cs.remove(m); removed++ } catch { /* counted below */ }
+    }
+    const failed = victims.length - removed
+    report('Purged', `Deleted ${removed} of ${whose} message${removed === 1 ? '' : 's'}${parsed.capped ? ` (capped at ${PURGE_MAX})` : ''}${failed ? ` - ${failed} couldn't be deleted` : ''}`, share)
   }
 
   // Site-wide variants. The target doesn't have to be in this room (or in any
@@ -716,7 +762,11 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   const runChangelogCommand = async (args: string): Promise<void> => {
-    await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus() }, splitShareFlag(args).share)
+    const { share, rest } = splitShareFlag(args)
+    const parsed = parseChangelogArgs(rest)
+    if ('error' in parsed) throw new Error(parsed.error)
+    await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus(parsed.count) }, share)
+    if (parsed.capped) toast(`Showing the latest ${CHANGELOG_MAX} commits (the maximum)`)
   }
 
   // `-h` lists past broadcasts as a local card (only this admin sees it);
@@ -745,15 +795,18 @@ const Composer = forwardRef<ComposerHandle, {
   // (no reply-in-progress, no attachments) - anything else starting with "/"
   // (a URL, a stray command someone typed) falls through and sends as a
   // normal text message, same as before this feature existed.
-  const runCommand = async (cmd: ParsedChatCommand): Promise<void> => {
-    setText('')
-    setFiles([])
-    setMention(null)
-    setEmojiQuery(null)
-    setSearchPick(null)
-    setSlashQuery(null)
-    drafts.delete(draftKey)
-    stopTyping()
+  const runCommand = async (cmd: ParsedChatCommand, fromTerminal = false): Promise<void> => {
+    // The terminal runs its own input, so the composer's draft stays untouched.
+    if (!fromTerminal) {
+      setText('')
+      setFiles([])
+      setMention(null)
+      setEmojiQuery(null)
+      setSearchPick(null)
+      setSlashQuery(null)
+      drafts.delete(draftKey)
+      stopTyping()
+    }
 
     if (cmd.command === 'theme') {
       const { share, rest } = splitShareFlag(cmd.args)
@@ -779,6 +832,10 @@ const Composer = forwardRef<ComposerHandle, {
           await send(room, { text: encodeSongShare(results[0].id), files: [] })
           return
         }
+        if (sink.current) {
+          sink.current.pickSearch(cmd.args, results.map((r) => ({ id: r.id, name: r.name, detail: r.era?.name ?? r.category })))
+          return
+        }
         setSearchPick({ query: cmd.args, results, index: 0 })
       } else if (cmd.command === 'info') {
         await runInfoCommand(cmd.args)
@@ -802,6 +859,8 @@ const Composer = forwardRef<ComposerHandle, {
         await runSeenCommand(cmd.args)
       } else if (cmd.command === 'changelog') {
         await runChangelogCommand(cmd.args)
+      } else if (cmd.command === 'purge') {
+        await runPurgeCommand(cmd.args)
       } else if (cmd.command === 'kick') {
         await runKickCommand(cmd.args)
       } else if (cmd.command === 'timeout') {
@@ -829,6 +888,23 @@ const Composer = forwardRef<ComposerHandle, {
       setCommandBusy(null)
     }
   }
+
+  // The terminal's way in. Re-assigned every render so the registered wrapper
+  // below always calls the latest closure (current room people, store state).
+  const terminalRun = useRef<TerminalRunner>(async () => false)
+  terminalRun.current = async (input, s) => {
+    const cmd = parseChatCommand(input)
+    if (!cmd) return false
+    sink.current = s
+    try { await runCommand(cmd, true) } finally { sink.current = null }
+    return true
+  }
+  const registerKey = roomKey(room)
+  useEffect(() => {
+    // A thread's composer shares the room but isn't the room's main one.
+    if (parent !== null) return
+    return registerTerminalRunner(registerKey, (input, s) => terminalRun.current(input, s))
+  }, [registerKey, parent])
 
   const pickSearchResult = (song: JWApiSong): void => {
     setSearchPick(null)
@@ -985,7 +1061,9 @@ const Composer = forwardRef<ComposerHandle, {
           <div className="flex items-center gap-1.5 flex-wrap text-sm font-mono">
             <span className="text-text-primary">/{activeCommand.info.name}</span>
             {activeCommand.info.params.length === 0 ? (
-              <span className="text-text-muted text-xs font-sans">takes no parameters</span>
+              <span className="text-text-muted text-xs font-sans">
+                {activeCommand.info.usage.includes('-s') ? 'takes no parameters, just an optional -s' : 'takes no parameters'}
+              </span>
             ) : (
               activeCommand.info.params.map((p, i) => (
                 <span

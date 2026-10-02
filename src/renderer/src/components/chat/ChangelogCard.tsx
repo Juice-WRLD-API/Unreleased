@@ -40,6 +40,17 @@ export default function ChangelogCard({ room, messageId, status }: { room?: Room
           <RefreshCw size={11} /> This tab is on {running} - reload to run it.
         </p>
       )}
+      {status.history && status.history.length > 0 && (
+        <ul className="mt-2.5 space-y-1 border-t border-[var(--border)] pt-2">
+          {status.history.map((c) => (
+            <li key={c.sha} className="flex items-baseline gap-2 text-[11px] min-w-0">
+              <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-accent hover:underline shrink-0">{c.sha.slice(0, 7)}</a>
+              <span className="min-w-0 flex-1 truncate text-text-primary">{c.message.split('\n')[0] || 'No message'}</span>
+              <span className="shrink-0 text-text-muted">{relativeTime(c.date)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </LocalNoticeFrame>
   )
 }

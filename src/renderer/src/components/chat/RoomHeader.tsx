@@ -1,9 +1,9 @@
-import { ChevronLeft, Info, Lock, Pin, Users } from 'lucide-react'
+import { ChevronLeft, Info, Lock, Pin, Terminal, Users } from 'lucide-react'
 import { useChatStore, type RoomRef } from '../../store/chatStore'
 import { useRoomInfo } from './RoomPane'
 import { IconButton } from './ui'
 
-export type SidePanel = 'members' | 'pins' | 'info' | null
+export type SidePanel = 'members' | 'pins' | 'info' | 'terminal' | null
 
 export default function RoomHeader({ room, panel, onPanel, onBack }: {
   room: RoomRef
@@ -13,6 +13,7 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
 }): JSX.Element {
   const info = useRoomInfo(room)
   const pinCount = useChatStore((s) => s.rooms[`${room.kind === 'channel' ? 'c' : 'd'}:${room.id}`]?.items.filter((m) => m.pinned && !m.deleted_at).length ?? 0)
+  const isAdmin = useChatStore((s) => s.me?.role === 'administrator')
   const toggle = (p: SidePanel): void => onPanel(panel === p ? null : p)
 
   return (
@@ -37,6 +38,7 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
           <Lock size={10} />Encrypted
         </span>
       )}
+      {isAdmin && <IconButton label="Terminal" active={panel === 'terminal'} onClick={() => toggle('terminal')}><Terminal size={17} /></IconButton>}
       <div className="relative">
         <IconButton label="Pinned messages" active={panel === 'pins'} onClick={() => toggle('pins')}><Pin size={17} /></IconButton>
         {pinCount > 0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400 pointer-events-none" />}

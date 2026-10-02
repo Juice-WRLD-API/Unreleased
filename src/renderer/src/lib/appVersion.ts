@@ -61,21 +61,13 @@ export interface BranchTip {
   url: string
 }
 
-async function fetchBranchTipCommit(): Promise<BranchTip> {
-  const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${BUILD_BRANCH}`, {
-    headers: { Accept: 'application/vnd.github+json' },
-    // Our own `cached` module var already governs staleness (see CACHE_MS
-    // above) - the browser's HTTP cache doing the same thing underneath it
-    // is what makes refresh() look like a no-op, since a plain GET here is
-    // otherwise a normal cacheable request the browser is free to reuse.
-    cache: 'no-store',
-  })
-  if (!res.ok) throw new Error(String(res.status))
-  const data = (await res.json()) as {
-    sha?: string
-    html_url?: string
-    commit?: { message?: string; author?: { name?: string; date?: string }; committer?: { date?: string } }
-  }
+interface GithubCommit {
+  sha?: string
+  html_url?: string
+  commit?: { message?: string; author?: { name?: string; date?: string }; committer?: { date?: string } }
+}
+
+function toBranchTip(data: GithubCommit): BranchTip {
   if (!data.sha) throw new Error('no sha')
   return {
     sha: data.sha,
@@ -84,6 +76,30 @@ async function fetchBranchTipCommit(): Promise<BranchTip> {
     date: data.commit?.committer?.date ?? data.commit?.author?.date ?? '',
     url: data.html_url ?? `https://github.com/${REPO}/commit/${data.sha}`,
   }
+}
+
+// Our own `cached` module var already governs staleness (see CACHE_MS above) -
+// the browser's HTTP cache doing the same thing underneath it is what makes
+// refresh() look like a no-op, since a plain GET here is otherwise a normal
+// cacheable request the browser is free to reuse.
+async function githubGet<T>(path: string): Promise<T> {
+  const res = await fetch(`https://api.github.com/repos/${REPO}/${path}`, {
+    headers: { Accept: 'application/vnd.github+json' },
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(String(res.status))
+  return (await res.json()) as T
+}
+
+async function fetchBranchTipCommit(): Promise<BranchTip> {
+  return toBranchTip(await githubGet<GithubCommit>(`commits/${BUILD_BRANCH}`))
+}
+
+// Newest first, so [0] is the branch tip.
+async function fetchBranchCommits(count: number): Promise<BranchTip[]> {
+  const list = await githubGet<GithubCommit[]>(`commits?sha=${encodeURIComponent(BUILD_BRANCH)}&per_page=${count}`)
+  if (!Array.isArray(list) || list.length === 0) throw new Error('no commits')
+  return list.map(toBranchTip)
 }
 
 async function fetchBranchTip(): Promise<string> {
@@ -102,17 +118,28 @@ export interface ChangelogStatus {
   built: 'live' | 'building' | 'unknown'
   // This tab booted from an older build than the one now live - a reload runs it.
   needsReload: boolean
+  // `/changelog <count>` only: the commits before the tip, newest first.
+  history?: BranchTip[]
 }
+
+export const CHANGELOG_MAX = 15
 
 // Backs /changelog: the newest commit on this build's branch, and whether the
 // deployed site has caught up to it - same two sources (`version.json`, the
-// GitHub branch tip) as the About page's freshness bulb above.
-export async function fetchChangelogStatus(): Promise<ChangelogStatus> {
+// GitHub branch tip) as the About page's freshness bulb above. With a `count`
+// above 1 the commits before it ride along as `history` (capped at
+// CHANGELOG_MAX), from the same single GitHub request.
+export async function fetchChangelogStatus(count = 1): Promise<ChangelogStatus> {
   if (BUILD_BRANCH === 'unknown') throw new Error("This build doesn't know which branch it came from")
-  const [tip, deployed] = await Promise.all([fetchBranchTipCommit(), fetchDeployedCommit()])
+  const n = Math.min(Math.max(Math.floor(count), 1), CHANGELOG_MAX)
+  const [commits, deployed] = await Promise.all([
+    n > 1 ? fetchBranchCommits(n) : fetchBranchTipCommit().then((t) => [t]),
+    fetchDeployedCommit(),
+  ])
+  const [tip, ...history] = commits
   const built = deployed === null ? 'unknown' : tip.sha.startsWith(deployed) ? 'live' : 'building'
   const needsReload = built === 'live' && COMMIT_HASH !== 'dev' && COMMIT_HASH !== 'unknown' && !tip.sha.startsWith(COMMIT_HASH)
-  return { branch: BUILD_BRANCH, tip, deployed, running: COMMIT_HASH, built, needsReload }
+  return { branch: BUILD_BRANCH, tip, deployed, running: COMMIT_HASH, built, needsReload, ...(history.length ? { history } : {}) }
 }
 
 // Works out whether this build is up to date, in order of what a reload can fix:

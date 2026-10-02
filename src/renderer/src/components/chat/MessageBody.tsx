@@ -90,7 +90,7 @@ const MemoMarkdown = memo(MarkdownText)
 // One renderer for a command's card whether it's the private local notice
 // (room + messageId given, so it can be dismissed) or the same card posted to
 // the chat with `-s` (neither given).
-function CommandCard({ card, room, messageId }: { card: SharedCommandCard; room?: RoomRef; messageId?: number }): JSX.Element | null {
+export function CommandCard({ card, room, messageId }: { card: SharedCommandCard; room?: RoomRef; messageId?: number }): JSX.Element | null {
   switch (card.kind) {
     case 'help': return <HelpCard room={room} messageId={messageId} />
     case 'themeList': return <ThemeListCard room={room} messageId={messageId} />
