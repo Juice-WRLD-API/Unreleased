@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ServerCard } from '../../lib/chatApi'
+import { changelogStatusForCommits, changelogStatusFrom } from '../../lib/appVersion'
 import { getSongsByIds } from '../../lib/juicewrldApi'
 import type { BroadcastMessage } from '../../lib/broadcastApi'
 import { displayName } from '../../store/chatStore'
 import BroadcastHistoryCard from './BroadcastHistoryCard'
+import ChangelogCard from './ChangelogCard'
 import HelpCard from './HelpCard'
 import NowPlayingHistoryCard from './NowPlayingHistoryCard'
 import NowPlayingNowCard from './NowPlayingNowCard'
+import ResultCard from './ResultCard'
+import ThemeListCard from './ThemeListCard'
 
-const KINDS = new Set<string>(['help', 'npNow', 'npHistory', 'broadcastHistory'])
+const KINDS = new Set<string>(['help', 'npNow', 'npHistory', 'broadcastHistory', 'themeList', 'changelog', 'result'])
 
 // A message's `card` only ever comes from the server, which built it from its
 // own records (see chat.cards in the API), so unlike chat text it can be
@@ -37,6 +41,21 @@ function useSongNames(ids: number[]): Map<number, string> {
 
 const songLabel = (names: Map<number, string>, id: number): string => names.get(id) ?? `Song #${id}`
 
+// The commits come from the server; whether the newest is built and live is the
+// viewer's own question, so it's answered here - "unknown" until the check
+// lands.
+function ChangelogServerCard({ card }: { card: Extract<ServerCard, { kind: 'changelog' }> }): JSX.Element | null {
+  const [status, setStatus] = useState(() => card.commits.length ? changelogStatusFrom(card.branch, card.commits, null) : null)
+  useEffect(() => {
+    let live = true
+    if (card.commits.length) {
+      changelogStatusForCommits(card.branch, card.commits).then((s) => { if (live) setStatus(s) }).catch(() => undefined)
+    }
+    return () => { live = false }
+  }, [card])
+  return status ? <ChangelogCard status={status} /> : null
+}
+
 export default function ServerCommandCard({ card }: { card: ServerCard }): JSX.Element | null {
   const songIds = useMemo(
     () => card.kind === 'npNow' ? [card.song] : card.kind === 'npHistory' ? card.items.map((p) => p.song) : [],
@@ -60,6 +79,12 @@ export default function ServerCommandCard({ card }: { card: ServerCard }): JSX.E
       )
     case 'broadcastHistory':
       return <BroadcastHistoryCard items={card.items as BroadcastMessage[]} total={card.total} />
+    case 'themeList':
+      return <ThemeListCard />
+    case 'changelog':
+      return <ChangelogServerCard card={card} />
+    case 'result':
+      return <ResultCard title={card.title} text={card.text} />
     default:
       return null
   }

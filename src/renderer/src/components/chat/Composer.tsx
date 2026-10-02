@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
 import * as chatApi from '../../lib/chatApi'
 import { MAX_CHAT_UPLOAD_BYTES, type CardCommand, type ChatUserBrief } from '../../lib/chatApi'
-import { CHANGELOG_MAX, fetchChangelogStatus } from '../../lib/appVersion'
+import { buildBranch, CHANGELOG_MAX, fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
 import { BROADCAST_HISTORY_DEFAULT, BROADCAST_HISTORY_MAX, CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChangelogArgs, parseChatCommand, parseNpArgs, parsePurgeArgs, PURGE_MAX, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
 import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, type AdminUser } from '../../lib/userApi'
@@ -291,12 +291,11 @@ const Composer = forwardRef<ComposerHandle, {
   // toast - a nicer, dismissible list that only this device ever sees.
   // Commands that answer with a card only the sender sees can take `-s` to
   // post the same answer to the room instead - one place decides which, so each
-  // command just hands over its payload. Where the server has the data
-  // (`command`: now playing, play history, broadcast history, the command
-  // list) the room gets a real card the server builds itself, which nobody can
-  // forge. Everything else - the changelog, themes, plain results, and any
-  // answer in an encrypted DM - goes out as plain text (see commandCardText),
-  // since a card carried in chat text could be written by anyone.
+  // command just hands over its payload and the `command` the server builds
+  // the card from. In a channel the room gets a real card the server builds
+  // itself, which nobody can forge; in an encrypted DM, where the server can't
+  // see what's said, it goes out as plain text (see commandCardText), since a
+  // card carried in chat text could be written by anyone.
   const deliverNotice = async (payload: LocalNoticePayload, share: boolean, command?: CardCommand): Promise<void> => {
     if (share && command && room.kind === 'channel') {
       await sendCommandCard(room, command)
@@ -316,11 +315,11 @@ const Composer = forwardRef<ComposerHandle, {
   // sender sees, or with `-s` the same card in the room. Errors and usage
   // hints stay toasts - they're a problem with the command, not its result.
   const report = (title: string, text: string, share: boolean): void => {
-    void deliverNotice({ kind: 'result', title, text }, share).catch((err) => toast(errorText(err, 'Message failed to send')))
+    void deliverNotice({ kind: 'result', title, text }, share, { name: 'result', title, text }).catch((err) => toast(errorText(err, 'Message failed to send')))
   }
 
   const applyThemeCommand = (args: string, share: boolean): void => {
-    if (!args) { void deliverNotice({ kind: 'themeList' }, share).catch((err) => toast(errorText(err, 'Message failed to send'))); return }
+    if (!args) { void deliverNotice({ kind: 'themeList' }, share, { name: 'theme_list' }).catch((err) => toast(errorText(err, 'Message failed to send'))); return }
     const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
     const wanted = norm(args)
     const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
@@ -776,7 +775,15 @@ const Composer = forwardRef<ComposerHandle, {
     const { share, rest } = splitShareFlag(args)
     const parsed = parseChangelogArgs(rest)
     if ('error' in parsed) throw new Error(parsed.error)
-    await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus(parsed.count) }, share)
+    if (share && room.kind === 'channel') {
+      // The server reads the commits from GitHub itself, so there's nothing to
+      // fetch here first.
+      const branch = buildBranch()
+      if (branch === 'unknown') throw new Error("This build doesn't know which branch it came from")
+      await sendCommandCard(room, { name: 'changelog', branch, count: parsed.count })
+    } else {
+      await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus(parsed.count) }, share)
+    }
     if (parsed.capped) toast(`Showing the latest ${CHANGELOG_MAX} commits (the maximum)`)
   }
 

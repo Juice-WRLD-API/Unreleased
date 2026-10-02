@@ -141,10 +141,26 @@ export async function fetchChangelogStatus(count = 1): Promise<ChangelogStatus> 
     n > 1 ? fetchBranchCommits(n) : fetchBranchTipCommit().then((t) => [t]),
     fetchDeployedCommit(),
   ])
+  return changelogStatusFrom(BUILD_BRANCH, commits, deployed)
+}
+
+// The branch this build came from, for naming it when asking the server for a
+// changelog card.
+export const buildBranch = (): string => BUILD_BRANCH
+
+export function changelogStatusFrom(branch: string, commits: BranchTip[], deployed: string | null): ChangelogStatus {
   const [tip, ...history] = commits
   const built = deployed === null ? 'unknown' : tip.sha.startsWith(deployed) ? 'live' : 'building'
   const needsReload = built === 'live' && COMMIT_HASH !== 'dev' && COMMIT_HASH !== 'unknown' && !tip.sha.startsWith(COMMIT_HASH)
-  return { branch: BUILD_BRANCH, tip, deployed, running: COMMIT_HASH, built, needsReload, ...(history.length ? { history } : {}) }
+  return { branch, tip, deployed, running: COMMIT_HASH, built, needsReload, ...(history.length ? { history } : {}) }
+}
+
+// A changelog card posted to a room carries only the commits (the server read
+// them from GitHub). Whether the newest is live is this viewer's own question -
+// they're the one running, or not running, the deployed build - so it's worked
+// out here, when the card is shown.
+export async function changelogStatusForCommits(branch: string, commits: BranchTip[]): Promise<ChangelogStatus> {
+  return changelogStatusFrom(branch, commits, await fetchDeployedCommit())
 }
 
 // Works out whether this build is up to date, in order of what a reload can fix:

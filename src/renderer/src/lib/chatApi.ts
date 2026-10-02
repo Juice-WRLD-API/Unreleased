@@ -179,6 +179,9 @@ export type ServerCard =
   | { kind: 'npNow'; user: ChatUserBrief; song: number; updated_at: string }
   | { kind: 'npHistory'; user: ChatUserBrief | null; items: { song: number; played_at: string }[]; total: number; capped: boolean }
   | { kind: 'broadcastHistory'; items: { id: number; title: string; message: string; level: string; sender: string; sent_at: string }[]; total: number }
+  | { kind: 'themeList' }
+  | { kind: 'changelog'; branch: string; commits: { sha: string; message: string; author: string; date: string; url: string }[] }
+  | { kind: 'result'; title: string; text: string }
 
 export interface ChatMessage {
   id: number
@@ -519,6 +522,9 @@ export type CardCommand =
   | { name: 'np'; user_id?: number }
   | { name: 'np_history'; user_id?: number; count?: number }
   | { name: 'broadcast_history'; count?: number }
+  | { name: 'theme_list' }
+  | { name: 'changelog'; branch: string; count?: number }
+  | { name: 'result'; title: string; text: string }
 export const createChannelCard = (id: number, command: CardCommand) =>
   request<ChatMessage>(`/channels/${id}/messages/`, json('POST', { command }))
 export const markChannelRead = (id: number, messageId?: number) =>

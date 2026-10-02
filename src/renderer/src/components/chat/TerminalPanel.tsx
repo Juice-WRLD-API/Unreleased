@@ -5,6 +5,7 @@ import { commandCardText } from '../../lib/commandCardText'
 import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { getTerminalRunner, type TerminalSearchResult, type TerminalSink } from '../../lib/chatTerminalBridge'
 import { conversationTitle, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
+import { useRoomPeople } from './people'
 import { errorText } from './ui'
 
 type NewEntry =
@@ -60,6 +61,26 @@ function helpText(): string {
   ].join('\n')
 }
 
+const BUILTIN_HELP: Record<string, string> = {
+  cd: 'cd <channel | server/channel | @dm>\n      Switch the room commands run in. Tab completes names.',
+  ls: 'ls\n      List the channels in this server, or your DMs.',
+  pwd: 'pwd\n      Show which room commands run in.',
+  whoami: 'whoami\n      Show who you are signed in as.',
+  clear: 'clear\n      Wipe the screen (Ctrl+L).',
+  exit: 'exit\n      Close the terminal (Ctrl+D on an empty line).',
+}
+
+// `help <command>`: just that command, found by name or alias ("commit" is
+// /changelog). Null when nothing by that name exists.
+function commandHelp(word: string): string | null {
+  const name = word.replace(/^\//, '').toLowerCase()
+  if (BUILTIN_HELP[name]) return BUILTIN_HELP[name]
+  const info = CHAT_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name))
+  if (!info) return null
+  const aliases = info.aliases?.length ? `\n      aliases: ${info.aliases.map((a) => `/${a}`).join(', ')}` : ''
+  return `${info.usage}\n      ${info.description}${aliases}`
+}
+
 function noticeText(payload: LocalNoticePayload): string {
   if (payload.kind === 'feedbackSent') return `Feedback sent: ${payload.message}`
   return stripMarkdown(commandCardText(payload) ?? '')
@@ -85,6 +106,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     const conv = s.conversations.find((c) => c.id === room.id)
     return `~/dm/${slug(conv ? conversationTitle(conv, s.meId) : 'chat')}`
   })
+  const people = useRoomPeople(room)
   const key = roomKey(room)
   const session = sessionFor(key)
   const [, bump] = useState(0)
@@ -162,10 +184,17 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       case 'whoami': print(user); return true
       case 'ls': listRooms(); return true
       case 'cd': changeRoom(arg); return true
-      case 'help': case '/help':
-        if (rest.length > 0) return false
-        print(helpText())
+      case 'help': case '/help': {
+        // -s means "post the full list to the room", which only the real
+        // command does; anything else after help names a command to look up.
+        const topic = rest.filter((t) => !/^(-s|--share)$/i.test(t))[0]
+        if (!topic && rest.length > 0) return false
+        if (!topic) { print(helpText()); return true }
+        const text = commandHelp(topic)
+        if (text) print(text)
+        else print(`help: no help for "${topic}"`, 'error')
         return true
+      }
       default: return false
     }
   }
@@ -213,17 +242,57 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     }
   }
 
+  // Tab completion: the command name for the first word; after that, room
+  // names for `cd` (channels, or `server/channel` for other servers, plus DMs)
+  // and @usernames for any other command. `#` / `@` typed first narrows to
+  // channels / DMs, like the prefix does in chat.
+  const roomCandidates = (): { name: string; dm: boolean }[] => {
+    const cs = useChatStore.getState()
+    const out: { name: string; dm: boolean }[] = []
+    for (const server of cs.servers) {
+      const prefix = server.id === cs.activeServerId ? '' : `${slug(server.name)}/`
+      for (const c of server.channels) out.push({ name: `${prefix}${slug(c.name)}`, dm: false })
+    }
+    for (const c of cs.conversations) out.push({ name: slug(conversationTitle(c, cs.meId)), dm: true })
+    return out
+  }
+
+  const finishCompletion = (head: string, sigil: string, names: string[], typed: string, space: boolean): void => {
+    const lower = typed.toLowerCase()
+    const hits = [...new Set(names)].filter((n) => n.toLowerCase().startsWith(lower)).sort()
+    if (hits.length === 0) return
+    if (hits.length === 1) { setLine(`${head}${sigil}${hits[0]}${space ? ' ' : ''}`); return }
+    let prefix = hits[0]
+    for (const h of hits) while (!h.toLowerCase().startsWith(prefix.toLowerCase())) prefix = prefix.slice(0, -1)
+    if (prefix.length > typed.length) setLine(`${head}${sigil}${prefix}`)
+    else print(hits.map((h) => `${sigil}${h}`).join('  '), 'dim')
+  }
+
   const complete = (): void => {
-    const m = /^\/?(\w*)$/.exec(input)
-    if (!m) return
-    const hits = COMPLETIONS.filter((c) => c.startsWith(m[1].toLowerCase()))
-    if (hits.length === 1) setLine(`${hits[0]} `)
-    else if (hits.length > 1) {
-      // Longest shared prefix first; if that adds nothing, list the options.
-      let prefix = hits[0]
-      for (const h of hits) while (!h.startsWith(prefix)) prefix = prefix.slice(0, -1)
-      if (prefix.length > m[1].length) setLine(prefix)
-      else print(hits.join('  '), 'dim')
+    const first = /^(\/?)(\S*)$/.exec(input)
+    if (first) {
+      const hits = COMPLETIONS.filter((c) => c.startsWith(first[2].toLowerCase()))
+      if (hits.length === 1) setLine(`${first[1]}${hits[0]} `)
+      else if (hits.length > 1) {
+        // Longest shared prefix first; if that adds nothing, list the options.
+        let prefix = hits[0]
+        for (const h of hits) while (!h.startsWith(prefix)) prefix = prefix.slice(0, -1)
+        if (prefix.length > first[2].length) setLine(`${first[1]}${prefix}`)
+        else print(hits.join('  '), 'dim')
+      }
+      return
+    }
+    const word = input.trim().split(/\s+/)[0].replace(/^\//, '').toLowerCase()
+    const token = /\S*$/.exec(input)?.[0] ?? ''
+    const head = input.slice(0, input.length - token.length)
+    if (word === 'cd') {
+      const sigil = /^[#@]/.exec(token)?.[0] ?? ''
+      const pool = roomCandidates().filter((r) => (sigil === '@' ? r.dm : sigil === '#' ? !r.dm : true))
+      finishCompletion(head, sigil, pool.map((r) => r.name), token.slice(sigil.length), false)
+    } else if (word === 'help' && !token.startsWith('-')) {
+      finishCompletion(head, token.startsWith('/') ? '/' : '', COMPLETIONS, token.replace(/^\//, ''), false)
+    } else if (token.startsWith('@')) {
+      finishCompletion(head, '@', people.map((p) => p.username), token.slice(1), true)
     }
   }
 
