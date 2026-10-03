@@ -14,6 +14,9 @@ const MARKDOWN_EXTS = ['md', 'markdown']
 // Big text files stay plain download cards: nobody reads a 2 MB log in a bubble.
 const MAX_PREVIEW_BYTES = 256 * 1024
 const MAX_PREVIEW_CHARS = 20000
+// Encrypted attachments are pulled whole into memory to decrypt, so anything
+// past this waits for a click instead of loading the moment the message shows.
+const AUTO_LOAD_MAX_BYTES = 25 * 1024 * 1024
 
 function extOf(name: string): string {
   return name.split('.').pop()?.toLowerCase() ?? ''
@@ -42,13 +45,13 @@ interface Resolved {
   kind: Kind
 }
 
-function useResolved(att: ChatAttachment, conversationId: number | null, encrypted: boolean): { data: Resolved | null; error: string | null } {
+function useResolved(att: ChatAttachment, conversationId: number | null, encrypted: boolean, load: boolean): { data: Resolved | null; error: string | null } {
   const meId = useChatStore((s) => s.meId)
   const [data, setData] = useState<Resolved | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (att.id < 0) return
+    if (att.id < 0 || !load) return
     if (!encrypted || !conversationId) {
       setData({
         url: chatAttachmentUrl(att.id),
@@ -80,18 +83,44 @@ function useResolved(att: ChatAttachment, conversationId: number | null, encrypt
     // Keyed on the attachment's identity, not the object: store updates rebuild
     // message objects, and re-running would re-download and re-decrypt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [att.id, att.nonce, att.key_version, att.encrypted_name, conversationId, encrypted, meId])
+  }, [att.id, att.nonce, att.key_version, att.encrypted_name, conversationId, encrypted, meId, load])
 
   return { data, error }
 }
 
-function FileCard({ name, size, href, encrypted, busy, error }: {
+// Just the name and mime, which come from the message metadata rather than
+// the file body, so a held-back attachment can still say what it is.
+function useEncryptedMeta(att: ChatAttachment, conversationId: number | null, enabled: boolean): { name: string; mime: string } | null {
+  const meId = useChatStore((s) => s.meId)
+  const [meta, setMeta] = useState<{ name: string; mime: string } | null>(null)
+
+  useEffect(() => {
+    if (!enabled || !meId || !conversationId || att.id < 0) return
+    let cancelled = false
+    import('../../lib/chatE2E')
+      .then((m) => m.decryptAttachmentMetaCached(meId, conversationId, att))
+      .then((res) => {
+        if (!cancelled) setMeta(res)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [att.id, att.encrypted_name, att.key_version, conversationId, enabled, meId])
+
+  return meta
+}
+
+function FileCard({ name, size, href, encrypted, busy, error, onLoad, loadLabel = 'Load' }: {
   name: string
   size: number
   href?: string
   encrypted?: boolean
   busy?: boolean
   error?: string | null
+  onLoad?: () => void
+  loadLabel?: string
 }): JSX.Element {
   return (
     <div className="flex items-center gap-3 w-full max-w-sm rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5">
@@ -109,6 +138,11 @@ function FileCard({ name, size, href, encrypted, busy, error }: {
         <a href={href} download={name} target="_blank" rel="noopener noreferrer" title="Download" className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
           <Download size={16} />
         </a>
+      )}
+      {!href && onLoad && (
+        <button type="button" onClick={onLoad} title={loadLabel} className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+          <Download size={16} />
+        </button>
       )}
     </div>
   )
@@ -198,10 +232,36 @@ function Attachment({ att, conversationId, encrypted, onOpenMedia }: {
   encrypted: boolean
   onOpenMedia: (item: LightboxItem) => void
 }): JSX.Element {
-  const { data, error } = useResolved(att, conversationId, encrypted)
+  const big = att.size > AUTO_LOAD_MAX_BYTES
+  const [requested, setRequested] = useState(false)
+  // Unencrypted files stream from a URL, so only images (which <img> pulls in
+  // full) need holding back; encrypted ones all download to decrypt.
+  const held = big && !requested
+  const { data, error } = useResolved(att, conversationId, encrypted, !(held && encrypted))
+  const meta = useEncryptedMeta(att, conversationId, encrypted && held)
+  const autoSaved = useRef(false)
+
+  // A held-back plain file has nothing to show once decrypted, so the click
+  // that asked for it should end in a save rather than a second click.
+  useEffect(() => {
+    if (!requested || !encrypted || !data || data.kind !== 'file' || autoSaved.current) return
+    autoSaved.current = true
+    const a = document.createElement('a')
+    a.href = data.downloadUrl
+    a.download = data.name
+    a.click()
+  }, [requested, encrypted, data])
 
   if (att.id < 0) return <FileCard name={att.name} size={att.size} busy />
-  if (!data) return <FileCard name={encrypted ? 'Encrypted file' : att.name} size={att.size} encrypted={encrypted} busy={!error} error={error} />
+  if (encrypted && held) {
+    const kind = meta ? kindOf(meta.mime, meta.name) : 'file'
+    return <FileCard name={meta?.name ?? 'Encrypted file'} size={att.size} encrypted onLoad={() => setRequested(true)} loadLabel={kind === 'file' ? 'Download' : 'Load'} />
+  }
+  if (!data) return <FileCard name={encrypted ? meta?.name ?? 'Encrypted file' : att.name} size={att.size} encrypted={encrypted} busy={!error} error={error} />
+
+  if (data.kind === 'image' && held) {
+    return <FileCard name={data.name} size={att.size} onLoad={() => setRequested(true)} />
+  }
 
   if (data.kind === 'image') {
     return (

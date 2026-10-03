@@ -1,0 +1,28 @@
+{
+  "name": "unreleased-cli",
+  "version": "0.1.0",
+  "description": "The Unreleased site terminal as a command-line shell",
+  "author": "leanwrldd",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "unreleased": "dist/unreleased.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/unreleased.mjs",
+    "prepack": "node build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.7.2"
+  }
+}
