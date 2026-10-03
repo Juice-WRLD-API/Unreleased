@@ -39,7 +39,7 @@ function sessionFor(key: string): Session {
 // where chat commands run); in `files` mode it walks the Files tab's tree and
 // `get` downloads from it. Chat commands work in both. Kept at module level so
 // the position survives closing the terminal.
-const shell: { mode: 'chat' | 'files'; cwd: FilesCwd; prevRoom: RoomRef | null } = { mode: 'chat', cwd: FILES_ROOT, prevRoom: null }
+const shell: { mode: 'chat' | 'files'; cwd: FilesCwd; prevRoom: RoomRef | null } = { mode: 'files', cwd: FILES_ROOT, prevRoom: null }
 
 const BUILTINS = ['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 // The ones that take a path in the file tree (Tab walks the folders); the
@@ -715,10 +715,8 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       s.search = []
       setBusy(true)
       try {
-        await useChatStore.getState().send(room, { text: encodeSongShare(pick.id), files: [] })
-        print(`posted "${pick.name}" to the room`, 'ok')
-      } catch (err) {
-        print(errorText(err, 'Message failed to send'), 'error')
+        // The terminal never posts to a chat; a picked result is not sent anywhere.
+        print(`"${pick.name}" - the terminal doesn’t post to chats`, 'error')
       } finally { setBusy(false) }
       return
     }

@@ -1,6 +1,12 @@
 import { useStore } from '../../store/useStore'
 import { FONTS } from '../fonts'
 import { allSkins } from '../skins'
+import { HOME_SECTIONS, isHomeSectionVisible } from '../homeSections'
+import {
+  DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY,
+  NAV_ITEMS, orderedNavControls, orderedNavItems,
+} from '../navItems'
+import type { ViewType } from '../../types'
 import { fail, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -37,6 +43,8 @@ const SETTINGS: Setting[] = [
   choice('theme', 'Colour theme', () => allSkins().map((s) => ({ value: s.id, label: s.name })), () => st().theme, (v) => st().setTheme(v)),
   color('accent', 'Accent colour (#rrggbb)', () => st().accentColor, (v) => { if (v) st().setAccentColor(v) }),
   choice('sidebar', 'Where the navigation sits', () => ['left', 'right', 'top', 'bottom'].map((v) => ({ value: v, label: v })), () => st().sidebarPosition, (v) => st().setSidebarPosition(v as 'left' | 'right' | 'top' | 'bottom')),
+  bool('auto-hide-nav', 'Hide the navigation until you reach for it', () => st().autoHideNav, (v) => st().setAutoHideNav(v)),
+  bool('lyrics-override', 'Use your own lyrics colours over the theme', () => st().lyricsOverride, (v) => st().setLyricsOverride(v)),
   num('text-scale', 'App-wide text size', 0.75, 1.5, () => st().appTextScale, (v) => st().setAppTextScale(v), 'x'),
   choice('font', 'App font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().appFont, (v) => st().setAppFont(v)),
   choice('lyrics-font', 'Lyrics font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().lyricsFont, (v) => st().setLyricsFont(v)),
@@ -129,7 +137,125 @@ export function searchSettings(q: string): { key: string; value: string; desc: s
   return SETTINGS.filter((s) => s.key.includes(needle) || s.desc.toLowerCase().includes(needle)).map((s) => ({ key: s.key, value: show(s), desc: s.desc }))
 }
 
+// The menu's tabs and bottom buttons share one namespace for the `nav` command
+// (their ids never collide), so one verb set covers both.
+interface NavEntry { id: string; label: string; kind: 'tab' | 'button'; visible: boolean }
+
+function navEntries(): NavEntry[] {
+  const s = st()
+  const tabs = orderedNavItems(s.navOrder, true, true, true).map((i): NavEntry => ({
+    id: i.view, label: i.label, kind: 'tab', visible: !!i.alwaysVisible || (s.navVisibility[i.view] ?? !i.defaultHidden),
+  }))
+  const buttons = orderedNavControls(s.navControlOrder).map((c): NavEntry => ({
+    id: c.id, label: c.label, kind: 'button', visible: s.navControlVisibility[c.id] ?? !c.defaultHidden,
+  }))
+  return [...tabs, ...buttons]
+}
+
+function findNavEntry(name: string): NavEntry {
+  const all = navEntries()
+  const q = name.trim().toLowerCase()
+  return all.find((e) => e.id === q) ?? pickByName(all, (e) => e.id, q) ?? pickByName(all, (e) => e.label, q) ?? fail(`no menu item "${name}" (try: nav)`)
+}
+
+function setNavVisible(e: NavEntry, visible: boolean): void {
+  if (e.kind === 'tab') {
+    if (NAV_ITEMS.find((i) => i.view === e.id)?.alwaysVisible && !visible) fail(`${e.label} can't be hidden`)
+    st().setNavItemVisible(e.id as ViewType, visible)
+  } else st().setNavControlVisible(e.id, visible)
+}
+
+function moveNavEntry(e: NavEntry, to: string): void {
+  const s = st()
+  const group = navEntries().filter((x) => x.kind === e.kind).map((x) => x.id)
+  const from = group.indexOf(e.id)
+  let index: number
+  if (to === 'up') index = from - 1
+  else if (to === 'down') index = from + 1
+  else if (to === 'top' || to === 'first') index = 0
+  else if (to === 'bottom' || to === 'last') index = group.length - 1
+  else {
+    const n = Number(to)
+    if (!Number.isInteger(n) || n < 1 || n > group.length) fail(`position: up | down | top | bottom | 1-${group.length}`)
+    index = n - 1
+  }
+  index = Math.max(0, Math.min(group.length - 1, index))
+  group.splice(from, 1)
+  group.splice(index, 0, e.id)
+  if (e.kind === 'tab') s.setNavOrder(group as ViewType[])
+  else s.setNavControlOrder(group)
+}
+
+const NAV_VERBS = ['show', 'hide', 'toggle', 'move', 'reset']
+
 export const SETTINGS_COMMANDS: TermCommand[] = [
+  {
+    name: 'nav', aliases: ['menu', 'navbar'], group: 'Settings', usage: 'nav [show|hide|toggle <item> | move <item> <up|down|top|bottom|n> | reset]',
+    description: 'List the menu items and bottom buttons, show or hide them, reorder them, or reset to the defaults (same as Settings > Menu items)',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return NAV_VERBS.filter((v) => v.startsWith(p))
+      const verb = before[0].toLowerCase()
+      if (before.length === 1 && ['show', 'hide', 'toggle', 'move'].includes(verb)) return navEntries().map((e) => e.id).filter((id) => id.startsWith(p))
+      if (before.length === 2 && verb === 'move') return ['up', 'down', 'top', 'bottom'].filter((v) => v.startsWith(p))
+      return []
+    },
+    run: (args, ctx) => {
+      const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean)
+      if (!verb) {
+        const rows = navEntries()
+        const line = (e: NavEntry, i: number): string => `${String(i + 1).padStart(2)}  ${e.id.padEnd(16)}${e.label.padEnd(16)}${e.visible ? 'shown' : 'hidden'}`
+        ctx.print(`Menu tabs\n${rows.filter((e) => e.kind === 'tab').map(line).join('\n')}\n\nBottom buttons\n${rows.filter((e) => e.kind === 'button').map(line).join('\n')}`)
+        return
+      }
+      const v = verb.toLowerCase()
+      if (v === 'reset') {
+        const s = st()
+        s.setNavOrder(DEFAULT_NAV_ORDER)
+        s.setNavControlOrder(DEFAULT_NAV_CONTROL_ORDER)
+        for (const [id, on] of Object.entries(DEFAULT_NAV_VISIBILITY)) s.setNavItemVisible(id as ViewType, on)
+        for (const [id, on] of Object.entries(DEFAULT_NAV_CONTROL_VISIBILITY)) s.setNavControlVisible(id, on)
+        ctx.print('menu reset to the defaults', 'ok')
+        return
+      }
+      if (!NAV_VERBS.includes(v)) fail(`unknown option "${verb}" (show, hide, toggle, move, reset)`)
+      if (rest.length === 0) fail(`usage: nav ${v} <item>${v === 'move' ? ' <up|down|top|bottom|n>' : ''}`)
+      if (v === 'move') {
+        if (rest.length < 2) fail('usage: nav move <item> <up|down|top|bottom|n>')
+        const e = findNavEntry(rest.slice(0, -1).join(' '))
+        moveNavEntry(e, rest[rest.length - 1].toLowerCase())
+        const group = navEntries().filter((x) => x.kind === e.kind)
+        ctx.print(`${e.label} is now #${group.findIndex((x) => x.id === e.id) + 1} of ${group.length}`, 'ok')
+        return
+      }
+      const e = findNavEntry(rest.join(' '))
+      setNavVisible(e, v === 'toggle' ? !e.visible : v === 'show')
+      ctx.print(`${e.label}: ${findNavEntry(e.id).visible ? 'shown' : 'hidden'}`, 'ok')
+    },
+  },
+  {
+    name: 'home-sections', aliases: ['homesections'], group: 'Settings', usage: 'home-sections [show|hide|toggle <section>]',
+    description: 'List the Home screen sections or show/hide one (same as Settings > Home screen)',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return ['show', 'hide', 'toggle'].filter((v) => v.startsWith(p))
+      return before.length === 1 ? HOME_SECTIONS.map((x) => x.id).filter((id) => id.startsWith(p)) : []
+    },
+    run: (args, ctx) => {
+      const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean)
+      const vis = (id: string): boolean => isHomeSectionVisible(id, st().homeSectionVisibility)
+      if (!verb) {
+        ctx.print(HOME_SECTIONS.map((x) => `${x.id.padEnd(12)}${x.label.padEnd(24)}${vis(x.id) ? 'shown' : 'hidden'}`).join('\n'))
+        return
+      }
+      const v = verb.toLowerCase()
+      if (!['show', 'hide', 'toggle'].includes(v) || rest.length === 0) fail('usage: home-sections [show|hide|toggle <section>]')
+      const name = rest.join(' ')
+      const section = HOME_SECTIONS.find((x) => x.id === name.toLowerCase()) ?? pickByName(HOME_SECTIONS, (x) => x.id, name) ?? pickByName(HOME_SECTIONS, (x) => x.label, name) ?? fail(`no section "${name}" (try: home-sections)`)
+      st().setHomeSectionVisible(section.id, v === 'toggle' ? !vis(section.id) : v === 'show')
+      ctx.print(`${section.label}: ${vis(section.id) ? 'shown' : 'hidden'}`, 'ok')
+    },
+  },
   {
     name: 'settings', group: 'Settings', usage: 'settings [filter]', description: 'List every setting you can change here with its current value',
     run: (args, ctx) => {

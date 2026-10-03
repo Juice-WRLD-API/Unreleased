@@ -297,7 +297,9 @@ const Composer = forwardRef<ComposerHandle, {
   // itself, which nobody can forge; in an encrypted DM, where the server can't
   // see what's said, it goes out as plain text (see commandCardText), since a
   // card carried in chat text could be written by anyone.
-  const deliverNotice = async (payload: LocalNoticePayload, share: boolean, command?: CardCommand): Promise<void> => {
+  const deliverNotice = async (payload: LocalNoticePayload, wantShare: boolean, command?: CardCommand): Promise<void> => {
+    // The terminal never posts into a chat, whatever flag it was typed with.
+    const share = wantShare && !sink.current
     if (share && command && room.kind === 'channel') {
       await sendCommandCard(room, command)
       return
@@ -365,9 +367,12 @@ const Composer = forwardRef<ComposerHandle, {
   // only works for API-sourced tracks (id "jw-<n>") - a local file has
   // nothing a recipient's client could stream from, and encodeSongShare's
   // decode side would reject it anyway (streamUrl isn't a JWAPI_BASE URL).
+  //
+  // In the terminal `np` only says what's playing - it never posts to the room.
   const shareNowPlayingCommand = async (): Promise<void> => {
     const track = useStore.getState().currentTrack
     if (!track) { toast('Nothing is playing right now'); return }
+    if (sink.current) { toast(`Now playing: ${track.title}${track.artist ? ` - ${track.artist}` : ''}`, 'ok'); return }
     const match = track.id.match(/^jw-(\d+)$/)
     if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
     await send(room, { text: encodeSongShare(Number(match[1])), files: [] })
@@ -783,7 +788,8 @@ const Composer = forwardRef<ComposerHandle, {
   }
 
   const runChangelogCommand = async (args: string): Promise<void> => {
-    const { share, rest } = splitShareFlag(args)
+    const { share: wantShare, rest } = splitShareFlag(args)
+    const share = wantShare && !sink.current
     const parsed = parseChangelogArgs(rest)
     if ('error' in parsed) throw new Error(parsed.error)
     if (share && room.kind === 'channel') {
@@ -928,6 +934,11 @@ const Composer = forwardRef<ComposerHandle, {
   terminalRun.current = async (input, s) => {
     const cmd = parseChatCommand(input)
     if (!cmd) return false
+    // These exist only to post into the room; the terminal never does that.
+    if (cmd.command === 'song' || cmd.command === 'search' || cmd.command === 'info' || cmd.command === 'sharetheme') {
+      s.toast(`/${cmd.command} posts to the chat, and the terminal never does - use the chat composer`, 'error')
+      return true
+    }
     sink.current = s
     try { await runCommand(cmd, true) } finally { sink.current = null }
     return true

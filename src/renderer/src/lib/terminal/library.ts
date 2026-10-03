@@ -16,7 +16,9 @@ async function myPlaylists(): Promise<PlaylistSummary[]> {
 // name, like a shell lets you point at a file by index or by prefix.
 async function playlistFromArg(arg: string): Promise<PlaylistSummary> {
   const list = await myPlaylists()
-  const n = /^\d+$/.test(arg.trim()) ? Number(arg) : 0
+  // `5` or `#5`, the number `playlists` printed.
+  const num = /^#?(\d+)$/.exec(arg.trim())
+  const n = num ? Number(num[1]) : 0
   if (n) return list[n - 1] ?? fail(`pick a playlist from 1 to ${list.length}`)
   return pickByName(list, (p) => p.name, arg) ?? fail(`no single playlist matches "${arg.trim()}" (try: playlists)`)
 }
@@ -31,11 +33,35 @@ async function playlistTracks(id: number): Promise<{ name: string; tracks: Retur
 }
 
 const SUBS = ['play', 'shuffle', 'show', 'create', 'delete', 'add', 'remove', 'open']
+// Subcommands whose first argument is a playlist (add/remove take it before `--`).
+const PLAYLIST_SUBS = new Set(['play', 'shuffle', 'show', 'ls', 'open', 'delete', 'rm', 'add', 'remove'])
+
+// Playlist titles for Tab. Like `shuffle <era>`, a title with spaces completes
+// one word at a time: only the words past what is already typed come back.
+async function completePlaylistNames(before: string[], partial: string): Promise<string[]> {
+  if (before.length === 0) return SUBS.filter((s) => s.startsWith(partial.toLowerCase()))
+  if (!PLAYLIST_SUBS.has(before[0].toLowerCase())) return []
+  const typed = [...before.slice(1), partial]
+  if (typed.includes('--')) return []
+  const full = typed.join(' ').toLowerCase()
+  if (full.startsWith('#')) return []
+  let list: PlaylistSummary[]
+  try { list = await myPlaylists() } catch { return [] }
+  return list
+    .map((p) => p.name)
+    .filter((n) => n.toLowerCase().startsWith(full))
+    .map((n) => n.split(' ').slice(typed.length - 1).join(' '))
+}
+
+const playlistCommand = (): TermCommand => LIBRARY_COMMANDS.find((c) => c.name === 'playlist')!
 
 export const LIBRARY_COMMANDS: TermCommand[] = [
   {
-    name: 'playlists', aliases: ['pls'], group: 'Library', usage: 'playlists', description: 'List your playlists, numbered',
-    run: async (_a, ctx) => {
+    name: 'playlists', aliases: ['pls'], group: 'Library', usage: 'playlists', description: 'List your playlists, numbered. With a subcommand (playlists play #5) it works like playlist',
+    complete: completePlaylistNames,
+    run: async (args, ctx) => {
+      // `playlists play 5` is `playlist play 5` - same words, easy to mistype.
+      if (args.trim()) { await playlistCommand().run(args, ctx); return }
       const list = await myPlaylists()
       if (list.length === 0) { ctx.print('no playlists yet (playlist create <name>)', 'dim'); return }
       ctx.print(list.map((p, i) => `${String(i + 1).padStart(3)}  ${p.name}  (${p.track_count} track${p.track_count === 1 ? '' : 's'}${p.is_public ? ', public' : ''})`).join('\n'))
@@ -44,8 +70,8 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
   {
     name: 'playlist', aliases: ['pl'], group: 'Library',
     usage: 'playlist <play|shuffle|show|open> <name|N>  ·  create <name>  ·  delete <name|N>  ·  add <name|N> -- <song>  ·  remove <name|N> -- <song>',
-    description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> a number from playlists, <song> a title or a number from find',
-    complete: (before, partial) => (before.length === 0 ? SUBS.filter((s) => s.startsWith(partial.toLowerCase())) : []),
+    description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> or #N a number from playlists, <song> a title or a number from find',
+    complete: completePlaylistNames,
     run: async (args, ctx) => {
       const [sub = '', ...restWords] = args.trim().split(/\s+/)
       const rest = restWords.join(' ')
