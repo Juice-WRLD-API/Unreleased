@@ -5,6 +5,7 @@ import { formatListeningTime, joinPlayedSongs, buildListeningStats, prefsForPeri
 import { resolveStatsSongs } from '../statsCatalog'
 import { loadAllSongs } from '../juicewrldApi'
 import { fail, type TermCommand } from './types'
+import { getTermFullscreen, setTermFullscreen } from './fullscreenStore'
 import { getTermTheme, setTermTheme, TERM_THEMES } from './themeStore'
 
 // The unserious end of the terminal: system-info flexing, fortunes, a cow, and
@@ -156,6 +157,14 @@ export const FUN_COMMANDS: TermCommand[] = [
       }
       const set = setTermTheme(want) ?? fail(`no theme "${want}" (try: termtheme)`)
       ctx.print(`terminal theme: ${set.label}`, 'ok')
+    },
+  },
+  {
+    name: 'full', aliases: ['fullscreen'], group: 'App', usage: 'full', description: 'Hide the rest of the app so only the terminal shows. Run it again to bring it back',
+    run: (_a, ctx) => {
+      const next = !getTermFullscreen()
+      setTermFullscreen(next)
+      ctx.print(next ? 'fullscreen on - run full again to exit' : 'fullscreen off', 'dim')
     },
   },
   {

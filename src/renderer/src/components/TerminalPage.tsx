@@ -5,6 +5,7 @@ import { useStore } from '../store/useStore'
 import Composer from './chat/Composer'
 import { useRoomPeople } from './chat/people'
 import TerminalPanel from './chat/TerminalPanel'
+import { setTermFullscreen, useTermFullscreen } from '../lib/terminal/fullscreenStore'
 
 // Stands in when no chat room exists yet: everything that doesn't need a room
 // (playback, settings, files, the review queues...) still works.
@@ -24,6 +25,10 @@ export default function TerminalPage(): JSX.Element {
   const firstChannelId = useChatStore((s) => s.servers.flatMap((x) => x.channels)[0]?.id ?? null)
   const firstConvId = useChatStore((s) => s.conversations[0]?.id ?? null)
   const people = useRoomPeople(active)
+  const full = useTermFullscreen()
+
+  // Fullscreen belongs to this visit; leaving the page (hotkey, nav, `exit`) ends it.
+  useEffect(() => () => setTermFullscreen(false), [])
 
   useEffect(() => {
     if (!isAdmin || active) return
@@ -50,7 +55,9 @@ export default function TerminalPage(): JSX.Element {
   }
 
   return (
-    <div className="relative flex-1 min-w-0 h-full bg-black overflow-hidden">
+    // Same element either way (a class swap, not a portal) so toggling keeps the
+    // panel mounted and the scrollback intact.
+    <div className={full ? 'fixed inset-0 z-[300] bg-black overflow-hidden' : 'relative flex-1 min-w-0 h-full bg-black overflow-hidden'}>
       <TerminalPanel room={active ?? NO_ROOM} onClose={leave} />
       {active && (
         <div hidden aria-hidden>
