@@ -1,8 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { CHAT_COMMANDS } from '../../lib/chatCommands'
 import { findChatCommand } from '../../lib/chatHelp'
-import { juicesayText, directory, findTermCommand, resolveHandles, TERM_COMMAND_WORDS, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
+import { hasChatAccess } from '../../lib/chatAccess'
+import { canRun, chatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
 import { termThemeVars, useTermTheme } from '../../lib/terminal/themeStore'
 import { catFile, diskUsage, grepFiles, headTailFile, locateName, treeView, wcFile } from '../../lib/terminalFileTools'
 import { commandCardText } from '../../lib/commandCardText'
@@ -10,6 +10,7 @@ import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { defaultFilesCwd, downloadPath, FILES_ROOT, filesPathString, formatListing, listDir, openTextFile, resolveDir, splitTyped, unquote, type FilesCwd } from '../../lib/terminalFiles'
 import { getTerminalRunner, type TerminalSearchResult, type TerminalSink } from '../../lib/chatTerminalBridge'
 import { conversationTitle, roomKey, useChatStore, type RoomRef } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
 import { useRoomPeople } from './people'
 import { errorText } from './ui'
 import NanoEditor from './NanoEditor'
@@ -46,10 +47,11 @@ const BUILTINS = ['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep'
 // directory-only ones skip files.
 const PATH_WORDS = new Set(['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'tree', 'du', 'source'])
 const DIR_ONLY_WORDS = new Set(['cd', 'ls', 'tree', 'du'])
-const COMPLETIONS = [...new Set([
-  ...CHAT_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]),
+// Every command word this account can type (see lib/terminal/access).
+const completions = (): string[] => [...new Set([
+  ...chatCommandsFor().flatMap((c) => [c.name, ...(c.aliases ?? [])]),
   ...BUILTINS,
-  ...TERM_COMMAND_WORDS,
+  ...TERM_COMMANDS.filter((c) => canRun(c)).flatMap((c) => [c.name, ...(c.aliases ?? [])]),
 ])].sort()
 
 // History is shared by every room and kept across restarts, like a shell's;
@@ -152,7 +154,7 @@ function editDistance(a: string, b: string): number {
 function suggest(word: string): string[] {
   const w = word.toLowerCase().replace(/^\//, '')
   if (!w) return []
-  const names = [...new Set([...COMPLETIONS, ...Object.keys(ALIASES)])]
+  const names = [...new Set([...completions(), ...Object.keys(ALIASES)])]
   return names
     .map((n) => ({ n, d: editDistance(w, n) + (n.startsWith(w) ? -2 : 0) }))
     .filter((x) => x.d <= (w.length <= 3 ? 1 : 2))
@@ -184,22 +186,26 @@ const noShare = (text: string): string => text
   .replace(/\s*\(-s posts [^)]*\)/g, '')
   .replace(/;\s*-s posts [^.]*$/, '')
 
+// The command groups this account has anything in, with those commands.
+const groupsShown = (): { g: string; commands: TermCommand[] }[] => TERM_GROUPS
+  .map((g) => ({ g, commands: TERM_COMMANDS.filter((c) => c.group === g && canRun(c)) }))
+  .filter((x) => x.commands.length > 0)
+
 // `help` alone is an index (there are a lot of commands now); `help <group>`
 // lists one group in full and `help <command>` explains one.
 function helpText(): string {
-  const chat = CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => c.name).join('  ')
-  const groups = TERM_GROUPS
-    .map((g) => ({ g, names: TERM_COMMANDS.filter((c) => c.group === g).map((c) => c.name) }))
-    .filter((x) => x.names.length > 0)
+  const chat = chatCommandsFor().filter((c) => c.name !== 'help').map((c) => c.name).join('  ')
+  const groups = groupsShown()
   const width = Math.max(...groups.map((x) => x.g.length), 'Chat'.length, 'Shell'.length) + 2
   const row = (label: string, names: string): string => `  ${label.padEnd(width)}${names}`
+  const topics = [...(chat ? ['chat'] : []), ...groups.map((x) => x.g.toLowerCase()), 'shell']
   return [
     'Commands (the slash is optional here):',
-    row('Chat', chat),
-    ...groups.map((x) => row(x.g, x.names.join('  '))),
+    ...(chat ? [row('Chat', chat)] : []),
+    ...groups.map((x) => row(x.g, x.commands.map((c) => c.name).join('  '))),
     row('Shell', SHELL_NAMES.join('  ')),
     '',
-    'help <command> explains one · help <group> lists a group in full (chat, people, player, library, navigation, settings, admin, app, fun, shell)',
+    `help <command> explains one · help <group> lists a group in full (${topics.join(', ')})`,
     'Tab completes names and arguments · ↑ ↓ history · Ctrl+R search history · Ctrl+L clear · Ctrl+C cancel line',
     'cmd | grep text · cmd | head 5 · fortune | juicesay · click a → hint to put it on the prompt',
   ].join('\n')
@@ -208,11 +214,12 @@ function helpText(): string {
 function groupHelp(word: string): string | null {
   const w = word.trim().toLowerCase()
   const entry = (usage: string, description: string): string => `  ${usage}\n      ${description}`
-  if (w === 'chat') return ['Chat commands (the slash is optional here):', ...CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => entry(noShare(c.usage), noShare(c.description)))].join('\n')
+  const chat = chatCommandsFor()
+  if (w === 'chat' && chat.length > 0) return ['Chat commands (the slash is optional here):', ...chat.filter((c) => c.name !== 'help').map((c) => entry(noShare(c.usage), noShare(c.description)))].join('\n')
   if (w === 'shell') return ['Shell:', ...SHELL_NAMES.map((n) => BUILTIN_HELP[n] ?? n)].join('\n')
-  const group = TERM_GROUPS.find((g) => g.toLowerCase() === w)
+  const group = groupsShown().find((x) => x.g.toLowerCase() === w)
   if (!group) return null
-  return [`${group}:`, ...TERM_COMMANDS.filter((c) => c.group === group).map((c) => entry(c.usage, c.description))].join('\n')
+  return [`${group.g}:`, ...group.commands.map((c) => entry(c.usage, c.description))].join('\n')
 }
 
 const BUILTIN_HELP: Record<string, string> = {
@@ -248,7 +255,7 @@ function commandHelp(word: string): string | null {
     return `${term.usage}\n      ${term.description}${termAliases}`
   }
   const info = findChatCommand(name)
-  if (!info) return null
+  if (!info || !chatCommandsFor().includes(info)) return null
   const aliases = info.aliases?.length ? `\n      aliases: ${info.aliases.map((a) => `/${a}`).join(', ')}` : ''
   return `${noShare(info.usage)}\n      ${noShare(info.description)}${aliases}`
 }
@@ -318,15 +325,20 @@ function LinkedText({ text, onPick }: { text: string; onPick: (command: string) 
 
 const MONO ="'JetBrains Mono', 'Cascadia Mono', 'Cascadia Code', Consolas, 'DejaVu Sans Mono', ui-monospace, monospace"
 
-// A Linux-style console for platform administrators. It does not reimplement
-// any chat command: input goes to the same runner the composer uses (see
-// chatTerminalBridge), so every command, flag, alias and permission check
-// behaves identically - only the output is printed here instead of shown as
-// toasts and cards in the room. Text that isn't a command is rejected rather
-// than posted, so nothing is ever sent by accident. It sits over the whole chat
-// view (the room underneath stays mounted - that's where the commands run).
-export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClose: () => void }): JSX.Element | null {
+// A Linux-style console, open to everyone; what it offers depends on the
+// account (lib/terminal/access). It does not reimplement any chat command:
+// input goes to the same runner the composer uses (see chatTerminalBridge), so
+// every command, flag, alias and permission check behaves identically - only
+// the output is printed here instead of shown as toasts and cards in the room.
+// Text that isn't a command is rejected rather than posted, so nothing is ever
+// sent by accident. Without chat (it's staff-only) the shell stays in the file
+// tree and the chat commands aren't offered.
+export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClose: () => void }): JSX.Element {
   const me = useChatStore((s) => s.me)
+  const account = useStore((s) => s.account)
+  const hasChat = hasChatAccess(account)
+  const isAdmin = !!account?.is_administrator
+  if (!hasChat && shell.mode === 'chat') shell.mode = 'files'
   const chatPath = useChatStore((s) => {
     // The terminal page can run with no room open (id 0 stands in for it).
     if (room.kind === 'channel' && room.id === 0) return '~'
@@ -359,7 +371,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   const historyIndex = useRef<number | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLInputElement>(null)
-  const user = me?.username ?? 'admin'
+  const user = me?.username ?? termUserName()
 
   const push = useCallback((entry: NewEntry): void => {
     const s = sessionFor(key)
@@ -401,8 +413,6 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       print(`${results.length} results for "${query}":\n${results.map((r, i) => `${String(i + 1).padStart(3)}  ${r.name}  (${r.detail})`).join('\n')}\nType a number to post that song to the room.`)
     },
   }), [key, print])
-
-  if (me?.role !== 'administrator') return null
 
   const setLine = (value: string): void => { setInput(value); setCaret(value.length) }
   const clear = (): void => { sessionFor(key).entries = []; bump((n) => n + 1) }
@@ -463,6 +473,12 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     // In the file tree `~` is home: back to chat (and a #channel / @dm goes
     // straight to that room).
     if (target === '~' || /^\/?chat\/?$/i.test(target) || /^[#@]/.test(target)) {
+      // Without chat there are no rooms to go back to: home is the file tree's.
+      if (!hasChat) {
+        if (target === '~') return enterFiles('')
+        print(`cd: ${arg}: chat is only for staff accounts`, 'error')
+        return true
+      }
       shell.mode = 'chat'
       bump((n) => n + 1)
       if (/^[#@]/.test(target)) changeRoom(arg)
@@ -509,7 +525,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       .then(() => true)
 
   // `source [-y] [-k] <file>`: without -y it only shows what would run, since
-  // the file could be anyone's and every line runs with admin rights.
+  // the file could be anyone's and every line runs as you.
   const runSource = async (arg: string): Promise<boolean> => {
     if (locked.current > 0) { print('source: a script can’t start another script', 'error'); return true }
     let rest = arg.trim()
@@ -529,7 +545,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     if (lines.length > 200) { print(`source: ${lines.length} commands is too many (limit 200)`, 'error'); return true }
     const plural = lines.length === 1 ? '' : 's'
     if (!go) {
-      print([`${file.name} would run ${lines.length} command${plural}:`, ...lines.map((l, i) => `${String(i + 1).padStart(4)}  ${l}`), '', `Read it first - these run with your admin rights. To run it: source -y ${rest}`].join('\n'))
+      print([`${file.name} would run ${lines.length} command${plural}:`, ...lines.map((l, i) => `${String(i + 1).padStart(4)}  ${l}`), '', `Read it first - these run as you. To run it: source -y ${rest}`].join('\n'))
       return true
     }
     locked.current += 1
@@ -560,7 +576,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         const name = word.toLowerCase()
         // Outside the file tree these have other meanings: `tail` is the message
         // log, and head/wc/grep filter another command's output after a pipe.
-        const logLike = name === 'tail' && (shell.mode !== 'files' || /^(\d+)?(\s+@\S+)?$/.test(arg.trim()))
+        const logLike = name === 'tail' && hasChat && (shell.mode !== 'files' || /^(\d+)?(\s+@\S+)?$/.test(arg.trim()))
         if (logLike) { const log = findTermCommand('tail'); return log ? runTerm(log, arg) : false }
         if (shell.mode !== 'files') {
           print(`${name}: only works in the file tree (try: cd files)${name === 'cat' ? '' : `; to filter output use: command | ${name} ...`}`, 'error')
@@ -584,7 +600,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         return openTextFile(cwd, arg).then((file) => { setEditor(file); return true })
       }
       case 'pwd': print(path); return true
-      case 'whoami': print(`${user}   id ${me?.id ?? '?'} · ${me?.role ?? 'user'}`); return true
+      case 'whoami': print(account ? `${user}   id ${account.id} · ${me?.role ?? 'user'}` : 'guest (not signed in)'); return true
       case 'man': return builtin(arg ? `help ${arg}` : 'help')
       case 'alias': {
         const m = /^([\w.-]+)\s*=\s*([\s\S]+)$/.exec(arg.trim())
@@ -721,6 +737,15 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       return
     }
 
+    const word = line.split(/\s+/)[0]
+    const notFound = (): void => {
+      const maybe = suggest(word)
+      print(`${word}: command not found${maybe.length ? ` - did you mean ${maybe.join(', ')}?` : ' (try help)'}`, 'error')
+    }
+    // A chat command this account isn't offered (an admin one, or any without
+    // chat) reads as unknown, same as in help and Tab.
+    const chatCommand = findChatCommand(word)
+    if (chatCommand ? !chatCommandsFor().includes(chatCommand) : !hasChat) { notFound(); return }
     const runner = getTerminalRunner(key)
     if (!runner) { print('room not ready yet - try again in a moment', 'error'); return }
     s.search = []
@@ -728,11 +753,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     try {
       const resolved = await resolveHandles(line, people)
       const handled = await runner(resolved.startsWith('/') ? resolved : `/${resolved}`, sink)
-      if (!handled) {
-        const word = line.split(/\s+/)[0]
-        const maybe = suggest(word)
-        print(`${word}: command not found${maybe.length ? ` - did you mean ${maybe.join(', ')}?` : ' (try help)'}`, 'error')
-      }
+      if (!handled) notFound()
     } catch (err) {
       printFailure(err, 'Command failed')
     } finally {
@@ -789,7 +810,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   const complete = (): void => {
     const first = /^(\/?)(\S*)$/.exec(input)
     if (first) {
-      const hits = COMPLETIONS.filter((c) => c.startsWith(first[2].toLowerCase()))
+      const hits = completions().filter((c) => c.startsWith(first[2].toLowerCase()))
       if (hits.length === 1) setLine(`${first[1]}${hits[0]} `)
       else if (hits.length > 1) {
         // Longest shared prefix first; if that adds nothing, list the options.
@@ -810,7 +831,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       const pool = roomCandidates().filter((r) => (sigil === '@' ? r.dm : sigil === '#' ? !r.dm : true))
       finishCompletion(head, sigil, pool.map((r) => r.name), token.slice(sigil.length), false)
     } else if (word === 'help' && !token.startsWith('-')) {
-      finishCompletion(head, token.startsWith('/') ? '/' : '', COMPLETIONS, token.replace(/^\//, ''), false)
+      finishCompletion(head, token.startsWith('/') ? '/' : '', completions(), token.replace(/^\//, ''), false)
     } else if (findTermCommand(word)?.complete) {
       const command = findTermCommand(word)!
       const tokens = input.slice(input.search(/\s/)).trim().split(/\s+/).filter(Boolean)
@@ -908,7 +929,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     <section
       className="absolute inset-0 z-40 flex flex-col bg-[var(--t-bg)] text-[color:var(--t-fg)]"
       style={{ fontFamily: MONO, ...termThemeVars(theme) }}
-      aria-label="Admin terminal"
+      aria-label="Terminal"
     >
       <header className="h-9 shrink-0 flex items-center gap-3 px-3 bg-[var(--t-bar)] border-b border-[color:var(--t-border)] text-[11px] text-[color:var(--t-dim)]">
         <span className="flex gap-1.5" aria-hidden>
@@ -941,7 +962,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       >
         {session.entries.length === 0 && (
           <p className="whitespace-pre-wrap text-[color:var(--t-dim)] mb-2">
-            {'Unreleased admin console\nTry: user <name> · lookup <text> · pending · play <song> · open settings · neofetch · help\nTab completes names, users and settings · ↑ / Ctrl+R history · cmd | grep text · !! repeats'}
+            {`Unreleased console\nTry: ${[hasChat && 'user <name>', 'lookup <text>', isAdmin && 'pending', 'play <song>', 'open settings', 'neofetch', 'help'].filter(Boolean).join(' · ')}\nTab completes names, users and settings · ↑ / Ctrl+R history · cmd | grep text · !! repeats`}
           </p>
         )}
         {session.entries.map((e) => {

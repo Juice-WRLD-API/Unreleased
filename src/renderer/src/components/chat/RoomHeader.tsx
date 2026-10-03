@@ -14,7 +14,6 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
 }): JSX.Element {
   const info = useRoomInfo(room)
   const pinCount = useChatStore((s) => s.rooms[`${room.kind === 'channel' ? 'c' : 'd'}:${room.id}`]?.items.filter((m) => m.pinned && !m.deleted_at).length ?? 0)
-  const isAdmin = useChatStore((s) => s.me?.role === 'administrator')
   const toggle = (p: SidePanel): void => onPanel(panel === p ? null : p)
 
   return (
@@ -39,7 +38,7 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
           <Lock size={10} />Encrypted
         </span>
       )}
-      {isAdmin && <IconButton label="Open terminal" onClick={() => useStore.getState().setActiveView('terminal')}><Terminal size={17} /></IconButton>}
+      <IconButton label="Open terminal" onClick={() => useStore.getState().setActiveView('terminal')}><Terminal size={17} /></IconButton>
       <div className="relative">
         <IconButton label="Pinned messages" active={panel === 'pins'} onClick={() => toggle('pins')}><Pin size={17} /></IconButton>
         {pinCount > 0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400 pointer-events-none" />}

@@ -4,6 +4,7 @@ import { APP_VERSION } from '../appVersion'
 import { formatListeningTime, joinPlayedSongs, buildListeningStats, prefsForPeriod, type ListeningPeriod, type RankedEntry } from '../listeningStats'
 import { resolveStatsSongs } from '../statsCatalog'
 import { loadAllSongsAbortable } from '../juicewrldApi'
+import { termAccess, termUserName } from './access'
 import { fail, type TermCommand } from './types'
 import { getTermFullscreen, setTermFullscreen } from './fullscreenStore'
 import { getTermTheme, setTermTheme, TERM_THEMES } from './themeStore'
@@ -97,7 +98,6 @@ function browserName(): string {
 function fetchText(): string {
   const s = useStore.getState()
   const cs = useChatStore.getState()
-  const me = cs.me
   const rooms = cs.servers.reduce((n, srv) => n + srv.channels.length, 0)
   const info: [string, string][] = [
     ['OS', `${navigator.platform || 'unknown'} · ${browserName()}`],
@@ -106,11 +106,11 @@ function fetchText(): string {
     ['Shell', 'unreleased-term'],
     ['Theme', `${s.theme} · terminal ${getTermTheme().id}`],
     ['Resolution', `${window.innerWidth}x${window.innerHeight}`],
-    ['Chat', `${cs.servers.length} server${cs.servers.length === 1 ? '' : 's'}, ${rooms} channels, ${cs.conversations.length} DMs`],
+    ...(termAccess().chat ? [['Chat', `${cs.servers.length} server${cs.servers.length === 1 ? '' : 's'}, ${rooms} channels, ${cs.conversations.length} DMs`] as [string, string]] : []),
     ['Library', `${s.playlists.length} playlists · ${s.likedTrackIds.length} liked · queue ${s.queue.length}`],
     ['Playing', s.currentTrack ? `${s.isPlaying ? '▶' : '⏸'} ${s.currentTrack.title}` : 'nothing'],
   ]
-  const head = `${me?.username ?? 'admin'}@unreleased`
+  const head = `${termUserName()}@unreleased`
   const text = [head, '-'.repeat(head.length), ...info.map(([k, v]) => `${k}: ${v}`)]
   const rows = Math.max(LOGO.length, text.length)
   return Array.from({ length: rows }, (_, i) => `${LOGO[i] ?? ' '.repeat(LOGO[0].length)}  ${text[i] ?? ''}`).join('\n')

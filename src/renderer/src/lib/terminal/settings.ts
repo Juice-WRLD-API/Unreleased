@@ -143,7 +143,7 @@ interface NavEntry { id: string; label: string; kind: 'tab' | 'button'; visible:
 
 function navEntries(): NavEntry[] {
   const s = st()
-  const tabs = orderedNavItems(s.navOrder, true, true, true).map((i): NavEntry => ({
+  const tabs = orderedNavItems(s.navOrder, true, true).map((i): NavEntry => ({
     id: i.view, label: i.label, kind: 'tab', visible: !!i.alwaysVisible || (s.navVisibility[i.view] ?? !i.defaultHidden),
   }))
   const buttons = orderedNavControls(s.navControlOrder).map((c): NavEntry => ({

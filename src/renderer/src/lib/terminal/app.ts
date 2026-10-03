@@ -5,6 +5,7 @@ import type { ViewType } from '../../types'
 import { APP_VERSION, COMMIT_HASH, fetchRunningCommit } from '../appVersion'
 import { cancelZipTask, isZipTaskId } from '../clientZip'
 import { formatBytes } from '../format'
+import { termAccess } from './access'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -21,15 +22,20 @@ const VIEWS: Record<string, ViewType> = {
 const SETTINGS_TABS: SettingsTab[] = ['account', 'appearance', 'preferences', 'playback', 'shortcuts', 'app', 'developer', 'feedback', 'about']
 const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'applications', 'reports', 'users', 'stats', 'security', 'channels', 'eras', 'cdn-nodes']
 const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'user', 'song']
+// The Admin page is for administrators and chat is for staff, so neither is offered otherwise.
+const offered = (target: string): boolean => {
+  const a = termAccess()
+  return (target !== 'admin' || a.admin) && (target !== 'chat' || a.chat)
+}
 
 export const APP_COMMANDS: TermCommand[] = [
   {
     name: 'open', aliases: ['go', 'goto'], group: 'Navigation',
-    usage: 'open <page> · open settings [tab] · open admin [tab] · open user <id> · open song <title> · open queue|eq|diagnostics',
+    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics` },
     description: 'Go to any page, as if you had clicked it. The terminal keeps its place for when you return (Ctrl+` or the Terminal button)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
-      if (before.length === 0) return OPEN_TARGETS.filter((t) => t.startsWith(p))
+      if (before.length === 0) return OPEN_TARGETS.filter((t) => t.startsWith(p) && offered(t))
       if (before.length === 1 && before[0].toLowerCase() === 'settings') return SETTINGS_TABS.filter((t) => t.startsWith(p))
       if (before.length === 1 && before[0].toLowerCase() === 'admin') return ADMIN_TABS.filter((t) => t.startsWith(p))
       return []
@@ -38,7 +44,8 @@ export const APP_COMMANDS: TermCommand[] = [
       const [target = '', ...restWords] = args.trim().split(/\s+/)
       const rest = restWords.join(' ')
       const key = target.toLowerCase()
-      if (!key) fail(`usage: open <${Object.keys(VIEWS).join('|')}|settings|admin|profile|queue|eq|diagnostics>`)
+      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics>`)
+      if (!offered(key)) fail(`no page "${target}" (try: open home)`)
       const s = st()
       if (key === 'settings') {
         const tab = rest ? SETTINGS_TABS.find((t) => t.startsWith(rest.toLowerCase())) ?? fail(`settings tabs: ${SETTINGS_TABS.join(', ')}`) : undefined
@@ -110,7 +117,7 @@ export const APP_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'servers', group: 'App', usage: 'servers', description: 'List your chat servers with their channels and unread counts',
+    name: 'servers', group: 'App', chat: true, usage: 'servers', description: 'List your chat servers with their channels and unread counts',
     run: (_a, ctx) => {
       const cs = useChatStore.getState()
       if (cs.servers.length === 0) { ctx.print('no servers', 'dim'); return }
@@ -124,7 +131,7 @@ export const APP_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'dms', group: 'App', usage: 'dms', description: 'List your direct messages with unread counts',
+    name: 'dms', group: 'App', chat: true, usage: 'dms', description: 'List your direct messages with unread counts',
     run: (_a, ctx) => {
       const cs = useChatStore.getState()
       if (cs.conversations.length === 0) { ctx.print('no conversations', 'dim'); return }
@@ -135,7 +142,7 @@ export const APP_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'unread', group: 'App', usage: 'unread', description: 'Total unread chat messages',
+    name: 'unread', group: 'App', chat: true, usage: 'unread', description: 'Total unread chat messages',
     run: (_a, ctx) => { const n = useChatStore.getState().totalUnread(); ctx.print(n ? `${n} unread message${n === 1 ? '' : 's'}` : 'all caught up', n ? 'plain' : 'dim') },
   },
   {

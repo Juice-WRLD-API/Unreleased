@@ -1,7 +1,7 @@
 import type { ChatUserBrief } from '../chatApi'
 import type { RoomRef } from '../../store/chatStore'
 
-// Terminal commands beyond the chat slash commands: the admin terminal's way of
+// Terminal commands beyond the chat slash commands: the terminal's way of
 // doing what the UI does (playback, settings, library, navigation, review
 // queues, ...). Each one calls the same store actions and API functions the
 // matching screen does, so the result is identical to clicking. A command that
@@ -48,6 +48,8 @@ export interface TermCommand {
   group: TermGroup
   usage: string
   description: string
+  /** Acts on chat (rooms, DMs, messages), which only staff accounts have. */
+  chat?: boolean
   run: (args: string, ctx: TermCtx) => void | Promise<void>
   /** Tab candidates for the token being typed, given the tokens before it. */
   complete?: (before: string[], partial: string) => string[] | Promise<string[]>

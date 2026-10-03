@@ -5,6 +5,7 @@ import { splitForwardRef } from '../chatForwardRef'
 import { splitReplyRef } from '../chatReplyRef'
 import { adminGetUser, adminListUsers, getNowPlaying, getPublicProfile, type AdminUser } from '../userApi'
 import { getSongsByIds } from '../juicewrldApi'
+import { termAccess } from './access'
 import { fail, type TermCommand } from './types'
 
 // A searchable list of everyone the terminal can name. The app has no public
@@ -156,7 +157,8 @@ async function describeUser(u: DirUser): Promise<string> {
       lines.push(`listening to: ${song?.name ?? `song #${np.song}`}`)
     }
   }
-  lines.push(`→ role @${name} · seen @${name} · dm ${name} · siteban @${name} · open user ${u.id}`)
+  const access = termAccess()
+  lines.push(`→ ${[access.admin && `role @${name}`, access.chat && `seen @${name}`, access.chat && `dm ${name}`, access.admin && `siteban @${name}`, `open user ${u.id}`].filter(Boolean).join(' · ')}`)
   return lines.join('\n')
 }
 
@@ -179,7 +181,7 @@ export const USER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'dm', group: 'People', usage: 'dm <user> [message]', description: 'Open a direct message with someone, optionally sending a first message',
+    name: 'dm', group: 'People', chat: true, usage: 'dm <user> [message]', description: 'Open a direct message with someone, optionally sending a first message',
     complete: async (before, partial) => (before.length === 0 ? (await directory()).map((u) => u.username).filter((n) => norm(n).startsWith(norm(partial))) : []),
     run: async (args, ctx) => {
       const [who, ...rest] = args.trim().split(/\s+/)
@@ -195,7 +197,7 @@ export const USER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'say', group: 'People', usage: 'say <message>', description: 'Post a message to the room the terminal is in (plain text is never sent unless you say it)',
+    name: 'say', group: 'People', chat: true, usage: 'say <message>', description: 'Post a message to the room the terminal is in (plain text is never sent unless you say it)',
     run: async (args, ctx) => {
       const text = args.trim()
       if (!text) fail('usage: say <message>')
@@ -204,7 +206,7 @@ export const USER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'log', aliases: ['messages', 'tail'], group: 'People', usage: 'log [N] [@user]', description: 'Show the latest messages in this room (default 20), optionally only from one person',
+    name: 'log', aliases: ['messages', 'tail'], group: 'People', chat: true, usage: 'log [N] [@user]', description: 'Show the latest messages in this room (default 20), optionally only from one person',
     run: (args, ctx) => {
       const words = args.trim().split(/\s+/).filter(Boolean)
       const countWord = words.find((w) => /^\d+$/.test(w))

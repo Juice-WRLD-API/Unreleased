@@ -587,11 +587,15 @@ GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&size=400`}</Pre>
           headers={['Param', 'Required', 'Description']}
           rows={[
             [<Code>path</Code>, 'Yes', 'File path relative to compilation root'],
-            [<Code>bitrate</Code>, 'No', 'Target bitrate, e.g. "160k" (default)'],
+            [<Code>bitrate</Code>, 'No', <>One of <Code>64k</Code>, <Code>96k</Code>, <Code>128k</Code>, <Code>160k</Code> (default), <Code>192k</Code>, <Code>256k</Code>, <Code>320k</Code>. Anything else is a 400</>],
             [<Code>channel</Code>, 'No', 'Comp channel slug. Defaults to the primary channel'],
           ]}
         />
-        <p className="text-xs text-text-muted">Response is always served as an attachment, not inline.</p>
+        <p className="text-xs text-text-muted">
+          Response is always served as an attachment, not inline. Only a couple of transcodes run at once (
+          <Code>COMPRESS_MAX_CONCURRENT</Code>, default 2); beyond that the endpoint returns 429 and the client should retry or fall back to{' '}
+          <Code>/files/download/</Code>.
+        </p>
       </Section>
 
       <Section title="ZIP Operations">
@@ -694,7 +698,7 @@ function PlaylistsTab() {
             ['GET', '/library/playlists/{id}/', 'Get playlist with full track list'],
             ['PATCH', '/library/playlists/{id}/', 'Update name, description, cover, visibility, or reorder tracks'],
             ['DELETE', '/library/playlists/{id}/', 'Delete a playlist'],
-            ['POST', '/library/playlists/{id}/items/', 'Add a track'],
+            ['POST', '/library/playlists/{id}/items/', <>Add a track. Body <Code>{'{ "song_id": 123 }'}</Code>. Returns the updated playlist detail (201), or 200 with <Code>{'{ "detail": "Track already in playlist." }'}</Code> if it is already there (nothing changes)</>],
             ['DELETE', '/library/playlists/{id}/items/{song_id}/', 'Remove a track'],
           ]}
         />
@@ -709,8 +713,14 @@ Authorization: Token <token>
 {
   "name": "My Playlist",
   "description": "optional",
-  "cover_image": undefined  // optional base64 string
+  "cover_image": undefined,  // optional base64 string
+  "is_public": false,        // optional, default false
+  "song_ids": [123, 456]     // optional, songs to add in this order
 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>song_ids</Code> must be a list, otherwise 400. Entries that aren&apos;t integers are skipped, duplicates are dropped,
+          and ids that match no song are ignored. The response is the playlist detail (below) with 201.
+        </p>
         <p className="text-xs text-text-muted font-semibold mt-3">Update (all fields optional, including track reorder):</p>
         <Pre>{`PATCH /library/playlists/{id}/
 
@@ -767,7 +777,7 @@ Authorization: Token <token>
         <Table
           headers={['Method', 'Path', 'Description']}
           rows={[
-            ['GET', '/library/playlists/public/{id}/', 'Full playlist detail (same shape as the authed detail response)'],
+            ['GET', '/library/playlists/public/{id}/', <>Full playlist detail (same shape as the authed detail response) plus <Code>owner_display_name</Code>: the owner&apos;s profile display name, falling back to their username</>],
           ]}
         />
         <p className="text-xs text-text-muted mt-2">Making a playlist public does not change its owner or contents; it only exposes this read-only endpoint.</p>
@@ -921,6 +931,13 @@ function AccountsTab() {
             <p className="text-xs text-text-muted font-semibold mt-2">400:</p>
             <Pre>{`{ "non_field_errors": ["Invalid username or password."] }`}</Pre>
             <p className="text-xs text-text-muted">Disabled accounts return <Code>"Account is disabled."</Code> instead.</p>
+            <p className="text-xs text-text-muted mt-2">
+              Accounts with two-factor authentication enabled (<Code>otp_enabled</Code>, i.e. staff who finished{' '}
+              <Code>/accounts/otp/setup/</Code>) must also send <Code>{'"otp_token": "123456"'}</Code>. With no code at all the response is{' '}
+              <Code>{'400 { "requires_otp": true, "detail": "OTP code required." }'}</Code> (password was correct; not counted as a failed
+              attempt, so prompt for the code and resend the same request with <Code>otp_token</Code>). A wrong code is{' '}
+              <Code>{'400 { "non_field_errors": ["Invalid or missing OTP code."] }'}</Code>. This applies since this returns the same token as the staff login.
+            </p>
           </div>
         </div>
       </Section>
@@ -1182,6 +1199,10 @@ Authorization: Token <token>`}</Pre>
             </p>
             <p className="text-xs text-text-muted font-semibold mt-2">400:</p>
             <Pre>{`{ "now_playing": ["A valid song id is required."] }`}</Pre>
+            <p className="text-xs text-text-muted mt-2">
+              Every PATCH that changes <Code>now_playing</Code> or <Code>public_now_playing</Code> also pushes a{' '}
+              <Code>now_playing.updated</Code> event to chat sockets (see the Staff Chat tab), so staff chat can show it live without polling.
+            </p>
             <p className="text-xs text-text-muted mt-2">
               The server stamps <Code>updated_at</Code> on every successful PATCH — don&apos;t send it yourself.
               While a track is actively playing, re-PATCH every 15–30s (on seek/track-change too) so the
@@ -1655,6 +1676,23 @@ Content-Type: application/json
       </Section>
 
 
+      <Section title={"Badge Catalog"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">GET</strong> <Code>{"/accounts/badges/"}</Code> (editor or admin) lists every badge that exists, not just the ones a user holds.</p>
+          <Pre>{`[
+  {
+    "slug": "hundred-club",
+    "name": "100 Club",
+    "description": "100 approved edits",
+    "icon": "🏅",
+    "category": "milestone",
+    "threshold": 100,       // approved-edit count that earns it, null for badges without one
+    "is_manual": false      // true = only awarded by an admin, never automatically
+  }
+]`}</Pre>
+        </div>
+      </Section>
+
       <Section title="Comp File Proposals: Overview" defaultOpen={false}>
         <p className="text-sm text-text-secondary leading-relaxed">
           A second, separate proposal pipeline from song-data Edit Proposals above. This one is for changes to the{' '}
@@ -1872,19 +1910,20 @@ function AdminTab() {
         <Table
           headers={['Method', 'Path', 'Description']}
           rows={[
-            ['GET', '/accounts/admin/users/', 'List all users. Filter: ?role=editor|contributor|manager|administrator|applicant'],
+            ['GET', '/accounts/admin/users/', 'List all users. Filter: ?role=editor|contributor|manager|news|administrator|applicant'],
             ['GET', '/accounts/admin/users/{user_id}/', 'Single user detail: role, is_active, Discord info, proposal counts, badges'],
-            ['PATCH', '/accounts/admin/users/{user_id}/', 'Update role, is_active, auto_approve_proposals, or contributor/manager flags'],
+            ['PATCH', '/accounts/admin/users/{user_id}/', 'Update role, is_active, auto_approve_proposals, or contributor/manager/news flags'],
           ]}
         />
         <Pre>{`PATCH /accounts/admin/users/{user_id}/
 
 {
-  "role": "contributor",            // "editor" | "contributor" | "manager" | "applicant"
+  "role": "contributor",            // "editor" | "contributor" | "manager" | "news" | "applicant"
   "is_active": true,
   "auto_approve_proposals": false,
   "contributor_enabled": true,
   "manager_enabled": false,
+  "news_enabled": true,
   "auto_approve_comp_proposals": false
 }`}</Pre>
         <Table
@@ -1892,7 +1931,10 @@ function AdminTab() {
           rows={[
             [<Code>contributor_enabled</Code>, 'boolean', 'Whether this user has comp-file proposal access, independent of role string'],
             [<Code>manager_enabled</Code>, 'boolean', 'Whether this user can review proposals/comp-proposals without full admin access, independent of role string'],
+            [<Code>news_enabled</Code>, 'boolean', <>Whether this user can post/edit/delete news and upload news attachments (see the News tab). <Code>false</Code> revokes it; <Code>{'role: "news"'}</Code> only ever grants. Filter the list with <Code>?role=news</Code></>],
             [<Code>auto_approve_comp_proposals</Code>, 'boolean', "Skip manual review and apply this user's comp-file proposals automatically"],
+            [<><Code>date_joined</Code>, <Code>last_login</Code></>, 'ISO8601 / null', 'Read-only: account creation and last login'],
+            [<><Code>proposal_count</Code>, <Code>approved_count</Code></>, 'number', "Read-only: this user's song-edit proposal submissions and how many were approved"],
             [<Code>comp_proposal_count</Code>, 'number', "Read-only: this user's total comp-file proposal submissions"],
             [<Code>comp_approved_count</Code>, 'number', 'Read-only: how many of those were approved'],
           ]}
@@ -2502,6 +2544,12 @@ FormData:
           to the raw <Code>url</Code> field only for older/id-less rows. A new upload should always come back with
           an <Code>id</Code>.
         </p>
+      </Section>
+
+      <Section title={"Live notifications (WebSocket)"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Creating a post pushes a <Code>{"type: \"news\""}</Code> event (<Code>{"action"}</Code>: <Code>{"created"}</Code>; edits and deletes are not pushed) to the public notifications socket at <Code>{"/juicewrld/ws/notifications/"}</Code>. Payload shape and details: the Realtime Sockets tab.</p>
+        </div>
       </Section>
     </div>
   )
@@ -3300,6 +3348,7 @@ function ChatTab() {
   "is_encrypted": false,
   "ciphertext": "", "nonce": "", "key_version": null,
   "format": 1, "client_id": "", "sender_device": "", "edit_seq": 0, "signature": "",
+  "card": null,
   "parent": null,
   "mentions": [15, 16],
   "attachments": [
@@ -3319,7 +3368,9 @@ function ChatTab() {
           <Code>edit_seq</Code>/<Code>signature</Code> (see End-to-End Encryption v2); everything else has{' '}
           <Code>format: 1</Code> and leaves them blank. Deleted messages come back with empty{' '}
           <Code>content</Code>/<Code>ciphertext</Code>/<Code>nonce</Code>/<Code>signature</Code>/
-          <Code>attachments</Code> and <Code>deleted_at</Code> set.
+          <Code>attachments</Code> and <Code>deleted_at</Code> set. <Code>card</Code> is <Code>null</Code> for ordinary
+          messages and a server-built object for a command card (see Command Cards below); clients render a card only
+          from this field and never from <Code>content</Code>.
         </p>
       </Section>
 
@@ -3788,6 +3839,28 @@ function ChatTab() {
         </p>
       </Section>
 
+      <Section title={"Command Cards"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">A command&apos;s answer (the app&apos;s <Code>{"/np"}</Code>, <Code>{"/np -h"}</Code>, <Code>{"/broadcast -h"}</Code>, <Code>{"/help"}</Code>, <Code>{"/theme"}</Code>, <Code>{"/changelog"}</Code> and result lines like &quot;Muted X&quot; with <Code>{"-s"}</Code>) is posted to the room as a *card*. The client names the command and the server builds the card, so a card can&apos;t be written by a member the way chat text can. The one exception is <Code>{"result"}</Code>, whose wording comes from the client but only under a fixed set of titles, with the privileged ones limited to people who hold that standing.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">POST</strong> <Code>{"/channels/{id}/messages/"}</Code></p>
+          <Pre>{`{ "command": { "name": "np_history", "user_id": 15, "count": 10 }, "parent": null }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">When <Code>{"command"}</Code> is present, <Code>{"content"}</Code>, <Code>{"attachments"}</Code>, <Code>{"mentions"}</Code> and any <Code>{"card"}</Code> key in the body are ignored. Returns the created <Code>{"message"}</Code> (201) with <Code>{"card"}</Code> set and <Code>{"content"}</Code> holding a short server-written summary (<Code>{"Shared recent plays"}</Code>) for previews, notifications and clients that don&apos;t know about cards. The usual channel rules apply (<Code>{"can_post_channel"}</Code>, mute/timeout, throttle). Anything else in <Code>{"content"}</Code>, including text shaped like a card, stays text with <Code>{"card: null"}</Code>.</p>
+          <Table
+            headers={["name", "Extra fields", "Card", "Rule"]}
+            rows={[
+              [<><Code>{"help"}</Code></>, "none", <><Code>{"{ \"kind\": \"help\" }"}</Code></>, "Anyone who can post"],
+              [<><Code>{"np"}</Code></>, <><Code>{"user_id?"}</Code></>, <><Code>{"{ \"kind\": \"npNow\", \"user\": brief, \"song\": 42, \"updated_at\": \"...\" }"}</Code></>, <>Your own, or another user&apos;s if they turned on <Code>{"public_now_playing"}</Code>. 404 if nothing is playing (same 5 minute staleness as <Code>{"/accounts/profile/{id}/np/"}</Code>)</>],
+              [<><Code>{"np_history"}</Code></>, <><Code>{"user_id?"}</Code>, <Code>{"count?"}</Code></>, <><Code>{"{ \"kind\": \"npHistory\", \"user\": brief | null, \"items\": [{ \"song\": 42, \"played_at\": \"...\" }], \"total\": 120, \"capped\": false }"}</Code></>, <>Your own, or another user&apos;s if they turned on <Code>{"public_play_history"}</Code>. <Code>{"user"}</Code> is <Code>{"null"}</Code> for your own. Newest first from the synced <Code>{"listening_plays"}</Code>. <Code>{"count"}</Code> defaults to 10, max 25 (<Code>{"capped"}</Code> says it was clamped)</>],
+              [<><Code>{"broadcast_history"}</Code></>, <><Code>{"count?"}</Code></>, <><Code>{"{ \"kind\": \"broadcastHistory\", \"items\": [broadcast, ...], \"total\": 7 }"}</Code></>, <>Platform administrators with 2FA, the same gate as <Code>{"GET /juicewrld/notifications/broadcast/"}</Code></>],
+              [<><Code>{"theme_list"}</Code></>, "none", <><Code>{"{ \"kind\": \"themeList\" }"}</Code></>, "Anyone who can post. Each viewer's client shows its own list"],
+              [<><Code>{"changelog"}</Code></>, <><Code>{"branch"}</Code>, <Code>{"count?"}</Code></>, <><Code>{"{ \"kind\": \"changelog\", \"branch\": \"web\", \"commits\": [{ \"sha\", \"message\", \"author\", \"date\", \"url\" }] }"}</Code></>, <>Anyone who can post. The server reads the commits from GitHub (<Code>{"CHANGELOG_GITHUB_REPO"}</Code>, default <Code>{"Juice-WRLD-API/Unreleased"}</Code>; optional <Code>{"GITHUB_TOKEN"}</Code> for the rate limit; cached 60 seconds) and builds each <Code>{"url"}</Code> from the sha. <Code>{"branch"}</Code> must look like a branch name; <Code>{"count"}</Code> defaults to 1, max 15. 502 if GitHub can&apos;t be reached. Whether the newest commit is live is worked out by each viewer&apos;s client</>],
+              [<><Code>{"result"}</Code></>, <><Code>{"title"}</Code>, <Code>{"text"}</Code></>, <><Code>{"{ \"kind\": \"result\", \"title\": \"Muted\", \"text\": \"Muted Bob\" }"}</Code></>, <><Code>{"title"}</Code> must be exactly one of the listed titles (anything else is 400). Open: <Code>{"Theme"}</Code>, <Code>{"Muted"}</Code>, <Code>{"Unmuted"}</Code>, <Code>{"Unmute"}</Code>, <Code>{"Last seen"}</Code>. Moderators of the room (manage messages, manage server, kick or ban) or administrators: <Code>{"Bans"}</Code>, <Code>{"Purged"}</Code>, <Code>{"Promote"}</Code>, <Code>{"Promoted"}</Code>. Platform administrators with 2FA: <Code>{"Role granted"}</Code>, <Code>{"Role removed"}</Code>, <Code>{"Roles"}</Code>, <Code>{"Auto-approve"}</Code>, <Code>{"Broadcast"}</Code>. <Code>{"text"}</Code> is required and clamped to 1000 characters. The wording is the poster&apos;s own claim</>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Cards carry song ids, not titles; clients look the titles up. Errors are <Code>{"{ detail }"}</Code>: 400 for a bad <Code>{"command"}</Code>, <Code>{"count"}</Code>, <Code>{"user_id"}</Code>, <Code>{"branch"}</Code> or <Code>{"title"}</Code>, 403 when the privacy, moderator or administrator rule fails, 404 for an unknown user or nothing playing, 502 when GitHub can&apos;t be read for <Code>{"changelog"}</Code>. A card message can&apos;t be edited (<Code>{"PATCH"}</Code> returns 400); it can be deleted like any message, after which <Code>{"card"}</Code> comes back <Code>{"null"}</Code>. Cards are unavailable in direct messages (400): the server can&apos;t see inside an encrypted conversation, so the app shares those answers as plain text.</p>
+        </div>
+      </Section>
+
       <Section title="Direct Messages (end-to-end encrypted)">
         <p className="text-sm text-text-secondary">
           DM bodies are encrypted client-side; the server stores and relays ciphertext only. See End-to-End
@@ -3874,7 +3947,7 @@ function ChatTab() {
           rows={[
             ['GET', '/messages/{id}/', 'Fetch a message'],
             ['PATCH', '/messages/{id}/', 'Author only. Plaintext: { content }. Encrypted: { ciphertext, nonce, key_version }. v2 (format 2): see below. Sets edited_at, broadcasts message.updated'],
-            ['DELETE', '/messages/{id}/', 'Soft delete (author, server owner/admin, or platform admin); broadcasts message.deleted'],
+            ['DELETE', '/messages/{id}/', <>Soft delete (author, server owner/admin, or platform admin); broadcasts message.deleted. <Code>?purge=1</Code> hard-deletes the row instead (same permission; replies are detached) and broadcasts message.purged</>],
             ['POST / DELETE', '/messages/{id}/pin/', 'Pin / unpin; broadcasts message.pinned / message.unpinned'],
             ['POST', '/messages/{id}/reactions/', '{ emoji } — add a reaction; broadcasts reaction.added'],
             ['DELETE', '/messages/{id}/reactions/', '{ emoji } or ?emoji= — remove your reaction; broadcasts reaction.removed'],
@@ -4012,18 +4085,20 @@ function ChatTab() {
             [<Code>message.created</Code>, 'message'],
             [<Code>message.updated</Code>, 'message'],
             [<Code>message.deleted</Code>, 'message_id, channel, conversation'],
-            [<Code>message.pinned</Code> + ' / ' + <Code>message.unpinned</Code>, 'message'],
-            [<Code>reaction.added</Code> + ' / ' + <Code>reaction.removed</Code>, 'message_id, emoji, user_id, channel, conversation'],
+            [<Code>message.purged</Code>, 'message_id, channel, conversation (row hard-deleted by ?purge=1; drop it from the list rather than showing a placeholder)'],
+            [<><Code>message.pinned</Code> / <Code>message.unpinned</Code></>, 'message'],
+            [<><Code>reaction.added</Code> / <Code>reaction.removed</Code></>, 'message_id, emoji, user_id, channel, conversation'],
             [<Code>read.receipt</Code>, 'user_id, last_read_message_id, channel or conversation'],
             [<Code>typing</Code>, 'user_id, active, kind, id'],
             [<Code>presence.update</Code>, 'user_id, online'],
-            [<Code>member.joined</Code> + ' / ' + <Code>member.updated</Code> + ' / ' + <Code>member.left</Code>, 'server, member or user_id (member.updated also fires on role assignment)'],
+            [<Code>now_playing.updated</Code>, 'user_id, now_playing (the track object, or null when cleared or when the user has public_now_playing off). Sent to every server the user is a member of, whenever they PATCH their now-playing state (see Now Playing in the Accounts tab)'],
+            [<><Code>member.joined</Code> / <Code>member.updated</Code> / <Code>member.left</Code></>, 'server, member or user_id (member.updated also fires on role assignment)'],
             [<Code>member.timeout</Code>, 'server, member (member.timeout_until is now set)'],
             [<Code>member.banned</Code>, 'server, ban — fires right after the member.left for the same user'],
             [<Code>member.unbanned</Code>, 'server, user_id'],
             [<Code>resync</Code>, '(no payload) — sent to a user whose own access changed; re-fetch servers and memberships'],
             [<Code>server.updated</Code>, 'server'],
-            [<Code>channel.created</Code> + ' / ' + <Code>channel.updated</Code>, 'server, channel'],
+            [<><Code>channel.created</Code> / <Code>channel.updated</Code></>, 'server, channel'],
             [<Code>channel.deleted</Code>, 'server, channel_id'],
             [<Code>conversation.updated</Code>, 'conversation'],
             [<Code>key.rotated</Code>, 'conversation, key_version'],
@@ -4035,7 +4110,7 @@ function ChatTab() {
             [<Code>todevice.available</Code>, 'device_id (v2 — to the recipient user only; fetch if it names this device)'],
             [<Code>link.claimed</Code>, 'session_id (v2 — to the linking user only)'],
             [<Code>backup.updated</Code>, '(no payload) (v2 — to the backup owner only)'],
-            [<Code>role.created</Code> + ' / ' + <Code>role.updated</Code>, 'server, role'],
+            [<><Code>role.created</Code> / <Code>role.updated</Code></>, 'server, role'],
             [<Code>role.deleted</Code>, 'server, role_id'],
             [<Code>channel.override.updated</Code>, 'server, channel, override'],
             [<Code>channel.override.deleted</Code>, 'server, channel, override_id'],
@@ -4665,366 +4740,379 @@ pkey=/path/privkey.pem`}</Pre>
 pc.createDataChannel('x'); pc.onicecandidate = e => console.log(e.candidate ? e.candidate.candidate : 'DONE');
 await pc.setLocalDescription(await pc.createOffer());`}</Pre>
           <p className="text-sm text-text-secondary leading-relaxed">A line containing <Code>{"typ relay"}</Code> means it works. If there isn&apos;t one, the credentials are bad, a port is blocked, or <Code>{"external-ip"}</Code> is wrong.</p>
-          <Pre>{`
-## WebRTC signaling (\`WS /ws/cdn/signal/\`)
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">wss://juicewrldapi.com/juicewrld/ws/cdn/signal/?role=client&amp;token=TOKEN</p>
-          <Pre>{`
-One socket per node attempt. The socket only carries the handshake.
-
-**Close codes**
-
-| Code | Sent to | Meaning |
-|---|---|---|
-| \`4000\` | any | \`role\` is not \`client\` or \`node\` |
-| \`4001\` | node | Bad API key, or node not approved/active |
-| \`4003\` | client | Invalid, tampered or expired token |
-| \`4004\` | client | Target node has no live signaling connection. Preceded by \`{ "type": "error", "reason": "node_offline" }\` |
-
-**Server -> client**
-
-| Type | Fields | Notes |
-|---|---|---|
-| \`ready\` | \`session_id\`, \`ice_servers\` | Sent right after the node was notified. Build the peer connection and send your offer |
-| \`answer\` | \`session_id\`, \`sdp\` | Relayed from the node |
-| \`ice\` | \`session_id\`, \`candidate\` | Relayed from the node, optional |
-| \`error\` | \`reason\` | Server-generated. Only \`node_offline\` is emitted by the server itself |
-| \`session_error\` | \`session_id\`, \`reason\` | Relayed from the node. Nodes use reasons such as \`invalid_token\`, \`not_hosted\`, \`private\` **(node-side)** |
-
-There is no \`teardown\` message to clients: the server only sends \`teardown\` to the node when the client socket closes. Treat a closed socket after a failure as the end signal.
-
-**Client -> server** (anything else is ignored)
-
-| Type | Payload | When |
-|---|---|---|
-| \`offer\` | \`{ sdp }\` | After ICE gathering finishes |
-| \`ice\` | \`{ candidate }\` | Optional |
-
-The server does **not** check that the node actually hosts the file; that is the node's job (\`not_hosted\`).
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">const ws = new WebSocket(signalUrl) let pc</p>
-          <p className="text-sm text-text-secondary leading-relaxed">ws.onmessage = async (event) =&gt; {'{'} const msg = JSON.parse(event.data)</p>
-          <p className="text-sm text-text-secondary leading-relaxed">if (msg.type === &apos;ready&apos;) {'{'} pc = new RTCPeerConnection({'{'} iceServers: msg.ice_servers {'}'}) const channel = pc.createDataChannel(&apos;file&apos;, {'{'} ordered: true {'}'}) channel.binaryType = &apos;arraybuffer&apos; channel.onmessage = handleData</p>
-          <p className="text-sm text-text-secondary leading-relaxed">const offer = await pc.createOffer() await pc.setLocalDescription(offer) await waitIceComplete(pc)        // 4s cap, then send anyway ws.send(JSON.stringify({'{'} type: &apos;offer&apos;, sdp: pc.localDescription.sdp {'}'})) {'}'}</p>
-          <p className="text-sm text-text-secondary leading-relaxed">if (msg.type === &apos;answer&apos;) {'{'} await pc.setRemoteDescription({'{'} type: &apos;answer&apos;, sdp: msg.sdp {'}'}) {'}'}</p>
-          <p className="text-sm text-text-secondary leading-relaxed">if (msg.type === &apos;error&apos; || msg.type === &apos;session_error&apos;) {'{'} // tear down and move to the next node {'}'} {'}'}</p>
-          <Pre>{`
-### Node side of the socket
-
-A node connects with \`?role=node&key=API_KEY\`. It then receives, per client:
-
-- \`{ "type": "session", "session_id", "filepath", "token" }\` when a client connects. The node must re-validate \`token\` against the server public key and confirm it hosts \`filepath\`.
-- \`{ "type": "offer" | "ice", "session_id", … }\` relayed from the client.
-- \`{ "type": "teardown", "session_id" }\` when the client socket closes.
-
-It may send only \`answer\`, \`ice\` or \`session_error\`, each carrying the \`session_id\`; other types are dropped. The "is this node online" registry is an in-process dict, so **run a single Daphne process**; multiple workers would each see only their own nodes and return false \`node_offline\`.
-
-## DataChannel protocol (node-side)
-
-The server never sees this traffic. The node pushes the file down the DataChannel named \`file\`. Every frame is a JSON control string or a binary \`ArrayBuffer\`; branch on \`typeof event.data\`.
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">Node -&gt; Browser:  {'{'} &quot;t&quot;: &quot;meta&quot;, &quot;size&quot;: 8432100, &quot;hash&quot;: &quot;a1b2…&quot;, &quot;chunk&quot;: 16384 {'}'} Node -&gt; Browser:  &lt;ArrayBuffer 16384 bytes&gt; … Node -&gt; Browser:  {'{'} &quot;t&quot;: &quot;done&quot;, &quot;size&quot;: 8432100 {'}'}</p>
-          <Pre>{`
-| Control frame | Fields | Meaning |
-|---|---|---|
-| \`meta\` | size, hash, chunk | Always first. hash is BLAKE2b-256 hex |
-| \`done\` | size | Transfer finished. Compare against bytes received |
-| \`error\` | none | Node-side failure. Abort, try the next node |
-
-## Hash verification & violations
-
-Every library file has a BLAKE2b-256 (32-byte digest) hash in the master list. After \`done\`, hash the assembled Blob and compare with \`expected_hash\`. A mismatch means corrupted or tampered data: report it, then move on.
-
-### \`POST /cdn/report-violation/\`
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;550e8400-…&quot;, &quot;filepath&quot;: &quot;path/to/file.mp3&quot;, &quot;reported_hash&quot;: &quot;deadbeef…&quot; {'}'}</p>
-          <Pre>{`
-\`reported_hash\` is optional.
-
-| Status | Body |
-|---|---|
-| 400 | \`{ "error": "node_id and filepath required" }\` |
-| 404 | \`{ "error": "node not found" }\` |
-| 200 | \`{ "accepted": false, "reason": "hash matches master" }\` when \`reported_hash\` equals the master hash |
-| 200 | \`{ "accepted": true, "node_active": <bool> }\` |
-
-An accepted report records a violation, subtracts **25** from the node's \`trust_score\` and adds 1 to \`hash_violations\`. At \`trust_score <= 0\` or \`hash_violations >= 5\` the node is set \`is_approved=false, is_active=false\` and disappears from resolution until an admin restores it.
-
-Caveats: \`node_active\` in the response is read before the deactivation is applied, so it can say \`true\` for the report that just disabled the node. Re-fetch the node if you need the truth. Reports are accepted even if the file has no master entry or \`reported_hash\` is omitted, and are not throttled or tied to a completed session, so only send them on a real hash mismatch, never on a timeout, stall or failed handshake.
-
-## Log a download (\`POST /cdn/log-download/\`)
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;550e8400-…&quot;, &quot;filepath&quot;: &quot;path/to/file.mp3&quot;, &quot;bytes_served&quot;: 8432100 {'}'}</p>
-          <Pre>{`
-Always answers \`{ "logged": true }\` and always writes a \`CdnDownloadLog\` row (with a null node if \`node_id\` is missing/unknown and an empty path if \`filepath\` is missing). If the node exists and \`bytes_served > 0\`, the node's \`total_bytes_served\` and \`total_requests\` are incremented, and those counters feed both ranking (load factor) and the admin stats. A non-numeric \`bytes_served\` causes a 500. Nodes are expected to log their own transfers; the endpoint is unauthenticated, so treat the counters as advisory.
-
-## Public nodes (\`GET /cdn/nodes/\`)
-
-Nodes that are active, approved, public and \`status == online\`.
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;nodes&quot;: [{'{'} &quot;node_id&quot;: &quot;550e8400-…&quot;, &quot;name&quot;: &quot;FastNode-EU&quot;, &quot;region&quot;: &quot;eu-west&quot;, &quot;is_public&quot;: true, &quot;status&quot;: &quot;online&quot;, &quot;online&quot;: true, &quot;file_count&quot;: 2400, &quot;current_storage_bytes&quot;: 51200000000, &quot;max_storage_bytes&quot;: 107374182400, &quot;upload_speed_mbps&quot;: 250.0, &quot;download_speed_mbps&quot;: 500.0, &quot;public_base_url&quot;: &quot;https://node.example.com&quot; {'}'}] {'}'}</p>
-          <Pre>{`
-\`online\` is recomputed from the heartbeat age (300 s). \`status\` is only flipped to \`offline\` by a Celery beat task every 120 s, so the two can briefly disagree.
-
-## Master hash list
-
-Built by scanning every active channel root for files with the extensions \`.mp3 .zip .wav .mp4 .m4a .mov .txt .caf .mkv .flac .aiff .aif .opus .png .jpg .jpeg .webp\`. Regeneration is **not scheduled**: run \`python manage.py generate_master_hashes\` or call the Celery task \`cdn.regenerate_master_hashes\` yourself. A new manifest version is only created when the fingerprint changes.
-
-### \`GET /cdn/master-hashes/\`
-
-Params: \`page\` (default 1, out-of-range returns the last page), \`page_size\` (default 500, max 2000), \`channel\` (channel slug). Ordered by \`filepath\`.
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;manifest_version&quot;: 12, &quot;count&quot;: 9800, &quot;page&quot;: 1, &quot;num_pages&quot;: 20, &quot;has_next&quot;: true, &quot;files&quot;: [{'{'} &quot;filepath&quot;: &quot;…/Lucid Dreams.mp3&quot;, &quot;blake2b_hash&quot;: &quot;a1b2c3d4…&quot;, &quot;size&quot;: 8432100, &quot;channel_slug&quot;: &quot;compilation&quot;, &quot;updated_at&quot;: &quot;2026-09-20T12:00:00.000000+00:00&quot; {'}'}] {'}'}</p>
-          <Pre>{`
-\`manifest_version\` is 0 if no manifest exists yet.
-
-### \`GET /cdn/master-hashes/since/{timestamp}/\`
-
-Entries with \`updated_at\` after an ISO-8601 timestamp in the path, oldest first, capped at 5000. Unparseable timestamp -> 400 \`{ "error": "invalid timestamp" }\`. Deleted files are not reported, so a delta sync cannot remove entries; re-pull the full list occasionally.
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;since&quot;: &quot;2026-01-01T00:00:00Z&quot;, &quot;count&quot;: 0, &quot;files&quot;: [] {'}'}</p>
-          <Pre>{`
-### \`GET /cdn/master-hashes/file/\`
-
-\`?filepath=\` (normalized like \`/resolve/\`). Missing -> 400 \`{ "error": "filepath required" }\`, unknown -> 404 \`{ "error": "not found" }\`. Returns one entry object.
-
-### \`GET /cdn/master-hashes/signature/\`
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;version&quot;: 12, &quot;manifest_hash&quot;: &quot;f0e1d2c3b4a5…&quot;, &quot;signature&quot;: &quot;base64-rsa-signature&quot;, &quot;total_files&quot;: 9800, &quot;total_bytes&quot;: 214748364800, &quot;generated_at&quot;: &quot;2026-09-20T12:00:00.000000+00:00&quot;, &quot;public_key&quot;: &quot;-----BEGIN PUBLIC KEY-----\n…&quot; {'}'}</p>
-          <Pre>{`
-To verify the whole list: sort entries by \`filepath\`, join lines \`filepath:blake2b_hash:size\` with \`\\n\`, take BLAKE2b-256 hex, compare to \`manifest_hash\`, then verify \`signature\` (base64, RSA-PSS SHA-256) over the string \`"{version}:{manifest_hash}"\`. Returns 404 \`{ "error": "manifest not generated yet" }\` before the first build.
-
-## Server public key (\`GET /cdn/server-key/\`)
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;public_key&quot;: &quot;-----BEGIN PUBLIC KEY-----\nMIIBIjAN…\n-----END PUBLIC KEY-----\n&quot; {'}'}</p>
-          <Pre>{`
-PEM SubjectPublicKeyInfo. Nodes use it to verify tokens and the manifest. The private key lives at \`CDN_SIGNING_KEY_PATH\` (default \`cdn_signing_key.pem\` in the project root) and is auto-generated (RSA-2048) on first use if the file is missing.
-
-## Node API
-
-For people running a node. Auth is a node API key (\`X-CDN-Key\` or \`Authorization: Node …\`). A deactivated node gets \`401 "Node is deactivated."\`. Node endpoints answer 401 \`{ "error": "authentication required" }\` with no key.
-
-### \`POST /cdn/nodes/register/\`
-
-Body: \`name\` (required), and optional \`public_key\` (PEM, for challenges), \`max_storage_bytes\`, \`is_public\` (default true), \`selected_channels\` (list), \`port\`, \`public_base_url\`, \`region\` (use an ISO country code like \`DE\` so the node can get the region boost, see [Resolve](#resolve-a-file-get-cdnresolve)). Returns **201**:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;…&quot;, &quot;api_key&quot;: &quot;…&quot;, &quot;is_approved&quot;: false, &quot;status&quot;: &quot;pending&quot;, &quot;message&quot;: &quot;Node registered. Awaiting administrator approval before serving public traffic.&quot; {'}'}</p>
-          <Pre>{`
-The \`api_key\` is shown once; only its BLAKE2b hash is stored. Registration requires a user token (\`401\` without one), and the new node's \`owner\` is set to that user, so it shows up under \`/accounts/nodes/\`. Nothing is served until an admin sets \`is_approved\`.
-
-### \`POST /cdn/nodes/heartbeat/\`
-
-Send at least every 300 s. Optional fields: \`current_storage_bytes\`, \`file_count\`, \`upload_speed_mbps\`, \`download_speed_mbps\`, \`port\`, \`public_base_url\`. The node's IP is taken from \`X-Forwarded-For\`. Sets \`status=online\` only if approved and active. Response:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;…&quot;, &quot;status&quot;: &quot;online&quot;, &quot;is_approved&quot;: true, &quot;is_active&quot;: true, &quot;manifest_version&quot;: 12, &quot;directives&quot;: [&quot;reverify&quot;] {'}'}</p>
-          <Pre>{`
-\`directives\` may contain \`deactivate\` (node is inactive) \`reverify\` (node has recorded violations; re-hash local files and re-upload the file list) and \`verify_key\` (node has a \`public_key\` that hasn't been proven yet; run the [challenge](#get--post-cdnnodeschallenge) flow). Compare \`manifest_version\` with your own to know when to re-sync hashes.
-
-### \`GET\` / \`PATCH /cdn/nodes/me/\`
-
-Read the node's own record (includes \`trust_score\`, \`hash_violations\`, \`total_bytes_served\`, \`available_storage_bytes\`, etc.). PATCH accepts \`name\`, \`is_public\`, \`max_storage_bytes\`, \`selected_channels\`, \`region\`, \`public_base_url\`. Approval, trust and counters are read-only here.
-
-### \`POST /cdn/nodes/speed-test/\`
-
-Body \`upload_speed_mbps\`, \`download_speed_mbps\`. Upload speed drives ranking. Returns both values plus \`last_speed_test\`. Speeds are self-reported and unverified.
-
-### \`POST /cdn/nodes/file-list/\`
-
-Full replace: \`{ "files": [ { "filepath", "blake2b_hash", "size" } ] }\`. Paths are normalized to forward slashes. Files absent from the list are deleted server-side. Returns \`{ "stored": n, "removed": n }\`; non-list \`files\` -> 400 \`{ "error": "files must be a list" }\`. Updates the node's \`file_count\` and \`current_storage_bytes\`.
-
-### \`POST /cdn/nodes/file-list/delta/\`
-
-\`{ "added": [ { filepath, blake2b_hash, size } ], "removed": [ "path", … ] }\`. Returns \`{ "added": n, "removed": n }\`.
-
-### \`GET\` / \`POST /cdn/nodes/challenge/\`
-
-Proves the node holds the private key for the \`public_key\` it registered with. Both calls return 400 \`{ "error": "node has no public_key" }\` if none was registered.
-
-1. \`GET\` issues a fresh nonce: \`{ "challenge": "<random string>", "expires_at": "<ISO time>" }\`. It's valid for **120 s**. Each \`GET\` replaces the previous nonce.
-2. Sign the exact \`challenge\` string (UTF-8) with RSA-PSS (MGF1-SHA256, max salt length) over SHA-256, base64-encode it, and \`POST { "challenge": "…", "signature": "…" }\`.
-3. The nonce is used up by the first \`POST\`, whether the signature is right or not. An unknown, expired or already-used nonce returns 400 \`{ "error": "unknown or expired challenge" }\`, so on failure call \`GET\` again.
-4. Returns \`{ "verified": true|false }\`. On success the node's \`key_verified_at\` is set (shown in \`nodes/me\` and admin node lists).
-
-**When to run it.** Heartbeats include the \`verify_key\` directive while the node has a \`public_key\` but no \`key_verified_at\`. Run the flow once when it appears. Verification isn't yet required for approval or used in ranking; admins can see \`key_verified_at\` when approving.
-
-## Admin: nodes & stats
-
-Require an administrator. Without credentials: \`401\`; authenticated non-admin: \`403\`.
-
-### \`GET /cdn/admin/nodes/\`
-
-Every registered node. Fields: \`id\`, \`node_id\`, \`name\`, \`owner\`, \`owner_username\`, \`region\`, \`is_public\`, \`is_active\`, \`is_approved\`, \`status\`, \`online\`, \`file_count\`, \`current_storage_bytes\`, \`max_storage_bytes\`, \`upload_speed_mbps\`, \`download_speed_mbps\`, \`trust_score\`, \`hash_violations\`, \`total_bytes_served\`, \`total_requests\`, \`ip_address\`, \`port\`, \`public_base_url\`, \`last_heartbeat\`, \`created_at\`.
-
-### \`PATCH /cdn/admin/nodes/{node_id}/\`
-
-\`node_id\` is the UUID. Unknown -> 404 \`{ "error": "node not found" }\`. Returns the full admin node object.
-
-| Field | Type | Effect |
-|---|---|---|
-| \`is_approved\` | boolean | Approve or revoke |
-| \`is_active\` | boolean | Enable/disable without touching approval |
-| \`trust_score\` | number | Set the score (default 100 for new nodes) |
-| \`hash_violations\` | number | Set the counter |
-
-Re-enabling a node auto-disabled for violations requires resetting **both** \`is_approved\`/\`is_active\` and the score/counter, otherwise the next accepted report can disable it again.
-
-### \`DELETE /cdn/admin/nodes/{node_id}/\`
-
-Permanently deletes any node. Unknown -> 404 \`{ "error": "node not found" }\`; success -> \`204\` with no body.
-
-Deletion cascades: the node's file list, throughput samples, peer speed tests (both sides), violations and download logs are removed with it. The node's API key stops working immediately. To keep history, disable the node with \`PATCH\` (\`is_active: false\`) instead.
-
-### \`GET /cdn/admin/stats/\`
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;total_nodes&quot;: 15, &quot;online_nodes&quot;: 8, &quot;pending_nodes&quot;: 3, &quot;total_bytes_served&quot;: 1099511627776, &quot;total_requests&quot;: 42000, &quot;manifest_version&quot;: 12, &quot;master_files&quot;: 9800, &quot;master_bytes&quot;: 214748364800 {'}'}</p>
-          <Pre>{`
-\`online_nodes\` counts \`status=online\` among approved, active nodes; \`pending_nodes\` counts every node with \`is_approved=false\` (including ones disabled for violations).
-
-## Account: your nodes
-
-All of these use token auth (\`Authorization: Token ...\`) and only ever touch nodes owned by the caller; a node you don't own is \`404 { "detail": "Node not found." }\`.
-
-| Method | Path | Description |
-|---|---|---|
-| GET | \`/accounts/nodes/\` | Your nodes: \`{ "nodes": [node, ...] }\` |
-| POST | \`/accounts/nodes/claim/\` | Link an existing node to your account using its API key |
-| GET | \`/accounts/nodes/{node_id}/\` | One node |
-| PATCH | \`/accounts/nodes/{node_id}/\` | Edit \`name\`, \`is_public\`, \`max_storage_bytes\`, \`selected_channels\` (list), \`region\`, \`public_base_url\` |
-| DELETE | \`/accounts/nodes/{node_id}/\` | Delete or unlink (below) |
-| POST | \`/accounts/nodes/{node_id}/regenerate-key/\` | Issue a new API key |
-
-The node object has \`node_id\`, \`name\`, \`owner\`, \`region\`, \`is_public\`, \`is_active\`, \`is_approved\`, \`status\`, \`online\`, \`file_count\`, \`current_storage_bytes\`, \`max_storage_bytes\`, \`available_storage_bytes\`, \`upload_speed_mbps\`, \`download_speed_mbps\`, \`observed_download_speed_mbps\`, \`observed_sample_count\`, \`trust_score\`, \`hash_violations\`, \`total_bytes_served\`, \`total_requests\`, \`selected_channels\`, \`ip_address\`, \`port\`, \`public_base_url\`, \`last_heartbeat\`, \`last_speed_test\`, \`key_verified_at\` and \`created_at\`. \`is_approved\`, \`trust_score\`, the observed/served counters and the timestamps are read-only; \`PATCH\` ignores them.
-
-### \`POST /accounts/nodes/claim/\`
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;api_key&quot;: &quot;the node&apos;s API key&quot; {'}'}</p>
-          <Pre>{`
-Sets you as the node's owner and returns the node object. Use it to re-link a node you unlinked with \`?unlink=1\`, or one registered without a user token. Errors: \`400 { "detail": "api_key is required." }\`, \`404 { "detail": "No node matches that API key." }\`, and \`403 { "detail": "This node is already linked to another account." }\` when someone else owns it. Claiming a node you already own is a no-op that returns it.
-
-### \`POST /accounts/nodes/{node_id}/regenerate-key/\`
-
-No body. The old key stops working immediately and the new one is shown once:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;…&quot;, &quot;api_key&quot;: &quot;…&quot;, &quot;message&quot;: &quot;Store this API key now. It will not be shown again.&quot; {'}'}</p>
-          <Pre>{`
-Put the new key in the node's config before its next heartbeat, or it will be rejected.
-
-### \`DELETE /accounts/nodes/{node_id}/\`
-
-Token auth; the node must be owned by the caller, otherwise \`404 { "detail": "Node not found." }\`.
-
-| Query | Effect | Response |
-|---|---|---|
-| *(none)* | Permanently deletes the node, cascading exactly like the admin delete | \`200 { "detail": "Node deleted." }\` |
-| \`unlink=1\` (\`true\`/\`yes\`) | Only removes the node from your account; it keeps running and can be re-claimed with its API key | \`200 { "detail": "Node unlinked from your account." }\` |
-
-> Before this change a plain \`DELETE\` only unlinked. Clients that relied on that must now pass \`?unlink=1\`.
-
-## Background jobs & config
-
-| Item | Detail |
-|---|---|
-| \`cdn.mark_stale_nodes_offline\` | Celery beat, every 120 s. Sets \`offline\` where last heartbeat is older than 300 s |
-| \`cdn.regenerate_master_hashes\` | Celery task, not scheduled. Same as \`manage.py generate_master_hashes\` |
-| \`CDN_SIGNING_KEY_PATH\` | Path of the RSA private key |
-| \`CDN_ICE_SERVERS\` | JSON array of STUN servers (default: two Google STUN servers) |
-| \`CDN_TURN_URLS\` | Comma-separated TURN URLs, \`turn:…?transport=udp\` first. Unset = no TURN |
-| \`CDN_TURN_SECRET\` | Shared with coturn's \`static-auth-secret\`. Unset = no TURN |
-| \`CDN_TURN_TTL_LISTENER\` | TURN credential lifetime for listeners (\`ready\`), default 3600 s |
-| \`CDN_TURN_TTL_NODE\` | TURN credential lifetime for nodes (\`ice-config\`), default 86400 s |
-| \`CDN_NODE_HEARTBEAT_TIMEOUT\` | Defined in settings but **not used**: the 300 s timeout is hard-coded in \`cdn/router.py\` and the beat task |
-
-## Client timeouts, fallback & failure modes
-
-These budgets are client recommendations; the server enforces none of them except the token lifetime.
-
-| Stage | Budget | On expiry |
-|---|---|---|
-| Signaling connect | 15 s | No \`ready\` -> close, try the next node |
-| ICE gathering | 4 s | Send the offer anyway |
-| Data stall | 30 s | No DataChannel frame for 30 s -> abort, try the next node |
-| Token lifetime | 5 min (server-enforced, at connect) | Re-resolve |
-
-**Fallback order**
-
-- If \`direct\` is \`true\`, skip straight to \`direct_url\`. Otherwise walk \`nodes\` in score order: open signaling with that node's token, negotiate, receive, verify the hash.
-- Any failure (offline node, handshake timeout, stalled channel, hash mismatch) tears down and moves to the next node.
-- \`direct\` is \`true\`, nodes exhausted, or \`node_count\` was 0 -> \`GET direct_url\`. The CDN is an optimisation, never a requirement.
-- Roughly 10-20% of consumer networks sit behind symmetric NAT, where STUN hole-punching fails. Those attempts die at the peer-connection stage; expect it.
-- Let users turn it off with a persisted preference that skips \`/cdn/resolve/\`.
-
-## Node speed measurement (implemented)
-
-Backend-side implementation of the Node Speed Measurement API draft. This is what's actually live in \`cdn/\` now — use it as the contract for the node app's changes.
-
-### 1. Real transfer telemetry
-
-\`POST /log-download/\` (unauthenticated, unchanged endpoint) now accepts two new optional fields:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;, &quot;filepath&quot;: &quot;compilation/track.flac&quot;, &quot;bytes_served&quot;: 41943040, &quot;elapsed_ms&quot;: 3120, &quot;reported_by&quot;: &quot;listener&quot; {'}'}</p>
-          <Pre>{`
-- \`elapsed_ms\` (number, optional) — wall-clock ms for the transfer.
-- \`reported_by\` (\`"node"\` | \`"listener"\`, optional, defaults to \`"node"\`) — who's reporting.
-
-When \`elapsed_ms > 0\`, the server computes Mbps and stores it as a \`NodeThroughputSample\`. Only \`reported_by: "listener"\` samples move the node's new \`observed_download_speed_mbps\` field (median of the last 20 listener samples). Node-reported samples are stored but don't affect it.
-
-Still unauthenticated — same trust level as today's advisory counters. Not changed as part of this work; flagged as an open call for whoever owns auth policy.
-
-### 2. Peer-to-peer speedtest
-
-\`POST /nodes/peer-test/request/\`
-Auth: \`X-CDN-Key\`
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'}{'}'}</p>
-          <Pre>{`
-(body is ignored — the requesting node is whoever the API key identifies)
-
-Response \`200\`:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;test_id&quot;: &quot;b7e6...&quot;, &quot;peer_node_id&quot;: &quot;6b1f...&quot;, &quot;role&quot;: &quot;initiator&quot;, &quot;expires_at&quot;: &quot;2026-09-22T20:10:00Z&quot; {'}'}</p>
-          <Pre>{`
-Response \`403\` if the requesting node isn't approved yet (it couldn't join the signaling socket anyway).
-
-Response \`503\` if fewer than 1 eligible peer is online, or all eligible peers are in this node's 24h pairing cooldown.
-
-Peer is picked randomly from \`is_active=True, is_approved=True, is_public=True, status='online'\` nodes, excluding self and anyone paired with this node in the last 24h. Test expires 180s after creation.
-
-\`POST /nodes/peer-test/report/\`
-Auth: \`X-CDN-Key\`
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;test_id&quot;: &quot;b7e6...&quot;, &quot;sent_mbps&quot;: 210.4, &quot;received_mbps&quot;: 198.7, &quot;duration_ms&quot;: 4032 {'}'}</p>
-          <Pre>{`
-- \`202\` while waiting on the other side to report.
-- \`200\` once both sides have reported. Reporting again after that returns the same result and changes nothing:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;test_id&quot;: &quot;b7e6...&quot;, &quot;status&quot;: &quot;complete&quot;, &quot;agreement&quot;: &quot;consistent&quot; {'}'}</p>
-          <Pre>{`
-\`agreement\` is \`"consistent"\` if both cross-legs (A's sent vs B's received, and vice versa) are within 25%, else \`"disputed"\`.
-
-- \`400\` if \`test_id\` isn't a UUID or the numbers aren't finite and non-negative, \`404\` unknown test_id, \`403\` if the authenticated node isn't part of that test, \`410\` if the test expired before both sides reported.
-
-### 3. Signaling addition: \`peer_session\`
-
-Same \`role=node\` websocket (\`/ws/cdn/signal/?role=node&key=...\`) used for listener sessions now also relays peer tests. After a successful \`/nodes/peer-test/request/\` call, both nodes receive:
-`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;type&quot;: &quot;peer_session&quot;, &quot;session_id&quot;: &quot;&lt;test_id&gt;&quot;, &quot;peer_node_id&quot;: &quot;...&quot;, &quot;role&quot;: &quot;initiator&quot; | &quot;responder&quot; {'}'}</p>
-          <Pre>{`
-From there, send \`offer\` / \`answer\` / \`ice\` / \`teardown\` with the same \`session_id\` — the server relays each message verbatim to the other node's socket (no token/filepath validation, unlike listener sessions). Whoever got \`role: "initiator"\` sends the \`offer\` first. If a node's last signaling socket closes mid-test, the server sends its peer a \`teardown\` for that \`session_id\`.
-
-### What this means for the node app
-
-- Call \`POST /nodes/peer-test/request/\` periodically (e.g. every few hours, back off on 503).
-- Handle the \`peer_session\` message in \`signaling.py\` alongside the existing listener \`session\` handler — same offer/answer/ice/teardown shape, keyed by \`session_id\`.
-- Once connected, send ~8–16MB each direction, time it locally, then \`POST /nodes/peer-test/report/\` with your own side's numbers.
-- The listener-side timing report (\`elapsed_ms\`/\`reported_by: "listener"\` on \`/log-download/\`) is a player-client change, not a node-app change — mentioned here for completeness.
-
-### Not decided (backend manager's call, not resolved in this pass)
-
-- Whether \`/log-download/\` should move behind listener auth.
-- How much weight \`observed_download_speed_mbps\` gets in routing (\`cdn/router.py\` scoring is unchanged — still uses only \`upload_speed_mbps\`).
-- Rate limiting on \`/nodes/peer-test/request/\`.
-- Whether peer-test payload size should scale with reported connection speed.
-`}</Pre>
+        </div>
+      </Section>
+
+      <Section title={"WebRTC signaling (WS /ws/cdn/signal/)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Pre>{`wss://juicewrldapi.com/juicewrld/ws/cdn/signal/?role=client&token=TOKEN`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">One socket per node attempt. The socket only carries the handshake.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Close codes</strong></p>
+          <Table
+            headers={["Code", "Sent to", "Meaning"]}
+            rows={[
+              [<><Code>{"4000"}</Code></>, "any", <><Code>{"role"}</Code> is not <Code>{"client"}</Code> or <Code>{"node"}</Code></>],
+              [<><Code>{"4001"}</Code></>, "node", "Bad API key, or node not approved/active"],
+              [<><Code>{"4003"}</Code></>, "client", "Invalid, tampered or expired token"],
+              [<><Code>{"4004"}</Code></>, "client", <>Target node has no live signaling connection. Preceded by <Code>{"{ \"type\": \"error\", \"reason\": \"node_offline\" }"}</Code></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Server -&gt; client</strong></p>
+          <Table
+            headers={["Type", "Fields", "Notes"]}
+            rows={[
+              [<><Code>{"ready"}</Code></>, <><Code>{"session_id"}</Code>, <Code>{"ice_servers"}</Code></>, "Sent right after the node was notified. Build the peer connection and send your offer"],
+              [<><Code>{"answer"}</Code></>, <><Code>{"session_id"}</Code>, <Code>{"sdp"}</Code></>, "Relayed from the node"],
+              [<><Code>{"ice"}</Code></>, <><Code>{"session_id"}</Code>, <Code>{"candidate"}</Code></>, "Relayed from the node, optional"],
+              [<><Code>{"error"}</Code></>, <><Code>{"reason"}</Code></>, <>Server-generated. Only <Code>{"node_offline"}</Code> is emitted by the server itself</>],
+              [<><Code>{"session_error"}</Code></>, <><Code>{"session_id"}</Code>, <Code>{"reason"}</Code></>, <>Relayed from the node. Nodes use reasons such as <Code>{"invalid_token"}</Code>, <Code>{"not_hosted"}</Code>, <Code>{"private"}</Code> <strong className="text-text-primary">(node-side)</strong></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">There is no <Code>{"teardown"}</Code> message to clients: the server only sends <Code>{"teardown"}</Code> to the node when the client socket closes. Treat a closed socket after a failure as the end signal.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Client -&gt; server</strong> (anything else is ignored)</p>
+          <Table
+            headers={["Type", "Payload", "When"]}
+            rows={[
+              [<><Code>{"offer"}</Code></>, <><Code>{"{ sdp }"}</Code></>, "After ICE gathering finishes"],
+              [<><Code>{"ice"}</Code></>, <><Code>{"{ candidate }"}</Code></>, "Optional"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">The server does <strong className="text-text-primary">not</strong> check that the node actually hosts the file; that is the node&apos;s job (<Code>{"not_hosted"}</Code>).</p>
+          <Pre>{`const ws = new WebSocket(signalUrl)
+let pc
+
+ws.onmessage = async (event) => {
+  const msg = JSON.parse(event.data)
+
+  if (msg.type === 'ready') {
+    pc = new RTCPeerConnection({ iceServers: msg.ice_servers })
+    const channel = pc.createDataChannel('file', { ordered: true })
+    channel.binaryType = 'arraybuffer'
+    channel.onmessage = handleData
+
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    await waitIceComplete(pc)        // 4s cap, then send anyway
+    ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }))
+  }
+
+  if (msg.type === 'answer') {
+    await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp })
+  }
+
+  if (msg.type === 'error' || msg.type === 'session_error') {
+    // tear down and move to the next node
+  }
+}`}</Pre>
+          <p className="text-sm font-medium text-text-primary mt-2">Node side of the socket</p>
+          <p className="text-sm text-text-secondary leading-relaxed">A node connects with <Code>{"?role=node&key=API_KEY"}</Code>. It then receives, per client:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><Code>{"{ \"type\": \"session\", \"session_id\", \"filepath\", \"token\" }"}</Code> when a client connects. The node must re-validate <Code>{"token"}</Code> against the server public key and confirm it hosts <Code>{"filepath"}</Code>.</li>
+            <li><Code>{"{ \"type\": \"offer\" | \"ice\", \"session_id\", … }"}</Code> relayed from the client.</li>
+            <li><Code>{"{ \"type\": \"teardown\", \"session_id\" }"}</Code> when the client socket closes.</li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed">It may send only <Code>{"answer"}</Code>, <Code>{"ice"}</Code> or <Code>{"session_error"}</Code>, each carrying the <Code>{"session_id"}</Code>; other types are dropped. The &quot;is this node online&quot; registry is an in-process dict, so <strong className="text-text-primary">run a single Daphne process</strong>; multiple workers would each see only their own nodes and return false <Code>{"node_offline"}</Code>.</p>
+        </div>
+      </Section>
+
+      <Section title={"DataChannel protocol (node-side)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The server never sees this traffic. The node pushes the file down the DataChannel named <Code>{"file"}</Code>. Every frame is a JSON control string or a binary <Code>{"ArrayBuffer"}</Code>; branch on <Code>{"typeof event.data"}</Code>.</p>
+          <Pre>{`Node -> Browser:  { "t": "meta", "size": 8432100, "hash": "a1b2…", "chunk": 16384 }
+Node -> Browser:  <ArrayBuffer 16384 bytes> …
+Node -> Browser:  { "t": "done", "size": 8432100 }`}</Pre>
+          <Table
+            headers={["Control frame", "Fields", "Meaning"]}
+            rows={[
+              [<><Code>{"meta"}</Code></>, "size, hash, chunk", "Always first. hash is BLAKE2b-256 hex"],
+              [<><Code>{"done"}</Code></>, "size", "Transfer finished. Compare against bytes received"],
+              [<><Code>{"error"}</Code></>, "none", "Node-side failure. Abort, try the next node"],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title={"Hash verification & violations"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Every library file has a BLAKE2b-256 (32-byte digest) hash in the master list. After <Code>{"done"}</Code>, hash the assembled Blob and compare with <Code>{"expected_hash"}</Code>. A mismatch means corrupted or tampered data: report it, then move on.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /cdn/report-violation/"}</Code></p>
+          <Pre>{`{ "node_id": "550e8400-…", "filepath": "path/to/file.mp3", "reported_hash": "deadbeef…" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"reported_hash"}</Code> is optional.</p>
+          <Table
+            headers={["Status", "Body"]}
+            rows={[
+              ["400", <><Code>{"{ \"error\": \"node_id and filepath required\" }"}</Code></>],
+              ["404", <><Code>{"{ \"error\": \"node not found\" }"}</Code></>],
+              ["200", <><Code>{"{ \"accepted\": false, \"reason\": \"hash matches master\" }"}</Code> when <Code>{"reported_hash"}</Code> equals the master hash</>],
+              ["200", <><Code>{"{ \"accepted\": true, \"node_active\": <bool> }"}</Code></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">An accepted report records a violation, subtracts <strong className="text-text-primary">25</strong> from the node&apos;s <Code>{"trust_score"}</Code> and adds 1 to <Code>{"hash_violations"}</Code>. At <Code>{"trust_score <= 0"}</Code> or <Code>{"hash_violations >= 5"}</Code> the node is set <Code>{"is_approved=false, is_active=false"}</Code> and disappears from resolution until an admin restores it.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Caveats: <Code>{"node_active"}</Code> in the response is read before the deactivation is applied, so it can say <Code>{"true"}</Code> for the report that just disabled the node. Re-fetch the node if you need the truth. Reports are accepted even if the file has no master entry or <Code>{"reported_hash"}</Code> is omitted, and are not throttled or tied to a completed session, so only send them on a real hash mismatch, never on a timeout, stall or failed handshake.</p>
+        </div>
+      </Section>
+
+      <Section title={"Log a download (POST /cdn/log-download/)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Pre>{`{ "node_id": "550e8400-…", "filepath": "path/to/file.mp3", "bytes_served": 8432100 }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Always answers <Code>{"{ \"logged\": true }"}</Code> and always writes a <Code>{"CdnDownloadLog"}</Code> row (with a null node if <Code>{"node_id"}</Code> is missing/unknown and an empty path if <Code>{"filepath"}</Code> is missing). If the node exists and <Code>{"bytes_served > 0"}</Code>, the node&apos;s <Code>{"total_bytes_served"}</Code> and <Code>{"total_requests"}</Code> are incremented, and those counters feed both ranking (load factor) and the admin stats. A non-numeric <Code>{"bytes_served"}</Code> causes a 500. Nodes are expected to log their own transfers; the endpoint is unauthenticated, so treat the counters as advisory.</p>
+        </div>
+      </Section>
+
+      <Section title={"Public nodes (GET /cdn/nodes/)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Nodes that are active, approved, public and <Code>{"status == online"}</Code>.</p>
+          <Pre>{`{
+  "nodes": [{
+    "node_id": "550e8400-…", "name": "FastNode-EU", "region": "eu-west",
+    "is_public": true, "status": "online", "online": true,
+    "file_count": 2400, "current_storage_bytes": 51200000000, "max_storage_bytes": 107374182400,
+    "upload_speed_mbps": 250.0, "download_speed_mbps": 500.0,
+    "public_base_url": "https://node.example.com"
+  }]
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"online"}</Code> is recomputed from the heartbeat age (300 s). <Code>{"status"}</Code> is only flipped to <Code>{"offline"}</Code> by a Celery beat task every 120 s, so the two can briefly disagree.</p>
+        </div>
+      </Section>
+
+      <Section title={"Master hash list"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Built by scanning every active channel root for files with the extensions <Code>{".mp3 .zip .wav .mp4 .m4a .mov .txt .caf .mkv .flac .aiff .aif .opus .png .jpg .jpeg .webp"}</Code>. Regeneration is <strong className="text-text-primary">not scheduled</strong>: run <Code>{"python manage.py generate_master_hashes"}</Code> or call the Celery task <Code>{"cdn.regenerate_master_hashes"}</Code> yourself. A new manifest version is only created when the fingerprint changes.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET /cdn/master-hashes/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Params: <Code>{"page"}</Code> (default 1, out-of-range returns the last page), <Code>{"page_size"}</Code> (default 500, max 2000), <Code>{"channel"}</Code> (channel slug). Ordered by <Code>{"filepath"}</Code>.</p>
+          <Pre>{`{
+  "manifest_version": 12, "count": 9800, "page": 1, "num_pages": 20, "has_next": true,
+  "files": [{ "filepath": "…/Lucid Dreams.mp3", "blake2b_hash": "a1b2c3d4…", "size": 8432100,
+              "channel_slug": "compilation", "updated_at": "2026-09-20T12:00:00.000000+00:00" }]
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"manifest_version"}</Code> is 0 if no manifest exists yet.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET /cdn/master-hashes/since/{timestamp}/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Entries with <Code>{"updated_at"}</Code> after an ISO-8601 timestamp in the path, oldest first, capped at 5000. Unparseable timestamp -&gt; 400 <Code>{"{ \"error\": \"invalid timestamp\" }"}</Code>. Deleted files are not reported, so a delta sync cannot remove entries; re-pull the full list occasionally.</p>
+          <Pre>{`{ "since": "2026-01-01T00:00:00Z", "count": 0, "files": [] }`}</Pre>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET /cdn/master-hashes/file/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"?filepath="}</Code> (normalized like <Code>{"/resolve/"}</Code>). Missing -&gt; 400 <Code>{"{ \"error\": \"filepath required\" }"}</Code>, unknown -&gt; 404 <Code>{"{ \"error\": \"not found\" }"}</Code>. Returns one entry object.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET /cdn/master-hashes/signature/"}</Code></p>
+          <Pre>{`{
+  "version": 12, "manifest_hash": "f0e1d2c3b4a5…", "signature": "base64-rsa-signature",
+  "total_files": 9800, "total_bytes": 214748364800,
+  "generated_at": "2026-09-20T12:00:00.000000+00:00",
+  "public_key": "-----BEGIN PUBLIC KEY-----\\n…"
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">To verify the whole list: sort entries by <Code>{"filepath"}</Code>, join lines <Code>{"filepath:blake2b_hash:size"}</Code> with <Code>{"\\n"}</Code>, take BLAKE2b-256 hex, compare to <Code>{"manifest_hash"}</Code>, then verify <Code>{"signature"}</Code> (base64, RSA-PSS SHA-256) over the string <Code>{"\"{version}:{manifest_hash}\""}</Code>. Returns 404 <Code>{"{ \"error\": \"manifest not generated yet\" }"}</Code> before the first build.</p>
+        </div>
+      </Section>
+
+      <Section title={"Server public key (GET /cdn/server-key/)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Pre>{`{ "public_key": "-----BEGIN PUBLIC KEY-----\\nMIIBIjAN…\\n-----END PUBLIC KEY-----\\n" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">PEM SubjectPublicKeyInfo. Nodes use it to verify tokens and the manifest. The private key lives at <Code>{"CDN_SIGNING_KEY_PATH"}</Code> (default <Code>{"cdn_signing_key.pem"}</Code> in the project root) and is auto-generated (RSA-2048) on first use if the file is missing.</p>
+        </div>
+      </Section>
+
+      <Section title={"Node API"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">For people running a node. Auth is a node API key (<Code>{"X-CDN-Key"}</Code> or <Code>{"Authorization: Node …"}</Code>). A deactivated node gets <Code>{"401 \"Node is deactivated.\""}</Code>. Node endpoints answer 401 <Code>{"{ \"error\": \"authentication required\" }"}</Code> with no key.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /cdn/nodes/register/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Body: <Code>{"name"}</Code> (required), and optional <Code>{"public_key"}</Code> (PEM, for challenges), <Code>{"max_storage_bytes"}</Code>, <Code>{"is_public"}</Code> (default true), <Code>{"selected_channels"}</Code> (list), <Code>{"port"}</Code>, <Code>{"public_base_url"}</Code>, <Code>{"region"}</Code> (use an ISO country code like <Code>{"DE"}</Code> so the node can get the region boost, see Resolve). Returns <strong className="text-text-primary">201</strong>:</p>
+          <Pre>{`{ "node_id": "…", "api_key": "…", "is_approved": false, "status": "pending",
+  "message": "Node registered. Awaiting administrator approval before serving public traffic." }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">The <Code>{"api_key"}</Code> is shown once; only its BLAKE2b hash is stored. Registration requires a user token (<Code>{"401"}</Code> without one), and the new node&apos;s <Code>{"owner"}</Code> is set to that user, so it shows up under <Code>{"/accounts/nodes/"}</Code>. Nothing is served until an admin sets <Code>{"is_approved"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /cdn/nodes/heartbeat/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Send at least every 300 s. Optional fields: <Code>{"current_storage_bytes"}</Code>, <Code>{"file_count"}</Code>, <Code>{"upload_speed_mbps"}</Code>, <Code>{"download_speed_mbps"}</Code>, <Code>{"port"}</Code>, <Code>{"public_base_url"}</Code>. The node&apos;s IP is taken from <Code>{"X-Forwarded-For"}</Code>. Sets <Code>{"status=online"}</Code> only if approved and active. Response:</p>
+          <Pre>{`{ "node_id": "…", "status": "online", "is_approved": true, "is_active": true,
+  "manifest_version": 12, "directives": ["reverify"] }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"directives"}</Code> may contain <Code>{"deactivate"}</Code> (node is inactive) <Code>{"reverify"}</Code> (node has recorded violations; re-hash local files and re-upload the file list) and <Code>{"verify_key"}</Code> (node has a <Code>{"public_key"}</Code> that hasn&apos;t been proven yet; run the challenge flow). Compare <Code>{"manifest_version"}</Code> with your own to know when to re-sync hashes.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET"}</Code> / <Code>{"PATCH /cdn/nodes/me/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Read the node&apos;s own record (includes <Code>{"trust_score"}</Code>, <Code>{"hash_violations"}</Code>, <Code>{"total_bytes_served"}</Code>, <Code>{"available_storage_bytes"}</Code>, etc.). PATCH accepts <Code>{"name"}</Code>, <Code>{"is_public"}</Code>, <Code>{"max_storage_bytes"}</Code>, <Code>{"selected_channels"}</Code>, <Code>{"region"}</Code>, <Code>{"public_base_url"}</Code>. Approval, trust and counters are read-only here.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /cdn/nodes/speed-test/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Body <Code>{"upload_speed_mbps"}</Code>, <Code>{"download_speed_mbps"}</Code>. Upload speed drives ranking. Returns both values plus <Code>{"last_speed_test"}</Code>. Speeds are self-reported and unverified.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /cdn/nodes/file-list/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Full replace: <Code>{"{ \"files\": [ { \"filepath\", \"blake2b_hash\", \"size\" } ] }"}</Code>. Paths are normalized to forward slashes. Files absent from the list are deleted server-side. Returns <Code>{"{ \"stored\": n, \"removed\": n }"}</Code>; non-list <Code>{"files"}</Code> -&gt; 400 <Code>{"{ \"error\": \"files must be a list\" }"}</Code>. Updates the node&apos;s <Code>{"file_count"}</Code> and <Code>{"current_storage_bytes"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /cdn/nodes/file-list/delta/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"{ \"added\": [ { filepath, blake2b_hash, size } ], \"removed\": [ \"path\", … ] }"}</Code>. Returns <Code>{"{ \"added\": n, \"removed\": n }"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET"}</Code> / <Code>{"POST /cdn/nodes/challenge/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Proves the node holds the private key for the <Code>{"public_key"}</Code> it registered with. Both calls return 400 <Code>{"{ \"error\": \"node has no public_key\" }"}</Code> if none was registered.</p>
+          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
+            <li><Code>{"GET"}</Code> issues a fresh nonce: <Code>{"{ \"challenge\": \"<random string>\", \"expires_at\": \"<ISO time>\" }"}</Code>. It&apos;s valid for <strong className="text-text-primary">120 s</strong>. Each <Code>{"GET"}</Code> replaces the previous nonce.</li>
+            <li>Sign the exact <Code>{"challenge"}</Code> string (UTF-8) with RSA-PSS (MGF1-SHA256, max salt length) over SHA-256, base64-encode it, and <Code>{"POST { \"challenge\": \"…\", \"signature\": \"…\" }"}</Code>.</li>
+            <li>The nonce is used up by the first <Code>{"POST"}</Code>, whether the signature is right or not. An unknown, expired or already-used nonce returns 400 <Code>{"{ \"error\": \"unknown or expired challenge\" }"}</Code>, so on failure call <Code>{"GET"}</Code> again.</li>
+            <li>Returns <Code>{"{ \"verified\": true|false }"}</Code>. On success the node&apos;s <Code>{"key_verified_at"}</Code> is set (shown in <Code>{"nodes/me"}</Code> and admin node lists).</li>
+          </ol>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">When to run it.</strong> Heartbeats include the <Code>{"verify_key"}</Code> directive while the node has a <Code>{"public_key"}</Code> but no <Code>{"key_verified_at"}</Code>. Run the flow once when it appears. Verification isn&apos;t yet required for approval or used in ranking; admins can see <Code>{"key_verified_at"}</Code> when approving.</p>
+        </div>
+      </Section>
+
+      <Section title={"Admin: nodes & stats"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Require an administrator. Without credentials: <Code>{"401"}</Code>; authenticated non-admin: <Code>{"403"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET /cdn/admin/nodes/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Every registered node. Fields: <Code>{"id"}</Code>, <Code>{"node_id"}</Code>, <Code>{"name"}</Code>, <Code>{"owner"}</Code>, <Code>{"owner_username"}</Code>, <Code>{"region"}</Code>, <Code>{"is_public"}</Code>, <Code>{"is_active"}</Code>, <Code>{"is_approved"}</Code>, <Code>{"status"}</Code>, <Code>{"online"}</Code>, <Code>{"file_count"}</Code>, <Code>{"current_storage_bytes"}</Code>, <Code>{"max_storage_bytes"}</Code>, <Code>{"upload_speed_mbps"}</Code>, <Code>{"download_speed_mbps"}</Code>, <Code>{"trust_score"}</Code>, <Code>{"hash_violations"}</Code>, <Code>{"total_bytes_served"}</Code>, <Code>{"total_requests"}</Code>, <Code>{"ip_address"}</Code>, <Code>{"port"}</Code>, <Code>{"public_base_url"}</Code>, <Code>{"last_heartbeat"}</Code>, <Code>{"created_at"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"PATCH /cdn/admin/nodes/{node_id}/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"node_id"}</Code> is the UUID. Unknown -&gt; 404 <Code>{"{ \"error\": \"node not found\" }"}</Code>. Returns the full admin node object.</p>
+          <Table
+            headers={["Field", "Type", "Effect"]}
+            rows={[
+              [<><Code>{"is_approved"}</Code></>, "boolean", "Approve or revoke"],
+              [<><Code>{"is_active"}</Code></>, "boolean", "Enable/disable without touching approval"],
+              [<><Code>{"trust_score"}</Code></>, "number", "Set the score (default 100 for new nodes)"],
+              [<><Code>{"hash_violations"}</Code></>, "number", "Set the counter"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Re-enabling a node auto-disabled for violations requires resetting <strong className="text-text-primary">both</strong> <Code>{"is_approved"}</Code>/<Code>{"is_active"}</Code> and the score/counter, otherwise the next accepted report can disable it again.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"DELETE /cdn/admin/nodes/{node_id}/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Permanently deletes any node. Unknown -&gt; 404 <Code>{"{ \"error\": \"node not found\" }"}</Code>; success -&gt; <Code>{"204"}</Code> with no body.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Deletion cascades: the node&apos;s file list, throughput samples, peer speed tests (both sides), violations and download logs are removed with it. The node&apos;s API key stops working immediately. To keep history, disable the node with <Code>{"PATCH"}</Code> (<Code>{"is_active: false"}</Code>) instead.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"GET /cdn/admin/stats/"}</Code></p>
+          <Pre>{`{ "total_nodes": 15, "online_nodes": 8, "pending_nodes": 3,
+  "total_bytes_served": 1099511627776, "total_requests": 42000,
+  "manifest_version": 12, "master_files": 9800, "master_bytes": 214748364800 }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"online_nodes"}</Code> counts <Code>{"status=online"}</Code> among approved, active nodes; <Code>{"pending_nodes"}</Code> counts every node with <Code>{"is_approved=false"}</Code> (including ones disabled for violations).</p>
+        </div>
+      </Section>
+
+      <Section title={"Account: your nodes"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">All of these use token auth (<Code>{"Authorization: Token ..."}</Code>) and only ever touch nodes owned by the caller; a node you don&apos;t own is <Code>{"404 { \"detail\": \"Node not found.\" }"}</Code>.</p>
+          <Table
+            headers={["Method", "Path", "Description"]}
+            rows={[
+              ["GET", <><Code>{"/accounts/nodes/"}</Code></>, <>Your nodes: <Code>{"{ \"nodes\": [node, ...] }"}</Code></>],
+              ["POST", <><Code>{"/accounts/nodes/claim/"}</Code></>, "Link an existing node to your account using its API key"],
+              ["GET", <><Code>{"/accounts/nodes/{node_id}/"}</Code></>, "One node"],
+              ["PATCH", <><Code>{"/accounts/nodes/{node_id}/"}</Code></>, <>Edit <Code>{"name"}</Code>, <Code>{"is_public"}</Code>, <Code>{"max_storage_bytes"}</Code>, <Code>{"selected_channels"}</Code> (list), <Code>{"region"}</Code>, <Code>{"public_base_url"}</Code></>],
+              ["DELETE", <><Code>{"/accounts/nodes/{node_id}/"}</Code></>, "Delete or unlink (below)"],
+              ["POST", <><Code>{"/accounts/nodes/{node_id}/regenerate-key/"}</Code></>, "Issue a new API key"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">The node object has <Code>{"node_id"}</Code>, <Code>{"name"}</Code>, <Code>{"owner"}</Code>, <Code>{"region"}</Code>, <Code>{"is_public"}</Code>, <Code>{"is_active"}</Code>, <Code>{"is_approved"}</Code>, <Code>{"status"}</Code>, <Code>{"online"}</Code>, <Code>{"file_count"}</Code>, <Code>{"current_storage_bytes"}</Code>, <Code>{"max_storage_bytes"}</Code>, <Code>{"available_storage_bytes"}</Code>, <Code>{"upload_speed_mbps"}</Code>, <Code>{"download_speed_mbps"}</Code>, <Code>{"observed_download_speed_mbps"}</Code>, <Code>{"observed_sample_count"}</Code>, <Code>{"trust_score"}</Code>, <Code>{"hash_violations"}</Code>, <Code>{"total_bytes_served"}</Code>, <Code>{"total_requests"}</Code>, <Code>{"selected_channels"}</Code>, <Code>{"ip_address"}</Code>, <Code>{"port"}</Code>, <Code>{"public_base_url"}</Code>, <Code>{"last_heartbeat"}</Code>, <Code>{"last_speed_test"}</Code>, <Code>{"key_verified_at"}</Code> and <Code>{"created_at"}</Code>. <Code>{"is_approved"}</Code>, <Code>{"trust_score"}</Code>, the observed/served counters and the timestamps are read-only; <Code>{"PATCH"}</Code> ignores them.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /accounts/nodes/claim/"}</Code></p>
+          <Pre>{`{ "api_key": "the node's API key" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Sets you as the node&apos;s owner and returns the node object. Use it to re-link a node you unlinked with <Code>{"?unlink=1"}</Code>, or one registered without a user token. Errors: <Code>{"400 { \"detail\": \"api_key is required.\" }"}</Code>, <Code>{"404 { \"detail\": \"No node matches that API key.\" }"}</Code>, and <Code>{"403 { \"detail\": \"This node is already linked to another account.\" }"}</Code> when someone else owns it. Claiming a node you already own is a no-op that returns it.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"POST /accounts/nodes/{node_id}/regenerate-key/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">No body. The old key stops working immediately and the new one is shown once:</p>
+          <Pre>{`{ "node_id": "…", "api_key": "…", "message": "Store this API key now. It will not be shown again." }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Put the new key in the node&apos;s config before its next heartbeat, or it will be rejected.</p>
+          <p className="text-sm font-medium text-text-primary mt-2"><Code>{"DELETE /accounts/nodes/{node_id}/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Token auth; the node must be owned by the caller, otherwise <Code>{"404 { \"detail\": \"Node not found.\" }"}</Code>.</p>
+          <Table
+            headers={["Query", "Effect", "Response"]}
+            rows={[
+              ["*(none)*", "Permanently deletes the node, cascading exactly like the admin delete", <><Code>{"200 { \"detail\": \"Node deleted.\" }"}</Code></>],
+              [<><Code>{"unlink=1"}</Code> (<Code>{"true"}</Code>/<Code>{"yes"}</Code>)</>, "Only removes the node from your account; it keeps running and can be re-claimed with its API key", <><Code>{"200 { \"detail\": \"Node unlinked from your account.\" }"}</Code></>],
+            ]}
+          />
+          <div className="border-l-2 border-[var(--border)] pl-3 text-xs text-text-muted leading-relaxed">Before this change a plain <Code>{"DELETE"}</Code> only unlinked. Clients that relied on that must now pass <Code>{"?unlink=1"}</Code>.</div>
+        </div>
+      </Section>
+
+      <Section title={"Background jobs & config"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={["Item", "Detail"]}
+            rows={[
+              [<><Code>{"cdn.mark_stale_nodes_offline"}</Code></>, <>Celery beat, every 120 s. Sets <Code>{"offline"}</Code> where last heartbeat is older than 300 s</>],
+              [<><Code>{"cdn.regenerate_master_hashes"}</Code></>, <>Celery task, not scheduled. Same as <Code>{"manage.py generate_master_hashes"}</Code></>],
+              [<><Code>{"CDN_SIGNING_KEY_PATH"}</Code></>, "Path of the RSA private key"],
+              [<><Code>{"CDN_ICE_SERVERS"}</Code></>, "JSON array of STUN servers (default: two Google STUN servers)"],
+              [<><Code>{"CDN_TURN_URLS"}</Code></>, <>Comma-separated TURN URLs, <Code>{"turn:…?transport=udp"}</Code> first. Unset = no TURN</>],
+              [<><Code>{"CDN_TURN_SECRET"}</Code></>, <>Shared with coturn&apos;s <Code>{"static-auth-secret"}</Code>. Unset = no TURN</>],
+              [<><Code>{"CDN_TURN_TTL_LISTENER"}</Code></>, <>TURN credential lifetime for listeners (<Code>{"ready"}</Code>), default 3600 s</>],
+              [<><Code>{"CDN_TURN_TTL_NODE"}</Code></>, <>TURN credential lifetime for nodes (<Code>{"ice-config"}</Code>), default 86400 s</>],
+              [<><Code>{"CDN_NODE_HEARTBEAT_TIMEOUT"}</Code></>, <>Defined in settings but <strong className="text-text-primary">not used</strong>: the 300 s timeout is hard-coded in <Code>{"cdn/router.py"}</Code> and the beat task</>],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title={"Client timeouts, fallback & failure modes"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">These budgets are client recommendations; the server enforces none of them except the token lifetime.</p>
+          <Table
+            headers={["Stage", "Budget", "On expiry"]}
+            rows={[
+              ["Signaling connect", "15 s", <>No <Code>{"ready"}</Code> -&gt; close, try the next node</>],
+              ["ICE gathering", "4 s", "Send the offer anyway"],
+              ["Data stall", "30 s", "No DataChannel frame for 30 s -> abort, try the next node"],
+              ["Token lifetime", "5 min (server-enforced, at connect)", "Re-resolve"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Fallback order</strong></p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>If <Code>{"direct"}</Code> is <Code>{"true"}</Code>, skip straight to <Code>{"direct_url"}</Code>. Otherwise walk <Code>{"nodes"}</Code> in score order: open signaling with that node&apos;s token, negotiate, receive, verify the hash.</li>
+            <li>Any failure (offline node, handshake timeout, stalled channel, hash mismatch) tears down and moves to the next node.</li>
+            <li><Code>{"direct"}</Code> is <Code>{"true"}</Code>, nodes exhausted, or <Code>{"node_count"}</Code> was 0 -&gt; <Code>{"GET direct_url"}</Code>. The CDN is an optimisation, never a requirement.</li>
+            <li>Roughly 10-20% of consumer networks sit behind symmetric NAT, where STUN hole-punching fails. Those attempts die at the peer-connection stage; expect it.</li>
+            <li>Let users turn it off with a persisted preference that skips <Code>{"/cdn/resolve/"}</Code>.</li>
+          </ul>
+        </div>
+      </Section>
+
+      <Section title={"Node speed measurement (implemented)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Backend-side implementation of the Node Speed Measurement API draft. This is what&apos;s actually live in <Code>{"cdn/"}</Code> now — use it as the contract for the node app&apos;s changes.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">1. Real transfer telemetry</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"POST /log-download/"}</Code> (unauthenticated, unchanged endpoint) now accepts two new optional fields:</p>
+          <Pre>{`{
+  "node_id": "550e8400-e29b-41d4-a716-446655440000",
+  "filepath": "compilation/track.flac",
+  "bytes_served": 41943040,
+  "elapsed_ms": 3120,
+  "reported_by": "listener"
+}`}</Pre>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><Code>{"elapsed_ms"}</Code> (number, optional) — wall-clock ms for the transfer.</li>
+            <li><Code>{"reported_by"}</Code> (<Code>{"\"node\""}</Code> | <Code>{"\"listener\""}</Code>, optional, defaults to <Code>{"\"node\""}</Code>) — who&apos;s reporting.</li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed">When <Code>{"elapsed_ms > 0"}</Code>, the server computes Mbps and stores it as a <Code>{"NodeThroughputSample"}</Code>. Only <Code>{"reported_by: \"listener\""}</Code> samples move the node&apos;s new <Code>{"observed_download_speed_mbps"}</Code> field (median of the last 20 listener samples). Node-reported samples are stored but don&apos;t affect it.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Still unauthenticated — same trust level as today&apos;s advisory counters. Not changed as part of this work; flagged as an open call for whoever owns auth policy.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">2. Peer-to-peer speedtest</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"POST /nodes/peer-test/request/"}</Code> Auth: <Code>{"X-CDN-Key"}</Code></p>
+          <Pre>{`{}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">(body is ignored — the requesting node is whoever the API key identifies)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Response <Code>{"200"}</Code>:</p>
+          <Pre>{`{
+  "test_id": "b7e6...",
+  "peer_node_id": "6b1f...",
+  "role": "initiator",
+  "expires_at": "2026-09-22T20:10:00Z"
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Response <Code>{"403"}</Code> if the requesting node isn&apos;t approved yet (it couldn&apos;t join the signaling socket anyway).</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Response <Code>{"503"}</Code> if fewer than 1 eligible peer is online, or all eligible peers are in this node&apos;s 24h pairing cooldown.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Peer is picked randomly from <Code>{"is_active=True, is_approved=True, is_public=True, status='online'"}</Code> nodes, excluding self and anyone paired with this node in the last 24h. Test expires 180s after creation.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"POST /nodes/peer-test/report/"}</Code> Auth: <Code>{"X-CDN-Key"}</Code></p>
+          <Pre>{`{
+  "test_id": "b7e6...",
+  "sent_mbps": 210.4,
+  "received_mbps": 198.7,
+  "duration_ms": 4032
+}`}</Pre>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><Code>{"202"}</Code> while waiting on the other side to report.</li>
+            <li><Code>{"200"}</Code> once both sides have reported. Reporting again after that returns the same result and changes nothing:</li>
+          </ul>
+          <Pre>{`{ "test_id": "b7e6...", "status": "complete", "agreement": "consistent" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"agreement"}</Code> is <Code>{"\"consistent\""}</Code> if both cross-legs (A&apos;s sent vs B&apos;s received, and vice versa) are within 25%, else <Code>{"\"disputed\""}</Code>.</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><Code>{"400"}</Code> if <Code>{"test_id"}</Code> isn&apos;t a UUID or the numbers aren&apos;t finite and non-negative, <Code>{"404"}</Code> unknown test_id, <Code>{"403"}</Code> if the authenticated node isn&apos;t part of that test, <Code>{"410"}</Code> if the test expired before both sides reported.</li>
+          </ul>
+          <p className="text-sm font-medium text-text-primary mt-2">3. Signaling addition: <Code>{"peer_session"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Same <Code>{"role=node"}</Code> websocket (<Code>{"/ws/cdn/signal/?role=node&key=..."}</Code>) used for listener sessions now also relays peer tests. After a successful <Code>{"/nodes/peer-test/request/"}</Code> call, both nodes receive:</p>
+          <Pre>{`{ "type": "peer_session", "session_id": "<test_id>", "peer_node_id": "...", "role": "initiator" | "responder" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">From there, send <Code>{"offer"}</Code> / <Code>{"answer"}</Code> / <Code>{"ice"}</Code> / <Code>{"teardown"}</Code> with the same <Code>{"session_id"}</Code> — the server relays each message verbatim to the other node&apos;s socket (no token/filepath validation, unlike listener sessions). Whoever got <Code>{"role: \"initiator\""}</Code> sends the <Code>{"offer"}</Code> first. If a node&apos;s last signaling socket closes mid-test, the server sends its peer a <Code>{"teardown"}</Code> for that <Code>{"session_id"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">What this means for the node app</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>Call <Code>{"POST /nodes/peer-test/request/"}</Code> periodically (e.g. every few hours, back off on 503).</li>
+            <li>Handle the <Code>{"peer_session"}</Code> message in <Code>{"signaling.py"}</Code> alongside the existing listener <Code>{"session"}</Code> handler — same offer/answer/ice/teardown shape, keyed by <Code>{"session_id"}</Code>.</li>
+            <li>Once connected, send ~8–16MB each direction, time it locally, then <Code>{"POST /nodes/peer-test/report/"}</Code> with your own side&apos;s numbers.</li>
+            <li>The listener-side timing report (<Code>{"elapsed_ms"}</Code>/<Code>{"reported_by: \"listener\""}</Code> on <Code>{"/log-download/"}</Code>) is a player-client change, not a node-app change — mentioned here for completeness.</li>
+          </ul>
+          <p className="text-sm font-medium text-text-primary mt-2">Not decided (backend manager&apos;s call, not resolved in this pass)</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>Whether <Code>{"/log-download/"}</Code> should move behind listener auth.</li>
+            <li>How much weight <Code>{"observed_download_speed_mbps"}</Code> gets in routing (<Code>{"cdn/router.py"}</Code> scoring is unchanged — still uses only <Code>{"upload_speed_mbps"}</Code>).</li>
+            <li>Rate limiting on <Code>{"/nodes/peer-test/request/"}</Code>.</li>
+            <li>Whether peer-test payload size should scale with reported connection speed.</li>
+          </ul>
         </div>
       </Section>
 
@@ -5504,7 +5592,7 @@ function SocketsTab() {
             headers={["Socket", "Path", "Auth", "Carries"]}
             rows={[
               ["Notifications", <><Code>{"/juicewrld/ws/notifications/"}</Code></>, "None, or optional ticket for per-user events (receive-only)", "Server-wide events such as new news posts, plus events addressed to one user"],
-              ["Chat", <><Code>{"/juicewrld/ws/chat/"}</Code></>, "Ticket, first frame", "Per-user and per-room chat events. Full event list in Staff Chat tab"],
+              ["Chat", <><Code>{"/juicewrld/ws/chat/"}</Code></>, "Ticket, first frame", "Per-user and per-room chat events. Full event list in the Staff Chat tab"],
             ]}
           />
           <p className="text-sm text-text-secondary leading-relaxed">Events are fanned out through the Channels layer. REST requests run in a different process from the sockets, so events only reach clients when the Redis channel layer is running (<Code>{"CHANNEL_REDIS_URL"}</Code>). With the in-memory fallback, REST-triggered events never arrive.</p>
@@ -5602,7 +5690,7 @@ notify_user(user, 'kind', 'action', {'key': 'value'})   # only that user's authe
 
       <Section title={"Chat push events"}>
         <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">These events replace client polling. The full chat event table is in Staff Chat tab; the ones below are the additions.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">These events replace client polling. The full chat event table is in the Staff Chat tab; the ones below are the additions.</p>
           <p className="text-sm font-medium text-text-primary mt-2">Chat list and unread</p>
           <p className="text-sm text-text-secondary leading-relaxed">Replaces the periodic chat/DM list poll. Load the list over REST once, and again after a reconnect or a <Code>{"resynced"}</Code>; drive everything else from events.</p>
           <Table

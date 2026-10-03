@@ -1,7 +1,7 @@
-import { CHAT_COMMANDS } from '../chatCommands'
 import { searchSongs } from '../juicewrldApi'
 import { useChatStore, conversationTitle } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
+import { canRun, chatCommandsFor } from './access'
 import { ADMIN_COMMANDS } from './admin'
 import { APP_COMMANDS } from './app'
 import { FUN_COMMANDS } from './fun'
@@ -12,6 +12,7 @@ import type { TermCommand, TermGroup } from './types'
 import { directory, matchUsers, USER_COMMANDS } from './users'
 
 export type { TermCommand, TermCtx, TermGroup, TermScreen, TermTone } from './types'
+export { canRun, chatCommandsFor, termAccess, termUserName, type TermAccess } from './access'
 export { juicesayText } from './fun'
 export { directory, directorySync, resolveHandles } from './users'
 
@@ -38,9 +39,9 @@ const LOOKUP: TermCommand = {
     ]
     const playlists = useStore.getState().playlists.filter((p) => norm(p.name).includes(ql)).map((p) => `${p.name}  (${p.track_count})   → playlist play ${p.name}`)
     const settings = searchSettings(q).map((s) => `${s.key} = ${s.value}   → set ${s.key} <value>`)
-    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...ADMIN_COMMANDS, ...APP_COMMANDS, ...USER_COMMANDS, LOOKUP]
+    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...ADMIN_COMMANDS, ...APP_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
     const commands = [
-      ...CHAT_COMMANDS.filter((c) => c.name.includes(ql) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
+      ...chatCommandsFor().filter((c) => c.name.includes(ql) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
       ...all.filter((c) => c.name.includes(ql) || c.aliases?.some((a) => a.includes(ql)) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
     ]
 
@@ -72,10 +73,10 @@ export const TERM_COMMANDS: TermCommand[] = [
 
 export const TERM_GROUPS: TermGroup[] = ['People', 'Player', 'Library', 'Navigation', 'Settings', 'Admin', 'App', 'Fun']
 
+/** A command by name or alias - only one this account can run. */
 export function findTermCommand(word: string): TermCommand | null {
   const name = word.trim().replace(/^\//, '').toLowerCase()
   if (!name) return null
-  return TERM_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name)) ?? null
+  const command = TERM_COMMANDS.find((c) => c.name === name || c.aliases?.includes(name))
+  return command && canRun(command) ? command : null
 }
-
-export const TERM_COMMAND_WORDS: string[] = TERM_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])])

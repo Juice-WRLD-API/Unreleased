@@ -1430,7 +1430,7 @@ export default function Player(): JSX.Element {
     'open-settings':    () => useStore.getState().setShowSettings(true),
     'open-diagnostics': () => useStore.getState().setShowDiagnostics(true),
     'toggle-queue':     () => { const s = useStore.getState(); s.setShowQueue(!s.showQueue) },
-    'open-terminal':    () => { const s = useStore.getState(); if (s.account?.is_administrator) s.setActiveView(s.activeView === 'terminal' ? (s.previousView ?? 'home') : 'terminal') },
+    'open-terminal':    () => { const s = useStore.getState(); s.setActiveView(s.activeView === 'terminal' ? (s.previousView ?? 'home') : 'terminal') },
     'focus-search':     () => {
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()
