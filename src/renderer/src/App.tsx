@@ -231,6 +231,14 @@ export default function App(): JSX.Element {
       .forEach((i) => preloadView(i.view))
   }, 4000), [navOrder, navVisibility, activeView])
 
+  // The terminal is hidden from the nav by default, so the pass above never
+  // warms it - but admins reach it by hotkey, where a chunk download would
+  // read as lag. Warm it as soon as the account resolves as an admin.
+  const isAdmin = useStore((s) => !!s.account?.is_administrator)
+  useEffect(() => {
+    if (isAdmin) return runWhenIdle(() => preloadView('terminal'), 4000)
+  }, [isAdmin])
+
   // Deliver any reports queued in a previous session. loadAccount also flushes
   // after login (to attach the token), but this covers a signed-out user whose
   // loadAccount returns early. No-op until the reporting endpoints exist.

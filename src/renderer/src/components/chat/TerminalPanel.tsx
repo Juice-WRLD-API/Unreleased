@@ -816,7 +816,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     if (rs) {
       const k = e.key.toLowerCase()
       const leave = (value: string): void => { e.preventDefault(); setLine(value); setRs(null) }
-      if (e.key === 'Enter') { leave(rs.at >= 0 ? HISTORY[rs.at] : rs.saved); return }
+      if (e.key === 'Enter') { leave(HISTORY[rs.at] ?? rs.saved); return }
       if (e.key === 'Escape' || (e.ctrlKey && (k === 'c' || k === 'g'))) { leave(rs.saved); return }
       if (e.ctrlKey && k === 'r') {
         e.preventDefault()
@@ -825,7 +825,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         return
       }
       // Arrows and Tab take the match to the prompt for editing, like bash.
-      if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) { leave(rs.at >= 0 ? HISTORY[rs.at] : rs.saved); return }
+      if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) { leave(HISTORY[rs.at] ?? rs.saved); return }
       return
     }
     if (e.ctrlKey && e.key.toLowerCase() === 'r') { e.preventDefault(); setRs({ saved: input, at: HISTORY.length }); setInput(''); setCaret(0); return }
@@ -845,10 +845,10 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       if (e.key === 'ArrowUp') {
         if (historyIndex.current === null) { setDraft(input); historyIndex.current = HISTORY.length - 1 }
         else historyIndex.current = Math.max(0, historyIndex.current - 1)
-        setLine(HISTORY[historyIndex.current])
+        setLine(HISTORY[historyIndex.current] ?? '')
       } else if (historyIndex.current !== null) {
         if (historyIndex.current >= HISTORY.length - 1) { historyIndex.current = null; setLine(draft) }
-        else { historyIndex.current += 1; setLine(HISTORY[historyIndex.current]) }
+        else { historyIndex.current += 1; setLine(HISTORY[historyIndex.current] ?? '') }
       }
     }
   }
