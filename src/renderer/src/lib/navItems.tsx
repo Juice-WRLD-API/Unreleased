@@ -1,4 +1,4 @@
-import { SearchCode, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, House, User, Download, Upload, Info, Settings } from 'lucide-react'
+import { SearchCode, SquareTerminal, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, House, User, Download, Upload, Info, Settings } from 'lucide-react'
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
@@ -28,6 +28,8 @@ export interface NavItemDef {
   /** Only exists for accounts with a staff profile (showStaffProfile) - the
    *  personal Admin/Editor/Manager/Contributor page. Dropped otherwise. */
   staffProfile?: boolean
+  /** Only exists for platform administrators (the terminal) - dropped otherwise. */
+  adminOnly?: boolean
 }
 
 export const NAV_ITEMS: NavItemDef[] = [
@@ -63,6 +65,8 @@ export const NAV_ITEMS: NavItemDef[] = [
   // default, addable from Settings → Menu items; desktop only (mobile's bottom
   // bar already carries the profile button).
   { view: 'editor-profile', label: 'Staff', icon: <Shield size={18} />, defaultHidden: true, staffProfile: true },
+  // Administrators only; off by default, addable from Settings → Menu items.
+  { view: 'terminal', label: 'Terminal', icon: <SquareTerminal size={18} />, defaultHidden: true, adminOnly: true },
 ]
 
 export const DEFAULT_NAV_ORDER: ViewType[] = NAV_ITEMS.map((i) => i.view)
@@ -120,7 +124,7 @@ export const DEFAULT_NAV_VISIBILITY: Record<string, boolean> = Object.fromEntrie
 // exist are skipped; items missing from `order` (e.g. a destination added in a
 // newer version than the saved order) keep their canonical position, appended
 // after the saved ones - so a stale persisted order never hides a new tab.
-export function orderedNavItems(order: ViewType[], includeStaff = false, includeStaffProfile = false): NavItemDef[] {
+export function orderedNavItems(order: ViewType[], includeStaff = false, includeStaffProfile = false, includeAdmin = false): NavItemDef[] {
   const byView = new Map(NAV_ITEMS.map((i) => [i.view, i]))
   const seen = new Set<ViewType>()
   const out: NavItemDef[] = []
@@ -129,7 +133,7 @@ export function orderedNavItems(order: ViewType[], includeStaff = false, include
     if (item && !seen.has(view)) { out.push(item); seen.add(view) }
   }
   for (const item of NAV_ITEMS) if (!seen.has(item.view)) out.push(item)
-  return out.filter((i) => (includeStaff || !i.staffOnly) && (includeStaffProfile || !i.staffProfile))
+  return out.filter((i) => (includeStaff || !i.staffOnly) && (includeStaffProfile || !i.staffProfile) && (includeAdmin || !i.adminOnly))
 }
 
 // Hard cap on the mobile bottom nav's direct buttons, Settings included - a

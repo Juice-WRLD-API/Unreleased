@@ -7,7 +7,6 @@ import { ChannelList, DmList } from './Navigator'
 import RoomHeader, { type SidePanel } from './RoomHeader'
 import RoomPane from './RoomPane'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './SidePanels'
-import TerminalPanel from './TerminalPanel'
 import { CountBadge, ServerGlyph } from './ui'
 
 function ServerStrip(): JSX.Element {
@@ -144,9 +143,6 @@ export default function ChatViewMobile(): JSX.Element {
         <div className={overlay} style={overlayStyle}>
           <ThreadPanel room={active} rootId={threadRootId} onClose={() => openThread(null)} />
         </div>
-      )}
-      {active && roomOpen && threadRootId === null && panel === 'terminal' && (
-        <div className={overlay} style={overlayStyle}><TerminalPanel room={active} onClose={() => setPanel(null)} /></div>
       )}
       {active && roomOpen && threadRootId === null && panel === 'pins' && (
         <div className={overlay} style={overlayStyle}><PinsPanel room={active} onClose={() => setPanel(null)} /></div>

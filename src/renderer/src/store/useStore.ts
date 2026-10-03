@@ -1343,6 +1343,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'thanks': '/thank-you',
       'settings': '/settings',
       'chat': '/chat',
+      'terminal': '/terminal',
     }
     // Returning to Playlists with a playlist already open (it stays selected
     // across tab switches - see playlistsSelectedId above) should restore its

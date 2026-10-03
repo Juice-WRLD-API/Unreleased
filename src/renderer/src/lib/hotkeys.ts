@@ -81,6 +81,7 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'open-diagnostics', label: 'Open diagnostics',          category: 'Navigation', defaultBinding: '' },
   { id: 'toggle-queue',     label: 'Toggle queue panel',        category: 'Navigation', defaultBinding: 'Q' },
   { id: 'focus-search',     label: 'Focus search box',          category: 'Navigation', defaultBinding: 'Ctrl+F' },
+  { id: 'open-terminal',    label: 'Open terminal (administrators)', category: 'Navigation', defaultBinding: 'Ctrl+`' },
 ] as const
 
 export const HOTKEY_CATEGORIES: readonly HotkeyCategory[] = ['Playback', 'Volume', 'Navigation']

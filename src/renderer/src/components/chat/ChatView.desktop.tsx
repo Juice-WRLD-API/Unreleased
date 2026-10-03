@@ -6,7 +6,6 @@ import { ChannelList, DmList, ServerRail } from './Navigator'
 import RoomHeader, { type SidePanel } from './RoomHeader'
 import RoomPane from './RoomPane'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './SidePanels'
-import TerminalPanel from './TerminalPanel'
 
 function EmptyMain(): JSX.Element {
   const activeServerId = useChatStore((s) => s.activeServerId)
@@ -67,7 +66,7 @@ export default function ChatViewDesktop(): JSX.Element {
 
   const serverId = active?.kind === 'channel' ? activeServerId : null
   const showThread = !!active && threadRootId !== null
-  const sideOpen = showThread || (panel !== null && panel !== 'terminal')
+  const sideOpen = showThread || panel !== null
   const sideClassName = compact
     ? 'flex h-full absolute inset-y-0 right-0 z-30 shadow-2xl'
     : 'flex h-full'
@@ -101,7 +100,6 @@ export default function ChatViewDesktop(): JSX.Element {
           </div>
         )}
       </main>
-      {active && panel === 'terminal' && <TerminalPanel room={active} onClose={() => setPanel(null)} />}
     </div>
   )
 }

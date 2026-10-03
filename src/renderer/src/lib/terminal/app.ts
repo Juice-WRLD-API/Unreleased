@@ -9,9 +9,9 @@ import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
-// What `open <name>` can reach. The terminal sits inside Chat, so anything that
-// switches to another page also closes it - the overlays (queue, equalizer,
-// diagnostics) are the ones that stay.
+// What `open <name>` can reach. The terminal is a page of its own, so going
+// anywhere else leaves it (its scrollback and position are kept for when you
+// come back); the overlays - queue, equalizer, diagnostics - open on top of it.
 const VIEWS: Record<string, ViewType> = {
   home: 'home', tracker: 'api-tracker', songs: 'api-tracker', files: 'api-files', playlists: 'playlists', liked: 'liked',
   chat: 'chat', news: 'news', docs: 'docs', wrld: 'wrld', stats: 'stats', statistics: 'statistics', download: 'download',
@@ -26,7 +26,7 @@ export const APP_COMMANDS: TermCommand[] = [
   {
     name: 'open', aliases: ['go', 'goto'], group: 'Navigation',
     usage: 'open <page> · open settings [tab] · open admin [tab] · open user <id> · open song <title> · open queue|eq|diagnostics',
-    description: 'Go to any page, as if you had clicked it. Pages other than chat close the terminal',
+    description: 'Go to any page, as if you had clicked it. The terminal keeps its place for when you return (Ctrl+` or the Terminal button)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
       if (before.length === 0) return OPEN_TARGETS.filter((t) => t.startsWith(p))
@@ -69,7 +69,6 @@ export const APP_COMMANDS: TermCommand[] = [
         return
       }
       const view = VIEWS[key] ?? VIEWS[pickByName(Object.keys(VIEWS), (k) => k, key) ?? ''] ?? fail(`no page "${target}" (try: open home)`)
-      if (view === 'chat') { ctx.print('you are already in chat', 'dim'); return }
       s.setActiveView(view)
     },
   },

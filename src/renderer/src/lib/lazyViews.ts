@@ -53,6 +53,7 @@ export const ContributorProfileView = lazyView(() => import('../components/Contr
 export const LikedSongsView = lazyView(() => import('../components/LikedSongsView'))
 export const DiagnosticsModal = lazyView(() => import('../components/DiagnosticsModal'))
 export const ChatView = lazyView(() => import('../components/ChatView'))
+export const TerminalPage = lazyView(() => import('../components/TerminalPage'))
 
 // The same import() factories again, keyed by view, for warming a chunk ahead
 // of the navigation that needs it. Deliberately a second reference to the same
@@ -88,6 +89,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   'api-files': ApiFilesView.preload,
   liked: () => import('../components/LikedSongsView'),
   chat: () => import('../components/ChatView'),
+  terminal: () => import('../components/TerminalPage'),
 }
 
 const started = new Set<ViewType>()

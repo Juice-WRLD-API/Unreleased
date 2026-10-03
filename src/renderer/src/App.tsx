@@ -49,6 +49,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/thank-you') return 'thanks'
   if (pathname === '/settings') return 'settings'
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
+  if (pathname === '/terminal') return 'terminal'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
   if (/^\/track\/\d+\/?$/.test(pathname)) return 'track'
   if (pathname.startsWith('/u/')) return 'public-profile'
@@ -88,7 +89,7 @@ import {
   DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
   StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
-  LikedSongsView, DiagnosticsModal, ChatView, TrackView, preloadView,
+  LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, preloadView,
 } from './lib/lazyViews'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
 
@@ -299,6 +300,7 @@ export default function App(): JSX.Element {
               : bgView === 'thanks' ? <ThankYouView />
               : bgView === 'albums-admin' ? <AlbumsAdminView />
               : bgView === 'chat' ? <ChatView />
+              : bgView === 'terminal' ? <TerminalPage />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
             </Suspense>

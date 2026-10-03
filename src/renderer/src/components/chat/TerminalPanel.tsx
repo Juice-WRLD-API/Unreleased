@@ -301,6 +301,8 @@ const MONO ="'JetBrains Mono', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Deja
 export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClose: () => void }): JSX.Element | null {
   const me = useChatStore((s) => s.me)
   const chatPath = useChatStore((s) => {
+    // The terminal page can run with no room open (id 0 stands in for it).
+    if (room.kind === 'channel' && room.id === 0) return '~'
     if (room.kind === 'channel') {
       const server = s.servers.find((x) => x.channels.some((c) => c.id === room.id))
       const channel = server?.channels.find((c) => c.id === room.id)

@@ -69,7 +69,7 @@ export default function Sidebar(): JSX.Element {
   // are preserved - same approach as Settings' moveNavItem.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder, true, true).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true, true, true).map((i) => i.view)
     const dragView = items[fromRow].view
     const targetView = items[toRow].view
     const from = full.indexOf(dragView)
@@ -123,7 +123,7 @@ export default function Sidebar(): JSX.Element {
   // Order + which tabs appear both come from Settings → Appearance → Menu
   // items. orderedNavItems sanitizes the saved order; isNavItemVisible drops
   // web-only tabs on web and anything the user has toggled off.
-  const items = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account)).filter((i) => isNavItemVisible(i, navVisibility, false))
+  const items = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account), !!account?.is_administrator).filter((i) => isNavItemVisible(i, navVisibility, false))
   // Which tab reads as current - not always activeView, since some views are
   // sub-views of a tab (the games inside Games). See navTabFor.
   const activeTab = navTabFor(activeView)

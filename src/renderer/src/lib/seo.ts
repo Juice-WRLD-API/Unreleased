@@ -110,6 +110,7 @@ const ROUTES: Record<ViewType, SeoEntry> = {
   track: { title: 'Track', description: 'A Juice WRLD song on unreleased.', noindex: true },
   'public-profile': { title: 'Profile', description: 'A public unreleased.gg user profile.', noindex: true },
   chat: { path: '/chat', title: 'Staff chat', description: 'Staff-only chat.', noindex: true },
+  terminal: { path: '/terminal', title: 'Terminal', description: 'Administrator console.', noindex: true },
   'not-found': { title: 'Page not found', description: 'This page does not exist.', noindex: true },
 }
 
