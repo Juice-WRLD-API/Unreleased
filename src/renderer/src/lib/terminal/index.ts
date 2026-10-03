@@ -12,7 +12,7 @@ import type { TermCommand, TermGroup } from './types'
 import { directory, matchUsers, USER_COMMANDS } from './users'
 
 export type { TermCommand, TermCtx, TermGroup, TermScreen, TermTone } from './types'
-export { canRun, chatCommandsFor, termAccess, termUserName, type TermAccess } from './access'
+export { canRun, chatCommandsFor, moderationChatCommandsFor, plainChatCommandsFor, termAccess, termUserName, type TermAccess } from './access'
 export { juicesayText } from './fun'
 export { directory, directorySync, resolveHandles } from './users'
 

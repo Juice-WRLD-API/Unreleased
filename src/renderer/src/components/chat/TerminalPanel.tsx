@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { X } from 'lucide-react'
 import { findChatCommand } from '../../lib/chatHelp'
 import { hasChatAccess } from '../../lib/chatAccess'
-import { canRun, chatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
+import { canRun, chatCommandsFor, moderationChatCommandsFor, plainChatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
 import { termThemeVars, useTermTheme } from '../../lib/terminal/themeStore'
 import { catFile, diskUsage, grepFiles, headTailFile, locateName, treeView, wcFile } from '../../lib/terminalFileTools'
 import { commandCardText } from '../../lib/commandCardText'
@@ -36,13 +36,13 @@ function sessionFor(key: string): Session {
   return s
 }
 
-// Where the shell is standing. In `chat` mode cd moves between rooms (which is
-// where chat commands run); in `files` mode it walks the Files tab's tree and
-// `get` downloads from it. Chat commands work in both. Kept at module level so
-// the position survives closing the terminal.
+// Where the shell is standing in the Files tab's tree: cd walks it and `get`
+// downloads from it. Moving between servers and DMs (where chat commands run)
+// is the separate `room` command, so cd is strictly for files. Kept at module
+// level so the position survives closing the terminal.
 const shell: { mode: 'chat' | 'files'; cwd: FilesCwd; prevRoom: RoomRef | null } = { mode: 'files', cwd: FILES_ROOT, prevRoom: null }
 
-const BUILTINS = ['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
+const BUILTINS = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 // The ones that take a path in the file tree (Tab walks the folders); the
 // directory-only ones skip files.
 const PATH_WORDS = new Set(['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'tree', 'du', 'source'])
@@ -176,7 +176,7 @@ function stripMarkdown(text: string): string {
     .replace(/^- /gm, '  ')
 }
 
-const SHELL_NAMES = ['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit']
+const SHELL_NAMES = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 
 // The chat commands' own usage/description mention `-s` (post the answer to the
 // room). It still works here, but it is chat noise in the terminal's help, so
@@ -194,19 +194,24 @@ const groupsShown = (): { g: string; commands: TermCommand[] }[] => TERM_GROUPS
 // `help` alone is an index (there are a lot of commands now); `help <group>`
 // lists one group in full and `help <command>` explains one.
 function helpText(): string {
-  const chat = chatCommandsFor().filter((c) => c.name !== 'help').map((c) => c.name).join('  ')
-  const groups = groupsShown()
+  const chat = plainChatCommandsFor().filter((c) => c.name !== 'help').map((c) => c.name).join('  ')
+  const mod = moderationChatCommandsFor().map((c) => c.name)
+  // Moderation chat commands list under Admin (or a Moderation row of their
+  // own for an account that has them but not the Admin group).
+  const groups = groupsShown().map((x) => ({ ...x, extra: x.g === 'Admin' ? mod : [] as string[] }))
+  if (mod.length > 0 && !groups.some((x) => x.g === 'Admin')) groups.push({ g: 'Moderation', commands: [], extra: mod })
   const width = Math.max(...groups.map((x) => x.g.length), 'Chat'.length, 'Shell'.length) + 2
   const row = (label: string, names: string): string => `  ${label.padEnd(width)}${names}`
   const topics = [...(chat ? ['chat'] : []), ...groups.map((x) => x.g.toLowerCase()), 'shell']
   return [
     'Commands (the slash is optional here):',
     ...(chat ? [row('Chat', chat)] : []),
-    ...groups.map((x) => row(x.g, x.commands.map((c) => c.name).join('  '))),
+    ...groups.map((x) => row(x.g, [...x.commands.map((c) => c.name), ...x.extra].join('  '))),
     row('Shell', SHELL_NAMES.join('  ')),
     '',
     `help <command> explains one · help <group> lists a group in full (${topics.join(', ')})`,
     'Tab completes names and arguments · ↑ ↓ history · Ctrl+R search history · Ctrl+L clear · Ctrl+C cancel line',
+    'Chat and moderation commands act on the current room’s server; add --server <name> to run one on another',
     'cmd | grep text · cmd | head 5 · fortune | juicesay · click a → hint to put it on the prompt',
   ].join('\n')
 }
@@ -214,16 +219,20 @@ function helpText(): string {
 function groupHelp(word: string): string | null {
   const w = word.trim().toLowerCase()
   const entry = (usage: string, description: string): string => `  ${usage}\n      ${description}`
-  const chat = chatCommandsFor()
+  const chat = plainChatCommandsFor()
+  const mod = moderationChatCommandsFor()
+  const modEntries = mod.map((c) => entry(noShare(c.usage), noShare(c.description)))
+  if (w === 'moderation' && mod.length > 0 && !groupsShown().some((x) => x.g === 'Admin')) return ['Moderation:', ...modEntries].join('\n')
   if (w === 'chat' && chat.length > 0) return ['Chat commands (the slash is optional here):', ...chat.filter((c) => c.name !== 'help').map((c) => entry(noShare(c.usage), noShare(c.description)))].join('\n')
   if (w === 'shell') return ['Shell:', ...SHELL_NAMES.map((n) => BUILTIN_HELP[n] ?? n)].join('\n')
   const group = groupsShown().find((x) => x.g.toLowerCase() === w)
   if (!group) return null
-  return [`${group.g}:`, ...group.commands.map((c) => entry(c.usage, c.description))].join('\n')
+  return [`${group.g}:`, ...group.commands.map((c) => entry(c.usage, c.description)), ...(group.g === 'Admin' ? modEntries : [])].join('\n')
 }
 
 const BUILTIN_HELP: Record<string, string> = {
-  cd: 'cd <channel | server/channel | @dm>\n      Switch the room commands run in. Tab completes names.\ncd files\n      Browse the Files tab. Inside it: cd <folder>, cd .., cd / (channels), cd ~ (back to chat).',
+  cd: 'cd <folder>\n      Move around the Files tab: cd <folder>, cd .., cd / (the top), cd ~ (home). Tab completes folders. To switch servers or DMs use room.',
+  room: 'room  ·  room <channel | server/channel | @dm>  ·  room -\n      Show the room chat commands run in and what else is there, or switch to another channel or DM (room - goes back). Tab completes names.',
   ls: 'ls [folder]\n      List the channels in this server, or your DMs. In the file tree, list a folder (size, name).',
   get: 'get <file | folder | *>\n      In the file tree: download a file, a folder as a ZIP (structure kept), or * for the whole current folder.',
   nano: 'nano [file]\n      Open a text editor. In the file tree it loads that file (read-only on the server); ^O saves your edited copy to your computer, ^X exits, ^G lists the keys.',
@@ -236,10 +245,13 @@ const BUILTIN_HELP: Record<string, string> = {
   tree: 'tree [-L depth] [folder]\n      File tree: an indented tree of a folder (two levels by default).',
   du: 'du [folder]\n      File tree: how much is in each subfolder, and in total.',
   source: 'source [-y] [-k] <file>\n      File tree: run the commands in a text file, one per line (# comments and blank lines are skipped). Without -y it only lists what would run; -k keeps going after an error.',
-  pwd: 'pwd\n      Show which room commands run in.',
+  pwd: 'pwd\n      Show your folder in the file tree, and the room chat commands run in.',
   whoami: 'whoami\n      Show who you are signed in as.',
   clear: 'clear\n      Wipe the screen (Ctrl+L).',
   exit: 'exit\n      Close the terminal (Ctrl+D on an empty line).',
+  alias: 'alias  ·  alias <name>  ·  alias <name>=<command…>\n      List your aliases, show one, or define a shortcut for a command line (kept across restarts). Remove one with unalias.',
+  unalias: 'unalias <name>\n      Remove an alias you defined.',
+  man: 'man [command]\n      Same as help.',
 }
 
 // `help <command>`: just that command, found by name or alias ("commit" is
@@ -419,8 +431,8 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
 
   const changeRoom = (arg: string): void => {
     const target = arg.replace(/^[#@]/, '').replace(/^\.\//, '').trim()
-    if (!target) { print('usage: cd <channel | server/channel | @dm>', 'error'); return }
-    if (locked.current > 0) { print('cd: can’t change rooms inside a script or watch', 'error'); return }
+    if (!target) { print('usage: room <channel | server/channel | @dm>', 'error'); return }
+    if (locked.current > 0) { print('room: can’t change rooms inside a script or watch', 'error'); return }
     const cs = useChatStore.getState()
     const norm = slug(target)
     const [serverPart, channelPart] = norm.includes('/') ? norm.split('/', 2) : [null, norm]
@@ -433,16 +445,39 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     }
     const conv = cs.conversations.find((c) => slug(conversationTitle(c, cs.meId)) === norm.replace(/^dm\//, ''))
     if (conv) { shell.prevRoom = room; cs.openRoom({ kind: 'conversation', id: conv.id }); return }
-    print(`cd: ${arg}: no such room`, 'error')
+    print(`room: ${arg}: no such room`, 'error')
   }
 
+  // `room` alone: where chat commands run now, and the rooms you can switch to
+  // (this server's channels, the other servers, and your DMs).
   const listRooms = (): void => {
     const cs = useChatStore.getState()
     const server = cs.activeServerId !== null ? cs.servers.find((x) => x.id === cs.activeServerId) : null
-    const names = server
-      ? server.channels.map((c) => `${slug(c.name)}${c.is_private ? '*' : ''}`)
-      : cs.conversations.map((c) => `@${slug(conversationTitle(c, cs.meId))}`)
-    print(names.length ? names.join('  ') : '(empty)', names.length ? 'plain' : 'dim')
+    const channels = server ? server.channels.map((c) => `${slug(c.name)}${c.is_private ? '*' : ''}`) : []
+    const dms = cs.conversations.map((c) => `@${slug(conversationTitle(c, cs.meId))}`)
+    const others = cs.servers.filter((x) => x !== server).map((x) => `${slug(x.name)}/`)
+    print([
+      `in ${chatPath}`,
+      ...(channels.length ? [`  ${server ? `${slug(server.name)}: ` : ''}${channels.join('  ')}`] : []),
+      ...(others.length ? [`  servers: ${others.join('  ')}`] : []),
+      ...(dms.length ? [`  dms: ${dms.join('  ')}`] : []),
+    ].join('\n'))
+  }
+
+  const runRoom = (arg: string): boolean => {
+    if (!hasChat) { print('room: chat is only for staff accounts', 'error'); return true }
+    const target = unquote(arg).trim()
+    if (!target) { listRooms(); return true }
+    if (target === '-') {
+      const back = shell.prevRoom
+      if (locked.current > 0) { print('room: can’t change rooms inside a script or watch', 'error'); return true }
+      if (!back) { print('room: no previous room', 'error'); return true }
+      shell.prevRoom = room
+      useChatStore.getState().openRoom(back)
+      return true
+    }
+    changeRoom(target)
+    return true
   }
 
   const enterFiles = async (sub: string): Promise<boolean> => {
@@ -456,34 +491,9 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
 
   const changeDir = (arg: string): boolean | Promise<boolean> => {
     const target = unquote(arg)
-    if (shell.mode === 'chat') {
-      const files = /^(?:~\/|\/)?files(?:\/(.*))?$/i.exec(target)
-      if (files) return enterFiles(files[1] ?? '')
-      if (target === '-') {
-        const back = shell.prevRoom
-        if (locked.current > 0) { print('cd: can’t change rooms inside a script or watch', 'error'); return true }
-        if (!back) { print('cd: no previous room', 'error'); return true }
-        shell.prevRoom = room
-        useChatStore.getState().openRoom(back)
-        return true
-      }
-      changeRoom(arg)
-      return true
-    }
-    // In the file tree `~` is home: back to chat (and a #channel / @dm goes
-    // straight to that room).
-    if (target === '~' || /^\/?chat\/?$/i.test(target) || /^[#@]/.test(target)) {
-      // Without chat there are no rooms to go back to: home is the file tree's.
-      if (!hasChat) {
-        if (target === '~') return enterFiles('')
-        print(`cd: ${arg}: chat is only for staff accounts`, 'error')
-        return true
-      }
-      shell.mode = 'chat'
-      bump((n) => n + 1)
-      if (/^[#@]/.test(target)) changeRoom(arg)
-      return true
-    }
+    // Rooms have their own command; say so rather than looking for a folder.
+    if (/^[#@]/.test(target)) { print(`cd: that is a room - use: room ${target}`, 'error'); return true }
+    if (target === '~' || /^\/?files\/?$/i.test(target)) return enterFiles('')
     return resolveDir(shell.cwd, target || '/').then((cwd) => { shell.cwd = cwd; bump((n) => n + 1); return true })
   }
 
@@ -599,7 +609,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         if (!arg.trim()) { setEditor({ name: '', text: '', existed: true }); return true }
         return openTextFile(cwd, arg).then((file) => { setEditor(file); return true })
       }
-      case 'pwd': print(path); return true
+      case 'pwd': print(hasChat ? `${path}\nroom ${chatPath}` : path); return true
       case 'whoami': print(account ? `${user}   id ${account.id} · ${me?.role ?? 'user'}` : 'guest (not signed in)'); return true
       case 'man': return builtin(arg ? `help ${arg}` : 'help')
       case 'alias': {
@@ -624,11 +634,9 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         print(`removed alias ${arg.trim()}`, 'ok')
         return true
       }
-      case 'ls': case 'dir':
-        if (shell.mode === 'files') return listFiles(arg)
-        listRooms()
-        return true
+      case 'ls': case 'dir': return listFiles(arg)
       case 'cd': return changeDir(arg)
+      case 'room': case 'rooms': return runRoom(arg)
       case 'get': case 'download': case 'dl': {
         if (shell.mode !== 'files') { print('get: only works in the file tree (try: cd files)', 'error'); return true }
         return downloadPath(shell.cwd, arg).then((r) => { print(r.message, r.message === 'cancelled' ? 'dim' : 'ok'); return true })
@@ -706,7 +714,15 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
 
   const printFailure = (err: unknown, fallback: string): void => {
     if (abortRef.current?.signal.aborted) print('cancelled', 'dim')
-    else print(errorText(err, fallback), 'error')
+    else {
+      // errorText swaps any message over 160 characters for the fallback, which
+      // turned a long usage line (`open` with no argument lists every page) into
+      // a bare "Command failed". The terminal prints the message as it is, and
+      // shows a usage hint as a hint rather than as a failure.
+      const msg = (err as Error)?.message
+      if (msg && /^usage:/i.test(msg)) print(msg, 'dim')
+      else print(msg && msg.length < 1000 ? msg : fallback, 'error')
+    }
   }
 
   const executeInner = async (line: string): Promise<void> => {
@@ -746,17 +762,47 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     // chat) reads as unknown, same as in help and Tab.
     const chatCommand = findChatCommand(word)
     if (chatCommand ? !chatCommandsFor().includes(chatCommand) : !hasChat) { notFound(); return }
-    const runner = getTerminalRunner(key)
-    if (!runner) { print('room not ready yet - try again in a moment', 'error'); return }
-    s.search = []
+    // `--server <name>` runs the command against another server: the terminal
+    // steps into that server's first channel for the command, then back.
+    let runLine = line
+    let runKey = key
+    let restore: RoomRef | null = null
+    const serverFlag = /(?:^|\s)--server(?:=|\s+)(\S+)/i.exec(line)
+    if (serverFlag) {
+      runLine = line.replace(serverFlag[0], '').trim()
+      const cs = useChatStore.getState()
+      const q = slug(serverFlag[1])
+      const all = cs.servers
+      const hits = all.filter((x) => slug(x.name) === q)
+      const pool = hits.length ? hits : all.filter((x) => slug(x.name).startsWith(q))
+      if (pool.length !== 1) { print(pool.length ? `--server ${serverFlag[1]}: more than one server matches` : `--server ${serverFlag[1]}: no such server (${all.map((x) => slug(x.name)).join(', ') || 'none'})`, 'error'); return }
+      const channel = pool[0].channels[0]
+      if (!channel) { print(`--server ${serverFlag[1]}: that server has no channels`, 'error'); return }
+      const inside = room.kind === 'channel' && pool[0].channels.some((c) => c.id === room.id)
+      if (!inside) {
+        const target: RoomRef = { kind: 'channel', id: channel.id }
+        runKey = roomKey(target)
+        if (room.id !== 0) restore = room
+        cs.openRoom(target)
+      }
+    }
     setBusy(true)
     try {
-      const resolved = await resolveHandles(line, people)
+      if (runKey !== key) {
+        // The new room's composer registers its runner once it has mounted.
+        for (let i = 0; i < 60 && !getTerminalRunner(runKey); i++) await new Promise((r) => setTimeout(r, 50))
+        await new Promise((r) => setTimeout(r, 300)) // let its member list load
+      }
+      const runner = getTerminalRunner(runKey)
+      if (!runner) { print('room not ready yet - try again in a moment', 'error'); return }
+      s.search = []
+      const resolved = await resolveHandles(runLine, runKey === key ? people : [])
       const handled = await runner(resolved.startsWith('/') ? resolved : `/${resolved}`, sink)
       if (!handled) notFound()
     } catch (err) {
       printFailure(err, 'Command failed')
     } finally {
+      if (restore) useChatStore.getState().openRoom(restore)
       setBusy(false)
       requestAnimationFrame(() => field.current?.focus())
     }
@@ -826,7 +872,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     const head = input.slice(0, input.length - token.length)
     if (shell.mode === 'files' && PATH_WORDS.has(word) && !/^[#@]/.test(token)) {
       void completeFiles(word)
-    } else if (word === 'cd') {
+    } else if (word === 'room' || word === 'rooms') {
       const sigil = /^[#@]/.exec(token)?.[0] ?? ''
       const pool = roomCandidates().filter((r) => (sigil === '@' ? r.dm : sigil === '#' ? !r.dm : true))
       finishCompletion(head, sigil, pool.map((r) => r.name), token.slice(sigil.length), false)
