@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore'
 import { EQ_PRESETS } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
 import { resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { loadCatalog, statsSongToTrack } from '../statsCatalog'
 import { clock, fail, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -32,6 +33,16 @@ function parseSeek(arg: string, now: number, duration: number): number {
   else if ((m = /^(\d+(?:\.\d+)?)s?$/i.exec(arg))) target = Number(m[1])
   else return fail('usage: seek <+10 | -10 | 1:30 | 90 | 50%>')
   return Math.max(0, duration > 0 ? Math.min(target, duration) : target)
+}
+
+export function progressBar(now: number, total: number, width = 24): string {
+  const filled = total > 0 ? Math.max(0, Math.min(width, Math.round((now / total) * width))) : 0
+  return `[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]`
+}
+
+async function eraNames(): Promise<string[]> {
+  const catalog = await loadCatalog()
+  return [...new Set([...catalog.values()].map((s) => s.era?.name).filter((n): n is string => !!n))].sort()
 }
 
 const trackLine = (t: { title: string; artist?: string }): string => `${t.title}${t.artist ? ` - ${t.artist}` : ''}`
@@ -103,12 +114,38 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'shuffle', group: 'Player', usage: 'shuffle [on|off]', description: 'Turn shuffle on or off (no argument toggles)',
-    complete: (before, partial) => (before.length === 0 ? ['on', 'off'].filter((w) => w.startsWith(partial)) : []),
-    run: (args, ctx) => {
-      const want = args.trim() ? parseBool(args) ?? fail('usage: shuffle [on|off]') : !st().shuffle
-      if (want !== st().shuffle) st().toggleShuffle()
-      ctx.print(`shuffle ${st().shuffle ? 'on' : 'off'}`, 'ok')
+    name: 'shuffle', group: 'Player', usage: 'shuffle [on|off]  ·  shuffle <era> [count]', description: 'Turn shuffle on or off (no argument toggles); or queue a random pick of songs from an era (default 40) and play it',
+    complete: async (before, partial) => {
+      const full = [...before, partial].join(' ').toLowerCase()
+      const modes = before.length === 0 ? ['on', 'off'].filter((w) => w.startsWith(partial)) : []
+      const eras = (await eraNames()).filter((n) => n.toLowerCase().startsWith(full)).map((n) => n.split(' ').slice(before.length).join(' '))
+      return [...modes, ...eras]
+    },
+    run: async (args, ctx) => {
+      const typed = args.trim()
+      const bool = typed ? parseBool(typed) : null
+      if (!typed || bool !== null) {
+        const want = typed ? bool! : !st().shuffle
+        if (want !== st().shuffle) st().toggleShuffle()
+        ctx.print(`shuffle ${st().shuffle ? 'on' : 'off'}`, 'ok')
+        return
+      }
+      const countWord = /\s(\d+)$/.exec(typed)
+      const count = Math.min(200, Math.max(1, countWord ? Number(countWord[1]) : 40))
+      const name = (countWord ? typed.slice(0, countWord.index) : typed).trim()
+      const catalog = await loadCatalog()
+      const names = await eraNames()
+      const era = pickByName(names, (n) => n, name) ?? fail(`no single era matches "${name}" (try: shuffle <tab>)`)
+      const pool = [...catalog.values()].filter((s) => s.era?.name === era)
+      if (pool.length === 0) fail(`no songs in ${era}`)
+      // Fisher-Yates, then the first `count`.
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]]
+      }
+      const picks = pool.slice(0, count)
+      st().playCollection(picks.map(statsSongToTrack), null, null)
+      ctx.print(`playing ${picks.length} random song${picks.length === 1 ? '' : 's'} from ${era}`, 'ok')
     },
   },
   {
@@ -137,7 +174,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       const dur = getAudioDuration() || t?.duration || 0
       const lines = [
         t ? `${s.isPlaying ? '▶' : '⏸'} ${trackLine(t)}` : 'nothing playing',
-        ...(t ? [`  ${clock(getAudioCurrentTime())}${dur ? ` / ${clock(dur)}` : ''}${s.likedTrackIds.includes(t.id) ? '  ♥' : ''}`] : []),
+        ...(t ? [`  ${progressBar(getAudioCurrentTime(), dur)} ${clock(getAudioCurrentTime())}${dur ? ` / ${clock(dur)}` : ''}${s.likedTrackIds.includes(t.id) ? '  ♥' : ''}`] : []),
         `volume ${Math.round(s.volume * 100)}%  speed ${s.playbackSpeed}x  shuffle ${s.shuffle ? 'on' : 'off'}  repeat ${s.repeat}`,
         `queue ${s.queue.length} track${s.queue.length === 1 ? '' : 's'}${s.queueIndex >= 0 ? ` (at ${s.queueIndex + 1})` : ''}`,
         ...(s.sleepTimerEnd ? [`sleep timer: ${clock(Math.max(0, (s.sleepTimerEnd - Date.now()) / 1000))} left`] : []),

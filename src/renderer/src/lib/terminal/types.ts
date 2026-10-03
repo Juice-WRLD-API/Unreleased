@@ -1,3 +1,6 @@
+import type { ChatUserBrief } from '../chatApi'
+import type { RoomRef } from '../../store/chatStore'
+
 // Terminal commands beyond the chat slash commands: the admin terminal's way of
 // doing what the UI does (playback, settings, library, navigation, review
 // queues, ...). Each one calls the same store actions and API functions the
@@ -5,13 +8,35 @@
 // can't proceed throws an Error with a short message; the terminal prints it.
 export type TermTone = 'error' | 'ok' | 'plain' | 'dim'
 
+/** A full-panel mode a command can hand the terminal (it replaces the scrollback
+ *  until the user leaves it, then the shell is back as it was). */
+export type TermScreen =
+  | { kind: 'matrix' }
+  | { kind: 'visualizer' }
+  | { kind: 'karaoke' }
+  | { kind: 'watch'; command: string; seconds: number }
+  | { kind: 'wordle'; unlimited: boolean }
+  | { kind: 'heardle' }
+
 export interface TermCtx {
   print: (text: string, tone?: TermTone) => void
-  /** Commands typed in this room's terminal, oldest first. */
+  /** Open a full-panel screen. Refused inside a script. */
+  screen: (screen: TermScreen) => void
+  /** Run a command line as if it were typed (echoed in the scrollback). Resolves
+   *  false when the line printed an error. */
+  exec: (line: string) => Promise<boolean>
+  /** Whether the line is running from a script (`source`), where interactive
+   *  commands have to refuse. */
+  scripted: boolean
+  /** Commands typed in the terminal, oldest first. */
   history: () => string[]
+  /** The room the terminal is attached to (where `say`, `log` and chat commands act). */
+  room: RoomRef
+  /** Members of that room. */
+  people: ChatUserBrief[]
 }
 
-export type TermGroup = 'Player' | 'Library' | 'Navigation' | 'Settings' | 'Admin' | 'App'
+export type TermGroup = 'Fun' | 'People' | 'Player' | 'Library' | 'Navigation' | 'Settings' | 'Admin' | 'App'
 
 export interface TermCommand {
   name: string
@@ -21,7 +46,7 @@ export interface TermCommand {
   description: string
   run: (args: string, ctx: TermCtx) => void | Promise<void>
   /** Tab candidates for the token being typed, given the tokens before it. */
-  complete?: (before: string[], partial: string) => string[]
+  complete?: (before: string[], partial: string) => string[] | Promise<string[]>
 }
 
 export const fail = (message: string): never => { throw new Error(message) }

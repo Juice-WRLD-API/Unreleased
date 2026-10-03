@@ -123,6 +123,12 @@ function applySetting(s: Setting, raw: string): void {
   }
 }
 
+/** Settings whose key or description mentions `q` - for the terminal's lookup. */
+export function searchSettings(q: string): { key: string; value: string; desc: string }[] {
+  const needle = q.trim().toLowerCase()
+  return SETTINGS.filter((s) => s.key.includes(needle) || s.desc.toLowerCase().includes(needle)).map((s) => ({ key: s.key, value: show(s), desc: s.desc }))
+}
+
 export const SETTINGS_COMMANDS: TermCommand[] = [
   {
     name: 'settings', group: 'Settings', usage: 'settings [filter]', description: 'List every setting you can change here with its current value',

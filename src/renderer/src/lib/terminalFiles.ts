@@ -109,6 +109,49 @@ export function splitTyped(arg: string): { dirPart: string; prefix: string } {
   return slash === -1 ? { dirPart: '', prefix: arg } : { dirPart: arg.slice(0, slash + 1), prefix: arg.slice(slash + 1) }
 }
 
+const EDIT_MAX_BYTES = 2 * 1024 * 1024
+
+export interface EditorFile {
+  name: string
+  text: string
+  /** False when the name doesn't exist (yet): nano opens it as a new file. */
+  existed: boolean
+}
+
+/** Fetches a file the way the Files tab's text viewer does (the stream URL,
+ *  2 MB cap, binary files refused). `cmd` and `label` only shape the error. */
+export async function fetchEntryText(entry: JWApiFileEntry, channel: string, cmd: string, label: string): Promise<string> {
+  const res = await fetch(buildStreamUrl(entry.path, channel))
+  if (!res.ok) throw new Error(`${cmd}: ${label}: couldn't load (HTTP ${res.status})`)
+  const buf = await res.arrayBuffer()
+  if (buf.byteLength > EDIT_MAX_BYTES) throw new Error(`${cmd}: ${label}: too large (${formatBytes(buf.byteLength)}, limit ${formatBytes(EDIT_MAX_BYTES)})`)
+  const bytes = new Uint8Array(buf)
+  if (bytes.subarray(0, 8000).includes(0)) throw new Error(`${cmd}: ${label}: looks like a binary file`)
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+/** Finds `typed` ("name", "a/b/name", "/chan/a/name") from `cwd`: the folder
+ *  it sits in, and the entry itself (null when nothing by that name is there). */
+export async function lookupEntry(cwd: FilesCwd, typedArg: string, cmd: string): Promise<{ parent: FilesCwd; leaf: string; entry: FsEntry | null }> {
+  const typed = unquote(typedArg)
+  const slash = typed.lastIndexOf('/')
+  const leaf = typed.slice(slash + 1)
+  if (!leaf) throw new Error(`${cmd}: no file name`)
+  const parent = slash === -1 ? cwd : await resolveDir(cwd, typed.slice(0, slash + 1))
+  if (parent.channel === null) return { parent, leaf, entry: null }
+  return { parent, leaf, entry: (await listDir(parent)).find((e) => norm(e.name) === norm(leaf)) ?? null }
+}
+
+/** `nano <path>`: loads a text file from the tree. A name that isn't there
+ *  opens empty; the server side is read-only, so the editor's "write out"
+ *  saves a copy to the user's machine rather than back here. */
+export async function openTextFile(cwd: FilesCwd, arg: string): Promise<EditorFile> {
+  const { parent, leaf, entry } = await lookupEntry(cwd, arg, 'nano')
+  if (!entry) return { name: leaf, text: '', existed: false }
+  if (entry.type === 'directory' || !entry.entry || parent.channel === null) throw new Error(`nano: ${unquote(arg)}: is a directory`)
+  return { name: entry.name, text: await fetchEntryText(entry.entry, parent.channel, 'nano', unquote(arg)), existed: true }
+}
+
 export interface DownloadResult {
   message: string
 }
