@@ -24,6 +24,7 @@ import {
 import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
 import { useEditorPageState } from '../hooks/useEditorPageState'
 import { clickable } from '../lib/a11y'
+import LyricsSyncTool from './LyricsSyncTool'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -361,7 +362,7 @@ export default function EditorPage({ initialSongId = null }: {
     instrumentals, setInstrumentals, instrumentalNames, setInstrumentalNames,
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable,
+    syncedTable, setSyncedTable, syncTool, setSyncTool,
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,
     showMore, setShowMore,
@@ -647,6 +648,15 @@ export default function EditorPage({ initialSongId = null }: {
                 <div className="flex items-center gap-0.5">
                   {lyricsTab === 'synced' && (
                     <button
+                      onClick={() => setSyncTool(v => !v)}
+                      title="Stamp each line's time while the song plays"
+                      className={`px-1.5 py-1 rounded-lg text-[10px] font-semibold transition-colors ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
+                    >
+                      Sync
+                    </button>
+                  )}
+                  {lyricsTab === 'synced' && !syncTool && (
+                    <button
                       onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
                       title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
                       className="px-1.5 py-1 rounded-lg text-[10px] font-semibold text-text-muted opacity-60 active:opacity-100 transition-opacity"
@@ -696,6 +706,8 @@ export default function EditorPage({ initialSongId = null }: {
                     </div>
                   )}
                 </div>
+              ) : syncTool ? (
+                <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
               ) : syncedTable ? (
                 <SyncedLyricsTable value={synced} onChange={setSynced} />
               ) : (

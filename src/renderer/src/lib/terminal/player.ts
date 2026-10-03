@@ -22,6 +22,19 @@ export async function songFromArg(arg: string): Promise<JWApiSong> {
   return (await resolveTitleToSong(arg)) ?? fail(`no song found for "${arg}"`)
 }
 
+/** Tab candidates for a song title typed over several words. `before` is the
+ *  title's words so far (not the command's other arguments) and `partial` the
+ *  word being typed; each candidate is only the rest of the title from that word
+ *  on, because the prompt keeps what was already typed. */
+export async function completeSongs(before: string[], partial: string): Promise<string[]> {
+  const typed = [...before, partial].join(' ').trim().toLowerCase()
+  // A bare number is a pick from the last find, not the start of a title.
+  if (typed.length < 2 || /^\d+$/.test(typed)) return []
+  const skip = before.length > 0 ? before.join(' ').length + 1 : 0
+  const results = await searchSongs(typed, 15)
+  return results.map((s) => s.name).filter((n) => n.toLowerCase().startsWith(typed)).map((n) => n.slice(skip))
+}
+
 function parseSeek(arg: string, now: number, duration: number): number {
   let target: number
   let m = /^([+-])(\d+(?:\.\d+)?)(s|m)?$/i.exec(arg)
@@ -50,7 +63,8 @@ const trackLine = (t: { title: string; artist?: string }): string => `${t.title}
 export const PLAYER_COMMANDS: TermCommand[] = [
   {
     name: 'play', group: 'Player', usage: 'play [title | N]',
-    description: 'Resume playback, or play a song by title (or by its number from the last find)',
+    description: 'Resume playback, or play a song by title (or by its number from the last find). Tab completes titles',
+    complete: completeSongs,
     run: async (args, ctx) => {
       const arg = args.trim()
       if (!arg) { currentTrack(); runHotkeyAction('play'); ctx.print('▶ playing', 'ok'); return }
@@ -184,6 +198,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
   },
   {
     name: 'find', aliases: ['f'], group: 'Player', usage: 'find <title>', description: 'Search the song library and number the results (then play N / queue add N)',
+    complete: completeSongs,
     run: async (args, ctx) => {
       const q = args.trim()
       if (!q) fail('usage: find <title>')
@@ -196,7 +211,10 @@ export const PLAYER_COMMANDS: TermCommand[] = [
   {
     name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list | clear | add <song> | next <song> | remove N | jump N]',
     description: 'Show or change the play queue. <song> is a title or a number from find',
-    complete: (before, partial) => (before.length === 0 ? ['list', 'clear', 'add', 'next', 'remove', 'jump'].filter((w) => w.startsWith(partial)) : []),
+    complete: (before, partial) => {
+      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump'].filter((w) => w.startsWith(partial))
+      return ['add', 'next'].includes(before[0].toLowerCase()) ? completeSongs(before.slice(1), partial) : []
+    },
     run: async (args, ctx) => {
       const [sub = 'list', ...restWords] = args.trim().split(/\s+/)
       const rest = restWords.join(' ')

@@ -34,8 +34,8 @@ const LOOKUP: TermCommand = {
     const [people, songs] = await Promise.all([directory(), searchSongs(q, 5).catch(() => [])])
     const users = matchUsers(people, q)
     const rooms = [
-      ...cs.servers.flatMap((srv) => srv.channels.filter((c) => norm(c.name).includes(ql) || norm(srv.name).includes(ql)).map((c) => `#${c.name.replace(/\s+/g, '-')}  in ${srv.name}   → cd ${srv.id === cs.activeServerId ? '' : `${srv.name.toLowerCase().replace(/\s+/g, '-')}/`}${c.name.toLowerCase().replace(/\s+/g, '-')}`)),
-      ...cs.conversations.filter((c) => norm(conversationTitle(c, cs.meId)).includes(ql)).map((c) => `@${conversationTitle(c, cs.meId)}   → cd @${conversationTitle(c, cs.meId).toLowerCase().replace(/\s+/g, '-')}`),
+      ...cs.servers.flatMap((srv) => srv.channels.filter((c) => norm(c.name).includes(ql) || norm(srv.name).includes(ql)).map((c) => `#${c.name.replace(/\s+/g, '-')}  in ${srv.name}   → room ${srv.id === cs.activeServerId ? '' : `${srv.name.toLowerCase().replace(/\s+/g, '-')}/`}${c.name.toLowerCase().replace(/\s+/g, '-')}`)),
+      ...cs.conversations.filter((c) => norm(conversationTitle(c, cs.meId)).includes(ql)).map((c) => `@${conversationTitle(c, cs.meId)}   → room @${conversationTitle(c, cs.meId).toLowerCase().replace(/\s+/g, '-')}`),
     ]
     const playlists = useStore.getState().playlists.filter((p) => norm(p.name).includes(ql)).map((p) => `${p.name}  (${p.track_count})   → playlist play ${p.name}`)
     const settings = searchSettings(q).map((s) => `${s.key} = ${s.value}   → set ${s.key} <value>`)

@@ -18,6 +18,7 @@ import {
 import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
 import { useEditorPageState, type LyricsTab } from '../hooks/useEditorPageState'
 import { clickable } from '../lib/a11y'
+import LyricsSyncTool from './LyricsSyncTool'
 
 /* ── Card - grouped section container ─────────────────────────────────────── */
 export function Card({ title, icon, action, children, className = '', overflowVisible = false }: {
@@ -399,7 +400,7 @@ export default function EditorPage({ initialSongId = null }: {
     instrumentals, setInstrumentals, instrumentalNames, setInstrumentalNames,
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable,
+    syncedTable, setSyncedTable, syncTool, setSyncTool,
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,
     showMore, setShowMore,
@@ -600,6 +601,15 @@ export default function EditorPage({ initialSongId = null }: {
                         <span className="flex-1" />
                         {showSynced && (
                           <button
+                            onClick={() => setSyncTool(v => !v)}
+                            title="Stamp each line's time while the song plays"
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
+                          >
+                            Sync
+                          </button>
+                        )}
+                        {showSynced && !syncTool && (
+                          <button
                             onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
                             title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
                             className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
@@ -623,7 +633,9 @@ export default function EditorPage({ initialSongId = null }: {
                           )
                         })}
                       </div>
-                      {showSynced && syncedTable ? (
+                      {showSynced && syncTool ? (
+                        <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
+                      ) : showSynced && syncedTable ? (
                         <SyncedLyricsTable value={synced} onChange={setSynced} />
                       ) : (
                         <textarea
@@ -977,6 +989,15 @@ export default function EditorPage({ initialSongId = null }: {
                     <div className="flex items-center gap-1">
                       {lyricsTab === 'synced' && (
                         <button
+                          onClick={() => setSyncTool(v => !v)}
+                          title="Stamp each line's time while the song plays"
+                          className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-all ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
+                        >
+                          Sync
+                        </button>
+                      )}
+                      {lyricsTab === 'synced' && !syncTool && (
+                        <button
                           onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
                           title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
                           className="px-2 py-1 rounded-lg text-[11px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
@@ -1026,6 +1047,8 @@ export default function EditorPage({ initialSongId = null }: {
                         </div>
                       )}
                     </div>
+                  ) : syncTool ? (
+                    <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
                   ) : syncedTable ? (
                     <SyncedLyricsTable value={synced} onChange={setSynced} />
                   ) : (

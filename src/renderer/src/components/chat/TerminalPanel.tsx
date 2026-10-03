@@ -14,6 +14,7 @@ import { useStore } from '../../store/useStore'
 import { useRoomPeople } from './people'
 import { errorText } from './ui'
 import NanoEditor from './NanoEditor'
+import { colorLine } from './termColor'
 import TerminalScreen from './TerminalScreens'
 
 type NewEntry =
@@ -274,8 +275,12 @@ function commandHelp(word: string): string | null {
 
 function noticeText(payload: LocalNoticePayload): string {
   if (payload.kind === 'feedbackSent') return `Feedback sent: ${payload.message}`
+  // A command's plain answer reads as a tagged line, coloured like the others.
+  if (payload.kind === 'result') return `[${payload.title}] ${payload.text}`
   return stripMarkdown(commandCardText(payload) ?? '')
 }
+
+const HELP_LABELS = new Set([...TERM_GROUPS, 'Chat', 'Shell', 'Moderation'])
 
 const LINK = 'underline decoration-dotted underline-offset-2 cursor-pointer hover:text-[color:var(--t-accent)]'
 
@@ -289,6 +294,11 @@ function linkLine(line: string, onPick: (command: string) => void): JSX.Element 
   // still goes through the link handling below.
   const heading = /^([A-Z][^:\n]{0,48}):$/.exec(line)
   if (heading) return <span className="text-[color:var(--t-path)] font-semibold">{line}</span>
+  // The `help` index: "  Player    play pause ...", a group name then its commands.
+  const row = /^(  )([A-Z][A-Za-z]+)( {2,})(\S.*)$/.exec(line)
+  if (row && HELP_LABELS.has(row[2])) {
+    return <>{row[1]}<span className="text-[color:var(--t-path)] font-semibold">{row[2]}</span>{row[3]}{row[4]}</>
+  }
   const tagged = /^(\s*)\[([^\]\s][^\]]{0,23})\](.*)$/.exec(line)
   const rest = tagged ? tagged[3] : line
   const meta = /^(.*?)( - \S+, [A-Z][a-z]{2} \d{1,2}, \d{4}, .*)$/.exec(rest)
@@ -312,6 +322,14 @@ function linkLine(line: string, onPick: (command: string) => void): JSX.Element 
       </>
     )
   }
+  const colored = colorLine(line, (t) => plainLinks(t, onPick))
+  if (colored !== null) return <>{colored}</>
+  return plainLinks(line, onPick)
+}
+
+// The "→ command" and @handle links, for a stretch of output with no colouring
+// of its own.
+function plainLinks(line: string, onPick: (command: string) => void): JSX.Element | string {
   const arrow = /^(.*→ )(\S.*)$/.exec(line)
   if (arrow) {
     const command = arrow[2]

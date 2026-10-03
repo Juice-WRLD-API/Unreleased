@@ -5,7 +5,9 @@ import type { ViewType } from '../../types'
 import { APP_VERSION, COMMIT_HASH, fetchRunningCommit } from '../appVersion'
 import { cancelZipTask, isZipTaskId } from '../clientZip'
 import { formatBytes } from '../format'
+import { getToken } from '../userApi'
 import { termAccess } from './access'
+import { completeSongs } from './player'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -38,6 +40,7 @@ export const APP_COMMANDS: TermCommand[] = [
       if (before.length === 0) return OPEN_TARGETS.filter((t) => t.startsWith(p) && offered(t))
       if (before.length === 1 && before[0].toLowerCase() === 'settings') return SETTINGS_TABS.filter((t) => t.startsWith(p))
       if (before.length === 1 && before[0].toLowerCase() === 'admin') return ADMIN_TABS.filter((t) => t.startsWith(p))
+      if (before.length >= 1 && before[0].toLowerCase() === 'song') return completeSongs(before.slice(1), partial)
       return []
     },
     run: async (args, ctx) => {
@@ -77,6 +80,30 @@ export const APP_COMMANDS: TermCommand[] = [
       }
       const view = VIEWS[key] ?? VIEWS[pickByName(Object.keys(VIEWS), (k) => k, key) ?? ''] ?? fail(`no page "${target}" (try: open home)`)
       s.setActiveView(view)
+    },
+  },
+  {
+    name: 'token', aliases: ['apikey', 'api-key'], group: 'App', usage: 'token [show | copy]',
+    description: 'The API token for your account (the Authorization: Token value the app sends). Masked unless you say show; copy puts it on the clipboard. Treat it like a password',
+    complete: (before, partial) => (before.length === 0 ? ['show', 'copy'].filter((w) => w.startsWith(partial.toLowerCase())) : []),
+    run: async (args, ctx) => {
+      const mode = args.trim().toLowerCase()
+      if (mode && mode !== 'show' && mode !== 'copy') fail('usage: token [show | copy]')
+      const token = getToken() ?? fail('not signed in, so there is no token')
+      // A script (`source`) runs lines nobody typed, so it doesn't get to read secrets.
+      if (mode && ctx.scripted) fail(`token ${mode}: not available from a script`)
+      if (mode === 'copy') {
+        try { await navigator.clipboard.writeText(token) } catch { fail('the clipboard is not available here (try: token show)') }
+        ctx.print('token copied to the clipboard', 'ok')
+        return
+      }
+      if (mode === 'show') {
+        ctx.print(`${token}
+Send it as  Authorization: Token <value>.  Anyone who has it can act as you; clear wipes this screen.`)
+        return
+      }
+      ctx.print(`${token.slice(0, 4)}${'•'.repeat(Math.max(4, Math.min(24, token.length - 8)))}${token.slice(-4)}
+token show prints it in full · token copy puts it on the clipboard`)
     },
   },
   {
