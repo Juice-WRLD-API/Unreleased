@@ -64,6 +64,7 @@ function OverviewTab() {
           <Endpoint method="GET" path="/eras/" description="All eras, paginated (34 total, 20 per page)" />
           <Endpoint method="GET" path="/eras/{id}/" description="Single era by ID" />
           <Endpoint method="GET" path="/stats/" description="Database-wide counts by category and era" />
+          <Endpoint method="GET" path="/playable_songs/" description="Every song that has a file attached: id, name, path" />
           <Endpoint method="GET" path="/radio/random/" description="Random playable song with full metadata" />
           <Endpoint method="GET" path="/radio/live/" description="Live 999 FM station state: now playing, votes, listeners" />
           <Endpoint method="GET" path="/radio/library/" description="Track list backing the live station, grouped by era" />
@@ -403,6 +404,21 @@ function SongsTab() {
         <p className="text-xs text-text-muted">Era keys in <Code>era_stats</Code> match the <Code>name</Code> field from <Code>/eras/</Code>.</p>
       </Section>
 
+      <Section title="GET /playable_songs/">
+        <p className="text-sm text-text-secondary">
+          Every song that has a file attached, in one lightweight response, for clients that only need to know what can be played. Cached for 15 minutes.
+        </p>
+        <Pre>{`{
+  "count": 9800,
+  "results": [
+    { "id": "ab12cd", "name": "Song Title", "path": "Compilation/1. Released Discography/.../song.mp3" }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>id</Code> is the song's <Code>public_id</Code>, or the numeric internal id for songs that have none, so it is not always usable with <Code>{'/songs/{id}/'}</Code> (which wants the internal id). Match on <Code>path</Code> or <Code>name</Code> if you need to join against other responses.
+        </p>
+      </Section>
+
       <Section title="GET /radio/random/">
         <p className="text-sm text-text-secondary">Returns a random playable song with full metadata and stream path.</p>
         <Pre>{`{
@@ -625,18 +641,43 @@ function PlaylistsTab() {
           <div>
             <MethodPath method="POST" path={`/playlists/share/`} />
             <Pre>{`// Request
-{ "paths": ["Compilation/song1.mp3", "Compilation/song2.mp3"] }
+{
+  "name": "Late night drive",          // optional, max 200 chars (default "Untitled Playlist")
+  "description": "optional text",
+  "songs": [101, 205, 4120],           // required: 1 to 1000 song IDs, all must exist
+  "current_song_id": 205,              // optional
+  "mode": "shuffle",                   // normal (default) | shuffle | radio | repeat-one | repeat-all
+  "expires_at": "2026-12-31T00:00:00Z" // optional, null = never expires
+}
 
-// Response
-{ "share_id": "abc123..." }`}</Pre>
+// Response (201)
+{
+  "success": true,
+  "share_id": "abc123XYZ789",
+  "playlist": { "share_id": "...", "name": "...", "songs": [101, 205, 4120], "mode": "shuffle", "created_at": "...", "expires_at": null, "view_count": 0, "song_count": 3, "is_expired": false },
+  "share_url": "https://juicewrldapi.com/player/shared/abc123XYZ789"
+}`}</Pre>
+            <p className="text-xs text-text-muted">
+              Validation failures return <Code>{'400 { "success": false, "errors": { field: [...] } }'}</Code>, for example an empty <Code>songs</Code> list, more than 1000 songs, or IDs that don't exist.
+            </p>
           </div>
           <div>
             <MethodPath method="GET" path={`/playlists/shared/{'{share_id}'}/ `} />
-            <p className="text-xs text-text-muted">Full shared playlist with all track metadata.</p>
+            <p className="text-xs text-text-muted">Full shared playlist with all track metadata. Each call increments <Code>view_count</Code>.</p>
+            <Pre>{`{
+  "success": true,
+  "playlist": { /* same shape as above */ },
+  "songs": [ /* full song objects, in playlist order */ ],
+  "missing_songs": [4120]   // ids that no longer exist
+}`}</Pre>
+            <p className="text-xs text-text-muted">
+              Errors are <Code>{'{ "success": false, "error": "..." }'}</Code>: <Code>404</Code> for an unknown <Code>share_id</Code>, <Code>410</Code> once <Code>expires_at</Code> has passed.
+            </p>
           </div>
           <div>
             <MethodPath method="GET" path={`/playlists/shared/{'{share_id}'}/info/`} />
-            <p className="text-xs text-text-muted">Lightweight preview: name and track count, no full fetch.</p>
+            <p className="text-xs text-text-muted">Lightweight preview, no song fetch and no <Code>view_count</Code> increment. Same <Code>404</Code> / <Code>410</Code> errors as above.</p>
+            <Pre>{`{ "success": true, "name": "Late night drive", "description": "", "song_count": 3, "mode": "shuffle", "created_at": "...", "view_count": 12 }`}</Pre>
           </div>
         </div>
       </Section>
@@ -1861,6 +1902,24 @@ function AdminTab() {
           per-channel grant instead, use Admin: Channels below.
         </p>
         <p className="text-xs text-text-muted">Requires admin token (<Code>is_administrator: true</Code>).</p>
+
+        <p className="text-sm font-medium text-text-primary mt-4 mb-1">Award a badge</p>
+        <Pre>{`POST /accounts/admin/users/{user_id}/badges/`}</Pre>
+        <p className="text-xs text-text-muted mb-2">
+          Grants a manual badge to a user. Admin only. Only badges with <Code>is_manual: true</Code> in the Badge Catalog
+          (Editor Workflow tab) can be granted here; the rest are awarded automatically from approved-edit counts.
+        </p>
+        <Pre>{`// Request
+{ "slug": "community-pillar", "note": "optional text", "proposal_id": 123 }
+
+// Response (201)
+{ "slug": "community-pillar", "name": "...", "description": "...", "icon": "...", "category": "...", "note": "optional text", "awarded_at": "...", "awarded_by_username": "admin" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>note</Code> and <Code>proposal_id</Code> (a song-edit proposal to attach as the reason) are optional; an unknown{' '}
+          <Code>proposal_id</Code> is ignored. Errors: <Code>{'404 { "detail": "User not found." }'}</Code>, and{' '}
+          <Code>{'400 { "detail": ... }'}</Code> for an unknown badge, an automatic badge (<Code>This badge is awarded automatically and
+          cannot be granted manually.</Code>) or a badge the user already holds (<Code>This editor already has that badge.</Code>).
+        </p>
       </Section>
 
 
@@ -2291,7 +2350,7 @@ Authorization: Token <token>
         <Table
           headers={['Method', 'Path', 'Auth', 'Description']}
           rows={[
-            ['GET', '/beta/unlock?code=X', 'None', <>Check a code, returns <Code>{'{ "valid": true|false }'}</Code></>],
+            ['GET', '/beta/unlock?code=X', 'None', <>Check a code, returns <Code>{'{ "valid": true|false }'}</Code>. Throttled at <Code>20/min</Code> per client, so don&apos;t poll it or try codes in a loop (429)</>],
             ['GET', '/beta/versions', <Code>X-Beta-Code</Code>, 'List active beta builds (401 if the code is invalid)'],
             ['GET', '/beta/download?version=X', <Code>X-Beta-Code</Code>, 'Stream the installer for that build (401/404)'],
           ]}
@@ -3876,13 +3935,43 @@ function ChatTab() {
           message&apos;s <Code>attachments</Code>. DM attachments also need <Code>encrypted_name</Code>,{' '}
           <Code>nonce</Code>, and <Code>key_version</Code>.
         </p>
+        <p className="text-sm font-medium text-text-primary mt-4 mb-1">Chunked uploads (large files)</p>
+        <p className="text-xs text-text-muted mb-2">
+          <Code>POST /uploads/</Code> is capped at 25 MB. For anything bigger, send the file in pieces; the finished
+          upload returns the same <Code>{'{ name, url, mime, size }'}</Code> object as <Code>/uploads/</Code> and is used
+          the same way in <Code>attachments</Code>. Same blocked extensions as <Code>/uploads/</Code>; token auth required.
+        </p>
+        <Table
+          headers={['Step', 'Request', 'Response']}
+          rows={[
+            ['1. Init', <>POST <Code>/uploads/chunked/init/</Code> JSON <Code>{'{ "filename", "total_size", "mime"? }'}</Code></>, <><Code>201</Code> <Code>{'{ "upload_id", "chunk_size", "total_chunks" }'}</Code></>],
+            ['2. Chunks', <>POST <Code>/uploads/chunked/chunk/</Code> <Code>multipart/form-data</Code>: <Code>upload_id</Code>, <Code>chunk_index</Code> (0-based), <Code>chunk</Code> (the bytes)</>, <><Code>200</Code> <Code>{'{ "upload_id", "chunk_index", "chunks_received", "chunks_remaining" }'}</Code></>],
+            ['3. Complete', <>POST <Code>/uploads/chunked/complete/</Code> JSON <Code>{'{ "upload_id" }'}</Code></>, <><Code>201</Code> <Code>{'{ "name", "url", "mime", "size" }'}</Code></>],
+          ]}
+        />
+        <ul className="text-xs text-text-muted list-disc pl-5 space-y-1 mt-2">
+          <li><Code>chunk_size</Code> is chosen by the server (default 8 MB); every chunk except the last must be exactly that size, and the last holds the remainder. A chunk of the wrong length is a 400.</li>
+          <li>Chunks can be sent in any order, in parallel, and retried; resending an index overwrites it.</li>
+          <li>Max total size is 1 GB by default (<Code>total_size</Code> above it is a 400). An unfinished upload is discarded after 6 hours.</li>
+          <li><Code>complete</Code> answers 400 if any chunk is missing (<Code>Missing chunks: 3 (+2 more)</Code>) or the assembled size doesn&apos;t match <Code>total_size</Code>.</li>
+          <li>An <Code>upload_id</Code> belongs to the user who created it; anyone else gets 404, as does an unknown id. A malformed id is a 400.</li>
+          <li>Errors are <Code>{'{ detail }'}</Code>. Throttled under their own <Code>chat_upload_chunk</Code> scope (600/min), looser than <Code>/uploads/</Code> (60/min), since one file is many requests.</li>
+          <li>For DMs, encrypt the whole file client-side first and chunk the ciphertext.</li>
+        </ul>
         <MethodPath method="GET" path="/attachments/{attachmentId}/stream/" className="mt-3" />
         <p className="text-xs text-text-muted">
           Supports HTTP range requests. Access is checked against the message&apos;s channel/DM membership.
           Since <Code>{'<img>'}</Code>/<Code>{'<audio>'}</Code> can&apos;t send an <Code>Authorization</Code>{' '}
           header, this endpoint also accepts <Code>?token=</Code>; add <Code>?download=1</Code> to force
           download disposition. For DM attachments the bytes are ciphertext — decrypt with the conversation
-          room key after fetching.
+          room key after fetching. An optional <Code>{'/{filename}'}</Code> suffix is accepted and ignored for lookup,
+          so players can show a real file name.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          Uploaded media (chat, donor files, news) is served with <Code>X-Content-Type-Options: nosniff</Code> and a
+          sandboxing <Code>Content-Security-Policy</Code>, so an uploaded <Code>.html</Code> or <Code>.svg</Code> can&apos;t
+          run script on the API origin. Fetch it with <Code>{'<img>'}</Code>/<Code>{'<audio>'}</Code>/<Code>fetch</Code>; don&apos;t
+          expect to render it as a page.
         </p>
       </Section>
 
@@ -4350,6 +4439,1247 @@ X-Device-Id: uuid-a
   )
 }
 
+function CdnTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title={"What is the distributed CDN?"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Reference for the <Code>{"cdn"}</Code> app (<Code>{"cdn/"}</Code> in the backend). Verified against the server code, not just the client implementation. Sections marked <strong className="text-text-primary">(node-side)</strong> describe a convention the server relays but does not enforce.</p>
+        </div>
+      </Section>
+
+      <Section title={"What is the distributed CDN?"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">A peer-to-peer delivery layer for library files. Volunteer-run nodes host copies of the compilation and serve them straight to the browser over WebRTC, so file bytes never pass through the main API server. The API does three things: resolve a path to a ranked list of nodes, hand out signed download tokens, and relay WebRTC signaling (about 2 KB per download). Everything else is the node operator&apos;s bandwidth.</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>REST base path: <Code>{"/juicewrld/cdn/"}</Code></li>
+            <li>Signaling: <Code>{"/juicewrld/ws/cdn/signal/"}</Code> (also answers on <Code>{"/ws/cdn/signal/"}</Code>). Served by the Daphne process (port 8001), not the Waitress API.</li>
+          </ul>
+          <Pre>{`Browser                    API Server                  CDN Node
+   |                           |                           |
+   | 1. GET /cdn/resolve/?filepath=...                      |
+   | ------------------------> |                           |
+   | <--- ranked nodes + signed tokens ---                  |
+   |                           |                           |
+   | 2. WS /ws/cdn/signal/?role=client&token=TOKEN          |
+   | ------------------------> |  ---- session ----------> |
+   | <--- { type: "ready", session_id, ice_servers } ---    |
+   |                           |                           |
+   | 3. RTCPeerConnection + DataChannel("file"), SDP offer  |
+   | --- offer --------------> | --- relayed ------------> |
+   | <-- answer -------------- | <-- answer -------------- |
+   |                           |                           |
+   | 4. P2P established (STUN hole-punched, encrypted)      |
+   | <=====================================================>|
+   |                           |                           |
+   | 5. { t:"meta" } -> binary chunks -> { t:"done" }       |
+   | <=====================================================>|
+   |                           |                           |
+   | 6. Verify BLAKE2b, assemble Blob                       |
+   |    mismatch -> POST /cdn/report-violation/             |
+   |    failure  -> next node -> GET /files/download/       |`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Fallback target:</strong> <Code>{"GET /juicewrld/files/download/"}</Code> (served by the media process on port 8002). <Code>{"/cdn/resolve/"}</Code> always includes this URL as <Code>{"direct_url"}</Code>, and sets <Code>{"direct: true"}</Code> when no node is worth trying. The server never redirects for you.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Rollout status (time-sensitive, not derivable from code):</strong> no public nodes had registered and the master manifest had not been generated as of the last check, so <Code>{"/cdn/resolve/"}</Code> returned an empty <Code>{"nodes"}</Code> array. Wiring a client up is safe, since the fallback is the download you already do.</p>
+        </div>
+      </Section>
+
+      <Section title={"Authentication at a glance"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={["Caller", "Credential", "Endpoints"]}
+            rows={[
+              ["Anyone", "none", <><Code>{"server-key"}</Code>, <Code>{"ice-config"}</Code>, <Code>{"master-hashes*"}</Code>, <Code>{"nodes/"}</Code></>],
+              ["Logged-in user", <><Code>{"Authorization: Token <user token>"}</Code> (required)</>, <><Code>{"nodes/register/"}</Code></>],
+              ["Anyone, optionally a user", <><Code>{"Authorization: Token <user token>"}</Code> (optional)</>, <><Code>{"resolve"}</Code>, <Code>{"report-violation"}</Code>, <Code>{"log-download"}</Code></>],
+              ["Administrator", <><Code>{"Authorization: Token <user token>"}</Code> for a superuser or a profile with <Code>{"is_administrator"}</Code></>, <><Code>{"admin/*"}</Code></>],
+              ["Node", <><Code>{"X-CDN-Key: <api_key>"}</Code> or <Code>{"Authorization: Node <api_key>"}</Code></>, <><Code>{"nodes/heartbeat"}</Code>, <Code>{"nodes/me"}</Code>, <Code>{"nodes/speed-test"}</Code>, <Code>{"nodes/file-list"}</Code>, <Code>{"nodes/file-list/delta"}</Code>, <Code>{"nodes/challenge"}</Code></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"resolve"}</Code>, <Code>{"report-violation"}</Code> and <Code>{"log-download"}</Code> use the default DRF token auth, so a malformed or stale <Code>{"Authorization: Token"}</Code> header returns <Code>{"401"}</Code> even though the endpoint is otherwise public. Omit the header when you have no valid token.</p>
+        </div>
+      </Section>
+
+      <Section title={"Endpoint overview"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={["Method", "Path", "Auth", "Description"]}
+            rows={[
+              ["GET", <><Code>{"/cdn/resolve/"}</Code></>, "optional", "Ranked nodes + signed tokens for a file"],
+              ["GET", <><Code>{"/cdn/ice-config/"}</Code></>, "none (node key optional)", "STUN list; adds TURN credentials for a valid node key"],
+              ["GET", <><Code>{"/cdn/server-key/"}</Code></>, "none", "Server RSA public key (PEM)"],
+              ["GET", <><Code>{"/cdn/nodes/"}</Code></>, "none", "List online, approved, public nodes"],
+              ["POST", <><Code>{"/cdn/report-violation/"}</Code></>, "optional", "Report a node that served a wrong hash"],
+              ["POST", <><Code>{"/cdn/log-download/"}</Code></>, "optional", "Log a completed CDN download"],
+              ["GET", <><Code>{"/cdn/master-hashes/"}</Code></>, "none", "Paginated master hash list"],
+              ["GET", <><Code>{"/cdn/master-hashes/since/{timestamp}/"}</Code></>, "none", "Entries changed after an ISO timestamp (max 5000)"],
+              ["GET", <><Code>{"/cdn/master-hashes/file/"}</Code></>, "none", "Hash entry for one file"],
+              ["GET", <><Code>{"/cdn/master-hashes/signature/"}</Code></>, "none", "Manifest version, hash and RSA signature"],
+              ["POST", <><Code>{"/cdn/nodes/register/"}</Code></>, "user", "Register a node, returns its API key once"],
+              ["POST", <><Code>{"/cdn/nodes/heartbeat/"}</Code></>, "node", "Report status, receive directives"],
+              ["GET/PATCH", <><Code>{"/cdn/nodes/me/"}</Code></>, "node", "Read or edit the node's own record"],
+              ["POST", <><Code>{"/cdn/nodes/speed-test/"}</Code></>, "node", "Report measured speeds"],
+              ["POST", <><Code>{"/cdn/nodes/file-list/"}</Code></>, "node", "Replace the node's full file list"],
+              ["POST", <><Code>{"/cdn/nodes/file-list/delta/"}</Code></>, "node", "Apply an incremental file-list change"],
+              ["GET/POST", <><Code>{"/cdn/nodes/challenge/"}</Code></>, "node", "Get a nonce, then return it signed to prove key ownership"],
+              ["GET", <><Code>{"/cdn/admin/nodes/"}</Code></>, "admin", "Every registered node"],
+              ["PATCH", <><Code>{"/cdn/admin/nodes/{node_id}/"}</Code></>, "admin", "Approve, disable or reset a node"],
+              ["DELETE", <><Code>{"/cdn/admin/nodes/{node_id}/"}</Code></>, "admin", "Permanently delete a node"],
+              ["GET", <><Code>{"/accounts/nodes/"}</Code></>, "user", "List the nodes you own"],
+              ["POST", <><Code>{"/accounts/nodes/claim/"}</Code></>, "user", "Link an existing node to your account by API key"],
+              ["GET/PATCH", <><Code>{"/accounts/nodes/{node_id}/"}</Code></>, "user (owner)", "Read or edit a node you own"],
+              ["DELETE", <><Code>{"/accounts/nodes/{node_id}/"}</Code></>, "user (owner)", "Delete (or unlink) a node you own"],
+              ["POST", <><Code>{"/accounts/nodes/{node_id}/regenerate-key/"}</Code></>, "user (owner)", "Issue a new API key (shown once)"],
+              ["GET", <><Code>{"/cdn/admin/stats/"}</Code></>, "admin", "CDN-wide stats"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">All request bodies are JSON (the API only accepts the JSON parser).</p>
+        </div>
+      </Section>
+
+      <Section title={"Resolve a file (GET /cdn/resolve/)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Returns up to five nodes hosting the file, best first, each with its own signed token.</p>
+          <Table
+            headers={["Param", "Required", "Description"]}
+            rows={[
+              [<><Code>{"filepath"}</Code></>, "yes", <>Library-relative path. Backslashes are converted to <Code>{"/"}</Code> and leading/trailing slashes are stripped. Missing -&gt; 400 <Code>{"{ \"error\": \"filepath required\" }"}</Code></>],
+            ]}
+          />
+          <Pre>{`{
+  "filepath": "Compilation/1. Released Discography/…/Lucid Dreams.mp3",
+  "expected_hash": "a1b2c3d4e5f6…",
+  "size": 8432100,
+  "is_donor": false,
+  "client_country": "DE",
+  "transport": "webrtc",
+  "node_count": 3,
+  "nodes": [
+    {
+      "node_id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "FastNode-EU",
+      "region": "eu-west",
+      "upload_speed_mbps": 250.0,
+      "score": 12.4501,
+      "token": "eyJub2RlX2lkIjoi….c2lnbmF0dXJl",
+      "transport": "webrtc"
+    }
+  ],
+  "direct": false,
+  "direct_url": "/juicewrld/files/download/?path=Compilation%2F1.%20Released%20Discography%2F…%2FLucid%20Dreams.mp3"
+}`}</Pre>
+          <Table
+            headers={["Field", "Type", "Meaning"]}
+            rows={[
+              [<><Code>{"expected_hash"}</Code></>, "string", "BLAKE2b-256 hex from the master list. Empty string if the file has no master entry"],
+              [<><Code>{"size"}</Code></>, "number", "Bytes from the master list, 0 if unknown"],
+              [<><Code>{"is_donor"}</Code></>, "boolean", <>Whether the requester&apos;s profile has <Code>{"is_donor"}</Code></>],
+              [<><Code>{"client_country"}</Code></>, "string", <>ISO country from Cloudflare&apos;s <Code>{"CF-IPCountry"}</Code> header. Empty when unknown (no header, <Code>{"XX"}</Code>, Tor)</>],
+              [<><Code>{"node_count"}</Code></>, "number", <>Length of <Code>{"nodes"}</Code></>],
+              [<><Code>{"direct"}</Code></>, "boolean", <><Code>{"true"}</Code> when <Code>{"nodes"}</Code> is empty or no node&apos;s base score (before the donor and region boosts) reaches 5.0. Skip the CDN and use <Code>{"direct_url"}</Code></>],
+              [<><Code>{"direct_url"}</Code></>, "string", <>Origin download URL for this file (<Code>{"/juicewrld/files/download/?path=…"}</Code>), always present. Includes <Code>{"&channel=<slug>"}</Code> when the master entry has a channel</>],
+              [<><Code>{"nodes[].score"}</Code></>, "number", "Ranking score, higher is better, already sorted"],
+              [<><Code>{"nodes[].token"}</Code></>, "string", "Signed token for this node + filepath, valid 5 minutes"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Which nodes qualify.</strong> A node is returned only if all of these hold:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><Code>{"is_active"}</Code>, <Code>{"is_approved"}</Code> and <Code>{"is_public"}</Code> are true.</li>
+            <li><Code>{"status"}</Code> is <Code>{"online"}</Code> and its last heartbeat is within 300 seconds.</li>
+            <li>Its reported file list contains the path <strong className="text-text-primary">with a hash equal to the master hash</strong>. A node holding a stale or different copy is excluded. If the file has no master entry, the hash check is skipped and any node listing the path qualifies (and <Code>{"expected_hash"}</Code> is empty, so the client cannot verify).</li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Ranking.</strong> <Code>{"score = max(upload_speed_mbps, 0.1) * 1/(1 + total_requests * 1e-7) * max(trust_score, 1) * 0.01"}</Code>. So faster, less-loaded, more-trusted nodes come first. Donors get <Code>{"score * 1.5"}</Code>, but the multiplier is applied to every candidate equally, so it changes the reported <Code>{"score"}</Code> values and <strong className="text-text-primary">not the order</strong>. Do not promise donors better nodes.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Region.</strong> The score is then multiplied by <strong className="text-text-primary">1.5</strong> if the node is in the client&apos;s country, or <strong className="text-text-primary">1.2</strong> if it&apos;s on the same continent. The client&apos;s country comes from the <Code>{"CF-IPCountry"}</Code> header, so this only works when traffic goes through Cloudflare. Without the header, no boost applies. The node&apos;s free-text <Code>{"region"}</Code> is parsed best-effort: ISO country codes (<Code>{"US"}</Code>, <Code>{"de"}</Code>, <Code>{"uk"}</Code> -&gt; GB), cloud-style prefixes (<Code>{"us-east"}</Code> -&gt; US, <Code>{"eu-west-1"}</Code> -&gt; Europe) and continent names or codes (<Code>{"Europe"}</Code>, <Code>{"EU"}</Code>, <Code>{"North America"}</Code>). <Code>{"NA"}</Code>, <Code>{"AS"}</Code> and <Code>{"SA"}</Code> are read as continents, not Namibia, American Samoa or Saudi Arabia. Anything else, like a city name, gets no boost.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Direct hint.</strong> <Code>{"direct"}</Code> is <Code>{"true"}</Code> when there are no candidates or the top score (after the region boost) is below <strong className="text-text-primary">5.0</strong>. At the default trust of 100, that&apos;s a node reporting under about 5 Mbps. <Code>{"nodes"}</Code> is still returned, so a client can ignore the hint.</p>
+        </div>
+      </Section>
+
+      <Section title={"Download tokens"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Format: <Code>{"base64url(payload_json).base64url(signature)"}</Code>. The signature is RSA-PSS (SHA-256, max salt length) by the server key over the encoded payload string. Payload:</p>
+          <Pre>{`{ "node_id": "550e8400-…", "filepath": "path/to/file.mp3", "exp": 1790000000, "donor": false, "req": "42" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"req"}</Code> is the requesting user&apos;s numeric id, or <Code>{"\"\""}</Code> for anonymous. Verify with the key from <Code>{"/cdn/server-key/"}</Code>.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">The signaling server checks signature and expiry <strong className="text-text-primary">once, at connect</strong>. Tokens are <strong className="text-text-primary">not</strong> single-use: the server keeps no record of use, so the same token can open several sessions until it expires. If a download fails, use the next node&apos;s token from the same resolution or call <Code>{"/cdn/resolve/"}</Code> again.</p>
+        </div>
+      </Section>
+
+      <Section title={"ICE configuration (GET /cdn/ice-config/)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The STUN part comes from the <Code>{"CDN_ICE_SERVERS"}</Code> env var (JSON array) and defaults to two Google STUN servers. When a TURN relay is configured (<Code>{"CDN_TURN_URLS"}</Code> and <Code>{"CDN_TURN_SECRET"}</Code> both set), one TURN entry with short-lived credentials is added after the STUN entries, depending on who is asking:</p>
+          <Table
+            headers={["Where", "Who", "TURN included?", "Credential TTL"]}
+            rows={[
+              [<><Code>{"ready"}</Code> message</>, "Listener that connected with a valid download token", <>Yes, fresh per session (label <Code>{"listener-<session_id>"}</Code>)</>, <><Code>{"CDN_TURN_TTL_LISTENER"}</Code>, default 3600 s</>],
+              [<><Code>{"GET /cdn/ice-config/"}</Code> with <Code>{"X-CDN-Key"}</Code> (or <Code>{"Authorization: Node …"}</Code>)</>, "Active, approved node", <>Yes (label <Code>{"node-<node_id>"}</Code>), sent with <Code>{"Cache-Control: no-store"}</Code></>, <><Code>{"CDN_TURN_TTL_NODE"}</Code>, default 86400 s</>],
+              [<><Code>{"GET /cdn/ice-config/"}</Code> anonymous, or with an unknown/inactive/unapproved key</>, "Anyone", "No, STUN only", "n/a"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">The endpoint stays public: a bad key never returns <Code>{"401"}</Code>, just the STUN-only list. With the TURN settings unset every caller gets the STUN list, exactly as before.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Anonymous response:</p>
+          <Pre>{`{ "ice_servers": [ { "urls": "stun:stun.l.google.com:19302" }, { "urls": "stun:stun1.l.google.com:19302" } ] }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">With TURN (node or listener):</p>
+          <Pre>{`{ "ice_servers": [
+  { "urls": "stun:stun.l.google.com:19302" },
+  { "urls": "stun:stun1.l.google.com:19302" },
+  { "urls": [ "turn:turn.example.com:3478?transport=udp",
+              "turn:turn.example.com:3478?transport=tcp",
+              "turns:turn.example.com:5349?transport=tcp" ],
+    "username": "1790000000:node-550e8400-…",
+    "credential": "base64-hmac" }
+] }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Credentials</strong> follow coturn&apos;s <Code>{"use-auth-secret"}</Code> scheme (the &quot;TURN REST API&quot;): <Code>{"username"}</Code> is <Code>{"\"<unix expiry>:<label>\""}</Code> and <Code>{"credential"}</Code> is <Code>{"base64(HMAC-SHA1(CDN_TURN_SECRET, username))"}</Code>. coturn must run with <Code>{"use-auth-secret"}</Code> and <Code>{"static-auth-secret"}</Code> set to the same value as <Code>{"CDN_TURN_SECRET"}</Code>. It rejects credentials once the expiry has passed, so there is no fixed password to leak. Nodes re-fetch <Code>{"ice-config"}</Code> on every signaling connect and every 6 hours while connected, so the 24 h node TTL leaves plenty of margin.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">URL order matters.</strong> The node&apos;s ICE library (aioice) uses only the first TURN URL, so list <Code>{"turn:…?transport=udp"}</Code> first in <Code>{"CDN_TURN_URLS"}</Code>.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Why TURN.</strong> With STUN only, a listener behind carrier-grade or symmetric NAT (common on ISPs, nearly universal on mobile) can never reach a node: its public port changes per destination, so the node&apos;s connectivity checks never arrive. Listeners that can connect directly still do; only the hard cases use relay bandwidth.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Running the relay (coturn)</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>Put it on a host with a public IP. TURN is raw UDP/TCP and <strong className="text-text-primary">cannot go through Cloudflare&apos;s proxy</strong>, so its DNS record must be DNS-only (grey cloud). That exposes the host&apos;s IP, so use a small separate VPS rather than the API origin.</li>
+            <li>Open <Code>{"3478"}</Code> UDP+TCP (TURN), <Code>{"5349"}</Code> TCP (TURN over TLS, for networks that block UDP), and the UDP relay range (<Code>{"min-port"}</Code>–<Code>{"max-port"}</Code>).</li>
+            <li><Code>{"turnserver.conf"}</Code> essentials:</li>
+          </ul>
+          <Pre>{`listening-port=3478
+tls-listening-port=5349
+realm=juicewrldapi.com
+use-auth-secret
+static-auth-secret=<same value as CDN_TURN_SECRET>
+external-ip=<public IP>            # if the host is behind NAT
+min-port=49152
+max-port=65535
+fingerprint
+no-multicast-peers
+# Stop the relay reaching private/internal addresses (SSRF):
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+# Bandwidth guards:
+user-quota=12
+total-quota=1200
+max-bps=0
+cert=/path/fullchain.pem
+pkey=/path/privkey.pem`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Checking the relay.</strong> In a browser console, with credentials from an authenticated <Code>{"ice-config"}</Code> call:</p>
+          <Pre>{`const pc = new RTCPeerConnection({iceServers:[{urls:'turn:turn.example.com:3478?transport=udp', username:'<u>', credential:'<c>'}]});
+pc.createDataChannel('x'); pc.onicecandidate = e => console.log(e.candidate ? e.candidate.candidate : 'DONE');
+await pc.setLocalDescription(await pc.createOffer());`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">A line containing <Code>{"typ relay"}</Code> means it works. If there isn&apos;t one, the credentials are bad, a port is blocked, or <Code>{"external-ip"}</Code> is wrong.</p>
+          <Pre>{`
+## WebRTC signaling (\`WS /ws/cdn/signal/\`)
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">wss://juicewrldapi.com/juicewrld/ws/cdn/signal/?role=client&amp;token=TOKEN</p>
+          <Pre>{`
+One socket per node attempt. The socket only carries the handshake.
+
+**Close codes**
+
+| Code | Sent to | Meaning |
+|---|---|---|
+| \`4000\` | any | \`role\` is not \`client\` or \`node\` |
+| \`4001\` | node | Bad API key, or node not approved/active |
+| \`4003\` | client | Invalid, tampered or expired token |
+| \`4004\` | client | Target node has no live signaling connection. Preceded by \`{ "type": "error", "reason": "node_offline" }\` |
+
+**Server -> client**
+
+| Type | Fields | Notes |
+|---|---|---|
+| \`ready\` | \`session_id\`, \`ice_servers\` | Sent right after the node was notified. Build the peer connection and send your offer |
+| \`answer\` | \`session_id\`, \`sdp\` | Relayed from the node |
+| \`ice\` | \`session_id\`, \`candidate\` | Relayed from the node, optional |
+| \`error\` | \`reason\` | Server-generated. Only \`node_offline\` is emitted by the server itself |
+| \`session_error\` | \`session_id\`, \`reason\` | Relayed from the node. Nodes use reasons such as \`invalid_token\`, \`not_hosted\`, \`private\` **(node-side)** |
+
+There is no \`teardown\` message to clients: the server only sends \`teardown\` to the node when the client socket closes. Treat a closed socket after a failure as the end signal.
+
+**Client -> server** (anything else is ignored)
+
+| Type | Payload | When |
+|---|---|---|
+| \`offer\` | \`{ sdp }\` | After ICE gathering finishes |
+| \`ice\` | \`{ candidate }\` | Optional |
+
+The server does **not** check that the node actually hosts the file; that is the node's job (\`not_hosted\`).
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">const ws = new WebSocket(signalUrl) let pc</p>
+          <p className="text-sm text-text-secondary leading-relaxed">ws.onmessage = async (event) =&gt; {'{'} const msg = JSON.parse(event.data)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">if (msg.type === &apos;ready&apos;) {'{'} pc = new RTCPeerConnection({'{'} iceServers: msg.ice_servers {'}'}) const channel = pc.createDataChannel(&apos;file&apos;, {'{'} ordered: true {'}'}) channel.binaryType = &apos;arraybuffer&apos; channel.onmessage = handleData</p>
+          <p className="text-sm text-text-secondary leading-relaxed">const offer = await pc.createOffer() await pc.setLocalDescription(offer) await waitIceComplete(pc)        // 4s cap, then send anyway ws.send(JSON.stringify({'{'} type: &apos;offer&apos;, sdp: pc.localDescription.sdp {'}'})) {'}'}</p>
+          <p className="text-sm text-text-secondary leading-relaxed">if (msg.type === &apos;answer&apos;) {'{'} await pc.setRemoteDescription({'{'} type: &apos;answer&apos;, sdp: msg.sdp {'}'}) {'}'}</p>
+          <p className="text-sm text-text-secondary leading-relaxed">if (msg.type === &apos;error&apos; || msg.type === &apos;session_error&apos;) {'{'} // tear down and move to the next node {'}'} {'}'}</p>
+          <Pre>{`
+### Node side of the socket
+
+A node connects with \`?role=node&key=API_KEY\`. It then receives, per client:
+
+- \`{ "type": "session", "session_id", "filepath", "token" }\` when a client connects. The node must re-validate \`token\` against the server public key and confirm it hosts \`filepath\`.
+- \`{ "type": "offer" | "ice", "session_id", … }\` relayed from the client.
+- \`{ "type": "teardown", "session_id" }\` when the client socket closes.
+
+It may send only \`answer\`, \`ice\` or \`session_error\`, each carrying the \`session_id\`; other types are dropped. The "is this node online" registry is an in-process dict, so **run a single Daphne process**; multiple workers would each see only their own nodes and return false \`node_offline\`.
+
+## DataChannel protocol (node-side)
+
+The server never sees this traffic. The node pushes the file down the DataChannel named \`file\`. Every frame is a JSON control string or a binary \`ArrayBuffer\`; branch on \`typeof event.data\`.
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Node -&gt; Browser:  {'{'} &quot;t&quot;: &quot;meta&quot;, &quot;size&quot;: 8432100, &quot;hash&quot;: &quot;a1b2…&quot;, &quot;chunk&quot;: 16384 {'}'} Node -&gt; Browser:  &lt;ArrayBuffer 16384 bytes&gt; … Node -&gt; Browser:  {'{'} &quot;t&quot;: &quot;done&quot;, &quot;size&quot;: 8432100 {'}'}</p>
+          <Pre>{`
+| Control frame | Fields | Meaning |
+|---|---|---|
+| \`meta\` | size, hash, chunk | Always first. hash is BLAKE2b-256 hex |
+| \`done\` | size | Transfer finished. Compare against bytes received |
+| \`error\` | none | Node-side failure. Abort, try the next node |
+
+## Hash verification & violations
+
+Every library file has a BLAKE2b-256 (32-byte digest) hash in the master list. After \`done\`, hash the assembled Blob and compare with \`expected_hash\`. A mismatch means corrupted or tampered data: report it, then move on.
+
+### \`POST /cdn/report-violation/\`
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;550e8400-…&quot;, &quot;filepath&quot;: &quot;path/to/file.mp3&quot;, &quot;reported_hash&quot;: &quot;deadbeef…&quot; {'}'}</p>
+          <Pre>{`
+\`reported_hash\` is optional.
+
+| Status | Body |
+|---|---|
+| 400 | \`{ "error": "node_id and filepath required" }\` |
+| 404 | \`{ "error": "node not found" }\` |
+| 200 | \`{ "accepted": false, "reason": "hash matches master" }\` when \`reported_hash\` equals the master hash |
+| 200 | \`{ "accepted": true, "node_active": <bool> }\` |
+
+An accepted report records a violation, subtracts **25** from the node's \`trust_score\` and adds 1 to \`hash_violations\`. At \`trust_score <= 0\` or \`hash_violations >= 5\` the node is set \`is_approved=false, is_active=false\` and disappears from resolution until an admin restores it.
+
+Caveats: \`node_active\` in the response is read before the deactivation is applied, so it can say \`true\` for the report that just disabled the node. Re-fetch the node if you need the truth. Reports are accepted even if the file has no master entry or \`reported_hash\` is omitted, and are not throttled or tied to a completed session, so only send them on a real hash mismatch, never on a timeout, stall or failed handshake.
+
+## Log a download (\`POST /cdn/log-download/\`)
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;550e8400-…&quot;, &quot;filepath&quot;: &quot;path/to/file.mp3&quot;, &quot;bytes_served&quot;: 8432100 {'}'}</p>
+          <Pre>{`
+Always answers \`{ "logged": true }\` and always writes a \`CdnDownloadLog\` row (with a null node if \`node_id\` is missing/unknown and an empty path if \`filepath\` is missing). If the node exists and \`bytes_served > 0\`, the node's \`total_bytes_served\` and \`total_requests\` are incremented, and those counters feed both ranking (load factor) and the admin stats. A non-numeric \`bytes_served\` causes a 500. Nodes are expected to log their own transfers; the endpoint is unauthenticated, so treat the counters as advisory.
+
+## Public nodes (\`GET /cdn/nodes/\`)
+
+Nodes that are active, approved, public and \`status == online\`.
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;nodes&quot;: [{'{'} &quot;node_id&quot;: &quot;550e8400-…&quot;, &quot;name&quot;: &quot;FastNode-EU&quot;, &quot;region&quot;: &quot;eu-west&quot;, &quot;is_public&quot;: true, &quot;status&quot;: &quot;online&quot;, &quot;online&quot;: true, &quot;file_count&quot;: 2400, &quot;current_storage_bytes&quot;: 51200000000, &quot;max_storage_bytes&quot;: 107374182400, &quot;upload_speed_mbps&quot;: 250.0, &quot;download_speed_mbps&quot;: 500.0, &quot;public_base_url&quot;: &quot;https://node.example.com&quot; {'}'}] {'}'}</p>
+          <Pre>{`
+\`online\` is recomputed from the heartbeat age (300 s). \`status\` is only flipped to \`offline\` by a Celery beat task every 120 s, so the two can briefly disagree.
+
+## Master hash list
+
+Built by scanning every active channel root for files with the extensions \`.mp3 .zip .wav .mp4 .m4a .mov .txt .caf .mkv .flac .aiff .aif .opus .png .jpg .jpeg .webp\`. Regeneration is **not scheduled**: run \`python manage.py generate_master_hashes\` or call the Celery task \`cdn.regenerate_master_hashes\` yourself. A new manifest version is only created when the fingerprint changes.
+
+### \`GET /cdn/master-hashes/\`
+
+Params: \`page\` (default 1, out-of-range returns the last page), \`page_size\` (default 500, max 2000), \`channel\` (channel slug). Ordered by \`filepath\`.
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;manifest_version&quot;: 12, &quot;count&quot;: 9800, &quot;page&quot;: 1, &quot;num_pages&quot;: 20, &quot;has_next&quot;: true, &quot;files&quot;: [{'{'} &quot;filepath&quot;: &quot;…/Lucid Dreams.mp3&quot;, &quot;blake2b_hash&quot;: &quot;a1b2c3d4…&quot;, &quot;size&quot;: 8432100, &quot;channel_slug&quot;: &quot;compilation&quot;, &quot;updated_at&quot;: &quot;2026-09-20T12:00:00.000000+00:00&quot; {'}'}] {'}'}</p>
+          <Pre>{`
+\`manifest_version\` is 0 if no manifest exists yet.
+
+### \`GET /cdn/master-hashes/since/{timestamp}/\`
+
+Entries with \`updated_at\` after an ISO-8601 timestamp in the path, oldest first, capped at 5000. Unparseable timestamp -> 400 \`{ "error": "invalid timestamp" }\`. Deleted files are not reported, so a delta sync cannot remove entries; re-pull the full list occasionally.
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;since&quot;: &quot;2026-01-01T00:00:00Z&quot;, &quot;count&quot;: 0, &quot;files&quot;: [] {'}'}</p>
+          <Pre>{`
+### \`GET /cdn/master-hashes/file/\`
+
+\`?filepath=\` (normalized like \`/resolve/\`). Missing -> 400 \`{ "error": "filepath required" }\`, unknown -> 404 \`{ "error": "not found" }\`. Returns one entry object.
+
+### \`GET /cdn/master-hashes/signature/\`
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;version&quot;: 12, &quot;manifest_hash&quot;: &quot;f0e1d2c3b4a5…&quot;, &quot;signature&quot;: &quot;base64-rsa-signature&quot;, &quot;total_files&quot;: 9800, &quot;total_bytes&quot;: 214748364800, &quot;generated_at&quot;: &quot;2026-09-20T12:00:00.000000+00:00&quot;, &quot;public_key&quot;: &quot;-----BEGIN PUBLIC KEY-----\n…&quot; {'}'}</p>
+          <Pre>{`
+To verify the whole list: sort entries by \`filepath\`, join lines \`filepath:blake2b_hash:size\` with \`\\n\`, take BLAKE2b-256 hex, compare to \`manifest_hash\`, then verify \`signature\` (base64, RSA-PSS SHA-256) over the string \`"{version}:{manifest_hash}"\`. Returns 404 \`{ "error": "manifest not generated yet" }\` before the first build.
+
+## Server public key (\`GET /cdn/server-key/\`)
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;public_key&quot;: &quot;-----BEGIN PUBLIC KEY-----\nMIIBIjAN…\n-----END PUBLIC KEY-----\n&quot; {'}'}</p>
+          <Pre>{`
+PEM SubjectPublicKeyInfo. Nodes use it to verify tokens and the manifest. The private key lives at \`CDN_SIGNING_KEY_PATH\` (default \`cdn_signing_key.pem\` in the project root) and is auto-generated (RSA-2048) on first use if the file is missing.
+
+## Node API
+
+For people running a node. Auth is a node API key (\`X-CDN-Key\` or \`Authorization: Node …\`). A deactivated node gets \`401 "Node is deactivated."\`. Node endpoints answer 401 \`{ "error": "authentication required" }\` with no key.
+
+### \`POST /cdn/nodes/register/\`
+
+Body: \`name\` (required), and optional \`public_key\` (PEM, for challenges), \`max_storage_bytes\`, \`is_public\` (default true), \`selected_channels\` (list), \`port\`, \`public_base_url\`, \`region\` (use an ISO country code like \`DE\` so the node can get the region boost, see [Resolve](#resolve-a-file-get-cdnresolve)). Returns **201**:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;…&quot;, &quot;api_key&quot;: &quot;…&quot;, &quot;is_approved&quot;: false, &quot;status&quot;: &quot;pending&quot;, &quot;message&quot;: &quot;Node registered. Awaiting administrator approval before serving public traffic.&quot; {'}'}</p>
+          <Pre>{`
+The \`api_key\` is shown once; only its BLAKE2b hash is stored. Registration requires a user token (\`401\` without one), and the new node's \`owner\` is set to that user, so it shows up under \`/accounts/nodes/\`. Nothing is served until an admin sets \`is_approved\`.
+
+### \`POST /cdn/nodes/heartbeat/\`
+
+Send at least every 300 s. Optional fields: \`current_storage_bytes\`, \`file_count\`, \`upload_speed_mbps\`, \`download_speed_mbps\`, \`port\`, \`public_base_url\`. The node's IP is taken from \`X-Forwarded-For\`. Sets \`status=online\` only if approved and active. Response:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;…&quot;, &quot;status&quot;: &quot;online&quot;, &quot;is_approved&quot;: true, &quot;is_active&quot;: true, &quot;manifest_version&quot;: 12, &quot;directives&quot;: [&quot;reverify&quot;] {'}'}</p>
+          <Pre>{`
+\`directives\` may contain \`deactivate\` (node is inactive) \`reverify\` (node has recorded violations; re-hash local files and re-upload the file list) and \`verify_key\` (node has a \`public_key\` that hasn't been proven yet; run the [challenge](#get--post-cdnnodeschallenge) flow). Compare \`manifest_version\` with your own to know when to re-sync hashes.
+
+### \`GET\` / \`PATCH /cdn/nodes/me/\`
+
+Read the node's own record (includes \`trust_score\`, \`hash_violations\`, \`total_bytes_served\`, \`available_storage_bytes\`, etc.). PATCH accepts \`name\`, \`is_public\`, \`max_storage_bytes\`, \`selected_channels\`, \`region\`, \`public_base_url\`. Approval, trust and counters are read-only here.
+
+### \`POST /cdn/nodes/speed-test/\`
+
+Body \`upload_speed_mbps\`, \`download_speed_mbps\`. Upload speed drives ranking. Returns both values plus \`last_speed_test\`. Speeds are self-reported and unverified.
+
+### \`POST /cdn/nodes/file-list/\`
+
+Full replace: \`{ "files": [ { "filepath", "blake2b_hash", "size" } ] }\`. Paths are normalized to forward slashes. Files absent from the list are deleted server-side. Returns \`{ "stored": n, "removed": n }\`; non-list \`files\` -> 400 \`{ "error": "files must be a list" }\`. Updates the node's \`file_count\` and \`current_storage_bytes\`.
+
+### \`POST /cdn/nodes/file-list/delta/\`
+
+\`{ "added": [ { filepath, blake2b_hash, size } ], "removed": [ "path", … ] }\`. Returns \`{ "added": n, "removed": n }\`.
+
+### \`GET\` / \`POST /cdn/nodes/challenge/\`
+
+Proves the node holds the private key for the \`public_key\` it registered with. Both calls return 400 \`{ "error": "node has no public_key" }\` if none was registered.
+
+1. \`GET\` issues a fresh nonce: \`{ "challenge": "<random string>", "expires_at": "<ISO time>" }\`. It's valid for **120 s**. Each \`GET\` replaces the previous nonce.
+2. Sign the exact \`challenge\` string (UTF-8) with RSA-PSS (MGF1-SHA256, max salt length) over SHA-256, base64-encode it, and \`POST { "challenge": "…", "signature": "…" }\`.
+3. The nonce is used up by the first \`POST\`, whether the signature is right or not. An unknown, expired or already-used nonce returns 400 \`{ "error": "unknown or expired challenge" }\`, so on failure call \`GET\` again.
+4. Returns \`{ "verified": true|false }\`. On success the node's \`key_verified_at\` is set (shown in \`nodes/me\` and admin node lists).
+
+**When to run it.** Heartbeats include the \`verify_key\` directive while the node has a \`public_key\` but no \`key_verified_at\`. Run the flow once when it appears. Verification isn't yet required for approval or used in ranking; admins can see \`key_verified_at\` when approving.
+
+## Admin: nodes & stats
+
+Require an administrator. Without credentials: \`401\`; authenticated non-admin: \`403\`.
+
+### \`GET /cdn/admin/nodes/\`
+
+Every registered node. Fields: \`id\`, \`node_id\`, \`name\`, \`owner\`, \`owner_username\`, \`region\`, \`is_public\`, \`is_active\`, \`is_approved\`, \`status\`, \`online\`, \`file_count\`, \`current_storage_bytes\`, \`max_storage_bytes\`, \`upload_speed_mbps\`, \`download_speed_mbps\`, \`trust_score\`, \`hash_violations\`, \`total_bytes_served\`, \`total_requests\`, \`ip_address\`, \`port\`, \`public_base_url\`, \`last_heartbeat\`, \`created_at\`.
+
+### \`PATCH /cdn/admin/nodes/{node_id}/\`
+
+\`node_id\` is the UUID. Unknown -> 404 \`{ "error": "node not found" }\`. Returns the full admin node object.
+
+| Field | Type | Effect |
+|---|---|---|
+| \`is_approved\` | boolean | Approve or revoke |
+| \`is_active\` | boolean | Enable/disable without touching approval |
+| \`trust_score\` | number | Set the score (default 100 for new nodes) |
+| \`hash_violations\` | number | Set the counter |
+
+Re-enabling a node auto-disabled for violations requires resetting **both** \`is_approved\`/\`is_active\` and the score/counter, otherwise the next accepted report can disable it again.
+
+### \`DELETE /cdn/admin/nodes/{node_id}/\`
+
+Permanently deletes any node. Unknown -> 404 \`{ "error": "node not found" }\`; success -> \`204\` with no body.
+
+Deletion cascades: the node's file list, throughput samples, peer speed tests (both sides), violations and download logs are removed with it. The node's API key stops working immediately. To keep history, disable the node with \`PATCH\` (\`is_active: false\`) instead.
+
+### \`GET /cdn/admin/stats/\`
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;total_nodes&quot;: 15, &quot;online_nodes&quot;: 8, &quot;pending_nodes&quot;: 3, &quot;total_bytes_served&quot;: 1099511627776, &quot;total_requests&quot;: 42000, &quot;manifest_version&quot;: 12, &quot;master_files&quot;: 9800, &quot;master_bytes&quot;: 214748364800 {'}'}</p>
+          <Pre>{`
+\`online_nodes\` counts \`status=online\` among approved, active nodes; \`pending_nodes\` counts every node with \`is_approved=false\` (including ones disabled for violations).
+
+## Account: your nodes
+
+All of these use token auth (\`Authorization: Token ...\`) and only ever touch nodes owned by the caller; a node you don't own is \`404 { "detail": "Node not found." }\`.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | \`/accounts/nodes/\` | Your nodes: \`{ "nodes": [node, ...] }\` |
+| POST | \`/accounts/nodes/claim/\` | Link an existing node to your account using its API key |
+| GET | \`/accounts/nodes/{node_id}/\` | One node |
+| PATCH | \`/accounts/nodes/{node_id}/\` | Edit \`name\`, \`is_public\`, \`max_storage_bytes\`, \`selected_channels\` (list), \`region\`, \`public_base_url\` |
+| DELETE | \`/accounts/nodes/{node_id}/\` | Delete or unlink (below) |
+| POST | \`/accounts/nodes/{node_id}/regenerate-key/\` | Issue a new API key |
+
+The node object has \`node_id\`, \`name\`, \`owner\`, \`region\`, \`is_public\`, \`is_active\`, \`is_approved\`, \`status\`, \`online\`, \`file_count\`, \`current_storage_bytes\`, \`max_storage_bytes\`, \`available_storage_bytes\`, \`upload_speed_mbps\`, \`download_speed_mbps\`, \`observed_download_speed_mbps\`, \`observed_sample_count\`, \`trust_score\`, \`hash_violations\`, \`total_bytes_served\`, \`total_requests\`, \`selected_channels\`, \`ip_address\`, \`port\`, \`public_base_url\`, \`last_heartbeat\`, \`last_speed_test\`, \`key_verified_at\` and \`created_at\`. \`is_approved\`, \`trust_score\`, the observed/served counters and the timestamps are read-only; \`PATCH\` ignores them.
+
+### \`POST /accounts/nodes/claim/\`
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;api_key&quot;: &quot;the node&apos;s API key&quot; {'}'}</p>
+          <Pre>{`
+Sets you as the node's owner and returns the node object. Use it to re-link a node you unlinked with \`?unlink=1\`, or one registered without a user token. Errors: \`400 { "detail": "api_key is required." }\`, \`404 { "detail": "No node matches that API key." }\`, and \`403 { "detail": "This node is already linked to another account." }\` when someone else owns it. Claiming a node you already own is a no-op that returns it.
+
+### \`POST /accounts/nodes/{node_id}/regenerate-key/\`
+
+No body. The old key stops working immediately and the new one is shown once:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;…&quot;, &quot;api_key&quot;: &quot;…&quot;, &quot;message&quot;: &quot;Store this API key now. It will not be shown again.&quot; {'}'}</p>
+          <Pre>{`
+Put the new key in the node's config before its next heartbeat, or it will be rejected.
+
+### \`DELETE /accounts/nodes/{node_id}/\`
+
+Token auth; the node must be owned by the caller, otherwise \`404 { "detail": "Node not found." }\`.
+
+| Query | Effect | Response |
+|---|---|---|
+| *(none)* | Permanently deletes the node, cascading exactly like the admin delete | \`200 { "detail": "Node deleted." }\` |
+| \`unlink=1\` (\`true\`/\`yes\`) | Only removes the node from your account; it keeps running and can be re-claimed with its API key | \`200 { "detail": "Node unlinked from your account." }\` |
+
+> Before this change a plain \`DELETE\` only unlinked. Clients that relied on that must now pass \`?unlink=1\`.
+
+## Background jobs & config
+
+| Item | Detail |
+|---|---|
+| \`cdn.mark_stale_nodes_offline\` | Celery beat, every 120 s. Sets \`offline\` where last heartbeat is older than 300 s |
+| \`cdn.regenerate_master_hashes\` | Celery task, not scheduled. Same as \`manage.py generate_master_hashes\` |
+| \`CDN_SIGNING_KEY_PATH\` | Path of the RSA private key |
+| \`CDN_ICE_SERVERS\` | JSON array of STUN servers (default: two Google STUN servers) |
+| \`CDN_TURN_URLS\` | Comma-separated TURN URLs, \`turn:…?transport=udp\` first. Unset = no TURN |
+| \`CDN_TURN_SECRET\` | Shared with coturn's \`static-auth-secret\`. Unset = no TURN |
+| \`CDN_TURN_TTL_LISTENER\` | TURN credential lifetime for listeners (\`ready\`), default 3600 s |
+| \`CDN_TURN_TTL_NODE\` | TURN credential lifetime for nodes (\`ice-config\`), default 86400 s |
+| \`CDN_NODE_HEARTBEAT_TIMEOUT\` | Defined in settings but **not used**: the 300 s timeout is hard-coded in \`cdn/router.py\` and the beat task |
+
+## Client timeouts, fallback & failure modes
+
+These budgets are client recommendations; the server enforces none of them except the token lifetime.
+
+| Stage | Budget | On expiry |
+|---|---|---|
+| Signaling connect | 15 s | No \`ready\` -> close, try the next node |
+| ICE gathering | 4 s | Send the offer anyway |
+| Data stall | 30 s | No DataChannel frame for 30 s -> abort, try the next node |
+| Token lifetime | 5 min (server-enforced, at connect) | Re-resolve |
+
+**Fallback order**
+
+- If \`direct\` is \`true\`, skip straight to \`direct_url\`. Otherwise walk \`nodes\` in score order: open signaling with that node's token, negotiate, receive, verify the hash.
+- Any failure (offline node, handshake timeout, stalled channel, hash mismatch) tears down and moves to the next node.
+- \`direct\` is \`true\`, nodes exhausted, or \`node_count\` was 0 -> \`GET direct_url\`. The CDN is an optimisation, never a requirement.
+- Roughly 10-20% of consumer networks sit behind symmetric NAT, where STUN hole-punching fails. Those attempts die at the peer-connection stage; expect it.
+- Let users turn it off with a persisted preference that skips \`/cdn/resolve/\`.
+
+## Node speed measurement (implemented)
+
+Backend-side implementation of the Node Speed Measurement API draft. This is what's actually live in \`cdn/\` now — use it as the contract for the node app's changes.
+
+### 1. Real transfer telemetry
+
+\`POST /log-download/\` (unauthenticated, unchanged endpoint) now accepts two new optional fields:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;node_id&quot;: &quot;550e8400-e29b-41d4-a716-446655440000&quot;, &quot;filepath&quot;: &quot;compilation/track.flac&quot;, &quot;bytes_served&quot;: 41943040, &quot;elapsed_ms&quot;: 3120, &quot;reported_by&quot;: &quot;listener&quot; {'}'}</p>
+          <Pre>{`
+- \`elapsed_ms\` (number, optional) — wall-clock ms for the transfer.
+- \`reported_by\` (\`"node"\` | \`"listener"\`, optional, defaults to \`"node"\`) — who's reporting.
+
+When \`elapsed_ms > 0\`, the server computes Mbps and stores it as a \`NodeThroughputSample\`. Only \`reported_by: "listener"\` samples move the node's new \`observed_download_speed_mbps\` field (median of the last 20 listener samples). Node-reported samples are stored but don't affect it.
+
+Still unauthenticated — same trust level as today's advisory counters. Not changed as part of this work; flagged as an open call for whoever owns auth policy.
+
+### 2. Peer-to-peer speedtest
+
+\`POST /nodes/peer-test/request/\`
+Auth: \`X-CDN-Key\`
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'}{'}'}</p>
+          <Pre>{`
+(body is ignored — the requesting node is whoever the API key identifies)
+
+Response \`200\`:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;test_id&quot;: &quot;b7e6...&quot;, &quot;peer_node_id&quot;: &quot;6b1f...&quot;, &quot;role&quot;: &quot;initiator&quot;, &quot;expires_at&quot;: &quot;2026-09-22T20:10:00Z&quot; {'}'}</p>
+          <Pre>{`
+Response \`403\` if the requesting node isn't approved yet (it couldn't join the signaling socket anyway).
+
+Response \`503\` if fewer than 1 eligible peer is online, or all eligible peers are in this node's 24h pairing cooldown.
+
+Peer is picked randomly from \`is_active=True, is_approved=True, is_public=True, status='online'\` nodes, excluding self and anyone paired with this node in the last 24h. Test expires 180s after creation.
+
+\`POST /nodes/peer-test/report/\`
+Auth: \`X-CDN-Key\`
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;test_id&quot;: &quot;b7e6...&quot;, &quot;sent_mbps&quot;: 210.4, &quot;received_mbps&quot;: 198.7, &quot;duration_ms&quot;: 4032 {'}'}</p>
+          <Pre>{`
+- \`202\` while waiting on the other side to report.
+- \`200\` once both sides have reported. Reporting again after that returns the same result and changes nothing:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;test_id&quot;: &quot;b7e6...&quot;, &quot;status&quot;: &quot;complete&quot;, &quot;agreement&quot;: &quot;consistent&quot; {'}'}</p>
+          <Pre>{`
+\`agreement\` is \`"consistent"\` if both cross-legs (A's sent vs B's received, and vice versa) are within 25%, else \`"disputed"\`.
+
+- \`400\` if \`test_id\` isn't a UUID or the numbers aren't finite and non-negative, \`404\` unknown test_id, \`403\` if the authenticated node isn't part of that test, \`410\` if the test expired before both sides reported.
+
+### 3. Signaling addition: \`peer_session\`
+
+Same \`role=node\` websocket (\`/ws/cdn/signal/?role=node&key=...\`) used for listener sessions now also relays peer tests. After a successful \`/nodes/peer-test/request/\` call, both nodes receive:
+`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">{'{'} &quot;type&quot;: &quot;peer_session&quot;, &quot;session_id&quot;: &quot;&lt;test_id&gt;&quot;, &quot;peer_node_id&quot;: &quot;...&quot;, &quot;role&quot;: &quot;initiator&quot; | &quot;responder&quot; {'}'}</p>
+          <Pre>{`
+From there, send \`offer\` / \`answer\` / \`ice\` / \`teardown\` with the same \`session_id\` — the server relays each message verbatim to the other node's socket (no token/filepath validation, unlike listener sessions). Whoever got \`role: "initiator"\` sends the \`offer\` first. If a node's last signaling socket closes mid-test, the server sends its peer a \`teardown\` for that \`session_id\`.
+
+### What this means for the node app
+
+- Call \`POST /nodes/peer-test/request/\` periodically (e.g. every few hours, back off on 503).
+- Handle the \`peer_session\` message in \`signaling.py\` alongside the existing listener \`session\` handler — same offer/answer/ice/teardown shape, keyed by \`session_id\`.
+- Once connected, send ~8–16MB each direction, time it locally, then \`POST /nodes/peer-test/report/\` with your own side's numbers.
+- The listener-side timing report (\`elapsed_ms\`/\`reported_by: "listener"\` on \`/log-download/\`) is a player-client change, not a node-app change — mentioned here for completeness.
+
+### Not decided (backend manager's call, not resolved in this pass)
+
+- Whether \`/log-download/\` should move behind listener auth.
+- How much weight \`observed_download_speed_mbps\` gets in routing (\`cdn/router.py\` scoring is unchanged — still uses only \`upload_speed_mbps\`).
+- Rate limiting on \`/nodes/peer-test/request/\`.
+- Whether peer-test payload size should scale with reported connection speed.
+`}</Pre>
+        </div>
+      </Section>
+
+    </div>
+  )
+}
+
+function NginxTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title={"nginx: Social Preview Routing"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The player at <Code>{"player.juicewrldapi.com"}</Code> is a client-rendered SPA. Link-unfurling bots (Discordbot, Twitterbot, Slackbot, iMessage, ...) don&apos;t run JS, so without help they only ever see the generic site card from <Code>{"index.html"}</Code>.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"server/social-preview.mjs"}</Code> is a small Node service that prerenders per-item Open Graph tags plus a Discord component embed. nginx sends <strong className="text-text-primary">only known bot user-agents</strong> on previewable paths to it. Real browsers hitting the same URLs keep getting the normal SPA build.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">The service only makes read-only, anonymous <Code>{"GET"}</Code> calls to the API. The one exception is <Code>{"/unfurl"}</Code> (below), which fetches pages from arbitrary sites.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">It also serves the chat client&apos;s link previews: <Code>{"GET /unfurl?url=<link>"}</Code> returns a linked page&apos;s title, description and image as JSON. See Chat link previews.</p>
+        </div>
+      </Section>
+
+      <Section title={"Routes"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={["Link", "Card", "API source", "Bot-gated"]}
+            rows={[
+              [<><Code>{"/track/{id}"}</Code></>, "Song: cover art, era, credits, AKAs, lyric hook, playable video", <><Code>{"/songs/{id}/"}</Code></>, "yes"],
+              [<><Code>{"/track/{id}/video.mp4"}</Code></>, "Playable embed video (cover + audio)", "Song audio and cover art", <><strong className="text-text-primary">no</strong></>],
+              [<><Code>{"/shared/{share_id}"}</Code></>, "Anonymous shared playlist", <><Code>{"/playlists/shared/{id}/"}</Code></>, "yes"],
+              [<><Code>{"/playlists?id={id}&view=shared"}</Code></>, "Public library playlist", <><Code>{"/library/playlists/public/{id}/"}</Code></>, "yes"],
+              [<><Code>{"/news/{id}"}</Code></>, "News post: body as Discord markdown, images in a gallery", <><Code>{"/news/{id}/"}</Code></>, "yes"],
+              [<><Code>{"/u/{id}"}</Code></>, "Profile: badges, bio, listening stats, public playlists", <><Code>{"/accounts/profile/{id}/"}</Code>, <Code>{".../np/"}</Code></>, "yes"],
+              [<><Code>{"/u/{id}/avatar.{jpg|png|webp|gif}"}</Code></>, "Decoded base64 avatar as a real image", <><Code>{"/accounts/profile/{id}/"}</Code></>, <><strong className="text-text-primary">no</strong></>],
+              [<><Code>{"/wrld"}</Code></>, "999 FM: live status, now playing, up next, listeners", <><Code>{"/radio/live/"}</Code></>, "yes"],
+              [<><Code>{"/statistics"}</Code></>, "Top songs, top eras, total plays", <><Code>{"/stats/"}</Code>, <Code>{"/plays/stats/"}</Code></>, "yes"],
+              [<><Code>{"/"}</Code>, <Code>{"/home"}</Code>, <Code>{"/playlists"}</Code></>, "Site card: catalog stats, latest news post", <><Code>{"/stats/"}</Code>, <Code>{"/eras/"}</Code>, <Code>{"/news/"}</Code></>, "yes"],
+              [<><Code>{"/unfurl?url={link}"}</Code></>, "JSON preview of any public page, for chat link cards", "The linked site itself", <><strong className="text-text-primary">no</strong></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">The avatar and video routes aren&apos;t bot-gated because Discord&apos;s media proxy fetches them, and the SPA has no such paths. <Code>{"/unfurl"}</Code> isn&apos;t bot-gated because real browsers call it.</p>
+        </div>
+      </Section>
+
+      <Section title={"Chat link previews (/unfurl)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The chat client shows a card (site name, title, description, thumbnail) under the first link in a channel message. A browser can&apos;t read another site&apos;s <Code>{"og:"}</Code> tags (CORS), and fetching from the viewer&apos;s machine would tell that site who is looking, so the SPA asks this endpoint instead. It&apos;s same-origin, so no CORS config is needed.</p>
+          <Pre>{`GET /unfurl?url=https%3A%2F%2Fexample.com%2Fpost
+200 { "url", "title", "description"?, "image"?, "siteName" }
+404 {}   nothing to show (bad or blocked URL, not HTML, no title, fetch failed)
+429 {}   caller over budget; the client retries on the next render`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Successful responses carry <Code>{"Cache-Control: public, max-age=3600"}</Code>, and 404s <Code>{"max-age=600"}</Code>.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Because the URL is chosen by any chat member, the fetch is fenced in against SSRF:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><Code>{"http"}</Code>/<Code>{"https"}</Code> only, default ports only (80/443), no credentials in the URL.</li>
+            <li>Every address a hostname resolves to must be public. The check runs in the request&apos;s <Code>{"lookup"}</Code>, so it applies to the address actually connected to, which defeats DNS rebinding. One private answer among several rejects the lot. Loopback, RFC 1918, link-local (including cloud metadata <Code>{"169.254.169.254"}</Code>), CGNAT, multicast, IPv6 ULA/link-local, NAT64 and 6to4 ranges are all blocked, and IPv4-mapped IPv6 is treated as the IPv4 it wraps.</li>
+            <li>Redirects are followed by hand, up to 4, and each hop is re-checked.</li>
+            <li>Only <Code>{"text/html"}</Code> and <Code>{"application/xhtml+xml"}</Code> are read. The read stops at <Code>{"</head>"}</Code> or 1.5 MB (YouTube buries its tags about 710 KB in), with a 6 s timeout.</li>
+            <li>Only the parsed fields come back, never the fetched body. Image URLs must be <Code>{"https"}</Code>.</li>
+            <li>Links to the site&apos;s own hosts (<Code>{"SITE_HOSTS"}</Code>) are refused. Those pages only carry generic tags.</li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed">Budgets, per process:</p>
+          <Table
+            headers={["Limit", "Value"]}
+            rows={[
+              ["Uncached fetches per client IP", "30 per minute"],
+              ["Concurrent fetches", "8"],
+              ["Cache", "1000 entries in memory, 1 h for hits, 10 min for misses"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">The per-client budget keys on <Code>{"X-Real-IP"}</Code>, which is only trusted from loopback. <strong className="text-text-primary">The nginx <Code>{"/unfurl"}</Code> block must set it</strong>, otherwise every user shares one budget under <Code>{"127.0.0.1"}</Code>. The endpoint doesn&apos;t check who is calling.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Privacy: DMs never request a preview. The client only asks for plaintext channel messages, since the service would otherwise see the URL of an end-to-end encrypted message. Thumbnails load straight from the linked site (with <Code>{"Referrer-Policy: no-referrer"}</Code>), so that site&apos;s image host can see the viewer&apos;s IP. Proxying images through the service would close that gap.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Set <Code>{"SOCIAL_PREVIEW_UNFURL=0"}</Code> to turn the endpoint off. It then answers 404 to everything and the chat shows no cards.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">For local dev, <Code>{"npm run social-preview"}</Code> alongside <Code>{"npm run dev"}</Code> works: <Code>{"vite.config.ts"}</Code> proxies <Code>{"/unfurl"}</Code> to port 8788.</p>
+        </div>
+      </Section>
+
+      <Section title={"Config"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">This isn&apos;t a drop-in file. Merge the two blocks into your existing config.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">1. <Code>{"http {}"}</Code> block (once)</p>
+          <Pre>{`map $http_user_agent $is_social_bot {
+    default 0;
+    "~*discordbot|twitterbot|facebookexternalhit|slackbot|telegrambot|whatsapp|linkedinbot|skypeuripreview|redditbot|vkshare|applebot|iframely|embedly|pinterest|discord" 1;
+}`}</Pre>
+          <p className="text-sm font-medium text-text-primary mt-2">2. <Code>{"server {}"}</Code> block for <Code>{"player.juicewrldapi.com"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Place these <strong className="text-text-primary">above</strong> the SPA fallback (<Code>{"location / { try_files $uri /index.html; }"}</Code>). Regex locations match in file order, so the avatar and video blocks must come before the catch-all preview block.</p>
+          <Pre>{`# Profile avatars - not bot-gated.
+location ~ ^/u/\\d+/avatar\\.(jpg|png|webp|gif)$ {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+}
+
+# Playable track videos - not bot-gated. First request for a song can wait
+# on the transcode. X-Real-IP feeds the per-client render budget.
+location ~ ^/track/\\d+/video\\.mp4$ {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 180s;
+}
+
+# Chat link previews - not bot-gated, browsers call it. X-Real-IP feeds the
+# per-client fetch budget. proxy_pass without a URI keeps the query string.
+location = /unfurl {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 15s;
+}
+
+# Every previewable page. Bots go to the service, everyone else gets the SPA.
+location ~ ^/((track|shared|news|u)/|(home|playlists|statistics|wrld)/?$|$) {
+    error_page 418 = @social_preview;
+    recursive_error_pages on;
+    if ($is_social_bot) {
+        return 418;
+    }
+    try_files $uri /index.html;
+}
+
+location @social_preview {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">The <Code>{"error_page 418"}</Code> + named location pattern is the standard way to proxy conditionally without wrapping <Code>{"proxy_pass"}</Code> in <Code>{"if"}</Code>. The <Code>{"@social_preview"}</Code> block must exist in the <strong className="text-text-primary">same</strong> <Code>{"server {}"}</Code>. Without it <Code>{"nginx -t"}</Code> still passes, but every bot request 500s with &quot;could not find named location&quot;.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">nginx locations never see the query string, so <Code>{"/playlists?id=...&view=shared"}</Code> matches the <Code>{"playlists"}</Code> entry and the service reads the query itself.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Apply:</p>
+          <Pre>{`sudo nginx -t && sudo systemctl reload nginx`}</Pre>
+        </div>
+      </Section>
+
+      <Section title={"Adding a new previewable page"} defaultOpen={false}>
+        <div className="space-y-3">
+          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
+            <li>Add a <Code>{"render*()"}</Code> function and a route in <Code>{"handle()"}</Code> in <Code>{"server/social-preview.mjs"}</Code>.</li>
+            <li>Add the path to the preview <Code>{"location"}</Code> regex above (exact pages go in the <Code>{"(home|playlists|statistics|wrld)"}</Code> group, prefixes in <Code>{"(track|shared|news|u)"}</Code>).</li>
+            <li>Reload nginx.</li>
+          </ol>
+        </div>
+      </Section>
+
+      <Section title={"Live beta config (beta.juicewrldapi.com)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The deployed config doesn&apos;t use the single catch-all regex from the section above. It routes bots two ways:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><strong className="text-text-primary">Prefix routes</strong> (<Code>{"/track/"}</Code>, <Code>{"/shared/"}</Code>, <Code>{"/news/"}</Code>, <Code>{"/u/"}</Code>): a server-level <Code>{"if ($social_preview)"}</Code> rewrites to the internal <Code>{"/__social_preview/"}</Code> location. <Code>{"$social_preview"}</Code> is a <Code>{"map"}</Code> in the <Code>{"http {}"}</Code> block (not shown here) that combines the bot UA check with the path.</li>
+            <li><strong className="text-text-primary">Exact pages</strong> (<Code>{"/"}</Code>, <Code>{"/home"}</Code>, <Code>{"/playlists"}</Code>, <Code>{"/statistics"}</Code>, <Code>{"/wrld"}</Code>): one <Code>{"location"}</Code> each, using the <Code>{"418"}</Code> to <Code>{"@social_preview"}</Code> pattern.</li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed">A new exact page needs its own <Code>{"location = /path"}</Code> block. A new prefix route goes in the <Code>{"$social_preview"}</Code> map.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Changes for the 999 FM embed:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>Added <Code>{"location = /wrld"}</Code>.</li>
+            <li>Escaped the <Code>{"."}</Code> in the avatar regex (<Code>{"avatar\\."}</Code>). It used to match any character there.</li>
+          </ul>
+          <Pre>{`server {
+        listen 80;
+        server_name beta.juicewrldapi.com;
+
+        root E:/v1.1.0/Experimental/Unreleased/dist;
+        index index.html;
+
+        location ~ ^/juicewrld/ws/ {
+            proxy_pass http://jwa_rt;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+
+            proxy_connect_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_read_timeout 3600s;
+        }
+
+        location ~ ^/u/\\d+/avatar\\.(jpg|png|webp|gif)$ {
+            proxy_pass http://127.0.0.1:8788;
+            proxy_set_header Host $host;
+        }
+
+        location ~ ^/track/\\d+/video\\.mp4$ {
+            proxy_pass http://127.0.0.1:8788;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 180s;
+        }
+
+        # Chat link previews (GET /unfurl?url=...). Not bot-gated. X-Real-IP
+        # feeds the per-client fetch budget.
+        location = /unfurl {
+            proxy_pass http://127.0.0.1:8788;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_read_timeout 15s;
+        }
+
+        location = /playlists {
+            error_page 418 = @social_preview;
+            recursive_error_pages on;
+            if ($is_social_bot) { return 418; }
+            try_files $uri /index.html;
+        }
+
+        location ~ ^/(home)?$ {
+            error_page 418 = @social_preview;
+            recursive_error_pages on;
+            if ($is_social_bot) { return 418; }
+            try_files $uri /index.html;
+        }
+
+        location = /statistics {
+            error_page 418 = @social_preview;
+            recursive_error_pages on;
+            if ($is_social_bot) { return 418; }
+            try_files $uri /index.html;
+        }
+
+        # 999 FM radio card
+        location = /wrld {
+            error_page 418 = @social_preview;
+            recursive_error_pages on;
+            if ($is_social_bot) { return 418; }
+            try_files $uri /index.html;
+        }
+
+        location @social_preview {
+            proxy_pass http://127.0.0.1:8788;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        if ($social_preview) {
+            rewrite ^ /__social_preview$uri last;
+        }
+
+        location ^~ /__social_preview/ {
+            internal;
+            rewrite ^/__social_preview(/.*)$ $1 break;
+            proxy_pass http://127.0.0.1:8788;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 10s;
+            add_header Vary User-Agent always;
+        }
+
+
+        location /juicewrld/heardle/ {
+            proxy_pass http://jwa_api;
+
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            proxy_connect_timeout 120s;
+            proxy_send_timeout 120s;
+            proxy_read_timeout 120s;
+        }
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        location /assets/ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|webmanifest)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Things to know about this config:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><strong className="text-text-primary">The <Code>{"/__social_preview/"}</Code> path doesn&apos;t pass <Code>{"X-Real-IP"}</Code></strong>, so bot hits on <Code>{"/track/:id"}</Code> reach the service without the client IP. The page render doesn&apos;t need it. The video render budget does, and it&apos;s charged on the <Code>{"video.mp4"}</Code> request, which does pass it.</li>
+            <li><strong className="text-text-primary"><Code>{"proxy_read_timeout 10s"}</Code></strong> on <Code>{"/__social_preview/"}</Code> is fine for pages. Each API fetch inside the service times out at 5s.</li>
+            <li><strong className="text-text-primary">Exact matches only.</strong> <Code>{"/wrld/"}</Code> and <Code>{"/statistics/"}</Code> with a trailing slash fall through to the SPA and get the generic card. The service accepts both forms, so widen a location (for example <Code>{"location ~ ^/wrld/?$"}</Code>) if that matters.</li>
+          </ul>
+        </div>
+      </Section>
+
+      <Section title={"Service"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Runs as systemd (<Code>{"server/social-preview.service.example"}</Code>), listening on loopback only.</p>
+          <div className="border-l-2 border-[var(--border)] pl-3 text-xs text-text-muted leading-relaxed">The live beta box runs the service on Windows (see the config below), so the systemd unit is only the Linux reference. There, ffmpeg comes from <Code>{"PATH"}</Code> (<Code>{"ffmpeg.exe"}</Code>).</div>
+          <Table
+            headers={["Env", "Default", "Notes"]}
+            rows={[
+              [<><Code>{"SOCIAL_PREVIEW_PORT"}</Code></>, <><Code>{"8788"}</Code></>, <>Must match the <Code>{"proxy_pass"}</Code> port</>],
+              [<><Code>{"SOCIAL_PREVIEW_HOST"}</Code></>, <><Code>{"127.0.0.1"}</Code></>, <>Only nginx should reach it. <Code>{"X-Real-IP"}</Code> is only trusted from loopback</>],
+              [<><Code>{"JWAPI_BASE"}</Code></>, <><Code>{"https://juicewrldapi.com/juicewrld"}</Code></>, ""],
+              [<><Code>{"SITE_ORIGIN"}</Code></>, <><Code>{"https://player.juicewrldapi.com"}</Code></>, "Fallback origin for links in embeds"],
+              [<><Code>{"SITE_HOSTS"}</Code></>, <>origin host + <Code>{"beta.juicewrldapi.com"}</Code></>, <>Hosts whose <Code>{"Host"}</Code> header picks the embed&apos;s link origin</>],
+              [<><Code>{"SOCIAL_PREVIEW_CACHE"}</Code></>, <><Code>{"$TMPDIR/social-preview-video"}</Code></>, "Track video cache dir"],
+              [<><Code>{"SOCIAL_PREVIEW_VIDEO"}</Code></>, "on", <><Code>{"0"}</Code> disables playable track embeds</>],
+              [<><Code>{"SOCIAL_PREVIEW_VIDEO_RENDERS_PER_HOUR"}</Code></>, <><Code>{"120"}</Code></>, "Global new-render budget"],
+              [<><Code>{"SOCIAL_PREVIEW_UNFURL"}</Code></>, "on", <><Code>{"0"}</Code> disables the <Code>{"/unfurl"}</Code> chat link-preview endpoint</>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Playable track videos need ffmpeg at <Code>{"/usr/bin/ffmpeg"}</Code> (<Code>{"apt install ffmpeg"}</Code>). Without it, track embeds fall back to a thumbnail.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Responses carry <Code>{"Vary: User-Agent"}</Code> because nginx serves a different body (the SPA shell) for the same URL to non-bots.</p>
+        </div>
+      </Section>
+
+      <Section title={"Testing"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Fake a bot user-agent:</p>
+          <Pre>{`curl -s -A Discordbot https://player.juicewrldapi.com/wrld | grep -E 'og:|component-embed'`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">A normal UA should return the SPA&apos;s <Code>{"index.html"}</Code>:</p>
+          <Pre>{`curl -s https://player.juicewrldapi.com/wrld | grep -c 'component-embed'`}</Pre>
+        </div>
+      </Section>
+
+    </div>
+  )
+}
+
+function TierListsTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title={"Tier Lists"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Account-synced song tier lists (S/A/B/... rows of songs). Any logged-in user, including standard accounts, can create them; no editor role required. Lists are private by default and can be shared by making them public.</p>
+        </div>
+      </Section>
+
+      <Section title={"Personal Tier Lists (auth required)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"Authorization: Token YOUR_TOKEN_HERE"}</Code> — only your own lists are visible or editable here; another user&apos;s list id returns <Code>{"404"}</Code>.</p>
+          <Table
+            headers={["Method", "Path", "Description"]}
+            rows={[
+              ["GET", <><Code>{"/library/tierlists/"}</Code></>, "All your tier lists, most recently updated first"],
+              ["POST", <><Code>{"/library/tierlists/"}</Code></>, "Create a tier list"],
+              ["PATCH", <><Code>{"/library/tierlists/{id}/"}</Code></>, "Update any of name, is_public, data"],
+              ["DELETE", <><Code>{"/library/tierlists/{id}/"}</Code></>, "Delete a tier list (204)"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">There is no authenticated <Code>{"GET /library/tierlists/{id}/"}</Code> — read a single list from the list response, or from the public endpoint below (which also serves your own private lists).</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"GET /library/tierlists/"}</Code> returns a plain array (not <Code>{"{ results }"}</Code>) of <Code>{"tierlist"}</Code> objects:</p>
+          <Pre>{`{
+  "id": 7,
+  "name": "Unreleased ranked",
+  "is_public": false,
+  "data": {
+    "v": 1,
+    "tiers": [
+      { "id": "s", "label": "S", "color": "#ff7f7f" },
+      { "id": "a", "label": "A", "color": "#ffbf7f" }
+    ],
+    "rows": { "s": [101, 57], "a": [12] },
+    "filters": { "categories": ["unreleased"], "eras": ["DRFL", "GBGR"], "albumId": null }
+  },
+  "ranked_count": 3,
+  "created_at": "2026-09-30T18:00:00Z",
+  "updated_at": "2026-09-30T18:05:00Z"
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"ranked_count"}</Code> is computed by the server from <Code>{"data.rows"}</Code> (number of distinct songs placed) and is read-only.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">POST</strong> <Code>{"/library/tierlists/"}</Code></p>
+          <Pre>{`{ "name": "Unreleased ranked", "is_public": false, "data": { "v": 1, "tiers": [...], "rows": {...}, "filters": {...} } }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"name"}</Code> and <Code>{"data"}</Code> are required; <Code>{"is_public"}</Code> is optional (default <Code>{"false"}</Code>). Returns the created <Code>{"tierlist"}</Code> (201).</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">PATCH</strong> <Code>{"/library/tierlists/{id}/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Send only the fields you&apos;re changing. <Code>{"data"}</Code> is replaced whole — there&apos;s no partial merge of tiers or rows, so send the full object. Returns the updated <Code>{"tierlist"}</Code>.</p>
+        </div>
+      </Section>
+
+      <Section title={"The data object"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The server stores <Code>{"data"}</Code> as-is after validating its shape. It doesn&apos;t check that song ids exist, so the client should resolve them against <Code>{"/songs/"}</Code> and skip ids it can&apos;t find.</p>
+          <Table
+            headers={["Field", "Rule"]}
+            rows={[
+              [<><Code>{"v"}</Code></>, <>Must be the integer <Code>{"1"}</Code></>],
+              [<><Code>{"tiers"}</Code></>, "Array of 1–30 tiers, in display order"],
+              [<><Code>{"tiers[].id"}</Code></>, "String, 1–64 chars, unique within the list"],
+              [<><Code>{"tiers[].label"}</Code></>, "String, at most 20 chars (may be empty)"],
+              [<><Code>{"tiers[].color"}</Code></>, <>String, at most 16 chars (e.g. <Code>{"#ff7f7f"}</Code>)</>],
+              [<><Code>{"rows"}</Code></>, "Object mapping a tier id to an ordered array of song ids. Every key must be a tier id; tiers with no songs can be omitted. Songs not in any row are unranked"],
+              [<><Code>{"rows[tier]"}</Code></>, "Positive integer song ids. A song may appear only once across all rows. At most 5000 ranked songs in total"],
+              [<><Code>{"filters"}</Code></>, "Object describing which songs the list ranks from"],
+              [<><Code>{"filters.categories"}</Code></>, <>Non-empty subset of <Code>{"\"released\""}</Code>, <Code>{"\"unreleased\""}</Code></>],
+              [<><Code>{"filters.eras"}</Code></>, "Array of at most 50 era names (strings; may be empty)"],
+              [<><Code>{"filters.albumId"}</Code></>, <>Required key: an integer, or <Code>{"null"}</Code> for no album filter</>],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title={"Limits and errors"} defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={["Limit", "Value"]}
+            rows={[
+              ["Tier lists per user", "200"],
+              ["Request body (POST/PATCH)", <>256 KB (by <Code>{"Content-Length"}</Code>)</>],
+              ["Name", "1–100 chars after trimming whitespace"],
+            ]}
+          />
+          <Table
+            headers={["Status", "detail", "Cause"]}
+            rows={[
+              ["400", "Request body must be an object.", "Body isn't a JSON object"],
+              ["400", "A tier list name is required.", <>Missing or blank <Code>{"name"}</Code> (POST, or PATCH that includes <Code>{"name"}</Code>)</>],
+              ["400", "Tier list name must be at most 100 characters.", "Name too long"],
+              ["400", "is_public must be a boolean.", <>Non-boolean <Code>{"is_public"}</Code></>],
+              ["400", "You can have at most 200 tier lists.", "Per-user cap reached (POST)"],
+              ["400", "data.v must be 1. / data.tiers must be an array of 1-30 tiers. / ...", <><Code>{"data"}</Code> failed validation — <Code>{"detail"}</Code> names the offending field (see table above)</>],
+              ["400", "Song {id} appears in more than one place.", "Duplicate song across rows"],
+              ["400", "data.rows has unknown tier id \"{id}\".", <><Code>{"rows"}</Code> key with no matching tier</>],
+              ["401", "", "Missing/invalid token"],
+              ["404", "Not found.", "List doesn't exist or isn't yours"],
+              ["413", "Request body is too large.", "Body over 256 KB"],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title={"Public Tier Lists (no auth required)"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">GET</strong> <Code>{"/library/tierlists/public/{id}/"}</Code></p>
+          <p className="text-sm text-text-secondary leading-relaxed">Anyone can read a list with <Code>{"is_public: true"}</Code>. A private list returns <Code>{"404"}</Code> — except to its owner, when the request carries the owner&apos;s token. Returns the <Code>{"tierlist"}</Code> object plus <Code>{"owner"}</Code>:</p>
+          <Pre>{`{
+  "id": 7,
+  "name": "Unreleased ranked",
+  "is_public": true,
+  "data": { "v": 1, "tiers": [...], "rows": {...}, "filters": {...} },
+  "ranked_count": 3,
+  "created_at": "...", "updated_at": "...",
+  "owner": { "id": 12, "display_name": "J Doe" }
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"owner.display_name"}</Code> falls back to the Discord username, then the account username.</p>
+        </div>
+      </Section>
+
+      <Section title={"On Public Profiles"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"GET /accounts/profile/{user_id}/"}</Code> (see Accounts) now includes <Code>{"tierlists"}</Code>: the user&apos;s public tier lists, most recently updated first, as summaries without <Code>{"data"}</Code>:</p>
+          <Pre>{`"tierlists": [
+  { "id": 7, "name": "Unreleased ranked", "ranked_count": 3, "created_at": "...", "updated_at": "..." }
+]`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Unlike <Code>{"playlists"}</Code>, this isn&apos;t gated by a profile-level toggle — each list&apos;s own <Code>{"is_public"}</Code> is the only switch. Fetch <Code>{"/library/tierlists/public/{id}/"}</Code> for the full list.</p>
+        </div>
+      </Section>
+
+      <Section title={"Deployment Notes"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Run <Code>{"python manage.py migrate"}</Code> after deploying — <Code>{"library.0005_tierlist"}</Code> creates the <Code>{"TierList"}</Code> table. Tier lists are also browsable in Django admin.</p>
+        </div>
+      </Section>
+
+    </div>
+  )
+}
+
+function SocketsTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title={"Overview"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Two sockets carry push events so clients don&apos;t have to poll. Both are served by the WebSocket (Daphne) process and live under both <Code>{"/juicewrld/ws/..."}</Code> and <Code>{"/ws/..."}</Code>.</p>
+          <Table
+            headers={["Socket", "Path", "Auth", "Carries"]}
+            rows={[
+              ["Notifications", <><Code>{"/juicewrld/ws/notifications/"}</Code></>, "None, or optional ticket for per-user events (receive-only)", "Server-wide events such as new news posts, plus events addressed to one user"],
+              ["Chat", <><Code>{"/juicewrld/ws/chat/"}</Code></>, "Ticket, first frame", "Per-user and per-room chat events. Full event list in Staff Chat tab"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Events are fanned out through the Channels layer. REST requests run in a different process from the sockets, so events only reach clients when the Redis channel layer is running (<Code>{"CHANNEL_REDIS_URL"}</Code>). With the in-memory fallback, REST-triggered events never arrive.</p>
+        </div>
+      </Section>
+
+      <Section title={"Notifications socket"}>
+        <div className="space-y-3">
+          <Pre>{`wss://YOUR_HOST/juicewrld/ws/notifications/`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">No auth and nothing to send. Every connected client receives every event as a JSON text frame. Send the text <Code>{"ping"}</Code> for a <Code>{"pong"}</Code> keepalive. Because it is public, it only ever carries data that is already public.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Per-user events (optional auth)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Any logged-in account (not just chat users) can also receive events meant only for it.</p>
+          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
+            <li><Code>{"POST /notifications/ws-ticket/"}</Code> (also <Code>{"/juicewrld/notifications/ws-ticket/"}</Code>) with <Code>{"Authorization: Token ..."}</Code> returns <Code>{"{ \"ticket\": \"...\", \"expires_in\": 30 }"}</Code>. Notification tickets are signed with their own salt, so they don&apos;t work on the chat socket and chat tickets don&apos;t work here.</li>
+            <li>After connecting, send <Code>{"{ \"type\": \"auth\", \"ticket\": \"...\" }"}</Code>.</li>
+            <li>The server answers <Code>{"{ \"type\": \"authenticated\" }"}</Code>, or <Code>{"{ \"type\": \"auth.failed\" }"}</Code> (the socket stays open and keeps receiving public events).</li>
+          </ol>
+          <p className="text-sm text-text-secondary leading-relaxed">Authenticating adds the socket to the account&apos;s private group; it never removes the public events. Unauthenticated sockets never receive per-user events. Ticket rules (30s, bound to the API token) match the chat socket. Authorization is checked once at auth time, so a token rotated afterwards doesn&apos;t close the socket; reconnect with a fresh ticket.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">News events</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Fired when a news post is created (<Code>{"news/views.py"}</Code>). Edits and deletes are not pushed.</p>
+          <Pre>{`{ "type": "news", "action": "created", "post": { "id": 12, "title": "New leak dropped", "summary": "...", "channel": "leaks", "featured": true, "image_url": "...", "author": "someuser", "published_at": "..." } }`}</Pre>
+          <Table
+            headers={["Field", "Notes"]}
+            rows={[
+              [<><Code>{"type"}</Code></>, <><Code>{"news"}</Code></>],
+              [<><Code>{"action"}</Code></>, <><Code>{"created"}</Code></>],
+              [<><Code>{"post"}</Code></>, <>The normal post object <strong className="text-text-primary">without <Code>{"body"}</Code></strong>; fetch <Code>{"GET /news/{id}/"}</Code> for the article</>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Every post is broadcast regardless of news channel.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Broadcast messages (admin)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">An administrator can push a message to every connected notifications socket from the frontend. The REST call does the sending, so it works from any client that can reach the API.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"POST /notifications/broadcast/"}</Code> (also <Code>{"/juicewrld/notifications/broadcast/"}</Code>) with <Code>{"Authorization: Token ..."}</Code>. Requires an administrator account with two-factor enabled; anyone else gets <Code>{"403"}</Code>.</p>
+          <Pre>{`{ "message": "Server restarting in 5 minutes", "title": "Maintenance", "level": "warning" }`}</Pre>
+          <Table
+            headers={["Field", "Notes"]}
+            rows={[
+              [<><Code>{"message"}</Code></>, "Required, up to 500 characters"],
+              [<><Code>{"title"}</Code></>, "Optional, up to 100 characters"],
+              [<><Code>{"level"}</Code></>, <>Optional: <Code>{"info"}</Code> (default), <Code>{"success"}</Code>, <Code>{"warning"}</Code>, <Code>{"error"}</Code></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Returns <Code>{"{ \"sent\": true, \"id\": 42 }"}</Code>, or <Code>{"400"}</Code> for a missing or oversized field. The broadcast is saved before it is pushed. Every connected client then receives:</p>
+          <Pre>{`{ "type": "broadcast", "action": "message", "id": 42, "title": "Maintenance", "message": "Server restarting in 5 minutes", "level": "warning", "sender": "someadmin", "sent_at": "2026-10-01T12:00:00+00:00" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"sent: true"}</Code> means the server accepted and queued it, not that anyone received it. Delivery is best effort and, like all REST-triggered events, needs the Redis channel layer. Render <Code>{"title"}</Code> and <Code>{"message"}</Code> as plain text. Only currently connected sockets get the live push, so clients should also fetch the catch-up list below.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Admin history.</strong> <Code>{"GET /notifications/broadcast/?limit=50&offset=0"}</Code> (same auth as the POST: administrator with two-factor) returns every past broadcast, newest first:</p>
+          <Pre>{`{ "count": 1, "limit": 50, "offset": 0, "results": [ { "id": 42, "title": "Maintenance", "message": "Server restarting in 5 minutes", "level": "warning", "sender": "someadmin", "sent_at": "2026-10-01T12:00:00+00:00" } ] }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"limit"}</Code> defaults to 50 and is capped at 200. Broadcasts are also listed in the Django admin.</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><strong className="text-text-primary">Catch-up (public).</strong> <Code>{"GET /notifications/broadcasts/recent/"}</Code> needs no auth and returns <Code>{"{ \"results\": [...] }"}</Code> with the broadcasts from the last 24 hours, oldest first, at most the newest 20. Call it when the app starts or the socket reconnects and pass <Code>{"?after_id=<highest id you have seen>"}</Code> to get only newer ones. Dedupe by <Code>{"id"}</Code>, since a broadcast can arrive over both the socket and this list.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Sending your own notification (server side)</p>
+          <Pre>{`from juicewrld.notifications import broadcast_notification
+broadcast_notification('kind', 'action', {'key': 'value'})   # -> {"type": "kind", "action": "action", "key": "value"}`}</Pre>
+          <Pre>{`from juicewrld.notifications import notify_user
+notify_user(user, 'kind', 'action', {'key': 'value'})   # only that user's authenticated sockets`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">Both are best effort: a missing or unreachable channel layer is swallowed so the REST request that triggered it never fails.</p>
+        </div>
+      </Section>
+
+      <Section title={"Chat socket authentication"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">The socket no longer needs the long-lived API token in the URL (where proxies and access logs keep it). Trade the token for a ticket, then send the ticket as the first frame.</p>
+          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
+            <li><Code>{"POST /chat/ws-ticket/"}</Code> (also <Code>{"/juicewrld/chat/ws-ticket/"}</Code>) with <Code>{"Authorization: Token ..."}</Code>:</li>
+          </ol>
+          <p className="text-sm text-text-secondary leading-relaxed">``<Code>{"json { \"ticket\": \"...\", \"expires_in\": 30 } "}</Code>``</p>
+          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
+            <li>Open <Code>{"wss://YOUR_HOST/juicewrld/ws/chat/"}</Code> with no query string and, within 10 seconds, send:</li>
+          </ol>
+          <p className="text-sm text-text-secondary leading-relaxed">``<Code>{"json { \"type\": \"auth\", \"ticket\": \"...\" } "}</Code>``</p>
+          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
+            <li>The server answers <Code>{"connected"}</Code>, then <Code>{"presence.snapshot"}</Code>. Until then the socket joins no rooms and receives no events.</li>
+          </ol>
+          <Table
+            headers={["Rule", "Detail"]}
+            rows={[
+              ["Lifetime", "30 seconds. Fetch a fresh ticket for every connect and reconnect"],
+              ["Single use", <>Enforced where the server cache is shared (Redis). With the default per-process cache, the 30s lifetime is the only replay limit. Set <Code>{"USE_REDIS_CACHE=1"}</Code></>],
+              ["Bound to the token", "Rotating or deleting the account's API token, or deactivating the account, kills any ticket issued from it"],
+              ["Signed, not stored", <>The API and WebSocket processes share only the database and <Code>{"SECRET_KEY"}</Code>, so tickets are signed rather than kept in a cache</>],
+              ["Bad first frame", <>Anything other than an <Code>{"auth"}</Code> frame, a frame over 4096 bytes, bad JSON, or silence for 10s closes the socket with <Code>{"4401"}</Code></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Legacy, still accepted: <Code>{"?ticket=..."}</Code> or <Code>{"?token=..."}</Code> in the URL (skips the first frame), and <Code>{"{ \"type\": \"auth\", \"token\": \"...\" }"}</Code>. Set <Code>{"CHAT_WS_ALLOW_QUERY_TOKEN=0"}</Code> to reject raw tokens on the socket once clients use tickets; tickets keep working.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">When the server closes your socket</p>
+          <p className="text-sm text-text-secondary leading-relaxed">A connected socket is closed with code <Code>{"4401"}</Code> when its account loses access:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li>the API token it connected with is deleted or rotated</li>
+            <li>the account is deactivated</li>
+            <li>a site ban is issued (moderation endpoint or Django admin)</li>
+            <li>a non-staff user loses their last server membership</li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed">This is checked whenever the server sends that user a <Code>{"resync"}</Code>, which also happens on server bans, kicks and leaves. Treat <Code>{"4401"}</Code> as &quot;sign in again&quot;, not &quot;retry with the same token&quot;. Changes made with bulk queryset operations (<Code>{"QuerySet.update()"}</Code> and the like) skip Django signals, so they only take effect at the next reconnect.</p>
+        </div>
+      </Section>
+
+      <Section title={"Chat push events"}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">These events replace client polling. The full chat event table is in Staff Chat tab; the ones below are the additions.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Chat list and unread</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Replaces the periodic chat/DM list poll. Load the list over REST once, and again after a reconnect or a <Code>{"resynced"}</Code>; drive everything else from events.</p>
+          <Table
+            headers={["Type", "Fields", "Sent to", "Use"]}
+            rows={[
+              [<><Code>{"room.updated"}</Code></>, <><Code>{"kind"}</Code> (<Code>{"channel"}</Code> or <Code>{"conversation"}</Code>), <Code>{"id"}</Code>, <Code>{"server"}</Code> (channels only), <Code>{"last_message_id"}</Code>, <Code>{"last_message_at"}</Code>, <Code>{"author_id"}</Code></>, "Everyone in the room, on every new message", <>Re-sort the list. Bump unread when <Code>{"author_id"}</Code> isn&apos;t you</>],
+              [<><Code>{"unread.changed"}</Code></>, <><Code>{"kind"}</Code>, <Code>{"id"}</Code>, <Code>{"last_read_message_id"}</Code>, <Code>{"unread"}</Code></>, "The reader's own sockets only, after they mark a room read (REST or socket)", "Sync the authoritative unread count to the user's other devices"],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">There is no server-computed unread count for new messages (that would be one count query per recipient per message), so clients increment from <Code>{"room.updated"}</Code>. <Code>{"unread"}</Code> counts messages by other people that are not deleted and have an id greater than <Code>{"last_read_message_id"}</Code>.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Device approval inbox (E2E v2)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Replaces the 10s poll for pending link requests and device changes.</p>
+          <Table
+            headers={["Type", "Fields", "Sent to", "Use"]}
+            rows={[
+              [<><Code>{"link.requested"}</Code></>, <><Code>{"device_id"}</Code>, <Code>{"label"}</Code>, <Code>{"expires_at"}</Code></>, "The account's own sockets, when a device opens a link session", "Show \"a new device wants to link\" right away"],
+              [<><Code>{"device.registered"}</Code></>, <><Code>{"device_id"}</Code></>, "The account's own sockets, on v1 device registration", "Refresh the device list"],
+              [<><Code>{"device.revoked"}</Code></>, <><Code>{"device_id"}</Code></>, "The account's own sockets, on v1 device revocation", <>Refresh the list; a device that sees its own <Code>{"device_id"}</Code> was removed</>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Security properties of <Code>{"link.requested"}</Code>:</p>
+          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
+            <li><strong className="text-text-primary">The link code is never pushed.</strong> It is the out-of-band proof that the person is looking at the new device. The approver must type the code that device shows, then look the session up with <Code>{"GET /keys/link-sessions/{code}/"}</Code>. Pushing the code would let anyone holding a stolen token open a session and get a prompt the user might approve blindly.</li>
+            <li>Only the account&apos;s own authenticated sockets receive it.</li>
+            <li><Code>{"label"}</Code> is chosen by the new device, so render it as plain text.</li>
+            <li>At most one <Code>{"link.requested"}</Code> per user per 10 seconds.</li>
+          </ul>
+          <p className="text-sm font-medium text-text-primary mt-2">Key and device changes</p>
+          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"pollKeys"}</Code> needs no new events. React to the existing ones and refetch once after a reconnect or <Code>{"resynced"}</Code>:</p>
+          <Table
+            headers={["Event", "Refetch"]}
+            rows={[
+              [<><Code>{"key.committed"}</Code></>, <><Code>{"/dms/{id}/keys/"}</Code></>],
+              [<><Code>{"key.rotated"}</Code>, <Code>{"device.added"}</Code>, <Code>{"envelope.available"}</Code></>, "Envelopes for that conversation"],
+              [<><Code>{"devices.updated"}</Code>, <Code>{"identity.changed"}</Code></>, <><Code>{"/keys/users/{id}/"}</Code></>],
+              [<><Code>{"todevice.available"}</Code></>, <>Drain <Code>{"/keys/to-device/"}</Code> (only if it names this device)</>],
+              [<><Code>{"link.claimed"}</Code></>, "The linking flow's next step"],
+              [<><Code>{"backup.updated"}</Code></>, <><Code>{"/keys/backup/"}</Code></>],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title={"Configuration"}>
+        <div className="space-y-3">
+          <Table
+            headers={["Setting / env", "Default", "Purpose"]}
+            rows={[
+              [<><Code>{"CHANNEL_REDIS_URL"}</Code></>, <><Code>{"redis://127.0.0.1:6379/2"}</Code></>, "Channels layer. Required for REST-triggered events to reach sockets"],
+              [<><Code>{"USE_REDIS_CACHE"}</Code> / <Code>{"REDIS_CACHE_URL"}</Code></>, "off", "Shared cache, which makes tickets strictly single use"],
+              [<><Code>{"CHAT_WS_ALLOW_QUERY_TOKEN"}</Code></>, <><Code>{"1"}</Code></>, "Accept the raw API token in the chat socket URL or auth frame"],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title={"Where it lives"}>
+        <div className="space-y-3">
+          <Table
+            headers={["File", "Role"]}
+            rows={[
+              [<><Code>{"juicewrld/notifications.py"}</Code></>, <>Notifications consumer, <Code>{"broadcast_notification"}</Code> and the admin broadcast endpoint</>],
+              [<><Code>{"juicewrld/ws_routing.py"}</Code></>, "Socket routes"],
+              [<><Code>{"chat/ws_auth.py"}</Code></>, "Ticket issue and redeem, token fingerprint"],
+              [<><Code>{"chat/consumers.py"}</Code></>, <>Chat consumer: first-frame auth, re-check on <Code>{"resync"}</Code></>],
+              [<><Code>{"chat/signals.py"}</Code></>, "Nudges sockets when a token, user or site ban changes"],
+              [<><Code>{"chat/utils.py"}</Code></>, <><Code>{"broadcast_room_updated"}</Code>, <Code>{"notify_unread_changed"}</Code></>],
+              [<><Code>{"chat/tests/test_ws_auth.py"}</Code></>, "Ticket and socket-closing tests"],
+            ]}
+          />
+        </div>
+      </Section>
+
+    </div>
+  )
+}
+
 export const TABS = [
   { id: 'overview',  label: 'Overview' },
   { id: 'songs',     label: 'Songs & Search' },
@@ -4366,6 +5696,10 @@ export const TABS = [
   { id: 'news',      label: 'News' },
   { id: 'feeds',     label: 'Feeds & Media' },
   { id: 'patterns',  label: 'Code Patterns' },
+  { id: 'cdn',       label: 'Distributed CDN' },
+  { id: 'nginx',     label: 'nginx: Social Preview' },
+  { id: 'tierlists', label: 'Tier Lists' },
+  { id: 'sockets',   label: 'Realtime Sockets' },
 ] as const
 
 export type TabId = typeof TABS[number]['id']
@@ -4386,6 +5720,10 @@ const TAB_CONTENT: Record<TabId, () => JSX.Element> = {
   news:      NewsTab,
   feeds:     FeedsMediaTab,
   patterns:  FetchPatternTab,
+  cdn:       CdnTab,
+  nginx:     NginxTab,
+  tierlists: TierListsTab,
+  sockets:   SocketsTab,
 }
 
 // One tab's worth of content. Kept mounted even when hidden so its Sections
