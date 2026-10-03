@@ -176,7 +176,7 @@ export const FUN_COMMANDS: TermCommand[] = [
     run: (_a, ctx) => ctx.screen({ kind: 'visualizer' }),
   },
   {
-    name: 'karaoke', group: 'Fun', usage: 'karaoke', description: 'The current song’s lyrics, following along (synced lyrics scroll with the song). q leaves',
+    name: 'karaoke', aliases: ['lyrics'], group: 'Fun', usage: 'karaoke', description: 'The current song’s lyrics, following along (synced lyrics scroll with the song). q leaves',
     run: (_a, ctx) => {
       if (!useStore.getState().currentTrack) fail('nothing is playing')
       ctx.screen({ kind: 'karaoke' })

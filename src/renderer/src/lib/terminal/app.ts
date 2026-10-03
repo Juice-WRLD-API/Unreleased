@@ -2,7 +2,7 @@ import { useChatStore, conversationTitle } from '../../store/chatStore'
 import { useStore, type SettingsTab } from '../../store/useStore'
 import type { AdminTab } from '../../hooks/useAdminQueue'
 import type { ViewType } from '../../types'
-import { APP_VERSION } from '../appVersion'
+import { APP_VERSION, COMMIT_HASH, fetchRunningCommit } from '../appVersion'
 import { cancelZipTask, isZipTaskId } from '../clientZip'
 import { formatBytes } from '../format'
 import { fail, pickByName, type TermCommand } from './types'
@@ -158,9 +158,7 @@ export const APP_COMMANDS: TermCommand[] = [
       try {
         const c = await fetchRunningCommit()
         const when = c.date ? `  ${new Date(c.date).toLocaleString()}` : ''
-        ctx.print(`commit ${c.sha.slice(0, 7)}  ${c.message.split('
-')[0]}
-  ${c.author}${when}`, 'dim')
+        ctx.print(`commit ${c.sha.slice(0, 7)}  ${c.message.split('\n')[0]}\n  ${c.author}${when}`, 'dim')
       } catch {
         // Offline or rate limited: the hash alone is still baked into the build.
         ctx.print(`commit ${COMMIT_HASH.slice(0, 7)}`, 'dim')

@@ -232,17 +232,35 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'lyrics', group: 'Player', usage: 'lyrics', description: 'Show or hide the lyrics panel',
-    run: (_a, ctx) => { runHotkeyAction('toggle-lyrics'); ctx.print('lyrics toggled', 'ok') },
-  },
-  {
-    name: 'eq', group: 'Player', usage: 'eq [on | off | list | reset | <preset>]', description: 'Show or change the equalizer; a preset name turns it on with that preset',
-    complete: (before, partial) => (before.length === 0 ? ['on', 'off', 'list', 'reset', ...EQ_PRESETS.map((p) => p.id)].filter((w) => w.startsWith(partial.toLowerCase())) : []),
+    name: 'eq', group: 'Player', usage: 'eq [on | off | list | reset | <preset> | reverb [on|off|<0-100>] [decay 1-8] | boost <100-200> | balance <-100..100> | speed <0.5-2> | mono [on|off] | pitch [on|off]]', description: 'Show or change the equalizer, reverb and sound effects; a preset name turns it on with that preset',
+    complete: (before, partial) => (before.length === 0 ? ['on', 'off', 'list', 'reset', 'reverb', 'boost', 'balance', 'speed', 'mono', 'pitch', ...EQ_PRESETS.map((p) => p.id)].filter((w) => w.startsWith(partial.toLowerCase())) : []),
     run: (args, ctx) => {
       const arg = args.trim().toLowerCase()
       const s = st()
       const describe = (): string => `equalizer ${st().eqEnabled ? 'on' : 'off'} · preset ${st().eqPreset} · boost ${Math.round(st().eqBoost * 100)}% · balance ${Math.round(st().eqBalance * 100)}`
-      if (!arg) { ctx.print(describe()); return }
+      if (!arg) { ctx.print(`${describe()}
+reverb ${st().reverbEnabled ? 'on' : 'off'} · mix ${Math.round(st().reverbMix * 100)}% · decay ${st().reverbDecay}s · speed ${st().playbackSpeed}x · mono ${st().eqMono ? 'on' : 'off'} · pitch follows speed ${st().pitchShift ? 'on' : 'off'}`); return }
+      const [sub, ...rest] = arg.split(/\s+/)
+      const onOff = (v: string | undefined, cur: boolean): boolean => (v === 'on' ? true : v === 'off' ? false : v === undefined ? !cur : fail('expected on or off'))
+      const numIn = (v: string | undefined, lo: number, hi: number, what: string): number => {
+        const n = Number(v)
+        if (v === undefined || !Number.isFinite(n) || n < lo || n > hi) fail(`${what} must be ${lo} to ${hi}`)
+        return n
+      }
+      if (sub === 'reverb') {
+        const [a, b] = rest
+        if (a === undefined) s.setReverbEnabled(!s.reverbEnabled)
+        else if (a === 'on' || a === 'off') s.setReverbEnabled(a === 'on')
+        else { s.setReverbMix(numIn(a, 0, 100, 'reverb amount') / 100); s.setReverbEnabled(true) }
+        if (b !== undefined) s.setReverbDecay(numIn(b, 1, 8, 'reverb decay'))
+        const r = st()
+        ctx.print(`reverb ${r.reverbEnabled ? 'on' : 'off'} · mix ${Math.round(r.reverbMix * 100)}% · decay ${r.reverbDecay}s`, 'ok'); return
+      }
+      if (sub === 'boost') { s.setEqBoost(numIn(rest[0], 100, 200, 'boost') / 100); ctx.print(describe(), 'ok'); return }
+      if (sub === 'balance') { s.setEqBalance(numIn(rest[0], -100, 100, 'balance') / 100); ctx.print(describe(), 'ok'); return }
+      if (sub === 'speed') { s.setPlaybackSpeed(numIn(rest[0], 0.5, 2, 'speed')); ctx.print(`speed ${st().playbackSpeed}x`, 'ok'); return }
+      if (sub === 'mono') { s.setEqMono(onOff(rest[0], s.eqMono)); ctx.print(`mono ${st().eqMono ? 'on' : 'off'}`, 'ok'); return }
+      if (sub === 'pitch') { s.setPitchShift(onOff(rest[0], s.pitchShift)); ctx.print(`pitch follows speed: ${st().pitchShift ? 'on' : 'off'}`, 'ok'); return }
       if (arg === 'list') { ctx.print(EQ_PRESETS.map((p) => `${p.id.padEnd(16)}${p.name}`).join('\n')); return }
       if (arg === 'on' || arg === 'off') { s.setEqEnabled(arg === 'on'); ctx.print(describe(), 'ok'); return }
       const preset = arg === 'reset' ? EQ_PRESETS.find((p) => p.id === 'flat') : pickByName(EQ_PRESETS, (p) => p.id, arg) ?? pickByName(EQ_PRESETS, (p) => p.name, arg)
