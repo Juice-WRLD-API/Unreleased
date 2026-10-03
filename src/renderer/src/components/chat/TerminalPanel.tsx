@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { X } from 'lucide-react'
 import { CHAT_COMMANDS } from '../../lib/chatCommands'
 import { findChatCommand } from '../../lib/chatHelp'
-import { cowsayText, directory, findTermCommand, resolveHandles, TERM_COMMAND_WORDS, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
+import { juicesayText, directory, findTermCommand, resolveHandles, TERM_COMMAND_WORDS, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
 import { termThemeVars, useTermTheme } from '../../lib/terminal/themeStore'
 import { catFile, diskUsage, grepFiles, headTailFile, locateName, treeView, wcFile } from '../../lib/terminalFileTools'
 import { commandCardText } from '../../lib/commandCardText'
@@ -94,7 +94,7 @@ function expandBang(line: string): string | null {
 // `cmd | grep text | head 5`: output filters for any command. Only recognised
 // when every part after a pipe is one of these, so a message that happens to
 // contain " | " is left alone.
-const FILTERS = new Set(['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'cowsay'])
+const FILTERS = new Set(['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'juicesay'])
 
 function splitPipes(line: string): { cmd: string; filters: string[] } {
   const parts = line.split(/\s+\|\s+/)
@@ -130,7 +130,7 @@ function applyFilter(lines: string[], filter: string): string[] {
       return args.some((a) => a.startsWith('-') && a.includes('r')) ? sorted.reverse() : sorted
     }
     case 'uniq': return lines.filter((l, i) => i === 0 || l !== lines[i - 1])
-    case 'cowsay': return cowsayText(lines.join(' ')).split('\n')
+    case 'juicesay': return juicesayText(lines.join(' ')).split('\n')
     default: return lines
   }
 }
@@ -193,7 +193,7 @@ function helpText(): string {
     '',
     'help <command> explains one · help <group> lists a group in full (chat, people, player, library, navigation, settings, admin, app, fun, shell)',
     'Tab completes names and arguments · ↑ ↓ history · Ctrl+R search history · Ctrl+L clear · Ctrl+C cancel line',
-    'cmd | grep text · cmd | head 5 · fortune | cowsay · click a → hint to put it on the prompt',
+    'cmd | grep text · cmd | head 5 · fortune | juicesay · click a → hint to put it on the prompt',
   ].join('\n')
 }
 
@@ -276,6 +276,25 @@ function linkLine(line: string, onPick: (command: string) => void): JSX.Element 
   return <>{parts.map((p, i) => <Fragment key={i}>{p}</Fragment>)}</>
 }
 
+const SPIN_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+// Shown in place of the prompt while a command is waiting on the network (/changelog
+// and the like): a spinner, what's running and, once it's been a couple of seconds,
+// how long. It exists only while busy, so its clock restarts for every command.
+function BusyLine({ label }: { label: string }): JSX.Element {
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 90)
+    return () => window.clearInterval(t)
+  }, [])
+  const secs = Math.floor((tick * 90) / 1000)
+  return (
+    <span role="status" className="text-[color:var(--t-dim)]">
+      <span className="text-[color:var(--t-ok)]">{SPIN_FRAMES[tick % SPIN_FRAMES.length]}</span> {label || 'working'}…{secs >= 2 ? ` ${secs}s` : ''}
+    </span>
+  )
+}
+
 function LinkedText({ text, onPick }: { text: string; onPick: (command: string) => void }): JSX.Element {
   return (
     <>
@@ -317,6 +336,8 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   const session = sessionFor(key)
   const [, bump] = useState(0)
   const [busy, setBusy] = useState(false)
+  // What the spinner says is running (the command word as typed).
+  const busyLabel = useRef('')
   const [input, setInput] = useState('')
   const [caret, setCaret] = useState(0)
   const [editor, setEditor] = useState<{ name: string; text: string; existed: boolean } | null>(null)
@@ -647,6 +668,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
 
   const execute = async (line: string): Promise<void> => {
     const s = sessionFor(key)
+    busyLabel.current = line.split(/\s+/)[0].replace(/^\//, '')
     const handled = builtin(line)
     if (handled !== false) {
       if (typeof handled !== 'boolean') {
@@ -912,12 +934,14 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
                 <span className="term-cursor bg-[var(--t-fg)] text-[color:var(--t-bg)]"> </span>
               </>
             ) : (
-              <>
-                {promptEl({ user, path })}
-                {before}
-                <span className={`${busy ? '' : 'term-cursor'} bg-[var(--t-fg)] text-[color:var(--t-bg)]`}>{at || ' '}</span>
-                {after}
-              </>
+              busy ? <BusyLine label={busyLabel.current} /> : (
+                <>
+                  {promptEl({ user, path })}
+                  {before}
+                  <span className="term-cursor bg-[var(--t-fg)] text-[color:var(--t-bg)]">{at || ' '}</span>
+                  {after}
+                </>
+              )
             )}
           </p>
           <input

@@ -19,18 +19,17 @@ export default function TerminalPage(): JSX.Element {
   const isAdmin = useStore((s) => !!s.account?.is_administrator)
   const me = useChatStore((s) => s.me)
   const active = useChatStore((s) => s.active)
-  const firstRoom = useChatStore((s): RoomRef | null => {
-    const channel = s.servers.flatMap((x) => x.channels)[0]
-    if (channel) return { kind: 'channel', id: channel.id }
-    const conv = s.conversations[0]
-    return conv ? { kind: 'conversation', id: conv.id } : null
-  })
+  // Primitive selectors: returning a new object here would never compare equal
+  // between renders and loop forever (React error #185).
+  const firstChannelId = useChatStore((s) => s.servers.flatMap((x) => x.channels)[0]?.id ?? null)
+  const firstConvId = useChatStore((s) => s.conversations[0]?.id ?? null)
   const people = useRoomPeople(active)
 
   useEffect(() => {
-    if (!isAdmin || active || !firstRoom) return
-    useChatStore.getState().openRoom(firstRoom)
-  }, [isAdmin, active, firstRoom])
+    if (!isAdmin || active) return
+    if (firstChannelId !== null) useChatStore.getState().openRoom({ kind: 'channel', id: firstChannelId })
+    else if (firstConvId !== null) useChatStore.getState().openRoom({ kind: 'conversation', id: firstConvId })
+  }, [isAdmin, active, firstChannelId, firstConvId])
 
   const leave = (): void => {
     const s = useStore.getState()

@@ -3,6 +3,7 @@ import { useStore } from '../../store/useStore'
 import { APP_VERSION } from '../appVersion'
 import { formatListeningTime, joinPlayedSongs, buildListeningStats, prefsForPeriod, type ListeningPeriod, type RankedEntry } from '../listeningStats'
 import { resolveStatsSongs } from '../statsCatalog'
+import { loadAllSongs } from '../juicewrldApi'
 import { fail, type TermCommand } from './types'
 import { getTermTheme, setTermTheme, TERM_THEMES } from './themeStore'
 
@@ -28,7 +29,7 @@ function wrap(text: string, width: number): string[] {
   return out.length ? out : ['']
 }
 
-export function cowsayText(text: string): string {
+export function juicesayText(text: string): string {
   const lines = wrap(text.trim() || '...', 40)
   const width = Math.max(...lines.map((l) => l.length))
   const body = lines.length === 1
@@ -41,50 +42,26 @@ export function cowsayText(text: string): string {
     ` ${'_'.repeat(width + 2)}`,
     ...body,
     ` ${'-'.repeat(width + 2)}`,
-    '        \\   ^__^',
-    '         \\  (oo)\\_______',
-    '            (__)\\       )\\/\\',
-    '                ||----w |',
-    '                ||     ||',
+    '        \\   .-------.',
+    '         \\  |_______|',
+    '            | JUICE |',
+    '            |  (:)  |',
+    '            |_______|',
   ].join('\n')
 }
 
-// ─── fortune ──────────────────────────────────────────────────────────────────
-
-const FORTUNES = [
-  'The best unreleased song is the one you have not heard yet.',
-  'A folder with no README is a mystery; a folder with three is a scandal.',
-  'Every playlist is a time capsule with a shuffle button.',
-  'He who sorts by date added shall never find the song again.',
-  'There are two kinds of tracks: the ones you skip, and the ones you replay forty times.',
-  'Turn it up. The neighbours will understand eventually.',
-  'The queue is not a to-do list, and yet.',
-  'A leak is only a rumour until someone confirms the timestamp.',
-  'Your tab key knows more commands than you do.',
-  'rm -rf is forever. Ctrl+C is merely a suggestion.',
-  'It works on my machine. It works on the admin terminal. It works in production, mostly.',
-  'Today is a good day to approve the pending queue.',
-  'A wise admin reads the modlog before breakfast.',
-  'There is no such thing as too many versions of the same song.',
-  'The intro is the most recognisable part. The outro is the most underrated.',
-  'Gapless playback is a love language.',
-  'Somewhere, a snippet is waiting for its full version.',
-  'Back up the chat keys. Then back up the backup.',
-  'The shortest distance between two songs is a well-named alias.',
-  'If it is not in the changelog, it did not happen.',
-  'Silence is just a very quiet track.',
-  'Normalise your volume, not your expectations.',
-  'Cache invalidation, naming things, and finding the right take.',
-  'You will find the file you need exactly one folder above where you looked.',
-  'Sort by size. The truth is at the top.',
-  'A good day starts with an empty queue and a full library.',
-  'The metadata was wrong. The metadata is always wrong. Fix the metadata.',
-  'Be kind to the one who uploads in the wrong channel; they are also learning.',
-  'Every great admin was once a person who typed /ban in the wrong room.',
-  'Latency is just the song arriving late to its own party.',
-]
-
-export const randomFortune = (): string => FORTUNES[Math.floor(Math.random() * FORTUNES.length)]
+// A random line from a random song's lyrics, read from the catalogue the app
+// already loads (5 minute cache) rather than shipped in the source.
+async function randomLyricLine(): Promise<string> {
+  const songs = (await loadAllSongs()).filter((s) => s.lyrics && s.lyrics.trim())
+  if (songs.length === 0) fail('juicesay: no lyrics in the catalogue')
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const song = songs[Math.floor(Math.random() * songs.length)]
+    const lines = song.lyrics!.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length >= 8 && l.length <= 120 && !/^[[(].*[\])]$/.test(l))
+    if (lines.length) return `${lines[Math.floor(Math.random() * lines.length)]}\n- ${song.name}`
+  }
+  return fail('juicesay: could not find a lyric line')
+}
 
 // ─── neofetch ─────────────────────────────────────────────────────────────────
 
@@ -160,12 +137,12 @@ export const FUN_COMMANDS: TermCommand[] = [
     run: (_a, ctx) => { ctx.print(fetchText()) },
   },
   {
-    name: 'fortune', group: 'Fun', usage: 'fortune  ·  fortune | cowsay', description: 'A random line of wisdom (pipe it into cowsay)',
-    run: (_a, ctx) => { ctx.print(randomFortune()) },
+    name: 'fortune', group: 'Fun', usage: 'fortune  ·  fortune | juicesay', description: 'A random line from a random song (pipe it into juicesay)',
+    run: async (_a, ctx) => { ctx.print(await randomLyricLine()) },
   },
   {
-    name: 'cowsay', group: 'Fun', usage: 'cowsay [text]  ·  <command> | cowsay', description: 'A cow says things (a fortune when you give it nothing)',
-    run: (args, ctx) => { ctx.print(cowsayText(args.trim() || randomFortune())) },
+    name: 'juicesay', group: 'Fun', usage: 'juicesay [text]  ·  <command> | juicesay', description: 'A juice box says things (a random lyric line when you give it nothing)',
+    run: async (args, ctx) => { ctx.print(juicesayText(args.trim() || await randomLyricLine())) },
   },
   {
     name: 'termtheme', aliases: ['colors'], group: 'Fun', usage: 'termtheme [name]', description: 'List the terminal colour schemes, or switch to one',

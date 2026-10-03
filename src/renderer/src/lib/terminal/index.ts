@@ -12,7 +12,7 @@ import type { TermCommand, TermGroup } from './types'
 import { directory, matchUsers, USER_COMMANDS } from './users'
 
 export type { TermCommand, TermCtx, TermGroup, TermScreen, TermTone } from './types'
-export { cowsayText } from './fun'
+export { juicesayText } from './fun'
 export { directory, directorySync, resolveHandles } from './users'
 
 const norm = (s: string): string => s.toLowerCase()
