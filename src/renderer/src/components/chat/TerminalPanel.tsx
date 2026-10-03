@@ -290,7 +290,7 @@ function BusyLine({ label }: { label: string }): JSX.Element {
   const secs = Math.floor((tick * 90) / 1000)
   return (
     <span role="status" className="text-[color:var(--t-dim)]">
-      <span className="text-[color:var(--t-ok)]">{SPIN_FRAMES[tick % SPIN_FRAMES.length]}</span> {label || 'working'}…{secs >= 2 ? ` ${secs}s` : ''}
+      <span className="text-[color:var(--t-ok)]">{SPIN_FRAMES[tick % SPIN_FRAMES.length]}</span> {label || 'working'}…{secs >= 2 ? ` ${secs}s · Ctrl+C cancels` : ''}
     </span>
   )
 }
@@ -338,6 +338,8 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   const [busy, setBusy] = useState(false)
   // What the spinner says is running (the command word as typed).
   const busyLabel = useRef('')
+  const abortRef = useRef<AbortController | null>(null)
+  const signalRead = useRef(false)
   const [input, setInput] = useState('')
   const [caret, setCaret] = useState(0)
   const [editor, setEditor] = useState<{ name: string; text: string; existed: boolean } | null>(null)
@@ -383,6 +385,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   }, [session.entries.length, busy, input])
 
   const sink = useMemo<TerminalSink>(() => ({
+    get signal() { signalRead.current = true; return abortRef.current?.signal },
     toast: (text, tone = 'error') => print(text, tone),
     notice: (payload) => print(noticeText(payload)),
     pickSearch: (query, results) => {
@@ -494,7 +497,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
 
   const runTerm = (command: TermCommand, arg: string): Promise<boolean> =>
     Promise.resolve()
-      .then(() => command.run(arg, { print, history: () => HISTORY, room, people, screen: openScreen, exec: execLine, scripted: locked.current > 0 }))
+      .then(() => command.run(arg, { print, history: () => HISTORY, room, people, screen: openScreen, exec: execLine, scripted: locked.current > 0, get signal() { signalRead.current = true; return (abortRef.current ?? new AbortController()).signal } }))
       .then(() => true)
 
   // `source [-y] [-k] <file>`: without -y it only shows what would run, since
@@ -666,14 +669,30 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     try { return (await withCapture(() => dispatch(line), true)).join('\n') || '(no output)' } finally { locked.current -= 1 }
   }
 
+  // Each command gets its own abort controller; Ctrl+C aborts it (see onKeyDown).
+  // A command only counts as cancellable once it has read the signal to hand to
+  // its requests - otherwise Ctrl+C says so instead of pretending.
   const execute = async (line: string): Promise<void> => {
+    const previous = abortRef.current
+    const controller = new AbortController()
+    abortRef.current = controller
+    signalRead.current = false
+    try { await executeInner(line) } finally { if (abortRef.current === controller) abortRef.current = previous }
+  }
+
+  const printFailure = (err: unknown, fallback: string): void => {
+    if (abortRef.current?.signal.aborted) print('cancelled', 'dim')
+    else print(errorText(err, fallback), 'error')
+  }
+
+  const executeInner = async (line: string): Promise<void> => {
     const s = sessionFor(key)
     busyLabel.current = line.split(/\s+/)[0].replace(/^\//, '')
     const handled = builtin(line)
     if (handled !== false) {
       if (typeof handled !== 'boolean') {
         setBusy(true)
-        try { await handled } catch (err) { print(errorText(err, 'Command failed'), 'error') } finally {
+        try { await handled } catch (err) { printFailure(err, 'Command failed') } finally {
           setBusy(false)
           requestAnimationFrame(() => field.current?.focus())
         }
@@ -709,7 +728,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         print(`${word}: command not found${maybe.length ? ` - did you mean ${maybe.join(', ')}?` : ' (try help)'}`, 'error')
       }
     } catch (err) {
-      print(errorText(err, 'Command failed'), 'error')
+      printFailure(err, 'Command failed')
     } finally {
       setBusy(false)
       requestAnimationFrame(() => field.current?.focus())
@@ -826,6 +845,12 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       }
       // Arrows and Tab take the match to the prompt for editing, like bash.
       if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) { leave(HISTORY[rs.at] ?? rs.saved); return }
+      return
+    }
+    if (busy && e.ctrlKey && e.key.toLowerCase() === 'c' && field.current?.selectionStart === field.current?.selectionEnd) {
+      e.preventDefault()
+      if (signalRead.current && abortRef.current) { print('^C', 'dim'); abortRef.current.abort() }
+      else print('^C  (this command can’t be cancelled)', 'dim')
       return
     }
     if (e.ctrlKey && e.key.toLowerCase() === 'r') { e.preventDefault(); setRs({ saved: input, at: HISTORY.length }); setInput(''); setCaret(0); return }

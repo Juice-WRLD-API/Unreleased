@@ -10,6 +10,13 @@ export function setTermFullscreen(next: boolean): void {
   if (next === on) return
   on = next
   listeners.forEach((l) => l())
+  // Browser fullscreen too. Called from the command's run(), still inside the
+  // keypress that submitted it, which is what lets requestFullscreen through.
+  // Failures (iframe, denied, unsupported) just leave the in-page version.
+  try {
+    if (next && !document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => {})
+    else if (!next && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+  } catch { /* in-page fullscreen still applies */ }
 }
 
 export const getTermFullscreen = (): boolean => on

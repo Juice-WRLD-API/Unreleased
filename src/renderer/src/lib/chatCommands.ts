@@ -30,6 +30,7 @@ const ALIASES: Record<string, ChatCommandName> = {
   nowplaying: 'np',
   to: 'timeout',
   unto: 'untimeout',
+  kys: 'kick',
   // One revoke covers every site-wide action on a user (ban, mute, timeout
   // alike), so the obvious spellings all land on the same command rather than
   // each needing an endpoint that doesn't exist.
@@ -231,7 +232,7 @@ export const CHAT_COMMANDS: ChatCommandInfo[] = [
   { name: 'allow', usage: '/allow @user <edits|comp> [-s]', description: 'Admins: turn on auto-approve for a user’s edit or comp proposals', params: ['user', 'type'] },
   { name: 'disallow', usage: '/disallow @user <edits|comp> [-s]', description: 'Admins: turn auto-approve back off', aliases: ['deny'], params: ['user', 'type'] },
   { name: 'purge', usage: '/purge [@user] [count] [-s]', description: `Delete the latest messages in this room, up to ${PURGE_MAX} (default ${PURGE_DEFAULT}). Add @user to only delete theirs. Moderators only, except for your own`, aliases: ['prune'], params: ['@user count'] },
-  { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server (they can rejoin)', params: ['user'] },
+  { name: 'kick', usage: '/kick @user', description: 'Remove a member from the server (they can rejoin)', aliases: ['kys'], params: ['user'] },
   { name: 'timeout', usage: '/timeout @user <minutes>', description: 'Temporarily stop a member from posting', aliases: ['to'], params: ['user', 'minutes'] },
   { name: 'untimeout', usage: '/untimeout @user', description: 'Lift a member’s timeout early', aliases: ['unto'], params: ['user'] },
   { name: 'ban', usage: '/ban @user [reason]', description: 'Ban a user from this server', params: ['user', 'reason'] },

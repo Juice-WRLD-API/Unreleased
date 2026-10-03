@@ -42,13 +42,14 @@ const CACHE_MS = 5 * 60 * 1000
 // emits (see emitVersionFile in vite.config.ts). null when it can't be read -
 // dev server, Electron, offline, or a host that answers unknown paths with
 // index.html - in which case the caller falls back to GitHub alone.
-async function fetchDeployedCommit(): Promise<string | null> {
+async function fetchDeployedCommit(signal?: AbortSignal): Promise<string | null> {
   try {
-    const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' })
+    const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store', signal })
     if (!res.ok) return null
     const data = (await res.json()) as { commit?: unknown }
     return typeof data.commit === 'string' && data.commit ? data.commit : null
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err
     return null
   }
 }
@@ -87,24 +88,30 @@ function toBranchTip(data: GithubCommit): BranchTip {
 // the browser's HTTP cache doing the same thing underneath it is what makes
 // refresh() look like a no-op, since a plain GET here is otherwise a normal
 // cacheable request the browser is free to reuse.
-async function githubGet<T>(path: string): Promise<T> {
+async function githubGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`https://api.github.com/repos/${REPO}/${path}`, {
     headers: { Accept: 'application/vnd.github+json' },
     cache: 'no-store',
+    signal,
   })
   if (!res.ok) throw new Error(String(res.status))
   return (await res.json()) as T
 }
 
-async function fetchBranchTipCommit(): Promise<BranchTip> {
-  return toBranchTip(await githubGet<GithubCommit>(`commits/${BUILD_BRANCH}`))
+async function fetchBranchTipCommit(signal?: AbortSignal): Promise<BranchTip> {
+  return toBranchTip(await githubGet<GithubCommit>(`commits/${BUILD_BRANCH}`, signal))
 }
 
 // Newest first, so [0] is the branch tip.
-async function fetchBranchCommits(count: number): Promise<BranchTip[]> {
-  const list = await githubGet<GithubCommit[]>(`commits?sha=${encodeURIComponent(BUILD_BRANCH)}&per_page=${count}`)
+async function fetchBranchCommits(count: number, signal?: AbortSignal): Promise<BranchTip[]> {
+  const list = await githubGet<GithubCommit[]>(`commits?sha=${encodeURIComponent(BUILD_BRANCH)}&per_page=${count}`, signal)
   if (!Array.isArray(list) || list.length === 0) throw new Error('no commits')
   return list.map(toBranchTip)
+}
+
+/** The commit this build was compiled from (message, author, date), by sha. */
+export async function fetchRunningCommit(signal?: AbortSignal): Promise<BranchTip> {
+  return toBranchTip(await githubGet<GithubCommit>(`commits/${encodeURIComponent(COMMIT_HASH)}`, signal))
 }
 
 async function fetchBranchTip(): Promise<string> {
@@ -134,12 +141,12 @@ export const CHANGELOG_MAX = 15
 // GitHub branch tip) as the About page's freshness bulb above. With a `count`
 // above 1 the commits before it ride along as `history` (capped at
 // CHANGELOG_MAX), from the same single GitHub request.
-export async function fetchChangelogStatus(count = 1): Promise<ChangelogStatus> {
+export async function fetchChangelogStatus(count = 1, signal?: AbortSignal): Promise<ChangelogStatus> {
   if (BUILD_BRANCH === 'unknown') throw new Error("This build doesn't know which branch it came from")
   const n = Math.min(Math.max(Math.floor(count), 1), CHANGELOG_MAX)
   const [commits, deployed] = await Promise.all([
-    n > 1 ? fetchBranchCommits(n) : fetchBranchTipCommit().then((t) => [t]),
-    fetchDeployedCommit(),
+    n > 1 ? fetchBranchCommits(n, signal) : fetchBranchTipCommit(signal).then((t) => [t]),
+    fetchDeployedCommit(signal),
   ])
   return changelogStatusFrom(BUILD_BRANCH, commits, deployed)
 }

@@ -29,6 +29,12 @@ export default function TerminalPage(): JSX.Element {
 
   // Fullscreen belongs to this visit; leaving the page (hotkey, nav, `exit`) ends it.
   useEffect(() => () => setTermFullscreen(false), [])
+  // Esc (or F11) leaving browser fullscreen should drop the in-page one too.
+  useEffect(() => {
+    const onChange = (): void => { if (!document.fullscreenElement) setTermFullscreen(false) }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
 
   useEffect(() => {
     if (!isAdmin || active) return

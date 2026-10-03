@@ -16,7 +16,7 @@
 // reason heardle isn't - a page of full song objects is ~0.5MB, and caching
 // those raw would blow the offline cache out.
 
-import { apiRequest } from './apiClient'
+import { apiRequest, untilAborted } from './apiClient'
 import { routeUrl, getSongsByIds, songToTrack, loadAllSongs } from './juicewrldApi'
 import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import type { Track } from '../types'
@@ -118,9 +118,10 @@ function writeCache(songs: StatsSong[]): void {
   }
 }
 
-async function fetchPage(page: number): Promise<JWApiPaginatedResponse> {
+async function fetchPage(page: number, signal?: AbortSignal): Promise<JWApiPaginatedResponse> {
   return apiRequest<JWApiPaginatedResponse>(
     `${routeUrl('/songs/')}?page=${page}&page_size=${PAGE_SIZE}`,
+    { signal },
   )
 }
 
@@ -128,8 +129,8 @@ async function fetchPage(page: number): Promise<JWApiPaginatedResponse> {
  *  known up front and they go out in parallel (capped at PAGE_CONCURRENCY)
  *  rather than awaiting one at a time - the serial version spent ~20s of
  *  wall clock on ~28 round trips that don't depend on each other. */
-async function fetchCatalog(onPage?: (page: number, total: number) => void): Promise<StatsSong[]> {
-  const first = await fetchPage(1)
+async function fetchCatalog(onPage?: (page: number, total: number) => void, signal?: AbortSignal): Promise<StatsSong[]> {
+  const first = await fetchPage(1, signal)
   const count = first.count ?? 0
   // `count` is the total row count, so the page total is only known after
   // the first response - before that the caller shows an indeterminate bar.
@@ -151,7 +152,8 @@ async function fetchCatalog(onPage?: (page: number, total: number) => void): Pro
       const i = next++
       if (i >= rest.length) return
       const page = rest[i]
-      const data = await fetchPage(page)
+      if (signal?.aborted) return
+      const data = await fetchPage(page, signal)
       pages[page - 1] = (data.results ?? []).map(slimSong)
       done++
       onPage?.(done, totalPages)
@@ -166,7 +168,7 @@ async function fetchCatalog(onPage?: (page: number, total: number) => void): Pro
 
 /** The whole catalogue keyed by song id - memoised for the session, cached on
  *  disk for a day. A stale cache is still returned on a network failure. */
-export async function loadCatalog(onPage?: (page: number, total: number) => void): Promise<Map<number, StatsSong>> {
+export async function loadCatalog(onPage?: (page: number, total: number) => void, signal?: AbortSignal): Promise<Map<number, StatsSong>> {
   if (memoryCatalog) return memoryCatalog
 
   const cached = readCache()
@@ -187,9 +189,11 @@ export async function loadCatalog(onPage?: (page: number, total: number) => void
     // than failing this page with it - it belongs to whoever started it.
     const warm = loadAllSongs.peek()
     songs = warm
-      ? await warm.then((all) => all.map(slimSong), () => fetchCatalog(onPage))
-      : await fetchCatalog(onPage)
+      ? await untilAborted(warm, signal).then((all) => all.map(slimSong), (err) => { if (signal?.aborted) throw err; return fetchCatalog(onPage, signal) })
+      : await fetchCatalog(onPage, signal)
   } catch (err) {
+    // A cancel is not a failure to paper over with the day-old copy.
+    if (signal?.aborted) throw err
     // A day-old catalogue beats an empty page; song metadata barely moves.
     if (cached) {
       memoryCatalog = new Map(cached.songs.map((s) => [s.id, s]))
@@ -224,6 +228,7 @@ export async function resolveStatsSongs(
   ids: number[],
   onProgress: (p: ResolveProgress) => void,
   isCancelled: () => boolean,
+  signal?: AbortSignal,
 ): Promise<Map<number, StatsSong>> {
   const out = new Map<number, StatsSong>()
   if (ids.length === 0) return out
@@ -250,7 +255,7 @@ export async function resolveStatsSongs(
     onProgress({ phase: 'catalog', done: 0, total: 0 })
     const catalog = await loadCatalog((page, total) => {
       if (!isCancelled()) onProgress({ phase: 'catalog', done: page, total })
-    })
+    }, signal)
     if (isCancelled()) return out
     for (const id of ids) {
       const song = catalog.get(id)
@@ -263,7 +268,7 @@ export async function resolveStatsSongs(
   // /songs/?ids=... request (chunked only if that ever changes to exceed the
   // endpoint's own per-request cap) instead of one /songs/{id}/ call per id.
   onProgress({ phase: 'songs', done: 0, total: missing.length })
-  const results = await getSongsByIds(missing)
+  const results = await getSongsByIds(missing, signal)
   if (isCancelled()) return out
   for (const song of results) out.set(song.id, slimSong(song))
   onProgress({ phase: 'songs', done: missing.length, total: missing.length })

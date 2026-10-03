@@ -16,6 +16,9 @@ export interface TerminalSink {
   // A card only the sender would have seen (the local notice path).
   notice: (payload: LocalNoticePayload) => void
   pickSearch: (query: string, results: TerminalSearchResult[]) => void
+  // Fires when the user cancels the running command (Ctrl+C). Commands that
+  // can be cancelled hand it to their fetches so the request is really aborted.
+  signal?: AbortSignal
 }
 
 // Resolves false when the text isn't a recognized command, so the terminal can

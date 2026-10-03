@@ -1,6 +1,6 @@
 import { relativeTime } from '../../components/adminShared'
 import { mentionIdsIn } from '../../components/chat/people'
-import { displayName, roomKey, useChatStore } from '../../store/chatStore'
+import { conversationTitle, displayName, roomKey, useChatStore } from '../../store/chatStore'
 import { splitForwardRef } from '../chatForwardRef'
 import { splitReplyRef } from '../chatReplyRef'
 import { adminGetUser, adminListUsers, getNowPlaying, getPublicProfile, type AdminUser } from '../userApi'
@@ -211,8 +211,11 @@ export const USER_COMMANDS: TermCommand[] = [
       const count = Math.min(100, Math.max(1, Number(countWord) || 20))
       const who = words.find((w) => w.startsWith('@'))?.slice(1).toLowerCase()
       const cs = useChatStore.getState()
+      const channelRoom = ctx.room.kind === 'channel' ? cs.servers.flatMap((s) => s.channels.map((c) => ({ s, c }))).find((x) => x.c.id === ctx.room.id) : undefined
+      const conv = ctx.room.kind === 'channel' ? undefined : cs.conversations.find((c) => c.id === ctx.room.id)
+      const roomName = channelRoom ? `#${channelRoom.c.name} (${channelRoom.s.name})` : conv ? `DM with ${conversationTitle(conv, cs.meId)}` : 'this room'
       const items = (cs.rooms[roomKey(ctx.room)]?.items ?? []).filter((m) => !m.deleted_at && !m.parent && (!who || m.author.username.toLowerCase() === who))
-      if (items.length === 0) { ctx.print(who ? `no loaded messages from @${who}` : 'no messages loaded in this room yet', 'dim'); return }
+      if (items.length === 0) { ctx.print(who ? `no loaded messages from @${who} in ${roomName}` : `no messages loaded in ${roomName} yet`, 'dim'); return }
       const lines = items.slice(-count).map((m) => {
         const raw = m.is_encrypted ? (() => { const p = cs.plain[m.id]; return p && 'text' in p ? p.text : '[encrypted - key not available]' })() : m.content
         const body = splitForwardRef(splitReplyRef(raw).body).body.replace(/\s+/g, ' ').trim()
@@ -221,7 +224,7 @@ export const USER_COMMANDS: TermCommand[] = [
         const files = m.attachments.length ? ` [${m.attachments.length} file${m.attachments.length === 1 ? '' : 's'}]` : ''
         return `${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}  ${displayName(m.author)}: ${text}${files}`
       })
-      ctx.print(lines.join('\n'))
+      ctx.print([`── ${roomName}${who ? ` · @${who}` : ''} · last ${lines.length} ──`, ...lines].join('\n'))
     },
   },
 ]

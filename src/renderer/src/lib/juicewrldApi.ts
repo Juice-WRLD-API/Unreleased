@@ -1,5 +1,5 @@
 import { Track } from '../types'
-import { apiRequest } from './apiClient'
+import { apiRequest, untilAborted } from './apiClient'
 import { cacheGet } from './apiCache'
 import { peekSongPref } from './songPrefs'
 import { peekRotatedCover } from './coverRotation'
@@ -220,10 +220,12 @@ export function apiUrl(path: string, params: Record<string, string | number | nu
 
 export async function apiFetch<T>(
   path: string,
-  params: Record<string, string | number | null | undefined> = {}
+  params: Record<string, string | number | null | undefined> = {},
+  signal?: AbortSignal,
 ): Promise<T> {
   const cacheKey = apiUrl(path, params)
   return apiRequest<T>(cacheKey, {
+    signal,
     // 'no-cache', not 'no-store': both guarantee the response is revalidated
     // with the server on every call (never a silently stale read), but
     // no-cache lets an unchanged response come back as a 304 against the HTTP
@@ -238,6 +240,14 @@ export async function apiFetch<T>(
 
 export const loadAllSongs = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[]>('/songs/', { all: 'true' }))
 
+// loadAllSongs, but cancellable. A warm or in-flight shared copy is just waited
+// on (it belongs to whoever started it, so the wait stops but the fetch runs
+// on); with none, this makes its own request and the signal really aborts it.
+export function loadAllSongsAbortable(signal?: AbortSignal): Promise<JWApiSong[]> {
+  const shared = loadAllSongs.peek()
+  return shared ? untilAborted(shared, signal) : apiFetch<JWApiSong[]>('/songs/', { all: 'true' }, signal)
+}
+
 // Shared TTL + in-flight cache for single-song lookups by id. Player's lyrics
 // fetch and RadioFmPlayer's now-playing match both resolve the full song
 // object for whatever's currently playing, and often for the same song at
@@ -249,7 +259,10 @@ export const loadAllSongs = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[
 const SONG_BY_ID_TTL_MS = 60_000
 const songByIdCache = new Map<number, { promise: Promise<JWApiSong>; ts: number }>()
 
-export function getSongById(id: number): Promise<JWApiSong> {
+export function getSongById(id: number, signal?: AbortSignal): Promise<JWApiSong> {
+  // A cancellable lookup skips the shared cache: aborting it must not fail the
+  // same promise for another caller.
+  if (signal) return apiFetch<JWApiSong>(`/songs/${id}/`, {}, signal)
   const now = Date.now()
   const cached = songByIdCache.get(id)
   if (cached && now - cached.ts < SONG_BY_ID_TTL_MS) return cached.promise
@@ -273,10 +286,14 @@ export function getSongById(id: number): Promise<JWApiSong> {
 // single-song endpoint (GET /songs/{id}/, confirmed still keyed by internal
 // id) in parallel and drops ids that don't exist - same contract callers
 // already relied on (no error, no null placeholder).
-export async function getSongsByIds(ids: number[]): Promise<JWApiSong[]> {
+export async function getSongsByIds(ids: number[], signal?: AbortSignal): Promise<JWApiSong[]> {
   const unique = Array.from(new Set(ids))
   if (unique.length === 0) return []
-  const results = await Promise.all(unique.map((id) => getSongById(id).catch(() => null)))
+  const results = await Promise.all(unique.map((id) => getSongById(id, signal).catch((err) => {
+    // A missing id is dropped; a cancel is not a missing id.
+    if (signal?.aborted) throw err
+    return null
+  })))
   return results.filter((s): s is JWApiSong => s !== null)
 }
 

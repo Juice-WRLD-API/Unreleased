@@ -793,7 +793,7 @@ const Composer = forwardRef<ComposerHandle, {
       if (branch === 'unknown') throw new Error("This build doesn't know which branch it came from")
       await sendCommandCard(room, { name: 'changelog', branch, count: parsed.count })
     } else {
-      await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus(parsed.count) }, share)
+      await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus(parsed.count, sink.current?.signal) }, share)
     }
     if (parsed.capped) toast(`Showing the latest ${CHANGELOG_MAX} commits (the maximum)`)
   }

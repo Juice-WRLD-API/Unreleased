@@ -3,7 +3,7 @@ import { useStore } from '../../store/useStore'
 import { APP_VERSION } from '../appVersion'
 import { formatListeningTime, joinPlayedSongs, buildListeningStats, prefsForPeriod, type ListeningPeriod, type RankedEntry } from '../listeningStats'
 import { resolveStatsSongs } from '../statsCatalog'
-import { loadAllSongs } from '../juicewrldApi'
+import { loadAllSongsAbortable } from '../juicewrldApi'
 import { fail, type TermCommand } from './types'
 import { getTermFullscreen, setTermFullscreen } from './fullscreenStore'
 import { getTermTheme, setTermTheme, TERM_THEMES } from './themeStore'
@@ -53,8 +53,8 @@ export function juicesayText(text: string): string {
 
 // A random line from a random song's lyrics, read from the catalogue the app
 // already loads (5 minute cache) rather than shipped in the source.
-async function randomLyricLine(): Promise<string> {
-  const songs = (await loadAllSongs()).filter((s) => s.lyrics && s.lyrics.trim())
+async function randomLyricLine(signal?: AbortSignal): Promise<string> {
+  const songs = (await loadAllSongsAbortable(signal)).filter((s) => s.lyrics && s.lyrics.trim())
   if (songs.length === 0) fail('juicesay: no lyrics in the catalogue')
   for (let attempt = 0; attempt < 10; attempt++) {
     const song = songs[Math.floor(Math.random() * songs.length)]
@@ -139,11 +139,11 @@ export const FUN_COMMANDS: TermCommand[] = [
   },
   {
     name: 'fortune', group: 'Fun', usage: 'fortune  ·  fortune | juicesay', description: 'A random line from a random song (pipe it into juicesay)',
-    run: async (_a, ctx) => { ctx.print(await randomLyricLine()) },
+    run: async (_a, ctx) => { ctx.print(await randomLyricLine(ctx.signal)) },
   },
   {
     name: 'juicesay', group: 'Fun', usage: 'juicesay [text]  ·  <command> | juicesay', description: 'A juice box says things (a random lyric line when you give it nothing)',
-    run: async (args, ctx) => { ctx.print(juicesayText(args.trim() || await randomLyricLine())) },
+    run: async (args, ctx) => { ctx.print(juicesayText(args.trim() || await randomLyricLine(ctx.signal))) },
   },
   {
     name: 'termtheme', aliases: ['colors'], group: 'Fun', usage: 'termtheme [name]', description: 'List the terminal colour schemes, or switch to one',
@@ -160,7 +160,7 @@ export const FUN_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'full', aliases: ['fullscreen'], group: 'App', usage: 'full', description: 'Hide the rest of the app so only the terminal shows. Run it again to bring it back',
+    name: 'full', aliases: ['fullscreen'], group: 'App', usage: 'full', description: 'Fullscreen the site and hide the rest of the app so only the terminal shows. Run it again to bring it back',
     run: (_a, ctx) => {
       const next = !getTermFullscreen()
       setTermFullscreen(next)
@@ -218,7 +218,7 @@ export const FUN_COMMANDS: TermCommand[] = [
       const prefs = prefsForPeriod(plays, period)
       if (prefs.length === 0) { ctx.print(`no plays in the last ${period} days`, 'dim'); return }
       ctx.print(`reading ${prefs.length} played songs…`, 'dim')
-      const songs = await resolveStatsSongs(prefs.map((p) => p.song), () => undefined, () => false)
+      const songs = await resolveStatsSongs(prefs.map((p) => p.song), () => undefined, () => false, ctx.signal)
       const stats = buildListeningStats(joinPlayedSongs(prefs, songs))
       const top = stats.played.slice(0, limit)
       const topMax = Math.max(1, top[0]?.playcount ?? 1)

@@ -34,6 +34,10 @@ export interface TermCtx {
   room: RoomRef
   /** Members of that room. */
   people: ChatUserBrief[]
+  /** Aborted when the user cancels the running command (Ctrl+C). A command that
+   *  fetches should pass it to its requests so they are actually aborted, not
+   *  merely ignored; one that never reads it can't be cancelled. */
+  signal: AbortSignal
 }
 
 export type TermGroup = 'Fun' | 'People' | 'Player' | 'Library' | 'Navigation' | 'Settings' | 'Admin' | 'App'

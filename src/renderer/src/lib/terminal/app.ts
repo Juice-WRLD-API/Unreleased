@@ -139,7 +139,7 @@ export const APP_COMMANDS: TermCommand[] = [
     run: (_a, ctx) => { const n = useChatStore.getState().totalUnread(); ctx.print(n ? `${n} unread message${n === 1 ? '' : 's'}` : 'all caught up', n ? 'plain' : 'dim') },
   },
   {
-    name: 'logout', group: 'App', usage: 'logout', description: 'Sign out of your account',
+    name: 'logout', aliases: ['kms'], group: 'App', usage: 'logout', description: 'Sign out of your account',
     run: async (_a, ctx) => {
       if (!window.confirm('Sign out of your account?')) { ctx.print('cancelled', 'dim'); return }
       await st().logoutAccount()
@@ -151,8 +151,21 @@ export const APP_COMMANDS: TermCommand[] = [
     run: () => { window.location.reload() },
   },
   {
-    name: 'version', group: 'App', usage: 'version', description: 'The app version this build is running',
-    run: (_a, ctx) => { ctx.print(`unreleased ${APP_VERSION}`) },
+    name: 'version', group: 'App', usage: 'version', description: 'The app version this build is running, and the commit it was built from',
+    run: async (_a, ctx) => {
+      ctx.print(`unreleased ${APP_VERSION}`)
+      if (COMMIT_HASH === 'dev') { ctx.print('commit: dev build (no commit baked in)', 'dim'); return }
+      try {
+        const c = await fetchRunningCommit()
+        const when = c.date ? `  ${new Date(c.date).toLocaleString()}` : ''
+        ctx.print(`commit ${c.sha.slice(0, 7)}  ${c.message.split('
+')[0]}
+  ${c.author}${when}`, 'dim')
+      } catch {
+        // Offline or rate limited: the hash alone is still baked into the build.
+        ctx.print(`commit ${COMMIT_HASH.slice(0, 7)}`, 'dim')
+      }
+    },
   },
   {
     name: 'history', group: 'App', usage: 'history [N]', description: 'The last commands you ran in this room’s terminal',
