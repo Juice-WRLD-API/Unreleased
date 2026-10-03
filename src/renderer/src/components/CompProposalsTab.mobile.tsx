@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Loader2, CheckCircle, XCircle, RotateCcw, Download, Calendar, Hash, AlertCircle, ChevronLeft, ImageOff,
+  Loader2, CheckCircle, XCircle, RotateCcw, Download, Calendar, Hash, AlertCircle, ChevronLeft, ImageOff, Globe,
 } from 'lucide-react'
 import * as userApi from '../lib/userApi'
 import type { CompFileProposal } from '../lib/userApi'
@@ -12,6 +12,7 @@ import { getMediaType } from '../lib/fileTypes'
 import { formatBytes, formatDuration } from '../lib/format'
 import { useAuthedBlobUrl, useCompProposalsQueue } from '../hooks/useCompProposalsQueue'
 import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason } from '../lib/compProposalShared'
+import ProposalPropagationModal from './ProposalPropagationModal'
 
 /** One preview slot - a live comp/ path (plain <img>/<audio> against the
  *  public download URL, same as FilePickerModal's thumbnails) or an authed
@@ -81,6 +82,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
     reviewNotes, setReviewNotes, error, setError, loadError,
     doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
   } = useCompProposalsQueue(activeChannel, onChanged, false)
+  const [propagationId, setPropagationId] = useState<number | null>(null)
 
   // The proposed file only exists in staging while the proposal is pending
   // (approval moves it into comp/, rejection discards it) - matches the same
@@ -251,12 +253,21 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
             )}
           </>
         ) : p.status === 'approved' ? (
-          <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
-            className="w-full h-11 rounded-xl text-sm text-text-muted active:text-amber-400 active:bg-amber-500/10 flex items-center justify-center gap-1.5">
-            <RotateCcw size={15} /> Reverse
-          </button>
+          <>
+            <button onClick={() => setPropagationId(p.id)}
+              className="w-full h-11 rounded-xl text-sm text-text-muted active:text-accent active:bg-accent/10 flex items-center justify-center gap-1.5">
+              <Globe size={15} /> Propagation
+            </button>
+            <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
+              className="w-full h-11 rounded-xl text-sm text-text-muted active:text-amber-400 active:bg-amber-500/10 flex items-center justify-center gap-1.5">
+              <RotateCcw size={15} /> Reverse
+            </button>
+          </>
         ) : null}
       </div>
+      {propagationId != null && (
+        <ProposalPropagationModal proposalId={propagationId} onClose={() => setPropagationId(null)} />
+      )}
     </div>
   )
 

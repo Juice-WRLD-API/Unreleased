@@ -102,3 +102,39 @@ export async function deleteCdnNode(nodeId: string): Promise<void> {
 export function wasAutoDisabled(n: CdnAdminNode): boolean {
   return n.trust_score <= 0 || n.hash_violations >= VIOLATION_LIMIT
 }
+
+export type PropagationState = 'propagated' | 'propagating' | 'offline'
+
+export interface PropagationServer {
+  host: string
+  online: boolean
+  manifest_version: number
+}
+
+export interface PropagationNode {
+  node_id: string
+  name: string
+  region: string
+  city: string
+  country_code: string
+  continent: string
+  latitude: number | null
+  longitude: number | null
+  online: boolean
+  state: PropagationState
+}
+
+export interface ProposalPropagation {
+  server: PropagationServer
+  proposal: {
+    id: number
+    status: string
+    change_type: string
+    file_path: string
+  }
+  nodes: PropagationNode[]
+}
+
+export async function fetchProposalPropagation(proposalId: number): Promise<ProposalPropagation> {
+  return request(`${CDN_ADMIN_BASE}/proposals/${proposalId}/propagation/`, { method: 'GET' })
+}

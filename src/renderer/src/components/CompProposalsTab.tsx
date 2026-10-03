@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import {
-  Loader2, CheckCircle, XCircle, RotateCcw, Download, Calendar, Hash, AlertCircle, ImageOff,
+  Loader2, CheckCircle, XCircle, RotateCcw, Download, Calendar, Hash, AlertCircle, ImageOff, Globe,
 } from 'lucide-react'
 import * as userApi from '../lib/userApi'
 import type { CompFileProposal } from '../lib/userApi'
@@ -11,6 +11,7 @@ import { getMediaType } from '../lib/fileTypes'
 import { formatBytes, formatDuration } from '../lib/format'
 import { useAuthedBlobUrl, useCompProposalsQueue } from '../hooks/useCompProposalsQueue'
 import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason } from '../lib/compProposalShared'
+import ProposalPropagationModal from './ProposalPropagationModal'
 
 /** One preview slot - a live comp/ path (plain <img>/<audio>/<video> against
  *  the public download URL, same as FilePickerModal's thumbnails) or an
@@ -90,6 +91,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
     doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
   } = useCompProposalsQueue(activeChannel, onChanged, true)
   const [query, setQuery] = useState('')
+  const [propagationId, setPropagationId] = useState<number | null>(null)
 
   // Searchable: both sides of a move, who filed it, the staged file's name,
   // the change type as it's labelled on screen ("New file", not "create"), and
@@ -255,10 +257,16 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                     )
                   )}
                   {p.status === 'approved' && (
-                    <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
-                      className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-amber-400 flex items-center gap-1.5">
-                      {actionId === p.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Reverse
-                    </button>
+                    <>
+                      <button onClick={() => setPropagationId(p.id)}
+                        className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-accent flex items-center gap-1.5">
+                        <Globe size={13} /> Propagation
+                      </button>
+                      <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
+                        className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-amber-400 flex items-center gap-1.5">
+                        {actionId === p.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Reverse
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -333,6 +341,9 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         )}
       </div>
       </div>
+      {propagationId != null && (
+        <ProposalPropagationModal proposalId={propagationId} onClose={() => setPropagationId(null)} />
+      )}
     </div>
   )
 }
