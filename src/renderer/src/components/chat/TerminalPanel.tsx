@@ -283,6 +283,35 @@ const LINK = 'underline decoration-dotted underline-offset-2 cursor-pointer hove
 // command (or the handle) is a button that puts it on the prompt. It never runs
 // it - clicking is only a shortcut for typing.
 function linkLine(line: string, onPick: (command: string) => void): JSX.Element | string {
+  // Structured output gets colour so the parts read apart: a leading [tag]
+  // (levels have their own colours, any other tag takes the accent), a trailing
+  // "- author, date" tail goes dim, and a "Heading:" line is bold. What is left
+  // still goes through the link handling below.
+  const heading = /^([A-Z][^:\n]{0,48}):$/.exec(line)
+  if (heading) return <span className="text-[color:var(--t-path)] font-semibold">{line}</span>
+  const tagged = /^(\s*)\[([^\]\s][^\]]{0,23})\](.*)$/.exec(line)
+  const rest = tagged ? tagged[3] : line
+  const meta = /^(.*?)( - \S+, [A-Z][a-z]{2} \d{1,2}, \d{4}, .*)$/.exec(rest)
+  if (tagged || meta) {
+    const body = meta ? meta[1] : rest
+    let tag: JSX.Element | null = null
+    if (tagged) {
+      const level = tagged[2].toLowerCase()
+      const color = level === 'error' || level === 'fail' || level === 'failed' ? 'text-[color:var(--t-err)]'
+        : level === 'warning' || level === 'warn' ? 'text-[#e5c07b]'
+        : level === 'success' || level === 'ok' || level === 'done' ? 'text-[color:var(--t-ok)]'
+        : level === 'debug' ? 'text-[color:var(--t-dim)]'
+        : level === 'info' ? 'text-[color:var(--t-path)]'
+        : 'text-[color:var(--t-accent)]'
+      tag = <>{tagged[1]}<span className={`${color} font-semibold`}>[{tagged[2]}]</span></>
+    }
+    return (
+      <>
+        {tag}{linkLine(body, onPick)}
+        {meta && <span className="text-[color:var(--t-dim)]">{meta[2]}</span>}
+      </>
+    )
+  }
   const arrow = /^(.*→ )(\S.*)$/.exec(line)
   if (arrow) {
     const command = arrow[2]
