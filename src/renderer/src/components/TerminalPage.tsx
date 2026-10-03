@@ -5,7 +5,7 @@ import { useStore } from '../store/useStore'
 import Composer from './chat/Composer'
 import { useRoomPeople } from './chat/people'
 import TerminalPanel from './chat/TerminalPanel'
-import { setTermFullscreen, useTermFullscreen } from '../lib/terminal/fullscreenStore'
+import { getTermFullscreen, setTermFullscreen, syncBrowserFullscreen, useTermFullscreen } from '../lib/terminal/fullscreenStore'
 
 // Stands in when no chat room exists yet: everything that doesn't need a room
 // (playback, settings, files, the review queues...) still works.
@@ -27,8 +27,13 @@ export default function TerminalPage(): JSX.Element {
   const people = useRoomPeople(active)
   const full = useTermFullscreen()
 
-  // Fullscreen belongs to this visit; leaving the page (hotkey, nav, `exit`) ends it.
-  useEffect(() => () => setTermFullscreen(false), [])
+  // Closing the terminal leaves fullscreen so the rest of the site isn't stuck
+  // in it; the flag stays set, so reopening re-enters it (the hotkey that
+  // reopens the page is the gesture the browser needs).
+  useEffect(() => {
+    if (getTermFullscreen()) syncBrowserFullscreen(true)
+    return () => syncBrowserFullscreen(false)
+  }, [])
   // Esc (or F11) leaving browser fullscreen should drop the in-page one too.
   useEffect(() => {
     const onChange = (): void => { if (!document.fullscreenElement) setTermFullscreen(false) }

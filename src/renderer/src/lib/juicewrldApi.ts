@@ -181,6 +181,17 @@ export async function listFilesRecursive(path: string, channel?: string): Promis
   return files
 }
 
+/** Everything under a folder (files and subfolders, any depth) in ONE request
+ *  via /files/list-all/?path= - the server walks its cached index instead of
+ *  the client listing folder by folder. Paths are relative to the channel root.
+ *  Resolves null while the server is still building its index, so callers can
+ *  fall back to per-folder listings. */
+export async function listSubtree(path: string, channel?: string): Promise<JWApiFileEntry[] | null> {
+  const data = await apiFetch<{ items?: JWApiFileEntry[]; building?: boolean }>('/files/list-all/', { path: path || undefined, channel })
+  if (data.building && !data.items?.length) return null
+  return data.items ?? []
+}
+
 /** Strips trailing qualifiers ("(feat. X)", "[Prod. Y]") from a song title so
  *  a /files/browse/ search hits the file tree's naming - folders/images are
  *  rarely filed under the full bracketed title. Same idea as

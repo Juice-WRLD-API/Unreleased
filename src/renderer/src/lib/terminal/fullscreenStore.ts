@@ -1,22 +1,26 @@
 import { useSyncExternalStore } from 'react'
 
-// Whether the terminal page covers the whole window (`full`). Session-only: the
-// page clears it when it unmounts, so leaving the terminal never strands the
-// next visit in a fullscreen the user has forgotten about.
+// Whether the terminal page covers the whole window (`full`). It outlives the
+// page: closing the terminal drops out of fullscreen, but the flag stays so the
+// next open comes back fullscreen. Only `full` (or Esc) clears it.
 let on = false
 const listeners = new Set<() => void>()
+
+/** Browser (real) fullscreen, matched to `want`. Needs a user gesture to enter:
+ *  the command's keypress, or the shortcut that reopens the page. Failures
+ *  (iframe, denied, unsupported) just leave the in-page version. */
+export function syncBrowserFullscreen(want: boolean): void {
+  try {
+    if (want && !document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => {})
+    else if (!want && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+  } catch { /* in-page fullscreen still applies */ }
+}
 
 export function setTermFullscreen(next: boolean): void {
   if (next === on) return
   on = next
   listeners.forEach((l) => l())
-  // Browser fullscreen too. Called from the command's run(), still inside the
-  // keypress that submitted it, which is what lets requestFullscreen through.
-  // Failures (iframe, denied, unsupported) just leave the in-page version.
-  try {
-    if (next && !document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => {})
-    else if (!next && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
-  } catch { /* in-page fullscreen still applies */ }
+  syncBrowserFullscreen(next)
 }
 
 export const getTermFullscreen = (): boolean => on

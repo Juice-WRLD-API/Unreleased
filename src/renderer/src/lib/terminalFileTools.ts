@@ -1,11 +1,12 @@
 import { getFileExt, TEXT_EXTS } from './fileTypes'
 import { formatBytes } from './format'
-import { fetchEntryText, listDir, lookupEntry, resolveDir, unquote, type FilesCwd, type FsEntry } from './terminalFiles'
+import { fetchEntryText, listDir, listSubtreeFlat, lookupEntry, resolveDir, unquote, type FilesCwd, type FsEntry } from './terminalFiles'
 
 // Read-only shell tools for the file tree (cat, head, tail, wc, grep, locate,
 // tree, du). Like `ls` and `get` they work on what /files/browse/ serves and
-// stream URLs download - there is no recursive endpoint, so the ones that walk
-// folders do it a level at a time with hard caps and say so when they stop.
+// stream URLs download. The ones that walk folders ask /files/list-all/?path=
+// for the whole subtree in one request; only if that isn't available do they
+// fall back to listing a level at a time, with hard caps they say so about.
 
 function fileOf(cwd: FilesCwd, cmd: string): string {
   if (cwd.channel === null) throw new Error(`${cmd}: pick a channel first (cd files, then cd <channel>)`)
@@ -79,10 +80,17 @@ export async function wcFile(cwd: FilesCwd, arg: string): Promise<string> {
 
 interface Crawled { rel: string[]; entry: FsEntry }
 
-// Breadth-first, a few listings at a time. `maxDirs` is the request budget;
-// folders past `maxDepth` are listed as entries but not entered (not a
-// truncation - that was asked for), folders past the budget are (truncated).
+// One request for the whole subtree when it can (nothing is ever truncated);
+// otherwise breadth-first, a few listings at a time. `maxDirs` is then the
+// request budget; folders past `maxDepth` are listed as entries but not
+// entered (not a truncation - that was asked for), folders past the budget
+// are (truncated). A single-level crawl is already one listing, so it skips
+// the subtree call.
 async function crawl(start: FilesCwd, maxDepth: number, maxDirs: number): Promise<{ items: Crawled[]; truncated: boolean }> {
+  if (maxDepth > 1) {
+    const flat = await listSubtreeFlat(start)
+    if (flat) return { items: flat.filter((i) => i.rel.length <= maxDepth), truncated: false }
+  }
   const items: Crawled[] = []
   const queue: { dir: FilesCwd; rel: string[] }[] = [{ dir: start, rel: [] }]
   let listed = 0
@@ -172,7 +180,7 @@ export async function treeView(cwd: FilesCwd, arg: string): Promise<string> {
 /** `du [folder]`: how much is in each subfolder, and in total. */
 export async function diskUsage(cwd: FilesCwd, arg: string): Promise<string> {
   const start = await startDir(cwd, arg, 'du')
-  const { items, truncated } = await crawl(start, 10, 250)
+  const { items, truncated } = await crawl(start, 64, 250)
   const sizes = new Map<string, { bytes: number; files: number }>()
   let loose = { bytes: 0, files: 0 }
   let total = { bytes: 0, files: 0 }

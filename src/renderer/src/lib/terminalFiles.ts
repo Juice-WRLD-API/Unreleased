@@ -4,7 +4,7 @@ import { triggerDownload } from './apiFilesShared'
 import { downloadFileSmart } from './cdn'
 import { openZipTarget, saveItems, type ZipItem } from './clientZip'
 import { formatBytes } from './format'
-import { apiFetch, buildStreamUrl, listFilesRecursive, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
+import { apiFetch, buildStreamUrl, listFilesRecursive, listSubtree, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
 
 // The Files tab as a little filesystem for the admin terminal: the root lists
 // the file channels, a channel is a directory, and below that it's the same
@@ -68,6 +68,47 @@ export async function listDir(cwd: FilesCwd, fresh = false): Promise<FsEntry[]> 
     .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) : a.type === 'directory' ? -1 : 1))
   listCache.set(key, { at: Date.now(), entries })
   return entries
+}
+
+const treeCache = new Map<string, { at: number; items: { rel: string[]; entry: FsEntry }[] }>()
+
+/** Every file and folder below `cwd`, with paths relative to it, from a single
+ *  /files/list-all/?path= request (cached a minute). Null when the server has
+ *  no index ready yet or the call fails, so the caller can walk folder by
+ *  folder instead. */
+export async function listSubtreeFlat(cwd: FilesCwd): Promise<{ rel: string[]; entry: FsEntry }[] | null> {
+  if (cwd.channel === null) return null
+  const base = cwd.dir.join('/')
+  const key = `${cwd.channel}:${base}`
+  const hit = treeCache.get(key)
+  if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.items
+  let raw: JWApiFileEntry[] | null
+  try { raw = await listSubtree(base, cwd.channel) } catch { return null }
+  if (raw === null) return null
+  const prefix = base ? `${base.toLowerCase()}/` : ''
+  const items: { rel: string[]; entry: FsEntry }[] = []
+  for (const e of raw) {
+    // The server already scopes to the folder; this keeps an older one (which
+    // ignores `path` and returns the whole channel) from over-reporting.
+    if (prefix && !e.path.toLowerCase().startsWith(prefix)) continue
+    items.push({ rel: e.path.slice(prefix.length).split('/'), entry: { name: e.name, type: e.type, size: e.size, entry: e } })
+  }
+  // Same order as a listing: folders before files, then natural name order,
+  // at every level.
+  const kind = (it: { rel: string[]; entry: FsEntry }, i: number): string => (i < it.rel.length - 1 ? 'directory' : it.entry.type)
+  items.sort((a, b) => {
+    for (let i = 0; ; i++) {
+      if (i >= a.rel.length) return -1
+      if (i >= b.rel.length) return 1
+      if (a.rel[i] === b.rel[i]) continue
+      const ka = kind(a, i)
+      const kb = kind(b, i)
+      if (ka !== kb) return ka === 'directory' ? -1 : 1
+      return a.rel[i].localeCompare(b.rel[i], undefined, { numeric: true, sensitivity: 'base' })
+    }
+  })
+  treeCache.set(key, { at: Date.now(), items })
+  return items
 }
 
 /** Walks `input` ("..", "a/b", "/", "/chan/a") from `cwd`, checking every

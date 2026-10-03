@@ -467,6 +467,7 @@ function FilesTab() {
         <Table
           headers={['Param', 'Required', 'Description']}
           rows={[
+            [<Code>path</Code>, 'No', 'Only return what is below this folder (any depth), in one request. Item paths stay relative to the channel root; the response gains base'],
             [<Code>channel</Code>, 'No', 'Comp channel slug. Defaults to the primary channel'],
           ]}
         />

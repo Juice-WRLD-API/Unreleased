@@ -1452,7 +1452,9 @@ export default function Player(): JSX.Element {
       const tag = target?.tagName
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || !!target?.isContentEditable
       const isFKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(combo.split('+').pop() ?? '')
-      if (typing && !combo.startsWith('Media') && !isFKey) return
+      // The terminal's own input has focus while it is open, so its hotkey has
+      // to get through typing too or it could never close the terminal.
+      if (typing && !combo.startsWith('Media') && !isFKey && resolveAction(combo, useStore.getState().hotkeyBindings) !== 'open-terminal') return
       // Leave Space/Enter alone when a button/link/select is focused so they
       // still activate it (native keyboard behavior) instead of toggling play.
       const clickable = tag === 'BUTTON' || tag === 'A' || tag === 'SELECT' || target?.getAttribute('role') === 'button'
