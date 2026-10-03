@@ -1,7 +1,7 @@
 import { useStore } from '../../store/useStore'
 import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, type PlaylistSummary } from '../userApi'
-import { getSongsByIds, songToTrack } from '../juicewrldApi'
-import { songFromArg } from './player'
+import { getSongById, getSongsByIds, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { completeSongs, songFromArg } from './player'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -53,9 +53,42 @@ async function completePlaylistNames(before: string[], partial: string): Promise
     .map((n) => n.split(' ').slice(typed.length - 1).join(' '))
 }
 
+const oneLine = (s: string | null | undefined): string => (s ?? '').replace(/\s+/g, ' ').trim()
+// The API's date fields repeat their own label ("Released" + a line break + the date).
+const dateLine = (s: string | null | undefined): string => oneLine(s).replace(/^(recorded|released|previewed)\s*/i, '')
+
+function describeSong(song: JWApiSong): string {
+  const field = (label: string, value: string | null | undefined): string[] => (oneLine(value) ? [`${label.padEnd(10)}${oneLine(value)}`] : [])
+  const aliases = (song.track_titles ?? []).filter((t) => t.toLowerCase() !== song.name.toLowerCase())
+  return [
+    `${song.name}   #${song.id}`,
+    ...field('era', song.era ? `${song.era.name}${song.era.time_frame ? ` (${song.era.time_frame})` : ''}` : ''),
+    ...field('category', `${song.category.replace('_', ' ')}${song.length ? ` · ${song.length}` : ''}`),
+    ...field('also', aliases.join(', ')),
+    ...field('artists', song.credited_artists),
+    ...field('producers', song.producers),
+    ...field('engineers', song.engineers),
+    ...field('studio', song.recording_locations),
+    ...field('recorded', dateLine(song.record_dates)),
+    ...field('previewed', dateLine(song.preview_date)),
+    ...field('released', dateLine(song.release_date)),
+    ...field('file', song.path),
+  ].join('\n')
+}
+
 const playlistCommand = (): TermCommand => LIBRARY_COMMANDS.find((c) => c.name === 'playlist')!
 
 export const LIBRARY_COMMANDS: TermCommand[] = [
+  {
+    name: 'song', aliases: ['info'], group: 'Library', usage: 'song <title | N>',
+    description: 'Everything the library knows about a song: era, credits, dates and its file. N is a number from find. (In the terminal this replaces the chat /song, which posts to a room)',
+    complete: completeSongs,
+    run: async (args, ctx) => {
+      if (!args.trim()) fail('usage: song <title | N>')
+      const picked = await songFromArg(args.trim())
+      ctx.print(describeSong(await getSongById(picked.id, ctx.signal)))
+    },
+  },
   {
     name: 'playlists', aliases: ['pls'], group: 'Library', usage: 'playlists', description: 'List your playlists, numbered. With a subcommand (playlists play #5) it works like playlist',
     complete: completePlaylistNames,

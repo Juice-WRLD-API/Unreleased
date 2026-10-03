@@ -2,11 +2,11 @@
 // aggregate per-song counts in lib/songPrefs (which predate this and stay the
 // source of truth for all-time numbers).
 //
-// The whole array is PATCHed to the profile blob on every play (there's no
-// append endpoint), and it also lives in localStorage, so the cap is a payload
-// budget, not a storage one: at ~45 bytes a row, 2000 rows is ~90 KB per push.
-// lib/songPrefs caps at 500 for the same reason. Raising this raises the cost
-// of every single credited play.
+// Each credited play is POSTed on its own (profilePushApi.appendPlay); the
+// whole array is only PATCHed as a fallback when that fails, and at login when
+// this device holds rows the profile lacks. The cap is therefore a payload
+// budget for those bulk pushes, not a storage one: at ~45 bytes a row, 2000
+// rows is ~90 KB per push. The server itself keeps up to 10,000.
 export interface ListeningPlayEvent {
   song: number
   played_at: string

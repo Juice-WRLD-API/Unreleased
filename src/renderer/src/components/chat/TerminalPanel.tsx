@@ -99,8 +99,29 @@ function expandBang(line: string): string | null {
 // contain " | " is left alone.
 const FILTERS = new Set(['grep', 'head', 'tail', 'wc', 'sort', 'uniq', 'juicesay'])
 
+// A pipe inside quotes belongs to the argument (`watch "queue | head 3"`). A
+// quote only opens at the start of a word, so an apostrophe in a message
+// doesn't swallow the rest of the line; an unclosed one falls back to a plain split.
+function splitOnPipes(line: string): string[] {
+  const parts: string[] = []
+  let quote = ''
+  let start = 0
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (quote) { if (ch === quote) quote = ''; continue }
+    if ((ch === '"' || ch === "'") && (i === 0 || /\s/.test(line[i - 1]))) { quote = ch; continue }
+    if (ch === '|' && /\s/.test(line[i - 1] ?? '') && /\s/.test(line[i + 1] ?? '')) {
+      parts.push(line.slice(start, i).trim())
+      start = i + 1
+    }
+  }
+  if (quote) return line.split(/\s+\|\s+/)
+  parts.push(line.slice(start).trim())
+  return parts
+}
+
 function splitPipes(line: string): { cmd: string; filters: string[] } {
-  const parts = line.split(/\s+\|\s+/)
+  const parts = splitOnPipes(line)
   if (parts.length > 1 && parts.slice(1).every((p) => FILTERS.has(p.trim().split(/\s+/)[0].toLowerCase()))) return { cmd: parts[0], filters: parts.slice(1) }
   return { cmd: line, filters: [] }
 }

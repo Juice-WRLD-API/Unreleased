@@ -1396,7 +1396,8 @@ Authorization: Token <token>`}</Pre>
         <p className="text-sm text-text-secondary">
           <Code>listening_plays</Code> is a raw per-play log, one entry per listen, distinct from{' '}
           <Code>user_preferences[].playcount</Code> which is just a running total per song. Same blob mechanics:
-          whole-array PATCH on <Code>/accounts/account/me/</Code>, no per-event route.
+          whole-array PATCH on <Code>/accounts/account/me/</Code>, or append a single play with{' '}
+          <Code>POST /accounts/account/me/listening-plays/</Code>.
         </p>
         <Pre>{`{
   "song": 94086,
@@ -1410,9 +1411,15 @@ Authorization: Token <token>`}</Pre>
           ]}
         />
         <p className="text-xs text-text-muted">
-          Capped at <span className="font-semibold text-text-primary">10,000 events</span>. Send the whole array,
-          debounced the same way as <Code>user_preferences</Code>, so a burst of plays collapses into one PATCH
-          rather than one per play.
+          Capped at <span className="font-semibold text-text-primary">10,000 events</span>. Prefer the append
+          route for live plays; the whole-array PATCH (debounced like <Code>user_preferences</Code>) is for
+          bulk sync, e.g. merging an offline backlog.
+        </p>
+        <p className="text-sm text-text-secondary mt-2">
+          <Code>POST /accounts/account/me/listening-plays/</Code> body:{' '}
+          <Code>{'{ "song": 94086, "played_at": "2026-08-03T20:14:00Z" }'}</Code> (<Code>played_at</Code> optional,
+          defaults to now). Returns <Code>201</Code> with <Code>{'{ "listening_plays": [...] }'}</Code> (newest
+          first, capped like the PATCH path). Invalid <Code>song</Code> returns <Code>400</Code>.
         </p>
       </Section>
 

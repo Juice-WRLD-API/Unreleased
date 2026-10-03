@@ -1960,8 +1960,17 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // one device's push can't erase plays made on another. The play *event*
     // appended alongside it is additive instead - merges union the two sides.
     get()._setSongPrefs(patchPrefMap(prefs, songId, { playcount: (prefs[songId]?.playcount ?? 0) + 1 }))
-    get()._setListeningPlays(appendListeningPlay(get().listeningPlays, songId))
-    get()._scheduleProfilePush(['songPrefs', 'listeningPlays'])
+    const plays = appendListeningPlay(get().listeningPlays, songId)
+    get()._setListeningPlays(plays)
+    get()._scheduleProfilePush(['songPrefs'])
+    // The server has an append route, so the new row goes up on its own rather
+    // than riding the whole-array PATCH. If the POST fails (offline, 5xx) the
+    // log is marked dirty and the debounced PATCH re-sends everything.
+    if (get().account && preferencesApi.preferencesApiEnabled) {
+      profilePushApi.appendPlay(plays[0]).catch(() => get()._scheduleProfilePush(['listeningPlays']))
+    } else {
+      get()._scheduleProfilePush(['listeningPlays'])
+    }
   },
 
   syncSongPrefs: async (serverPrefs) => {

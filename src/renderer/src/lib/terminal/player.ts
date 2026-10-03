@@ -181,6 +181,32 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
+    name: 'unlike', group: 'Player', usage: 'unlike [title | N]', description: 'Take a song out of your liked songs (no argument: the one playing). like toggles; this only removes',
+    complete: completeSongs,
+    run: async (args, ctx) => {
+      const arg = args.trim()
+      const song = arg ? await songFromArg(arg) : null
+      const id = song ? `jw-${song.id}` : currentTrack().id
+      const title = song?.name ?? currentTrack().title
+      if (!st().likedTrackIds.includes(id)) { ctx.print(`${title} isn’t in your liked songs`, 'dim'); return }
+      st().toggleLike(id)
+      ctx.print(`♡ removed ${title} from your liked songs`, 'ok')
+    },
+  },
+  {
+    name: 'stop', group: 'Player', usage: 'stop', description: 'Stop playback and empty the queue (pause only pauses)',
+    run: (_a, ctx) => {
+      const s = st()
+      if (!s.currentTrack && s.queue.length === 0) fail('nothing is playing')
+      runHotkeyAction('pause')
+      useStore.setState({
+        isPlaying: false, currentTrack: null, currentTrackFull: null, queue: [], queueIndex: -1, progress: 0, currentTime: 0,
+        queueFilter: null, queueSource: null, radioMode: false, radioNext: null, _radioWaiting: false,
+      })
+      ctx.print('⏹ stopped', 'ok')
+    },
+  },
+  {
     name: 'status', aliases: ['now'], group: 'Player', usage: 'status', description: 'What is playing, plus volume, speed, shuffle, repeat and the queue',
     run: (_a, ctx) => {
       const s = st()

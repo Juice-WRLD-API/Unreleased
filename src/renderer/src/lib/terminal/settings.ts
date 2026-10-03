@@ -7,6 +7,7 @@ import {
   NAV_ITEMS, orderedNavControls, orderedNavItems,
 } from '../navItems'
 import type { ViewType } from '../../types'
+import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, getRouteRules, normalizePrefix, setRouteRules, setServerOverride } from '../apiServers'
 import { fail, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -188,6 +189,20 @@ function moveNavEntry(e: NavEntry, to: string): void {
 
 const NAV_VERBS = ['show', 'hide', 'toggle', 'move', 'reset']
 
+// `api`: Settings > About's server override and route rules. The setters
+// reload the page (every API module reads its base at import time), so the
+// message goes up first and the change follows a moment later.
+const API_SUBS = ['set', 'reset', 'rule', 'unrule']
+
+function isHttpUrl(s: string): boolean {
+  try {
+    const { protocol } = new URL(s)
+    return protocol === 'https:' || protocol === 'http:'
+  } catch { return false }
+}
+
+const reloadAfter = (apply: () => void): void => { setTimeout(apply, 500) }
+
 export const SETTINGS_COMMANDS: TermCommand[] = [
   {
     name: 'nav', aliases: ['menu', 'navbar'], group: 'Settings', usage: 'nav [show|hide|toggle <item> | move <item> <up|down|top|bottom|n> | reset]',
@@ -254,6 +269,54 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       const section = HOME_SECTIONS.find((x) => x.id === name.toLowerCase()) ?? pickByName(HOME_SECTIONS, (x) => x.id, name) ?? pickByName(HOME_SECTIONS, (x) => x.label, name) ?? fail(`no section "${name}" (try: home-sections)`)
       st().setHomeSectionVisible(section.id, v === 'toggle' ? !vis(section.id) : v === 'show')
       ctx.print(`${section.label}: ${vis(section.id) ? 'shown' : 'hidden'}`, 'ok')
+    },
+  },
+  {
+    name: 'api', group: 'Settings', usage: 'api [set <url> | reset | rule <prefix> <url> | unrule <prefix>]',
+    description: 'Show or change the API base, and route path prefixes (/cdn, /chat…) to other servers (same as Settings > About). A change reloads the page',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return API_SUBS.filter((v) => v.startsWith(p))
+      return before.length === 1 && before[0].toLowerCase() === 'unrule' ? getRouteRules().map((r) => r.prefix).filter((x) => x.startsWith(p)) : []
+    },
+    run: (args, ctx) => {
+      const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
+      const verb = sub.toLowerCase()
+      if (!verb || verb === 'show') {
+        const rules = getRouteRules()
+        const how = getServerOverride() ? '' : ' (default)'
+        ctx.print(`API ${JWAPI_BASE}${how}${rules.length ? `\n${rules.map((r) => `  ${r.prefix.padEnd(14)} -> ${r.base}`).join('\n')}` : '\nno route rules'}`)
+        return
+      }
+      if (verb === 'set') {
+        const url = (rest[0] ?? '').trim().replace(/\/+$/, '')
+        if (!isHttpUrl(url)) fail('usage: api set <url>  (a full http(s) address, e.g. https://staging.example.com/juicewrld)')
+        ctx.print(`API base -> ${url} - reloading…`, 'ok')
+        reloadAfter(() => setServerOverride(url))
+        return
+      }
+      if (verb === 'reset') {
+        if (!getServerOverride() && getRouteRules().length === 0) { ctx.print(`already on the default (${DEFAULT_JWAPI_BASE})`, 'dim'); return }
+        ctx.print('API base and route rules cleared - reloading…', 'ok')
+        reloadAfter(() => { setRouteRules([]); setServerOverride(null) })
+        return
+      }
+      if (verb === 'rule') {
+        const prefix = normalizePrefix(rest[0] ?? '')
+        const base = (rest[1] ?? '').trim().replace(/\/+$/, '')
+        if (!prefix || !isHttpUrl(base)) fail('usage: api rule <prefix> <url>  (e.g. api rule /cdn https://cdn.example.com/juicewrld)')
+        ctx.print(`${prefix} -> ${base} - reloading…`, 'ok')
+        reloadAfter(() => setRouteRules([...getRouteRules().filter((r) => r.prefix !== prefix), { prefix, base }]))
+        return
+      }
+      if (verb === 'unrule') {
+        const prefix = normalizePrefix(rest[0] ?? '')
+        if (!getRouteRules().some((r) => r.prefix === prefix)) fail(`unrule: ${prefix || '?'}: no such rule (api lists them)`)
+        ctx.print(`removed rule ${prefix} - reloading…`, 'ok')
+        reloadAfter(() => setRouteRules(getRouteRules().filter((r) => r.prefix !== prefix)))
+        return
+      }
+      fail('usage: api [set <url> | reset | rule <prefix> <url> | unrule <prefix>]')
     },
   },
   {

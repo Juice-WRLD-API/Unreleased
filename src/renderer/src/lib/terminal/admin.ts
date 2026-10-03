@@ -171,7 +171,7 @@ export const ADMIN_COMMANDS: TermCommand[] = [
         u.contributor_enabled ? 'contrib' : '', u.manager_enabled ? 'mgr' : '', u.news_enabled ? 'news' : '',
         u.auto_approve_proposals ? 'auto-edits' : '', u.auto_approve_comp_proposals ? 'auto-comp' : '', u.is_active ? '' : 'DISABLED',
       ].filter(Boolean).join(',')
-      ctx.print(`${list.slice(0, LIMIT).map((u) => `${String(u.user_id).padEnd(7)}${u.username.padEnd(22)}${u.role.padEnd(13)}${relativeTime(u.last_login).padEnd(12)}${flags(u)}`).join('\n')}\n${list.length > LIMIT ? `… ${list.length - LIMIT} more · ` : ''}${list.length} user${list.length === 1 ? '' : 's'}`)
+      ctx.print(`${list.slice(0, LIMIT).map((u) => `${String(u.user_id).padEnd(7)}${u.username.padEnd(22)}${u.role.padEnd(15)}${relativeTime(u.last_login).padEnd(12)}${flags(u)}`).join('\n')}\n${list.length > LIMIT ? `… ${list.length - LIMIT} more · ` : ''}${list.length} user${list.length === 1 ? '' : 's'}`)
     },
   },
   {

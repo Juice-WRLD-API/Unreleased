@@ -18,6 +18,7 @@ import type { PlaylistFolder } from './playlistFolders'
 import type { UserSettings } from './userApi'
 
 const ME_URL = routeUrl('/accounts/account/me/')
+const PLAYS_URL = routeUrl('/accounts/account/me/listening-plays/')
 
 export interface ProfilePushPatch {
   songPrefs?: SongPreference[]
@@ -28,6 +29,20 @@ export interface ProfilePushPatch {
   // just the one that changed, since a partial object here would read as
   // "cleared" for whichever fields are missing.
   userSettings?: UserSettings
+}
+
+/** Appends one play via the dedicated route, so a credited play costs a
+ *  ~50-byte POST instead of re-sending the whole log. Throws on failure - the
+ *  caller falls back to the whole-array PATCH, which also carries the row.
+ *  No-op when signed out. */
+export async function appendPlay(event: ListeningPlayEvent): Promise<void> {
+  const token = getToken()
+  if (!token) return
+  await apiRequest<unknown>(PLAYS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+    body: JSON.stringify({ song: event.song, played_at: event.played_at }),
+  })
 }
 
 /** Single PATCH carrying whichever of the four profile-blob fields are
