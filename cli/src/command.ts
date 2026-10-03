@@ -1,7 +1,8 @@
-import { getToken } from './config'
+import { getMe } from './api'
+import { getToken, loadConfig } from './config'
 import type { Shell } from './shell'
 
-export type Group = 'Files' | 'Library' | 'Player' | 'People' | 'Shell' | 'Account'
+export type Group = 'Files' | 'Library' | 'Player' | 'People' | 'Admin' | 'Fun' | 'Shell' | 'Account'
 
 export interface Command {
   name: string
@@ -21,6 +22,20 @@ export const fail = (message: string): never => { throw new Error(message) }
 
 export function needSignIn(what: string): void {
   if (!getToken()) fail(`sign in to ${what} (try: login)`)
+}
+
+/** Whether the signed-in account is a platform administrator: the role saved
+ *  at login (whoami refreshes it), else asked of the API. */
+export async function isAdmin(): Promise<boolean> {
+  if (!getToken()) return false
+  const saved = loadConfig().user?.role
+  if (saved) return saved === 'admin'
+  try { return !!(await getMe()).is_administrator } catch { return false }
+}
+
+export async function needAdmin(): Promise<void> {
+  needSignIn('use the admin commands')
+  if (!(await isAdmin())) fail('that needs an administrator account (if your role just changed, run whoami)')
 }
 
 export const plural = (n: number, word: string, many = `${word}s`): string => `${n} ${n === 1 ? word : many}`

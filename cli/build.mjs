@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url'
 // Bundles the CLI into one file with no runtime dependencies. Some of the site's
 // own modules are compiled in as they are (the file tools behind cat, grep,
 // tree, du, locate, head, tail, wc; the listening-stats maths; the terminal's
-// name matching), so both terminals behave the same. They
-// are pulled in through `site:<name>` imports; anything those modules import
-// that only works in the browser is swapped for a Node version here.
+// name matching; the Wordle and Heardle game logic), so both terminals behave
+// the same. They are pulled in through `site:<name>` imports; anything those
+// modules import that only works in the browser is swapped for a Node version
+// here (their localStorage is src/shims/localStorage.ts).
 const here = dirname(fileURLToPath(import.meta.url))
 const siteLib = resolve(here, '../src/renderer/src/lib')
 const pkg = JSON.parse(readFileSync(resolve(here, 'package.json'), 'utf8'))
@@ -19,6 +20,8 @@ const SITE_MODULES = {
   'site:fileTypes': resolve(siteLib, 'fileTypes.ts'),
   'site:listeningStats': resolve(siteLib, 'listeningStats.ts'),
   'site:termTypes': resolve(siteLib, 'terminal/types.ts'),
+  'site:wordle': resolve(siteLib, 'wordle.ts'),
+  'site:heardle': resolve(siteLib, 'heardle.ts'),
 }
 
 // Imports made from inside the site's modules, keyed by importing file, that
@@ -27,6 +30,15 @@ const REPLACED = {
   [resolve(siteLib, 'terminalFileTools.ts')]: { './terminalFiles': resolve(here, 'src/files.ts') },
   [resolve(siteLib, 'fileTypes.ts')]: { '../store/useStore': resolve(here, 'src/shims/useStore.ts') },
   [resolve(siteLib, 'listeningStats.ts')]: { './juicewrldApi': resolve(here, 'src/shims/juicewrldApi.ts') },
+  [resolve(siteLib, 'heardle.ts')]: {
+    './apiClient': resolve(here, 'src/shims/apiClient.ts'),
+    './juicewrldApi': resolve(here, 'src/shims/juicewrldApi.ts'),
+  },
+  [resolve(siteLib, 'versionsApi.ts')]: {
+    './apiClient': resolve(here, 'src/shims/apiClient.ts'),
+    './juicewrldApi': resolve(here, 'src/shims/juicewrldApi.ts'),
+    './userApi': resolve(here, 'src/shims/userApi.ts'),
+  },
 }
 
 const sitePlugin = {

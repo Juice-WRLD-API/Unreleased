@@ -1,6 +1,6 @@
-import { apiFetch, getMe, isAbortError } from './api'
-import { fail, type Command } from './command'
-import { getToken, loadConfig } from './config'
+import { apiFetch, isAbortError } from './api'
+import { fail, isAdmin, type Command } from './command'
+import { getToken } from './config'
 import { channelList } from './files'
 import { myPlaylists } from './library'
 import { searchSongs, getSong } from './songs'
@@ -47,13 +47,6 @@ interface PublicProfile {
 interface DirUser { id: number; username: string; display: string; discord: string; role: string }
 
 const norm = (s: string): string => s.toLowerCase()
-
-async function isAdmin(): Promise<boolean> {
-  if (!getToken()) return false
-  const saved = loadConfig().user?.role
-  if (saved) return saved === 'admin'
-  try { return !!(await getMe()).is_administrator } catch { return false }
-}
 
 const ADMIN_TTL_MS = 5 * 60_000
 let adminUsers: { at: number; list: AdminUser[] } | null = null

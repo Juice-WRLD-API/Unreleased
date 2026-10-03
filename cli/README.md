@@ -27,7 +27,7 @@ You can also run it without linking: `node cli/dist/unreleased.mjs`. It needs No
 | | |
 |---|---|
 | `unreleased` | Open the interactive shell. |
-| `unreleased ls Snippets` | Run one command and exit. The exit code is 1 if the command failed. |
+| `unreleased ls Snippets` | Run one command and exit. The exit code is 1 if the command failed. A single quoted argument is a whole line: `unreleased "ls \| head 2"`. |
 | `unreleased < script.txt` | Run each line of a file. Lines starting with `#` are comments. |
 
 The shell starts in the main channel (`comp`). `cd /` lists every channel, and `cd` on its own takes you back.
@@ -38,17 +38,24 @@ Commands (type `help <command>` in the shell for the details of each one):
 - **Library:** `find`, `song`, `like`, `unlike`, `liked`, `playlists`, `playlist`, `stats`
 - **Player:** `play`, `pause`, `toggle`, `next`, `prev`, `seek`, `volume`, `speed`, `shuffle`, `repeat`, `queue`, `status`, `sleep`, `stop`
 - **People:** `user`, `lookup`
-- **Shell:** `source`, `alias`, `unalias`, `history`, `echo`, `clear`, `exit`, `help`
+- **Admin** (administrators only): `pending`, `proposals`, `comps`, `applications`, `inspect`, `approve`, `reject`, `reverse`, `users`, `sitebans`, `siteunban`
+- **Fun:** `neofetch`, `fortune`, `juicesay`, `matrix`, `wordle`, `heardle`
+- **Shell:** `source`, `alias`, `unalias`, `history`, `echo`, `watch`, `date`, `clear`, `exit`, `help`
 - **Account:** `login`, `logout`, `whoami`, `version`
 
 Things that work the same as on the site:
 
-- Pipe output into `grep`, `head`, `tail`, `wc`, `sort` or `uniq`.
+- Pipe output into `grep`, `head`, `tail`, `wc`, `sort`, `uniq` or `juicesay`. A `|` inside quotes stays part of the argument.
 - `!!`, `!N` and `!text` re-run earlier commands.
+- Ctrl+R searches your history, as in bash:
+  - Type to find the newest match, and press Ctrl+R again for older ones.
+  - Enter runs the match. Esc or an arrow key puts it on the line to edit.
+  - Ctrl+C gives up and leaves the line as it was.
 - `cd -` goes back to the previous folder.
 - `alias` saves shortcuts.
 - Tab completes command names and paths.
 - Ctrl+C cancels the running command.
+- `watch [-n seconds] <command>` re-runs a command on a refreshing screen, every 2 seconds unless `-n` says otherwise. Quote it if it has a pipe: `watch -n 5 "pending | head 3"`. `q` leaves.
 
 `get` saves into the current local folder. Use `lcd` to change that folder, or `get -o <dir>` for a single download. A folder keeps its structure on disk where the site would hand you a ZIP. Files that already exist are skipped unless you pass `-f`.
 
@@ -82,6 +89,33 @@ The CLI looks for mpv on PATH and then in the usual install folders. Set `UNRELE
 
 Plays here aren't added to your listening history on the site.
 
+## Admin
+
+These cover the Admin page's review queues and site moderation, using the same endpoints. They only appear in `help` for an administrator account, and they stop any other account before a request is sent. If your role changed since you logged in, run `whoami` to refresh it.
+
+- `pending` shows how much is waiting in each queue.
+- `proposals`, `comps` and `applications` list a queue. Each takes a status: pending (the default), approved, rejected, or reversed.
+- `inspect [song|comp|app] <id>` shows one item in full. For a song edit, that's every field it changes.
+- `approve` and `reject` take `[song|comp|app] <id> [note]`. Song edits are the default kind, so `approve 12` and `reject 12 no source` work as they are.
+- `reverse [song|comp] <id>` undoes an approved proposal.
+- `users [role] [filter]` lists accounts. `user <name>` shows one person.
+- `sitebans` lists active site-wide bans, mutes and timeouts. `siteunban <user | #id>` lifts them.
+
+`reverse` and `siteunban` ask before they act. Outside the interactive shell, such as in one-shot use or a script, they need `-y` instead.
+
+## Fun
+
+- `neofetch` shows system info with a logo.
+- `fortune` prints a random lyric line from a random song. Try `fortune | juicesay`.
+- `juicesay [text]` has a juice box say it.
+- `matrix` is digital rain. Any key leaves.
+- `wordle [daily | unlimited]` is the song-title Wordle, using the site's own puzzle logic, so the daily puzzle is the same one. Type a title and press Enter. Esc leaves, and your progress is saved.
+- `heardle` gives practice rounds: Tab plays the clip, Enter guesses (an empty Enter skips), and ↑↓ picks a suggestion. The clip plays through its own mpv. Music that was playing gets paused, and `play` resumes it.
+
+`matrix`, `wordle`, `heardle` and `watch` take over the whole terminal, then hand it back as it was. They need an interactive terminal, so they won't run from a pipe or a script.
+
+Wordle and Heardle keep their progress, streaks and song lists in `~/.unreleased/storage.json`. That's separate from your browser's, the same way two browsers are separate. They use the default game settings, because the settings you change on the site are stored in your browser.
+
 ## Signing in
 
 You can browse the files without an account. To sign in:
@@ -91,15 +125,23 @@ You can browse the files without an account. To sign in:
 
 `logout` only forgets the token on this computer. The token itself keeps working on the site.
 
+## API base and route rules
+
+`api` shows the current base. `api set <url>` moves everything to another API instance, and `api reset` goes back to the default.
+
+Route rules send one path prefix somewhere else on top of that, like the site's Settings: `api rule /cdn https://cdn.example.com/juicewrld`. The longest matching prefix wins. `api unrule /cdn` removes one. `UNRELEASED_API` still overrides the base.
+
 ## Files and environment
 
 Everything is kept in `~/.unreleased`. Set `UNRELEASED_HOME` to use another folder.
 
 | File | Contents |
 |---|---|
-| `config.json` | The token and account name (owner-only permissions where the OS supports it), plus an optional `"api"` base URL |
+| `config.json` | The token and account name (owner-only permissions where the OS supports it), plus an optional `"api"` base URL and `"rules"` route rules (set both with the `api` command) |
 | `history` | Typed commands. Start a line with a space and it won't be saved. |
 | `aliases.json` | Your aliases |
+| `storage.json` | Wordle and Heardle progress, streaks and their cached song lists |
+| `cache/catalog.json` | The song catalog `stats` and `shuffle <era>` use, refreshed daily |
 | `rc` | Commands run each time the interactive shell starts |
 
 | Environment variable | Effect |
@@ -118,5 +160,6 @@ Some of the CLI is the site's own code, compiled in by `build.mjs`:
 - `cat`, `head`, `tail`, `wc`, `grep`, `locate`, `tree` and `du` come from `src/renderer/src/lib/terminalFileTools.ts`. Its imports point at `src/files.ts`, the Node version of the site's `terminalFiles.ts`.
 - The `stats` maths comes from `lib/listeningStats.ts`. Its two helpers from `juicewrldApi.ts` are swapped for `src/shims/juicewrldApi.ts`.
 - Playlist name matching comes from `lib/terminal/types.ts`.
+- The Wordle and Heardle logic comes from `lib/wordle.ts`, `lib/heardle.ts` and `lib/versionsApi.ts`. That covers the daily pick, grading, title search and version matching. Their request helpers are swapped for shims in `src/shims/`, and `localStorage` for `src/shims/localStorage.ts`.
 
 A change to those on the site reaches the CLI on the next `npm run build`. The declarations in `src/site.d.ts` have to stay in step with their signatures. The other commands are ports, because their site versions read the app's stores.

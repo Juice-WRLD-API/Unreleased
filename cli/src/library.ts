@@ -96,7 +96,7 @@ const PLAYLIST: Command = {
         const pl = await playlistFromArg(rest)
         if (!yes) {
           if (!process.stdin.isTTY) fail(`playlist delete: add -y to delete "${pl.name}" without asking`)
-          const answer = await sh.prompter.ask(`Delete the playlist "${pl.name}" (${plural(pl.track_count, 'track')})? This can't be undone. [y/N] `)
+          const answer = await sh.ask(`Delete the playlist "${pl.name}" (${plural(pl.track_count, 'track')})? This can't be undone. [y/N] `)
           if (!/^y(es)?$/i.test(answer.trim())) { sh.print('cancelled', 'dim'); return }
         }
         await apiFetch(`/library/playlists/${pl.id}/`, {}, { method: 'DELETE' })

@@ -2,6 +2,10 @@ import { createInterface } from 'node:readline'
 import { VERSION } from './api'
 import { startRepl } from './repl'
 import { Shell, type Prompter } from './shell'
+import { installLocalStorage } from './shims/localStorage'
+
+// The site modules compiled in (the games) keep their state in localStorage.
+installLocalStorage()
 
 // `unreleased`                 the interactive shell
 // `unreleased <command> ...`   one command, then exit (exit code 1 if it failed)
@@ -77,8 +81,10 @@ async function main(): Promise<number> {
     if (++interrupts > 1) process.exit(130)
     shell.abort()
   })
+  // One argument is a whole command line (`unreleased "ls | head 2"`); several
+  // are words, re-quoted where the calling shell had them quoted.
   const lines = args.length > 0
-    ? [joinArgs(args)]
+    ? [args.length === 1 ? args[0] : joinArgs(args)]
     : (await readStdin()).split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
   await shell.goHome()
   const ok = await runLines(shell, lines)

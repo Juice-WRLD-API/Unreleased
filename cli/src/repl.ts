@@ -1,7 +1,9 @@
 import { createInterface, type Interface } from 'node:readline'
 import { getToken, HISTORY_MAX, loadConfig, readRc } from './config'
-import { color, writeTone } from './out'
+import { historySearchActive, installHistorySearch } from './historySearch'
+import { color, writeTone, type Tone } from './out'
 import { Player } from './player'
+import { screenActive } from './screen'
 import { Shell, type Prompter } from './shell'
 import { VERSION } from './api'
 
@@ -55,13 +57,18 @@ export async function startRepl(): Promise<void> {
   const showPrompt = (): void => { rl.setPrompt(shell.prompt()); rl.prompt() }
 
   // The player reports what happens on its own (next song, a file that won't
-  // play). At the prompt that goes above it, keeping whatever is half-typed.
+  // play). At the prompt that goes above it, keeping whatever is half-typed;
+  // over a full screen or a Ctrl+R search it waits until that's closed.
+  const held: { text: string; tone: Tone }[] = []
+  const flushHeld = (): void => { for (const n of held.splice(0)) writeTone(n.text, n.tone) }
   shell.player = new Player((text, tone = 'dim') => {
+    if (screenActive() || historySearchActive()) { held.push({ text, tone }); return }
     if (running) { writeTone(text, tone); return }
     process.stdout.write('\r\x1b[2K')
     writeTone(text, tone)
     rl.prompt(true)
   })
+  installHistorySearch(rl, () => shell.history, () => !running, flushHeld)
   const stopMusic = (): void => shell.player?.shutdown()
   process.on('exit', stopMusic)
   process.on('SIGHUP', () => { stopMusic(); process.exit(129) })
@@ -70,7 +77,7 @@ export async function startRepl(): Promise<void> {
   const drain = async (): Promise<void> => {
     if (running) return
     running = true
-    while (queue.length > 0 && !shell.exiting) await shell.run(queue.shift()!)
+    while (queue.length > 0 && !shell.exiting) { await shell.run(queue.shift()!); flushHeld() }
     running = false
     if (shell.exiting) rl.close()
     else showPrompt()

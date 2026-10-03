@@ -22,6 +22,8 @@ export interface Config {
   user?: SavedUser
   /** Overrides the API base (UNRELEASED_API wins over this). */
   api?: string
+  /** Route rules: requests whose path starts with `prefix` go to `base`. */
+  rules?: { prefix: string; base: string }[]
 }
 
 function readJson<T>(file: string, fallback: T): T {

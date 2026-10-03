@@ -7,6 +7,37 @@ export function apiBase(): string {
   return (process.env.UNRELEASED_API || loadConfig().api || DEFAULT_API).replace(/\/+$/, '')
 }
 
+export interface RouteRule { prefix: string; base: string }
+
+export function isHttpUrl(s: string): boolean {
+  try {
+    const { protocol } = new URL(s)
+    return protocol === 'https:' || protocol === 'http:'
+  } catch { return false }
+}
+
+export const stripSlash = (s: string): string => s.trim().replace(/\/+$/, '')
+
+export function normalizePrefix(prefix: string): string {
+  const p = stripSlash(prefix)
+  if (!p) return ''
+  return p.startsWith('/') ? p : `/${p}`
+}
+
+export function routeRules(): RouteRule[] {
+  return (loadConfig().rules ?? []).filter((r) => r.prefix && isHttpUrl(r.base))
+}
+
+/** The base a request for `path` goes to. Same as the site: the longest
+ *  matching prefix wins, on whole segments (`/cdn` covers `/cdn/x`, not `/cdnfoo`). */
+export function baseFor(path: string): string {
+  const rules = [...routeRules()].sort((a, b) => b.prefix.length - a.prefix.length)
+  for (const r of rules) {
+    if (path === r.prefix || path.startsWith(`${r.prefix}/`) || path.startsWith(`${r.prefix}?`)) return stripSlash(r.base)
+  }
+  return apiBase()
+}
+
 // The command running right now. Every request picks up its abort signal, so
 // Ctrl+C cancels the network work of any command - including the site's file
 // tools, which don't take a signal of their own.
@@ -41,7 +72,7 @@ export interface RequestOptions {
 }
 
 export function apiUrl(path: string, params: Record<string, string | number | null | undefined> = {}): string {
-  const url = new URL(`${apiBase()}${path}`)
+  const url = new URL(`${baseFor(path)}${path}`)
   for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, String(v))
   return url.toString()
 }
