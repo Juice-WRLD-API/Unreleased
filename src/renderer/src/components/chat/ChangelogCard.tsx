@@ -15,6 +15,7 @@ const BUILT = {
 export default function ChangelogCard({ room, messageId, status }: { room?: RoomRef; messageId?: number; status: ChangelogStatus }): JSX.Element {
   const { tip, built, deployed, running, branch, needsReload } = status
   const { Icon, cls, text } = BUILT[built]
+  const isRunning = (sha: string): boolean => running !== 'dev' && running !== 'unknown' && sha.startsWith(running)
   const [subject, ...body] = tip.message.split('\n')
   const detail = built === 'building'
     ? `The site is still serving ${deployed}.`
@@ -29,7 +30,7 @@ export default function ChangelogCard({ room, messageId, status }: { room?: Room
       )}
       <p className="mt-1 text-[11px] text-text-muted">
         <a href={tip.url} target="_blank" rel="noopener noreferrer" className="font-mono text-accent hover:underline">{tip.sha.slice(0, 7)}</a>
-        {' · '}{tip.author} · {relativeTime(tip.date)} · {branch}
+        {' · '}{tip.author} · {relativeTime(tip.date)} · {branch}{isRunning(tip.sha) && ' · ◀ this build'}
       </p>
       <div className={`mt-2 flex items-center gap-1.5 text-xs font-semibold ${cls}`}>
         <Icon size={14} /> {text}
@@ -46,6 +47,7 @@ export default function ChangelogCard({ room, messageId, status }: { room?: Room
             <li key={c.sha} className="flex items-baseline gap-2 text-[11px] min-w-0">
               <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-accent hover:underline shrink-0">{c.sha.slice(0, 7)}</a>
               <span className="min-w-0 flex-1 truncate text-text-primary">{c.message.split('\n')[0] || 'No message'}</span>
+              {isRunning(c.sha) && <span className="shrink-0 text-accent">◀ this build</span>}
               <span className="shrink-0 text-text-muted">{relativeTime(c.date)}</span>
             </li>
           ))}

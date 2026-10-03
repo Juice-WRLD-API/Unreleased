@@ -58,6 +58,7 @@ function getViewFromPath(pathname: string): ViewType {
 }
 
 import Sidebar from './components/Sidebar'
+import AutoHideNav from './components/AutoHideNav'
 import BottomNav from './components/BottomNav'
 import RadioFmPlayer from './components/RadioFmPlayer'
 import RadioVotePopup from './components/RadioVotePopup'
@@ -102,8 +103,8 @@ const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
+  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
   // wherever you were (Spotify-style "now playing" sheet), not a real nav
   // destination, so dragging it down should reveal that page like a curtain
@@ -246,7 +247,9 @@ export default function App(): JSX.Element {
           : sidebarPosition === 'bottom' ? 'flex-col-reverse'
           : 'flex-row'
       }`}>
-        <Sidebar />
+        {autoHideNav && !isMobile
+          ? <AutoHideNav position={sidebarPosition}><Sidebar /></AutoHideNav>
+          : <Sidebar />}
         <main
           className="flex-1 overflow-hidden flex flex-col relative"
           // Reserve the phone status-bar inset by default; a mobile view that
@@ -269,7 +272,7 @@ export default function App(): JSX.Element {
           // more - see BottomNav), so on mobile this only ever depends on
           // heroBleedTop. sidebarPosition still gates it on desktop, where
           // Sidebar itself can sit at the top and already reserves the space.
-          style={(isMobile || sidebarPosition !== 'top') && !heroBleedTop
+          style={(isMobile || sidebarPosition !== 'top' || autoHideNav) && !heroBleedTop
             ? { paddingTop: 'var(--top-inset)' } : undefined}
         >
           <div className="flex-1 overflow-hidden flex">

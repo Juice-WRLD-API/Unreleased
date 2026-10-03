@@ -53,12 +53,14 @@ export function commandCardText(payload: LocalNoticePayload): string | null {
       return fit('**Past broadcasts**', lines)
     }
     case 'changelog': {
-      const { tip, history, built, branch } = card.status
+      const { tip, history, built, branch, running } = card.status
+      // Marks the commit this build was made from, when it's one of those listed.
+      const here = (c: typeof tip): string => (running && running !== 'dev' && running !== 'unknown' && c.sha.startsWith(running) ? ' ◀ this build' : '')
       const line = (c: typeof tip): string => `[\`${c.sha.slice(0, 7)}\`](${c.url}) ${oneLine(c.message.split('\n')[0] || 'No message')}`
       const lines = [
-        `${line(tip)} - ${oneLine(tip.author)}, ${when(tip.date)}`,
+        `${line(tip)} - ${oneLine(tip.author)}, ${when(tip.date)}${here(tip)}`,
         BUILT_TEXT[built],
-        ...(history ?? []).map((c) => `- ${line(c)} - ${when(c.date)}`),
+        ...(history ?? []).map((c) => `- ${line(c)} - ${when(c.date)}${here(c)}`),
       ]
       return fit(`**Latest commit** on ${oneLine(branch)}`, lines)
     }

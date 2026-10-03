@@ -244,6 +244,9 @@ interface AppState {
   // getSkin() resolves them everywhere.
   customSkins: Skin[]
   sidebarPosition: SidebarPosition
+  // Desktop only: the nav menu slides out of view until the pointer touches its
+  // screen edge (like an auto-hiding taskbar). Local-only preference.
+  autoHideNav: boolean
   // User-defined order of the primary side-menu nav items, by view id. Only
   // ever a permutation of the known ids - orderedNavItems() sanitizes it on
   // read, so a stale/partial saved order can't drop or duplicate a tab.
@@ -617,6 +620,7 @@ interface AppActions {
   /** Removes a custom skin; if it was the active theme, falls back to dark. */
   deleteCustomSkin: (id: string) => void
   setSidebarPosition: (position: SidebarPosition) => void
+  setAutoHideNav: (on: boolean) => void
   setNavOrder: (order: ViewType[]) => void
   setNavItemVisible: (view: ViewType, visible: boolean) => void
   setNavControlOrder: (order: string[]) => void
@@ -1291,6 +1295,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // getSkin() maps unknown persisted ids (renamed/removed skins) back to dark.
   theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
+  autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
   navOrder: (() => {
     // Only users who actually reordered their menu have this key at all -
     // everyone else falls through to DEFAULT_NAV_ORDER and picks up new
@@ -1479,6 +1484,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
+  setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav) },
   setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder); get()._scheduleProfilePush(['userSettings']) },
   setNavItemVisible: (view, visible) => {
     const navVisibility = { ...get().navVisibility, [view]: visible }

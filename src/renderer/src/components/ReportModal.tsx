@@ -26,7 +26,7 @@ export default function ReportModal(): JSX.Element | null {
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full overflow-y-auto">
         <div
-          className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface cursor-grab active:cursor-grabbing"
+          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">

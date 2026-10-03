@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Info } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -114,7 +114,7 @@ export default function DiagnosticsModal(): JSX.Element {
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
         <div
-          className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing"
+          className={`flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <div className="flex items-center gap-2">
