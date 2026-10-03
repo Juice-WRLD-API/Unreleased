@@ -176,6 +176,14 @@ function stripMarkdown(text: string): string {
 
 const SHELL_NAMES = ['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit']
 
+// The chat commands' own usage/description mention `-s` (post the answer to the
+// room). It still works here, but it is chat noise in the terminal's help, so
+// the help text leaves it out.
+const noShare = (text: string): string => text
+  .replace(/ ?\[-s\]/g, '')
+  .replace(/\s*\(-s posts [^)]*\)/g, '')
+  .replace(/;\s*-s posts [^.]*$/, '')
+
 // `help` alone is an index (there are a lot of commands now); `help <group>`
 // lists one group in full and `help <command>` explains one.
 function helpText(): string {
@@ -200,7 +208,7 @@ function helpText(): string {
 function groupHelp(word: string): string | null {
   const w = word.trim().toLowerCase()
   const entry = (usage: string, description: string): string => `  ${usage}\n      ${description}`
-  if (w === 'chat') return ['Chat commands (the slash is optional here):', ...CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => entry(c.usage, c.description))].join('\n')
+  if (w === 'chat') return ['Chat commands (the slash is optional here):', ...CHAT_COMMANDS.filter((c) => c.name !== 'help').map((c) => entry(noShare(c.usage), noShare(c.description)))].join('\n')
   if (w === 'shell') return ['Shell:', ...SHELL_NAMES.map((n) => BUILTIN_HELP[n] ?? n)].join('\n')
   const group = TERM_GROUPS.find((g) => g.toLowerCase() === w)
   if (!group) return null
@@ -242,7 +250,7 @@ function commandHelp(word: string): string | null {
   const info = findChatCommand(name)
   if (!info) return null
   const aliases = info.aliases?.length ? `\n      aliases: ${info.aliases.map((a) => `/${a}`).join(', ')}` : ''
-  return `${info.usage}\n      ${info.description}${aliases}`
+  return `${noShare(info.usage)}\n      ${noShare(info.description)}${aliases}`
 }
 
 function noticeText(payload: LocalNoticePayload): string {
