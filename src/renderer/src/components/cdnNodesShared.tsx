@@ -166,6 +166,12 @@ function Fact({ label, value, copy }: { label: string; value: string; copy?: str
   )
 }
 
+export function nodeLocation(n: Pick<CdnOwnedNode, 'city' | 'country_code' | 'latitude' | 'longitude'>): string {
+  const place = [n.city, n.country_code].filter(Boolean).join(', ')
+  if (place) return place
+  return n.latitude != null && n.longitude != null ? `${n.latitude.toFixed(2)}, ${n.longitude.toFixed(2)}` : '—'
+}
+
 export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: string }): JSX.Element {
   const used = node.current_storage_bytes
   const max = node.max_storage_bytes
@@ -194,6 +200,8 @@ export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: s
         <Fact label="Violations" value={String(node.hash_violations)} />
         <Fact label="Owner" value={node.owner_username || 'Unclaimed'} />
         <Fact label="Region" value={node.region || '—'} />
+        <Fact label="Location" value={nodeLocation(node)} />
+        <Fact label="Tunnel" value={node.tunnel_hostname ? `${node.tunnel_hostname}${node.serve_ready ? '' : ' (not ready)'}` : '—'} copy={node.tunnel_hostname || undefined} />
         <Fact label="Address" value={node.ip_address ? (node.port ? `${node.ip_address}:${node.port}` : node.ip_address) : '—'} copy={node.ip_address ?? undefined} />
         <Fact label="Last heartbeat" value={relativeTime(node.last_heartbeat)} />
         <Fact label="Registered" value={shortDate(node.created_at)} />

@@ -792,6 +792,8 @@ interface AppActions {
   completeDiscordLogin: (code: string, state: string) => Promise<void>
   signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
   loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
+  /** Finishes a login another signed-in device approved (the token comes from the approval poll). */
+  completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
@@ -2389,6 +2391,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
       password,
       ...(otpToken ? { otp_token: otpToken } : {}),
     })
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  completeApprovedLogin: async (token, user) => {
     userApi.setToken(token)
     set({ account: user })
     await get().loadAccount()

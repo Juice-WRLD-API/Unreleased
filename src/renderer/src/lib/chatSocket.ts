@@ -32,6 +32,7 @@ export type ChatEvent =
   | { type: 'conversation.updated'; conversation: Conversation }
   | { type: 'key.rotated'; conversation: number; key_version: number }
   | { type: 'device.added'; conversation: number; user_id: number }
+  | { type: 'device.registered'; device_id: string }
   | { type: 'envelope.available'; conversation: number; key_version: number }
   // E2E v2 (lib/chatIdentity, lib/chatToDevice)
   | { type: 'key.committed'; conversation: number; key_version: number }

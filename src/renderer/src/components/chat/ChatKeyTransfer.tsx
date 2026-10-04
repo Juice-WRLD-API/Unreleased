@@ -214,7 +214,7 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
         value={passphrase}
         onChange={(e) => setPassphrase(e.target.value)}
         placeholder="Passphrase"
-        autoComplete="off"
+        autoComplete="new-password"
         className={field}
       />
       <div className="flex items-center gap-1 flex-wrap">

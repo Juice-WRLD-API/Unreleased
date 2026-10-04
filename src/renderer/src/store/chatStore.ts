@@ -759,6 +759,20 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
+      case 'device.registered': {
+        // One of my devices just signed in. If it isn't in my signed device
+        // list yet it needs approving: refresh the prompt and alert, without
+        // waiting for it to open a link session.
+        const meId = s.meId
+        if (!meId || s.identity !== 'ready') return
+        set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+        void import('../lib/chatLinking').then(async (l) => {
+          const pending = await l.pendingDevices(meId)
+          const hit = pending.find((c) => c.session.device_id === ev.device_id)
+          if (hit) notifyLinkRequest(hit.session.device_id, hit.session.label)
+        }).catch(() => undefined)
+        return
+      }
       case 'key.committed':
         void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
           .then(() => get().resolveKey(ev.conversation))

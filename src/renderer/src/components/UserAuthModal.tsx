@@ -1,18 +1,20 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ModalOverlay } from './Modal'
 import { X, Loader2, AlertCircle, Heart, ListMusic } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { errorMessage } from '../lib/format'
+import * as userApi from '../lib/userApi'
 
 interface Props {
   onClose: () => void
 }
 
 export default function UserAuthModal({ onClose }: Props): JSX.Element {
-  const { loginWithDiscord, loginWithPassword, signupWithPassword } = useStorePick(
+  const { loginWithDiscord, loginWithPassword, signupWithPassword, completeApprovedLogin } = useStorePick(
     'loginWithDiscord',
     'loginWithPassword',
     'signupWithPassword',
+    'completeApprovedLogin',
   )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -22,6 +24,57 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
   // Shown only after the server says this account has 2FA on.
   const [needsOtp, setNeedsOtp] = useState(false)
   const [otp, setOtp] = useState('')
+  // Second factor can be a code from the authenticator app or a yes from a signed-in device.
+  const [otpMethod, setOtpMethod] = useState<'code' | 'device'>('code')
+  const [approval, setApproval] = useState<{ code: string } | null>(null)
+  const pollRef = useRef<number | null>(null)
+
+  const stopPolling = (): void => {
+    if (pollRef.current != null) { window.clearInterval(pollRef.current); pollRef.current = null }
+  }
+  useEffect(() => stopPolling, [])
+
+  const resetOtp = (): void => {
+    stopPolling()
+    setApproval(null)
+    setOtpMethod('code')
+    setNeedsOtp(false)
+    setOtp('')
+    setPassword('')
+    setError(null)
+  }
+
+  const requestApproval = async (): Promise<void> => {
+    setError(null)
+    setLoading(true)
+    try {
+      const req = await userApi.requestLoginApproval(username.trim(), password)
+      setApproval({ code: req.code })
+      const deadline = Date.now() + req.expires_in * 1000
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const res = await userApi.pollLoginApproval(req.id, req.secret)
+          if (res.status === 'approved') {
+            stopPolling()
+            await completeApprovedLogin(res.token, res.user)
+            onClose()
+          } else if (res.status === 'denied' || res.status === 'expired' || Date.now() > deadline) {
+            stopPolling()
+            setApproval(null)
+            setError(res.status === 'denied' ? 'The other device denied this login.' : 'The request expired. Try again.')
+          }
+        } catch (err) {
+          stopPolling()
+          setApproval(null)
+          setError(errorMessage(err, 'The request expired. Try again.'))
+        }
+      }, 2000)
+    } catch (err) {
+      setError(errorMessage(err, 'Could not send the request.'))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const start = async (): Promise<void> => {
     setError(null)
@@ -116,20 +169,48 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               <>
                 <p className="text-xs text-text-secondary">
                   Two-factor is on for <span className="text-text-primary font-medium">{username.trim()}</span>.
-                  Enter the 6-digit code from your authenticator app.
+                  Choose how to verify.
                 </p>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  placeholder="Authenticator code"
-                  autoComplete="one-time-code"
-                  maxLength={8}
-                  autoFocus
-                  disabled={loading}
-                  className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
-                />
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))]">
+                  {(['code', 'device'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => { stopPolling(); setApproval(null); setError(null); setOtpMethod(m) }}
+                      className={`py-1.5 rounded-lg text-xs font-medium transition-colors ${otpMethod === m ? 'bg-accent text-white' : 'text-text-muted hover:text-text-primary'}`}
+                    >
+                      {m === 'code' ? 'Authenticator code' : 'Approve on device'}
+                    </button>
+                  ))}
+                </div>
+                {otpMethod === 'code' ? (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    placeholder="6-digit code"
+                    autoComplete="one-time-code"
+                    maxLength={8}
+                    autoFocus
+                    disabled={loading}
+                    className="w-full px-3 py-2.5 rounded-xl bg-[var(--surface-muted,rgba(255,255,255,0.05))] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
+                  />
+                ) : approval ? (
+                  <div className="text-center space-y-2 py-1">
+                    <p className="text-xs text-text-secondary">
+                      Open Unreleased on a device you&apos;re signed in to and approve this login. It should show:
+                    </p>
+                    <div className="text-4xl font-bold tracking-widest text-text-primary">{approval.code}</div>
+                    <div className="flex items-center justify-center gap-2 text-xs text-text-muted">
+                      <Loader2 size={13} className="animate-spin" /> Waiting for approval
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-text-muted">
+                    We&apos;ll send a request to your other signed-in devices. Approve it there to finish logging in.
+                  </p>
+                )}
               </>
             ) : (
               <>
@@ -156,17 +237,18 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               </>
             )}
             <button
-              type="submit"
-              disabled={loading}
+              type={needsOtp && otpMethod === 'device' ? 'button' : 'submit'}
+              onClick={needsOtp && otpMethod === 'device' ? requestApproval : undefined}
+              disabled={loading || (needsOtp && otpMethod === 'device' && !!approval)}
               className="w-full py-2.5 rounded-xl bg-accent hover:opacity-90 text-white text-sm font-semibold transition-opacity flex items-center justify-center gap-2 disabled:opacity-60"
             >
               {loading && <Loader2 size={16} className="animate-spin" />}
-              {needsOtp ? 'Verify' : mode === 'signup' ? 'Create account' : 'Log in'}
+              {needsOtp ? (otpMethod === 'device' ? (approval ? 'Waiting…' : 'Send request') : 'Verify') : mode === 'signup' ? 'Create account' : 'Log in'}
             </button>
             {needsOtp && (
               <button
                 type="button"
-                onClick={() => { setNeedsOtp(false); setOtp(''); setPassword(''); setError(null) }}
+                onClick={resetOtp}
                 className="w-full text-xs text-text-muted hover:text-text-primary transition-colors"
               >
                 Back

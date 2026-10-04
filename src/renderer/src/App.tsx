@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense, lazy } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -104,6 +104,7 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 // shipped to every visitor in the startup bundle.
 import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
+const LoginApprovalPrompt = lazy(() => import('./components/LoginApprovalPrompt'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
@@ -418,6 +419,7 @@ export default function App(): JSX.Element {
           <UserAuthModal onClose={() => setShowUserAuth(false)} />
         </ErrorBoundary>
       )}
+      <ErrorBoundary fallback={null}><Suspense fallback={null}><LoginApprovalPrompt /></Suspense></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ReportModal /></ErrorBoundary>
       {bulkEdit && <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>

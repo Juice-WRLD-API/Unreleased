@@ -557,7 +557,7 @@ export default function Settings(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [recording, setHotkeyBinding])
 
-  const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
+  const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'account')
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -632,6 +632,7 @@ export default function Settings(): JSX.Element {
               value={settingsQuery}
               onChange={(e) => setSettingsQuery(e.target.value)}
               placeholder="Search settings"
+              autoComplete="off"
               className="w-full bg-[var(--surface-overlay)] text-text-primary text-sm rounded-lg pl-8 pr-8 py-1.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
             />
             {settingsQuery && (

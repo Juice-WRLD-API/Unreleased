@@ -41,7 +41,16 @@ export interface CdnOwnedNode {
   /** Manifest version the node last finished syncing, from its heartbeat.
    *  Null for a node that hasn't completed a sync yet. */
   synced_manifest_version?: number | null
+  city?: string
+  country_code?: string
+  latitude?: number | null
+  longitude?: number | null
+  tunnel_hostname?: string
+  serve_port?: number
+  serve_ready?: boolean
 }
+
+export type CdnNodeLocationPatch = Partial<Pick<CdnOwnedNode, 'city' | 'country_code' | 'latitude' | 'longitude'>>
 
 function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   return authedRequest<T>(url, options, getToken())
@@ -53,6 +62,10 @@ export async function fetchMyNodes(): Promise<CdnOwnedNode[]> {
   const data = await request<ListShape>(`${NODES_BASE}/`, { method: 'GET' })
   if (Array.isArray(data)) return data
   return data?.nodes ?? data?.results ?? []
+}
+
+export async function updateMyNodeLocation(nodeId: string, patch: CdnNodeLocationPatch): Promise<CdnOwnedNode> {
+  return request(`${NODES_BASE}/${encodeURIComponent(nodeId)}/`, { method: 'PATCH', body: JSON.stringify(patch) })
 }
 
 /** Removes the node from this account only - it keeps running and can be

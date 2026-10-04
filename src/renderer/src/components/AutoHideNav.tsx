@@ -32,17 +32,33 @@ export default function AutoHideNav({ position, children }: { position: SidebarP
     clear()
     timer.current = setTimeout(() => setOpen(false), HIDE_DELAY_MS)
   }
+  const wrapRef = useRef<HTMLDivElement>(null)
   useEffect(() => clear, [])
+  // Pointer jumping to another monitor can skip the element's own leave event,
+  // so also close when it leaves the page or the window loses focus.
+  useEffect(() => {
+    if (!open) return
+    const hide = (): void => hideSoon()
+    document.documentElement.addEventListener('mouseleave', hide)
+    window.addEventListener('blur', hide)
+    return () => {
+      document.documentElement.removeEventListener('mouseleave', hide)
+      window.removeEventListener('blur', hide)
+    }
+  }, [open])
 
   return (
     <>
       <div
         aria-hidden
         onPointerEnter={show}
+        // Reached the edge but moved away without touching the menu: close.
+        onPointerLeave={(e) => { if (!wrapRef.current?.contains(e.relatedTarget as Node | null)) hideSoon() }}
         className={`fixed z-40 hidden md:block ${edge.zone}`}
         style={vertical ? { width: HOT_ZONE_PX } : { height: HOT_ZONE_PX }}
       />
       <div
+        ref={wrapRef}
         onPointerEnter={show}
         onPointerLeave={hideSoon}
         // Keep it open while a control inside has keyboard focus.

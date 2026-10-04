@@ -398,6 +398,48 @@ export async function passwordLogin(payload: {
   }, false)
 }
 
+export interface LoginApprovalRequest {
+  id: string
+  secret: string
+  code: string
+  expires_in: number
+}
+
+export type LoginApprovalPoll =
+  | { status: 'pending' | 'denied' | 'expired' }
+  | { status: 'approved'; token: string; user: AccountUser }
+
+export interface PendingLoginApproval {
+  id: string
+  code: string
+  ip: string | null
+  user_agent: string
+  created_at: string
+}
+
+/** Second-factor option 2: after a valid password, ask the user's signed-in devices to approve. */
+export async function requestLoginApproval(username: string, password: string): Promise<LoginApprovalRequest> {
+  return request(`${ACCOUNT_BASE}/auth/login/approval/`, {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  }, false)
+}
+
+export async function pollLoginApproval(id: string, secret: string): Promise<LoginApprovalPoll> {
+  return request(`${ACCOUNT_BASE}/auth/login/approval/${id}/poll/`, {
+    method: 'POST',
+    body: JSON.stringify({ secret }),
+  }, false)
+}
+
+export async function listLoginApprovals(): Promise<PendingLoginApproval[]> {
+  return request(`${ACCOUNT_BASE}/account/login-approvals/`, { method: 'GET' })
+}
+
+export async function decideLoginApproval(id: string, decision: 'approve' | 'deny'): Promise<void> {
+  await request(`${ACCOUNT_BASE}/account/login-approvals/${id}/${decision}/`, { method: 'POST' })
+}
+
 export async function logout(): Promise<void> {
   try {
     await request(`${ACCOUNT_BASE}/logout/`, { method: 'POST' })

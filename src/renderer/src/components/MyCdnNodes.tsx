@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Server, Trash2, Unlink } from 'lucide-react'
+import { Loader2, MapPin, Server, Trash2, Unlink } from 'lucide-react'
 import * as api from '../lib/cdnAccountApi'
 import type { CdnOwnedNode } from '../lib/cdnAccountApi'
 import { VIOLATION_LIMIT } from '../lib/cdnAdminApi'
 import { formatBytes, errorMessage } from '../lib/format'
 import { relativeTime } from './adminShared'
-import { CdnBucketChip, CdnSyncBadge } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge, nodeLocation } from './cdnNodesShared'
 import { formatMbps } from '../hooks/useCdnNodesAdmin'
 
 type NodeAction = 'unlink' | 'delete'
@@ -33,6 +33,8 @@ export default function MyCdnNodes(): JSX.Element {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState({ city: '', country_code: '', latitude: '', longitude: '' })
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +65,33 @@ export default function MyCdnNodes(): JSX.Element {
     }
   }
 
+  const startEdit = (n: CdnOwnedNode): void => {
+    setDraft({ city: n.city ?? '', country_code: n.country_code ?? '', latitude: n.latitude != null ? String(n.latitude) : '', longitude: n.longitude != null ? String(n.longitude) : '' })
+    setEditing(n.node_id)
+  }
+
+  const saveLocation = async (node: CdnOwnedNode): Promise<void> => {
+    const lat = draft.latitude.trim() === '' ? null : Number(draft.latitude)
+    const lon = draft.longitude.trim() === '' ? null : Number(draft.longitude)
+    if ((lat !== null && !(lat >= -90 && lat <= 90)) || (lon !== null && !(lon >= -180 && lon <= 180))) {
+      setError('Latitude must be -90 to 90 and longitude -180 to 180')
+      return
+    }
+    setBusy(node.node_id)
+    try {
+      const updated = await api.updateMyNodeLocation(node.node_id, {
+        city: draft.city.trim(), country_code: draft.country_code.trim().toUpperCase(), latitude: lat, longitude: lon,
+      })
+      setNodes((prev) => prev?.map((x) => x.node_id === node.node_id ? { ...x, ...updated } : x) ?? prev)
+      setEditing(null)
+      setError(null)
+    } catch (err) {
+      setError(errorMessage(err, 'Could not save the location'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   if (!nodes) {
     return error
       ? <p className="text-red-400 text-[11px] py-2">{error}</p>
@@ -87,6 +116,23 @@ export default function MyCdnNodes(): JSX.Element {
                   {n.is_public === false && <span className="text-[10px] font-semibold uppercase tracking-wide text-text-muted">Private</span>}
                 </p>
                 {line && <p className="text-text-muted text-[11px] truncate">{line}</p>}
+                <p className="text-text-muted text-[11px] truncate">
+                  {nodeLocation(n)}
+                  {n.tunnel_hostname && ` · tunnel ${n.serve_ready ? 'ready' : 'not ready'}`}
+                </p>
+                {editing === n.node_id && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                    {([['city', 'City', 'w-28'], ['country_code', 'CC', 'w-12'], ['latitude', 'Lat', 'w-20'], ['longitude', 'Lon', 'w-20']] as const).map(([key, label, w]) => (
+                      <input key={key} value={draft[key]} placeholder={label} aria-label={label}
+                        maxLength={key === 'country_code' ? 2 : undefined}
+                        onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                        className={`${w} rounded-md bg-surface-overlay border border-[var(--border)] px-2 py-1 text-xs text-text-primary`} />
+                    ))}
+                    <button onClick={() => setEditing(null)} className="text-xs text-text-muted hover:text-text-primary">Cancel</button>
+                    <button onClick={() => void saveLocation(n)} disabled={busy === n.node_id}
+                      className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent disabled:opacity-60">Save</button>
+                  </div>
+                )}
                 {(n.hash_violations ?? 0) > 0 && (
                   <p className="text-amber-400 text-[11px]">
                     {n.hash_violations} of {VIOLATION_LIMIT} bad-file reports from listeners before the server disables it. The node re-checks its files on its own.
@@ -109,6 +155,14 @@ export default function MyCdnNodes(): JSX.Element {
             ) : (
               <div className="flex items-center gap-0.5 shrink-0">
                 <CdnSyncBadge node={n} onRefresh={refresh} busy={refreshing} />
+                <button
+                  onClick={() => startEdit(n)}
+                  title="Edit location"
+                  aria-label="Edit location"
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:bg-[var(--surface-overlay)] hover:text-text-primary"
+                >
+                  <MapPin size={15} />
+                </button>
                 <button
                   onClick={() => setConfirming({ id: n.node_id, action: 'unlink' })}
                   title="Unlink from your account"
