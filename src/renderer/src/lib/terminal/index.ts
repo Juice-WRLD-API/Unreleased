@@ -3,6 +3,7 @@ import { useChatStore, conversationTitle } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { canRun, chatCommandsFor } from './access'
 import { ADMIN_COMMANDS } from './admin'
+import { BIND_COMMANDS } from './bind'
 import { CDN_COMMANDS } from './cdn'
 import { APP_COMMANDS } from './app'
 import { FUN_COMMANDS } from './fun'
@@ -40,7 +41,7 @@ const LOOKUP: TermCommand = {
     ]
     const playlists = useStore.getState().playlists.filter((p) => norm(p.name).includes(ql)).map((p) => `${p.name}  (${p.track_count})   → playlist play ${p.name}`)
     const settings = searchSettings(q).map((s) => `${s.key} = ${s.value}   → set ${s.key} <value>`)
-    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...APP_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
+    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...APP_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
     const commands = [
       ...chatCommandsFor().filter((c) => c.name.includes(ql) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
       ...all.filter((c) => c.name.includes(ql) || c.aliases?.some((a) => a.includes(ql)) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
@@ -67,6 +68,7 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...PLAYER_COMMANDS,
   ...LIBRARY_COMMANDS,
   ...SETTINGS_COMMANDS,
+  ...BIND_COMMANDS,
   ...ADMIN_COMMANDS,
   ...CDN_COMMANDS,
   ...APP_COMMANDS,
