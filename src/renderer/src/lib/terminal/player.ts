@@ -207,8 +207,11 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'status', aliases: ['now'], group: 'Player', usage: 'status', description: 'What is playing, plus volume, speed, shuffle, repeat and the queue',
-    run: (_a, ctx) => {
+    name: 'status', aliases: ['now'], group: 'Player', usage: 'status [-1]', description: 'What is playing, plus volume, speed, shuffle, repeat and the queue. Live (q leaves); -1 prints it once',
+    run: (args, ctx) => {
+      // It follows along on the watch screen (every second); in a script, inside
+      // watch or with -1 it prints once.
+      if (!ctx.scripted && args.trim() !== '-1') { ctx.screen({ kind: 'watch', command: 'status -1', seconds: 1 }); return }
       const s = st()
       const t = s.currentTrack
       const dur = getAudioDuration() || t?.duration || 0
