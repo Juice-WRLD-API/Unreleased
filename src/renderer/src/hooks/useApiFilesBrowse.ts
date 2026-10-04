@@ -3,7 +3,7 @@
 // URL sync were byte-identical between the two views before this extraction.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  apiFetch, apiPeek, JWApiBrowseResponse, JWApiFileEntry, parseBrowseEntries as parseEntries,
+  apiFetch, apiPeek, searchFiles, JWApiBrowseResponse, JWApiFileEntry, parseBrowseEntries as parseEntries,
 } from '../lib/juicewrldApi'
 import { parentFolder, pathToUrl, urlToPath } from '../lib/apiFilesShared'
 import type { JWApiChannel } from '../lib/juicewrldApi'
@@ -119,10 +119,10 @@ export function useApiFilesBrowse(opts: {
     if (!isSearching) { setSearchResults([]); return }
     let cancelled = false
     setSearchLoading(true)
-    const params: Record<string, string> = { search: debouncedSearch.trim() }
-    if (activeChannel) params.channel = activeChannel
-    apiFetch<JWApiBrowseResponse>('/files/browse/', params)
-      .then(data => { if (!cancelled) setSearchResults(parseEntries(data)) })
+    const extra: Record<string, string> = {}
+    if (activeChannel) extra.channel = activeChannel
+    searchFiles(debouncedSearch, extra)
+      .then(entries => { if (!cancelled) setSearchResults(entries) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }

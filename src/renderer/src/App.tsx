@@ -1,4 +1,4 @@
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -14,6 +14,12 @@ import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
 // Minimum gap between window-focus-triggered refetches (playlists, news) -
 // alt-tabbing back and forth shouldn't refire a request on every focus event.
 const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
+
+// Views that stay mounted (hidden) underneath the terminal so their local
+// state survives opening and closing it. Only form-like views with no
+// route-driven side effects - Admin pushes its own history entries and Heardle/
+// Wordle play audio, so those are left to remount.
+const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'
@@ -110,6 +116,19 @@ export default function App(): JSX.Element {
   // destination, so dragging it down should reveal that page like a curtain
   // instead of empty space. Everywhere else this is just activeView itself.
   const bgView = activeView === 'wrld' ? (previousView ?? 'api-tracker') : activeView
+  // Opening the terminal from a view that holds unsaved local state (the song
+  // editor's draft, a half-filled submission, an open playlist...) must not
+  // unmount it - the terminal would otherwise swap it out of the ternary below,
+  // and closing the terminal remounts it empty (the editor then sees "nothing
+  // to edit" and bounces to its dashboard). Derived during render, not in an
+  // effect, so the held view is never unmounted for even one commit.
+  const heldViewRef = useRef<ViewType | null>(null)
+  if (activeView === 'terminal') {
+    if (previousView && HOLD_UNDER_TERMINAL.includes(previousView)) heldViewRef.current = previousView
+  } else if (activeView !== heldViewRef.current) {
+    heldViewRef.current = null
+  }
+  const heldView = heldViewRef.current
   const isMobile = useIsMobile()
   // Keep the panel mounted after its first open instead of unmounting on
   // close - unmounting destroyed every cover <img>, so reopening the queue
@@ -286,16 +305,26 @@ export default function App(): JSX.Element {
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
             <Suspense fallback={<ViewSkeleton />}>
-            {bgView === 'home' ? <HomeView />
-              : bgView === 'settings' ? <Settings />
+            {/* Holdable views live in their own keyed slots so toggling between
+                "shown" and "hidden under the terminal" never remounts them.
+                `contents` keeps the wrapper out of the flex layout. */}
+            {HOLD_UNDER_TERMINAL.map((v) => (bgView === v || heldView === v) && (
+              <div key={v} className={bgView === v ? 'contents' : 'hidden'}>
+                {v === 'editor' ? <EditorPage />
+                  : v === 'contributor' ? <ContributorPage />
+                  : v === 'albums-admin' ? <AlbumsAdminView />
+                  : v === 'playlists' ? <PlaylistsView />
+                  : v === 'settings' ? <Settings />
+                  : <ChatView />}
+              </div>
+            ))}
+            {HOLD_UNDER_TERMINAL.includes(bgView) ? null
+              : bgView === 'home' ? <HomeView />
               : bgView === 'api-tracker' ? <ApiTrackerView />
               : bgView === 'api-files' ? <ApiFilesView />
-              : bgView === 'editor' ? <EditorPage />
-              : bgView === 'contributor' ? <ContributorPage />
               : bgView === 'contributor-profile' ? <ContributorProfileView />
               : bgView === 'admin' ? <AdminPage />
               : bgView === 'liked' ? <LikedSongsView />
-              : bgView === 'playlists' ? <PlaylistsView />
               : bgView === 'shared-playlist' ? <SharedPlaylistView />
               : bgView === 'track' ? <TrackView />
               : bgView === 'public-profile' ? <PublicProfileView />
@@ -309,8 +338,6 @@ export default function App(): JSX.Element {
               : bgView === 'statistics' ? <StatisticsView />
               : bgView === 'download' ? <DownloadAppView />
               : bgView === 'thanks' ? <ThankYouView />
-              : bgView === 'albums-admin' ? <AlbumsAdminView />
-              : bgView === 'chat' ? <ChatView />
               : bgView === 'terminal' ? <TerminalPage />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}

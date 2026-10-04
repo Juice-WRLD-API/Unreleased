@@ -1,5 +1,6 @@
 import { getFileExt, TEXT_EXTS } from './fileTypes'
 import { formatBytes } from './format'
+import { normalizeForSearch } from './juicewrldApi'
 import { fetchEntryText, listDir, listSubtreeFlat, lookupEntry, resolveDir, unquote, type FilesCwd, type FsEntry } from './terminalFiles'
 
 // Read-only shell tools for the file tree (cat, head, tail, wc, grep, locate,
@@ -132,7 +133,8 @@ export async function locateName(cwd: FilesCwd, arg: string): Promise<string> {
     ? new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`)
     : null
   const { items, truncated } = await crawl(start, 8, 150)
-  const hits = items.filter((i) => (re ? re.test(i.entry.name.toLowerCase()) : i.entry.name.toLowerCase().includes(pattern)))
+  const plain = normalizeForSearch(pattern)
+  const hits = items.filter((i) => (re ? re.test(i.entry.name.toLowerCase()) : normalizeForSearch(i.entry.name).includes(plain)))
   if (hits.length === 0) return `nothing named "${unquote(m[1])}" under ${start.channel}/${start.dir.join('/')}${MORE(truncated)}`
   const shown = hits.slice(0, 200).map((h) => h.rel.join('/') + (h.entry.type === 'directory' ? '/' : ''))
   return [...shown, ...(hits.length > shown.length ? [`… ${hits.length - shown.length} more`] : [])].join('\n') + MORE(truncated)

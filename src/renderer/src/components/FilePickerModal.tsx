@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Folder, FolderOpen, ArrowLeft, Home, ChevronRight, Loader2, ImageIcon, Search, Check, Music2, File, FolderCheck, FolderPlus } from 'lucide-react'
 import {
-  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, filterSearchResults,
+  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, filterSearchResults, searchFiles,
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
@@ -163,8 +163,8 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     let cancelled = false
     setSearchLoading(true)
     const term = debouncedSearch.trim()
-    apiFetch<JWApiBrowseResponse>('/files/browse/', searchParams(term))
-      .then((data) => { if (!cancelled) setSearchResults(filterSearchResults(parseBrowseEntries(data), term)) })
+    searchFiles(term, searchParams(term))
+      .then((entries) => { if (!cancelled) setSearchResults(filterSearchResults(entries, term)) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
@@ -179,8 +179,8 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     if (!initialQuery || altQueries.length === 0) return
     let cancelled = false
     Promise.all(altQueries.map((q) =>
-      apiFetch<JWApiBrowseResponse>('/files/browse/', searchParams(q))
-        .then((data) => filterSearchResults(parseBrowseEntries(data), q))
+      searchFiles(q, searchParams(q))
+        .then((entries) => filterSearchResults(entries, q))
         .catch(() => [] as JWApiFileEntry[])
     )).then((lists) => {
       if (cancelled) return

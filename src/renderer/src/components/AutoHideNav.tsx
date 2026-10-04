@@ -4,7 +4,7 @@ import type { SidebarPosition } from '../store/useStore'
 const HIDE_DELAY_MS = 300
 const SLIDE_MS = 200
 // Thickness of the invisible strip along the screen edge that reveals the menu.
-const HOT_ZONE_PX = 24
+const HOT_ZONE_PX = 48
 
 const EDGE: Record<SidebarPosition, { box: string; hidden: string; zone: string }> = {
   left: { box: 'top-0 bottom-0 left-0', hidden: 'translateX(-100%)', zone: 'top-0 bottom-0 left-0' },

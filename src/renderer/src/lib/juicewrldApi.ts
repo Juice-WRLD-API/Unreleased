@@ -211,10 +211,39 @@ function escapeRegExp(s: string): string {
  *  "Parental Advisory.png" (which literally contains "rental"). Shared by
  *  CoverPickerModal and SongPrefsSection's inline cover search. */
 export function filterSearchResults(entries: JWApiFileEntry[], term: string): JWApiFileEntry[] {
-  const t = term.trim()
+  const t = normalizeForSearch(term)
   if (!t) return entries
-  const re = new RegExp(`\\b${escapeRegExp(t)}\\b`, 'i')
-  return entries.filter((e) => re.test(e.path))
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(t)}(?![\\p{L}\\p{N}])`, 'u')
+  return entries.filter((e) => re.test(normalizeForSearch(e.path)))
+}
+
+/** Lowercases and drops punctuation (apostrophes vanish, everything else
+ *  becomes a space) so "Wouldn't" / "Wouldnt" / "Would-nt" compare alike. */
+export function normalizeForSearch(s: string): string {
+  return s.toLowerCase().replace(/['’‘`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+/** Query variants to send to the server's plain-substring `search` param so a
+ *  title with punctuation still finds files named without it (and vice
+ *  versa): the raw term, apostrophes stripped, and punctuation as spaces. */
+export function searchVariants(term: string): string[] {
+  const t = term.trim()
+  if (!t) return []
+  const noApos = t.replace(/['’‘`]/g, '')
+  const spaced = noApos.replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return [t, noApos, spaced].filter((v, i, a) => v && a.indexOf(v) === i)
+}
+
+/** Recursive /files/browse/ search that ignores punctuation: queries every
+ *  variant of the term and merges the results by path. */
+export async function searchFiles(term: string, extra: Record<string, string> = {}): Promise<JWApiFileEntry[]> {
+  const lists = await Promise.all(searchVariants(term).map((v, i) =>
+    apiFetch<JWApiBrowseResponse>('/files/browse/', { ...extra, search: v })
+      .then(parseBrowseEntries)
+      .catch((err) => { if (i === 0) throw err; return [] as JWApiFileEntry[] })
+  ))
+  const seen = new Set<string>()
+  return lists.flat().filter((e) => !seen.has(e.path) && !!seen.add(e.path))
 }
 
 // ─── Fetch util ───────────────────────────────────────────────────────────────
@@ -511,8 +540,7 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
 export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]> {
   const term = song.original_key || song.name
   if (!term) return []
-  const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', { search: term })
-  const entries = Array.isArray(data) ? data : (data?.items ?? [])
+  const entries = await searchFiles(term)
   const zips = entries.filter(e => e.type === 'file' && e.name.toLowerCase().endsWith('.zip'))
   if (zips.length <= 1) return zips
 

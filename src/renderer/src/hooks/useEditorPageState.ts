@@ -7,6 +7,7 @@ import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from './useChannelRoles'
 import { invalidateLyricsCache } from '../components/Player'
 import type { EditorApplication } from '../lib/userApi'
+import type { ViewType } from '../types'
 import {
   versionsEnabled, getOwnVersionMeta, setSongVersion, setGroupVersionTitle, setOwnVersionTitle,
   searchVersionTitles, joinVersionGroup, getVersionGroup,
@@ -32,7 +33,12 @@ export function useEditorPageState(initialSongId: number | null = null) {
   // Where "back"/"nothing to edit" should return to - wherever the user was
   // before landing here, falling back to the editor dashboard when that's
   // unknown (e.g. a deep link straight into the editor).
-  const backView = previousView && previousView !== 'editor' ? previousView : 'editor-profile'
+  // The terminal doesn't count: the editor stays mounted underneath it, so
+  // coming back from it leaves previousView === 'terminal' - remember the last
+  // real origin instead so "back" doesn't dump the user into the terminal.
+  const lastOriginRef = useRef<ViewType | null>(null)
+  if (previousView && previousView !== 'editor' && previousView !== 'terminal') lastOriginRef.current = previousView
+  const backView = lastOriginRef.current ?? 'editor-profile'
   // Mirrored into a ref so the redirect effect below can read the latest value
   // without listing it as a dependency - setActiveView rewrites previousView,
   // which would otherwise re-run that effect and make it call itself forever.

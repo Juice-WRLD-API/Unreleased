@@ -238,42 +238,50 @@ export default function LyricsSyncTool({ value, onChange, plainLyrics, song }: {
   useEffect(() => { if (follow && active >= 0) centerRow(active, 'smooth') }, [active, follow])
   useEffect(() => { if (sel >= 0) centerRow(sel, 'smooth') }, [sel])
 
-  // Keyboard shortcuts, active whenever focus isn't in a text field. The
+  // Keyboard shortcuts, active whenever focus isn't in a text field and the
+  // edited song is the one playing (otherwise the app's own shortcuts apply).
+  // The app's global hotkeys (Space = play/pause, arrows, ...) listen on
+  // `document`, so this is registered on `window` in the capture phase and
+  // stops propagation for the keys it handles, which gives it priority. The
   // handler is reassigned each render so the single listener below always sees
   // fresh state without re-subscribing.
   const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {})
   keyHandler.current = (e: KeyboardEvent): void => {
-    if (isTyping(e.target) || e.altKey || e.metaKey) return
+    if (!isThisSong || isTyping(e.target) || e.altKey || e.metaKey) return
     if (e.key === 'Shift') {
       if (!e.repeat) setFollow(f => !f)
       return
     }
     const ctrl = e.ctrlKey
+    // Ctrl+C/X/V stay copy/cut/paste.
+    if (ctrl && e.key !== ' ' && !e.key.startsWith('Arrow')) return
+    const claim = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
     switch (e.key) {
       case ' ':
-        e.preventDefault()
-        if (ctrl) { if (isThisSong) setIsPlaying(!isPlaying) } else stamp()
+        claim()
+        if (ctrl) setIsPlaying(!isPlaying)
+        else if (!e.repeat) stamp()
         break
       case 'ArrowLeft':
       case 'ArrowRight': {
         if (!rows.length) return
-        e.preventDefault()
+        claim()
         const base = effSel >= 0 ? effSel : 0
         const i = Math.min(rows.length - 1, Math.max(0, base + (e.key === 'ArrowRight' ? 1 : -1)))
         select(i, !ctrl)
         break
       }
-      case 'ArrowUp': e.preventDefault(); skip(-1); break
-      case 'ArrowDown': e.preventDefault(); skip(1); break
-      case 'v': case 'V': e.preventDefault(); skip(1); break
-      case 'c': case 'C': e.preventDefault(); nudgeLineEarlier(); break
-      case 'x': case 'X': e.preventDefault(); replayLine(); break
+      case 'ArrowUp': claim(); skip(-1); break
+      case 'ArrowDown': claim(); skip(1); break
+      case 'v': case 'V': claim(); skip(1); break
+      case 'c': case 'C': claim(); nudgeLineEarlier(); break
+      case 'x': case 'X': claim(); replayLine(); break
     }
   }
   useEffect(() => {
     const on = (e: KeyboardEvent): void => keyHandler.current(e)
-    window.addEventListener('keydown', on)
-    return () => window.removeEventListener('keydown', on)
+    window.addEventListener('keydown', on, true)
+    return () => window.removeEventListener('keydown', on, true)
   }, [])
 
   const stampedCount = times.filter(t => t !== null).length
@@ -402,7 +410,7 @@ export default function LyricsSyncTool({ value, onChange, plainLyrics, song }: {
                 onDoubleClick={e => { if (!(e.target as HTMLElement).closest('[data-chip]')) setEditText({ i, draft: r.text }) }}
                 className={`group flex items-center gap-2 rounded-lg px-1.5 py-1 cursor-pointer transition-colors ${
                   isActive ? 'bg-accent/10' : 'hover:bg-surface-overlay/60'
-                } ${isSel ? 'outline outline-1 outline-accent/60' : ''} ${flashIdx === i ? '!outline-2 !outline-accent bg-accent/20' : ''}`}
+                } ${isSel ? 'ring-1 ring-inset ring-accent/60' : ''} ${flashIdx === i ? '!ring-2 !ring-accent bg-accent/20' : ''}`}
               >
                 {editTime?.i === i ? (
                   <input
