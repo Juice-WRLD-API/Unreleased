@@ -444,6 +444,9 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   const [caret, setCaret] = useState(0)
   const [editor, setEditor] = useState<{ name: string; text: string; existed: boolean } | null>(null)
   const [draft, setDraft] = useState('')
+  // A command waiting on a typed answer (`login` asking for the password). The
+  // answer never reaches the scrollback or the history; a secret one is masked.
+  const [asking, setAsking] = useState<{ label: string; secret: boolean; resolve: (v: string) => void; reject: (e: Error) => void } | null>(null)
   const [screen, setScreen] = useState<TermScreen | null>(null)
   // Ctrl+R: the line as it was, and which history entry the query has reached.
   const [rs, setRs] = useState<{ saved: string; at: number } | null>(null)
@@ -597,9 +600,16 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
     return errorCount.current === before
   }
 
+  const ask = (label: string, opts?: { secret?: boolean }): Promise<string> =>
+    new Promise<string>((resolve, reject) => {
+      if (locked.current > 0) { reject(new Error('a script can’t answer prompts')); return }
+      setLine('')
+      setAsking({ label, secret: !!opts?.secret, resolve, reject })
+    })
+
   const runTerm = (command: TermCommand, arg: string): Promise<boolean> =>
     Promise.resolve()
-      .then(() => command.run(arg, { print, history: () => HISTORY, room, people, screen: openScreen, exec: execLine, scripted: locked.current > 0, get signal() { signalRead.current = true; return (abortRef.current ?? new AbortController()).signal } }))
+      .then(() => command.run(arg, { print, ask, history: () => HISTORY, room, people, screen: openScreen, exec: execLine, scripted: locked.current > 0, get signal() { signalRead.current = true; return (abortRef.current ?? new AbortController()).signal } }))
       .then(() => true)
 
   // `source [-y] [-k] <file>`: without -y it only shows what would run, since
@@ -973,6 +983,23 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (asking) {
+      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+        e.preventDefault()
+        const done = asking
+        push({ kind: 'out', text: `${done.label}${done.secret ? '' : input}`, tone: 'dim' })
+        setAsking(null)
+        setLine('')
+        done.resolve(input)
+      } else if (e.key === 'Escape' || (e.ctrlKey && e.key.toLowerCase() === 'c')) {
+        e.preventDefault()
+        const done = asking
+        setAsking(null)
+        setLine('')
+        done.reject(new Error('cancelled'))
+      } else if (e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || (e.ctrlKey && e.key.toLowerCase() === 'r')) e.preventDefault()
+      return
+    }
     if (rs) {
       const k = e.key.toLowerCase()
       const leave = (value: string): void => { e.preventDefault(); setLine(value); setRs(null) }
@@ -1020,9 +1047,10 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   }
 
   const syncCaret = (): void => setCaret(field.current?.selectionStart ?? input.length)
-  const before = input.slice(0, caret)
-  const at = input.slice(caret, caret + 1)
-  const after = input.slice(caret + 1)
+  const shown = asking?.secret ? '•'.repeat(input.length) : input
+  const before = shown.slice(0, caret)
+  const at = shown.slice(caret, caret + 1)
+  const after = shown.slice(caret + 1)
 
   const promptEl = (p: { user: string; path: string }): JSX.Element => (
     <>
@@ -1100,7 +1128,14 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
                 <span className="term-cursor bg-[var(--t-fg)] text-[color:var(--t-bg)]"> </span>
               </>
             ) : (
-              busy ? <BusyLine label={busyLabel.current} /> : (
+              asking ? (
+                <>
+                  {asking.label}
+                  {before}
+                  <span className="term-cursor bg-[var(--t-fg)] text-[color:var(--t-bg)]">{at || ' '}</span>
+                  {after}
+                </>
+              ) : busy ? <BusyLine label={busyLabel.current} /> : (
                 <>
                   {promptEl({ user, path })}
                   {before}

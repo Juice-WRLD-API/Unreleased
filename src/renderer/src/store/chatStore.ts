@@ -4,6 +4,7 @@ import * as api from '../lib/chatApi'
 import { isTimedOut } from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerBan, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
+import { subscribeNotifications } from '../lib/notificationSocket'
 import { splitReplyRef } from '../lib/chatReplyRef'
 import { decodeModerationNotice, encodeModerationNotice, moderationNoticeSelfText, moderationNoticeVerb, shareSummaryText, type ModerationNoticePayload } from '../lib/chatShare'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
@@ -303,6 +304,7 @@ const rerunResolve = new Set<number>()
 // per shared conversation.
 const seenDeviceLists = new Set<string>()
 let stopToDevice: (() => void) | null = null
+let stopNotifications: (() => void) | null = null
 // Last room open per server (-1 for DMs), so switching back lands where you were.
 const lastRoomBySpace = new Map<number, RoomRef>()
 
@@ -368,6 +370,21 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
         },
       })
+    }).catch(() => undefined)
+  }
+
+  // One of my devices just signed in (pushed on both the chat and the
+  // notification socket). If it isn't in my signed device list yet it needs
+  // approving: refresh the prompt and alert, without waiting for it to open a
+  // link session. Safe to run twice for one sign-in.
+  const onDeviceRegistered = (deviceId: string): void => {
+    const meId = get().meId
+    if (!meId || get().identity !== 'ready') return
+    set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+    void import('../lib/chatLinking').then(async (l) => {
+      const pending = await l.pendingDevices(meId)
+      const hit = pending.find((c) => c.session.device_id === deviceId)
+      if (hit) notifyLinkRequest(hit.session.device_id, hit.session.label)
     }).catch(() => undefined)
   }
 
@@ -759,20 +776,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
-      case 'device.registered': {
-        // One of my devices just signed in. If it isn't in my signed device
-        // list yet it needs approving: refresh the prompt and alert, without
-        // waiting for it to open a link session.
-        const meId = s.meId
-        if (!meId || s.identity !== 'ready') return
-        set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
-        void import('../lib/chatLinking').then(async (l) => {
-          const pending = await l.pendingDevices(meId)
-          const hit = pending.find((c) => c.session.device_id === ev.device_id)
-          if (hit) notifyLinkRequest(hit.session.device_id, hit.session.label)
-        }).catch(() => undefined)
+      case 'device.registered':
+        onDeviceRegistered(ev.device_id)
         return
-      }
       case 'key.committed':
         void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
           .then(() => get().resolveKey(ev.conversation))
@@ -1122,6 +1128,18 @@ export const useChatStore = create<ChatState>((set, get) => {
                 set({ offerRestore: true })
               }
             })
+            // Account-addressed pushes on the notification socket: new-device
+            // sign-ins and key traffic reach us even if the chat socket is down.
+            stopNotifications?.()
+            stopNotifications = subscribeNotifications((frame) => {
+              if (get().meId !== account.id) return
+              if (frame.type === 'device' && frame.action === 'registered') {
+                onDeviceRegistered(String(frame.device_id))
+              } else if (frame.type === 'todevice' && frame.action === 'available') {
+                void m.localDeviceId(account.id).then((id) => (id === frame.device_id ? td.processInbox(account.id) : undefined))
+                  .catch((err) => console.warn('[chat] to-device inbox failed', err))
+              }
+            }, () => { void td.processInbox(account.id).catch(() => undefined) })
             await td.processInbox(account.id)
           }).catch((err) => console.warn('[chat] device setup failed', err))
           void reconcileKeys().catch(() => undefined)
@@ -1141,6 +1159,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       stopToDevice?.()
       stopToDevice = null
+      stopNotifications?.()
+      stopNotifications = null
       seenDeviceLists.clear()
       if (typingTimer !== null) window.clearInterval(typingTimer)
       typingTimer = null

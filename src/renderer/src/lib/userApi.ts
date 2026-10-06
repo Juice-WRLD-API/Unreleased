@@ -7,7 +7,7 @@ import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
-import { apiRequest, authedRequest, cacheDelete } from './apiClient'
+import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
@@ -1317,6 +1317,19 @@ export function adminCompProposalStagingUrl(id: number, channel?: string): strin
   const url = new URL(`${ACCOUNT_BASE}/admin/comp-proposals/${id}/staging/`)
   if (channel) url.searchParams.set('channel', channel)
   return url.toString()
+}
+
+/** A route's bytes behind the sign-in token (a staged comp file isn't public, so
+ *  a bare link can't fetch it). Throws on an HTTP error rather than handing
+ *  back the error page as if it were the file. */
+export async function fetchAuthedBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { headers: authHeaders(getToken()), signal })
+  if (!res.ok) throw new Error(`Request failed (${res.status})`)
+  return res.blob()
+}
+
+export function adminFetchCompProposalStaging(id: number, channel?: string, signal?: AbortSignal): Promise<Blob> {
+  return fetchAuthedBlob(adminCompProposalStagingUrl(id, channel), signal)
 }
 
 export async function adminCompFileHistory(filepath: string, channel?: string): Promise<{ filepath: string; revisions: CompFileRevision[] }> {
