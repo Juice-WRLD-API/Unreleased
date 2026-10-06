@@ -910,6 +910,13 @@ const _offlineKeyEpochs = new Map<string, number>()
 // its own set() meant a full libraryTracks copy and list re-render per cover.
 let _pendingArt: Map<string, string | null> | null = null
 
+// Ids currently holding a cover data URI in libraryArt, oldest first. The map
+// otherwise only ever grows (every cover scrolled past stays resident), so
+// past the cap the oldest covers not in use by the queue are dropped — they
+// re-read from the main process's disk cache if they scroll back into view.
+const _artResident = new Set<string>()
+const ART_RESIDENT_MAX = 1200
+
 // --- Song preferences helpers -------------------------------------------------
 
 /** Merges `patch` into one song's row, dropping the row once nothing is left
@@ -2482,7 +2489,21 @@ export const useStore = create<AppStore>((set, get, store) => ({
           // entry) track array or invalidates the album/artist/song memos that
           // key on it. Only the per-id thumbnail subscribers re-render.
           const libraryArt = { ...s.libraryArt }
-          for (const [k, v] of batch) libraryArt[k] = v
+          for (const [k, v] of batch) {
+            libraryArt[k] = v
+            _artResident.delete(k)
+            if (v) _artResident.add(k)
+          }
+          if (_artResident.size > ART_RESIDENT_MAX) {
+            const keep = new Set<string>(s.queue.map((t) => t.id))
+            if (s.currentTrack) keep.add(s.currentTrack.id)
+            for (const id of _artResident) {
+              if (_artResident.size <= ART_RESIDENT_MAX) break
+              if (batch.has(id) || keep.has(id)) continue
+              _artResident.delete(id)
+              delete libraryArt[id]
+            }
+          }
           // Fan the same covers out to the active queue / now-playing so an
           // already-queued local track picks up its art. Guarded so a large
           // queue isn't copied when none of the batched ids are even in it.

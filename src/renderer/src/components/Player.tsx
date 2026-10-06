@@ -98,14 +98,68 @@ const LYRICS_CACHE_TTL_MS = 2 * 60 * 1000
 const lyricsCache = new Map<number, { lyrics: string | null; syncedLyrics: string | null; ts: number }>()
 export function invalidateLyricsCache(songId: number): void { lyricsCache.delete(songId) }
 
+// Playback position (progress / currentTime) changes ~4x/sec. Reading it in the
+// Player body re-rendered the entire (huge) component on every tick, so the
+// parts that actually display it subscribe on their own.
+function ProgressFill({ seekDrag, className }: { seekDrag: number | null; className: string }): JSX.Element {
+  const progress = useStore((s) => s.progress)
+  return <div className={className} style={{ width: `${(seekDrag !== null ? seekDrag : progress) * 100}%` }} />
+}
+
+function ElapsedTime(): JSX.Element {
+  const currentTime = useStore((s) => s.currentTime)
+  return <>{formatDuration(currentTime)}</>
+}
+
+interface SeekRangeProps {
+  seekDrag: number | null
+  radioFmActive: boolean
+  fmProgress: number
+  disabled: boolean
+  onMouseDown?: () => void
+  onTouchStart?: () => void
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onMouseUp?: () => void
+  onTouchEnd?: () => void
+  onKeyUp?: () => void
+}
+function SeekRange({ seekDrag, radioFmActive, fmProgress, ...rest }: SeekRangeProps): JSX.Element {
+  const progress = useStore((s) => s.progress)
+  const v = radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)
+  return (
+    <input
+      type="range" min={0} max={1} step={0.001} value={v} className="w-full"
+      style={{ '--val': `${v * 100}%`, ...(radioFmActive ? { pointerEvents: 'none' as const } : {}) } as React.CSSProperties}
+      {...rest}
+    />
+  )
+}
+
+// Media Session position state — for the lock screen / OS seek bar.
+function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; playbackSpeed: number }): null {
+  const currentTime = useStore((s) => s.currentTime)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    if (!active) return
+    const duration = getAudioDuration()
+    if (!duration || isNaN(duration)) return
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: playbackSpeed,
+        position:     Math.min(currentTime, duration),
+      })
+    } catch {/* ignore */}
+  }, [currentTime, playbackSpeed, active])
+  return null
+}
+
 export default function Player(): JSX.Element {
   const {
     currentTrack,
     currentTrackFull,
     isPlaying,
     volume,
-    progress,
-    currentTime,
     shuffle,
     repeat,
     setIsPlaying,
@@ -137,7 +191,7 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, updateLibraryTrack, popoutWindows } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'progress', 'currentTime', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack', 'popoutWindows')
+    playNext, account, updateLibraryTrack, popoutWindows } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack', 'popoutWindows')
   const canEditSong = useCanEdit()
 
   const [showContextMenu, setShowContextMenu] = useState(false)
@@ -1086,20 +1140,9 @@ export default function Player(): JSX.Element {
     }
   }, [setIsPlaying, mediaSessionActive])
 
-  // Media Session position state — for lock screen seek bar
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return
-    if (!mediaSessionActive) return
-    const audio = getActive()
-    if (!audio || !audio.duration || isNaN(audio.duration)) return
-    try {
-      navigator.mediaSession.setPositionState({
-        duration:     audio.duration,
-        playbackRate: playbackSpeed,
-        position:     Math.min(currentTime, audio.duration),
-      })
-    } catch {/* ignore */}
-  }, [currentTime, playbackSpeed, mediaSessionActive])
+  // Media Session position state — for lock screen seek bar. Lives in its own
+  // component (rendered below) so the ~4x/sec currentTime updates re-render
+  // only it, not the whole player.
 
   // Audio output device
   useEffect(() => {
@@ -1673,7 +1716,7 @@ export default function Player(): JSX.Element {
 
   // Seek: buffer visually while dragging, only commit on mouse release
   const handleSeekMouseDown = (): void => {
-    setSeekDrag(progress)
+    setSeekDrag(useStore.getState().progress)
   }
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -1791,6 +1834,7 @@ export default function Player(): JSX.Element {
 
   return (
     <>
+      <MediaSessionPosition active={mediaSessionActive} playbackSpeed={playbackSpeed} />
       {/* crossOrigin: required for the Web Audio effects chain — without CORS
           clearance createMediaElementSource outputs pure silence. The API and
           the local-media:// protocol both send Access-Control-Allow-Origin. */}
@@ -1887,10 +1931,7 @@ export default function Player(): JSX.Element {
           }}
         >
           <div className="h-[2px] bg-surface-overlay relative">
-            <div
-              className="h-full bg-accent absolute left-0 top-0 transition-none"
-              style={{ width: `${(seekDrag !== null ? seekDrag : progress) * 100}%` }}
-            />
+            <ProgressFill seekDrag={seekDrag} className="h-full bg-accent absolute left-0 top-0 transition-none" />
           </div>
         </div>
         )}
@@ -1973,7 +2014,7 @@ export default function Player(): JSX.Element {
             </div>
           ) : (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
-              <div className="h-full bg-accent" style={{ width: `${(seekDrag !== null ? seekDrag : progress) * 100}%` }} />
+              <ProgressFill seekDrag={seekDrag} className="h-full bg-accent" />
             </div>
           )}
           <button
@@ -1997,7 +2038,7 @@ export default function Player(): JSX.Element {
           <span className="text-text-muted text-xs tabular-nums shrink-0">
             {radioFmActive
               ? `${formatDuration(Math.floor(fmElapsedMs / 1000))} / ${formatDuration(Math.floor(fmDurationMs / 1000))}`
-              : `${formatDuration(currentTime)} / ${formatDuration(duration)}`}
+              : <><ElapsedTime /> / {formatDuration(duration)}</>}
           </span>
           <button
             onClick={() => setPlayerCollapsed(false)}
@@ -2157,20 +2198,18 @@ export default function Player(): JSX.Element {
             <span className="text-text-muted text-xs w-10 text-right tabular-nums">
               {radioFmActive
                 ? formatDuration(Math.floor(fmElapsedMs / 1000))
-                : formatDuration(currentTime)}
+                : <ElapsedTime />}
             </span>
             <div className="flex-1 progress-track">
-              <input
-                type="range" min={0} max={1} step={0.001}
-                value={radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)}
+              <SeekRange
+                seekDrag={seekDrag} radioFmActive={radioFmActive} fmProgress={fmProgress}
                 onMouseDown={radioFmActive ? undefined : handleSeekMouseDown}
                 onTouchStart={radioFmActive ? undefined : handleSeekMouseDown}
                 onChange={handleSeekChange}
                 onMouseUp={radioFmActive ? undefined : handleSeekCommit}
                 onTouchEnd={radioFmActive ? undefined : handleSeekCommit}
                 onKeyUp={radioFmActive ? undefined : handleSeekCommit}
-                disabled={!currentTrack} className="w-full"
-                style={{ '--val': `${(radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)) * 100}%`, ...(radioFmActive ? { pointerEvents: 'none' as const } : {}) } as React.CSSProperties}
+                disabled={!currentTrack}
               />
             </div>
             <span className="text-text-muted text-xs w-10 tabular-nums">

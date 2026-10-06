@@ -220,16 +220,24 @@ function SortHeader({ label, field, sort, onSort }: {
 
 // ── Local-library helpers ─────────────────────────────────────────────────────
 
+// First `n` loaded covers, stopping as soon as they're found — a playlist can
+// hold thousands of tracks and this runs for every card on every cover batch.
+function firstCovers(ids: string[], art: Record<string, string | null>, n: number): string[] {
+  const out: string[] = []
+  for (let i = 0; i < ids.length && out.length < n; i++) {
+    const a = art[ids[i]]
+    if (a) out.push(a)
+  }
+  return out
+}
+
 function LocalPlaylistMosaic({ trackIds, className = '' }: {
   trackIds: string[]; className?: string
 }): JSX.Element {
   // Covers live in the store's libraryArt map (keyed by track id), populated as
   // tracks are viewed in the Library tab — read them straight from there.
   const libraryArt = useStore(s => s.libraryArt)
-  const covers = trackIds
-    .map(id => libraryArt[id])
-    .filter((a): a is string => !!a)
-    .slice(0, 4)
+  const covers = firstCovers(trackIds, libraryArt, 4)
   if (covers.length === 0) {
     return (
       <div className={`bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center ${className}`}>
@@ -1999,7 +2007,7 @@ export default function PlaylistsView(): JSX.Element {
     const lp = localById.get(parsed.id)
     if (!lp) return undefined
     if (lp.coverImage) return lp.coverImage
-    return lp.trackIds.map(id => libraryArt[id]).find((a): a is string => !!a) ?? null
+    return firstCovers(lp.trackIds, libraryArt, 1)[0] ?? null
   }
 
   const folderCoverNode = (f: PlaylistFolder): React.ReactNode => {
@@ -2160,7 +2168,7 @@ export default function PlaylistsView(): JSX.Element {
       return (
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
           <div className="relative overflow-hidden px-6 pb-6 shrink-0">
-            <HeroBackdrop src={localPl.coverImage ?? localTracks.map(t => libraryArt[t.id]).find(a => !!a) ?? null} />
+            <HeroBackdrop src={localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0] ?? null} />
             <div className="relative z-10 pt-5">
               <button onClick={() => setLocalSelectedId(null)} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm transition-colors">
                 <ArrowLeft size={15} /> Playlists
@@ -3158,7 +3166,7 @@ export default function PlaylistsView(): JSX.Element {
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
         {/* Hero */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
-          <HeroBackdrop src={localPl.coverImage ?? localTracks.map(t => libraryArt[t.id]).find(a => !!a) ?? null} />
+          <HeroBackdrop src={localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0] ?? null} />
           <div className="relative z-10 pt-5">
             <button onClick={() => setLocalSelectedId(null)} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm transition-colors">
               <ArrowLeft size={15} /> Playlists

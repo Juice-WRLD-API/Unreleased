@@ -405,7 +405,7 @@ function applyAlwaysOnTop(win, on) {
 //
 // Only runs while pinned, visible and unfocused — a focused window is already
 // on top, and re-asserting then would be pure churn.
-const TOP_REASSERT_MS = 3000
+const TOP_REASSERT_MS = 10000
 let miniTopKeeper = null
 
 function startTopKeeper(win) {
