@@ -14,6 +14,7 @@ import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { placeFlyout } from '../lib/menuFlyout'
 import {
   apiFetch,
+  searchFiles,
   apiPeek,
   buildStreamUrl,
   buildCoverArtUrl,
@@ -40,7 +41,9 @@ import TextFileViewer, { TextFileSource } from './TextFileViewer'
 type ViewMode = 'list' | 'grid'
 type SortBy = 'name' | 'type' | 'size'
 type SortDir = 'asc' | 'desc'
-type ZipStatus = 'idle' | 'starting' | 'zipping' | 'done' | 'error'
+import { useApiFilesZip } from '../hooks/useApiFilesZip'
+import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
+import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
 type MediaFilter = 'all' | 'audio' | 'image' | 'video' | 'text'
 
 interface LocalEntry { name: string; path: string; type: 'file' | 'directory'; size: number | null }
@@ -263,7 +266,8 @@ export default function ApiFilesView(): JSX.Element {
   // Multi-select state — see the useMultiSelect() call further down (needs
   // filteredEntries, which isn't defined yet here) for
   // selectMode/selectedPaths/enterSelectMode/toggleSelect/exitSelectMode.
-  const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
+  // Cleared when select mode exits; the zip hook below owns the real reset.
+  const zipResetRef = useRef<() => void>(() => {})
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Local files mode (Electron only)
@@ -523,10 +527,10 @@ export default function ApiFilesView(): JSX.Element {
     if (!isSearching) { setSearchResults([]); return }
     let cancelled = false
     setSearchLoading(true)
-    const params: Record<string, string> = { search: debouncedSearch.trim() }
-    if (activeChannel) params.channel = activeChannel
-    apiFetch<JWApiBrowseResponse>('/files/browse/', params)
-      .then(data => { if (!cancelled) setSearchResults(parseEntries(data)) })
+    const extra: Record<string, string> = {}
+    if (activeChannel) extra.channel = activeChannel
+    searchFiles(debouncedSearch, extra)
+      .then(entries => { if (!cancelled) setSearchResults(entries) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
@@ -765,51 +769,6 @@ export default function ApiFilesView(): JSX.Element {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
   }
 
-  // Backend zips a folder path recursively with its subfolder structure
-  // intact (see /files/zip-selection/'s `{ "paths": ["Compilation/Folder"] }`
-  // shape in the docs), so a single directory path is enough — no need to
-  // walk and flatten the tree client-side.
-  const startZip = async (paths: string[], filename: string): Promise<void> => {
-    if (paths.length === 0) return
-    setZipStatus('starting')
-    try {
-      const res = await fetch(`${JWAPI_BASE}/start-zip-job/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(activeChannel ? { paths, channel: activeChannel } : { paths }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { job_id } = await res.json() as { job_id: string }
-      setZipStatus('zipping')
-      const poll = async (): Promise<void> => {
-        const st = await apiFetch<{ status: string; download_url?: string; error?: string }>(`/zip-job-status/${job_id}/`)
-        if (st.status === 'completed' && st.download_url) {
-          const a = document.createElement('a')
-          a.href = st.download_url
-          a.download = filename
-          a.target = '_blank'
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          setZipStatus('done')
-          setTimeout(() => setZipStatus('idle'), 3000)
-        } else if (st.status === 'failed') {
-          throw new Error(st.error || 'ZIP job failed')
-        } else {
-          setTimeout(() => { poll().catch(() => { setZipStatus('error'); setTimeout(() => setZipStatus('idle'), 3000) }) }, 1500)
-        }
-      }
-      await poll()
-    } catch {
-      setZipStatus('error')
-      setTimeout(() => setZipStatus('idle'), 3000)
-    }
-  }
-
-  const downloadZip = (): Promise<void> => startZip([...selectedPaths.keys()], 'selection.zip')
-
-  const downloadFolder = (entry: JWApiFileEntry): Promise<void> => startZip([entry.path], `${entry.name}.zip`)
-
   // ── Sorted entries ─────────────────────────────────────────────────────────
 
   const sortedEntries = useMemo(
@@ -826,6 +785,14 @@ export default function ApiFilesView(): JSX.Element {
     [sortedEntries, typeFilter]
   )
 
+  // The user's own pending comp proposals, as ghost rows in the folder they'd
+  // land in - same type filter as the real entries.
+  const { ghosts, pendingFor } = usePendingCompGhosts({ enabled: canPropose, activeChannel, currentPath, entries, isSearching })
+  const visibleGhosts = useMemo(
+    () => typeFilter === 'all' ? ghosts : ghosts.filter((g) => g.type === 'directory' || getMediaType(g.name) === typeFilter),
+    [ghosts, typeFilter]
+  )
+
   // Multi-select — select mode, the selected-paths Map, Escape-to-exit, and
   // Ctrl/Cmd+A "select all" are handled by the shared hook. Value === key
   // (path) here since there's nothing extra to carry per entry — `.has()`/
@@ -835,11 +802,19 @@ export default function ApiFilesView(): JSX.Element {
     selectMode, selected: selectedPaths, selectMany: selectManyPaths, toggle,
     exitSelectMode, selectAll: selectAllEntries, clear: clearSelection,
   } = useMultiSelect<string>({
-    onExit: () => setZipStatus('idle'),
+    onExit: () => zipResetRef.current(),
     ctrlA: {
       getAll: () => new Map(filteredEntries.map(e => [e.path, e.path])),
     },
   })
+
+  // Backend ZIP jobs are disabled, so the archive is built client-side
+  // (lib/clientZip) from the entries' stream URLs.
+  const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
+    activeChannel,
+    getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
+  })
+  zipResetRef.current = resetZip
   const enterSelectMode = (entry: JWApiFileEntry): void => {
     selectManyPaths(new Map([[entry.path, entry.path]]))
     setCtxMenu(null)
@@ -1411,12 +1386,12 @@ export default function ApiFilesView(): JSX.Element {
               <p className="text-text-muted text-sm">{error}</p>
               <button onClick={() => navigate(currentPath, false)} className="text-accent text-sm underline">Retry</button>
             </div>
-          ) : sortedEntries.length === 0 ? (
+          ) : sortedEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Music2 size={32} className="text-text-muted opacity-30" />
               <p className="text-text-muted text-sm">{isSearching ? `No files match "${debouncedSearch.trim()}"` : 'Nothing here'}</p>
             </div>
-          ) : filteredEntries.length === 0 ? (
+          ) : filteredEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Filter size={32} className="text-text-muted opacity-30" />
               <p className="text-text-muted text-sm">No {typeFilter} files here</p>
@@ -1516,6 +1491,7 @@ export default function ApiFilesView(): JSX.Element {
                       )}
                     </span>
                     {stagedBadge(entry.path)}
+                    {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
                     {isLiked && (
                       <button
                         className="shrink-0 p-1 text-accent"
@@ -1545,6 +1521,7 @@ export default function ApiFilesView(): JSX.Element {
                   </div>
                 )
               })}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="row" />)}
             </div>
           ) : (
             /* ── Grid view ────────────────────────────────────────────────────── */
@@ -1676,6 +1653,7 @@ export default function ApiFilesView(): JSX.Element {
                         {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
                       </div>
                       {stagedBadge(entry.path)}
+                      {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
                       {/* Same visible context-menu trigger as the list rows —
                           right-click/long-press aren't discoverable on touch. */}
                       {!selectMode && (
@@ -1691,6 +1669,7 @@ export default function ApiFilesView(): JSX.Element {
                   </div>
                 )
               })}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="tile" />)}
             </div>
           )}
         </div>}
@@ -1739,7 +1718,7 @@ export default function ApiFilesView(): JSX.Element {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
             >
               {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Zipping…'}</>
+                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Zipping…'}</>
               ) : zipStatus === 'done' ? (
                 <><Check size={13} /> Done</>
               ) : zipStatus === 'error' ? (
@@ -1771,7 +1750,7 @@ export default function ApiFilesView(): JSX.Element {
       {!selectMode && zipStatus !== 'idle' && (
         <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-            <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting ZIP…' : 'Zipping folder…'}</>
+            <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting ZIP…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Zipping folder…'}</>
           ) : zipStatus === 'done' ? (
             <><Check size={13} className="text-accent" /> Downloaded</>
           ) : (

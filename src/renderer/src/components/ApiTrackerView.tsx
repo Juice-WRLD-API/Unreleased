@@ -7,6 +7,7 @@ import {
   AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type, BarChart3,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { useShallow } from 'zustand/react/shallow'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import SongContextMenu from './SongContextMenu'
@@ -16,6 +17,9 @@ import {
   JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra, loadAllSongs,
   parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
+import { openZipTarget, saveItems } from '../lib/clientZip'
+import { preloadView } from '../lib/lazyViews'
+import { downloadFileSmart } from '../lib/cdn'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
@@ -33,7 +37,6 @@ import { formatDuration } from '../lib/format'
 import { parseSearchQuery, matchesFieldFilters, SEARCH_FIELD_HELP } from '../lib/trackerSearch'
 import { loadEraFullNames, eraLabel } from '../lib/eras'
 import { useMultiSelect } from '../hooks/useMultiSelect'
-import { downloadFileSmart } from '../lib/cdn'
 
 type Category = 'released' | 'unreleased' | 'unsurfaced' | 'recording_session' | ''
 type ViewMode = 'list' | 'detail' | 'grid'
@@ -1837,6 +1840,12 @@ function VersionTitlePromptModal({
 }
 
 // ─── Main view ────────────────────────────────────────────────────────────────
+function warmStatistics(): void {
+  preloadView('statistics')
+  apiFetch('/stats/').catch(() => undefined)
+  apiFetch('/plays/stats/').catch(() => undefined)
+}
+
 export default function ApiTrackerView(): JSX.Element {
   const {
     playTrack, startRadio, addToQueue, account, shuffle,
@@ -2704,33 +2713,31 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
+  // built client-side instead (lib/clientZip). Songs whose file fails to
+  // fetch are counted with the ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
     const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
-    const skipped = selectedSongs.length - paths.length
+    let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
       setBulkZipStatus('none')
       setTimeout(() => setBulkZipStatus('idle'), 4000)
       return
     }
+    const target = await openZipTarget(paths.length === 1 ? (paths[0].split('/').pop() || 'Song').replace(/\.[^.]+$/, '') : `Songs (${paths.length})`)
+    if (!target) return
     setBulkZipStatus('zipping')
     try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = 'songs.zip'; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = 'songs.zip'; a.click() }
-      }
+      // CDN only for the primary channel - see handleDownload's comment above.
+      const useCdn = isPrimaryChannelSlug(useStore.getState().channels, activeChannel)
+      const { failed, cancelled } = await saveItems(target, paths.map(path => ({
+        name: path.split('/').pop() || path,
+        url: buildStreamUrl(path, activeChannel || undefined),
+        cdnPath: useCdn ? path : undefined,
+      })))
+      if (cancelled) { setBulkZipStatus('idle'); return }
+      skipped += failed
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
     } catch {
@@ -2842,6 +2849,10 @@ export default function ApiTrackerView(): JSX.Element {
           </button>
           <button
             onClick={() => setActiveView('statistics')}
+            // Warm the chunk and both endpoints so the first open doesn't
+            // flash the generic skeleton and then Statistics' own.
+            onPointerEnter={warmStatistics}
+            onFocus={warmStatistics}
             className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
           >
             <BarChart3 size={11} /> Statistics

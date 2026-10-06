@@ -1,3 +1,4 @@
+import { useOpenUserCard } from './chat/UserCard'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Loader2, Trophy, FileEdit, ChevronLeft, Pencil, Trash2, RefreshCw, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Search, Flag, ShieldCheck, FolderOpen, Copy, PictureInPicture2, User, MessagesSquare } from 'lucide-react'
@@ -21,6 +22,7 @@ import FilePickerModal from './FilePickerModal'
 import { BasicRow, BasicSelect, SyncedLyricsTable, cleanDate } from './EditorPage'
 import CompProposalList, { CompFilterBar, filterCompProposals, type CompFilterTab } from './CompProposalList'
 import RoleBadges from './RoleBadges'
+import BroadcastModal from './BroadcastModal'
 import { Tile } from './Tile'
 
 const CATEGORIES = [
@@ -440,6 +442,8 @@ function AdminStatBox({ label, value, highlight, onClick }: {
 
 export default function EditorProfileView(): JSX.Element {
   const isElectron = navigator.userAgent.includes('Electron')
+  const [showBroadcast, setShowBroadcast] = useState(false)
+  const openUserCard = useOpenUserCard()
   const { account, setPendingEditorSongId, setPendingEditProposal, activeChannel, channels, setActiveChannel, loadChannels, openOwnPublicProfile, setActiveAdminTab } = useStore(useShallow(s => ({
     account: s.account,
     setPendingEditorSongId: s.setPendingEditorSongId,
@@ -867,7 +871,7 @@ export default function EditorProfileView(): JSX.Element {
                           </h1>
                         )}
                         {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
-                        <div className="mt-1">
+                        <div className="mt-1 flex flex-wrap gap-1.5">
                           <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={!!account?.is_editor} isContributor={isContributor} />
                         </div>
                       </div>
@@ -1123,7 +1127,8 @@ export default function EditorProfileView(): JSX.Element {
                         return (
                           <div
                             key={entry.user_id}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
+                            onClick={(e) => openUserCard({ id: entry.user_id, username: entry.discord_username || entry.username, display_name: entry.username || entry.discord_username, avatar: entry.discord_avatar, role: '' }, e)}
+                            className={`cursor-pointer flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${
                               isMe ? 'bg-accent/8 ring-1 ring-accent/20' : 'hover:bg-surface-overlay'
                             }`}
                           >
@@ -1208,6 +1213,7 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
                             <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
                             <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdmin('cdn-nodes')} />
+                            <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                           </>
                         )}
                         {isAdmin && (
@@ -1251,6 +1257,8 @@ export default function EditorProfileView(): JSX.Element {
 
         </div>
       </div>
+
+      {showBroadcast && <BroadcastModal onClose={() => setShowBroadcast(false)} />}
 
       {showAddSong && (
         <AddSongModal

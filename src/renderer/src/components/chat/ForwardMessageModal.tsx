@@ -212,7 +212,9 @@ export default function ForwardMessageModal({ message, bodyText, onClose }: Prop
                         key={key}
                         icon={<Hash size={16} className="text-text-muted" />}
                         label={channel.name}
-                        sub={busy === key ? 'Forwarding...' : undefined}
+                        // Channels aren't E2E encrypted: forwarding an encrypted DM
+                        // here posts its text and files as plain, server-readable content.
+                        sub={busy === key ? 'Forwarding...' : message.is_encrypted ? 'Not end-to-end encrypted - sent in plain text' : undefined}
                         sent={sentTo.has(key)}
                         onClick={() => void share(room)}
                       />

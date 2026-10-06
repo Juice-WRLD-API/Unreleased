@@ -20,11 +20,13 @@ export function UserCardBody({ user, bio, children }: {
       <ChatAvatar user={user} size={64} className="-mt-8 ring-4 ring-[var(--surface)]" />
       <p className="mt-2 text-base font-bold text-text-primary truncate">{displayName(user)}</p>
       <p className="text-xs text-text-muted truncate">@{user.username}</p>
-      <span className={`mt-2 inline-flex items-center px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider ${
-        user.role === 'administrator' ? 'bg-red-500/15 text-red-400' : 'bg-sky-500/15 text-sky-400'
-      }`}>
-        {user.role === 'administrator' ? 'Administrator' : 'Manager'}
-      </span>
+      {(user.role === 'administrator' || user.role === 'manager') && (
+        <span className={`mt-2 inline-flex items-center px-1.5 py-px rounded text-[9px] font-bold uppercase tracking-wider ${
+          user.role === 'administrator' ? 'bg-red-500/15 text-red-400' : 'bg-sky-500/15 text-sky-400'
+        }`}>
+          {user.role === 'administrator' ? 'Administrator' : 'Manager'}
+        </span>
+      )}
       {bio && (
         <p className="mt-2 text-xs text-text-secondary leading-relaxed whitespace-pre-wrap line-clamp-3">{bio}</p>
       )}
@@ -83,7 +85,7 @@ function OtherUserCard({ user, x, y, onClose }: { user: ChatUserBrief; x: number
   }, [x, y])
 
   return createPortal(
-    <div className="fixed inset-0 z-[140]">
+    <div className="fixed inset-0 z-[210]">
       <div
         ref={ref}
         className="chat-pop absolute w-[280px] rounded-2xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden"

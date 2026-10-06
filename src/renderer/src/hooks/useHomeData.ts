@@ -7,7 +7,7 @@ import { peekPlaylistCover } from '../lib/userApi'
 import { loadRecentPlaylistIds } from '../lib/recentPlaylists'
 import { loadStats as loadHeardleStats, todayKey as heardleToday } from '../lib/heardle'
 import { loadStats as loadWordleStats, todayKey as wordleToday } from '../lib/wordle'
-import { loadTierlistState } from '../lib/tierlist'
+import { loadTierlistLibrary, rankedCount as tierlistRankedCount } from '../lib/tierlist'
 import { ALL_CHANNEL, fetchNews, peekNews, type NewsItem } from '../lib/newsApi'
 import { isHomeSectionVisible } from '../lib/homeSections'
 import { getActiveRadioClient } from '../lib/radioSocketService'
@@ -65,12 +65,12 @@ export function useHomeData() {
     account, playlists, followedPlaylists, likedTrackIds,
     listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
-    homeSectionVisibility, refreshPlaylists, setIsPlaying,
+    homeSectionVisibility, refreshPlaylists, setIsPlaying, recentTracksRev,
   } = useStorePick(
     'account', 'playlists', 'followedPlaylists', 'likedTrackIds',
     'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
     'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
-    'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying',
+    'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying', 'recentTracksRev',
   )
 
   const showSection = (id: string): boolean => isHomeSectionVisible(id, homeSectionVisibility)
@@ -89,7 +89,9 @@ export function useHomeData() {
   // localStorage-backed, so read once per mount rather than per render. Home is
   // remounted on every visit (it's a route), which is exactly when this should
   // refresh - a song played while you were on another tab shows up on return.
-  const recent = useMemo(() => loadRecentTracks(), [])
+  // recentTracksRev also re-reads it when the post-sign-in backfill lands.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const recent = useMemo(() => loadRecentTracks(), [recentTracksRev])
 
   // Same stale-while-revalidate pattern as NewsView: paint the last cached
   // page instantly, then let the network response replace it.
@@ -116,10 +118,16 @@ export function useHomeData() {
   const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
   useEffect(() => {
     albumsApi.fetchAlbums()
-      .then((list) => setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? ''))))
-      .catch(() => undefined)
-    loadAllSongs()
-      .then((list) => setAlbumSongIndex(new Map(list.filter((s) => s.path).map((s) => [s.path as string, s]))))
+      .then((list) => {
+        setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? '')))
+        // The catalogue is ~10 MB of JSON, and Home is the desktop landing
+        // page - only pull it in when some album actually lists tracks to
+        // resolve. The public list can come back with none at all, and then
+        // the whole download bought nothing.
+        if (!list.some((a) => a.songs?.length)) return
+        return loadAllSongs()
+          .then((all) => setAlbumSongIndex(new Map(all.filter((s) => s.path).map((s) => [s.path as string, s]))))
+      })
       .catch(() => undefined)
   }, [])
 
@@ -144,11 +152,15 @@ export function useHomeData() {
   const games = useMemo((): GameCard[] => {
     const heardle = loadHeardleStats('daily')
     const wordle = loadWordleStats()
-    const rankedCount = Object.keys(loadTierlistState().assignments).length
+    const tierlists = loadTierlistLibrary().lists
+    const rankedCount = tierlists.reduce((n, l) => n + tierlistRankedCount(l), 0)
+    const tierSub = rankedCount === 0
+      ? 'Rank your songs'
+      : tierlists.length > 1 ? `${tierlists.length} lists · ${rankedCount} ranked` : `${rankedCount} ranked`
     return [
       { view: 'heardle', label: 'Heardle', kind: 'daily', streak: heardle.currentStreak, done: heardle.lastDay === heardleToday() },
       { view: 'wordle', label: 'Wordle', kind: 'daily', streak: wordle.currentStreak, done: wordle.lastDay === wordleToday() },
-      { view: 'tierlist', label: 'Tier List', kind: 'freeform', sub: rankedCount > 0 ? `${rankedCount} ranked` : 'Rank your songs' },
+      { view: 'tierlist', label: 'Tier List', kind: 'freeform', sub: tierSub },
     ]
   }, [])
 

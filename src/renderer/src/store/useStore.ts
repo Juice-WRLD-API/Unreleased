@@ -10,9 +10,9 @@ import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
-  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache,
+  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
-import type { SongPreference, SongPrefMap, SongPrefPatch } from '../lib/songPrefs'
+import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 
 // AdminPage's own tab set (see its local `Tab` type) — duplicated here rather
 // than imported so the store doesn't depend on a component file; keep in sync.
@@ -23,6 +23,7 @@ import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
+  listeningPlaysMatchServer,
   mergeListeningPlays,
   normalizeListeningPlayEvent,
   sortListeningPlays,
@@ -35,7 +36,8 @@ import type {
   PendingReport, ReportTarget, FeedbackCategory, SongIssueType,
 } from '../lib/reports'
 import * as foldersApi from '../lib/foldersApi'
-import { newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
+import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
+import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
@@ -78,6 +80,8 @@ export interface DownloadItem {
   // 'upload' is the one that goes the other way � a comp file proposal's body
   // on its way to the API (see lib/compUploads).
   type: 'file' | 'zip' | 'update' | 'playlist' | 'upload'
+  /** Secondary status line, e.g. "12 / 40 files" for a ZIP (lib/clientZip). */
+  detail?: string
   state: 'downloading' | 'done' | 'error' | 'cancelled'
   percent: number
   received?: number
@@ -127,7 +131,7 @@ export type AppMenuPosition = 'title-bar' | 'sidebar' | 'hidden'
 // The Settings dialog's tabs � the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'appearance' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
 
 // The detached ("pop-out") BrowserWindows the desktop build can open instead of
 // rendering a view inline (see FloatApp). Each can be turned off individually:
@@ -245,6 +249,9 @@ interface AppState {
   customSkins: Skin[]
   sidebarPosition: SidebarPosition
   appMenuPosition: AppMenuPosition
+  // Desktop only: the nav menu slides out of view until the pointer touches its
+  // screen edge (like an auto-hiding taskbar). Local-only preference.
+  autoHideNav: boolean
   // User-defined order of the primary side-menu nav items, by view id. Only
   // ever a permutation of the known ids � orderedNavItems() sanitizes it on
   // read, so a stale/partial saved order can't drop or duplicate a tab.
@@ -378,6 +385,10 @@ interface AppState {
   // source of truth; this exists so StatsView can answer "last 7/30 days" and
   // show a recent-plays timeline, which absolute counters can't.
   listeningPlays: ListeningPlayEvent[]
+  /** Bumped whenever _backfillRecentTracks rewrites the localStorage ring, so
+   *  an already-mounted Home re-reads it (the backfill lands after sign-in,
+   *  usually well after Home has mounted). */
+  recentTracksRev: number
 
   // In-app reports (feedback + song issue reports). `pendingReports` is a
   // persisted outbox: a report is queued locally on submit and delivered when
@@ -408,6 +419,9 @@ interface AppState {
   // (Songs/Lyrics/Overview/Producers) opens - see StatisticsView's tab bar,
   // the only current setter.
   apiTrackerTab: string
+  // One-shot deep link: when true, ApiTrackerView focuses its search input on
+  // mount (and clears the flag) - set by the mobile Home search shortcut.
+  focusApiTrackerSearch: boolean
   apiFilesPath: string
   apiFilesLastPath: string
 
@@ -606,6 +620,7 @@ interface AppActions {
   deleteCustomSkin: (id: string) => void
   setSidebarPosition: (position: SidebarPosition) => void
   setAppMenuPosition: (position: AppMenuPosition) => void
+  setAutoHideNav: (on: boolean) => void
   setNavOrder: (order: ViewType[]) => void
   setNavItemVisible: (view: ViewType, visible: boolean) => void
   setHomeSectionVisible: (id: string, visible: boolean) => void
@@ -676,7 +691,7 @@ interface AppActions {
   /** Merges the profile's `user_preferences` blob (from getMe) with local
    *  state � profile wins per song except playcount, which takes the max �
    *  then pushes the merged array back up. Runs on login. */
-  syncSongPrefs: (serverPrefs?: SongPreference[]) => Promise<void>
+  syncSongPrefs: (serverPrefs?: WireSongPreference[]) => Promise<void>
   /** Same shape as syncSongPrefs, but a union rather than a per-key merge �
    *  play events are immutable, so the two sides just get deduped. */
   syncListeningPlays: (serverPlays?: ListeningPlayEvent[]) => Promise<void>
@@ -686,7 +701,7 @@ interface AppActions {
    *  credited elsewhere never lands here on its own. Runs after
    *  syncListeningPlays so it sees the merged log, not just this device's. */
   _backfillRecentTracks: () => Promise<void>
-  /** Internal � the single write path for songPrefs (state + localStorage +
+  /** Internal - the single write path for songPrefs (state + localStorage +
    *  lib/songPrefs' cache). */
   _setSongPrefs: (next: SongPrefMap) => void
   /** Internal � the single write path for listeningPlays (state + localStorage). */
@@ -748,6 +763,7 @@ interface AppActions {
   setApiTrackerCategory: (cat: string) => void
   setApiTrackerEra: (era: string) => void
   setApiTrackerTab: (tab: string) => void
+  setFocusApiTrackerSearch: (focus: boolean) => void
   setApiFilesPath: (path: string) => void
   setApiFilesLastPath: (path: string) => void
 
@@ -755,6 +771,10 @@ interface AppActions {
   loadAccount: () => Promise<void>
   loginWithDiscord: () => Promise<void>
   completeDiscordLogin: (code: string, state: string) => Promise<void>
+  signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
+  loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
+  /** Finishes a login another signed-in device approved (the token comes from the approval poll). */
+  completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
@@ -1013,16 +1033,47 @@ function waitForReportSettled(id: string, timeoutMs = 8000): Promise<boolean> {
 
 // --- Profile-blob push debounce -----------------------------------------------
 
-// Preferences, listening plays, and folders each live as one JSON field on
-// /account/me/, PATCHed whole. A single shared timer/dirty-set collapses a
-// burst of edits across ANY of the three fields (typing a rename, a run of
-// playcount bumps, a song skip that touches both prefs and listening plays)
-// into one combined PATCH instead of one request per field. Failures are
-// swallowed: state is local-first, and the next push � or the next login's
-// merge � re-sends everything anyway.
+// Preferences, listening plays, and folders each live as one JSON
+// field on /account/me/, PATCHed whole. A single shared timer/dirty-set
+// collapses a burst of edits across ANY of the three fields (typing a
+// rename, a run of playcount bumps, a song skip that touches both prefs and
+// listening plays) into one combined PATCH instead of one request per field.
+// Failures are swallowed: state is local-first, and the next push - or the
+// next login's merge - re-sends everything anyway.
+// Last URL each path-param view was showing when it was navigated away from -
+// see setActiveView.
+const PATH_PARAM_VIEWS: ViewType[] = ['track', 'shared-playlist', 'public-profile']
+const lastPathParamUrl: Partial<Record<ViewType, string>> = {}
+
 const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
 let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false }
+
+// loadAccount's sync* merges used to end by pushing the merged copy back
+// unconditionally - but on most logins the merge changes nothing, so every
+// app start re-uploaded the whole profile blob (~90 KB for an active
+// listener) just to write the server's own data back to it. Each merge now
+// checks whether its result matches what the server sent and, if so, calls
+// this instead of scheduling a push. It also cancels a push the merge's own
+// setters queued while adopting server values - safe, because the merge
+// already folded in every local change, so "matches the server" means no
+// local edit is waiting on that push.
+function dropProfilePush(field: keyof typeof _profilePushDirty): void {
+  _profilePushDirty[field] = false
+  if (_profilePushTimer && !Object.values(_profilePushDirty).some(Boolean)) {
+    clearTimeout(_profilePushTimer)
+    _profilePushTimer = null
+  }
+}
+
+// Key-order-insensitive JSON, so a nested settings object the merge rebuilt
+// (`{ ...local, ...server }`) doesn't read as changed just for key order.
+function stableJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v)
+}
 
 // Chains `fn` behind any in-flight offline work for `key` so writers for the
 // same playlist never interleave.
@@ -1226,7 +1277,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
   theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
   appMenuPosition: ls.get<AppMenuPosition>('appMenuPosition') ?? 'sidebar',
-  navOrder: ls.get<ViewType[]>('navOrder') ?? DEFAULT_NAV_ORDER,
+  autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
+  navOrder: (() => {
+    // Only users who actually reordered their menu have this key at all -
+    // everyone else falls through to DEFAULT_NAV_ORDER and picks up new
+    // destinations in their intended position for free. For the ones who did,
+    // orderedNavItems appends anything missing at the *end*, which would bury
+    // Home in the "More" sheet, so front-load it instead. The `includes` guard
+    // makes this idempotent, and a later drag persists whatever they choose.
+    const saved = ls.get<ViewType[]>('navOrder')
+    if (!saved) return DEFAULT_NAV_ORDER
+    return saved.includes('home') ? saved : ['home' as ViewType, ...saved]
+  })(),
   navVisibility: { ...DEFAULT_NAV_VISIBILITY, ...(ls.get<Record<string, boolean>>('navVisibility') ?? {}) },
   homeSectionVisibility: { ...DEFAULT_HOME_SECTION_VISIBILITY, ...(ls.get<Record<string, boolean>>('homeSectionVisibility') ?? {}) },
   navControlOrder: (() => {
@@ -1259,8 +1321,27 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'tierlist': '/tierlist',
       'stats': '/stats',
       'statistics': '/statistics',
+      'terminal': '/terminal',
     }
-    window.history.pushState({ view }, '', paths[view] ?? '/tracker')
+    // Returning to Playlists with a playlist already open (it stays selected
+    // across tab switches - see playlistsSelectedId above) should restore its
+    // ?id= too, not just land on the bare list. Same idea for Admin: land
+    // back on whichever section (Users, Security, ...) was last open there
+    // instead of always resetting to the base /admin.
+    const selectedPlaylistId = get().playlistsSelectedId
+    const activeAdminTab = get().activeAdminTab
+    // Views whose identity lives in the URL path itself (/track/<id>,
+    // /shared/<id>, /u/<id>) have no fixed entry above - remember the URL
+    // they were left at so coming back (closing Settings, collapsing WRLD)
+    // restores it instead of falling back to /tracker.
+    const current = get().activeView
+    if (PATH_PARAM_VIEWS.includes(current)) lastPathParamUrl[current] = window.location.pathname
+    const path = view === 'playlists' && selectedPlaylistId != null
+      ? `/playlists?id=${selectedPlaylistId}`
+      : view === 'admin' && activeAdminTab
+        ? ADMIN_TAB_PATHS[activeAdminTab] ?? '/admin'
+        : paths[view] ?? lastPathParamUrl[view] ?? '/tracker'
+    window.history.pushState({ view }, '', path)
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
   },
   setActiveAdminTab: (tab) => set({ activeAdminTab: tab }),
@@ -1459,6 +1540,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition) },
   setAppMenuPosition: (appMenuPosition) => { set({ appMenuPosition }); ls.set('appMenuPosition', appMenuPosition) },
+  setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav) },
   setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder) },
   setHomeSectionVisible: (id, visible) => {
     const homeSectionVisibility = { ...get().homeSectionVisibility, [id]: visible }
@@ -1684,6 +1766,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // -- Song preferences ------------------------------------------------------
   songPrefs: hydrateSongPrefs(),
   listeningPlays: hydrateListeningPlays(),
+  recentTracksRev: 0,
 
   // Every write lands in three places: Zustand state (so React re-renders),
   // localStorage (so overrides survive a restart and work logged out), and
@@ -1767,14 +1850,23 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // one device's push can't erase plays made on another. The play *event*
     // appended alongside it is additive instead � merges union the two sides.
     get()._setSongPrefs(patchPrefMap(prefs, songId, { playcount: (prefs[songId]?.playcount ?? 0) + 1 }))
-    get()._setListeningPlays(appendListeningPlay(get().listeningPlays, songId))
-    get()._scheduleProfilePush(['songPrefs', 'listeningPlays'])
+    const plays = appendListeningPlay(get().listeningPlays, songId)
+    get()._setListeningPlays(plays)
+    get()._scheduleProfilePush(['songPrefs'])
+    // The server has an append route, so the new row goes up on its own rather
+    // than riding the whole-array PATCH. If the POST fails (offline, 5xx) the
+    // log is marked dirty and the debounced PATCH re-sends everything.
+    if (get().account && preferencesApi.preferencesApiEnabled) {
+      profilePushApi.appendPlay(plays[0]).catch(() => get()._scheduleProfilePush(['listeningPlays']))
+    } else {
+      get()._scheduleProfilePush(['listeningPlays'])
+    }
   },
 
   syncSongPrefs: async (serverPrefs) => {
     if (!preferencesApi.preferencesApiEnabled) return
     try {
-      const rows = serverPrefs ?? []
+      const rows = (serverPrefs ?? []).map(normalizeSongPref)
       const local = get().songPrefs
       const merged: SongPrefMap = {}
       // The profile's copy wins for override fields (another device may have
@@ -1792,6 +1884,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
         if (!merged[pref.song]) merged[pref.song] = pref
       }
       get()._setSongPrefs(merged)
+      if (songPrefsMatchServer(Object.values(merged), rows)) {
+        dropProfilePush('songPrefs')
+        return
+      }
       // Goes through the shared debounced scheduler rather than pushing
       // immediately — loadAccount calls this alongside syncListeningPlays and
       // syncFolders right after, and routing all three through the same
@@ -1809,7 +1905,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
         .filter((row): row is ListeningPlayEvent => row != null)
       const merged = mergeListeningPlays(get().listeningPlays, serverRows)
       get()._setListeningPlays(merged)
-      get()._scheduleProfilePush(['listeningPlays'])
+      if (listeningPlaysMatchServer(merged, serverRows)) dropProfilePush('listeningPlays')
+      else get()._scheduleProfilePush(['listeningPlays'])
     } catch {}
   },
 
@@ -1823,8 +1920,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
       const songs = await getSongsByIds(missing)
       const resolved = new Map(songs.map((s) => [s.id, songToTrack(s)]))
       backfillRecentTracks(orderedIds, resolved)
+      set({ recentTracksRev: get().recentTracksRev + 1 })
     } catch {}
   },
+
 
   // -- Reports (feedback + song issue reports) --------------------------------
   pendingReports: ls.get<PendingReport[]>('pendingReports') ?? [],
@@ -2033,7 +2132,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
         if (!serverIds.has(f.id) && hasLocal && !hasApi) merged.push(f)
       }
       get()._setFolders(merged)
-      get()._scheduleProfilePush(['folders'])
+      if (foldersMatchServer(merged, server)) dropProfilePush('folders')
+      else get()._scheduleProfilePush(['folders'])
     } catch {}
   },
 
@@ -2041,12 +2141,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
   apiTrackerCategory: '',
   apiTrackerEra: '',
   apiTrackerTab: '',
+  focusApiTrackerSearch: false,
   apiFilesPath: '',
   apiFilesLastPath: '',
 
   setApiTrackerCategory: (cat) => set({ apiTrackerCategory: cat }),
   setApiTrackerEra: (era) => set({ apiTrackerEra: era }),
   setApiTrackerTab: (tab) => set({ apiTrackerTab: tab }),
+  setFocusApiTrackerSearch: (focus) => set({ focusApiTrackerSearch: focus }),
   setApiFilesLastPath: (path) => set({ apiFilesLastPath: path }),
   setApiFilesPath: (path) => set({ apiFilesPath: path }),
 
@@ -2181,6 +2283,34 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
     const redirectUri = userApi.discordRedirectUri()
     const { token, user } = await userApi.exchangeDiscord(code, state, redirectUri)
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  signupWithPassword: async (username, password, displayName) => {
+    const { token, user } = await userApi.registerAccount({
+      username,
+      password,
+      display_name: displayName,
+    })
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  loginWithPassword: async (username, password, otpToken) => {
+    const { token, user } = await userApi.passwordLogin({
+      username,
+      password,
+      ...(otpToken ? { otp_token: otpToken } : {}),
+    })
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  completeApprovedLogin: async (token, user) => {
     userApi.setToken(token)
     set({ account: user })
     await get().loadAccount()
@@ -2681,7 +2811,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   updateFollowedPlaylistMeta: (id, meta) => {
     const existing = get().followedPlaylists
-    if (!existing.some((f) => f.id === id)) return
+    const cur = existing.find((f) => f.id === id)
+    if (!cur) return
+    // No-op when nothing changed - callers run this from an effect that also
+    // depends on followedPlaylists, so a fresh array every call would loop.
+    if (cur.name === meta.name && cur.trackCount === meta.trackCount && cur.coverUrl === meta.coverUrl) return
     const next = existing.map((f) => f.id === id ? { ...f, ...meta } : f)
     set({ followedPlaylists: next })
     ls.set('followedPlaylists', next)

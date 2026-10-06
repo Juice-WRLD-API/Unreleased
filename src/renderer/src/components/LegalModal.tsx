@@ -300,10 +300,10 @@ export default function LegalModal({ initialDoc = 'terms', onClose }: { initialD
       panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[520px] h-[640px] max-h-[85vh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
         <div className="w-full h-full flex flex-col overflow-hidden">
           <div
-            className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing"
+            className={`flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
             onMouseDown={onHandleMouseDown}
           >
             <div className="flex items-center gap-2">

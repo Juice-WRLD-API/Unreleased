@@ -1,3 +1,4 @@
+import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -557,7 +558,8 @@ export default function PlaylistsView(): JSX.Element {
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
 
   // Zip / share / bulk-add
-  const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  // Backend ZIP jobs are disabled, so the ZIP is built client-side (lib/clientZip).
+  const { zipState, handleZipDownload } = usePlaylistZipDownload()
   const [shareCopied, setShareCopied] = useState(false)
   const [togglingPublic, setTogglingPublic] = useState(false)
   const [addingAll, setAddingAll] = useState(false)
@@ -1330,33 +1332,6 @@ export default function PlaylistsView(): JSX.Element {
     return cache.has(songId)
   }
 
-  const handleZipDownload = useCallback(async (trackList: Track[], name: string) => {
-    if (zipState === 'loading') return
-    const paths = trackList.map(t => t.path).filter(Boolean)
-    if (!paths.length) return
-    setZipState('loading')
-    try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `${name}.zip`; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = `${name}.zip`; a.click() }
-      }
-      setZipState('done')
-    } catch { setZipState('error') }
-    setTimeout(() => setZipState('idle'), 3000)
-  }, [zipState])
-
   const offlineKey = selectedId != null ? `api-${selectedId}` : null
   const offlineEntry = offlineKey ? offlinePlaylists[offlineKey] : undefined
   const offlineSyncState = offlineKey ? offlineSync[offlineKey] : undefined
@@ -1656,12 +1631,11 @@ export default function PlaylistsView(): JSX.Element {
           />
           <MenuItem
             icon={Archive}
-            label="Download as ZIP"
-            onClick={async () => {
-              const name = cardMenu.playlist.name
-              const d = await userApi.getPlaylist(cardMenu.playlist.id)
+            label="Download all"
+            onClick={() => {
+              const { id, name } = cardMenu.playlist
               setCardMenu(null)
-              handleZipDownload(d.items.map(i => userApi.liteSongToTrack(i.song)), name)
+              handleZipDownload(async () => (await userApi.getPlaylist(id)).items.map(i => userApi.liteSongToTrack(i.song)), name)
             }}
           />
           {/* Same offline toggle the opened playlist's "⋯" menu carries, so the

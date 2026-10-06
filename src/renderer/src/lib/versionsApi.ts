@@ -56,7 +56,11 @@ function toMeta(row: VersionRow): SongVersionMeta {
 
 async function getRow(songId: number): Promise<VersionRow | null> {
   const data = await apiFetch<VersionsPage>(`/versions/${songId}/`)
-  return data.results[0] ?? null
+  const raw = data.results[0]
+  if (!raw) return null
+  // Use the title-unified copy so group_id comparisons match getAllRows
+  const all = await getAllRows()
+  return all.find(r => r.id === raw.id) ?? raw
 }
 
 // Full-table fetch (via ?all=true, same as juicewrldApi's /songs/ bulk mode),
@@ -72,8 +76,46 @@ function invalidateAllRowsCache(): void {
   allRowsCache = null
 }
 
+function titleKey(title: string | null): string | null {
+  const k = title?.replace(/['’‘]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  return k ? k : null
+}
+
+/** Songs are linked by title: rows whose titles match (ignoring case,
+ *  apostrophe style and stray whitespace) are one group even if their raw
+ *  group_ids differ. Rows that already share a group_id stay together too, so
+ *  untitled legacy links keep working. Each merged group is reported under
+ *  the lowest raw group_id among its members, which is also what the write
+ *  helpers patch to when they merge, so the two views agree. */
+function unifyByTitle(rows: VersionRow[]): VersionRow[] {
+  const parent = new Map<number, number>()
+  const find = (g: number): number => {
+    let p = parent.get(g) ?? g
+    while (p !== (parent.get(p) ?? p)) p = parent.get(p) ?? p
+    parent.set(g, p)
+    return p
+  }
+  const union = (a: number, b: number) => {
+    const ra = find(a), rb = find(b)
+    if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb))
+  }
+  const byTitle = new Map<string, number>()
+  for (const r of rows) {
+    find(r.group_id)
+    const k = titleKey(r.title)
+    if (!k) continue
+    const seen = byTitle.get(k)
+    if (seen === undefined) byTitle.set(k, r.group_id)
+    else union(seen, r.group_id)
+  }
+  return rows.map(r => {
+    const g = find(r.group_id)
+    return g === r.group_id ? r : { ...r, group_id: g }
+  })
+}
+
 async function fetchAllRows(): Promise<VersionRow[]> {
-  return apiFetch<VersionRow[]>('/versions/', { all: 'true' })
+  return unifyByTitle(await apiFetch<VersionRow[]>('/versions/', { all: 'true' }))
 }
 
 async function getAllRows(): Promise<VersionRow[]> {

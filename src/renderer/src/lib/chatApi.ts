@@ -1,9 +1,12 @@
+import { CHAT_API_BASE } from './apiServers'
 import { JWAPI_BASE } from './juicewrldApi'
 import { apiRequest } from './apiClient'
 import { getToken } from './userApi'
 
-export const CHAT_BASE = `${JWAPI_BASE}/chat`
-export const MAX_CHAT_UPLOAD_BYTES = 25 * 1024 * 1024
+export const CHAT_BASE = `${CHAT_API_BASE}/chat`
+export const CHAT_CHUNK_THRESHOLD = 25 * 1024 * 1024
+// Matches the server's CHAT_CHUNK_UPLOAD_MAX_SIZE.
+export const MAX_CHAT_UPLOAD_BYTES = 1024 * 1024 * 1024
 
 export type StaffRole = 'administrator' | 'manager' | string
 
@@ -172,6 +175,17 @@ export interface ChatReaction {
   me: boolean
 }
 
+// What the server puts in a message's `card`. Songs travel as ids and are looked
+// up for display, so a card never carries a title someone could have chosen.
+export type ServerCard =
+  | { kind: 'help' }
+  | { kind: 'npNow'; user: ChatUserBrief; song: number; updated_at: string }
+  | { kind: 'npHistory'; user: ChatUserBrief | null; items: { song: number; played_at: string }[]; total: number; capped: boolean }
+  | { kind: 'broadcastHistory'; items: { id: number; title: string; message: string; level: string; sender: string; sent_at: string }[]; total: number }
+  | { kind: 'themeList' }
+  | { kind: 'changelog'; branch: string; commits: { sha: string; message: string; author: string; date: string; url: string }[] }
+  | { kind: 'result'; title: string; text: string }
+
 export interface ChatMessage {
   id: number
   channel: number | null
@@ -182,6 +196,16 @@ export interface ChatMessage {
   ciphertext: string
   nonce: string
   key_version: number | null
+  // E2E v2 (format 2): see lib/chatE2E. Absent on older servers.
+  format?: number
+  client_id?: string
+  sender_device?: string
+  edit_seq?: number
+  signature?: string
+  // Server-built command card (see createChannelCard); null on ordinary
+  // messages, absent on older servers. The only place a card is read from -
+  // never from `content`.
+  card?: ServerCard | null
   parent: number | null
   mentions: number[]
   attachments: ChatAttachment[]
@@ -217,17 +241,121 @@ export interface ChatDevice {
   id: number
   device_id: string
   public_key: string
+  sign_pub?: string
+  format?: number
   algorithm: string
   label: string
-  owner: number
+  // The server sends a user brief here; older code treated it as an id.
+  owner: number | ChatUserBrief
   created_at?: string
 }
+
+export const deviceOwnerId = (d: ChatDevice): number => (typeof d.owner === 'number' ? d.owner : d.owner.id)
 
 export interface Envelope {
   id?: number
   recipient_device: number
+  recipient_device_id?: string
   key_version: number
   encrypted_key: string
+  format?: number
+  sender_device?: string
+  sender_device_id?: string | null
+  signature?: string
+  created_by?: number
+}
+
+export interface ListDeviceEntry {
+  device_id: string
+  enc_pub: string
+  sign_pub: string
+}
+
+export interface ServerDeviceRow {
+  id: number
+  device_id: string
+  public_key: string
+  sign_pub: string
+  format: number
+  revoked: boolean
+}
+
+export interface UserKeysInfo {
+  user_id: number
+  msk_pub: string
+  list_version: number
+  devices: ListDeviceEntry[]
+  list_sig: string
+  server_devices: ServerDeviceRow[]
+  backup_pub?: string
+  backup_sig?: string
+}
+
+export interface KeyCommitmentInfo {
+  conversation: number
+  key_version: number
+  key_commitment: string
+  creator_user: number
+  creator_device: string
+  commit_sig: string
+  created_at: string
+}
+
+export interface ConversationKeys {
+  current_key_version: number
+  results: ChatDevice[]
+  key_version?: number
+  commitment?: KeyCommitmentInfo | null
+  message_count?: number
+  members?: { user_id: number; list_version: number }[]
+}
+
+export interface E2EFeatures {
+  send: boolean
+  identity: boolean
+  linking: boolean
+  backup: boolean
+}
+
+export interface ToDeviceOut {
+  recipient_device: number
+  type: string
+  payload: string
+  signature: string
+}
+
+export interface ToDeviceIn extends Omit<ToDeviceOut, 'recipient_device'> {
+  id: number
+  sender_device: string
+  sender_user: number
+  created_at: string
+}
+
+export interface LinkSessionInfo {
+  session_id: string
+  device_id: string
+  enc_pub: string
+  sign_pub: string
+  label: string
+  expires_at: string
+  claimed: boolean
+  // The existing device that signed this one in; null until claimed.
+  claimed_by: { device_id: string; sign_pub: string } | null
+}
+
+export interface BackupEntryIn {
+  id: number
+  conversation: number
+  key_version: number
+  sealed: string
+}
+
+export interface V2MessageFields {
+  format: 2
+  client_id: string
+  sender_device: string
+  edit_seq: number
+  signature: string
 }
 
 export interface UploadedFile {
@@ -266,6 +394,24 @@ const json = (method: string, body?: unknown): RequestInit => ({
   method,
   body: body === undefined ? undefined : JSON.stringify(body),
 })
+
+// For the v2 compare-and-set endpoints, where a 409 is an expected answer
+// whose body the caller needs (the winning commitment, the current version).
+export interface Outcome<T> { ok: boolean; status: number; data: T }
+
+async function requestOutcome<T>(path: string, init: RequestInit = {}, headers: Record<string, string> = {}): Promise<Outcome<T>> {
+  const res = await fetch(`${CHAT_BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()), ...headers },
+  })
+  let data: unknown = null
+  try { data = await res.json() } catch {}
+  if (!res.ok && res.status !== 409) {
+    const detail = (data as { detail?: string } | null)?.detail
+    throw Object.assign(new Error(detail || `Request failed (${res.status})`), { status: res.status })
+  }
+  return { ok: res.ok, status: res.status, data: data as T }
+}
 
 function pageQuery(opts: { limit?: number; before?: number; after?: number }): string {
   const qs = new URLSearchParams()
@@ -378,6 +524,20 @@ export const createChannelMessage = (id: number, body: {
   mentions?: number[]
   attachments?: AttachmentInput[]
 }) => request<ChatMessage>(`/channels/${id}/messages/`, json('POST', body))
+
+// Posts a command's answer to a channel as a card. The client only names the
+// command; the server builds the card from its own data and the poster's
+// standing, which is what makes a card something no one can forge with text.
+export type CardCommand =
+  | { name: 'help' }
+  | { name: 'np'; user_id?: number }
+  | { name: 'np_history'; user_id?: number; count?: number }
+  | { name: 'broadcast_history'; count?: number }
+  | { name: 'theme_list' }
+  | { name: 'changelog'; branch: string; count?: number }
+  | { name: 'result'; title: string; text: string }
+export const createChannelCard = (id: number, command: CardCommand) =>
+  request<ChatMessage>(`/channels/${id}/messages/`, json('POST', { command }))
 export const markChannelRead = (id: number, messageId?: number) =>
   request<void>(`/channels/${id}/read/`, json('POST', messageId ? { message_id: messageId } : {}))
 
@@ -402,15 +562,16 @@ export const createDmMessage = (id: number, body: {
   parent?: number | null
   mentions?: number[]
   attachments?: AttachmentInput[]
-}) => request<ChatMessage>(`/dms/${id}/messages/`, json('POST', body))
+} & Partial<V2MessageFields>) => request<ChatMessage>(`/dms/${id}/messages/`, json('POST', body))
 export const markDmRead = (id: number, messageId?: number) =>
   request<void>(`/dms/${id}/read/`, json('POST', messageId ? { message_id: messageId } : {}))
 
 // Message actions
 export const getMessage = (id: number) => request<ChatMessage>(`/messages/${id}/`)
-export const editMessage = (id: number, body: { content: string } | { ciphertext: string; nonce: string; key_version: number }) =>
+export const editMessage = (id: number, body: { content: string } | ({ ciphertext: string; nonce: string; key_version: number; mentions?: number[] } & Partial<V2MessageFields>)) =>
   request<ChatMessage>(`/messages/${id}/`, json('PATCH', body))
-export const deleteMessage = (id: number) => request<void>(`/messages/${id}/`, json('DELETE'))
+/** `purge` hard-deletes the row (no "deleted" placeholder in history) instead of soft-deleting it. */
+export const deleteMessage = (id: number, purge = false) => request<void>(`/messages/${id}/${purge ? '?purge=1' : ''}`, json('DELETE'))
 export const pinMessage = (id: number) => request<ChatMessage>(`/messages/${id}/pin/`, json('POST'))
 export const unpinMessage = (id: number) => request<ChatMessage>(`/messages/${id}/pin/`, json('DELETE'))
 export const addReaction = (id: number, emoji: string) =>
@@ -425,23 +586,66 @@ export const getPresence = () => request<{ online: number[] }>('/presence/').the
 
 // Keys
 export const listMyDevices = () => request<Results<ChatDevice>>('/keys/devices/').then((r) => r.results)
-export const registerDevice = (body: { device_id: string; public_key: string; algorithm: 'x25519'; label: string }) =>
+export const registerDevice = (body: { device_id: string; public_key: string; sign_pub?: string; algorithm: 'x25519'; label: string }) =>
   request<ChatDevice>('/keys/devices/', json('POST', body))
 export const revokeDevice = (deviceId: string) =>
   request<void>(`/keys/devices/${encodeURIComponent(deviceId)}/`, json('DELETE'))
-export const listConversationDevices = (id: number) =>
-  request<{ current_key_version: number; results: ChatDevice[] }>(`/dms/${id}/keys/`)
+export const listConversationDevices = (id: number, keyVersion?: number) =>
+  request<ConversationKeys>(`/dms/${id}/keys/${keyVersion ? `?key_version=${keyVersion}` : ''}`)
 export const postEnvelopes = (id: number, envelopes: Envelope[]) =>
   request<unknown>(`/dms/${id}/envelopes/`, json('POST', { envelopes }))
 export const listEnvelopes = (id: number, keyVersion?: number) =>
   request<Results<Envelope>>(`/dms/${id}/envelopes/${keyVersion ? `?key_version=${keyVersion}` : ''}`)
     .then((r) => r.results)
 
+// E2E v2 keys. The server stores and orders these; it never checks a
+// signature - lib/chatIdentity and lib/chatE2E do.
+export const getE2EFeatures = () => request<E2EFeatures>('/keys/features/')
+export const getUserKeys = (userId: number) => request<UserKeysInfo>(`/keys/users/${userId}/`)
+export const getUsersKeys = (ids: number[]) =>
+  request<Results<UserKeysInfo>>(`/keys/users/?ids=${ids.join(',')}`).then((r) => r.results)
+export const putIdentity = (body: { msk_pub: string; reset?: boolean }, deviceId?: string) =>
+  requestOutcome<UserKeysInfo & { detail?: string }>('/keys/identity/', json('PUT', body), deviceId ? { 'X-Device-Id': deviceId } : {})
+// deviceId: the publishing device, which the server records as the claimer
+// of any link session the new list completes.
+export const putDeviceList = (body: { list_version: number; devices: ListDeviceEntry[]; list_sig: string }, deviceId?: string) =>
+  requestOutcome<UserKeysInfo & { detail?: string }>('/keys/devices/list/', json('PUT', body), deviceId ? { 'X-Device-Id': deviceId } : {})
+export const establishKey = (id: number, body: { key_version: number; key_commitment: string; creator_device: string; commit_sig: string }) =>
+  requestOutcome<KeyCommitmentInfo & { commitment?: KeyCommitmentInfo; current_key_version?: number }>(`/dms/${id}/keys/establish/`, json('POST', body))
+export const rotateKey = (id: number, expectedVersion: number) =>
+  requestOutcome<{ current_key_version: number }>(`/dms/${id}/keys/rotate/`, json('POST', { expected_version: expectedVersion }))
+export const createLinkSession = (body: { device_id: string; enc_pub: string; sign_pub: string; label: string }) =>
+  request<{ session_id: string; expires_at: string }>('/keys/link-sessions/', json('POST', body))
+export const getLinkSession = (sessionId: string) =>
+  request<LinkSessionInfo>(`/keys/link-sessions/${encodeURIComponent(sessionId)}/`)
+export const sendToDevice = (deviceId: string, messages: ToDeviceOut[]) =>
+  request<{ sent: number }>('/keys/to-device/', { ...json('POST', { messages }), headers: { 'X-Device-Id': deviceId } })
+export const fetchToDevice = (deviceId: string) =>
+  request<Results<ToDeviceIn>>('/keys/to-device/', { headers: { 'X-Device-Id': deviceId } }).then((r) => r.results)
+export const ackToDevice = (ids: number[]) => request<{ deleted: number }>('/keys/to-device/ack/', json('POST', { ids }))
+export const getBackup = () => requestOutcome<{ backup_pub: string; backup_sig: string; sealed_msk: string }>('/keys/backup/')
+  .then((o) => o.data)
+  .catch((err: { status?: number }) => { if (err.status === 404) return null; throw err })
+export const putBackup = (body: {
+  backup_pub: string
+  backup_sig: string
+  sealed_msk: string
+  expected_backup_pub?: string
+  entries?: { conversation: number; key_version: number; sealed: string }[]
+}) => requestOutcome<{ backup_pub: string; detail?: string }>('/keys/backup/', json('PUT', body))
+export const postBackupEntries = (backupPub: string, entries: { conversation: number; key_version: number; sealed: string }[]) =>
+  requestOutcome<{ accepted?: number; detail?: string }>('/keys/backup/entries/', json('POST', { backup_pub: backupPub, entries }))
+export const listBackupEntries = (after?: number) =>
+  request<{ results: BackupEntryIn[]; next: number | null }>(`/keys/backup/entries/${after ? `?after=${after}` : ''}`)
+
 // Uploads
+// Files up to the threshold go in one request; anything larger is sent as
+// chunks, each retried on its own so a flaky connection doesn't restart it.
 export async function uploadChatFile(file: Blob, name: string): Promise<UploadedFile> {
   if (file.size > MAX_CHAT_UPLOAD_BYTES) {
-    throw new Error(`"${name}" is larger than 25 MB`)
+    throw new Error(`"${name}" is larger than ${MAX_CHAT_UPLOAD_BYTES / (1024 * 1024)} MB`)
   }
+  if (file.size > CHAT_CHUNK_THRESHOLD) return uploadChatFileChunked(file, name)
   const form = new FormData()
   form.append('file', file, name)
   return apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/`, {
@@ -449,6 +653,45 @@ export async function uploadChatFile(file: Blob, name: string): Promise<Uploaded
     headers: authHeaders(getToken()),
     body: form,
   })
+}
+
+const CHUNK_RETRIES = 3
+
+async function withChunkRetry<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run()
+    } catch (err) {
+      // A thrown Error from apiRequest is an HTTP rejection (bad chunk, expired
+      // upload) and won't improve on retry; only a network-level TypeError will.
+      if (!(err instanceof TypeError) || attempt >= CHUNK_RETRIES) throw err
+      await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt))
+    }
+  }
+}
+
+export async function uploadChatFileChunked(file: Blob, name: string): Promise<UploadedFile> {
+  const init = await withChunkRetry(() => apiRequest<{ upload_id: string; chunk_size: number; total_chunks: number }>(
+    `${CHAT_BASE}/uploads/chunked/init/`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
+      body: JSON.stringify({ filename: name, total_size: file.size, mime: file.type }) },
+  ))
+  const chunkSize = init.chunk_size
+  for (let i = 0; i < init.total_chunks; i++) {
+    await withChunkRetry(() => {
+      const form = new FormData()
+      form.append('upload_id', init.upload_id)
+      form.append('chunk_index', String(i))
+      form.append('chunk', file.slice(i * chunkSize, Math.min(file.size, (i + 1) * chunkSize)), `${name}.part.${i}`)
+      return apiRequest(`${CHAT_BASE}/uploads/chunked/chunk/`, {
+        method: 'POST', headers: authHeaders(getToken()), body: form,
+      })
+    })
+  }
+  return withChunkRetry(() => apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/chunked/complete/`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
+    body: JSON.stringify({ upload_id: init.upload_id }),
+  }))
 }
 
 export function chatAttachmentUrl(id: number, opts: { download?: boolean } = {}): string {

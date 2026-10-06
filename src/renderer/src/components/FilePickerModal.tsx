@@ -2,17 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Folder, FolderOpen, ArrowLeft, Home, ChevronRight, Loader2, ImageIcon, Search, Check, Music2, File, FolderCheck, FolderPlus } from 'lucide-react'
 import {
-  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, filterSearchResults,
+  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, filterSearchResults, searchFiles,
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
+import { breadcrumbs, parentFolder } from '../lib/apiFilesShared'
 import { useStore } from '../store/useStore'
-
-function breadcrumbs(path: string): { label: string; path: string }[] {
-  if (!path) return []
-  const parts = path.split('/').filter(Boolean)
-  return parts.map((label, i) => ({ label, path: parts.slice(0, i + 1).join('/') }))
-}
 
 // Path join that tolerates a typed name with stray slashes or spaces.
 function joinFolder(base: string, name: string): string {
@@ -21,12 +16,7 @@ function joinFolder(base: string, name: string): string {
   return base ? `${base}/${clean}` : clean
 }
 
-function parentFolder(path: string): string {
-  const i = path.lastIndexOf('/')
-  return i > 0 ? path.slice(0, i) : ''
-}
-
-// Directories first, then matching files, alphabetically within each — a picker
+// Directories first, then matching files, alphabetically within each - a picker
 // has no need for the full sort/view-mode machinery ApiFilesView offers.
 function sortForPicker(entries: JWApiFileEntry[], kind: PickerKind): JWApiFileEntry[] {
   return [...entries]
@@ -172,8 +162,8 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     let cancelled = false
     setSearchLoading(true)
     const term = debouncedSearch.trim()
-    apiFetch<JWApiBrowseResponse>('/files/browse/', searchParams(term))
-      .then((data) => { if (!cancelled) setSearchResults(filterSearchResults(parseBrowseEntries(data), term)) })
+    searchFiles(term, searchParams(term))
+      .then((entries) => { if (!cancelled) setSearchResults(filterSearchResults(entries, term)) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
@@ -188,8 +178,8 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     if (!initialQuery || altQueries.length === 0) return
     let cancelled = false
     Promise.all(altQueries.map((q) =>
-      apiFetch<JWApiBrowseResponse>('/files/browse/', searchParams(q))
-        .then((data) => filterSearchResults(parseBrowseEntries(data), q))
+      searchFiles(q, searchParams(q))
+        .then((entries) => filterSearchResults(entries, q))
         .catch(() => [] as JWApiFileEntry[])
     )).then((lists) => {
       if (cancelled) return
@@ -232,11 +222,11 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg h-[85svh] md:h-[600px] max-h-[92svh] md:max-h-[86vh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="select-text bg-surface w-full h-full flex flex-col overflow-hidden">
         {/* Header */}
         <div
-          className="shrink-0 px-4 pt-4 pb-3 border-b border-[var(--border)] cursor-grab active:cursor-grabbing"
+          className={`shrink-0 px-4 pt-4 pb-3 border-b border-[var(--border)] ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <div className="flex items-center justify-between mb-3">

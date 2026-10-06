@@ -7,13 +7,19 @@ import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import type { PlaylistSummary } from '../lib/userApi'
-import { JWAPI_BASE } from '../lib/juicewrldApi'
+import { JWAPI_BASE, buildStreamUrl } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
+import { openZipTarget, saveItems } from '../lib/clientZip'
+import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
-import { hasChatAccess } from '../store/chatStore'
-import SharePlaylistModal from './chat/SharePlaylistModal'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
-// Self-contained context menu for an API playlist — usable from anywhere
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
+
+// Self-contained context menu for an API playlist - usable from anywhere
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing
 // PlaylistsView mounted, since it talks to userApi/the store directly. Mirrors
 // the action set in PlaylistsView's open-playlist "⋯" menu.
@@ -92,28 +98,24 @@ export default function PlaylistContextMenu({ state, onClose }: {
     onClose()
   }
 
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
+  // built client-side instead (lib/clientZip). The save dialog opens before
+  // the playlist fetch, while the click's user activation is still live.
   const downloadZip = async (): Promise<void> => {
     if (zipState === 'loading') return
+    const target = await openZipTarget(playlist.name)
+    if (!target) return
     setZipState('loading')
     try {
       const d = await userApi.getPlaylist(playlist.id)
-      const paths = d.items.map(i => userApi.liteSongToTrack(i.song)).map((t: Track) => t.path).filter(Boolean)
-      if (!paths.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = `${playlist.name}.zip`; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = `${playlist.name}.zip`; a.click() }
-      }
-      setZipState('done')
+      const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
+      if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
+      const { saved, cancelled } = await saveItems(target, tracks.map(t => ({
+        name: t.path.split('/').pop() || t.title,
+        url: t.streamUrl ?? buildStreamUrl(t.path),
+      })))
+      if (cancelled) { setZipState('idle'); return }
+      setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
     setTimeout(() => setZipState('idle'), 2500)
   }

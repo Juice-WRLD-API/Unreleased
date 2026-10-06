@@ -92,6 +92,7 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'rescan-library',       label: 'Rescan library',              category: 'App', defaultBinding: '', electronOnly: true },
   { id: 'discord-status',       label: 'Toggle Discord status',       category: 'App', defaultBinding: '', electronOnly: true },
   { id: 'toggle-devtools',      label: 'Toggle DevTools',              category: 'App', defaultBinding: 'F12', electronOnly: true, devModeOnly: true },
+  { id: 'open-terminal',    label: 'Open terminal', category: 'Navigation', defaultBinding: 'Ctrl+`' },
 ] as const
 
 export const HOTKEY_CATEGORIES: readonly HotkeyCategory[] = ['Playback', 'Volume', 'Navigation', 'App']

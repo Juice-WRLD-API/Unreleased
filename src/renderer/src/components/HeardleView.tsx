@@ -1,3 +1,4 @@
+import { useOpenUserCard } from './chat/UserCard'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronLeft, Play, Pause, SkipForward, Search, X, Check, Music2,
@@ -506,10 +507,12 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
       ? "Nobody's finished today's round yet."
       : 'No streaks going yet.'
 
+  const openUserCard = useOpenUserCard()
   const row = (e: LeaderboardEntry, isMe: boolean): JSX.Element => (
     <div
       key={`${e.user_id}-${e.rank}`}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg ${
+      onClick={(ev) => openUserCard({ id: e.user_id, username: e.display_name, display_name: e.display_name, avatar: e.discord_avatar ?? '', role: '' }, ev)}
+      className={`cursor-pointer flex items-center gap-3 px-3 py-2 rounded-lg ${
         isMe ? 'bg-accent/15 border border-accent/30' : ''
       }`}
     >

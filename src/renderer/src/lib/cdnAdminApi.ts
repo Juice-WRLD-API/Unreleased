@@ -46,6 +46,16 @@ export interface CdnAdminNode {
   /** See CdnOwnedNode - both absent until the backend sends them. */
   manifest_version?: number
   synced_manifest_version?: number | null
+  city?: string
+  country_code?: string
+  latitude?: number | null
+  longitude?: number | null
+  /** Cloudflare tunnel the node serves files through; listeners get its
+   *  serve_url from /cdn/resolve/. serve_ready is false until it connects. */
+  tunnel_hostname?: string
+  serve_port?: number
+  serve_ready?: boolean
+  tunnel_id?: string
 }
 
 export interface CdnAdminStats {
@@ -101,4 +111,40 @@ export async function deleteCdnNode(nodeId: string): Promise<void> {
  *  reset, or the next accepted report disables it again. */
 export function wasAutoDisabled(n: CdnAdminNode): boolean {
   return n.trust_score <= 0 || n.hash_violations >= VIOLATION_LIMIT
+}
+
+export type PropagationState = 'propagated' | 'propagating' | 'offline'
+
+export interface PropagationServer {
+  host: string
+  online: boolean
+  manifest_version: number
+}
+
+export interface PropagationNode {
+  node_id: string
+  name: string
+  region: string
+  city: string
+  country_code: string
+  continent: string
+  latitude: number | null
+  longitude: number | null
+  online: boolean
+  state: PropagationState
+}
+
+export interface ProposalPropagation {
+  server: PropagationServer
+  proposal: {
+    id: number
+    status: string
+    change_type: string
+    file_path: string
+  }
+  nodes: PropagationNode[]
+}
+
+export async function fetchProposalPropagation(proposalId: number): Promise<ProposalPropagation> {
+  return request(`${CDN_ADMIN_BASE}/proposals/${proposalId}/propagation/`, { method: 'GET' })
 }

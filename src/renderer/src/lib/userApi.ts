@@ -1,17 +1,20 @@
-import { Track, ViewType } from '../types'
-import { JWAPI_BASE, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
+import { Track, ViewType, DonorPlaylist } from '../types'
+import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
-import type { SongPreference } from './songPrefs'
+import type { WireSongPreference } from './songPrefs'
 import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
-import { apiRequest, cacheDelete } from './apiClient'
+import { apiRequest, authedRequest, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
+import type { Skin } from './skins'
+import type { GifResult } from './gifApi'
+import type { TierlistSummary } from './tierlistApi'
 
-const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
-const LIBRARY_BASE = `${JWAPI_BASE}/library`
+const ACCOUNT_BASE = routeUrl('/accounts')
+const LIBRARY_BASE = routeUrl('/library')
 const TOKEN_KEY = 'unreleased:authToken'
 
 export interface AccountUser {
@@ -19,50 +22,133 @@ export interface AccountUser {
   display_name: string
   discord_id: string
   discord_username: string
-  discord_avatar: string
-  // The account's actual login handle, set on every account. discord_username
-  // is empty for username/password accounts, so this is the fallback
-  // wherever a handle must never be blank.
+  // The account's actual login handle, set on every account (auto-generated
+  // for Discord signups, chosen at signup for username/password accounts -
+  // see Username + Password Auth docs). discord_username is empty for the
+  // latter, so this is the fallback wherever a handle must never be blank.
   username?: string
+  discord_avatar: string
   avatar?: string
   bio?: string
   public_play_history?: boolean
   public_playlists?: boolean
   public_now_playing?: boolean
+  now_playing?: NowPlayingState | Record<string, never>
   is_editor: boolean
   is_contributor: boolean
   // Optional: the API only started returning this with the manager role, so
   // older responses and anything replayed from cache simply omit it.
   is_manager?: boolean
-  // Grants News write access (create/edit-own/delete-own posts) — separate
+  // Grants News write access (create/edit-own/delete-own posts) - separate
   // from is_editor. Admins can write News regardless of this flag.
   is_news?: boolean
-  // Donor priority - admin-granted only, never PATCHable. donor_since is null
-  // while is_donor is false.
+  // Donor priority (see docs/content.tsx "Donor Priority API") - admin-granted
+  // only, never PATCHable. donor_since is null while is_donor is false.
   is_donor?: boolean
   donor_since?: string | null
   is_administrator: boolean
   otp_enabled: boolean
-  // JSON blobs stored on the profile and PATCHable through this same route —
+  // JSON blobs stored on the profile and PATCHable through this same route -
   // per-song preferences and playlist folders (see lib/preferencesApi and
   // lib/foldersApi). Optional so cached/older responses stay assignable.
-  user_preferences?: SongPreference[]
+  // Rows arrive as stored: fields a row carries no value for are absent
+  // rather than null (see songPrefs' WireSongPreference/normalizeSongPref).
+  user_preferences?: WireSongPreference[]
   listening_plays?: ListeningPlayEvent[]
   playlist_folders?: ServerPlaylistFolder[]
   // Channel ids the user follows for news notifications (see lib/newsNotifications).
   news_subscriptions?: string[]
   memberships?: ChannelMembership[]
   // Free-form JSON settings blob, PATCHable whole-object through this same
-  // route. Only the fields the chat feature needs are modeled here so far.
+  // route (see updateUserSettings). Distinct from `user_preferences` above,
+  // which is the per-song overrides array - this one holds account-level
+  // settings that should follow the user across devices.
   user_settings?: UserSettings
 }
 
+/** Account-level settings synced through the `user_settings` blob. Extend
+ *  this as more settings need to follow the user across devices - it's
+ *  stored whole-object (see updateUserSettings), so every push has to carry
+ *  every field the caller knows about, not just the one that changed, or an
+ *  omitted field reads to the account as "cleared" on the next device. */
 export interface UserSettings {
-  /** Account ids of servers/conversations this device has muted in chat -
-   *  mirrors chatStore's own local copy so it can follow the user across
-   *  devices once this blob is PATCHable from here too. */
+  /** Account ids of users whose messages this user has muted in chat. */
+  muted_user_ids?: number[]
+  /** Active theme/skin id. */
+  theme?: string
+
+  // ── Appearance ──────────────────────────────────────────────────────────
+  custom_skins?: Skin[]
+  /** Donor cloud-file playlists (see types DonorPlaylist). */
+  donor_playlists?: DonorPlaylist[]
+  accent_color?: string
+  app_text_scale?: number
+  app_font?: string
+  lyrics_font?: string
+  lyrics_scale?: number
+  lyrics_align?: 'left' | 'center'
+  lyrics_blur?: boolean
+  lyrics_blur_amount?: number
+  lyrics_color_active?: string | null
+  lyrics_color_inactive?: string | null
+  lyrics_override?: boolean
+  full_era_names?: boolean
+  gradients_enabled?: boolean
+  surface_gradients_enabled?: boolean
+  wrld_theme_background?: boolean
+  playlist_hero_enabled_dark?: boolean
+  playlist_hero_enabled_light?: boolean
+  sidebar_position?: string
+
+  // ── Navigation/layout ───────────────────────────────────────────────────
+  nav_order?: ViewType[]
+  nav_visibility?: Record<string, boolean>
+  nav_control_order?: string[]
+  nav_control_visibility?: Record<string, boolean>
+  home_section_visibility?: Record<string, boolean>
+
+  // ── Playback preferences ───────────────────────────────────────────────
+  playback_speed?: number
+  crossfade_enabled?: boolean
+  crossfade_duration?: number
+  pause_fade_enabled?: boolean
+  prefer_og_version?: boolean
+  rotate_suggested_covers?: boolean
+  media_overlay_enabled?: boolean
+  lastfm_enabled?: boolean
+  auto_report_errors?: boolean
+  eq_enabled?: boolean
+  eq_gains?: number[]
+  eq_preset?: string
+  eq_balance?: number
+  eq_mono?: boolean
+  eq_boost?: number
+  skip_silence?: boolean
+  reverb_enabled?: boolean
+  reverb_mix?: number
+  reverb_decay?: number
+  pitch_shift?: boolean
+
+  // ── Hotkeys ─────────────────────────────────────────────────────────────
+  hotkey_bindings?: Record<string, string>
+  hotkey_seek_seconds?: number
+  global_hotkeys_enabled?: boolean
+
+  // ── Chat mutes (servers/conversations - distinct from muted_user_ids) ──
   muted_servers?: number[]
   muted_conversations?: number[]
+
+  // GIFs favorited from the chat GIF picker (see components/chat/GifPicker
+  // and lib/gifApi) - stored whole so the picker's Favorites tab never has
+  // to re-hit Tenor/Giphy just to redisplay them.
+  favorite_gifs?: GifResult[]
+}
+
+export interface NowPlayingState {
+  song: number
+  path: string
+  position: number
+  updated_at: string
 }
 
 export interface ChannelMembership {
@@ -96,11 +182,11 @@ export function channelMembership(
 }
 
 // The global is_editor/is_contributor/is_manager booleans are an unscoped
-// grant that predates per-channel memberships — but the backend only ever
+// grant that predates per-channel memberships - but the backend only ever
 // honours it on the *primary* channel (legacy accounts never got a membership
 // row, so their global flag has to keep covering the one channel that existed
 // before channels did). On any other channel, the global flag alone isn't
-// enough — the account needs an explicit membership row for that channel, or
+// enough - the account needs an explicit membership row for that channel, or
 // admin. `isPrimary` defaults true so call sites that can't yet determine it
 // (e.g. before the channel list has loaded) keep the old, safe behavior.
 export function isChannelEditor(account: AccountUser | null, slug: string | null | undefined, isPrimary = true): boolean {
@@ -173,17 +259,6 @@ export interface PlaylistDetail {
   updated_at: string
 }
 
-export interface NowPlayingState {
-  song: number
-  path: string
-  position: number
-  updated_at: string
-}
-
-export interface NowPlayingResponse {
-  now_playing: NowPlayingState | null
-}
-
 export interface PublicProfile {
   id: number
   username: string
@@ -199,6 +274,13 @@ export interface PublicProfile {
   public_now_playing: boolean
   play_history?: ListeningPlayEvent[]
   playlists?: PlaylistSummary[]
+  /** The user's tier lists with is_public === true (absent on servers
+   *  without /library/tierlists/). */
+  tierlists?: TierlistSummary[]
+}
+
+export interface NowPlayingResponse {
+  now_playing: NowPlayingState | null
 }
 
 export function getToken(): string | null {
@@ -221,24 +303,15 @@ export function clearToken(): void {
   } catch {}
 }
 
-// `cacheKey` opts a GET call into the offline fallback cache — pass it only
+// `cacheKey` opts a GET call into the offline fallback cache - pass it only
 // for idempotent reads whose staleness is acceptable (playlists, favorites,
 // profile). Mutations don't pass one, so they always hit the network and
 // fail loudly if offline rather than silently no-op against stale data.
-async function request<T>(url: string, options: RequestInit = {}, auth = true, cacheKey?: string): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (auth) {
-    const token = getToken()
-    if (token) headers['Authorization'] = `Token ${token}`
-  }
-  return apiRequest<T>(url, {
-    ...options,
-    headers: { ...headers, ...(options.headers as Record<string, string>) },
-    cacheKey,
-  })
+function request<T>(url: string, options: RequestInit = {}, auth = true, cacheKey?: string): Promise<T> {
+  return authedRequest<T>(url, { ...options, cacheKey }, auth ? getToken() : null)
 }
 
-// Applies per-song overrides for the same reason songToTrack does — a track
+// Applies per-song overrides for the same reason songToTrack does - a track
 // reached through a playlist or the favorites list has to show the user's
 // custom name and cover just like one reached through the Tracker.
 export function liteSongToTrack(song: ApiSongLite): Track {
@@ -302,6 +375,71 @@ export async function exchangeDiscord(
   }, false)
 }
 
+export async function registerAccount(payload: {
+  username: string
+  password: string
+  display_name?: string
+}): Promise<{ token: string; user: AccountUser }> {
+  return request(`${ACCOUNT_BASE}/auth/register/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, false)
+}
+
+export async function passwordLogin(payload: {
+  username: string
+  password: string
+  // Required by the server once the account has 2FA enabled (staff).
+  otp_token?: string
+}): Promise<{ token: string; user: AccountUser }> {
+  return request(`${ACCOUNT_BASE}/auth/login/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }, false)
+}
+
+export interface LoginApprovalRequest {
+  id: string
+  secret: string
+  code: string
+  expires_in: number
+}
+
+export type LoginApprovalPoll =
+  | { status: 'pending' | 'denied' | 'expired' }
+  | { status: 'approved'; token: string; user: AccountUser }
+
+export interface PendingLoginApproval {
+  id: string
+  code: string
+  ip: string | null
+  user_agent: string
+  created_at: string
+}
+
+/** Second-factor option 2: after a valid password, ask the user's signed-in devices to approve. */
+export async function requestLoginApproval(username: string, password: string): Promise<LoginApprovalRequest> {
+  return request(`${ACCOUNT_BASE}/auth/login/approval/`, {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  }, false)
+}
+
+export async function pollLoginApproval(id: string, secret: string): Promise<LoginApprovalPoll> {
+  return request(`${ACCOUNT_BASE}/auth/login/approval/${id}/poll/`, {
+    method: 'POST',
+    body: JSON.stringify({ secret }),
+  }, false)
+}
+
+export async function listLoginApprovals(): Promise<PendingLoginApproval[]> {
+  return request(`${ACCOUNT_BASE}/account/login-approvals/`, { method: 'GET' })
+}
+
+export async function decideLoginApproval(id: string, decision: 'approve' | 'deny'): Promise<void> {
+  await request(`${ACCOUNT_BASE}/account/login-approvals/${id}/${decision}/`, { method: 'POST' })
+}
+
 export async function logout(): Promise<void> {
   try {
     await request(`${ACCOUNT_BASE}/logout/`, { method: 'POST' })
@@ -334,6 +472,81 @@ export async function updateAvatar(base64: string): Promise<AccountUser> {
   return result
 }
 
+export async function removeAvatar(): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ avatar: '' }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function updateBio(bio: string): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ bio }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function updatePrivacySettings(payload: {
+  public_play_history?: boolean
+  public_playlists?: boolean
+  public_now_playing?: boolean
+}): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+// Whole-object PATCH, same mechanics as user_preferences/playlist_folders -
+// callers merge their change into the current blob (see useStore's
+// muteUser/unmuteUser/setTheme) before calling this, since a partial payload
+// here would overwrite the rest of the blob rather than merge server-side.
+export async function updateUserSettings(settings: UserSettings): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ user_settings: settings }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function updateNowPlaying(
+  nowPlaying: { song: number; path?: string; position?: number } | null,
+): Promise<AccountUser> {
+  const url = `${ACCOUNT_BASE}/account/me/`
+  const result = await request<AccountUser>(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ now_playing: nowPlaying ?? {} }),
+  })
+  cacheSet(url, result)
+  return result
+}
+
+export async function getPublicProfile(userId: number): Promise<PublicProfile> {
+  const url = `${ACCOUNT_BASE}/profile/${userId}/`
+  return request(url, { method: 'GET' }, false, url)
+}
+
+export async function getNowPlaying(userId: number): Promise<NowPlayingResponse> {
+  const url = `${ACCOUNT_BASE}/profile/${userId}/np/`
+  return request(url, { method: 'GET' }, false)
+}
+
+// useNowPlayingByIds lives in store/chatStore.ts now - it needs the chat
+// socket's now_playing.updated push to stay current, and this file can't
+// import that store without creating a cycle (chatStore already imports
+// getNowPlaying/NowPlayingState from here).
+
 export async function getFavorites(): Promise<FavoriteEntry[]> {
   const url = `${LIBRARY_BASE}/favorites/`
   return request(url, { method: 'GET' }, true, url)
@@ -359,7 +572,7 @@ type PlaylistCoverEntry = { cover_image_url?: string | null; cover_image?: strin
 
 // In-memory cache so re-opening a playlist (or re-rendering the playlists
 // grid after switching tabs) shows its cover instantly instead of re-hitting
-// the API every time — covers rarely change, so a session-lifetime cache is
+// the API every time - covers rarely change, so a session-lifetime cache is
 // safe as long as uploads/removals below keep it in sync.
 const playlistCoverCache = new Map<number, PlaylistCoverEntry>()
 
@@ -373,20 +586,21 @@ export function peekPlaylistCover(id: number): PlaylistCoverEntry | undefined {
 export async function getPlaylistCover(id: number): Promise<PlaylistCoverEntry> {
   const cached = playlistCoverCache.get(id)
   if (cached) return cached
-  // getPlaylist's cached detail carries the same cover fields this needs —
+  // getPlaylist's cached detail carries the same cover fields this needs -
   // reuse it instead of firing a second near-duplicate /playlists/{id}/
-  // request for the same playlist (prefetchPlaylistDetails calls both back
-  // to back for every playlist on startup, which used to double the network
-  // traffic for no benefit). Only skipped if that cache entry came back from
-  // the omit_cover_image=true fetch and genuinely lacks the fields.
-  const peeked = peekPlaylistDetail(id)
-  const d = peeked && ('cover_image_url' in peeked || 'cover_image' in peeked)
-    ? peeked
+  // request for the same playlist. With nothing cached it goes through
+  // getPlaylist too, so the Playlists grid's cover loader and the startup
+  // prefetch share one fetch instead of racing a full + an omit_cover_image
+  // request for every playlist. Only falls back to the full fetch if that
+  // response genuinely lacks the cover fields.
+  const detail = peekPlaylistDetail(id) ?? await getPlaylist(id)
+  const d = 'cover_image_url' in detail || 'cover_image' in detail
+    ? detail
     : await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/`)
   const trackImages = (d.items ?? []).slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
   // cover_image_url/cover_image can be a site-relative pointer (the same
   // "/assets/x.jpg" shape a song's image_url uses, e.g. for era-linked
-  // covers) rather than an absolute URL — resolve it here so every caller
+  // covers) rather than an absolute URL - resolve it here so every caller
   // gets a directly loadable src instead of each having to know the shape.
   const entry: PlaylistCoverEntry = {
     cover_image_url: buildImageUrl(d.cover_image_url) ?? null,
@@ -447,16 +661,23 @@ export function peekPlaylistDetail(id: number): PlaylistDetail | undefined {
   return playlistDetailCache.get(id)
 }
 
-// Cache key for a playlist's persisted detail response — kept in sync with
+// Cache key for a playlist's persisted detail response - kept in sync with
 // mutations below so offline reads never show a stale-past-the-last-edit copy.
 const playlistDetailUrl = (id: number): string => `${LIBRARY_BASE}/playlists/${id}/?omit_cover_image=true`
 
-// Single request — tracks + cover in one response
-export async function getPlaylist(id: number): Promise<PlaylistDetail> {
+const playlistDetailInFlight = new Map<number, Promise<PlaylistDetail>>()
+
+// Single request - tracks + cover in one response. Concurrent callers for the
+// same id share the in-flight request.
+export function getPlaylist(id: number): Promise<PlaylistDetail> {
+  const pending = playlistDetailInFlight.get(id)
+  if (pending) return pending
   const url = playlistDetailUrl(id)
-  const result = await request<PlaylistDetail>(url, {}, true, url)
-  playlistDetailCache.set(id, result)
-  return result
+  const p = request<PlaylistDetail>(url, {}, true, url)
+    .then((result) => { playlistDetailCache.set(id, result); return result })
+    .finally(() => playlistDetailInFlight.delete(id))
+  playlistDetailInFlight.set(id, p)
+  return p
 }
 
 export async function renamePlaylist(id: number, name: string): Promise<PlaylistDetail> {
@@ -487,28 +708,6 @@ export async function getPublicPlaylist(id: number): Promise<PlaylistDetail> {
   return result
 }
 
-export async function getPublicProfile(userId: number): Promise<PublicProfile> {
-  const url = `${ACCOUNT_BASE}/profile/${userId}/`
-  return request(url, { method: 'GET' }, false, url)
-}
-
-export async function getNowPlaying(userId: number): Promise<NowPlayingResponse> {
-  const url = `${ACCOUNT_BASE}/profile/${userId}/np/`
-  return request(url, { method: 'GET' }, false)
-}
-
-export async function updateNowPlaying(
-  nowPlaying: { song: number; path?: string; position?: number } | null,
-): Promise<AccountUser> {
-  const url = `${ACCOUNT_BASE}/account/me/`
-  const result = await request<AccountUser>(url, {
-    method: 'PATCH',
-    body: JSON.stringify({ now_playing: nowPlaying ?? {} }),
-  })
-  cacheSet(url, result)
-  return result
-}
-
 /** Fetch cover of a public playlist without authentication. */
 export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverEntry> {
   const cached = playlistCoverCache.get(id)
@@ -521,7 +720,7 @@ export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverE
 }
 
 export async function uploadPlaylistCover(id: number, file: File): Promise<PlaylistDetail> {
-  // Compress to max 400px / 200 KB before encoding — prevents large covers in future
+  // Compress to max 400px / 200 KB before encoding - prevents large covers in future
   const base64 = await compressImageFile(file).catch(() =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader()
@@ -599,13 +798,18 @@ export async function removeFromPlaylist(id: number, songId: number): Promise<vo
 }
 
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'reversed'
-export type CompProposalChangeType = 'upload' | 'replace' | 'move' | 'delete' | 'create_folder'
+export type CompProposalChangeType =
+  | 'upload' | 'replace' | 'move' | 'delete' | 'create_folder'
+  | 'rename_folder' | 'move_folder' | 'delete_folder'
 
 // Only the underscored ones need spelling out; everything else reads fine as
 // the raw enum. Lives here rather than in one of the review components because
 // four separate places render this badge.
 const COMP_CHANGE_LABELS: Record<string, string> = {
   create_folder: 'new folder',
+  rename_folder: 'rename folder',
+  move_folder: 'move folder',
+  delete_folder: 'delete folder',
 }
 
 export function compChangeTypeLabel(type: string): string {
@@ -711,6 +915,7 @@ export interface AdminUser {
   role: string
   contributor_enabled: boolean
   manager_enabled?: boolean
+  news_enabled?: boolean
   discord_id: string
   discord_username: string
   discord_avatar: string
@@ -743,7 +948,7 @@ export function applicationType(app: Pick<EditorApplication, 'application_type'>
 /** The caller's application *of one kind*.
  *
  *  `type` is sent as a query param for a backend that can narrow, and the
- *  result is filtered client-side regardless — the endpoint historically
+ *  result is filtered client-side regardless - the endpoint historically
  *  returned "the" single application, and a page that blocks on the wrong kind
  *  strands the user (an editor rejection is not a reason to refuse a
  *  contributor application, and vice versa). Filtering here means the worst
@@ -779,7 +984,7 @@ function myProposalsUrl(channel?: string): string {
   return url.toString()
 }
 
-// Cached (offline-fallback) like the other "list my stuff" reads — this is
+// Cached (offline-fallback) like the other "list my stuff" reads - this is
 // the tab a signed-in editor lands on, and it shouldn't go blank just because
 // the request raced a flaky connection.
 export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
@@ -819,7 +1024,7 @@ export async function withdrawProposal(id: number): Promise<void> {
   cacheDelete(myProposalsUrl())
 }
 
-// Withdraws a proposal and immediately re-creates it with the same data —
+// Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
   await withdrawProposal(p.id)
@@ -846,7 +1051,7 @@ export async function getLeaderboard(): Promise<Array<{
 
 
 // Cached per status filter (each filter value is its own URL, so its own
-// cache entry) — offline fallback only. Not actively invalidated by
+// cache entry) - offline fallback only. Not actively invalidated by
 // adminReviewProposal/adminReverseProposal: those change which filtered list
 // an item belongs to, and a review queue is re-fetched right after acting on
 // it anyway (see AdminPage), so the tiny staleness window only ever shows up
@@ -915,6 +1120,7 @@ export async function adminUpdateUser(userId: number, payload: {
   role?: 'editor' | 'contributor' | 'manager' | 'applicant'
   contributor_enabled?: boolean
   manager_enabled?: boolean
+  news_enabled?: boolean
   is_active?: boolean
   auto_approve_proposals?: boolean
   auto_approve_comp_proposals?: boolean
@@ -936,13 +1142,13 @@ export async function confirmOtpSetup(otpToken: string): Promise<{ otp_enabled: 
   })
 }
 
-// Same path as request(), minus the JSON Content-Type — the browser has to set
+// Same path as request(), minus the JSON Content-Type - the browser has to set
 // its own multipart boundary. Everything else (error parsing, offline cache
 // fallback) comes from apiClient like every other call in this module.
 // Comp-file contributions (proposals, the admin review queue, file history)
 // hang off routes that are newer than the rest of this module. Everything the
 // feature touches is gated on this one flag the way lib/newsApi gates `/news/`
-// — flip it to false and the contributor role disappears from the UI instead
+// - flip it to false and the contributor role disappears from the UI instead
 // of leading users to forms that fail on submit.
 export const CONTRIBUTOR_ENABLED = true
 
@@ -968,7 +1174,7 @@ export function showStaffProfile(account: AccountUser | null): boolean {
 
 export function staffProfileView(account: AccountUser | null): ViewType {
   if (!account) return 'api-tracker'
-  // Everyone with review duties lands on the editor profile — it's the personal
+  // Everyone with review duties lands on the editor profile - it's the personal
   // page (your own song edits, your own comp files) and it embeds the review
   // queue as a tab. Pointing managers straight at the review panel instead cost
   // them any way to reach their own proposals, since this is the single profile
@@ -1022,7 +1228,7 @@ export async function createCompProposal(form: FormData): Promise<CompFilePropos
 }
 
 /** Same call as createCompProposal, but over XHR so the upload body's progress
- *  is observable — fetch() reports nothing until the whole request has been
+ *  is observable - fetch() reports nothing until the whole request has been
  *  sent, which is useless for the multi-hundred-megabyte zips this endpoint
  *  takes. Returns an abort handle so a queued upload can be cancelled. */
 export function createCompProposalUpload(form: FormData, opts: {
@@ -1043,7 +1249,7 @@ export function createCompProposalUpload(form: FormData, opts: {
         catch { reject(new Error('Upload succeeded but the response was unreadable')) }
         return
       }
-      // DRF answers with {"detail": …} or {"field": ["…"]} — surface whichever
+      // DRF answers with {"detail": …} or {"field": ["…"]} - surface whichever
       // is there rather than a bare status code.
       let msg = `Upload failed (HTTP ${xhr.status})`
       try {

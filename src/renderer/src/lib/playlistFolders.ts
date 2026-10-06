@@ -99,6 +99,13 @@ export function toServerFolders(folders: PlaylistFolder[]): ServerPlaylistFolder
   }))
 }
 
+/** Whether pushing `local` would send exactly the folder list the profile
+ *  already holds (same folders, names and synced members, in order). */
+export function foldersMatchServer(local: PlaylistFolder[], server: ServerPlaylistFolder[]): boolean {
+  const wire = server.map(({ id, name, playlist_ids }) => ({ id, name, playlist_ids }))
+  return JSON.stringify(toServerFolders(local)) === JSON.stringify(wire)
+}
+
 /** Drops member keys that no longer point at a real playlist (deleted since),
  *  and folders left empty by that pruning stay — an empty folder is still a
  *  folder the user made. Returns the SAME array reference when nothing changed

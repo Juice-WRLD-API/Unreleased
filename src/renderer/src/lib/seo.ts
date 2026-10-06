@@ -110,6 +110,8 @@ const ROUTES: Record<ViewType, SeoEntry> = {
   'shared-playlist': { title: 'Shared playlist', description: 'A playlist shared from unreleased.', noindex: true },
   'public-profile': { title: 'Profile', description: 'A public unreleased user profile.', noindex: true },
   chat: { path: '/chat', title: 'Chat', description: 'Staff chat.', noindex: true },
+  terminal: { path: '/terminal', title: 'Terminal', description: 'Administrator console.', noindex: true },
+  track: { title: 'Track', description: 'A Juice WRLD song on unreleased.', noindex: true },
   'not-found': { title: 'Page not found', description: 'This page does not exist.', noindex: true },
 }
 

@@ -32,6 +32,8 @@ export interface FullTrack extends Track {
   notes: string | null
   ext: string
   error?: string
+  /** Lyrics are still being fetched - keeps WRLD from collapsing to its no-lyrics layout meanwhile. */
+  lyricsPending?: boolean
   // File technical info
   sampleRate?: number
   bitrate?: number
@@ -141,4 +143,4 @@ export interface SyncedLyricLine {
   text: string
 }
 
-export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'local-editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'editor-profile' | 'docs' | 'wrld' | 'library' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'public-profile' | 'chat' | 'not-found'
+export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'local-editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'editor-profile' | 'docs' | 'wrld' | 'library' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'public-profile' | 'chat' | 'terminal' | 'track' | 'not-found'

@@ -7,15 +7,23 @@ import type { ChatUserBrief } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
 import { decodeLocalNotice, decodeNewsShare, decodePlaylistShare, decodeSongInfoShare, decodeSongShare, decodeThemeShare } from '../../lib/chatShare'
+import type { CommandCardPayload } from '../../lib/chatShare'
 import { useChatStore, useModerationNotice, type RoomRef, type UiMessage } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { EMOJI_IMG } from './emoji'
 import rehypeChatEmoji from './emojiRehype'
+import BroadcastHistoryCard from './BroadcastHistoryCard'
+import ChangelogCard from './ChangelogCard'
 import FeedbackSentCard from './FeedbackSentCard'
 import HelpCard from './HelpCard'
+import LinkPreviewCard from './LinkPreviewCard'
 import { linkMentions } from './people'
 import { useOpenUserCard } from './UserCard'
 import NewsShareCard from './NewsShareCard'
+import NowPlayingHistoryCard from './NowPlayingHistoryCard'
+import NowPlayingNowCard from './NowPlayingNowCard'
+import ResultCard from './ResultCard'
+import ServerCommandCard, { isKnownServerCard } from './ServerCommandCard'
 import PlaylistShareCard from './PlaylistShareCard'
 import SongInfoCard from './SongInfoCard'
 import SongShareCard from './SongShareCard'
@@ -80,6 +88,21 @@ function MarkdownText({ text, people, meId }: { text: string; people: ChatUserBr
 
 const MemoMarkdown = memo(MarkdownText)
 
+// A command's card. These only ever come from this client's own local notices
+// (see postLocalNotice) - never from chat text, which anyone could write.
+export function CommandCard({ card, room, messageId }: { card: CommandCardPayload; room?: RoomRef; messageId?: number }): JSX.Element | null {
+  switch (card.kind) {
+    case 'help': return <HelpCard room={room} messageId={messageId} />
+    case 'themeList': return <ThemeListCard room={room} messageId={messageId} />
+    case 'broadcastHistory': return <BroadcastHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} />
+    case 'changelog': return <ChangelogCard room={room} messageId={messageId} status={card.status} />
+    case 'npHistory': return <NowPlayingHistoryCard room={room} messageId={messageId} items={card.items} total={card.total} capped={card.capped} user={card.user} />
+    case 'result': return <ResultCard room={room} messageId={messageId} title={card.title} text={card.text} />
+    case 'npNow': return <NowPlayingNowCard room={room} messageId={messageId} user={card.user} song={card.song} name={card.name} updatedAt={card.updated_at} />
+    default: return null
+  }
+}
+
 export default function MessageBody({ message, people, room }: { message: UiMessage; people: ChatUserBrief[]; room?: RoomRef }): JSX.Element | null {
   const meId = useChatStore((s) => s.meId)
   const decrypted = useChatStore((s) => (message.is_encrypted ? s.plain[message.id] : undefined))
@@ -93,11 +116,13 @@ export default function MessageBody({ message, people, room }: { message: UiMess
 
   if (message.local && room) {
     const notice = decodeLocalNotice(message.content)
-    if (notice?.kind === 'help') return <HelpCard room={room} messageId={message.id} />
-    if (notice?.kind === 'themeList') return <ThemeListCard room={room} messageId={message.id} />
     if (notice?.kind === 'feedbackSent') return <FeedbackSentCard room={room} messageId={message.id} message={notice.message} />
-    return null
+    return notice ? <CommandCard card={notice} room={room} messageId={message.id} /> : null
   }
+
+  // A command card posted to the room. It comes from the message's own `card`
+  // field, which only the server can set - never decoded out of `content`.
+  if (!message.is_encrypted && isKnownServerCard(message.card)) return <ServerCommandCard card={message.card} />
 
   if (!message.is_encrypted) {
     const afterReply = splitReplyRef(message.content).body
@@ -113,7 +138,13 @@ export default function MessageBody({ message, people, room }: { message: UiMess
     if (info) return <SongInfoCard info={info} />
     const theme = decodeThemeShare(body)
     if (theme) return <ThemeShareCard theme={theme} />
-    return moderation ? <ModerationCard notice={moderation} /> : <MemoMarkdown text={body} people={people} meId={meId} />
+    if (moderation) return <ModerationCard notice={moderation} />
+    // Channel messages only. A preview is fetched through our server, which
+    // would see the URL - fine for a room it already relays in plaintext, not
+    // for a DM, so DMs (and anything encrypted, below) never get one.
+    return message.channel != null
+      ? <><MemoMarkdown text={body} people={people} meId={meId} /><LinkPreviewCard text={body} /></>
+      : <MemoMarkdown text={body} people={people} meId={meId} />
   }
 
   if (!message.ciphertext && message.id > 0 && !decrypted) return null
@@ -132,8 +163,27 @@ export default function MessageBody({ message, people, room }: { message: UiMess
       </p>
     )
   }
-  if (!decrypted.text) return null
-  const decryptedAfterReply = splitReplyRef(decrypted.text).body
+  const content = decryptedContent(decrypted.text, people, meId)
+  if (!decrypted.unverified) return content
+  return <>{content}<UnverifiedBadge /></>
+}
+
+// A v2 message whose sender signature, sender device or attachment list
+// didn't check out. Shown rather than hidden, so nothing silently vanishes.
+function UnverifiedBadge(): JSX.Element {
+  return (
+    <p
+      className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400"
+      title="The sender's signature on this message could not be verified. It may not be from the device it claims."
+    >
+      <ShieldAlert size={10} />Couldn&apos;t verify sender
+    </p>
+  )
+}
+
+function decryptedContent(text: string, people: ChatUserBrief[], meId: number | null): JSX.Element | null {
+  if (!text) return null
+  const decryptedAfterReply = splitReplyRef(text).body
   const decryptedBody = splitForwardRef(decryptedAfterReply).body
   if (!decryptedBody) return null
   const decryptedSong = decodeSongShare(decryptedBody)

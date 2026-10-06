@@ -55,6 +55,11 @@ export function shareOrigin(): string {
   return IS_ELECTRON ? 'https://player.juicewrldapi.com' : window.location.origin
 }
 
+/** Public, shareable URL for a single song's /track/<id> page. */
+export function trackShareUrl(songId: number): string {
+  return `${shareOrigin()}/track/${songId}`
+}
+
 // True when the page is running as an installed PWA (launched from the home
 // screen / app icon) rather than in a browser tab.
 export function isStandalonePWA(): boolean {

@@ -61,14 +61,17 @@ function mentionRegex(people: ChatUserBrief[]): RegExp | null {
   return new RegExp(`(^|[\\s(])@(${usernames.join('|')})(?=[^\\w]|$)`, 'gi')
 }
 
-export function mentionIdsIn(text: string, people: ChatUserBrief[]): number[] {
+// `allowEveryone` is false for a sender without mention_everyone: @everyone
+// then expands to nobody instead of an explicit mention of every member,
+// which the server would otherwise accept as ordinary per-user mentions.
+export function mentionIdsIn(text: string, people: ChatUserBrief[], allowEveryone = true): number[] {
   const re = mentionRegex(people)
   if (!re) return []
   const ids = new Set<number>()
   for (const match of text.matchAll(re)) {
     const handle = match[2].toLowerCase()
     if (handle === EVERYONE_HANDLE) {
-      for (const p of people) ids.add(p.id)
+      if (allowEveryone) for (const p of people) ids.add(p.id)
       continue
     }
     const user = people.find((p) => p.username.toLowerCase() === handle)
@@ -77,12 +80,16 @@ export function mentionIdsIn(text: string, people: ChatUserBrief[]): number[] {
   return [...ids]
 }
 
+// Display names are user-chosen; escaped so one containing `]`, `(`, `*` etc.
+// can't close the mention link early and inject its own markdown/link.
+const escapeLinkText = (s: string): string => s.replace(/[\\[\]()*_~`<>]/g, '\\$&')
+
 export function linkMentions(text: string, people: ChatUserBrief[]): string {
   const re = mentionRegex(people)
   if (!re || !text.includes('@')) return text
   return text.replace(re, (whole, lead: string, handle: string) => {
     if (handle.toLowerCase() === EVERYONE_HANDLE) return `${lead}[@everyone](mention:everyone)`
     const user = people.find((p) => p.username.toLowerCase() === handle.toLowerCase())
-    return user ? `${lead}[@${displayName(user)}](mention:${user.id})` : whole
+    return user ? `${lead}[@${escapeLinkText(displayName(user))}](mention:${user.id})` : whole
   })
 }

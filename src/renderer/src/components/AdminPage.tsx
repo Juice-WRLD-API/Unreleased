@@ -1,250 +1,115 @@
-import { useEffect, useState, useCallback, useMemo, useDeferredValue, memo } from 'react'
+import { useState, memo, useEffect, useMemo } from 'react'
 import {
   ChevronLeft, Users, Clock, CheckCircle, XCircle, ShieldCheck, BarChart2,
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
-  ChevronDown, ChevronUp, Shield, TrendingUp, MessageSquare, Calendar,
-  Hash, Minus, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
-  Flag, History, Play, Radio, Server,
+  ChevronDown, ChevronUp, Shield, MessageSquare, Calendar,
+  Hash, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
+  History, Play,
 } from 'lucide-react'
-import { apiFetch, songToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
+import { apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { navigateFromWindow } from '../lib/windowSync'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { useStore, useStorePick } from '../store/useStore'
+import { displayName } from '../store/chatStore'
+import { discordHandle } from '../lib/format'
 import * as userApi from '../lib/userApi'
-import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
-import * as reportsApi from '../lib/reportsApi'
-import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
-import { invalidateLyricsCache } from './Player'
-import { navigateFromWindow } from '../lib/windowSync'
-import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, buildHaystack, matchesHaystack, CopyButton } from './adminShared'
+import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, ProposalDiff } from './adminShared'
 import ReportsTab from './ReportsTab'
 import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
-import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
+import { useStaffRoles } from '../hooks/useStaffRoles'
+import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
+import { useOtpGate } from '../hooks/useOtpGate'
+import { useVisitedTabs } from '../hooks/useVisitedTabs'
+import { useReviseProposalForm } from '../hooks/useReviseProposalForm'
+import { useProposalsTabData } from '../hooks/useProposalsTabData'
+import { useAdminUsersList } from '../hooks/useAdminUsersList'
+import { useAdminStats } from '../hooks/useAdminStats'
+import { TEXTAREA_FIELDS, ALL_SONG_FIELDS, PROPOSAL_FILTERS, PROPOSAL_SORTS, PROPOSAL_PAGE } from '../lib/proposalRevise'
+import RoleBadges from './RoleBadges'
 
-type Tab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes'
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
-function renderValue(v: unknown): string {
-  if (v == null || v === '') return '(empty)'
-  if (typeof v === 'string') return v
-  if (Array.isArray(v)) return v.length ? v.join('\n') : '(empty)'
-  if (typeof v === 'boolean') return v ? 'true' : 'false'
-  return JSON.stringify(v, null, 2)
-}
-
-const LONG_KEYS = new Set(['lyrics', 'synced_lyrics', 'description', 'notes', 'additional_information'])
-const LONG_THRESHOLD = 200
-
-// ── Diff ──────────────────────────────────────────────────────────────────────
-
-function FieldDiff({ fieldKey, before, after }: { fieldKey: string; before: unknown; after: unknown }): JSX.Element {
-  const beforeStr = renderValue(before)
-  const afterStr  = renderValue(after)
-  const unchanged = beforeStr === afterStr
-  const isLong    = LONG_KEYS.has(fieldKey) || beforeStr.length > LONG_THRESHOLD || afterStr.length > LONG_THRESHOLD
-  // synced_lyrics is LRC — default expanded so content is visible immediately
-  const [exp, setExp] = useState(!isLong || fieldKey === 'synced_lyrics')
-  const MAX = fieldKey === 'synced_lyrics' ? 60 : 8
-
-  const sliceLong = (s: string) => {
-    const lines = s.split('\n')
-    if (exp || lines.length <= MAX) return { lines, clipped: false }
-    return { lines: lines.slice(0, MAX), clipped: true, total: lines.length }
-  }
-
-  const b = sliceLong(beforeStr)
-  const a = sliceLong(afterStr)
-  const hasBefore = before !== undefined && !unchanged
-  const sideBySide = hasBefore && !unchanged
-
-  return (
-    <div className="rounded-lg overflow-hidden border border-[var(--border)] text-[11px]">
-      {/* Field header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-surface-raised border-b border-[var(--border)]">
-        <span className="font-mono text-[10px] text-text-muted tracking-tight">{fieldKey.replace(/_/g, ' ')}</span>
-        <div className="flex items-center gap-2">
-          {unchanged && (
-            <>
-              <span className="text-[9px] italic text-text-muted">unchanged</span>
-              <CopyButton text={afterStr} label={fieldKey} />
-            </>
-          )}
-          {isLong && (
-            <button onClick={() => setExp(e => !e)} className="text-[10px] text-accent/70 hover:text-accent">
-              {exp ? 'collapse' : 'expand'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Side-by-side before / after */}
-      {sideBySide && (
-        <div className="grid grid-cols-2 divide-x divide-[var(--border)]">
-          {/* Before */}
-          <div className="bg-red-500/8 min-w-0">
-            <div className="flex items-center gap-1.5 px-3 py-1 border-b border-red-500/15">
-              <Minus size={9} className="text-red-500 shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wide text-red-500 flex-1">Before</span>
-              <CopyButton text={beforeStr} label={`${fieldKey} (before)`} />
-            </div>
-            <div className="px-3 py-2">
-              {b.lines.map((line, i) => (
-                <pre key={i} className="font-mono text-red-500 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-              ))}
-              {'clipped' in b && b.clipped && (
-                <p className="text-[9px] text-red-400 italic mt-1">+{(b as { total?: number }).total! - MAX} more lines</p>
-              )}
-            </div>
-          </div>
-
-          {/* After */}
-          <div className="bg-emerald-500/8 min-w-0">
-            <div className="flex items-center gap-1.5 px-3 py-1 border-b border-emerald-500/15">
-              <Plus size={9} className="text-emerald-600 shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-600 flex-1">After</span>
-              <CopyButton text={afterStr} label={`${fieldKey} (after)`} />
-            </div>
-            <div className="px-3 py-2">
-              {a.lines.map((line, i) => (
-                <pre key={i} className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-              ))}
-              {'clipped' in a && a.clipped && (
-                <p className="text-[9px] text-emerald-500 italic mt-1">+{(a as { total?: number }).total! - MAX} more lines</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* New value only (no snapshot) */}
-      {!unchanged && !hasBefore && (
-        <div className="bg-emerald-500/8">
-          <div className="flex items-center gap-1.5 px-3 py-1 border-b border-emerald-500/15">
-            <Plus size={9} className="text-emerald-600 shrink-0" />
-            <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-600 flex-1">Value</span>
-            <CopyButton text={afterStr} label={fieldKey} />
-          </div>
-          <div className="px-3 py-2">
-            {a.lines.map((line, i) => (
-              <pre key={i} className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Unchanged */}
-      {unchanged && (
-        <div className="px-3 py-2">
-          <pre className="font-mono text-text-muted whitespace-pre-wrap break-words leading-relaxed">
-            {exp ? afterStr : afterStr.slice(0, 120) + (afterStr.length > 120 ? '…' : '')}
-          </pre>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Memoized: a proposal touching lyrics renders two full lyric bodies side by
-// side, and this sits in the same component as the search box — so without it
-// every keystroke re-rendered the entire diff of whatever was selected.
-const ProposalDiff = memo(function ProposalDiff({ proposal }: { proposal: SongEditProposal }): JSX.Element {
-  const entries = Object.entries(proposal.proposed_data || {})
-  if (!entries.length) return <p className="text-text-muted text-xs italic p-4">No field data.</p>
-  const snap = proposal.original_snapshot || {}
-  return (
-    <div className="space-y-2 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-3">
-        Changes · {entries.length} field{entries.length !== 1 ? 's' : ''}
-      </p>
-      {entries.map(([k, v]) => <FieldDiff key={k} fieldKey={k} before={snap[k]} after={v} />)}
-    </div>
-  )
-})
+type Tab = AdminTab
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 // `embedded` renders the page as a panel inside another view (the editor
-// profile's Admin tab) — no back button, page title, or window-control
+// profile's Admin tab) - no back button, page title, or window-control
 // clearance, since the host view owns that chrome.
-export default function AdminPage({ embedded = false }: { embedded?: boolean }): JSX.Element {
-  const { account, loadAccount, showNowPlaying, showQueue, activeChannel, channels, activeAdminTab, setActiveAdminTab } = useStorePick('account', 'loadAccount', 'showNowPlaying', 'showQueue', 'activeChannel', 'channels', 'activeAdminTab', 'setActiveAdminTab')
-  // Renders inside the profile page, which can itself be a pop-out window —
-  // setActiveView would go nowhere there. See navigateFromWindow.
+export default function AdminPage({ embedded = false, initialTab, onExit }: {
+  embedded?: boolean
+  /** Which section to show - used by EditorProfileView's managerOnly mobile
+   *  landing (the only remaining embedded caller). Standalone falls back to
+   *  the URL-derived tab below instead. */
+  initialTab?: AdminTab
+  /** Embedded-only: lets the host (EditorProfileView) close this panel and
+   *  return to its own page. */
+  onExit?: () => void
+}): JSX.Element {
+  const { account, loadAccount, showNowPlaying, showQueue, setActiveAdminTab, activeChannel, channels, activeAdminTab } = useStorePick('account', 'loadAccount', 'showNowPlaying', 'showQueue', 'setActiveAdminTab', 'activeChannel', 'channels', 'activeAdminTab')
+  // Pop-out windows don't own the view state - setActiveView would go nowhere
+  // there. See navigateFromWindow.
   const go = navigateFromWindow
-  // The header's rightmost controls (refresh + tabs) sit at the same corner
-  // as the custom frameless-window buttons (see WindowControls in App.tsx,
-  // fixed top-right). Without extra clearance they render underneath them —
-  // only needed when this page actually reaches the window's right edge, i.e.
-  // no side panel is open to its right (mirrors NowPlaying's same check).
   const isElectron = navigator.userAgent.includes('Electron')
+  // The frameless window's controls sit over the top-right corner.
   const needsWindowControlClearance = !embedded && isElectron && !showNowPlaying && !showQueue
-  const isFullAdmin = !!account?.is_administrator
-  // Scoped to the active channel, not "any channel" — a manager grant on one
+  // Falls back to the standalone console's own deep link (see
+  // ADMIN_TAB_PATHS) when nobody passed an explicit initialTab - only
+  // relevant when not embedded, since the embedded panel has no URL of its
+  // own and always arrives with an explicit initialTab from its host
+  // (e.g. EditorProfileView's Admin tile) instead.
+  const effectiveInitialTab = initialTab ?? (embedded ? undefined : activeAdminTab ?? undefined)
+  // Scoped to the active channel, not "any channel" - a manager grant on one
   // channel shouldn't leave this nav/content visible (and then erroring) on
   // a channel they don't actually manage. See useChannelRoles for the same
   // pattern used elsewhere.
-  const isManager = userApi.isChannelManager(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
-  const canAccessStaff = isFullAdmin || isManager
+  const { isAdmin: isFullAdmin, canReviewStaff: canAccessStaff } = useStaffRoles(account, activeChannel, channels)
   const otpEnabled = !!account?.otp_enabled
 
-  const [tab,          setTab]          = useState<Tab>(() => activeAdminTab ?? 'proposals')
-  const [loading,      setLoading]      = useState(false)
-  const [error,        setError]        = useState<string | null>(null)
-  const [refreshKey,   setRefreshKey]   = useState(0)
-  const [applications, setApplications] = useState<EditorApplication[]>([])
-  const [propStatus,   setPropStatus]   = useState<ProposalStatus | ''>('pending')
-  const [proposals,    setProposals]    = useState<SongEditProposal[]>([])
-  const [users,        setUsers]        = useState<AdminUser[]>([])
-  const [reportStatus, setReportStatus] = useState<SongReportStatus | ''>('pending')
-  const [reports,      setReports]      = useState<SongReportRow[]>([])
+  const {
+    tab, setTab,
+    loading, error,
+    applications, setApplications,
+    propStatus, setPropStatus,
+    proposals, setProposals,
+    users, setUsers,
+    reportStatus, setReportStatus,
+    reports, setReports,
+    refresh,
+    nav,
+  } = useAdminQueue({
+    canLoad: canAccessStaff,
+    isFullAdmin,
+    gateNonProposalTabs: true,
+    activeChannel,
+    initialTab: effectiveInitialTab ?? 'proposals',
+    // No Security tab for managers: it renders a flat "2FA is enabled", which
+    // the OTP gate below guarantees for admins and can't guarantee for them.
+    managerNavIds: ['proposals', 'comp-proposals'],
+  })
 
-  const load = useCallback(async () => {
-    if (!canAccessStaff) return
-    setLoading(true); setError(null)
-    try {
-      if (tab === 'proposals') {
-        setProposals(await userApi.adminListProposals(propStatus || undefined, activeChannel))
-      } else if (isFullAdmin && tab === 'applications') {
-        setApplications(await userApi.adminListApplications())
-      } else if (isFullAdmin && tab === 'reports') {
-        setReports(await reportsApi.listSongReports(reportStatus || undefined))
-      } else if (isFullAdmin && (tab === 'users' || tab === 'stats')) {
-        setUsers(await userApi.adminListUsers())
-        if (tab === 'stats') {
-          setApplications(await userApi.adminListApplications())
-          setProposals(await userApi.adminListProposals(undefined, activeChannel))
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load')
-      // Don't leave the previous channel's/tab's data on screen underneath the
-      // error — it's stale and its action buttons (approve/reject etc.) would
-      // still be live against the wrong channel context.
-      if (tab === 'proposals') setProposals([])
-      else if (tab === 'applications') setApplications([])
-      else if (tab === 'reports') setReports([])
-      else if (tab === 'users' || tab === 'stats') setUsers([])
-    }
-    finally { setLoading(false) }
-  }, [tab, canAccessStaff, isFullAdmin, propStatus, reportStatus, activeChannel])
+  // No more overview grid - every section already has its own deep link
+  // (see ADMIN_TAB_PATHS) and its own entry point on the profile page's
+  // Admin tile, so a second, in-page "pick a section" screen was a
+  // redundant extra hop rather than a real navigation aid. AdminPage now
+  // just shows whichever single section it was asked for, directly, but
+  // still offers a compact in-page tab row below to move between sections
+  // without leaving the page (embedded mode only ever switches local state;
+  // standalone also updates the URL so the switch is a real deep link).
+  const activeNavItem = nav.find(n => n.id === tab)
+  const switchTab = (t: AdminTab): void => {
+    setTab(t)
+    if (!embedded) setActiveAdminTab(t)
+  }
 
-  useEffect(() => { load() }, [load, refreshKey])
-
-  // A stat box on the Editor/Contributor profile's Admin tile deep-links here
-  // via activeAdminTab rather than a prop — this page can mount fresh (the
-  // normal case, navigated to from elsewhere) or already be showing (this
-  // effect still catches that). Cleared right after so a later manual tab
-  // click, or just remounting this page later, doesn't get overridden by a
-  // stale deep link.
-  useEffect(() => {
-    if (activeAdminTab == null) return
-    setTab(activeAdminTab)
-    setActiveAdminTab(null)
-  }, [activeAdminTab, setActiveAdminTab])
+  // Each tab's content, once mounted, stays mounted (just hidden) instead of
+  // being torn down and rebuilt every time you switch away and back - an
+  // unmount/remount was re-triggering every <img> in the tab (avatars, song
+  // art) on every single switch, which for a list of any size fired hundreds
+  // of redundant image requests for data that hadn't changed.
+  const visited = useVisitedTabs(tab)
 
   if (!canAccessStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
@@ -256,7 +121,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
 
   // Admins only, deliberately. A manager approving proposals is making the same
   // kind of irreversible change, so gating them on 2FA as well would be the
-  // right call — but they can't satisfy it: GET accounts/otp/setup/ answers
+  // right call - but they can't satisfy it: GET accounts/otp/setup/ answers
   // "Administrator access required.", so a manager with otp_enabled false would
   // be parked in front of a panel whose first request 403s, with no way through
   // to the review queues. Enforcing this is the API's job; don't tighten it here
@@ -269,74 +134,54 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
     </div>
   )
 
-  const pendingApps    = applications.filter(a => a.status === 'pending').length
-  const pendingProps   = tab !== 'proposals' ? proposals.filter(p => p.status === 'pending').length : 0
-  const pendingReports = tab !== 'reports' ? reports.filter(r => r.status === 'pending').length : 0
-
-  type NavItem = { id: Tab; label: string; icon: React.ReactNode; badge?: number }
-  const fullNav: NavItem[] = [
-    { id: 'proposals',    label: 'Song edits',   icon: <FileEdit size={13} />,   badge: pendingProps || undefined },
-    ...(CONTRIBUTOR_ENABLED ? [{ id: 'comp-proposals' as const, label: 'Comp files', icon: <FileCheck size={13} /> }] : []),
-    { id: 'applications', label: 'Applications', icon: <Clock size={13} />,      badge: pendingApps || undefined },
-    { id: 'reports',      label: 'Reports',      icon: <Flag size={13} />,       badge: pendingReports || undefined },
-    { id: 'users',        label: 'Users',        icon: <Users size={13} /> },
-    { id: 'stats',        label: 'Stats',        icon: <TrendingUp size={13} /> },
-    { id: 'eras',         label: 'Eras',         icon: <Calendar size={13} /> },
-    { id: 'channels',     label: 'Channels',     icon: <Radio size={13} /> },
-    { id: 'cdn-nodes',    label: 'CDN nodes',    icon: <Server size={13} /> },
-    { id: 'security',     label: 'Security',     icon: <Shield size={13} /> },
-  ]
-  // No Security tab for managers: it renders a flat "2FA is enabled", which the
-  // gate above guarantees for admins and can't guarantee for them.
-  const nav = isFullAdmin
-    ? fullNav
-    : fullNav.filter(n => n.id === 'proposals' || n.id === 'comp-proposals')
-
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className={`shrink-0 flex items-center gap-3 pb-0 border-b border-[var(--border)] ${embedded ? 'px-4' : 'px-6'}`}
-        style={{ paddingTop: needsWindowControlClearance ? 36 : embedded ? 4 : 16, paddingRight: needsWindowControlClearance ? 148 : undefined }}>
-        {!embedded && (
+      <div className={`shrink-0 flex items-center gap-3 py-1.5 ${nav.length > 1 ? '' : 'border-b border-[var(--border)]'} ${embedded ? 'px-4' : 'px-6'}`}
+        style={needsWindowControlClearance ? { paddingTop: 36, paddingRight: 148 } : undefined}>
+        {embedded && onExit ? (
+          <button onClick={onExit}
+            className="flex items-center gap-1.5 p-1.5 -ml-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary text-xs font-semibold">
+            <ChevronLeft size={16} /> Dashboard
+          </button>
+        ) : !embedded ? (
           <button onClick={() => go('api-tracker')}
-            className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary mb-3">
+            className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary">
             <ChevronLeft size={16} />
           </button>
+        ) : null}
+        <div className="min-w-0 flex-1 truncate">
+          <span className="text-text-primary font-bold text-sm">{activeNavItem?.label ?? (isFullAdmin ? 'Admin' : 'Manager')}</span>
+          {!embedded && account?.discord_username && (
+            <span className="text-text-muted text-xs ml-2">{account.discord_username}</span>
+          )}
+        </div>
+        {/* A tab's data loads once per visit (see the sig comment in
+            useAdminQueue) rather than refetching every time it's reselected -
+            this is the explicit way back to fresh data instead. */}
+        {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+          <button onClick={() => refresh()} disabled={loading} title="Refresh"
+            className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          </button>
         )}
-        {!embedded && (
-          <div className="mb-3">
-            <span className="text-text-primary font-bold text-sm">{isFullAdmin ? 'Admin' : 'Manager'}</span>
-            {account?.discord_username && (
-              <span className="text-text-muted text-xs ml-2">{account.discord_username}</span>
-            )}
-          </div>
-        )}
-        <button onClick={() => setRefreshKey(k => k + 1)} disabled={loading}
-          className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary mb-3 disabled:opacity-40">
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-        </button>
+      </div>
 
-        {/* Tabs — scroll horizontally rather than wrap/overflow on narrow
-            (mobile) widths, where six of them don't fit. */}
-        <div className="flex items-end gap-0 ml-2 min-w-0 flex-1 overflow-x-auto">
-          {nav.map(n => (
-            <button key={n.id} onClick={() => setTab(n.id)}
-              className={`relative flex items-center gap-1.5 px-4 py-3 text-[12px] font-medium transition-colors border-b-2 shrink-0 whitespace-nowrap ${
-                tab === n.id
-                  ? 'text-accent border-accent'
-                  : 'text-text-muted hover:text-text-primary border-transparent'
+      {nav.length > 1 && (
+        <div className={`shrink-0 flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] scrollbar-none ${embedded ? 'px-4' : 'px-6'}`}>
+          {nav.map(item => (
+            <button key={item.id} onClick={() => switchTab(item.id)}
+              className={`shrink-0 flex items-center gap-1.5 px-2 py-1 my-0.5 rounded-lg text-[11px] font-semibold transition-colors ${
+                tab === item.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
               }`}>
-              <span className={tab === n.id ? 'text-accent' : ''}>{n.icon}</span>
-              {n.label}
-              {n.badge ? (
-                <span className="bg-accent text-[var(--bg)] text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1">
-                  {n.badge > 9 ? '9+' : n.badge}
-                </span>
-              ) : null}
+              {item.label}
+              {!!item.badge && (
+                <span className="text-[9px] font-bold px-1 min-w-[14px] text-center rounded-full bg-accent/20 text-accent">{item.badge}</span>
+              )}
             </button>
           ))}
         </div>
-      </div>
+      )}
 
       {error && (
         <div className="mx-6 mt-3 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs shrink-0">
@@ -346,7 +191,7 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
 
       {/* The tab body stays mounted through a reload (switching the reports/
           proposals status filter, hitting refresh, etc.) instead of being
-          replaced by a spinner — that was unmounting things like the status
+          replaced by a spinner - that was unmounting things like the status
           filter chips and each tab's local state (selection, draft notes,
           cached song lookups) on every refetch. A translucent overlay signals
           the load without tearing the UI down. */}
@@ -356,30 +201,70 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
             <Loader2 size={20} className="animate-spin text-text-muted" />
           </div>
         )}
-        {tab === 'proposals'    && <ProposalsTab
-          proposals={proposals}
-          status={propStatus}
-          setStatus={setPropStatus}
-          onChanged={() => setRefreshKey(k => k + 1)}
-          onReviewed={(updated) => setProposals(prev => {
-            const next = prev.map(p => p.id === updated.id ? updated : p)
-            return propStatus && updated.status !== propStatus ? next.filter(p => p.id !== updated.id) : next
-          })}
-          channel={activeChannel}
-        />}
-        {tab === 'comp-proposals' && <CompProposalsTab embedded onChanged={() => setRefreshKey(k => k + 1)} />}
-        {tab === 'applications' && <ApplicationsTab
-          applications={applications}
-          onChanged={() => setRefreshKey(k => k + 1)}
-          onReviewed={(updated) => setApplications(prev => prev.map(a => a.id === updated.id ? updated : a))}
-        />}
-        {tab === 'reports'      && <ReportsTab reports={reports} status={reportStatus} setStatus={setReportStatus} onChanged={() => setRefreshKey(k => k + 1)} />}
-        {tab === 'users'        && <UsersTab users={users} onChanged={() => setRefreshKey(k => k + 1)} currentUserId={account?.id} />}
-        {tab === 'stats'        && <StatsTab applications={applications} proposals={proposals} users={users} />}
-        {tab === 'eras'         && <EraTab />}
-        {tab === 'channels'     && <ChannelsTab />}
-        {tab === 'cdn-nodes'    && <CdnNodesTab />}
-        {tab === 'security'     && <SecurityTab />}
+        {visited.has('proposals') && (
+          <div className={tab === 'proposals' ? 'h-full' : 'hidden'}>
+            <ProposalsTab
+              proposals={proposals}
+              status={propStatus}
+              setStatus={setPropStatus}
+              onChanged={() => refresh()}
+              onReviewed={(updated) => setProposals(prev => {
+                const next = prev.map(p => p.id === updated.id ? updated : p)
+                return propStatus && updated.status !== propStatus ? next.filter(p => p.id !== updated.id) : next
+              })}
+              channel={activeChannel}
+            />
+          </div>
+        )}
+        {visited.has('comp-proposals') && (
+          <div className={tab === 'comp-proposals' ? 'h-full' : 'hidden'}>
+            <CompProposalsTab embedded onChanged={() => refresh()} />
+          </div>
+        )}
+        {visited.has('applications') && (
+          <div className={tab === 'applications' ? 'h-full' : 'hidden'}>
+            <ApplicationsTab
+              applications={applications}
+              onChanged={() => refresh()}
+              onReviewed={(updated) => setApplications(prev => prev.map(a => a.id === updated.id ? updated : a))}
+            />
+          </div>
+        )}
+        {visited.has('reports') && (
+          <div className={tab === 'reports' ? 'h-full' : 'hidden'}>
+            <ReportsTab reports={reports} status={reportStatus} setStatus={setReportStatus} onChanged={() => refresh()} />
+          </div>
+        )}
+        {visited.has('users') && (
+          <div className={tab === 'users' ? 'h-full' : 'hidden'}>
+            <UsersTab users={users} onChanged={() => refresh()} currentUserId={account?.id} />
+          </div>
+        )}
+        {visited.has('stats') && (
+          <div className={tab === 'stats' ? 'h-full' : 'hidden'}>
+            <StatsTab applications={applications} proposals={proposals} users={users} />
+          </div>
+        )}
+        {visited.has('channels') && (
+          <div className={tab === 'channels' ? 'h-full' : 'hidden'}>
+            <ChannelsTab />
+          </div>
+        )}
+        {visited.has('eras') && (
+          <div className={tab === 'eras' ? 'h-full' : 'hidden'}>
+            <EraTab />
+          </div>
+        )}
+        {visited.has('cdn-nodes') && (
+          <div className={tab === 'cdn-nodes' ? 'h-full' : 'hidden'}>
+            <CdnNodesTab />
+          </div>
+        )}
+        {visited.has('security') && (
+          <div className={tab === 'security' ? 'h-full' : 'hidden'}>
+            <SecurityTab />
+          </div>
+        )}
       </div>
     </div>
   )
@@ -388,75 +273,16 @@ export default function AdminPage({ embedded = false }: { embedded?: boolean }):
 
 // ── Revise Panel ──────────────────────────────────────────────────────────────
 
-const TEXTAREA_FIELDS = new Set(['lyrics', 'synced_lyrics', 'notes', 'additional_information', 'description'])
-const ALL_SONG_FIELDS = [
-  'name','track_titles','credited_artists','producers','engineers',
-  'recording_locations','record_dates','length','bitrate','additional_information',
-  'file_names','instrumentals','instrumental_names','preview_date','release_date',
-  'dates','session_titles','session_tracking','lyrics','synced_lyrics',
-  'album','date_leaked','leak_type',
-]
-
 function RevisePanel({ proposal, onClose, onDone, channel }: {
   proposal: SongEditProposal
   onClose: () => void
   onDone:  () => void
   channel?: string
 }): JSX.Element {
-  const [fields,  setFields]  = useState<Record<string, string>>(() => {
-    const init: Record<string, string> = {}
-    Object.entries(proposal.proposed_data || {}).forEach(([k, v]) => {
-      init[k] = Array.isArray(v) ? v.join('\n') : (typeof v === 'string' ? v : JSON.stringify(v))
-    })
-    return init
-  })
-  const [reviewNote, setReviewNote] = useState('')
-  const [addKey,     setAddKey]     = useState('')
-  const [saving,     setSaving]     = useState(false)
-  const [err,        setErr]        = useState<string | null>(null)
-
-  // Fields that are available to add (in snapshot but not already in the working set)
-  const snap = proposal.original_snapshot || {}
-  const available = ALL_SONG_FIELDS.filter(k => !(k in fields))
-
-  const addField = (key: string) => {
-    if (!key) return
-    const snapVal = snap[key]
-    const init = Array.isArray(snapVal) ? (snapVal as string[]).join('\n')
-                : typeof snapVal === 'string' ? snapVal : ''
-    setFields(f => ({ ...f, [key]: init }))
-    setAddKey('')
-  }
-
-  const removeField = (key: string) => {
-    setFields(f => { const n = { ...f }; delete n[key]; return n })
-  }
-
-  const submit = async () => {
-    setSaving(true); setErr(null)
-    try {
-      // Convert back — track_titles is array
-      const revised_data: Record<string, unknown> = {}
-      Object.entries(fields).forEach(([k, v]) => {
-        if (k === 'track_titles') {
-          revised_data[k] = v.split('\n').map(s => s.trim()).filter(Boolean)
-        } else {
-          revised_data[k] = v
-        }
-      })
-      await userApi.adminReviewProposal(proposal.id, {
-        action: 'revise',
-        review_notes: reviewNote,
-        revised_data,
-        channel,
-      })
-      onDone()
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to revise')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const {
+    fields, reviewNote, setReviewNote, addKey, setAddKey, saving, err,
+    snap, available, addField, removeField, setFieldValue, submit,
+  } = useReviseProposalForm(proposal, channel, onDone)
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden border-l-2 border-accent/30 bg-[var(--surface)]">
@@ -464,7 +290,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
       <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border)] bg-[var(--surface-raised)]">
         <Pencil size={13} className="text-accent" />
         <span className="text-text-primary text-xs font-semibold flex-1">Revise proposal</span>
-        <button onClick={onClose} className="p-1 rounded text-text-muted hover:text-text-primary transition-colors">
+        <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted hover:text-text-primary transition-colors">
           <XIcon size={14} />
         </button>
       </div>
@@ -482,7 +308,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
             {TEXTAREA_FIELDS.has(key) ? (
               <textarea
                 value={val}
-                onChange={e => setFields(f => ({ ...f, [key]: e.target.value }))}
+                onChange={e => setFieldValue(key, e.target.value)}
                 rows={key === 'lyrics' || key === 'synced_lyrics' ? 10 : 4}
                 className="w-full bg-[var(--surface)] text-text-primary text-xs font-mono px-3 py-2.5 resize-none focus:outline-none focus:bg-[var(--surface-raised)] transition-colors"
               />
@@ -490,7 +316,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
               <input
                 type="text"
                 value={val}
-                onChange={e => setFields(f => ({ ...f, [key]: e.target.value }))}
+                onChange={e => setFieldValue(key, e.target.value)}
                 className="w-full bg-[var(--surface)] text-text-primary text-xs px-3 py-2.5 focus:outline-none focus:bg-[var(--surface-raised)] transition-colors"
               />
             )}
@@ -570,37 +396,45 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
 // ── Proposals (master-detail) ─────────────────────────────────────────────────
 
-type ProposalSort = 'date' | 'user'
-
-function sortProposals(rows: SongEditProposal[], sortBy: ProposalSort): SongEditProposal[] {
-  if (sortBy === 'date') return rows
-  return [...rows].sort((a, b) => {
-    const byUser = a.editor_username.localeCompare(b.editor_username, undefined, { sensitivity: 'base' })
-    if (byUser !== 0) return byUser
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  })
-}
-
-/** How many proposal rows to mount at once (see `shown` in ProposalsTab). */
-const PROPOSAL_PAGE = 400
-
 // Memoized because the list isn't windowed: with the status filter on "All"
 // it holds the whole proposal archive, and without this every keystroke in the
 // search box re-rendered every row that survived the filter. `onSelect` is
 // setSelected straight from useState, so its identity is stable and the memo
 // actually holds.
-const ProposalRow = memo(function ProposalRow({ item, active, showUserHeader, onSelect }: {
+const ProposalRow = memo(function ProposalRow({ item, active, showUserHeader, pendingCount, accepting, onSelect, onAcceptAll, onRejectAll }: {
   item: SongEditProposal
   active: boolean
   showUserHeader: boolean
+  /** Pending proposals by this user, across the whole (unfiltered-by-search)
+   *  list - drives whether the group header offers "Accept all". */
+  pendingCount: number
+  accepting: boolean
   onSelect: (p: SongEditProposal) => void
+  onAcceptAll: (editorId: number) => void
+  onRejectAll: (editorId: number) => void
 }): JSX.Element {
   const ss = STATUS_STYLE[item.status] ?? { border: 'border-l-transparent', text: 'text-text-muted', bg: '', dot: '' }
   return (
     <div>
       {showUserHeader && (
-        <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-text-muted bg-surface-overlay border-b border-[var(--border)] sticky top-0 z-[1]">
-          {item.editor_username}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay border-b border-[var(--border)] sticky top-0 z-[1]">
+          <span className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-text-muted">
+            {item.editor_username}
+          </span>
+          {pendingCount > 1 && (
+            <>
+            <button onClick={(e) => { e.stopPropagation(); onAcceptAll(item.editor_id) }} disabled={accepting}
+              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors disabled:opacity-40">
+              {accepting ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
+              Accept all ({pendingCount})
+            </button>
+            <button onClick={(e) => { e.stopPropagation(); onRejectAll(item.editor_id) }} disabled={accepting}
+              className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors disabled:opacity-40">
+              <XCircle size={10} />
+              Deny all ({pendingCount})
+            </button>
+            </>
+          )}
         </div>
       )}
       <button onClick={() => onSelect(item)}
@@ -641,49 +475,38 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
   const [notes,       setNotes]       = useState<Record<number, string>>({})
   const [selected,    setSelected]    = useState<SongEditProposal | null>(null)
   const [revising,    setRevising]    = useState(false)
-  const [sortBy,      setSortBy]      = useState<ProposalSort>('date')
-  const [query,       setQuery]       = useState('')
+  const [acceptingAllUser, setAcceptingAllUser] = useState<number | null>(null)
+
+  const {
+    sortBy, setSortBy, query, setQuery, sortedProposals, pageOf, remaining, setShown,
+    dropCache, setArchive, archive, archiveLoading, archiveError,
+    historyOpen, openHistory, expandedPast, setExpandedPast,
+    history, pastCount, loadingSongId, setLoadingSongId, playError, setPlayError,
+  } = useProposalsTabData(proposals, channel, selected)
   const { playTrack } = useStorePick('playTrack')
 
-  // Every proposal ever filed, fetched once and only when the history panel is
-  // first opened — /admin/proposals/ has no per-song filter, so "what else has
-  // been proposed for this song" means holding the whole archive and grouping
-  // client-side. Nulled after a review so the next open reflects it.
-  const [archive,        setArchive]        = useState<SongEditProposal[] | null>(null)
-  const [archiveLoading, setArchiveLoading] = useState(false)
-  const [archiveError,   setArchiveError]   = useState(false)
-  const [historyOpen,    setHistoryOpen]    = useState(false)
-  const [expandedPast,   setExpandedPast]   = useState<number | null>(null)
-
-  const [loadingSongId, setLoadingSongId] = useState<number | null>(null)
-  const [playError,     setPlayError]     = useState<string | null>(null)
-
-  // Searchable: the song title, who filed it, the change type, and both ids —
-  // the public song id is what reports and Discord threads cite, so pasting
-  // one should land on its proposal. Built once per fetch: under the "All"
-  // filter this list is the entire archive, and doing it inline in the filter
-  // meant re-flattening every row on every keystroke.
-  const haystacks = useMemo(() => {
-    const m = new Map<number, string>()
-    for (const p of proposals) {
-      m.set(p.id, buildHaystack(p.title, p.editor_username, p.change_type, p.song_public_id, p.id))
+  // Plays the song a proposal targets, so a reviewer can hear what they're
+  // approving without leaving the queue. Fetched per click rather than per
+  // selection - flipping through the list would otherwise fire a request for
+  // every row passed over.
+  const playProposalSong = async (songId: number): Promise<void> => {
+    setPlayError(null)
+    setLoadingSongId(songId)
+    try {
+      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+      const track = songToTrack(song)
+      // An unsurfaced song is a real catalog entry with no file behind it -
+      // the proposal is still reviewable, there's just nothing to play.
+      if (!track.path) { setPlayError('No file on this song to play'); return }
+      playTrack(track, [track])
+    } catch {
+      setPlayError('Could not load this song')
+    } finally {
+      setLoadingSongId(null)
     }
-    return m
-  }, [proposals])
+  }
 
-  // The filter runs against a deferred copy of the query, so a keystroke
-  // repaints the input immediately and React re-runs the list at a lower
-  // priority — typing stays smooth even when the match set is huge.
-  const deferredQuery = useDeferredValue(query)
-
-  const sortedProposals = useMemo(() => sortProposals(
-    deferredQuery.trim()
-      ? proposals.filter(p => matchesHaystack(deferredQuery, haystacks.get(p.id)))
-      : proposals,
-    sortBy,
-  ), [proposals, haystacks, sortBy, deferredQuery])
-
-  // Auto-select first item, and keep the selection inside the visible list —
+  // Auto-select first item, and keep the selection inside the visible list -
   // searching can otherwise filter out the proposal the detail pane's
   // Approve/Reject buttons are pointed at.
   useEffect(() => {
@@ -695,22 +518,15 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 
   // A refetch replaces the rows wholesale, so a half-written revision no
   // longer lines up with what's on screen. Typing in the search box must not
-  // trip this — that's why it keys off the raw list, not the filtered one.
+  // trip this - that's why it keys off the raw list, not the filtered one.
   useEffect(() => { setRevising(false) }, [proposals])
-
-  // Approving/reversing a proposal changes a song's live data — drop its
-  // cached lyrics so the next play reflects it.
-  const dropCache = (id: number) => {
-    const songId = proposals.find(p => p.id === id)?.song
-    if (songId != null) invalidateLyricsCache(songId)
-  }
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try {
       const updated = await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel })
       dropCache(id); setArchive(null)
-      // The endpoint hands back the updated row — apply it immediately rather
+      // The endpoint hands back the updated row - apply it immediately rather
       // than waiting on onChanged()'s full refetch, so the row leaves the
       // pending list (or updates its status badge) right away instead of
       // sitting there looking unactioned until the round-trip finishes.
@@ -732,79 +548,45 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     catch {} finally { setActionId(null) }
   }
 
-  const openHistory = () => {
-    const next = !historyOpen
-    setHistoryOpen(next)
-    if (!next || archive || archiveLoading) return
-    setArchiveLoading(true)
-    setArchiveError(false)
-    userApi.adminListProposals(undefined, channel)
-      .then(setArchive)
-      .catch(() => setArchiveError(true))
-      .finally(() => setArchiveLoading(false))
-  }
+  // Keyed off the full (unfiltered-by-search) list so the group header's
+  // count and the "Accept all" button reflect what's actually pending, not
+  // just what the search box happens to be showing.
+  const pendingByUser = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const x of proposals) {
+      if (x.status === 'pending') m.set(x.editor_id, (m.get(x.editor_id) ?? 0) + 1)
+    }
+    return m
+  }, [proposals])
 
-  // Plays the song a proposal targets, so a reviewer can hear what they're
-  // approving without leaving the queue. Fetched per click rather than per
-  // selection — flipping through the list would otherwise fire a request for
-  // every row passed over.
-  const playProposalSong = async (songId: number) => {
-    setPlayError(null)
-    setLoadingSongId(songId)
+  // Approves every pending proposal from one editor in sequence (not
+  // parallel - these mutate the same song's data, and later ones may build
+  // on fields an earlier one just touched). Each success is applied via
+  // onReviewed as it lands, same as a single Approve; a per-item failure is
+  // swallowed so one bad row doesn't stop the rest of the batch.
+  const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
+    const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
+    if (pending.length === 0) return
+    if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
+    setAcceptingAllUser(editorId)
     try {
-      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
-      // An unsurfaced song is a real catalog entry with no file behind it —
-      // the proposal is still reviewable, there's just nothing to play. A
-      // recording-session song with no `path` of its own may still resolve to
-      // a playable file through a session-edit link, same as songToTrack()
-      // itself already accounts for below.
-      if (!resolveSessionEditSource(song).path) { setPlayError('No file on this song to play'); return }
-      const track = songToTrack(song)
-      playTrack(track, [track])
-    } catch {
-      setPlayError('Could not load this song')
+      for (const item of pending) {
+        try {
+          const updated = await userApi.adminReviewProposal(item.id, { action, channel })
+          dropCache(item.id); setArchive(null)
+          onReviewed(updated)
+        } catch {}
+      }
+      onChanged()
     } finally {
-      setLoadingSongId(null)
+      setAcceptingAllUser(null)
     }
   }
 
-  const FILTERS: { id: ProposalStatus | ''; label: string }[] = [
-    { id: 'pending',  label: 'Pending'  },
-    { id: 'approved', label: 'Approved' },
-    { id: 'rejected', label: 'Rejected' },
-    { id: 'reversed', label: 'Reversed' },
-    { id: '',         label: 'All'      },
-  ]
-
-  const SORTS: { id: ProposalSort; label: string }[] = [
-    { id: 'date', label: 'Newest' },
-    { id: 'user', label: 'User' },
-  ]
+  const FILTERS = PROPOSAL_FILTERS
+  const SORTS = PROPOSAL_SORTS
 
   const p = selected
-
-  // Newest first, and it deliberately includes the proposal being viewed — the
-  // point is to read this one in the context of the run, so dropping it leaves
-  // a hole in the timeline. It's marked "viewing" instead.
-  const history = useMemo(() => {
-    if (!p?.song || !archive) return []
-    return archive
-      .filter(r => r.song === p.song)
-      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
-  }, [archive, p?.song])
-  const pastCount = Math.max(history.length - 1, 0)
-
-  // Both are about the proposal on screen, so neither should outlive it.
-  useEffect(() => { setExpandedPast(null); setPlayError(null) }, [p?.id])
-
-  // The list isn't windowed, and "All" can be the entire archive — mounting
-  // every row costs ~8 DOM nodes each before the user has even typed. Render a
-  // page at a time and let them ask for more; searching normally narrows the
-  // set well below the cap anyway.
-  const [shown, setShown] = useState(PROPOSAL_PAGE)
-  useEffect(() => { setShown(PROPOSAL_PAGE) }, [proposals, deferredQuery, sortBy])
-  const pageOf = sortedProposals.slice(0, shown)
-  const remaining = sortedProposals.length - pageOf.length
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -815,20 +597,20 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
           <div className="flex gap-1 flex-wrap items-center">
             {FILTERS.map(f => (
               <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
-                className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-colors ${
+                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
                   status === f.id
-                    ? 'bg-accent text-[var(--bg)]'
-                    : 'text-text-muted hover:text-text-muted bg-surface-overlay'
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
                 }`}>{f.label}
               </button>
             ))}
             <div className="ml-auto flex gap-1 shrink-0">
               {SORTS.map(s => (
                 <button key={s.id} onClick={() => setSortBy(s.id)}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-colors ${
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
                     sortBy === s.id
-                      ? 'bg-surface-overlay text-text-primary ring-1 ring-[var(--border)]'
-                      : 'text-text-muted hover:text-text-primary bg-transparent'
+                      ? 'bg-accent/15 text-accent'
+                      : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
                   }`}>{s.label}
                 </button>
               ))}
@@ -849,8 +631,12 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
               key={item.id}
               item={item}
               active={selected?.id === item.id}
-              showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_username !== item.editor_username)}
+              showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_id !== item.editor_id)}
+              pendingCount={pendingByUser.get(item.editor_id) ?? 0}
+              accepting={acceptingAllUser === item.editor_id}
               onSelect={setSelected}
+              onAcceptAll={(id) => doReviewAllForUser(id, 'approve')}
+              onRejectAll={(id) => doReviewAllForUser(id, 'reject')}
             />
           ))}
           {remaining > 0 && (
@@ -908,7 +694,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
                   </div>
                 </div>
 
-                {/* Play — outside the pending-only block below: hearing the
+                {/* Play - outside the pending-only block below: hearing the
                     song is just as useful when auditing something already
                     approved or reversed. */}
                 {p.song != null && (
@@ -989,7 +775,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
               )}
             </div>
 
-            {/* Song history — every proposal ever filed against this song, so a
+            {/* Song history - every proposal ever filed against this song, so a
                 reviewer can see whether a field has been fought over before,
                 or whether this editor is re-submitting something already
                 rejected. Read-only: expanding a row shows its diff in place
@@ -1066,8 +852,8 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
     setActionId(id)
     try {
       const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' })
-      // Apply the returned row immediately — same reasoning as ProposalsTab's
-      // doReview — instead of leaving it looking pending until onChanged()'s
+      // Apply the returned row immediately - same reasoning as ProposalsTab's
+      // doReview - instead of leaving it looking pending until onChanged()'s
       // refetch lands.
       onReviewed(updated)
       onChanged()
@@ -1094,9 +880,9 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
             <button key={item.id} onClick={() => setSelected(item)}
               className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 border-l-amber-500/60 transition-colors text-text-primary ${selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-2.5">
-                <Avatar src={item.discord_avatar} name={item.display_name || item.username} size={8} />
+                <Avatar src={item.discord_avatar} name={displayName(item)} size={8} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-text-primary text-xs font-semibold truncate">{item.display_name || item.username}</p>
+                  <p className="text-text-primary text-xs font-semibold truncate">{displayName(item)}</p>
                   <p className="text-text-muted text-[10px] truncate">{item.application_type} · {item.discord_username} · {relativeTime(item.created_at)}</p>
                 </div>
               </div>
@@ -1112,9 +898,9 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
             <button key={item.id} onClick={() => setSelected(item)}
               className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors text-text-primary opacity-60 ${selected?.id === item.id ? 'bg-accent/10 opacity-100' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-2.5">
-                <Avatar src={item.discord_avatar} name={item.display_name || item.username} size={7} />
+                <Avatar src={item.discord_avatar} name={displayName(item)} size={7} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-text-primary text-xs font-medium truncate">{item.display_name || item.username}</p>
+                  <p className="text-text-primary text-xs font-medium truncate">{displayName(item)}</p>
                   <p className="text-text-muted text-[10px]">{item.status} · {shortDate(item.reviewed_at)}</p>
                 </div>
               </div>
@@ -1129,10 +915,10 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
           <div className="flex-1 overflow-y-auto p-6 space-y-5">
             {/* User info */}
             <div className="flex items-start gap-4">
-              <Avatar src={a.discord_avatar} name={a.display_name || a.username} size={14} />
+              <Avatar src={a.discord_avatar} name={displayName(a)} size={14} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3 flex-wrap mb-1">
-                  <h2 className="text-text-primary text-lg font-bold">{a.display_name || a.username}</h2>
+                  <h2 className="text-text-primary text-lg font-bold">{displayName(a)}</h2>
                   <StatusChip status={a.status} />
                 </div>
                 <div className="flex items-center gap-4 text-xs text-text-muted flex-wrap">
@@ -1172,8 +958,8 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
 
             {/* Review notes */}
             {a.status === 'pending' && (
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</label>
+              <label className="space-y-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
                 <textarea
                   value={notes[a.id] || ''}
                   onChange={e => setNotes(n => ({ ...n, [a.id]: e.target.value }))}
@@ -1181,7 +967,7 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
                   rows={3}
                   className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
                 />
-              </div>
+              </label>
             )}
           </div>
         )}
@@ -1193,167 +979,173 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onChanged: () => void; currentUserId?: number }): JSX.Element {
-  const [actionId, setActionId] = useState<number | null>(null)
-  const [filter,   setFilter]   = useState<'all' | 'admins' | 'editors' | 'contributors' | 'managers' | 'applicants'>('all')
-  const [search,   setSearch]   = useState('')
+  const { actionId, filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, currentUserId, onChanged)
+  // Master/detail instead of one wide row per user - a click on the roster
+  // rail (left) drives which user's full stat/badge/action surface shows on
+  // the right, rather than every user's actions competing for space in a
+  // single dense line.
+  const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const doUpdate = async (uid: number, payload: Parameters<typeof userApi.adminUpdateUser>[1]) => {
-    setActionId(uid)
-    try { await userApi.adminUpdateUser(uid, payload); onChanged() }
-    catch {} finally { setActionId(null) }
-  }
+  // Keep a valid selection as filter/search narrows the roster - falls back
+  // to the first visible row, or nothing once the list is empty.
+  useEffect(() => {
+    if (selectedId != null && visible.some(u => u.user_id === selectedId)) return
+    setSelectedId(visible[0]?.user_id ?? null)
+  }, [visible, selectedId])
 
-  const FILTERS = [
-    { id: 'all' as const,        label: 'All',        count: users.length },
-    { id: 'admins' as const,     label: 'Admins',     count: users.filter(u => u.role === 'administrator').length },
-    { id: 'editors' as const,    label: 'Editors',    count: users.filter(u => u.role === 'editor').length },
-    // Contributors cuts across the role buckets rather than being one of them
-    // — contributor_enabled is a flag on top of a role, so a contributor is
-    // still counted under whichever of Admins/Editors/Applicants they are.
-    { id: 'contributors' as const, label: 'Contributors', count: users.filter(u => u.contributor_enabled).length },
-    { id: 'managers' as const, label: 'Managers', count: users.filter(u => !!u.manager_enabled).length },
-    { id: 'applicants' as const, label: 'Applicants', count: users.filter(u => u.role === 'applicant').length },
-  ]
-
-  const ROLE = {
-    administrator: 'text-accent bg-accent/15 border-accent/20',
-    editor:        'text-emerald-400 bg-emerald-500/15 border-emerald-500/20',
-    applicant:     'text-text-muted bg-surface-raised border-[var(--border)]',
-  } as Record<string, string>
-  const CONTRIBUTOR_BADGE = 'text-sky-400 bg-sky-500/15 border-sky-500/20'
-  const MANAGER_BADGE = 'text-amber-400 bg-amber-500/15 border-amber-500/20'
-
-  const visible = useMemo(() => users.filter(u => {
-    const ok = filter === 'all'
-      ? true
-      : filter === 'admins'
-        ? u.role === 'administrator'
-        : filter === 'editors'
-          ? u.role === 'editor'
-          : filter === 'contributors'
-            ? u.contributor_enabled
-            : filter === 'managers'
-              ? !!u.manager_enabled
-              : u.role === 'applicant'
-    const q = search.toLowerCase()
-    return ok && (!q || (u.discord_username || u.username || '').toLowerCase().includes(q))
-  }), [users, filter, search])
+  const selected = visible.find(u => u.user_id === selectedId) ?? null
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* Toolbar */}
-      <div className="shrink-0 flex items-center gap-3 px-6 py-3 border-b border-[var(--border)] bg-surface-raised">
-        <div className="flex gap-1">
-          {FILTERS.map(f => (
-            <button key={f.id} onClick={() => setFilter(f.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                filter === f.id ? 'bg-accent text-[var(--bg)] font-semibold' : 'text-text-muted hover:text-text-muted hover:bg-surface-overlay'
+    <div className="h-full flex overflow-hidden">
+      {/* Roster rail */}
+      <div className="w-[300px] shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
+        <div className="shrink-0 flex flex-col gap-2 p-3 border-b border-[var(--border)]">
+          <div className="flex flex-wrap gap-1">
+            {FILTERS.map(f => (
+              <button key={f.id} onClick={() => setFilter(f.id)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                  filter === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
+                }`}>
+                {f.label}
+                <span className={`text-[9px] px-1 rounded-full ${filter === f.id ? 'bg-accent/20' : 'bg-surface-raised'}`}>{f.count}</span>
+              </button>
+            ))}
+          </div>
+          <QueueSearch value={search} onChange={setSearch} placeholder="Search users…" matches={visible.length} total={users.length} />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {visible.length === 0 && <Empty label="No users" />}
+          {visible.map(u => (
+            <button key={u.user_id} onClick={() => setSelectedId(u.user_id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 border-b border-[var(--border)] text-left transition-colors ${
+                selectedId === u.user_id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               }`}>
-              {f.label}
-              <span className={`text-[9px] px-1 rounded ${filter === f.id ? 'bg-white/20' : 'bg-surface-raised'}`}>{f.count}</span>
+              <Avatar src={u.discord_avatar} name={discordHandle(u)} size={8} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-text-primary truncate flex items-center gap-1.5">
+                  {discordHandle(u)}
+                  {!u.is_active && <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />}
+                </p>
+                <div className="flex gap-1 flex-wrap mt-0.5">
+                  <RoleBadges isAdmin={u.role === 'administrator'} isManager={!!u.manager_enabled}
+                    isEditor={u.role === 'editor'} isContributor={u.contributor_enabled} />
+                  {u.role === 'applicant' && !u.contributor_enabled && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide text-text-muted bg-surface-raised">Applicant</span>
+                  )}
+                </div>
+              </div>
             </button>
           ))}
         </div>
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
-          className="ml-auto bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-1.5 text-text-primary text-xs focus:outline-none focus:border-accent/40 w-52" />
       </div>
 
-      {/* Table header */}
-      <div className="shrink-0 grid grid-cols-[auto_1fr_120px_100px_80px_minmax(220px,1fr)] items-center gap-3 px-6 py-2 border-b border-[var(--border)] bg-surface-raised">
-        {['', 'User', 'Role', 'Approved', 'Props', 'Actions'].map(h => (
-          <p key={h} className="text-[9px] font-bold uppercase tracking-widest text-text-muted">{h}</p>
-        ))}
-      </div>
-
-      {/* Rows */}
-      <div className="flex-1 overflow-y-auto">
-        {visible.length === 0 && <Empty label="No users" />}
-        {visible.map(u => (
-          <div key={u.user_id} className="grid grid-cols-[auto_1fr_120px_100px_80px_minmax(220px,1fr)] items-center gap-3 px-6 py-3 border-b border-[var(--border)] hover:bg-surface-raised transition-colors">
-            <Avatar src={u.discord_avatar} name={u.discord_username || u.username} size={8} />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-text-primary text-sm font-medium truncate">{u.discord_username || u.username}</p>
-                {!u.is_active && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded text-red-400 bg-red-500/15">disabled</span>}
-                {u.user_id === currentUserId && <span className="text-[9px] text-text-muted italic">you</span>}
+      {/* Detail panel */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {!selected ? <Empty label="Select a user" /> : (
+          <div className="max-w-2xl space-y-5">
+            <div className="flex items-center gap-4">
+              <Avatar src={selected.discord_avatar} name={discordHandle(selected)} size={16} />
+              <div className="min-w-0">
+                <h2 className="text-text-primary text-lg font-bold truncate flex items-center gap-2">
+                  {discordHandle(selected)}
+                  {!selected.is_active && <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded text-red-400 bg-red-500/15">disabled</span>}
+                  {selected.user_id === currentUserId && <span className="text-xs text-text-muted italic font-normal">you</span>}
+                </h2>
+                <p className="text-text-muted text-xs mt-0.5">
+                  Joined {shortDate(selected.date_joined)} · Last seen {relativeTime(selected.last_login)}
+                </p>
               </div>
-              <p className="text-text-muted text-[10px]">joined {shortDate(u.date_joined)}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-1">
-              {u.role !== 'administrator' && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${ROLE[u.role] ?? 'text-text-muted bg-surface-raised border-[var(--border)]'}`}>
-                  {u.role}
-                </span>
-              )}
-              {u.role === 'administrator' && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${ROLE.administrator}`}>
-                  administrator
-                </span>
-              )}
-              {u.contributor_enabled && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${CONTRIBUTOR_BADGE}`}>
-                  contributor
-                </span>
-              )}
-              {!!u.manager_enabled && (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase border ${MANAGER_BADGE}`}>
-                  manager
-                </span>
+
+            <div className="flex flex-wrap gap-1.5">
+              <RoleBadges isAdmin={selected.role === 'administrator'} isManager={!!selected.manager_enabled}
+                isEditor={selected.role === 'editor'} isContributor={selected.contributor_enabled} />
+              {selected.role === 'applicant' && !selected.contributor_enabled && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide text-text-muted bg-surface-raised">Applicant</span>
               )}
             </div>
-            <p className="text-text-primary text-sm font-semibold">{u.approved_count}</p>
-            <p className="text-text-muted text-sm">{u.proposal_count}</p>
-            <div className="flex items-center gap-1 flex-wrap justify-end">
-              {actionId === u.user_id ? (
-                <Loader2 size={13} className="animate-spin text-text-muted" />
-              ) : u.user_id !== currentUserId && u.role !== 'administrator' ? (
+
+            <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
+              <span><span className="text-text-primary font-bold">{selected.approved_count}</span> <span className="text-text-muted">approved</span></span>
+              <span><span className="text-text-primary font-bold">{selected.proposal_count}</span> <span className="text-text-muted">proposals</span></span>
+              {selected.contributor_enabled && (
                 <>
-                  {u.role === 'editor' && (
-                    <label className="flex items-center gap-1 text-[10px] text-text-muted cursor-pointer mr-2 hover:text-text-muted">
-                      <input type="checkbox" checked={u.auto_approve_proposals}
-                        onChange={e => doUpdate(u.user_id, { auto_approve_proposals: e.target.checked })}
-                        className="w-3 h-3 accent-[var(--accent)]" />
-                      auto
-                    </label>
-                  )}
-                  {u.contributor_enabled && (
-                    <label className="flex items-center gap-1 text-[10px] text-text-muted cursor-pointer mr-2 hover:text-text-muted">
-                      <input type="checkbox" checked={u.auto_approve_comp_proposals}
-                        onChange={e => doUpdate(u.user_id, { auto_approve_comp_proposals: e.target.checked })}
-                        className="w-3 h-3 accent-[var(--accent)]" />
-                      auto
-                    </label>
-                  )}
-                  {u.role === 'editor' ? (
-                    <button onClick={() => doUpdate(u.user_id, { role: 'applicant' })}
-                      className="px-2 py-1 rounded text-[10px] text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors font-medium">−Editor</button>
-                  ) : (
-                    <button onClick={() => doUpdate(u.user_id, { role: 'editor' })}
-                      className="px-2 py-1 rounded text-[10px] text-emerald-400 hover:bg-emerald-500/10 transition-colors font-medium">+Editor</button>
-                  )}
-                  {u.contributor_enabled ? (
-                    <button onClick={() => doUpdate(u.user_id, { contributor_enabled: false })}
-                      className="px-2 py-1 rounded text-[10px] text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors font-medium">−Contrib</button>
-                  ) : (
-                    <button onClick={() => doUpdate(u.user_id, { contributor_enabled: true })}
-                      className="px-2 py-1 rounded text-[10px] text-emerald-400 hover:bg-emerald-500/10 transition-colors font-medium">+Contrib</button>
-                  )}
-                  {u.manager_enabled ? (
-                    <button onClick={() => doUpdate(u.user_id, { manager_enabled: false })}
-                      className="px-2 py-1 rounded text-[10px] text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors font-medium">−Manager</button>
-                  ) : (
-                    <button onClick={() => doUpdate(u.user_id, { manager_enabled: true })}
-                      className="px-2 py-1 rounded text-[10px] text-emerald-400 hover:bg-emerald-500/10 transition-colors font-medium">+Manager</button>
-                  )}
-                  <button onClick={() => doUpdate(u.user_id, { is_active: !u.is_active })}
-                    className="px-2 py-1 rounded text-[10px] text-text-muted hover:text-text-muted hover:bg-surface-raised transition-colors font-medium">
-                    {u.is_active ? 'Disable' : 'Enable'}
-                  </button>
+                  <span><span className="text-text-primary font-bold">{selected.comp_approved_count}</span> <span className="text-text-muted">comp approved</span></span>
+                  <span><span className="text-text-primary font-bold">{selected.comp_proposal_count}</span> <span className="text-text-muted">comp proposals</span></span>
                 </>
-              ) : <span className="text-text-muted text-[10px]">—</span>}
+              )}
             </div>
+
+            {selected.badges.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selected.badges.map(b => (
+                  <span key={b.slug} title={b.description}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-overlay text-[11px] text-text-secondary">
+                    <span>{b.icon}</span>{b.name}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {actionId === selected.user_id ? (
+              <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Updating…</div>
+            ) : canAct(selected) ? (
+              <div className="space-y-4">
+                {(selected.role === 'editor' || selected.contributor_enabled) && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                    {selected.role === 'editor' && (
+                      <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                        Song edit proposals
+                        <input type="checkbox" checked={selected.auto_approve_proposals}
+                          onChange={e => doUpdate(selected.user_id, { auto_approve_proposals: e.target.checked })}
+                          className="w-4 h-4 accent-[var(--accent)]" />
+                      </label>
+                    )}
+                    {selected.contributor_enabled && (
+                      <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                        Comp file proposals
+                        <input type="checkbox" checked={selected.auto_approve_comp_proposals}
+                          onChange={e => doUpdate(selected.user_id, { auto_approve_comp_proposals: e.target.checked })}
+                          className="w-4 h-4 accent-[var(--accent)]" />
+                      </label>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-2">Role & status</p>
+                  <div className="space-y-1.5 mb-3">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+                    {([
+                      ['Editor', selected.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
+                      ['Contributor', !!selected.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
+                      ['Manager', !!selected.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
+                      ['News', !!selected.news_enabled, (on: boolean) => ({ news_enabled: on })],
+                    ] as const).map(([label, checked, payload]) => (
+                      <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                        {label}
+                        <input type="checkbox" checked={checked}
+                          onChange={e => doUpdate(selected.user_id, payload(e.target.checked))}
+                          className="w-4 h-4 accent-[var(--accent)]" />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => doUpdate(selected.user_id, { is_active: !selected.is_active })}
+                      className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
+                      {selected.is_active ? 'Disable account' : 'Enable account'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-text-muted text-xs italic">
+                {selected.user_id === currentUserId ? "You can't modify your own account here." : 'Administrators can only be modified elsewhere.'}
+              </p>
+            )}
           </div>
-        ))}
+        )}
       </div>
     </div>
   )
@@ -1364,23 +1156,18 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
 function StatsTab({ applications, proposals, users }: {
   applications: EditorApplication[]; proposals: SongEditProposal[]; users: AdminUser[]
 }): JSX.Element {
-  const approved    = proposals.filter(p => p.status === 'approved').length
-  const reviewed    = proposals.filter(p => p.status !== 'pending').length
-  const approvalPct = reviewed > 0 ? Math.round(approved / reviewed * 100) : 0
-  const editors     = users.filter(u => u.role === 'editor')
-  const managers    = users.filter(u => !!u.manager_enabled)
-  const topEditors  = [...editors].sort((a, b) => b.approved_count - a.approved_count).slice(0, 8)
+  const { approved, approvalPct, editors, managers, topEditors, pendingProposals, pendingApplications, applicants } = useAdminStats(applications, proposals, users)
 
   const metrics = [
-    { label: 'Total users',       value: users.length,                                             color: 'text-accent',        icon: <Users size={16} /> },
-    { label: 'Editors',           value: editors.length,                                           color: 'text-emerald-400',   icon: <UserCheck size={16} /> },
-    { label: 'Managers',          value: managers.length,                                          color: 'text-amber-400',     icon: <Shield size={16} /> },
-    { label: 'Total proposals',   value: proposals.length,                                         color: 'text-blue-400',      icon: <FileEdit size={16} /> },
-    { label: 'Approved',          value: approved,                                                  color: 'text-emerald-400',   icon: <FileCheck size={16} /> },
-    { label: 'Pending proposals', value: proposals.filter(p => p.status === 'pending').length,     color: 'text-amber-400',     icon: <Clock size={16} /> },
-    { label: 'Pending apps',      value: applications.filter(a => a.status === 'pending').length,  color: 'text-amber-400',     icon: <Clock size={16} /> },
-    { label: 'Approval rate',     value: `${approvalPct}%`,                                        color: 'text-purple-400',    icon: <Activity size={16} /> },
-    { label: 'Applicants',        value: users.filter(u => u.role === 'applicant').length,          color: 'text-text-muted', icon: <Users size={16} /> },
+    { label: 'Total users',       value: users.length,        color: 'text-accent',        icon: <Users size={16} /> },
+    { label: 'Editors',           value: editors.length,      color: 'text-emerald-400',   icon: <UserCheck size={16} /> },
+    { label: 'Managers',          value: managers.length,     color: 'text-amber-400',     icon: <Shield size={16} /> },
+    { label: 'Total proposals',   value: proposals.length,    color: 'text-blue-400',      icon: <FileEdit size={16} /> },
+    { label: 'Approved',          value: approved,            color: 'text-emerald-400',   icon: <FileCheck size={16} /> },
+    { label: 'Pending proposals', value: pendingProposals,    color: 'text-amber-400',     icon: <Clock size={16} /> },
+    { label: 'Pending apps',      value: pendingApplications, color: 'text-amber-400',     icon: <Clock size={16} /> },
+    { label: 'Approval rate',     value: `${approvalPct}%`,   color: 'text-purple-400',    icon: <Activity size={16} /> },
+    { label: 'Applicants',        value: applicants,          color: 'text-text-muted',    icon: <Users size={16} /> },
   ]
 
   return (
@@ -1404,9 +1191,9 @@ function StatsTab({ applications, proposals, users }: {
                 <span className={`text-sm font-black w-6 text-center shrink-0 ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-700' : 'text-text-muted'}`}>
                   {i + 1}
                 </span>
-                <Avatar src={u.discord_avatar} name={u.discord_username || u.username} size={8} />
+                <Avatar src={u.discord_avatar} name={discordHandle(u)} size={8} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-text-primary text-xs font-semibold truncate">{u.discord_username || u.username}</p>
+                  <p className="text-text-primary text-xs font-semibold truncate">{discordHandle(u)}</p>
                   <p className="text-text-muted text-[10px]">{u.proposal_count} total</p>
                 </div>
                 <div className="text-right">
@@ -1443,22 +1230,7 @@ function SecurityTab(): JSX.Element {
 // ── OTP Setup ─────────────────────────────────────────────────────────────────
 
 function OtpSetupPanel({ onEnabled }: { onEnabled: () => Promise<void> }): JSX.Element {
-  const [setup,      setSetup]      = useState<userApi.OtpSetupPayload | null>(null)
-  const [loading,    setLoading]    = useState(true)
-  const [code,       setCode]       = useState('')
-  const [confirming, setConfirming] = useState(false)
-  const [error,      setError]      = useState<string | null>(null)
-
-  useEffect(() => {
-    userApi.getOtpSetup().then(setSetup).catch(e => setError(e instanceof Error ? e.message : 'Could not load')).finally(() => setLoading(false))
-  }, [])
-
-  const confirm = async () => {
-    setConfirming(true); setError(null)
-    try { await userApi.confirmOtpSetup(code); await onEnabled() }
-    catch (e) { setError(e instanceof Error ? e.message : 'Verification failed') }
-    finally { setConfirming(false) }
-  }
+  const { setup, loading, code, setCode, confirming, error, confirm } = useOtpGate(onEnabled)
 
   if (loading) return <div className="flex items-center justify-center h-32"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
   if (!setup) return <p className="text-red-400 text-sm">Could not load OTP setup.</p>
@@ -1480,14 +1252,14 @@ function OtpSetupPanel({ onEnabled }: { onEnabled: () => Promise<void> }): JSX.E
           <code className="block bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-xs font-mono break-all">{setup.otp_secret}</code>
         </div>
       )}
-      <div>
-        <label className="block text-xs font-semibold text-text-muted mb-1.5">Verification code</label>
+      <label className="block">
+        <span className="block text-xs font-semibold text-text-muted mb-1.5">Verification code</span>
         <input type="text" inputMode="numeric" value={code}
-          onChange={e => { setCode(e.target.value); setError(null) }}
+          onChange={e => setCode(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && confirm()} placeholder="123456"
           className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-4 py-2.5 text-text-primary text-base focus:outline-none focus:border-accent/50 font-mono tracking-[0.5em] text-center"
         />
-      </div>
+      </label>
       {error && (
         <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}

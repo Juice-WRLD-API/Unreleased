@@ -1,3 +1,5 @@
+import type { ChangelogStatus } from './appVersion'
+import type { BroadcastMessage } from './broadcastApi'
 import { isColor, SKIN_OPTIONAL_VAR_KEYS, SKIN_VAR_META, type Skin, type SkinVars } from './skins'
 
 // A song share rides in a chat message's plain `content` (or, for DMs, the
@@ -361,6 +363,12 @@ export type LocalNoticePayload =
   | { kind: 'help' }
   | { kind: 'themeList' }
   | { kind: 'feedbackSent'; message: string }
+  | { kind: 'broadcastHistory'; items: BroadcastMessage[]; total: number }
+  | { kind: 'changelog'; status: ChangelogStatus }
+  | { kind: 'npHistory'; items: { song: number; name: string; played_at: string }[]; total: number; capped: boolean; user?: string }
+  | { kind: 'npNow'; user: string; song: number; name: string; updated_at: string }
+  // A command's plain answer ("Muted X", "Theme set to Y") as a card.
+  | { kind: 'result'; title: string; text: string }
 
 export function encodeLocalNotice(payload: LocalNoticePayload): string {
   return `${LOCAL_NOTICE_PREFIX}${JSON.stringify(payload)}`
@@ -375,9 +383,18 @@ export function decodeLocalNotice(content: string): LocalNoticePayload | null {
   }
 }
 
+// What a command card shows - every payload except the private confirmation.
+// These live only in the sender's own client (see postLocalNotice): the server
+// stores chat text verbatim and posts as whoever sent it, so a card carried in
+// message text could be written by anyone and nothing about it could be trusted.
+// With `-s` the room gets either a card the server builds itself (see
+// ServerCommandCard) or, where the server doesn't have the data, a plain-text
+// version (see commandCardText).
+export type CommandCardPayload = Exclude<LocalNoticePayload, { kind: 'feedbackSent' }>
+
 // Plain-text summary for surfaces that can't render the rich card (notification
-// banners, OS notifications) - falls through the three share types before
-// treating the content as a regular message.
+// banners, OS notifications) - falls through the share types before treating
+// the content as a regular message.
 export function shareSummaryText(content: string): string | null {
   if (decodeSongShare(content)) return 'Shared a song'
   const playlist = decodePlaylistShare(content)

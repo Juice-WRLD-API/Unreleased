@@ -27,6 +27,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { registerPlayerCommandHandler, runPlayerCommand } from '../lib/windowSync'
 import { eventToCombo, resolveAction, getAction, effectiveGlobalBinding, comboToAccelerator, registerHotkeyDispatch, HOTKEY_ACTIONS } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
+import { takeEqAnchor } from '../lib/eqAnchor'
 import { apiFetch, smallCoverUrl, JWApiSong } from '../lib/juicewrldApi'
 import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
 import { rememberRecentTrack } from '../lib/recentTracks'
@@ -515,6 +516,12 @@ export default function Player(): JSX.Element {
         const offlineMeta = useStore.getState().offlineTracks[currentTrack.id]
         if (offlineMeta) {
           setCurrentTrackFull({ ...synthetic, albumArt: offlineMeta.imageUrl ?? synthetic.albumArt, lyrics: offlineMeta.lyrics, syncedLyrics: offlineMeta.syncedLyrics })
+        } else {
+          // Flagged pending so WRLD's layout doesn't read the still-null
+          // lyrics as "this song has none" and snap to the centered,
+          // no-lyrics arrangement before the fetch below has a chance to say
+          // otherwise.
+          setCurrentTrackFull({ ...synthetic, lyricsPending: true })
         }
         apiFetch<JWApiSong>(`/songs/${songId}/`)
           .then((song) => {
@@ -524,7 +531,7 @@ export default function Player(): JSX.Element {
             if (isStale()) return
             setCurrentTrackFull({ ...synthetic, lyrics, syncedLyrics })
           })
-          .catch(() => {/* no network — offline snapshot (if any) already applied above */})
+          .catch(() => { if (!offlineMeta && !isStale()) setCurrentTrackFull(synthetic) /* no network - treat as no lyrics; an offline snapshot (if any) was already applied above */ })
       }
     } else if (!donorFileId) {
       // Local track — load lyrics + cover art from IPC
@@ -1610,6 +1617,7 @@ export default function Player(): JSX.Element {
     'open-settings':    () => useStore.getState().setShowSettings(true),
     'open-diagnostics': () => useStore.getState().setShowDiagnostics(true),
     'toggle-queue':     () => { const s = useStore.getState(); s.setShowQueue(!s.showQueue) },
+    'open-terminal':    () => { const s = useStore.getState(); s.setActiveView(s.activeView === 'terminal' ? (s.previousView ?? 'home') : 'terminal') },
     'focus-search':     () => {
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()
@@ -1644,7 +1652,9 @@ export default function Player(): JSX.Element {
       const tag = target?.tagName
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || !!target?.isContentEditable
       const isFKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(combo.split('+').pop() ?? '')
-      if (typing && !combo.startsWith('Media') && !isFKey) return
+      // The terminal's own input has focus while it is open, so its hotkey has
+      // to get through typing too or it could never close the terminal.
+      if (typing && !combo.startsWith('Media') && !isFKey && resolveAction(combo, useStore.getState().hotkeyBindings) !== 'open-terminal') return
       // Leave Space/Enter alone when a button/link/select is focused so they
       // still activate it (native keyboard behavior) instead of toggling play.
       const clickable = tag === 'BUTTON' || tag === 'A' || tag === 'SELECT' || target?.getAttribute('role') === 'button'
@@ -1781,15 +1791,19 @@ export default function Player(): JSX.Element {
   }, [])
   const eqPoppedOut = openFloatViews.includes('equalizer')
   const eqBtnRef = useRef<HTMLButtonElement>(null)
-  const [eqPos, setEqPos] = useState({ bottom: 0, right: 0 })
-  // Anchor above the bar button when it's on screen; openers without an
-  // anchor (hotkey, WRLD tab, collapsed bar) get a fixed bottom-right spot.
+  const [eqPos, setEqPos] = useState<{ bottom?: number; top?: number; right: number }>({ bottom: 0, right: 0 })
+  // Anchor to the button that opened it (bar or WRLD tab); openers without an
+  // anchor (hotkey, collapsed bar) get a fixed bottom-right spot.
   useEffect(() => {
     if (!showEqPanel) return
-    const btn = eqBtnRef.current
+    const taken = takeEqAnchor()
+    const btn = taken?.isConnected ? taken : eqBtnRef.current
     if (btn?.isConnected) {
       const r = btn.getBoundingClientRect()
-      setEqPos({ bottom: window.innerHeight - r.top + 8, right: Math.max(8, window.innerWidth - r.right - 170) })
+      // Panel is 340px wide, centred on the button, clamped inside the window.
+      const right = Math.min(Math.max(8, window.innerWidth - r.right - 170), Math.max(8, window.innerWidth - 348))
+      if (r.top > window.innerHeight / 2) setEqPos({ bottom: window.innerHeight - r.top + 8, right })
+      else setEqPos({ top: r.bottom + 8, right })
     } else {
       setEqPos({ bottom: 104, right: 16 })
     }
@@ -1866,10 +1880,10 @@ export default function Player(): JSX.Element {
           <div className="fixed inset-0 z-40" onClick={() => setShowEqPanel(false)} />
           <div
             onMouseDown={(e) => e.stopPropagation()}
-            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto"
+            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto slim-scroll"
             // Cap below the title bar so a full panel scrolls internally
             // instead of growing under the window controls.
-            style={{ bottom: eqPos.bottom, right: eqPos.right, maxHeight: `calc(100vh - ${eqPos.bottom + 48}px)` }}
+            style={{ bottom: eqPos.bottom, top: eqPos.top, right: eqPos.right, maxHeight: `calc(100vh - ${(eqPos.bottom ?? eqPos.top ?? 0) + 48}px)` }}
           >
             <EqualizerPanel />
           </div>

@@ -5,8 +5,9 @@ import {
   FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home,
+  ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal,
 } from 'lucide-react'
+import VizControls from './VizControls'
 import DonorFiles from './DonorFiles'
 import MyCdnNodes from './MyCdnNodes'
 import { useStore, useStorePick, type SidebarPosition, type AppMenuPosition, type PopoutWindowKind } from '../store/useStore'
@@ -84,7 +85,7 @@ const POPOUT_KINDS: { key: PopoutWindowKind; label: string; sub?: string }[] = [
 ]
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'
-type Tab = 'appearance' | 'playback' | 'shortcuts' | 'library' | 'app' | 'donor' | 'developer' | 'feedback' | 'about'
+type Tab = 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'donor' | 'developer' | 'feedback' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `electronOnly`/`devOnly` mirror
@@ -104,11 +105,14 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
-  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits — left, right, top, bottom' },
-  { tab: 'appearance', label: 'App menu button', sub: 'Where the File / Edit / View… menu opens from', electronOnly: true },
-  { tab: 'appearance', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
-  { tab: 'appearance', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
+  // Preferences
+  { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Auto-hide navigation', sub: 'Hide the nav menu until the pointer reaches its edge' },
+  { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits — left, right, top, bottom' },
+  { tab: 'preferences', label: 'App menu button', sub: 'Where the File / Edit / View… menu opens from', electronOnly: true },
+  { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
+  { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
@@ -254,6 +258,31 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
   )
 }
 
+function VizSettings(): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className={`flex items-center gap-2.5 w-full text-left ${open ? 'mb-2.5' : ''}`}
+      >
+        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
+          <AudioLines size={13} className="text-white" strokeWidth={2.25} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="text-text-primary text-sm">WRLD visualizer</span>
+          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → and V work in fullscreen: ← → switches visualizer, V toggles visualizer only</p>
+        </div>
+        <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+      <div className="pl-[34px]"><VizControls /></div>
+      )}
+    </div>
+  )
+}
+
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
   return (
     <button
@@ -312,6 +341,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     settingsTab, setSettingsTab,
     sidebarPosition, setSidebarPosition,
     appMenuPosition, setAppMenuPosition,
+    autoHideNav, setAutoHideNav,
     navOrder, setNavOrder,
     navVisibility, setNavItemVisible,
     homeSectionVisibility, setHomeSectionVisible,
@@ -348,7 +378,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     wrldThemeBackground, setWrldThemeBackground,
     refreshPlaylists,
     fullEraNames, setFullEraNames,
-  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'appMenuPosition', 'setAppMenuPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'popoutWindows', 'setPopoutWindow', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'resetGlobalHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'globalHotkeysEnabled', 'setGlobalHotkeysEnabled', 'globalHotkeyBindings', 'setGlobalHotkeyBinding', 'updateStatus', 'libraryFolders', 'addLibraryFolder', 'removeLibraryFolder', 'scanLibrary', 'libraryScanning', 'libraryTracks', 'libraryLastScanned', 'libraryAutoRefresh', 'setLibraryAutoRefresh', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames')
+  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'appMenuPosition', 'setAppMenuPosition', 'autoHideNav', 'setAutoHideNav', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'popoutWindows', 'setPopoutWindow', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'resetGlobalHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'globalHotkeysEnabled', 'setGlobalHotkeysEnabled', 'globalHotkeyBindings', 'setGlobalHotkeyBinding', 'updateStatus', 'libraryFolders', 'addLibraryFolder', 'removeLibraryFolder', 'scanLibrary', 'libraryScanning', 'libraryTracks', 'libraryLastScanned', 'libraryAutoRefresh', 'setLibraryAutoRefresh', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames')
 
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [customAccent, setCustomAccent] = useState(accentColor)
@@ -405,7 +435,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   // Every platform-eligible nav item in saved order — visible ones and the
   // toggled-off extras alike — so the list is where you both reorder and
   // show/hide. Web-only tabs (Library) are dropped on web.
-  const navRows = orderedNavItems(navOrder).filter((i) => isElectron || !i.electronOnly)
+  const navRows = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account)).filter((i) => isElectron || !i.electronOnly)
   const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
   const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
   const navIsDefault = navOrderIsDefault && navVisIsDefault
@@ -421,7 +451,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   // even when a web user rearranges the visible ones.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true, true).map((i) => i.view)
     const dragView = navRows[fromRow].view
     const targetView = navRows[toRow].view
     const from = full.indexOf(dragView)
@@ -580,6 +610,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     ...(isElectron ? [{ id: 'library' as Tab, label: 'Library', icon: FolderOpen }] : []),
@@ -853,6 +884,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
               value={settingsQuery}
               onChange={(e) => setSettingsQuery(e.target.value)}
               placeholder="Search settings"
+              autoComplete="off"
               className="w-full bg-[var(--surface-overlay)] text-text-primary text-sm rounded-lg pl-8 pr-8 py-1.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
             />
             {settingsQuery && (
@@ -902,7 +934,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
             ))}
           </div>
 
-          <div className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -1287,13 +1319,6 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     </div>
                   )}
                 </Row>
-                <Row
-                  icon={BookOpen}
-                  iconColor="#0891b2"
-                  label="Full era names"
-                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
-                />
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#9333ea' }}>
@@ -1321,6 +1346,21 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     />
                   </div>
                 </div>
+                <VizSettings />
+              </div>
+            )}
+
+            {/* ── Preferences ── */}
+            {!settingsQueryTrimmed && tab === 'preferences' && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-4">Preferences</h3>
+                <Row
+                  icon={BookOpen}
+                  iconColor="#0891b2"
+                  label="Full era names"
+                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
+                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
+                />
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
@@ -1383,6 +1423,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     </div>
                   </div>
                 )}
+                <Row
+                  icon={Minimize2}
+                  iconColor="#0d9488"
+                  label="Auto-hide navigation"
+                  sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
+                >
+                  <Toggle on={autoHideNav} onClick={() => setAutoHideNav(!autoHideNav)} />
+                </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#6366f1' }}>

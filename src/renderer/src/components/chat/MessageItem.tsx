@@ -21,6 +21,22 @@ import { ChatAvatar, clockTime, errorText, fullStamp, useChatToast } from './ui'
 import { useOpenUserCard } from './UserCard'
 import { anchorOf, clickable } from '../../lib/a11y'
 
+// First line of what a message actually says, read from the message itself
+// (decrypted text for DMs) - null while that text isn't available yet.
+function liveSnippet(content: string | null | undefined): string | null {
+  if (content == null) return null
+  return splitForwardRef(splitReplyRef(content).body).body.split('\n')[0].slice(0, 140)
+}
+
+function useLiveText(message: UiMessage | undefined): string | null {
+  return useChatStore((s) => {
+    if (!message) return null
+    if (!message.is_encrypted) return message.content
+    const p = s.plain[message.id]
+    return p && 'text' in p ? p.text : null
+  })
+}
+
 function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }: {
   replyToId: number
   authorId: number
@@ -34,11 +50,15 @@ function ReplyBar({ replyToId, authorId, name, snippet, hasAttachment, people }:
   // live message (fetched independently, not trusted from this payload) can
   // confirm who actually said what - without it, show a neutral placeholder
   // instead of attributing unverified text to a specific person.
+  //
+  // The payload's snippet is just as forgeable as its name, so a verified
+  // author is only ever shown next to text read from the live message too.
   const live = useMessageById(replyToId)
-  const verified = !!live
-  const author = live?.author
+  const liveText = liveSnippet(useLiveText(live))
+  const verified = !!live && liveText !== null
+  const author = verified ? live?.author : undefined
   const deleted = !!live?.deleted_at
-  const preview = deleted ? 'Original message was deleted' : verified ? (snippet || (hasAttachment ? 'Attachment' : '')) : 'Original message'
+  const preview = deleted ? 'Original message was deleted' : verified ? (liveText || (live!.attachments.length ? 'Attachment' : '')) : 'Original message'
   return (
     <button
       onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('chat:jump', { detail: replyToId })) }}
@@ -70,19 +90,26 @@ function ForwardBar({ forwardToId, name, snippet, hasAttachment, sourceLabel }: 
   // viewer's own access to that channel/DM) - can confirm who actually said
   // what. Never attribute unverified text to a specific person.
   const live = useMessageById(forwardToId)
-  const [fetched, setFetched] = useState<{ author: ChatUserBrief; deleted: boolean } | 'denied' | null>(null)
+  const liveText = useLiveText(live)
+  const [fetched, setFetched] = useState<{ author: ChatUserBrief; deleted: boolean; text: string | null } | 'denied' | null>(null)
   useEffect(() => {
     if (live) return
     let cancelled = false
     getMessage(forwardToId).then((m) => {
-      if (!cancelled) setFetched({ author: m.author, deleted: !!m.deleted_at })
+      // An encrypted original isn't decrypted here, so its text stays unknown.
+      if (!cancelled) setFetched({ author: m.author, deleted: !!m.deleted_at, text: m.is_encrypted ? null : m.content })
     }).catch(() => { if (!cancelled) setFetched('denied') })
     return () => { cancelled = true }
   }, [live, forwardToId])
 
-  const author = live?.author ?? (fetched && fetched !== 'denied' ? fetched.author : undefined)
-  const deleted = live ? !!live.deleted_at : fetched && fetched !== 'denied' ? fetched.deleted : false
+  const ok = fetched && fetched !== 'denied' ? fetched : null
+  const deleted = live ? !!live.deleted_at : ok ? ok.deleted : false
+  // Only attribute when the text shown is the original's own, not the
+  // payload's (forgeable) snippet.
+  const confirmedText = liveSnippet(live ? liveText : ok ? ok.text : null)
+  const author = confirmedText !== null ? live?.author ?? ok?.author : undefined
   const verified = !!author
+  const shownSnippet = verified ? confirmedText : snippet
   return (
     <div className="mb-1.5 flex items-start gap-2 rounded-lg border border-[var(--border)] bg-surface-raised/50 px-3 py-2 max-w-full">
       <Forward size={14} className="shrink-0 mt-0.5 opacity-70 text-text-muted" />
@@ -99,7 +126,7 @@ function ForwardBar({ forwardToId, name, snippet, hasAttachment, sourceLabel }: 
             </span>
           )}
           <span className="min-w-0 truncate text-sm text-text-primary">
-            {deleted ? 'Original message was deleted' : (snippet || (hasAttachment ? 'Attachment' : '') || '…')}
+            {deleted ? 'Original message was deleted' : (shownSnippet || (hasAttachment ? 'Attachment' : '') || '…')}
           </span>
         </div>
       </div>

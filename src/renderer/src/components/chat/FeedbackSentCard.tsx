@@ -4,7 +4,7 @@ import LocalNoticeFrame from './LocalNoticeFrame'
 
 // Rendered for /feedback's local notice - confirms what was sent without
 // leaving a "/feedback ..." message sitting in the room for everyone else.
-export default function FeedbackSentCard({ room, messageId, message }: { room: RoomRef; messageId: number; message: string }): JSX.Element {
+export default function FeedbackSentCard({ room, messageId, message }: { room?: RoomRef; messageId?: number; message: string }): JSX.Element {
   return (
     <LocalNoticeFrame room={room} messageId={messageId} title="Feedback sent">
       <div className="mt-1.5 flex items-start gap-1.5">

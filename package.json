@@ -38,6 +38,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "client-zip": "^2.5.1",
     "concurrently": "^10.0.3",
     "electron": "^42.9.2",
     "electron-builder": "^26.15.3",

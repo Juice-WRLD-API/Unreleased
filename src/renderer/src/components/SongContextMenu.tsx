@@ -2,13 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen,
   ChevronDown, ChevronRight, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2,
-  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X,
+  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry } from '../lib/juicewrldApi'
 import { isDonorStreamUrl } from '../lib/donorPlayback'
+import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
 import ChangeVersionMenuItem from './ChangeVersionMenuItem'
 import { placeFlyout } from '../lib/menuFlyout'
@@ -170,6 +171,7 @@ export default function SongContextMenu({
   const [zipCandidates, setZipCandidates] = useState<JWApiFileEntry[] | null>(null)
   const [downloadingOffline, setDownloadingOffline] = useState(false)
   const el = (window as any).electron
+  const [linkCopied, setLinkCopied] = useState(false)
 
   useEffect(() => {
     const handle = (e: MouseEvent): void => {
@@ -264,6 +266,16 @@ export default function SongContextMenu({
   // for staff, who are the only ones with a chat to share into.
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
   // Sessions/unsurfaced are treated as unplayable — don't offer Play / Play
+
+  const handleCopyLink = async (): Promise<void> => {
+    if (!hasValidSong) return
+    try {
+      await navigator.clipboard.writeText(trackShareUrl(songId))
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2500)
+    } catch {}
+  }
+  // Sessions/unsurfaced are treated as unplayable - don't offer Play / Play
   // next / Add to queue for them (they'd never actually play). Local files
   // (no category in genre) stay playable as long as they have a path.
   const canQueue = !!track.path && !isUnplayable
@@ -515,6 +527,13 @@ export default function SongContextMenu({
           )}
           {canShareToChat && (
             <MenuItem icon={<Share2 size={14} />} label="Share to chat" onClick={() => setShareOpen(true)} />
+          )}
+          {hasValidSong && (
+            <MenuItem
+              icon={linkCopied ? <Check size={14} /> : <Link2 size={14} />}
+              label={linkCopied ? 'Link copied' : 'Copy link'}
+              onClick={handleCopyLink}
+            />
           )}
           {onShowInFiles && track.path && (
             <MenuItem icon={<Folder size={14} />} label="Show in Files" onClick={() => { onShowInFiles(); onClose() }} />

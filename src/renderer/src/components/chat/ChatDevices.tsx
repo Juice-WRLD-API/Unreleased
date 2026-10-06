@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Laptop, Loader2, Smartphone } from 'lucide-react'
 import * as api from '../../lib/chatApi'
-import type { ChatDevice } from '../../lib/chatApi'
+import type { ChatDevice, E2EFeatures } from '../../lib/chatApi'
+import type { IdentityStatus } from '../../lib/chatIdentity'
+import ChatDevicesV2 from './ChatDevicesV2'
 
 const e2e = () => import('../../lib/chatE2E')
 
@@ -11,6 +13,35 @@ const isMobileLabel = (label: string): boolean => /iOS|Android/.test(label)
 // device, and keys keep getting sealed for each one. Old ones pile up (cleared
 // storage, other browsers), so this lets you drop the ones you no longer use.
 export default function ChatDevices({ userId }: { userId: number }): JSX.Element {
+  const [v2, setV2] = useState<{ status: IdentityStatus; features: E2EFeatures } | null>(null)
+
+  const loadV2 = useCallback(async () => {
+    try {
+      const [m, idm] = await Promise.all([e2e(), import('../../lib/chatIdentity')])
+      idm.resetIdentity()
+      const [status, features] = await Promise.all([m.identityStatus(userId), idm.getFeatures()])
+      setV2({ status, features })
+    } catch {
+      setV2({ status: 'disabled', features: { send: false, identity: false, linking: false, backup: false } })
+    }
+  }, [userId])
+
+  useEffect(() => { void loadV2() }, [loadV2])
+
+  if (!v2) {
+    return <div className="flex items-center gap-2 py-3 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Loading devices…</div>
+  }
+  if (v2.status !== 'disabled') {
+    const onChanged = (): void => {
+      void loadV2()
+      void import('../../store/chatStore').then(({ useChatStore }) => useChatStore.getState().refreshIdentity())
+    }
+    return <ChatDevicesV2 userId={userId} status={v2.status} features={v2.features} onChanged={onChanged} />
+  }
+  return <LegacyDevices userId={userId} />
+}
+
+function LegacyDevices({ userId }: { userId: number }): JSX.Element {
   const [devices, setDevices] = useState<ChatDevice[] | null>(null)
   const [keyedId, setKeyedId] = useState<number | null>(null)
   const [thisDevice, setThisDevice] = useState<string | null>(null)

@@ -168,15 +168,22 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
 
   // Images and embeds settle after first paint; keep the view pinned while
   // they grow rather than letting new height push the latest message off-screen.
+  // Keyed on `loaded` too: a room that isn't cached yet renders the skeleton
+  // first (no content node), so without re-running once the list mounts the
+  // observer never attaches and late-loading images strand the view short of
+  // the newest message.
+  const loaded = !!state?.loaded
   useEffect(() => {
     const el = content.current
-    if (!el) return
+    const box = scroller.current
+    if (!el || !box) return
     const ro = new ResizeObserver(() => {
-      if (atBottom.current && scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight
+      if (atBottom.current) box.scrollTop = box.scrollHeight
     })
     ro.observe(el)
+    ro.observe(box)
     return () => ro.disconnect()
-  }, [key])
+  }, [key, loaded])
 
   const onScroll = (): void => {
     const el = scroller.current

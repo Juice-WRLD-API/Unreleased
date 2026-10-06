@@ -238,6 +238,8 @@ export function ModalOverlay({
     onHandleMouseDown: (e: ReactMouseEvent) => void
     locked: boolean
     toggleLock: () => void
+    /** Whether this modal can be pinned (sandbox) - false in standalone/inline renders, where the drag handle and lock toggle do nothing. */
+    canLock: boolean
   }) => ReactNode
 }): JSX.Element | null {
   const id = useId()
@@ -369,7 +371,7 @@ export function ModalOverlay({
     // OS window, nothing docked in the sandbox can cover it.
     return createPortal(
       <div className={`fixed inset-0 ${zIndexClassName} flex`}>
-        {children({ onHandleMouseDown: () => {}, locked: false, toggleLock: () => {} })}
+        {children({ onHandleMouseDown: () => {}, locked: false, toggleLock: () => {}, canLock: false })}
       </div>,
       document.body,
     )
@@ -389,7 +391,7 @@ export function ModalOverlay({
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
       >
         <div className={`relative overflow-hidden ${panelClassName}`}>
-          {children({ onHandleMouseDown: () => {}, locked: false, toggleLock: () => {} })}
+          {children({ onHandleMouseDown: () => {}, locked: false, toggleLock: () => {}, canLock: false })}
         </div>
       </div>,
       document.body,
@@ -412,7 +414,7 @@ export function ModalOverlay({
           width/height/maxWidth/maxHeight via inline-style specificity, while
           its border/radius/shadow/bg/overflow-hidden keep applying either way. */}
       <div ref={panelRef} className={`relative overflow-hidden ${panelClassName}`} style={panelStyle}>
-        {children({ onHandleMouseDown, locked, toggleLock })}
+        {children({ onHandleMouseDown, locked, toggleLock, canLock: true })}
         <ResizeHandle onMouseDown={onResizeHandleMouseDown} />
       </div>
     </div>,

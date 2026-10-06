@@ -2,11 +2,11 @@
 // aggregate per-song counts in lib/songPrefs (which predate this and stay the
 // source of truth for all-time numbers).
 //
-// The whole array is PATCHed to the profile blob on every play (there's no
-// append endpoint), and it also lives in localStorage, so the cap is a payload
-// budget, not a storage one: at ~45 bytes a row, 2000 rows is ~90 KB per push.
-// lib/songPrefs caps at 500 for the same reason. Raising this raises the cost
-// of every single credited play.
+// Each credited play is POSTed on its own (profilePushApi.appendPlay); the
+// whole array is only PATCHed as a fallback when that fails, and at login when
+// this device holds rows the profile lacks. The cap is therefore a payload
+// budget for those bulk pushes, not a storage one: at ~45 bytes a row, 2000
+// rows is ~90 KB per push. The server itself keeps up to 10,000.
 export interface ListeningPlayEvent {
   song: number
   played_at: string
@@ -41,6 +41,8 @@ export function capListeningPlays(events: ListeningPlayEvent[], max = SERVER_LIS
   return [...events].sort(newestFirst).slice(0, max)
 }
 
+const playKey = (event: ListeningPlayEvent): string => `${event.song}\0${timeOf(event)}`
+
 /** Union of this device's rows and the profile's, newest first. Dedupes on
  *  (song, parsed timestamp) rather than the literal string — see timeOf: a
  *  server that reformats timestamps would otherwise duplicate the entire
@@ -49,12 +51,22 @@ export function mergeListeningPlays(local: ListeningPlayEvent[], server: Listeni
   const seen = new Set<string>()
   const out: ListeningPlayEvent[] = []
   for (const event of [...local, ...server].sort(newestFirst)) {
-    const key = `${event.song}\0${timeOf(event)}`
+    const key = playKey(event)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(event)
   }
   return capListeningPlays(out)
+}
+
+/** Whether a merge result holds exactly the plays the profile already has -
+ *  nothing this device logged that the server is missing - so pushing it back
+ *  would only re-send the server's own rows. Same (song, parsed timestamp)
+ *  identity as the merge, so a server that reformats timestamps still counts
+ *  as in sync. */
+export function listeningPlaysMatchServer(merged: ListeningPlayEvent[], server: ListeningPlayEvent[]): boolean {
+  const serverKeys = new Set(server.map(playKey))
+  return merged.length === serverKeys.size && merged.every((event) => serverKeys.has(playKey(event)))
 }
 
 export function appendListeningPlay(events: ListeningPlayEvent[], songId: number, at = new Date()): ListeningPlayEvent[] {

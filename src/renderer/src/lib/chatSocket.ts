@@ -11,7 +11,7 @@ export type ChatEvent =
   | { type: 'pong' }
   | { type: 'resynced' }
   | { type: 'message.created' | 'message.updated' | 'message.pinned' | 'message.unpinned'; message: ChatMessage }
-  | { type: 'message.deleted'; message_id: number; channel: number | null; conversation: number | null }
+  | { type: 'message.deleted' | 'message.purged'; message_id: number; channel: number | null; conversation: number | null }
   | { type: 'reaction.added' | 'reaction.removed'; message_id: number; emoji: string; user_id: number; channel: number | null; conversation: number | null }
   | { type: 'read.receipt'; user_id: number; last_read_message_id: number | null; channel?: number; conversation?: number }
   | { type: 'typing'; user_id: number; active: boolean; kind: RoomKind; id: number }
@@ -32,7 +32,16 @@ export type ChatEvent =
   | { type: 'conversation.updated'; conversation: Conversation }
   | { type: 'key.rotated'; conversation: number; key_version: number }
   | { type: 'device.added'; conversation: number; user_id: number }
+  | { type: 'device.registered'; device_id: string }
   | { type: 'envelope.available'; conversation: number; key_version: number }
+  // E2E v2 (lib/chatIdentity, lib/chatToDevice)
+  | { type: 'key.committed'; conversation: number; key_version: number }
+  | { type: 'devices.updated'; conversation?: number; user_id: number; list_version: number; dropped: boolean }
+  | { type: 'identity.changed'; conversation?: number; user_id: number }
+  | { type: 'todevice.available'; device_id: string }
+  | { type: 'link.claimed'; session_id: string }
+  | { type: 'link.requested'; device_id: string; label: string; expires_at: string }
+  | { type: 'backup.updated' }
   | { type: 'role.created' | 'role.updated'; server: number; role: ServerRoleDef }
   | { type: 'role.deleted'; server: number; role_id: number }
   | { type: 'channel.override.updated'; server: number; channel: number; override: ChannelOverride }

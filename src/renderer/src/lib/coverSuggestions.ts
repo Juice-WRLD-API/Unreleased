@@ -5,8 +5,8 @@
 // readable from juicewrldApi's songToTrack without a cycle; everything here
 // runs at play time, well away from that path, so it can import freely.
 import {
-  apiFetch, buildStreamUrl, parseBrowseEntries, cleanTitleForSearch,
-  JWApiSong, JWApiBrowseResponse,
+  apiFetch, buildStreamUrl, searchFiles, cleanTitleForSearch,
+  JWApiSong,
 } from './juicewrldApi'
 import { getMediaType } from './fileTypes'
 import { peekRotatedCover, rememberRotatedCover, clearRotatedCovers } from './coverRotation'
@@ -38,9 +38,7 @@ async function fetchCandidates(songId: number): Promise<string[]> {
   if (queries.length === 0) return []
 
   const lists = await Promise.all(queries.map((q) =>
-    apiFetch<JWApiBrowseResponse>('/files/browse/', { search: q })
-      .then(parseBrowseEntries)
-      .catch(() => [])
+    searchFiles(q).catch(() => [])
   ))
 
   const seenPaths = new Set<string>()

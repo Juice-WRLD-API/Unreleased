@@ -12,7 +12,8 @@
 // further wiring needed at the call sites.
 import { JWAPI_BASE } from './juicewrldApi'
 import { getToken } from './userApi'
-import { downloadViaNode, CdnNodeError, NO_ICE_CANDIDATES, type CdnDownloadProgress } from './cdnWebrtc'
+import { downloadViaNode, CdnNodeError, NO_ICE_CANDIDATES, type CdnDownloadProgress, type CdnNodeDownloadResult } from './cdnWebrtc'
+import { downloadViaTunnel } from './cdnTunnel'
 import { blake2bHexFromBlob } from './cdnBlake2b'
 
 const CDN_BASE = `${JWAPI_BASE}/cdn`
@@ -46,6 +47,7 @@ export interface CdnResolveNode {
   score: number
   token: string
   transport: string
+  serve_url?: string
 }
 
 export interface CdnResolveResponse {
@@ -157,7 +159,6 @@ class CdnService {
     onProgress?: (p: CdnDownloadProgress) => void
   ): Promise<CdnDownloadResult | null> {
     if (!this.enabled) { debug(filepath, 'CDN disabled in settings - using origin'); return null }
-    if (webrtcBlocked) { debug(filepath, 'WebRTC blocked in this browser (found earlier this session) - using origin'); return null }
 
     const resolution = await this.resolve(filepath)
     if (!resolution) { debug(filepath, 'resolve failed - using origin'); return null }
@@ -171,29 +172,42 @@ class CdnService {
       return null
     }
 
-    debug(filepath, `trying ${resolution.nodes.length} node(s)`, resolution.nodes.map((n) => `${n.name} (${n.node_id}, score ${n.score})`))
-    for (const node of resolution.nodes) {
-      try {
-        const { blob, bytesReceived, elapsedMs } = await downloadViaNode(node, onProgress)
+    const candidates = webrtcBlocked ? resolution.nodes.filter((n) => n.serve_url) : resolution.nodes
+    if (candidates.length === 0) {
+      debug(filepath, 'WebRTC blocked in this browser and no node has a tunnel - using origin')
+      return null
+    }
 
-        const hash = await blake2bHexFromBlob(blob)
+    debug(filepath, `trying ${candidates.length} node(s)`, candidates.map((n) => `${n.name} (${n.node_id}, score ${n.score}, ${n.serve_url ? 'tunnel' : 'webrtc'})`))
+    for (const node of candidates) {
+      const attempts: Array<['tunnel' | 'webrtc', () => Promise<CdnNodeDownloadResult>]> = []
+      if (node.serve_url) attempts.push(['tunnel', () => downloadViaTunnel(node, filepath, onProgress)])
+      if (!webrtcBlocked) attempts.push(['webrtc', () => downloadViaNode(node, onProgress)])
+
+      for (const [via, attempt] of attempts) {
+        let result: CdnNodeDownloadResult
+        try {
+          result = await attempt()
+        } catch (err) {
+          if (err instanceof CdnNodeError && err.reason === NO_ICE_CANDIDATES) {
+            webrtcBlocked = true
+            debug(filepath, `WebRTC blocked - ${err.message} - only tunnel nodes from here on`)
+          } else {
+            debug(filepath, `node ${node.name} (${node.node_id}) ${via} failed - ${err instanceof Error ? err.message : String(err)}`)
+          }
+          continue
+        }
+
+        const hash = await blake2bHexFromBlob(result.blob)
         if (hash !== resolution.expected_hash) {
-          debug(filepath, `hash mismatch from ${node.name} (${node.node_id}) - reported, trying next`, { expected: resolution.expected_hash, got: hash })
+          debug(filepath, `hash mismatch from ${node.name} (${node.node_id}) via ${via} - reported, trying next node`, { expected: resolution.expected_hash, got: hash })
           this.reportViolation(node.node_id, filepath, hash)
-          continue   // tampered or corrupted - try the next node, never hand this blob back
+          break
         }
 
-        debug(filepath, `served by ${node.name} (${node.node_id}): ${bytesReceived} bytes in ${elapsedMs} ms, hash verified`)
-        this.logDownload(node.node_id, filepath, bytesReceived, elapsedMs)
-        return { blob, node, verified: true, isDonor: resolution.is_donor }
-      } catch (err) {
-        if (err instanceof CdnNodeError && err.reason === NO_ICE_CANDIDATES) {
-          webrtcBlocked = true
-          debug(filepath, `WebRTC blocked - ${err.message} - skipping remaining nodes, using origin`)
-          return null
-        }
-        debug(filepath, `node ${node.name} (${node.node_id}) failed - ${err instanceof Error ? err.message : String(err)} - trying next`)
-        continue   // this node failed (timeout, NAT, offline, ...) - next one
+        debug(filepath, `served by ${node.name} (${node.node_id}) via ${via}: ${result.bytesReceived} bytes in ${result.elapsedMs} ms, hash verified`)
+        this.logDownload(node.node_id, filepath, result.bytesReceived, result.elapsedMs)
+        return { blob: result.blob, node, verified: true, isDonor: resolution.is_donor }
       }
     }
 

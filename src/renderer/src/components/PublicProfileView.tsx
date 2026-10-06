@@ -2,12 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, Heart,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import {
   getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
-  adminGetUser, adminUpdateUser,
+  adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
 } from '../lib/userApi'
 import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser } from '../lib/userApi'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
@@ -23,6 +23,79 @@ import {
 import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { clickable } from '../lib/a11y'
+import { initial } from '../lib/format'
+import { relativeTime } from './adminShared'
+
+type ProposalRow = { key: string; kind: 'edit' | 'comp'; title: string; status: string; created_at: string }
+
+const PROPOSAL_STATUS_STYLE: Record<string, string> = {
+  pending: 'text-amber-400 bg-amber-500/15',
+  approved: 'text-emerald-400 bg-emerald-500/15',
+  rejected: 'text-red-400 bg-red-500/15',
+  reversed: 'text-text-muted bg-surface-raised',
+}
+
+const PROPOSAL_HISTORY_LIMIT = 8
+
+// Manage panel's per-user proposal history. The admin list endpoints have no
+// per-user filter, so both queues are fetched and narrowed by id here.
+function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
+  const [rows, setRows] = useState<ProposalRow[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([adminListProposals(), adminListCompProposals().catch(() => [])])
+      .then(([edits, comps]) => {
+        if (!alive) return
+        const merged: ProposalRow[] = [
+          ...edits.filter((p) => p.editor_id === userId).map((p): ProposalRow => ({
+            key: `e${p.id}`, kind: 'edit', title: p.title || `${p.change_type} song`, status: p.status, created_at: p.created_at,
+          })),
+          ...comps.filter((p) => p.contributor_id === userId).map((p): ProposalRow => ({
+            key: `c${p.id}`, kind: 'comp', title: p.file_path, status: p.status, created_at: p.created_at,
+          })),
+        ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+        setRows(merged)
+      })
+      .catch(() => { if (alive) setError(true) })
+    return () => { alive = false }
+  }, [userId])
+
+  const count = (st: string): number => rows?.filter((r) => r.status === st).length ?? 0
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Proposals</p>
+      {error ? (
+        <p className="text-text-muted text-xs italic">Couldn't load proposals.</p>
+      ) : !rows ? (
+        <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+      ) : rows.length === 0 ? (
+        <p className="text-text-muted text-xs italic">No proposals yet.</p>
+      ) : (
+        <>
+          <p className="text-xs text-text-muted">
+            <span className="text-amber-400 font-semibold">{count('pending')} pending</span> · {count('approved')} approved · {count('rejected')} rejected
+            {count('reversed') > 0 && <> · {count('reversed')} reversed</>}
+          </p>
+          <ul className="space-y-1">
+            {rows.slice(0, PROPOSAL_HISTORY_LIMIT).map((r) => (
+              <li key={r.key} className="flex items-center gap-2 text-xs">
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${PROPOSAL_STATUS_STYLE[r.status] ?? 'text-text-muted bg-surface-raised'}`}>{r.status}</span>
+                <span className="min-w-0 flex-1 truncate text-text-secondary">{r.kind === 'comp' && <span className="text-text-muted">Comp · </span>}{r.title}</span>
+                <span className="shrink-0 text-text-muted">{relativeTime(r.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+          {rows.length > PROPOSAL_HISTORY_LIMIT && (
+            <p className="text-[11px] text-text-muted">+{rows.length - PROPOSAL_HISTORY_LIMIT} older</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
 // Recent plays render actual track info, but the profile payload only carries
 // {song, played_at} - resolving every row would mean one fetch per play, so
@@ -180,7 +253,18 @@ export default function PublicProfileView(): JSX.Element {
   const showPlayHistory = isOwnProfile || !!profile?.public_play_history
   const showPlaylists = isOwnProfile || !!profile?.public_playlists
   const effectivePlayHistory = isOwnProfile ? account?.listening_plays : profile?.play_history
-  const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists
+  // The server's profile serializer currently returns *every* playlist once
+  // public_playlists is on, private ones included (docs promise is_public
+  // only) - filter here too so a private playlist's name never shows.
+  const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists?.filter((p) => p.is_public)
+  const publicTierlists = profile?.tierlists ?? []
+
+  // The tier list view picks up ?id= on mount and opens that list read-only
+  // (or, for your own, straight into editing).
+  function openTierlist(id: number): void {
+    setActiveView('tierlist')
+    window.history.replaceState({ view: 'tierlist' }, '', `/tierlist?id=${id}`)
+  }
 
   useEffect(() => {
     if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
@@ -448,7 +532,7 @@ export default function PublicProfileView(): JSX.Element {
         <div className="w-16 h-16 rounded-full bg-surface-overlay flex items-center justify-center shrink-0 overflow-hidden ring-2 ring-[var(--border)]">
           {profile.avatar
             ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
-            : <User size={26} className="text-text-muted" />}
+            : <div className="w-full h-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{initial(profile.display_name || profile.username)}</div>}
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
@@ -503,33 +587,52 @@ export default function PublicProfileView(): JSX.Element {
           ) : adminUser.role === 'administrator' ? (
             <p className="text-text-muted text-xs italic">Administrators can only be modified from the admin console.</p>
           ) : (
+            <>
+            {(adminUser.role === 'editor' || adminUser.contributor_enabled) && (
+              <div className="space-y-1.5 mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                {adminUser.role === 'editor' && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Song edit proposals
+                    <input type="checkbox" checked={adminUser.auto_approve_proposals}
+                      onChange={(e) => void doAdminUpdate({ auto_approve_proposals: e.target.checked })}
+                      className="w-4 h-4 accent-[var(--accent)]" />
+                  </label>
+                )}
+                {adminUser.contributor_enabled && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Comp file proposals
+                    <input type="checkbox" checked={adminUser.auto_approve_comp_proposals}
+                      onChange={(e) => void doAdminUpdate({ auto_approve_comp_proposals: e.target.checked })}
+                      className="w-4 h-4 accent-[var(--accent)]" />
+                  </label>
+                )}
+              </div>
+            )}
+            <div className="space-y-1.5 mb-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+              {([
+                ['Editor', adminUser.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
+                ['Contributor', !!adminUser.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
+                ['Manager', !!adminUser.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
+                ['News', !!adminUser.news_enabled, (on: boolean) => ({ news_enabled: on })],
+              ] as const).map(([label, checked, payload]) => (
+                <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                  {label}
+                  <input type="checkbox" checked={checked}
+                    onChange={(e) => void doAdminUpdate(payload(e.target.checked))}
+                    className="w-4 h-4 accent-[var(--accent)]" />
+                </label>
+              ))}
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              {adminUser.role === 'editor' ? (
-                <button onClick={() => void doAdminUpdate({ role: 'applicant' })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Editor</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ role: 'editor' })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Editor</button>
-              )}
-              {adminUser.contributor_enabled ? (
-                <button onClick={() => void doAdminUpdate({ contributor_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Contrib</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ contributor_enabled: true })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Contrib</button>
-              )}
-              {adminUser.manager_enabled ? (
-                <button onClick={() => void doAdminUpdate({ manager_enabled: false })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-colors">−Manager</button>
-              ) : (
-                <button onClick={() => void doAdminUpdate({ manager_enabled: true })}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15 transition-colors">+Manager</button>
-              )}
               <button onClick={() => void doAdminUpdate({ is_active: !adminUser.is_active })}
                 className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
                 {adminUser.is_active ? 'Disable account' : 'Enable account'}
               </button>
             </div>
+            <AdminProposalHistory userId={adminUser.user_id} />
+            </>
           )}
         </div>
       )}
@@ -570,7 +673,7 @@ export default function PublicProfileView(): JSX.Element {
         </div>
       )}
 
-      {!showPlayHistory && !showPlaylists && (
+      {!showPlayHistory && !showPlaylists && publicTierlists.length === 0 && (
         <div className="flex flex-col items-center justify-center gap-2 text-text-muted mt-16">
           <Lock size={28} className="opacity-30" />
           <p className="text-sm">This profile is private.</p>
@@ -578,7 +681,7 @@ export default function PublicProfileView(): JSX.Element {
       )}
 
       {/* Recently played, Wrapped, Playlists - side by side on wide screens to cut down on scrolling */}
-      {(showPlayHistory || showPlaylists) && (
+      {(showPlayHistory || showPlaylists || publicTierlists.length > 0) && (
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch auto-rows-fr">
 
       {/* Recently played */}
@@ -713,6 +816,31 @@ export default function PublicProfileView(): JSX.Element {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Public tier lists - each list is opted in on its own (is_public),
+          so there's no profile-wide flag gating this card. */}
+      {publicTierlists.length > 0 && (
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
+            <Rows3 size={15} /> Tier lists
+          </h2>
+          <div className="overflow-y-auto max-h-[420px] -mx-1 px-1 space-y-1">
+            {publicTierlists.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => openTierlist(t.id)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-overlay text-left transition-colors"
+              >
+                <Rows3 size={16} className="text-text-muted shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-text-primary text-sm truncate">{t.name}</span>
+                  <span className="block text-text-muted text-xs">{t.ranked_count} ranked</span>
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

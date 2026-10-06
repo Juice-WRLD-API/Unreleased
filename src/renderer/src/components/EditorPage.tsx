@@ -8,6 +8,8 @@ import FilePickerModal from './FilePickerModal'
 import { useStore, useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
 import { attachToMainWindow } from '../lib/windowSync'
 import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import LyricsSyncTool from './LyricsSyncTool'
+import type { ViewType } from '../types'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { invalidateLyricsCache } from './Player'
@@ -525,7 +527,12 @@ export default function EditorPage({ initialSongId = null }: {
   // Where "back"/"nothing to edit" should return to — wherever the user was
   // before landing here, falling back to the editor dashboard when that's
   // unknown (e.g. a deep link straight into the editor).
-  const backView = previousView && previousView !== 'editor' ? previousView : 'editor-profile'
+  // The terminal doesn't count: the editor stays mounted underneath it, so
+  // coming back from it leaves previousView === 'terminal' - remember the last
+  // real origin instead so "back" doesn't dump the user into the terminal.
+  const lastOriginRef = useRef<ViewType | null>(null)
+  if (previousView && previousView !== 'editor' && previousView !== 'terminal') lastOriginRef.current = previousView
+  const backView = lastOriginRef.current ?? 'editor-profile'
   // Mirrored into a ref so the redirect effect below can read the latest value
   // without listing it as a dependency — setActiveView rewrites previousView,
   // which would otherwise re-run that effect and make it call itself forever.
@@ -620,6 +627,8 @@ export default function EditorPage({ initialSongId = null }: {
   const [pickingFile, setPickingFile] = useState(false)
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
   const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
+  // Manual sync tool (stamp lines against the playing song) - session-only, unlike the Lines/Raw choice.
+  const [syncTool,     setSyncTool]     = useState(false)
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
   // True while editing a 'create' proposal (new song) — has no backing song object yet
   const [isNewSongDraft, setIsNewSongDraft] = useState(false)
@@ -1312,6 +1321,15 @@ export default function EditorPage({ initialSongId = null }: {
                         <span className="flex-1" />
                         {showSynced && (
                           <button
+                            onClick={() => setSyncTool(v => !v)}
+                            title="Stamp each line's time while the song plays"
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
+                          >
+                            Sync
+                          </button>
+                        )}
+                        {showSynced && !syncTool && (
+                          <button
                             onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
                             title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
                             className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
@@ -1335,7 +1353,9 @@ export default function EditorPage({ initialSongId = null }: {
                           )
                         })}
                       </div>
-                      {showSynced && syncedTable ? (
+                      {showSynced && syncTool ? (
+                        <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
+                      ) : showSynced && syncedTable ? (
                         <SyncedLyricsTable value={synced} onChange={setSynced} />
                       ) : (
                         <textarea
@@ -1689,6 +1709,15 @@ export default function EditorPage({ initialSongId = null }: {
                     <div className="flex items-center gap-1">
                       {lyricsTab === 'synced' && (
                         <button
+                          onClick={() => setSyncTool(v => !v)}
+                          title="Stamp each line's time while the song plays"
+                          className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-all ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
+                        >
+                          Sync
+                        </button>
+                      )}
+                      {lyricsTab === 'synced' && !syncTool && (
+                        <button
                           onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
                           title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
                           className="px-2 py-1 rounded-lg text-[11px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
@@ -1738,6 +1767,8 @@ export default function EditorPage({ initialSongId = null }: {
                         </div>
                       )}
                     </div>
+                  ) : syncTool ? (
+                    <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
                   ) : syncedTable ? (
                     <SyncedLyricsTable value={synced} onChange={setSynced} />
                   ) : (

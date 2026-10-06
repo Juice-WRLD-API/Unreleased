@@ -138,19 +138,21 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
     }
     setError(null)
     setScanning(true)
+    let stream: MediaStream | null = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      const live = stream
       const detector = new Detector({ formats: ['qr_code'] })
       let raf = 0
       const stop = (): void => {
         cancelAnimationFrame(raf)
-        stream.getTracks().forEach((t) => t.stop())
+        live.getTracks().forEach((t) => t.stop())
         stopScan.current = null
         setScanning(false)
       }
       stopScan.current = stop
       if (video.current) {
-        video.current.srcObject = stream
+        video.current.srcObject = live
         await video.current.play()
       }
       const tick = async (): Promise<void> => {
@@ -169,6 +171,9 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
       }
       void tick()
     } catch {
+      // play() can reject after the camera is already open - release it.
+      stream?.getTracks().forEach((t) => t.stop())
+      stopScan.current = null
       setError('Could not open the camera')
       setScanning(false)
     }
@@ -209,7 +214,7 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
         value={passphrase}
         onChange={(e) => setPassphrase(e.target.value)}
         placeholder="Passphrase"
-        autoComplete="off"
+        autoComplete="new-password"
         className={field}
       />
       <div className="flex items-center gap-1 flex-wrap">
@@ -228,26 +233,34 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
 }
 
 // Only one device per person is keyed automatically, so this is how your other
-// browsers get in: export on the device that has the keys, import here.
+// browsers get in: export on the device that has the keys, import here. Once
+// device linking is on (E2E v2), linking replaces export and this stays only
+// for importing an old v1 blob.
 export default function ChatKeyTransfer({ userId }: { userId: number }): JSX.Element {
   const [tab, setTab] = useState<'export' | 'import' | null>(null)
+  const [importOnly, setImportOnly] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void import('../../lib/chatIdentity').then((m) => m.getFeatures()).then((f) => { if (!cancelled) setImportOnly(f.linking) })
+    return () => { cancelled = true }
+  }, [])
   return (
     <div className="pt-1">
       <div className="flex items-center gap-1">
-        <button
+        {!importOnly && <button
           onClick={() => setTab(tab === 'export' ? null : 'export')}
           className={tab === 'export' ? `${plainBtn} bg-[var(--surface-overlay)] text-text-primary` : plainBtn}
         >
           <Upload size={12} />Export keys
-        </button>
+        </button>}
         <button
           onClick={() => setTab(tab === 'import' ? null : 'import')}
           className={tab === 'import' ? `${plainBtn} bg-[var(--surface-overlay)] text-text-primary` : plainBtn}
         >
-          <Download size={12} />Import keys
+          <Download size={12} />{importOnly ? 'Import old keys' : 'Import keys'}
         </button>
       </div>
-      {tab === 'export' && <ExportPanel userId={userId} />}
+      {tab === 'export' && !importOnly && <ExportPanel userId={userId} />}
       {tab === 'import' && <ImportPanel userId={userId} />}
     </div>
   )

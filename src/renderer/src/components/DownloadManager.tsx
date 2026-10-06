@@ -3,6 +3,7 @@ import { Download, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, FolderOpen,
 import { useStore, useStorePick, DownloadItem, StagedFileChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
+import { cancelZipTask, isZipTaskId } from '../lib/clientZip'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 
 export default function DownloadManager(): JSX.Element | null {
@@ -239,6 +240,8 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
   const isError = item.state === 'error' || item.state === 'cancelled'
   const isActive = item.state === 'downloading'
   const isUpload = item.type === 'upload'
+  // A ZIP being built in the browser (lib/clientZip) - cancellable like an upload.
+  const isZip = isZipTaskId(item.id)
 
   const sizeLabel = item.type === 'playlist'
     ? [
@@ -268,6 +271,7 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={item.filename}>{item.filename}</p>
+          {item.detail && <p className="text-[var(--text-muted)] text-[10px] mt-0.5">{item.detail}</p>}
           {isActive && (sizeLabel || speedLabel) && (
             <p className="text-[var(--text-muted)] text-[10px] mt-0.5">
               {sizeLabel}{sizeLabel && speedLabel ? ' · ' : ''}{speedLabel}
@@ -283,6 +287,12 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {isActive && <span className="text-[var(--text-muted)] text-[10px]">{item.percent}%</span>}
+          {isActive && isZip && (
+            <button onClick={() => cancelZipTask(item.id)} title="Cancel download"
+              className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 transition-colors">
+              <X size={12} />
+            </button>
+          )}
           {isActive && isUpload && (
             <button onClick={() => cancelCompUpload(item.id)} title="Cancel upload"
               className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 transition-colors">

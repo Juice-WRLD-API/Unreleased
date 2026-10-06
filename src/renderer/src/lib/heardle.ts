@@ -153,6 +153,8 @@ export interface HeardleSong {
   era: string | null
   category: string
   imageUrl?: string
+  /** The API's free-text `album` - sparsely filled, but authoritative where set. */
+  album?: string
   length: string
 }
 
@@ -202,6 +204,7 @@ function slim(song: JWApiSong): HeardleSong | null {
     era: song.era?.name ?? null,
     category: song.category,
     imageUrl: buildImageUrl(song.image_url),
+    album: song.album || undefined,
     length: song.length,
   }
 }
@@ -346,7 +349,8 @@ export async function loadPool(category: PoolId): Promise<HeardleSong[]> {
 
   // v2: entries cached before the display name switched from track_titles[0]
   // to `name` would keep showing aliases until the TTL ran out.
-  const cached = lsGet<CachedPool>(`pool:v2:${category}`)
+  // v3: songs carry `album` (the Tier List's album filter reads it).
+  const cached = lsGet<CachedPool>(`pool:v3:${category}`)
   if (cached && cached.songs?.length && Date.now() - cached.ts < POOL_TTL_MS) {
     memoryPool.set(category, cached.songs)
     return cached.songs
@@ -364,7 +368,24 @@ export async function loadPool(category: PoolId): Promise<HeardleSong[]> {
     throw err
   }
   memoryPool.set(category, songs)
-  lsSet(`pool:v2:${category}`, { ts: Date.now(), songs } as CachedPool)
+  lsSet(`pool:v3:${category}`, { ts: Date.now(), songs } as CachedPool)
+  return songs
+}
+
+/** How old the cached copy of a pool is, in ms (Infinity when there's none). */
+export function poolAgeMs(category: PoolId): number {
+  const cached = lsGet<CachedPool>(`pool:v3:${category}`)
+  return cached?.ts ? Date.now() - cached.ts : Infinity
+}
+
+/** Refetches a pool regardless of cache and replaces both cached copies.
+ *  For callers where freshness matters more than a pool that holds still
+ *  (the Tier List picks up edited covers this way) - Heardle never calls it
+ *  mid-round. */
+export async function refreshPool(category: PoolId): Promise<HeardleSong[]> {
+  const songs = await fetchPool(category)
+  memoryPool.set(category, songs)
+  lsSet(`pool:v3:${category}`, { ts: Date.now(), songs } as CachedPool)
   return songs
 }
 

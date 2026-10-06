@@ -11,12 +11,17 @@ import {
   type NewsItem, type NewsChannel, type NewsAttachment, type NewsSort,
 } from '../lib/newsApi'
 import { isSubscribed, setSubscribed, ensureNotifyPermission } from '../lib/newsNotifications'
+import { errorMessage } from '../lib/format'
+import { hasChatAccess } from '../lib/chatAccess'
 import NewsComposeModal from './NewsComposeModal'
 import NewsChannelsModal from './NewsChannelsModal'
+import NewsContextMenu, { type NewsMenuState } from './NewsContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
-import { hasChatAccess } from '../store/chatStore'
-import ShareNewsModal from './chat/ShareNewsModal'
+
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
 
 type NewsMode = 'news' | 'feed'
 
@@ -79,13 +84,15 @@ interface CardProps {
   canManage: boolean
   onEdit: (item: NewsItem) => void
   onDelete: (item: NewsItem) => void
+  onContextMenu: (item: NewsItem, e: React.MouseEvent) => void
 }
 
-function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
+function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
   return (
     <div className="relative group">
       <button
         onClick={() => onOpen(item)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
         className="w-full text-left rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 transition-all duration-200 block cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {item.image_url ? (
@@ -124,9 +131,9 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) 
   )
 }
 
-function NewsCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
+function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
   // Cards in the same grid row stretch to match the tallest sibling (h-full),
-  // so a short summary next to a card with more content — or a taller image —
+  // so a short summary next to a card with more content - or a taller image -
   // otherwise leaves dead space beneath it. Filling that with a clipped
   // preview of the full body reads as more content rather than empty air;
   // overflow-hidden on the text column lets it get cut off naturally at
@@ -139,6 +146,7 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
     <div className="relative group h-full">
       <button
         onClick={() => onOpen(item)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
         className="w-full h-full text-left flex flex-col rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {item.image_url && (
@@ -377,6 +385,10 @@ export default function NewsView(): JSX.Element {
   const [editing, setEditing] = useState<NewsItem | null>(null)
   const [channelsOpen, setChannelsOpen] = useState(false)
   const [sharing, setSharing] = useState<NewsItem | null>(null)
+  const [menu, setMenu] = useState<NewsMenuState | null>(null)
+  const openMenu = (item: NewsItem, e: React.MouseEvent): void => setMenu({ item, x: e.clientX, y: e.clientY })
+  const openItem = (item: NewsItem): void => setSelected(item)
+  const closeMenu = useCallback(() => setMenu(null), [])
 
   const loadChannels = useCallback(async () => {
     try {
@@ -619,10 +631,10 @@ export default function NewsView(): JSX.Element {
               <EmptyState canManage={canPost} onCompose={openNew} />
             ) : (
               <div className="space-y-5">
-                {featured && <FeaturedCard item={featured} onOpen={setSelected} canManage={canManageItem(featured)} onEdit={openEdit} onDelete={handleDelete} />}
+                {featured && <FeaturedCard item={featured} onOpen={openItem} canManage={canManageItem(featured)} onEdit={openEdit} onDelete={handleDelete} onContextMenu={openMenu} />}
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                   {rest.map((item) => (
-                    <NewsCard key={item.id} item={item} onOpen={setSelected} canManage={canManageItem(item)} onEdit={openEdit} onDelete={handleDelete} />
+                    <NewsCard key={item.id} item={item} onOpen={openItem} canManage={canManageItem(item)} onEdit={openEdit} onDelete={handleDelete} onContextMenu={openMenu} />
                   ))}
                 </div>
               </div>
@@ -645,6 +657,16 @@ export default function NewsView(): JSX.Element {
           channels={channels}
           onClose={() => setChannelsOpen(false)}
           onChanged={loadChannels}
+        />
+      )}
+      {menu && (
+        <NewsContextMenu
+          state={menu}
+          onClose={closeMenu}
+          onOpen={() => openItem(menu.item)}
+          onShare={canShareToChat ? () => setSharing(menu.item) : undefined}
+          onEdit={canManageItem(menu.item) ? () => openEdit(menu.item) : undefined}
+          onDelete={canManageItem(menu.item) ? () => { void handleDelete(menu.item) } : undefined}
         />
       )}
       {sharing && <ShareNewsModal item={sharing} onClose={() => setSharing(null)} />}

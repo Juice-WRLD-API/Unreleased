@@ -847,11 +847,11 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-2xl max-h-[92svh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full flex flex-col">
 
         <div
-          className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing"
+          className={`flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--border)] shrink-0 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <div className="min-w-0">

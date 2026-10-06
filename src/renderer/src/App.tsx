@@ -1,4 +1,4 @@
-import React, { useEffect, useState, Suspense } from 'react'
+import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -7,6 +7,12 @@ import { applySeo } from './lib/seo'
 import { loadSessionEditLinks } from './lib/sessionEditsApi'
 import { lazyView } from './lib/lazyView'
 import { ViewType } from './types'
+
+// Views that stay mounted (hidden) underneath the terminal so their local
+// state survives opening and closing it. Only form-like views with no
+// route-driven side effects - Admin pushes its own history entries and Heardle/
+// Wordle play audio, so those are left to remount.
+const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'chat']
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/' || pathname === '/tracker') return 'api-tracker'
@@ -26,13 +32,16 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/statistics') return 'statistics'
   if (pathname.startsWith('/u/')) return 'public-profile'
   if (pathname.startsWith('/chat')) return 'chat'
+  if (pathname === '/terminal') return 'terminal'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
+  if (pathname.startsWith('/track/') && /^[0-9]+$/.test(pathname.split('/')[2] ?? '')) return 'track'
   if (pathname === '/library') return 'library'
   if (pathname === '/auth/discord/callback') return 'api-tracker'
   return 'not-found'
 }
 
 import Sidebar from './components/Sidebar'
+import AutoHideNav from './components/AutoHideNav'
 import BottomNav from './components/BottomNav'
 import ApiTrackerView from './components/ApiTrackerView'
 import ApiFilesView from './components/ApiFilesView'
@@ -44,6 +53,7 @@ import DiscordRpcSync from './components/DiscordRpcSync'
 import LastfmScrobbler from './components/LastfmScrobbler'
 import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
+import BroadcastNotifier from './components/BroadcastNotifier'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
@@ -62,6 +72,8 @@ import LibraryTab from './components/LibraryTab'
 import AppMenu from './components/AppMenu'
 import ErrorBoundary from './components/ErrorBoundary'
 import SandboxNotch from './components/SandboxNotch'
+import { UserCardHost } from './components/chat/UserCard'
+import { useIsMobile } from './hooks/useIsMobile'
 
 // Rarely-visited views load on first navigation instead of inflating the
 // startup bundle. Suspense fallback is null: these chunks are local (Electron)
@@ -90,6 +102,9 @@ const ContributorPage = lazyView(() => import('./components/ContributorPage'))
 const ContributorProfileView = lazyView(() => import('./components/ContributorProfileView'))
 const Settings = lazyView(() => import('./components/Settings'))
 const DiagnosticsModal = lazyView(() => import('./components/DiagnosticsModal'))
+const TerminalPage = lazyView(() => import('./components/TerminalPage'))
+const TrackView = lazyView(() => import('./components/TrackView'))
+const LoginApprovalPrompt = lazy(() => import('./components/LoginApprovalPrompt'))
 
 function WindowControls(): JSX.Element {
   const [maximized, setMaximized] = React.useState(false)
@@ -120,13 +135,26 @@ function WindowControls(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav')
   // Keep the panel mounted after its first open instead of unmounting on
   // close - unmounting destroyed every cover <img>, so reopening the queue
   // made them all reload/re-decode from scratch instead of just reappearing.
   const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
+  // Opening the terminal from a view that holds unsaved local state (the song
+  // editor's draft, a half-filled submission, an open playlist...) must not
+  // unmount it - closing the terminal would otherwise remount it empty. Derived
+  // during render, not in an effect, so the held view is never unmounted for
+  // even one commit.
+  const heldViewRef = useRef<ViewType | null>(null)
+  if (activeView === 'terminal') {
+    if (previousView && HOLD_UNDER_TERMINAL.includes(previousView)) heldViewRef.current = previousView
+  } else if (activeView !== heldViewRef.current) {
+    heldViewRef.current = null
+  }
+  const heldView = heldViewRef.current
   useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
+  const isMobile = useIsMobile()
   useThemeEffects()
 
   // Warms the session-edit auto-match mirror so any view that resolves a
@@ -252,6 +280,7 @@ export default function App(): JSX.Element {
   const titleBarMenu = isElectron && !wrldFullscreen && appMenuPosition === 'title-bar'
 
   return (
+    <UserCardHost>
     <div className="app-shell flex flex-col h-dvh bg-surface overflow-hidden">
       {/* Reserved title bar — only when the app-menu button is parked here. A
           real row (not an overlay) so content flows BELOW it and the menu can
@@ -273,7 +302,9 @@ export default function App(): JSX.Element {
           : sidebarPosition === 'bottom' ? 'flex-col-reverse'
           : 'flex-row'
       }`}>
-        <Sidebar />
+        {autoHideNav && !isMobile
+          ? <AutoHideNav position={sidebarPosition}><Sidebar /></AutoHideNav>
+          : <Sidebar />}
         <main className="flex-1 overflow-hidden flex flex-col relative">
           {/* Frameless-window drag strip — when the nav bar sits on top (md+
               only; it's hidden on narrow windows) the bar touches the window
@@ -289,16 +320,27 @@ export default function App(): JSX.Element {
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
             <Suspense fallback={null}>
-            {activeView === 'home' ? <HomeView />
+            {/* Holdable views live in their own keyed slots so toggling between
+                "shown" and "hidden under the terminal" never remounts them.
+                `contents` keeps the wrapper out of the flex layout. */}
+            {HOLD_UNDER_TERMINAL.map((v) => (activeView === v || heldView === v) && (
+              <div key={v} className={activeView === v ? 'contents' : 'hidden'}>
+                {v === 'editor' ? <EditorPage />
+                  : v === 'contributor' ? <ContributorPage />
+                  : v === 'albums-admin' ? <AlbumsAdminView />
+                  : v === 'playlists' ? <PlaylistsView />
+                  : <ChatView />}
+              </div>
+            ))}
+            {HOLD_UNDER_TERMINAL.includes(activeView) ? null
+              : activeView === 'home' ? <HomeView />
               : activeView === 'api-tracker' ? <ApiTrackerView />
               : activeView === 'api-files' ? <ApiFilesView />
-              : activeView === 'editor' ? <EditorPage />
-              : activeView === 'contributor' ? <ContributorPage />
               : activeView === 'contributor-profile' ? <ContributorProfileView />
               : activeView === 'admin' ? <AdminPage />
               : activeView === 'liked' ? <LikedSongsView />
-              : activeView === 'playlists' ? <PlaylistsView />
               : activeView === 'shared-playlist' ? <SharedPlaylistView />
+              : activeView === 'track' ? <TrackView />
               : activeView === 'editor-profile' ? <EditorProfileView />
               : activeView === 'docs' ? <DocsPage />
               : activeView === 'wrld' ? <WrldView />
@@ -309,10 +351,9 @@ export default function App(): JSX.Element {
               : activeView === 'stats' ? <StatsView />
               : activeView === 'statistics' ? <StatisticsView />
               : activeView === 'public-profile' ? <PublicProfileView />
-              : activeView === 'chat' ? <ChatView />
+              : activeView === 'terminal' ? <TerminalPage />
               : activeView === 'library' ? <LibraryTab />
               : activeView === 'local-editor' ? <LocalEditorPage />
-              : activeView === 'albums-admin' ? <AlbumsAdminView />
               : activeView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
             </Suspense>
@@ -320,7 +361,9 @@ export default function App(): JSX.Element {
             {showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
             {queueEverOpened && (
               <ErrorBoundary>
-                <div style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
+                {/* flex so QueuePanel stretches to the full height; a plain
+                    block wrapper let it collapse to its content height. */}
+                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
                   <QueuePanel />
                 </div>
               </ErrorBoundary>
@@ -343,6 +386,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       {showSettings && (
@@ -360,6 +404,7 @@ export default function App(): JSX.Element {
           <UserAuthModal onClose={() => setShowUserAuth(false)} />
         </ErrorBoundary>
       )}
+      <ErrorBoundary fallback={null}><Suspense fallback={null}><LoginApprovalPrompt /></Suspense></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ReportModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ConvertFormatModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>
@@ -383,5 +428,6 @@ export default function App(): JSX.Element {
       {isElectron && !wrldFullscreen && <WindowControls />}
       <ErrorBoundary fallback={null}><SandboxNotch /></ErrorBoundary>
     </div>
+    </UserCardHost>
   )
 }

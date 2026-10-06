@@ -16,6 +16,7 @@ import { relativeTime } from '../adminShared'
 import { useRoomInfo } from './RoomPane'
 import { ChatAvatar, IconButton, errorText, shortStamp, useChatToast, useDismiss } from './ui'
 import { useOpenUserCard } from './UserCard'
+import { SafetyNumber } from './ChatTrust'
 import { anchorOf, clickable } from '../../lib/a11y'
 
 function PanelShell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
@@ -380,6 +381,7 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
             )}
           </div>
         ))}
+        {conv.participants.filter((p) => p.user.id !== meId).map((p) => <SafetyNumber key={`sn-${p.id}`} user={p.user} />)}
         {conv.is_group && (
           <button onClick={onAddPeople} className="mt-2 w-full rounded-lg border border-dashed border-[var(--border)] py-2 text-xs font-semibold text-text-muted hover:text-text-primary hover:border-text-muted">
             Add people

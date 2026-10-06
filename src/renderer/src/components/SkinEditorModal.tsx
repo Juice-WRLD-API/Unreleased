@@ -93,11 +93,11 @@ export default function SkinEditorModal({
       panelClassName="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl w-full max-w-lg max-h-[85vh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="w-full h-full flex flex-col overflow-hidden">
         {/* Header */}
         <div
-          className="flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-raised)] cursor-grab active:cursor-grabbing"
+          className={`flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-raised)] ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <input

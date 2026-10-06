@@ -1,4 +1,4 @@
-import { Home, SearchCode, HardDrive, Library, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, User, LogOut, Info, Settings } from 'lucide-react'
+import { Home, SearchCode, SquareTerminal, HardDrive, Library, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, User, LogOut, Info, Settings } from 'lucide-react'
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
@@ -15,6 +15,13 @@ export interface NavItemDef {
   icon: ReactNode
   electronOnly?: boolean
   defaultHidden?: boolean
+  /** Can't be toggled off from Settings - always occupies a bar slot. */
+  alwaysVisible?: boolean
+  /** Only exists for managers/administrators - dropped from every list otherwise. */
+  staffOnly?: boolean
+  /** Only exists for accounts with a staff profile (showStaffProfile) - the
+   *  personal Admin/Editor/Manager/Contributor page. Dropped otherwise. */
+  staffProfile?: boolean
 }
 
 export const NAV_ITEMS: NavItemDef[] = [
@@ -32,6 +39,12 @@ export const NAV_ITEMS: NavItemDef[] = [
   // Extras — off by default, addable from Settings → Appearance → Menu items.
   { view: 'liked', label: 'Liked Songs', icon: <Heart size={18} />, defaultHidden: true },
   { view: 'docs', label: 'API Docs', icon: <BookOpen size={18} />, defaultHidden: true },
+  // The staff page (the sidebar's profile entry, see openProfile). Off by
+  // default, addable from Settings → Menu items; desktop only (mobile's bottom
+  // bar already carries the profile button).
+  { view: 'editor-profile', label: 'Staff', icon: <Shield size={18} />, defaultHidden: true, staffProfile: true },
+  // Off by default, addable from Settings → Menu items.
+  { view: 'terminal', label: 'Terminal', icon: <SquareTerminal size={18} />, defaultHidden: true },
 ]
 
 export const DEFAULT_NAV_ORDER: ViewType[] = NAV_ITEMS.map((i) => i.view)
@@ -43,6 +56,8 @@ export const DEFAULT_NAV_ORDER: ViewType[] = NAV_ITEMS.map((i) => i.view)
 const TAB_OF: Partial<Record<ViewType, ViewType>> = {
   wordle: 'heardle',
   tierlist: 'heardle',
+  // openProfile lands contributor-only accounts here instead.
+  'contributor-profile': 'editor-profile',
 }
 
 /** The nav tab `view` belongs to — itself, unless it's a sub-view. */
@@ -86,8 +101,8 @@ export const DEFAULT_NAV_VISIBILITY: Record<string, boolean> = Object.fromEntrie
 // Reorder NAV_ITEMS by a saved list of view ids. Ids in `order` that no longer
 // exist are skipped; items missing from `order` (e.g. a destination added in a
 // newer version than the saved order) keep their canonical position, appended
-// after the saved ones — so a stale persisted order never hides a new tab.
-export function orderedNavItems(order: ViewType[]): NavItemDef[] {
+// after the saved ones - so a stale persisted order never hides a new tab.
+export function orderedNavItems(order: ViewType[], includeStaff = false, includeStaffProfile = false): NavItemDef[] {
   const byView = new Map(NAV_ITEMS.map((i) => [i.view, i]))
   const seen = new Set<ViewType>()
   const out: NavItemDef[] = []
@@ -96,7 +111,7 @@ export function orderedNavItems(order: ViewType[]): NavItemDef[] {
     if (item && !seen.has(view)) { out.push(item); seen.add(view) }
   }
   for (const item of NAV_ITEMS) if (!seen.has(item.view)) out.push(item)
-  return out
+  return out.filter((i) => (includeStaff || !i.staffOnly) && (includeStaffProfile || !i.staffProfile))
 }
 
 // True when an item should render in the side menu: platform-eligible and not

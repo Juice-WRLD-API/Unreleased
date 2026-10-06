@@ -173,7 +173,7 @@ export default function ContributorProfileView(): JSX.Element {
                   </h2>
                 )}
                 {nameError && <p className="text-[10px] text-red-400 mt-0.5">{nameError}</p>}
-                <div className="mt-1">
+                <div className="mt-1 flex flex-wrap gap-1.5">
                   <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={isEditor} isContributor={isContributor} />
                 </div>
               </div>

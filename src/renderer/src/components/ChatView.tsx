@@ -8,7 +8,6 @@ import RoomPane from './chat/RoomPane'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './chat/SidePanels'
 import { ModalHost } from './chat/modalHost'
 import { useOpenModal } from './chat/modalHost'
-import { UserCardHost } from './chat/UserCard'
 import { ToastHost } from './chat/ui'
 import './chat/chat.css'
 
@@ -92,7 +91,7 @@ function ChatViewMain(): JSX.Element {
     : 'flex h-full'
 
   return (
-    <div className="flex-1 min-w-0 h-full flex bg-surface overflow-hidden" style={{ ['--chat-rail' as string]: 'var(--sidebar, var(--surface))' }}>
+    <div className="relative flex-1 min-w-0 h-full flex bg-surface overflow-hidden" style={{ ['--chat-rail' as string]: 'var(--sidebar, var(--surface))' }}>
       <ServerRail />
       <div className="w-[264px] shrink-0 min-h-0 flex flex-col bg-surface-raised/30 border-r border-[var(--border)]">
         {activeServerId === null ? <DmList /> : <ChannelList serverId={activeServerId} />}
@@ -202,9 +201,7 @@ export default function ChatView(): JSX.Element {
   return (
     <ToastHost>
       <ModalHost>
-        <UserCardHost>
-          <ChatViewMain />
-        </UserCardHost>
+        <ChatViewMain />
       </ModalHost>
     </ToastHost>
   )

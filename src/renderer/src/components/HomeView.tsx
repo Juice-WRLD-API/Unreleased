@@ -8,23 +8,29 @@ import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import * as userApi from '../lib/userApi'
-import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
-import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
+import type { SongContextMenuState } from './SongContextMenu'
+import type { PlaylistContextMenuState } from './PlaylistContextMenu'
+import type { NewsMenuState } from './NewsContextMenu'
 import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
-import { hasChatAccess } from '../store/chatStore'
-import HomeChatCard from './chat/HomeChatCard'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
 
-// The desktop landing screen - a bento that fills the window. Cover grids
-// clamp to whole rows and size to their own content (however many rows the
-// actual items need, capped per section - see fitCount's callers) rather
-// than stretching to fill whatever space is left - a card whose border runs
-// on well past its last cover reads as broken the same way a half-visible
-// row would. News, the one section where the extra headlines are worth
-// keeping reachable, is the exception: it fills its rail and scrolls
-// internally.
+// Staff-only, and it reads the chat store - loading it lazily keeps the chat
+// client out of Home's chunk for everyone else.
+const HomeChatCard = lazyOverlay(() => import('./chat/HomeChatCard'))
+// Right-click only. Home is the desktop landing page, so anything it imports
+// statically is startup cost - these load on the first right-click instead.
+const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
+const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
+const NewsContextMenu = lazyOverlay(() => import('./NewsContextMenu'))
+const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
+
+// The desktop landing screen - same sections, same data (useHomeData) and the
+// same Settings → Home screen toggles as the mobile shell, laid out as a bento
+// that fills the window instead of a stack that scrolls out of it.
 //
 // Section ids map 1:1 to one place on screen, so hiding a section in
 // Settings removes exactly one thing. News, 999 FM and Liked share one
@@ -174,9 +180,10 @@ function AlbumsTile({ albums, onAll, span }: {
 
 // ─── Row A side: the one tile that scrolls ───────────────────────────────────
 
-function NewsTile({ items, onOpen, onAll, span }: {
+function NewsTile({ items, onOpen, onContextMenu, onAll, span }: {
   items: NewsItem[]
   onOpen: (item: NewsItem) => void
+  onContextMenu: (item: NewsItem, e: React.MouseEvent) => void
   onAll: () => void
   span: string
 }): JSX.Element {
@@ -187,6 +194,7 @@ function NewsTile({ items, onOpen, onAll, span }: {
           <button
             key={item.id}
             onClick={() => onOpen(item)}
+            onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
             className="group w-full flex items-center gap-2.5 rounded-lg p-1.5 text-left hover:bg-[var(--surface-raised)] transition-colors"
           >
             <span className="w-12 h-12 shrink-0 rounded-md overflow-hidden bg-surface-raised flex items-center justify-center">
@@ -323,6 +331,8 @@ export default function HomeView(): JSX.Element {
   const [showMore, setShowMore] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistContextMenuState | null>(null)
+  const [newsMenu, setNewsMenu] = useState<NewsMenuState | null>(null)
+  const [sharingNews, setSharingNews] = useState<NewsItem | null>(null)
   const hiddenNavItems = orderedNavItems(navOrder).filter(
     (i) => i.defaultHidden && !isNavItemVisible(i, navVisibility, true),
   )
@@ -461,6 +471,7 @@ export default function HomeView(): JSX.Element {
                   <NewsTile
                     items={newsItems}
                     onOpen={openNewsItem}
+                    onContextMenu={(item, e) => setNewsMenu({ item, x: e.clientX, y: e.clientY })}
                     onAll={() => setActiveView('news')}
                     span="flex-1 min-h-0"
                   />
@@ -524,6 +535,15 @@ export default function HomeView(): JSX.Element {
       {playlistMenu && (
         <PlaylistContextMenu state={playlistMenu} onClose={() => setPlaylistMenu(null)} />
       )}
+      {newsMenu && (
+        <NewsContextMenu
+          state={newsMenu}
+          onClose={() => setNewsMenu(null)}
+          onOpen={() => openNewsItem(newsMenu.item)}
+          onShare={hasChatAccess(account) ? () => setSharingNews(newsMenu.item) : undefined}
+        />
+      )}
+      {sharingNews && <ShareNewsModal item={sharingNews} onClose={() => setSharingNews(null)} />}
     </div>
   )
 }
