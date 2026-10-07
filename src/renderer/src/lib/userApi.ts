@@ -563,9 +563,28 @@ export async function removeFavorite(songId: number): Promise<void> {
   return request(`${LIBRARY_BASE}/favorites/${songId}/`, { method: 'DELETE' })
 }
 
+// One request for the whole library: include_items=true makes the list endpoint
+// return each playlist's tracks too (omit_cover_image keeps the base64 covers
+// out). The per-playlist detail and cover caches are seeded from that response,
+// so opening a playlist or the startup prefetch needs no further requests.
+// Servers without include_items just return plain summaries (no items), in
+// which case nothing is seeded and callers fall back to per-playlist fetches.
 export async function getPlaylists(): Promise<PlaylistSummary[]> {
-  const url = `${LIBRARY_BASE}/playlists/?omit_cover_image=true`
-  return request(url, { method: 'GET' }, true, url)
+  const url = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
+  const rows = await request<Array<PlaylistSummary & { items?: PlaylistItemEntry[] }>>(url, { method: 'GET' }, true, url)
+  return rows.map((row) => {
+    const { items, ...summary } = row
+    if (Array.isArray(items)) {
+      const detail = { ...summary, items } as unknown as PlaylistDetail
+      playlistDetailCache.set(row.id, detail)
+      playlistCoverCache.set(row.id, {
+        cover_image_url: buildImageUrl(row.cover_image_url) ?? null,
+        cover_image: buildImageUrl(row.cover_image) ?? null,
+        trackImages: items.slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[],
+      })
+    }
+    return summary
+  })
 }
 
 type PlaylistCoverEntry = { cover_image_url?: string | null; cover_image?: string | null; trackImages: string[] }

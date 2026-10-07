@@ -2349,9 +2349,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
       get()._flushReports()
       await get().refreshPlaylists()
       // Fire-and-forget: warm playlist tracks + covers in the background so the
-      // Playlists page is ready before the user ever navigates to it. Two
-      // requests per playlist, so it waits for idle rather than piling onto the
-      // startup burst.
+      // Playlists page is ready before the user ever navigates to it. The list
+      // request (include_items) already seeds those caches, so this only does
+      // work against a server that lacks include_items - one request per
+      // playlist, hence waiting for idle.
       runWhenIdle(() => { get().prefetchPlaylistDetails() })
     })().finally(() => { _loadAccountInFlight = null })
     return _loadAccountInFlight
