@@ -160,14 +160,21 @@ export default function ProposalPropagationModal({ proposalId, onClose }: {
     }
   }, [proposalId])
 
-  useEffect(() => {
-    load()
-    const interval = setInterval(load, POLL_INTERVAL)
-    return () => clearInterval(interval)
-  }, [load])
-
   const propagatedCount = data?.nodes.filter(n => n.state === 'propagated').length ?? 0
   const totalCount = data?.nodes.length ?? 0
+  // Nothing left to wait for once every node has the change.
+  const settled = totalCount > 0 && propagatedCount === totalCount
+
+  useEffect(() => {
+    load()
+    if (settled) return
+    // No server push exists for propagation progress, so this stays a poll -
+    // but not while the tab is hidden or once every node is done.
+    const interval = setInterval(() => { if (!document.hidden) void load() }, POLL_INTERVAL)
+    const onVisible = (): void => { if (!document.hidden) void load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible) }
+  }, [load, settled])
 
   return (
     <ModalOverlay

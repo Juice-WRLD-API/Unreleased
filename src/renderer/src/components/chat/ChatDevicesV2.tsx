@@ -6,6 +6,7 @@ import type { E2EFeatures, ListDeviceEntry } from '../../lib/chatApi'
 import type { IdentityStatus } from '../../lib/chatIdentity'
 import type { LinkCandidate, PendingLink } from '../../lib/chatLinking'
 import { useChatStore } from '../../store/chatStore'
+import { subscribeNotifications } from '../../lib/notificationSocket'
 
 const e2e = () => import('../../lib/chatE2E')
 const identity = () => import('../../lib/chatIdentity')
@@ -184,11 +185,16 @@ function LinkThisDevice({ userId, onLinked }: { userId: number; onLinked: () => 
     if (!pending) return
     let stop = (): void => undefined
     void toDevice().then((m) => { stop = m.onToDeviceEvent((ev) => { if (ev.type === 'linked') { setPending(null); onLinked() } }) })
-    const timer = window.setInterval(() => {
-      setNow(Date.now())
-      void toDevice().then((m) => m.processInbox(userId)).catch(() => undefined)
-    }, 3000)
-    return () => { stop(); window.clearInterval(timer) }
+    const drain = (): void => { void toDevice().then((m) => m.processInbox(userId)).catch(() => undefined) }
+    // todevice.available is pushed on the notifications socket; the slow poll
+    // only covers a missed frame.
+    const unsubscribe = subscribeNotifications(
+      (frame) => { if (frame.type === 'todevice' && frame.action === 'available') drain() },
+      drain,
+    )
+    const clock = window.setInterval(() => setNow(Date.now()), 1000)
+    const timer = window.setInterval(drain, 15_000)
+    return () => { stop(); unsubscribe(); window.clearInterval(clock); window.clearInterval(timer) }
   }, [pending, userId, onLinked])
 
   if (!pending) {

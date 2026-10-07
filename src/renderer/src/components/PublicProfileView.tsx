@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
+import { subscribeNotifications } from '../lib/notificationSocket'
 import {
   getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
   adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
@@ -104,9 +105,9 @@ function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
 const RECENT_PLAYS_DISPLAY_LIMIT = 10
 
 // The server itself expires now_playing after 5 minutes without a push (see
-// docs/content.tsx "Now Playing") - polling well inside that window keeps the
-// live indicator from lagging behind a track change or a stop.
-const NOW_PLAYING_POLL_MS = 15_000
+// docs/content.tsx "Now Playing"). Pushes cover live updates; this poll is the
+// fallback that keeps the indicator inside that window.
+const NOW_PLAYING_POLL_MS = 60_000
 
 // How many of the profile owner's top songs the compact Wrapped teaser shows -
 // the full breakdown lives behind "View full Wrapped" for the owner's own page.
@@ -326,8 +327,22 @@ export default function PublicProfileView(): JSX.Element {
         .catch(() => { if (!cancelled) setNowPlaying(null) })
     }
     poll()
+    // The chat socket pushes now_playing.updated into the chat store, but only
+    // for users it routes to us, so the mount-time fetch above stays the source
+    // of truth and the store is only followed for changes after it. The slow
+    // poll covers users the socket never pushes for.
+    const unsubscribe = useChatStore.subscribe((state, prev) => {
+      if (cancelled || state.nowPlaying[userId] === prev.nowPlaying[userId] || !(userId in state.nowPlaying)) return
+      setNowPlaying(state.nowPlaying[userId])
+    })
+    // The backend also broadcasts song changes on the public notifications
+    // socket, so a profile viewer doesn't need to share a chat server.
+    const unsubscribeSocket = subscribeNotifications((frame) => {
+      if (cancelled || frame.type !== 'now_playing' || Number(frame.user_id) !== userId) return
+      setNowPlaying((frame.now_playing as typeof nowPlaying) ?? null)
+    }, poll)
     const id = setInterval(poll, NOW_PLAYING_POLL_MS)
-    return () => { cancelled = true; clearInterval(id) }
+    return () => { cancelled = true; unsubscribe(); unsubscribeSocket(); clearInterval(id) }
   }, [profile?.public_now_playing, userId])
 
   useEffect(() => {

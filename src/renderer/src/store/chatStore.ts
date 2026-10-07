@@ -290,7 +290,9 @@ const seenNew = new Set<number>()
 // admin picker, etc.) asking about the same user shares one request instead
 // of each firing its own.
 const nowPlayingRequested = new Set<number>()
-const LIST_POLL_MS = 30_000
+// Fallback only: room.updated / unread.changed / todevice.available push the
+// same changes over the sockets.
+const LIST_POLL_MS = 120_000
 // Rooms primeRoom has already fetched. The list poll can't use lastMessage
 // for this: an empty room never gets an entry there, so it was re-primed
 // (another limit=1 fetch) on every tick, forever.
@@ -729,6 +731,24 @@ export const useChatStore = create<ChatState>((set, get) => {
           for (const id of Object.keys(get().members)) void get().loadMembers(Number(id), true)
         }).catch(() => undefined)
         return
+      // Known rooms are already kept current by message.created, so this only
+      // matters for a room we have no record of yet (a brand-new DM/channel).
+      case 'room.updated': {
+        const known = ev.kind === 'conversation'
+          ? s.conversations.some((c) => c.id === ev.id)
+          : s.servers.some((sv) => sv.channels.some((c) => c.id === ev.id))
+        if (!known && s.initialized) {
+          void get().refreshLists().then(() => primeRoom(`${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`)).catch(() => undefined)
+        }
+        return
+      }
+      // Another of my devices read the room: mirror its authoritative count.
+      case 'unread.changed': {
+        const key = `${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`
+        if (s.active && roomKey(s.active) === key) return
+        set((st) => ({ unread: { ...st.unread, [key]: ev.unread } }))
+        return
+      }
       case 'server.updated':
         set((st) => ({ servers: st.servers.map((x) => x.id === ev.server.id ? { ...x, ...ev.server } : x) }))
         return
