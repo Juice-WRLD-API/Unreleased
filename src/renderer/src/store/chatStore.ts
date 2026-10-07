@@ -283,16 +283,12 @@ interface ChatState {
 
 let socket: ChatSocket | null = null
 let typingTimer: number | null = null
-let listPollTimer: number | null = null
 const seenNew = new Set<number>()
 // Ids already fetched or in flight for ensureNowPlaying - keyed globally
 // (not per-store-instance) so every caller (DM list, online members panel,
 // admin picker, etc.) asking about the same user shares one request instead
 // of each firing its own.
 const nowPlayingRequested = new Set<number>()
-// Fallback only: room.updated / unread.changed / todevice.available push the
-// same changes over the sockets.
-const LIST_POLL_MS = 120_000
 // Rooms primeRoom has already fetched. The list poll can't use lastMessage
 // for this: an empty room never gets an entry there, so it was re-primed
 // (another limit=1 fetch) on every tick, forever.
@@ -1075,6 +1071,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           if (status === 'open' && prev === 'reconnecting') {
             void catchUp().catch(() => undefined)
             void reconcileKeys().catch(() => undefined)
+            // No list poll: room.updated / unread.changed / key events arrive live,
+            // and anything missed during the drop is re-read here.
+            void get().refreshLists().catch(() => undefined)
+            void pollKeys().catch(() => undefined)
+            const meId = get().meId
+            if (meId) void import('../lib/chatToDevice').then((td) => td.processInbox(meId)).catch(() => undefined)
             // catchUp only covers the open room - re-prime the rest so
             // anything sent while we were disconnected still bumps unread
             // and updates previews.
@@ -1102,26 +1104,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         if (changed) set({ typing: next })
       }, 1500)
-      // Rooms we already know about stay current via the socket (message.created
-      // updates lastMessage/unread directly); a real gap after a drop is handled
-      // by catchUp/reconcileKeys on reconnect. This timer only has to pick up
-      // rooms the socket never told us about yet: new DMs/channels from refreshLists.
-      listPollTimer = window.setInterval(() => {
-        if (!get().initialized || document.visibilityState !== 'visible') return
-        void get().refreshLists().then(() => {
-          const active = get().active
-          const known = get().lastMessage
-          const keys = [
-            ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
-            ...get().conversations.map((c) => `d:${c.id}`),
-          ].filter((k) => (!active || k !== roomKey(active)) && !(k in known) && !primedRooms.has(k))
-          return pool(keys, 4, primeRoom)
-        }).catch(() => undefined)
-        void pollKeys().catch(() => undefined)
-        const meId = get().meId
-        if (meId) void import('../lib/chatToDevice').then((td) => td.processInbox(meId)).catch(() => undefined)
-      }, LIST_POLL_MS)
-
       initPromise = (async () => {
         try {
           await get().refreshLists()
@@ -1184,8 +1166,6 @@ export const useChatStore = create<ChatState>((set, get) => {
       seenDeviceLists.clear()
       if (typingTimer !== null) window.clearInterval(typingTimer)
       typingTimer = null
-      if (listPollTimer !== null) window.clearInterval(listPollTimer)
-      listPollTimer = null
       seenNew.clear()
       primedRooms.clear()
       initPromise = null
