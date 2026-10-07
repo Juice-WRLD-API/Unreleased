@@ -52,7 +52,7 @@ export default function AutoHideNav({ position, children }: { position: SidebarP
         aria-hidden
         onPointerEnter={show}
         // Reached the edge but moved away without touching the menu: close.
-        onPointerLeave={(e) => { if (!wrapRef.current?.contains(e.relatedTarget as Node | null)) hideSoon() }}
+        onPointerLeave={(e) => { if (!(e.relatedTarget instanceof Node && wrapRef.current?.contains(e.relatedTarget))) hideSoon() }}
         className={`fixed z-40 hidden md:block ${edge.zone}`}
         style={vertical ? { width: hotZonePx } : { height: hotZonePx }}
       />

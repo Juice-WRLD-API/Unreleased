@@ -6,7 +6,9 @@
 //
 // Where the File System Access API exists (Chromium desktop, Electron) the
 // archive streams straight to disk, so memory stays flat however big it
-// gets. Elsewhere it's assembled in memory as a Blob, capped at
+// gets. Elsewhere (Firefox, Safari, mobile) it streams through the service
+// worker (public/sw.js) as a normal browser download, which is just as flat.
+// Only if neither is available is it assembled in memory as a Blob, capped at
 // MEMORY_ZIP_LIMIT; past that the caller gets ZipTooLargeError and should
 // fall back to downloading files one at a time.
 //
@@ -35,6 +37,7 @@ export interface ZipResult { saved: number; failed: number; cancelled?: boolean 
 
 export type ZipTarget =
   | { kind: 'disk'; handle: FileSystemFileHandle; filename: string }
+  | { kind: 'stream'; filename: string }
   | { kind: 'memory'; filename: string }
 
 export class ZipTooLargeError extends Error {
@@ -58,7 +61,7 @@ type SavePicker = (opts: {
 export async function openZipTarget(baseName: string): Promise<ZipTarget | null> {
   const filename = `${sanitizeName(baseName) || 'download'}.zip`
   const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker
-  if (!picker) return { kind: 'memory', filename }
+  if (!picker) return fallbackTarget(filename)
   try {
     const handle = await picker({
       suggestedName: filename,
@@ -67,9 +70,63 @@ export async function openZipTarget(baseName: string): Promise<ZipTarget | null>
     return { kind: 'disk', handle, filename: handle.name }
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') return null
-    // SecurityError (activation lapsed) or anything else - memory still works.
-    return { kind: 'memory', filename }
+    // SecurityError (activation lapsed) or anything else - use the fallback.
+    return fallbackTarget(filename)
   }
+}
+
+function fallbackTarget(filename: string): ZipTarget {
+  const controlled = typeof navigator !== 'undefined' && !!navigator.serviceWorker?.controller
+  return { kind: controlled ? 'stream' : 'memory', filename }
+}
+
+/** Opens a download served by the service worker and returns a sink that
+ *  feeds it. Rejects if the worker doesn't pick the request up (not
+ *  controlling the page yet, or an older worker without the handler). */
+async function openStreamSink(filename: string): Promise<WritableStream<Uint8Array>> {
+  const sw = navigator.serviceWorker?.controller
+  if (!sw) throw new Error('No service worker')
+  const id = crypto.randomUUID()
+  const { port1, port2 } = new MessageChannel()
+  let waiter: { resolve: () => void; reject: (e: unknown) => void } | null = null
+  let cancelled = false
+  let onStarted: () => void = () => {}
+  const started = new Promise<void>((resolve) => { onStarted = resolve })
+  port1.onmessage = ({ data }) => {
+    if (data.type === 'started') onStarted()
+    else if (data.type === 'ack') { waiter?.resolve(); waiter = null }
+    else if (data.type === 'cancel') {
+      // The user cancelled in the browser's download UI.
+      cancelled = true
+      waiter?.reject(new DOMException('Cancelled', 'AbortError'))
+      waiter = null
+    }
+  }
+  sw.postMessage({ type: 'zip-open', id, filename }, [port2])
+
+  const frame = document.createElement('iframe')
+  frame.hidden = true
+  frame.src = `/__zip-download/${id}`
+  document.body.appendChild(frame)
+  const dispose = (): void => { port1.close(); setTimeout(() => frame.remove(), 5000) }
+
+  const ok = await Promise.race([started.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 5000))])
+  if (!ok) { dispose(); throw new Error('Service worker did not respond') }
+
+  return new WritableStream<Uint8Array>({
+    write(chunk) {
+      if (cancelled) throw new DOMException('Cancelled', 'AbortError')
+      // Copy: the transfer detaches the buffer, and chunks can be views into
+      // a larger one the zipper still uses.
+      const copy = chunk.slice().buffer
+      return new Promise<void>((resolve, reject) => {
+        waiter = { resolve, reject }
+        port1.postMessage({ type: 'chunk', chunk: copy }, [copy])
+      })
+    },
+    close() { port1.postMessage({ type: 'end' }); dispose() },
+    abort() { port1.postMessage({ type: 'abort' }); dispose() },
+  })
 }
 
 /** Fetches every item into one ZIP and saves it to `target`. Items that fail
@@ -82,6 +139,10 @@ export async function writeZip(
   opts: { signal?: AbortSignal; onProgress?: (p: ZipProgress) => void; onBytes?: (bytes: number) => void } = {}
 ): Promise<ZipResult> {
   const { signal, onProgress, onBytes } = opts
+  let sink: WritableStream<Uint8Array> | null = null
+  if (target.kind === 'stream') {
+    try { sink = await openStreamSink(target.filename) } catch { target = { kind: 'memory', filename: target.filename } }
+  }
   if (target.kind === 'memory') {
     const known = items.reduce((sum, i) => sum + (i.size ?? 0), 0)
     if (known > MEMORY_ZIP_LIMIT) throw new ZipTooLargeError()
@@ -103,10 +164,11 @@ export async function writeZip(
     },
   }))
 
-  if (target.kind === 'disk') {
+  if (sink || target.kind === 'disk') {
     // On failure or abort pipeTo aborts the writable, which discards the
     // partial file.
-    await body.pipeTo(await target.handle.createWritable(), { signal })
+    const dest = sink ?? await (target as Extract<ZipTarget, { kind: 'disk' }>).handle.createWritable()
+    await body.pipeTo(dest, { signal })
     return result
   }
 
