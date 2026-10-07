@@ -1,4 +1,5 @@
 import type { JWApiSong } from './juicewrldApi'
+import { locateFuzzy } from './lyricSearch'
 
 // Pure logic shared by ApiTrackerView.desktop.tsx and ApiTrackerView.mobile.tsx -
 // verified byte-identical between the two before being pulled out here. The
@@ -84,9 +85,8 @@ export function getLyricSnippet(lyrics: string | null, query: string): { before:
   let idx = lower.indexOf(q.toLowerCase())
   let matchLen = q.length
   if (idx === -1) {
-    const firstWord = q.split(/\s+/)[0]
-    idx = firstWord ? lower.indexOf(firstWord.toLowerCase()) : -1
-    matchLen = firstWord.length
+    const fuzzy = locateFuzzy(lyrics, q)
+    if (fuzzy) { idx = fuzzy.idx; matchLen = fuzzy.len }
   }
   if (idx === -1) return null
   const start = Math.max(0, idx - SNIPPET_CONTEXT_CHARS)

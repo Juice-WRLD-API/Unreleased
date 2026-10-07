@@ -1,10 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { SidebarPosition } from '../store/useStore'
+import { useStore, type SidebarPosition } from '../store/useStore'
 
 const HIDE_DELAY_MS = 300
 const SLIDE_MS = 200
-// Thickness of the invisible strip along the screen edge that reveals the menu.
-const HOT_ZONE_PX = 48
 
 const EDGE: Record<SidebarPosition, { box: string; hidden: string; zone: string }> = {
   left: { box: 'top-0 bottom-0 left-0', hidden: 'translateX(-100%)', zone: 'top-0 bottom-0 left-0' },
@@ -19,6 +17,7 @@ const EDGE: Record<SidebarPosition, { box: string; hidden: string; zone: string 
  * edge it lives on. It slides back out shortly after the pointer leaves.
  */
 export default function AutoHideNav({ position, children }: { position: SidebarPosition; children: React.ReactNode }): JSX.Element {
+  const hotZonePx = useStore((s) => s.autoHideNavZone)
   const [open, setOpen] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const edge = EDGE[position]
@@ -55,7 +54,7 @@ export default function AutoHideNav({ position, children }: { position: SidebarP
         // Reached the edge but moved away without touching the menu: close.
         onPointerLeave={(e) => { if (!wrapRef.current?.contains(e.relatedTarget as Node | null)) hideSoon() }}
         className={`fixed z-40 hidden md:block ${edge.zone}`}
-        style={vertical ? { width: HOT_ZONE_PX } : { height: HOT_ZONE_PX }}
+        style={vertical ? { width: hotZonePx } : { height: hotZonePx }}
       />
       <div
         ref={wrapRef}

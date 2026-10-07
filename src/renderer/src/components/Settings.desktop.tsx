@@ -420,6 +420,7 @@ export default function Settings(): JSX.Element {
     settingsTab, setSettingsTab,
     sidebarPosition, setSidebarPosition,
     autoHideNav, setAutoHideNav,
+    autoHideNavZone, setAutoHideNavZone,
     navOrder, setNavOrder,
     navVisibility, setNavItemVisible,
     navControlOrder, setNavControlOrder,
@@ -452,7 +453,7 @@ export default function Settings(): JSX.Element {
     refreshPlaylists, fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
     uploads,
-  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'uploads')
+  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'uploads')
 
   function startEditName(): void {
     setNameInput(accountDisplayName(account))
@@ -1347,6 +1348,24 @@ export default function Settings(): JSX.Element {
                 >
                   <Toggle on={autoHideNav} onClick={() => setAutoHideNav(!autoHideNav)} />
                 </Row>
+                {autoHideNav && (
+                  <Row
+                    icon={Minimize2}
+                    iconColor="#0d9488"
+                    label="Reveal area"
+                    sub="How close to the edge the pointer needs to get to bring the menu back"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={4} max={120} step={4}
+                        value={autoHideNavZone}
+                        onChange={(e) => setAutoHideNavZone(parseInt(e.target.value))}
+                        className="w-28 accent-[var(--accent)]"
+                      />
+                      <span className="text-text-muted text-xs tabular-nums w-10 text-right">{autoHideNavZone}px</span>
+                    </div>
+                  </Row>
+                )}
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#6366f1' }}>

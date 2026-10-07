@@ -46,6 +46,7 @@ import {
   SNIPPET_CONTEXT_CHARS, getLyricSnippet, MONTH_LABELS, buildMonthGrid,
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
+import { useLyricSearch } from '../lib/lyricSearch'
 
 const LS_TRACKER_VIEW = 'api-tracker:viewMode'
 const LS_TRACKER_COMPACT = 'api-tracker:compactView'
@@ -2044,51 +2045,16 @@ export default function ApiTrackerView(): JSX.Element {
   // the main song list's search/category/era/sort state above.
   const [lyricsQuery, setLyricsQuery] = useState('')
   const [debouncedLyricsQuery, setDebouncedLyricsQuery] = useState('')
-  const [lyricsResults, setLyricsResults] = useState<JWApiSong[]>([])
-  const [lyricsPage, setLyricsPage] = useState(1)
-  const [lyricsCount, setLyricsCount] = useState(0)
-  const [lyricsHasMore, setLyricsHasMore] = useState(false)
-  const [lyricsLoading, setLyricsLoading] = useState(false)
-  const [lyricsError, setLyricsError] = useState<string | null>(null)
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedLyricsQuery(lyricsQuery), 400)
     return () => clearTimeout(t)
   }, [lyricsQuery])
 
-  useEffect(() => {
-    if (!debouncedLyricsQuery.trim()) {
-      setLyricsResults([]); setLyricsCount(0); setLyricsHasMore(false); setLyricsError(null)
-      return
-    }
-    let cancelled = false
-    setLyricsLoading(true); setLyricsError(null)
-    apiFetch<JWApiPaginatedResponse>('/songs/', { lyrics: debouncedLyricsQuery, page: 1, page_size: PAGE_SIZE })
-      .then((data) => {
-        if (cancelled) return
-        setLyricsResults(data.results)
-        setLyricsCount(data.count)
-        setLyricsHasMore(data.next !== null)
-        setLyricsPage(1)
-      })
-      .catch((err) => { if (!cancelled) setLyricsError(err.message) })
-      .finally(() => { if (!cancelled) setLyricsLoading(false) })
-    return () => { cancelled = true }
-  }, [debouncedLyricsQuery])
-
-  const loadMoreLyrics = (): void => {
-    if (lyricsLoading || !lyricsHasMore) return
-    const nextPage = lyricsPage + 1
-    setLyricsLoading(true)
-    apiFetch<JWApiPaginatedResponse>('/songs/', { lyrics: debouncedLyricsQuery, page: nextPage, page_size: PAGE_SIZE })
-      .then((data) => {
-        setLyricsResults((prev) => [...prev, ...data.results])
-        setLyricsHasMore(data.next !== null)
-        setLyricsPage(nextPage)
-      })
-      .catch((err) => setLyricsError(err.message))
-      .finally(() => setLyricsLoading(false))
-  }
+  const {
+    results: lyricsResults, count: lyricsCount, hasMore: lyricsHasMore, loading: lyricsLoading, error: lyricsError, loadMore,
+  } = useLyricSearch(debouncedLyricsQuery)
+  const loadMoreLyrics = (): void => { if (!lyricsLoading) loadMore() }
 
   const linkedLyricsResults = useMemo(() => lyricsResults.map(linkSessionEdit), [lyricsResults, linkSessionEdit])
 

@@ -2,9 +2,10 @@ import { getAudioCurrentTime, getAudioDuration, seekAudio } from '../../componen
 import { useStore } from '../../store/useStore'
 import { EQ_PRESETS } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
-import { resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { loadAllSongsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { loadCatalog, statsSongToTrack } from '../statsCatalog'
-import { clock, fail, parseBool, pickByName, type TermCommand } from './types'
+import { bestLyricLine, searchLyrics } from '../lyricSearch'
+import { clock, fail, parseArgs, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -235,6 +236,23 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       lastFind = results
       if (results.length === 0) { ctx.print(`no songs found for "${q}"`, 'dim'); return }
       ctx.print(`${results.map((r, i) => `${String(i + 1).padStart(3)}  ${r.name}  (${r.era?.name ?? r.category})`).join('\n')}\nplay N · queue add N · queue next N`, 'plain')
+    },
+  },
+  {
+    name: 'lyricfind', aliases: ['lf'], group: 'Player', usage: 'lyricfind [--exact] <words from the lyrics>',
+    description: 'Search every song’s lyrics, forgiving of punctuation, typos and word order (--exact for a plain phrase match), and number the songs (then play N / queue add N)',
+    run: async (args, ctx) => {
+      const { rest, bool } = parseArgs(args)
+      const q = rest.join(' ').trim()
+      if (!q) fail('usage: lyricfind [--exact] <words from the lyrics>')
+      const fuzzy = !bool.has('exact')
+      const hits = searchLyrics(await loadAllSongsAbortable(ctx.signal), q, fuzzy)
+      if (hits.length === 0) { ctx.print(`no lyrics match "${q}"${fuzzy ? ' (even loosely)' : ' - drop --exact to loosen it'}`, 'dim'); return }
+      const shown = hits.slice(0, 15)
+      lastFind = shown
+      const line = (s: JWApiSong): string => { const l = bestLyricLine(s.lyrics, q, fuzzy); return l ? `\n       “${l.length > 100 ? `${l.slice(0, 100)}…` : l}”` : '' }
+      const more = hits.length > shown.length ? `\n… ${hits.length - shown.length} more songs match - narrow the phrase` : ''
+      ctx.print(`${shown.map((s, i) => `${String(i + 1).padStart(3)}  ${s.name}  (${s.era?.name ?? s.category})${line(s)}`).join('\n')}${more}\nplay N · queue add N · queue next N`, 'plain')
     },
   },
   {

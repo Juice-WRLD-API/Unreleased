@@ -247,6 +247,8 @@ interface AppState {
   // Desktop only: the nav menu slides out of view until the pointer touches its
   // screen edge (like an auto-hiding taskbar). Local-only preference.
   autoHideNav: boolean
+  // Width (px) of the invisible edge strip that reveals the auto-hidden nav.
+  autoHideNavZone: number
   // User-defined order of the primary side-menu nav items, by view id. Only
   // ever a permutation of the known ids - orderedNavItems() sanitizes it on
   // read, so a stale/partial saved order can't drop or duplicate a tab.
@@ -621,6 +623,7 @@ interface AppActions {
   deleteCustomSkin: (id: string) => void
   setSidebarPosition: (position: SidebarPosition) => void
   setAutoHideNav: (on: boolean) => void
+  setAutoHideNavZone: (px: number) => void
   setNavOrder: (order: ViewType[]) => void
   setNavItemVisible: (view: ViewType, visible: boolean) => void
   setNavControlOrder: (order: string[]) => void
@@ -1298,6 +1301,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
   autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
+  autoHideNavZone: ls.get<number>('autoHideNavZone') ?? 24,
   navOrder: (() => {
     // Only users who actually reordered their menu have this key at all -
     // everyone else falls through to DEFAULT_NAV_ORDER and picks up new
@@ -1487,6 +1491,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
   setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav) },
+  setAutoHideNavZone: (px) => {
+    const autoHideNavZone = Math.max(4, Math.min(120, Math.round(px)))
+    set({ autoHideNavZone }); ls.set('autoHideNavZone', autoHideNavZone)
+  },
   setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder); get()._scheduleProfilePush(['userSettings']) },
   setNavItemVisible: (view, visible) => {
     const navVisibility = { ...get().navVisibility, [view]: visible }
