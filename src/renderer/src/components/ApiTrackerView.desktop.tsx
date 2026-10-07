@@ -46,7 +46,7 @@ import {
   SNIPPET_CONTEXT_CHARS, getLyricSnippet, MONTH_LABELS, buildMonthGrid,
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
-import { useLyricSearch } from '../lib/lyricSearch'
+import { useLyricSearch } from '../lib/useLyricSearch'
 
 const LS_TRACKER_VIEW = 'api-tracker:viewMode'
 const LS_TRACKER_COMPACT = 'api-tracker:compactView'

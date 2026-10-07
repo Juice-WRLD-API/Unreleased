@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
-import { loadAllSongsAbortable, type JWApiSong } from './juicewrldApi'
+import type { JWApiSong } from './juicewrldApi'
 
 // One lyric matcher for the Lyrics tab (desktop + mobile) and the terminal's
 // `lyricfind`, so they can't drift apart. Searches the catalogue the app already
@@ -9,8 +8,6 @@ import { loadAllSongsAbortable, type JWApiSong } from './juicewrldApi'
 // breaks, then falls back to "every word appears somewhere" (as a whole word,
 // a prefix of 3+ letters, or within a typo or two). Exact mode is a plain
 // case-insensitive substring match on the raw lyrics.
-
-const PAGE = 50
 
 const normalize = (s: string): string => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/['’`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
@@ -137,29 +134,4 @@ export function locateFuzzy(lyrics: string, query: string): { idx: number; len: 
     if (hit) return { idx: lineStart + (hit.index ?? 0), len: hit[0].length }
   }
   return { idx: lineStart, len: line.length }
-}
-
-/** The Lyrics tab's search: all matches computed locally from the cached catalogue,
- *  shown a page at a time. `fuzzy` defaults on. */
-export function useLyricSearch(query: string, fuzzy = true): {
-  results: JWApiSong[]; count: number; hasMore: boolean; loading: boolean; error: string | null; loadMore: () => void
-} {
-  const [matches, setMatches] = useState<JWApiSong[]>([])
-  const [shown, setShown] = useState(PAGE)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!query.trim()) { setMatches([]); setError(null); setLoading(false); return }
-    const ctl = new AbortController()
-    setLoading(true); setError(null)
-    loadAllSongsAbortable(ctl.signal)
-      .then((songs) => { setMatches(searchLyrics(songs, query, fuzzy)); setShown(PAGE) })
-      .catch((err) => { if (!ctl.signal.aborted) setError(err instanceof Error ? err.message : String(err)) })
-      .finally(() => { if (!ctl.signal.aborted) setLoading(false) })
-    return () => ctl.abort()
-  }, [query, fuzzy])
-
-  const results = useMemo(() => matches.slice(0, shown), [matches, shown])
-  return { results, count: matches.length, hasMore: shown < matches.length, loading, error, loadMore: () => setShown((n) => n + PAGE) }
 }

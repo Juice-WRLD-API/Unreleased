@@ -20,6 +20,7 @@ import { VERSION_COMMANDS } from './versions'
 import { APP_COMMANDS } from './app'
 import { FUN_COMMANDS } from './fun'
 import { HTTP_COMMANDS } from './http'
+import { MORE_COMMANDS } from './more'
 import { LIBRARY_COMMANDS } from './library'
 import { PLAYER_COMMANDS } from './player'
 import { SETTINGS_COMMANDS, searchSettings } from './settings'
@@ -86,6 +87,7 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...CDN_COMMANDS,
   ...APP_COMMANDS,
   ...HTTP_COMMANDS,
+  ...MORE_COMMANDS,
   ...ACCOUNT_COMMANDS,
   ...EDITING_COMMANDS,
   ...VERSION_COMMANDS,

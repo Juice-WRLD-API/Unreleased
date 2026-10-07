@@ -9,6 +9,7 @@ import {
   updateProposal, withdrawCompProposal, withdrawProposal, type ApplicationType, type CompProposalChangeType, type ProposalChangeType,
 } from '../userApi'
 import { pickLocalFile, saveBlob } from './pick'
+import { pageLines } from './more'
 import { completeSongs, songFromArg } from './player'
 import { asJson, confirmAction, fail, idArg, oneLine, parseArgs, parseJsonArg, table, type TermCommand, type TermCtx } from './types'
 
@@ -261,7 +262,7 @@ export const EDITING_COMMANDS: TermCommand[] = [
       const shown = era ? files.filter((f) => f.era.toLowerCase().includes(era)) : files
       if (asJson(ctx, bool.has('json'), shown)) return
       if (shown.length === 0) { ctx.print('no session edits', 'dim'); return }
-      ctx.print(`${table(shown.slice(0, 100).map((f) => [f.era, f.name, f.duration ?? '']))}${shown.length > 100 ? `\n… ${shown.length - 100} more (give an era to narrow it)` : ''}`)
+      ctx.print(pageLines(table(shown.map((f) => [f.era, f.name, f.duration ?? ''])).split('\n'), 100))
     },
   },
 ]

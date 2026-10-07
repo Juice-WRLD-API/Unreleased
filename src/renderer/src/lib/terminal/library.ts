@@ -3,6 +3,7 @@ import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromP
 import { getSongById, getSongsByIds, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { completeSongs, songFromArg } from './player'
 import { PLAYLIST_EDIT_SUBS, runPlaylistEdit } from './playlistEdit'
+import { pageRows } from './more'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -127,7 +128,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
         case 'show': case 'ls': {
           const pl = await playlistFromArg(rest)
           const { songs } = await playlistTracks(pl.id)
-          ctx.print(`${pl.name}\n${songs.length ? songs.slice(0, 80).map((s, i) => `${String(i + 1).padStart(3)}  ${s.name}`).join('\n') : '(empty)'}${songs.length > 80 ? `\n  … ${songs.length - 80} more` : ''}`)
+          ctx.print(`${pl.name}\n${songs.length ? pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${songs[i].name}`, 80) : '(empty)'}`)
           return
         }
         case 'open': {
@@ -182,7 +183,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
         ctx.print(`▶ ${songs.length} liked song${songs.length === 1 ? '' : 's'}`, 'ok')
         return
       }
-      ctx.print(`${songs.slice(0, 80).map((s, i) => `${String(i + 1).padStart(3)}  ${s.name}`).join('\n')}${songs.length > 80 ? `\n  … ${songs.length - 80} more` : ''}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)
+      ctx.print(`${pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${songs[i].name}`, 80)}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)
     },
   },
 ]

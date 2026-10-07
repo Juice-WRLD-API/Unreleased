@@ -3,6 +3,7 @@ import {
   getPlaylist, getPlaylistCover, getPublicPlaylist, getPublicPlaylistCover, removePlaylistCover, renamePlaylist, reorderPlaylist,
   updatePlaylist, uploadPlaylistCover, type PlaylistSummary,
 } from '../userApi'
+import { pageRows } from './more'
 import { pickLocalFile } from './pick'
 import { fail, oneLine, type TermCtx } from './types'
 
@@ -27,11 +28,9 @@ export async function runPlaylistEdit(sub: string, rest: string, ctx: TermCtx, p
       if (!Number.isInteger(id) || id < 1) fail('usage: playlist view <id>  (the id of a public playlist)')
       const pub = await getPublicPlaylist(id)
       const items = [...pub.items].sort((a, b) => a.position - b.position)
-      const lines = items.slice(0, 80).map((i, n) => `${String(n + 1).padStart(3)}  ${i.song.name}`)
       ctx.print([
         `${pub.name}${pub.description ? ` - ${oneLine(pub.description)}` : ''}`,
-        ...(lines.length ? lines : ['(empty)']),
-        ...(items.length > 80 ? [`  … ${items.length - 80} more`] : []),
+        items.length ? pageRows(items.length, (n) => `${String(n + 1).padStart(3)}  ${items[n].song.name}`, 80) : '(empty)',
       ].join('\n'))
       return
     }

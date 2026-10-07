@@ -38,7 +38,7 @@ import {
   SNIPPET_CONTEXT_CHARS, getLyricSnippet, MONTH_LABELS, buildMonthGrid,
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
-import { useLyricSearch } from '../lib/lyricSearch'
+import { useLyricSearch } from '../lib/useLyricSearch'
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
 // Phone-first rewrite of the catalog browser. Every fetch path is unchanged -

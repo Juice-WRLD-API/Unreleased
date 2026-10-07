@@ -7,6 +7,7 @@ import {
   adminReviewProposal, type ApplicationStatus, type ProposalStatus,
 } from '../userApi'
 import { fail, type TermCommand } from './types'
+import { pageRows } from './more'
 
 // The Admin page's review queues, user list and site moderation list, as
 // commands. They call the same endpoints the Admin page does and need the same
@@ -74,8 +75,8 @@ export const ADMIN_COMMANDS: TermCommand[] = [
       const status = statusArg(args, PROPOSAL_STATUSES, 'pending') as ProposalStatus
       const list = await adminListProposals(status)
       if (list.length === 0) { ctx.print(`no ${status} song proposals`, 'dim'); return }
-      const rows = list.slice(0, LIMIT).map((p) => `#${String(p.id).padEnd(6)}${p.change_type.padEnd(8)}${oneLine(p.title, 46).padEnd(48)}${p.editor_username}  ${relativeTime(p.created_at)}`)
-      ctx.print(`${rows.join('\n')}${list.length > LIMIT ? `\n… ${list.length - LIMIT} more` : ''}\n${list.length} ${status} · inspect <id> · approve <id> · reject <id> [note]`)
+      const rows = pageRows(list.length, (i) => { const p = list[i]; return `#${String(p.id).padEnd(6)}${p.change_type.padEnd(8)}${oneLine(p.title, 46).padEnd(48)}${p.editor_username}  ${relativeTime(p.created_at)}` }, LIMIT)
+      ctx.print(`${rows}\n${list.length} ${status} · inspect <id> · approve <id> · reject <id> [note]`)
     },
   },
   {
@@ -85,8 +86,8 @@ export const ADMIN_COMMANDS: TermCommand[] = [
       const status = statusArg(args, PROPOSAL_STATUSES, 'pending') as ProposalStatus
       const list = await adminListCompProposals(status)
       if (list.length === 0) { ctx.print(`no ${status} comp proposals`, 'dim'); return }
-      const rows = list.slice(0, LIMIT).map((p) => `#${String(p.id).padEnd(6)}${String(p.change_type).padEnd(10)}${oneLine(p.file_path, 46).padEnd(48)}${p.contributor_username}  ${relativeTime(p.created_at)}`)
-      ctx.print(`${rows.join('\n')}${list.length > LIMIT ? `\n… ${list.length - LIMIT} more` : ''}\n${list.length} ${status} · inspect comp <id> · approve comp <id> · reject comp <id> [note]`)
+      const rows = pageRows(list.length, (i) => { const p = list[i]; return `#${String(p.id).padEnd(6)}${String(p.change_type).padEnd(10)}${oneLine(p.file_path, 46).padEnd(48)}${p.contributor_username}  ${relativeTime(p.created_at)}` }, LIMIT)
+      ctx.print(`${rows}\n${list.length} ${status} · inspect comp <id> · approve comp <id> · reject comp <id> [note]`)
     },
   },
   {
@@ -171,7 +172,7 @@ export const ADMIN_COMMANDS: TermCommand[] = [
         u.contributor_enabled ? 'contrib' : '', u.manager_enabled ? 'mgr' : '', u.news_enabled ? 'news' : '',
         u.auto_approve_proposals ? 'auto-edits' : '', u.auto_approve_comp_proposals ? 'auto-comp' : '', u.is_active ? '' : 'DISABLED',
       ].filter(Boolean).join(',')
-      ctx.print(`${list.slice(0, LIMIT).map((u) => `${String(u.user_id).padEnd(7)}${u.username.padEnd(22)}${u.role.padEnd(15)}${relativeTime(u.last_login).padEnd(12)}${flags(u)}`).join('\n')}\n${list.length > LIMIT ? `… ${list.length - LIMIT} more · ` : ''}${list.length} user${list.length === 1 ? '' : 's'}`)
+      ctx.print(`${pageRows(list.length, (i) => { const u = list[i]; return `${String(u.user_id).padEnd(7)}${u.username.padEnd(22)}${u.role.padEnd(15)}${relativeTime(u.last_login).padEnd(12)}${flags(u)}` }, LIMIT)}\n${list.length} user${list.length === 1 ? '' : 's'}`)
     },
   },
   {

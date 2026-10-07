@@ -5,6 +5,7 @@ import { runHotkeyAction } from '../hotkeys'
 import { loadAllSongsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { loadCatalog, statsSongToTrack } from '../statsCatalog'
 import { bestLyricLine, searchLyrics } from '../lyricSearch'
+import { pageRows } from './more'
 import { clock, fail, parseArgs, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -34,6 +35,21 @@ export async function completeSongs(before: string[], partial: string): Promise<
   const skip = before.length > 0 ? before.join(' ').length + 1 : 0
   const results = await searchSongs(typed, 15)
   return results.map((s) => s.name).filter((n) => n.toLowerCase().startsWith(typed)).map((n) => n.slice(skip))
+}
+
+/** The queue position a `jump` argument means: a number, or a title (exact, then
+ *  the start of one, then part of one - the first such in the queue). */
+function queueIndexFor(arg: string, titles: string[]): number {
+  const typed = arg.trim()
+  if (/^#?\d+$/.test(typed)) {
+    const n = Number(typed.replace('#', ''))
+    return n >= 1 && n <= titles.length ? n - 1 : fail(`jump to which? 1-${titles.length}`)
+  }
+  if (!typed) fail(`jump to which? 1-${titles.length} or part of a title`)
+  const q = typed.toLowerCase()
+  const lower = titles.map((t) => t.toLowerCase())
+  const at = [lower.findIndex((t) => t === q), lower.findIndex((t) => t.startsWith(q)), lower.findIndex((t) => t.includes(q))].find((i) => i >= 0)
+  return at ?? fail(`nothing in the queue matches "${typed}"`)
 }
 
 function parseSeek(arg: string, now: number, duration: number): number {
@@ -248,15 +264,13 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       const fuzzy = !bool.has('exact')
       const hits = searchLyrics(await loadAllSongsAbortable(ctx.signal), q, fuzzy)
       if (hits.length === 0) { ctx.print(`no lyrics match "${q}"${fuzzy ? ' (even loosely)' : ' - drop --exact to loosen it'}`, 'dim'); return }
-      const shown = hits.slice(0, 15)
-      lastFind = shown
+      lastFind = hits
       const line = (s: JWApiSong): string => { const l = bestLyricLine(s.lyrics, q, fuzzy); return l ? `\n       “${l.length > 100 ? `${l.slice(0, 100)}…` : l}”` : '' }
-      const more = hits.length > shown.length ? `\n… ${hits.length - shown.length} more songs match - narrow the phrase` : ''
-      ctx.print(`${shown.map((s, i) => `${String(i + 1).padStart(3)}  ${s.name}  (${s.era?.name ?? s.category})${line(s)}`).join('\n')}${more}\nplay N · queue add N · queue next N`, 'plain')
+      ctx.print(`${pageRows(hits.length, (i) => `${String(i + 1).padStart(3)}  ${hits[i].name}  (${hits[i].era?.name ?? hits[i].category})${line(hits[i])}`, 15)}\nplay N · queue add N · queue next N`, 'plain')
     },
   },
   {
-    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list | clear | add <song> | next <song> | remove N | jump N]',
+    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list | clear | add <song> | next <song> | remove N | jump N|title]',
     description: 'Show or change the play queue. <song> is a title or a number from find',
     complete: (before, partial) => {
       if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump'].filter((w) => w.startsWith(partial))
@@ -270,8 +284,8 @@ export const PLAYER_COMMANDS: TermCommand[] = [
         case 'list': case 'ls': {
           if (s.queue.length === 0) { ctx.print('queue is empty', 'dim'); return }
           const from = Math.max(0, s.queueIndex - 5)
-          const rows = s.queue.slice(from, from + 40).map((t, i) => `${from + i === s.queueIndex ? '▶' : ' '} ${String(from + i + 1).padStart(3)}  ${trackLine(t)}`)
-          ctx.print(`${from > 0 ? `  … ${from} earlier\n` : ''}${rows.join('\n')}${from + 40 < s.queue.length ? `\n  … ${s.queue.length - from - 40} more` : ''}`)
+          const rows = pageRows(s.queue.length - from, (i) => `${from + i === s.queueIndex ? '▶' : ' '} ${String(from + i + 1).padStart(3)}  ${trackLine(s.queue[from + i])}`, 40)
+          ctx.print(`${from > 0 ? `  … ${from} earlier\n` : ''}${rows}`)
           return
         }
         case 'clear': s.clearQueue(); ctx.print('queue cleared', 'ok'); return
@@ -286,13 +300,12 @@ export const PLAYER_COMMANDS: TermCommand[] = [
           return
         }
         case 'jump': {
-          const n = Number(rest)
-          if (!Number.isInteger(n) || n < 1 || n > s.queue.length) fail(`jump to which? 1-${s.queue.length}`)
-          s.jumpToTrack(s.queue[n - 1], n - 1)
-          ctx.print(`▶ ${s.queue[n - 1].title}`, 'ok')
+          const n = queueIndexFor(rest, s.queue.map((t) => t.title))
+          s.jumpToTrack(s.queue[n], n)
+          ctx.print(`▶ ${s.queue[n].title}`, 'ok')
           return
         }
-        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N]')
+        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title]')
       }
     },
   },
