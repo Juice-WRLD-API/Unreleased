@@ -44,6 +44,10 @@ import {
 import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
+import { showPlaybackNotice } from '../lib/playbackNotice'
+import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 
 // Only opened from the "more" button / right-click, so it loads on first use
@@ -562,6 +566,7 @@ export default function Player(): JSX.Element {
 
     if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
       const trackId = currentTrack.id
+      const { streamUrl, title } = currentTrack
       setCurrentTrackReady(false)
       cancelCF()
       cancelPauseFade()
@@ -578,7 +583,13 @@ export default function Player(): JSX.Element {
         if (s.isPlaying) playSlot(a)
       }).catch((err) => {
         console.error('Could not load donor file', err)
-        if (useStore.getState().currentTrack?.id === trackId) setIsPlaying(false)
+        if (useStore.getState().currentTrack?.id !== trackId) return
+        setIsPlaying(false)
+        if (isSessionEditPlaceholder(streamUrl)) {
+          showPlaybackNotice(err instanceof SessionEditNotFoundError
+            ? `No session edit found for "${title}"`
+            : `Couldn't load the session edit for "${title}"`)
+        }
       })
       return
     }
@@ -1634,6 +1645,7 @@ export default function Player(): JSX.Element {
   return (
     <>
       <MediaSessionPosition active={mediaSessionActive} playbackSpeed={playbackSpeed} />
+      <PlaybackNotice />
       {/* crossOrigin: required for the Web Audio effects chain - without CORS
           clearance createMediaElementSource outputs pure silence. The API and
           the local-media:// protocol both send Access-Control-Allow-Origin. */}

@@ -5,7 +5,6 @@ import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, isStandalonePWA } from './lib/platform'
 import { applySeo } from './lib/seo'
 import { orderedNavItems, isNavItemVisible } from './lib/navItems'
-import { loadSessionEditLinks } from './lib/sessionEditsApi'
 import { useIsMobile, isMobileViewport } from './hooks/useIsMobile'
 import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
@@ -145,8 +144,6 @@ export default function App(): JSX.Element {
     const devToken = import.meta.env.VITE_AUTH_TOKEN as string | undefined
     if (devToken) { setToken(devToken); loadAccount() }
   }, [])
-
-  useEffect(() => { loadSessionEditLinks(activeChannel).catch(() => {}) }, [activeChannel])
 
   // Sync view from URL on mount + handle back/forward
   useEffect(() => {

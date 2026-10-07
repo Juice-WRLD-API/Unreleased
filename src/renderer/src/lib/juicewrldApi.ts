@@ -7,7 +7,7 @@ import { peekEraCover } from './eraCovers'
 import { createTtlCache } from './ttlCache'
 import { peekSessionEditOverride } from './sessionEditOverrides'
 import { peekActiveChannel } from './activeChannelState'
-import { peekSessionEditLink } from './sessionEditLinksMirror'
+import { peekSessionEditLink, sessionEditPlaceholder, isSessionEditPlaceholder } from './sessionEditLinksMirror'
 import { JWAPI_BASE, baseFor, routeUrl } from './apiServers'
 
 export { JWAPI_BASE, baseFor, routeUrl }
@@ -811,9 +811,11 @@ export function resolveSessionEditSource(song: { id: number; category: string; p
   const channel = peekActiveChannel()
   const override = peekSessionEditOverride(song.id, channel)
   if (override) return { path: override.path, length: override.duration ?? song.length, channel }
-  if (song.path) return { path: song.path, length: song.length, channel }
+  if (song.path && !isSessionEditPlaceholder(song.path)) return { path: song.path, length: song.length, channel }
   const link = peekSessionEditLink(song.id, channel)
-  return link ? { path: link.path, length: link.duration ?? song.length, channel } : { path: song.path, length: song.length, channel: undefined }
+  if (link) return { path: link.path, length: link.duration ?? song.length, channel }
+  // Not looked up yet: playable, resolved by the Player when it's actually played.
+  return { path: sessionEditPlaceholder(song.id), length: song.length, channel: undefined }
 }
 
 export function songToTrack(song: JWApiSong): Track {
@@ -830,7 +832,7 @@ export function songToTrack(song: JWApiSong): Track {
   return {
     id: `jw-${song.id}`,
     path: resolvedPath,
-    streamUrl: buildStreamUrl(resolvedPath, streamChannel),
+    streamUrl: isSessionEditPlaceholder(resolvedPath) ? resolvedPath : buildStreamUrl(resolvedPath, streamChannel),
     imageUrl: coverUrl ?? apiImageUrl,
     title: pref?.name || apiTitle,
     apiTitle,

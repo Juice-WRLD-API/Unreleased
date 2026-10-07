@@ -1,7 +1,8 @@
-import { apiFetch, apiUrl, parseBrowseEntries, normalizeSongTitle, loadAllSongs, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
+import { apiFetch, apiUrl, parseBrowseEntries, normalizeSongTitle, loadAllSongs, getSongById, searchFiles, buildStreamUrl, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
 import { apiRequest } from './apiClient'
 import { createTtlCache } from './ttlCache'
-import { setSessionEditLinksCache } from './sessionEditLinksMirror'
+import { peekActiveChannel } from './activeChannelState'
+import { peekSessionEditLink, setSessionEditLink, setSessionEditLinksCache, sessionEditSongId } from './sessionEditLinksMirror'
 
 export interface SessionEditFile {
   name: string
@@ -124,6 +125,74 @@ async function buildLinkMap(channel: string): Promise<Map<number, SessionEditLin
     if (song && !map.has(song.id)) map.set(song.id, { path: file.path, duration: file.duration })
   }
   return map
+}
+
+// ─── Lookup on play ───────────────────────────────────────────────────────────
+//
+// The walk above lists every Session Edits folder; that's far more than playing
+// one song needs, so playback instead searches the file tree for just that
+// song's name (and its alternate titles) and keeps the result.
+
+const AUDIO_FILE = /\.(mp3|wav|flac|m4a|aac|ogg|opus|aiff?|wma|mp4)$/i
+const SESSION_EDITS_PREFIX = `${SESSION_EDITS_ROOT.toLowerCase()}/`
+
+export class SessionEditNotFoundError extends Error {
+  constructor(songId: number) {
+    super(`No session edit found for song ${songId}`)
+    this.name = 'SessionEditNotFoundError'
+  }
+}
+
+const lookups = new Map<string, Promise<SessionEditLink | null>>()
+
+async function lookupSessionEdit(songId: number, channel: string): Promise<SessionEditLink | null> {
+  const song = await getSongById(songId)
+  const terms = [song.name, ...(song.track_titles ?? [])]
+    .map((t) => stripSessionEditSuffix(t))
+    .filter((t, i, a) => t && a.indexOf(t) === i)
+  const extra: Record<string, string> = channel ? { channel } : {}
+  // Primary name first; alternate titles only if it finds nothing.
+  for (const term of terms) {
+    const wanted = normalizeSongTitle(term)
+    if (!wanted) continue
+    const entries = await searchFiles(term, extra)
+    const hit = entries.find((e) =>
+      e.type === 'file' &&
+      e.path.toLowerCase().startsWith(SESSION_EDITS_PREFIX) &&
+      AUDIO_FILE.test(e.name) &&
+      normalizeSongTitle(stripSessionEditSuffix(e.name.replace(/\.[^.]+$/, ''))) === wanted)
+    if (hit) return { path: hit.path, duration: hit.duration ?? null }
+  }
+  return null
+}
+
+/** The stream URL for a `sessionedit://<id>` marker, or null if it hasn't been looked up yet. */
+export function cachedSessionEditUrl(placeholder: string): string | null {
+  const channel = peekActiveChannel()
+  const link = peekSessionEditLink(sessionEditSongId(placeholder), channel)
+  return link ? buildStreamUrl(link.path, channel || undefined) : null
+}
+
+/** Looks up (once per song and channel) the session edit file a song plays, rejecting when there isn't one. */
+export function ensureSessionEditUrl(placeholder: string): Promise<string> {
+  const hit = cachedSessionEditUrl(placeholder)
+  if (hit) return Promise.resolve(hit)
+  const songId = sessionEditSongId(placeholder)
+  const channel = peekActiveChannel()
+  const key = `${channel}:${songId}`
+  let p = lookups.get(key)
+  if (!p) {
+    p = lookupSessionEdit(songId, channel).finally(() => {
+      // A miss isn't remembered, so a retry searches again.
+      if (!peekSessionEditLink(songId, channel)) lookups.delete(key)
+    })
+    lookups.set(key, p)
+  }
+  return p.then((link) => {
+    if (!link) throw new SessionEditNotFoundError(songId)
+    setSessionEditLink(songId, channel, link)
+    return buildStreamUrl(link.path, channel || undefined)
+  })
 }
 
 const linkCaches = new Map<string, () => Promise<Map<number, SessionEditLink>>>()

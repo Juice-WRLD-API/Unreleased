@@ -26,7 +26,6 @@ import { Track } from '../types'
 import * as userApi from '../lib/userApi'
 import { useCanEdit, useCanContribute, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { loadRecentlyAddedMap } from '../lib/changesApi'
-import { loadSessionEditLinks } from '../lib/sessionEditsApi'
 import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
@@ -1932,18 +1931,11 @@ export default function ApiTrackerView(): JSX.Element {
     return () => { cancelled = true }
   }, [orderField])
 
-  const [sessionEditLinks, setSessionEditLinks] = useState<Map<number, { path: string; duration: string | null }> | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    loadSessionEditLinks(activeChannel).then((m) => { if (!cancelled) setSessionEditLinks(m) }).catch(console.error)
-    return () => { cancelled = true }
-  }, [activeChannel])
-
   const linkSessionEdit = useCallback((s: JWApiSong): JWApiSong => {
     if (s.category !== 'recording_session') return s
     const { path, length } = resolveSessionEditSource(s)
     return path === s.path && length === s.length ? s : { ...s, path, length }
-  }, [sessionEditLinks, sessionEditOverrideVersion])
+  }, [sessionEditOverrideVersion])
 
   // Reset accumulated songs and go back to page 1
   const resetSongs = useCallback((): void => {
