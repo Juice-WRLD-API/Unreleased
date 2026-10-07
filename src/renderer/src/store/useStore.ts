@@ -133,6 +133,8 @@ export interface StagedSongChange {
 // Where the desktop nav menu sits - classic left sidebar, mirrored right, or a
 // horizontal bar above/below the content. Mobile always uses the bottom tab bar.
 export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
+// 'classic' = the docked menu; 'pill' = a floating, rounded, icon-only bar.
+export type NavStyle = 'classic' | 'pill'
 
 // The Settings dialog's tabs - the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
@@ -244,6 +246,8 @@ interface AppState {
   // getSkin() resolves them everywhere.
   customSkins: Skin[]
   sidebarPosition: SidebarPosition
+  // Desktop only: visual style of the nav menu. Local-only preference.
+  navStyle: NavStyle
   // Desktop only: the nav menu slides out of view until the pointer touches its
   // screen edge (like an auto-hiding taskbar). Local-only preference.
   autoHideNav: boolean
@@ -622,6 +626,7 @@ interface AppActions {
   /** Removes a custom skin; if it was the active theme, falls back to dark. */
   deleteCustomSkin: (id: string) => void
   setSidebarPosition: (position: SidebarPosition) => void
+  setNavStyle: (style: NavStyle) => void
   setAutoHideNav: (on: boolean) => void
   setAutoHideNavZone: (px: number) => void
   setNavOrder: (order: ViewType[]) => void
@@ -1300,6 +1305,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // getSkin() maps unknown persisted ids (renamed/removed skins) back to dark.
   theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
+  navStyle: ls.get<NavStyle>('navStyle') ?? 'classic',
   autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
   autoHideNavZone: ls.get<number>('autoHideNavZone') ?? 24,
   navOrder: (() => {
@@ -1490,6 +1496,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
+  setNavStyle: (navStyle) => { set({ navStyle }); ls.set('navStyle', navStyle) },
   setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav) },
   setAutoHideNavZone: (px) => {
     const autoHideNavZone = Math.max(4, Math.min(120, Math.round(px)))

@@ -73,6 +73,7 @@ const SETTINGS: Setting[] = [
   choice('theme', 'Colour theme', () => allSkins().map((s) => ({ value: s.id, label: s.name })), () => st().theme, (v) => st().setTheme(v)),
   color('accent', 'Accent colour (#rrggbb)', () => st().accentColor, (v) => { if (v) st().setAccentColor(v) }),
   choice('sidebar', 'Where the navigation sits', () => ['left', 'right', 'top', 'bottom'].map((v) => ({ value: v, label: v })), () => st().sidebarPosition, (v) => st().setSidebarPosition(v as 'left' | 'right' | 'top' | 'bottom')),
+  choice('nav-style', 'Navigation style (classic or floating pill)', () => ['classic', 'pill'].map((v) => ({ value: v, label: v })), () => st().navStyle, (v) => st().setNavStyle(v as 'classic' | 'pill')),
   bool('auto-hide-nav', 'Hide the navigation until you reach for it', () => st().autoHideNav, (v) => st().setAutoHideNav(v)),
   num('auto-hide-nav-zone', 'Width of the edge strip that reveals the hidden navigation', 4, 120, () => st().autoHideNavZone, (v) => st().setAutoHideNavZone(v), 'px'),
   bool('lyrics-override', 'Use your own lyrics colours over the theme', () => st().lyricsOverride, (v) => st().setLyricsOverride(v)),

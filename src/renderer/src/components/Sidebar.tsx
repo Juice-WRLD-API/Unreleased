@@ -19,7 +19,7 @@ const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'uploads', 'showUploadManager', 'setShowUploadManager')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'uploads', 'showUploadManager', 'setShowUploadManager')
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(LS_COLLAPSED) === 'true'
@@ -249,6 +249,43 @@ export default function Sidebar(): JSX.Element {
       case 'settings':
         return <button key="settings" onClick={() => openSettings()} {...warmOnIntent('settings')} title="Settings" className={barIconBtn}><Settings size={18} /></button>
     }
+  }
+
+  // ── Floating pill (Settings → Appearance → Navigation style). Icon-only, rounded,
+  // laid out along the chosen edge; AutoHideNav floats it over the page.
+  if (navStyle === 'pill') {
+    const horizontal = sidebarPosition === 'top' || sidebarPosition === 'bottom'
+    return (
+      <aside
+        className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+      >
+        {items.map(({ icon, label, view }) => (
+          <button
+            key={view}
+            onClick={() => navClick(view)}
+            {...warmOnIntent(view)}
+            onContextMenu={openNavMenu(view, label)}
+            title={label}
+            aria-label={label}
+            className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-full transition-colors ${
+              activeTab === view
+                ? 'bg-accent/20 text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+            }`}
+          >
+            {icon}
+          </button>
+        ))}
+        <div className={`shrink-0 bg-[var(--border)] ${horizontal ? 'w-px h-6 mx-1' : 'h-px w-6 my-1'}`} />
+        {!account && (
+          <button onClick={() => setShowUserAuth(true)} title="Log in" aria-label="Log in" className={`${barIconBtn} !w-10 !h-10 !rounded-full`}>
+            <LogIn size={18} />
+          </button>
+        )}
+        {controls.map((c) => renderControlIcon(c.id))}
+        {navContextMenu}
+      </aside>
+    )
   }
 
   // ── Horizontal bar (Settings → Appearance → Navigation position: top/bottom).
