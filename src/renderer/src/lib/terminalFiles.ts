@@ -1,7 +1,8 @@
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { useStore } from '../store/useStore'
 import { triggerDownload } from './apiFilesShared'
-import { downloadFileSmart } from './cdn'
+import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
+import cdnService from './cdn'
 import { openZipTarget, saveItems, type ZipItem } from './clientZip'
 import { formatBytes } from './format'
 import { apiFetch, buildStreamUrl, listFilesRecursive, listSubtree, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
@@ -200,8 +201,10 @@ export interface DownloadResult {
 /** `get <path>`: one file downloads directly (via the CDN first on the primary
  *  channel, same as the Files tab); a folder is zipped client-side with its
  *  structure kept; `*` zips everything in the current folder. The ZIP shows up
- *  in the Transfers panel like any other bulk download. */
-export async function downloadPath(cwd: FilesCwd, arg: string): Promise<DownloadResult> {
+ *  in the Transfers panel like any other bulk download. `onLine` gets a
+ *  single file's CDN progress a quarter at a time - a terminal can't redraw a
+ *  bar - since the browser's download only starts once the file is all in. */
+export async function downloadPath(cwd: FilesCwd, arg: string, onLine?: (text: string) => void): Promise<DownloadResult> {
   if (cwd.channel === null) throw new Error('get: pick a channel first (cd <channel>)')
   const channel = cwd.channel
   const typed = unquote(arg)
@@ -230,8 +233,16 @@ export async function downloadPath(cwd: FilesCwd, arg: string): Promise<Download
   if (single?.type === 'file' && single.entry) {
     const streamUrl = buildStreamUrl(single.entry.path, channel)
     const channels = useStore.getState().channels
-    if (isPrimaryChannelSlug(channels, channel)) await downloadFileSmart(single.entry.path, single.name, streamUrl)
-    else triggerDownload(streamUrl, single.name)
+    if (isPrimaryChannelSlug(channels, channel)) {
+      if (cdnService.enabled) onLine?.(`${single.name}: connecting to the CDN…`)
+      let shown = 0
+      await startCdnFileDownload(single.entry.path, single.name, streamUrl, (p) => {
+        const step = Math.floor(p.progress / 25) * 25
+        if (step <= shown) return
+        shown = step
+        onLine?.(step >= 100 ? `${single.name}: verifying` : `${single.name} ${step}%`)
+      })
+    } else triggerDownload(streamUrl, single.name)
     return { message: `downloading ${single.name}${single.size != null ? ` (${formatBytes(single.size)})` : ''}` }
   }
 

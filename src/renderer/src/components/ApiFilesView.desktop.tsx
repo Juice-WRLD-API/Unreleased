@@ -27,7 +27,8 @@ import {
   breadcrumbs, parentFolder, fileToTrack, sortEntries, fileEntryLinkUrl, findSongByFilename, triggerDownload,
   type ViewMode, type SortBy, type SortDir,
 } from '../lib/apiFilesShared'
-import { downloadFileSmart } from '../lib/cdn'
+import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
+import { CdnDownloadToast } from './CdnDownloadToast'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { useTrackerMatches } from '../hooks/useTrackerMatches'
@@ -295,7 +296,7 @@ export default function ApiFilesView(): JSX.Element {
   const handleDownload = (entry: JWApiFileEntry): void => {
     const streamUrl = buildStreamUrl(entry.path, activeChannel)
     if (!isPrimary) { triggerDownload(streamUrl, entry.name); return }
-    downloadFileSmart(entry.path, entry.name, streamUrl).then((isDonor) => {
+    startCdnFileDownload(entry.path, entry.name, streamUrl).then((isDonor) => {
       if (!isDonor) return
       setBoostToast(true)
       setTimeout(() => setBoostToast(false), 1800)
@@ -1172,6 +1173,9 @@ export default function ApiFilesView(): JSX.Element {
           )}
         </div>
       )}
+
+      {/* Single-file CDN download progress, above the folder toast when both show. */}
+      <CdnDownloadToast raised={!selectMode && zipStatus !== 'idle'} />
 
       {/* Name prompt for the drop-a-file-onto-a-file gesture: both files move
           into a folder that doesn't exist yet, and its name is the one thing

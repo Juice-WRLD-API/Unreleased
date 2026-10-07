@@ -27,7 +27,8 @@ import {
   breadcrumbs, parentFolder, fileToTrack, sortEntries, fileEntryLinkUrl, findSongByFilename, triggerDownload,
   type ViewMode, type SortBy, type SortDir,
 } from '../lib/apiFilesShared'
-import { downloadFileSmart } from '../lib/cdn'
+import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
+import { CdnDownloadToastMobile } from './CdnDownloadToast'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { useTrackerMatches } from '../hooks/useTrackerMatches'
@@ -300,7 +301,7 @@ export default function ApiFilesView(): JSX.Element {
   const handleDownload = (entry: JWApiFileEntry): void => {
     const streamUrl = buildStreamUrl(entry.path, activeChannel)
     if (!isPrimary) { triggerDownload(streamUrl, entry.name); return }
-    downloadFileSmart(entry.path, entry.name, streamUrl)
+    startCdnFileDownload(entry.path, entry.name, streamUrl)
       .then((isDonor) => { if (isDonor) showToast('Priority routing active') })
   }
 
@@ -822,6 +823,8 @@ export default function ApiFilesView(): JSX.Element {
             : <><X size={14} className="text-red-400" /> Download failed</>}
         </div>
       )}
+
+      <CdnDownloadToastMobile />
 
       {lightboxIndex >= 0 && lightboxItems.length > 0 && (
         <MediaLightbox

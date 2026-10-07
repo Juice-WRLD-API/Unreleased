@@ -19,7 +19,8 @@ import {
 } from '../lib/juicewrldApi'
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { preloadView } from '../lib/lazyViews'
-import { downloadFileSmart } from '../lib/cdn'
+import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
+import { CdnDownloadToast } from './CdnDownloadToast'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
@@ -1314,7 +1315,7 @@ const SongCard = memo(function SongCard({
               e.stopPropagation()
               // Always the primary channel here (no channel arg), so the
               // P2P CDN is safe to try before falling back to the stream URL.
-              downloadFileSmart(song.path, `${title}.mp3`, buildStreamUrl(song.path))
+              startCdnFileDownload(song.path, `${title}.mp3`, buildStreamUrl(song.path))
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"
@@ -3696,6 +3697,8 @@ export default function ApiTrackerView(): JSX.Element {
           }}
         />
       )}
+
+      <CdnDownloadToast />
     </div>
   )
 }

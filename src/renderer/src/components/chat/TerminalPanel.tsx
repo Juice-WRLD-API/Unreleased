@@ -717,7 +717,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       case 'room': case 'rooms': return runRoom(arg)
       case 'get': case 'download': case 'dl': {
         if (shell.mode !== 'files') { print('get: only works in the file tree (try: cd files)', 'error'); return true }
-        return downloadPath(shell.cwd, arg).then((r) => { print(r.message, r.message === 'cancelled' ? 'dim' : 'ok'); return true })
+        return downloadPath(shell.cwd, arg, (line) => print(line, 'dim')).then((r) => { print(r.message, r.message === 'cancelled' ? 'dim' : 'ok'); return true })
       }
       case 'help': case '/help': {
         // -s means "post the full list to the room", which only the real

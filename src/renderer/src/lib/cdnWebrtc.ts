@@ -18,9 +18,10 @@ const WS_BASE = (() => {
 const SIGNAL_CONNECT_TIMEOUT_MS = 15_000
 const ICE_GATHER_TIMEOUT_MS = 4_000
 const DATA_STALL_TIMEOUT_MS = 30_000
-// Offer sent -> answer. The node can take 5-6s just to answer (it gathers on
-// every network adapter) and gives up itself at 30s.
-const ANSWER_TIMEOUT_MS = 20_000
+// Offer sent -> answer. The node gathers every candidate (STUN, TURN
+// allocation) before answering - usually under 1s, capped at 5s by aioice -
+// and gives up itself at 30s.
+const ANSWER_TIMEOUT_MS = 10_000
 // Answer applied -> data channel open. Timed separately so a slow answer
 // doesn't eat into the time ICE gets to connect.
 const ICE_CONNECT_TIMEOUT_MS = 15_000
@@ -98,6 +99,11 @@ export function downloadViaNode(
     const pendingIce: RTCIceCandidateInit[] = []
     let remoteIceCount = 0
     let sessionId = ''
+    // Where the setup time goes, ms since this attempt started - logged on
+    // success and failure so a slow start can be pinned to one step.
+    const startedAt = performance.now()
+    const marks: string[] = []
+    const mark = (step: string): void => { marks.push(`${step} ${Math.round(performance.now() - startedAt)}ms`) }
 
     const ws = new WebSocket(`${WS_BASE}/ws/cdn/signal/?role=client&token=${encodeURIComponent(node.token)}`)
 
@@ -127,7 +133,7 @@ export function downloadViaNode(
       console.debug(
         `[cdn] session ${sessionId || '?'} failing: ${err instanceof Error ? err.message : String(err)}`
           + ` (bytes ${received}, ice ${pc?.iceConnectionState ?? '?'}, conn ${pc?.connectionState ?? '?'},`
-          + ` local ${localSummary()}, ${remoteIceCount} remote candidates)`
+          + ` local ${localSummary()}, ${remoteIceCount} remote candidates; ${marks.join(', ') || 'no steps reached'})`
       )
       cleanup()
       reject(err)
@@ -136,6 +142,7 @@ export function downloadViaNode(
     function succeed(result: CdnNodeDownloadResult): void {
       if (settled) return
       settled = true
+      console.debug(`[cdn] session ${sessionId || '?'} timeline: ${marks.join(', ')}`)
       cleanup()
       resolve(result)
     }
@@ -184,6 +191,7 @@ export function downloadViaNode(
       if (msg.type === 'ready') {
         if (connectTimer) { clearTimeout(connectTimer); connectTimer = null }
         sessionId = typeof msg.session_id === 'string' ? msg.session_id : ''
+        mark('ready')
         try {
           iceServers = Array.isArray(msg.ice_servers) ? (msg.ice_servers as RTCIceServer[]) : []
           pc = new RTCPeerConnection({ iceServers })
@@ -206,6 +214,7 @@ export function downloadViaNode(
 
           channel.onopen = () => {
             channelOpen = true
+            mark('channel open')
             if (negotiationTimer) { clearTimeout(negotiationTimer); negotiationTimer = null }
             bumpStallTimer()
           }
@@ -225,10 +234,12 @@ export function downloadViaNode(
               if (ctrl.t === 'meta') {
                 expectedSize = typeof ctrl.size === 'number' ? ctrl.size : 0
                 transferStart = performance.now()
+                mark('first data')
               } else if (ctrl.t === 'error') {
                 fail(new CdnNodeError('transfer', 'node reported an error', typeof ctrl.reason === 'string' ? ctrl.reason : typeof ctrl.message === 'string' ? ctrl.message : undefined))
               } else if (ctrl.t === 'done') {
                 const elapsedMs = transferStart ? Math.round(performance.now() - transferStart) : 0
+                mark('done')
                 succeed({ blob: new Blob(chunks), bytesReceived: received, elapsedMs })
               }
               return
@@ -248,6 +259,7 @@ export function downloadViaNode(
           await pc.setLocalDescription(offer)
           if (settled) return
           ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp ?? offer.sdp ?? '' }))
+          mark('offer sent')
           gatherTimer = setTimeout(() => {
             if (!settled && localCandidateCount === 0) {
               fail(new CdnNodeError('negotiation', NO_ICE_CANDIDATES))
@@ -264,6 +276,7 @@ export function downloadViaNode(
         try {
           await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp as string })
           answerApplied = true
+          mark('answer')
           if (!channelOpen) {
             armNegotiationTimer(ICE_CONNECT_TIMEOUT_MS, `no data channel within ${ICE_CONNECT_TIMEOUT_MS / 1000}s of the answer`)
           }
