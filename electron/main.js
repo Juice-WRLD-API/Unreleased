@@ -3563,18 +3563,33 @@ autoUpdater.on('download-progress', (p) => {
 // read by the template in silent (/S) mode, so a silent install just quits
 // and never comes back. Work around it ourselves: spawn a detached watcher
 // before quitting that waits for this process to exit and for the installer
-// to finish overwriting our exe (detected by the file becoming unlockable
-// again), then starts the app back up.
+// process itself to finish, then starts the app back up. The exe becoming
+// unlockable is NOT a safe "installer is done" signal on its own: it unlocks
+// the instant we exit, before the installer has uninstalled the old version,
+// so relaunching on that alone starts the old exe and the installer's
+// running-app check kills it again.
 function quitAndInstallSilently() {
   if (process.platform !== 'win32') {
     autoUpdater.quitAndInstall(true, true)
     return
   }
   const exePath = process.execPath
+  // electron-updater runs the installer out of its cache dir (see
+  // clearUpdaterCache); installerPath is the exact file when it exposes it.
+  const installerPath = autoUpdater.installerPath || ''
   const watcherPath = path.join(app.getPath('temp'), `unreleased-update-relaunch-${process.pid}.ps1`)
   const script = [
-    `param([int]$AppPid, [string]$AppExePath, [int]$TimeoutSeconds = 120)`,
+    `param([int]$AppPid, [string]$AppExePath, [string]$InstallerPath = '', [int]$TimeoutSeconds = 120)`,
     `try { Wait-Process -Id $AppPid -ErrorAction SilentlyContinue -Timeout $TimeoutSeconds } catch {}`,
+    `$detectUntil = (Get-Date).AddSeconds(20)`,
+    `while ((Get-Date) -lt $detectUntil) {`,
+    `  $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -and (($InstallerPath -and $_.ExecutablePath -ieq $InstallerPath) -or $_.ExecutablePath -like '*\\unreleased-updater\\*') })`,
+    `  if ($procs.Count -gt 0) {`,
+    `    foreach ($p in $procs) { try { Wait-Process -Id $p.ProcessId -Timeout 600 -ErrorAction SilentlyContinue } catch {} }`,
+    `    break`,
+    `  }`,
+    `  Start-Sleep -Milliseconds 300`,
+    `}`,
     `$deadline = (Get-Date).AddSeconds($TimeoutSeconds)`,
     `while ((Get-Date) -lt $deadline) {`,
     `  try { $s = [System.IO.File]::Open($AppExePath, 'Open', 'ReadWrite', 'None'); $s.Close(); break } catch { Start-Sleep -Milliseconds 400 }`,
@@ -3587,7 +3602,7 @@ function quitAndInstallSilently() {
     fs.writeFileSync(watcherPath, script, 'utf-8')
     const child = spawn('powershell.exe', [
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
-      '-File', watcherPath, '-AppPid', String(process.pid), '-AppExePath', exePath,
+      '-File', watcherPath, '-AppPid', String(process.pid), '-AppExePath', exePath, '-InstallerPath', installerPath,
     ], { detached: true, stdio: 'ignore' })
     child.unref()
   } catch (e) {
