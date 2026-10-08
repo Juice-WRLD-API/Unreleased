@@ -122,7 +122,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
-  { tab: 'about', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
@@ -1303,6 +1303,14 @@ export default function Settings(): JSX.Element {
                   labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
                 />
                 <Row
+                  icon={Bug}
+                  iconColor="#ef4444"
+                  label="Auto-report app errors"
+                  sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                >
+                  <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                </Row>
+                <Row
                   icon={FlaskConical}
                   iconColor="#f59e0b"
                   label="Sandbox"
@@ -1896,24 +1904,6 @@ export default function Settings(): JSX.Element {
                   </a>
                 </div>
 
-                <div className="mb-4 rounded-xl border border-[var(--border)] p-3 max-w-md">
-                  <button
-                    onClick={() => useStore.getState().openReport({ kind: 'feedback' })}
-                    className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-accent/10 hover:bg-accent/15 border border-accent/25 text-accent text-sm font-medium transition-colors mb-2"
-                  >
-                    <MessageCircle size={15} />
-                    Send feedback
-                  </button>
-                  <Row
-                    icon={Bug}
-                    iconColor="#ef4444"
-                    label="Auto-report app errors"
-                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
-                  >
-                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
-                  </Row>
-                </div>
-
                 <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
                   <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
                     <Server size={13} />
@@ -1950,6 +1940,14 @@ export default function Settings(): JSX.Element {
                 >
                   <BookOpen size={15} />
                   API Docs
+                </button>
+
+                <button
+                  onClick={() => useStore.getState().openReport({ kind: 'feedback' })}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
+                >
+                  <MessageCircle size={15} />
+                  Send Feedback
                 </button>
 
                 <button
