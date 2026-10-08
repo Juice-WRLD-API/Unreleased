@@ -13,15 +13,6 @@ import { ViewType } from './types'
 // Wordle play audio, so those are left to remount.
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'chat']
 
-// Footprint of the floating nav pill (40px icons + 6px padding each side + the
-// 12px inset AutoHideNav wraps it in), reserved on the edge the pill sits on.
-const PILL_RESERVE_STYLE: Record<string, React.CSSProperties> = {
-  top: { paddingTop: 'calc(var(--top-inset) + 4.75rem)' },
-  bottom: { paddingBottom: '4.75rem' },
-  left: { paddingLeft: '4.75rem' },
-  right: { paddingRight: '4.75rem' },
-}
-
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/' || pathname === '/tracker') return 'api-tracker'
   if (pathname.startsWith('/files')) return 'api-files'
@@ -283,7 +274,6 @@ export default function App(): JSX.Element {
   const isElectron = navigator.userAgent.includes("Electron")
 
   const titleBarMenu = isElectron && !wrldFullscreen && appMenuPosition === 'title-bar'
-  const pillReserve = !isMobile && navStyle === 'pill' && !autoHideNav
 
   return (
     <UserCardHost>
@@ -311,7 +301,7 @@ export default function App(): JSX.Element {
         {!isMobile && (autoHideNav || navStyle === 'pill')
           ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
           : <Sidebar />}
-        <main className="flex-1 overflow-hidden flex flex-col relative" style={pillReserve ? PILL_RESERVE_STYLE[sidebarPosition] : undefined}>
+        <main className="flex-1 overflow-hidden flex flex-col relative">
           {/* Frameless-window drag strip — when the nav bar sits on top (md+
               only; it's hidden on narrow windows) the bar touches the window
               edge instead and carries its own strip. mr-[188px] clears the
