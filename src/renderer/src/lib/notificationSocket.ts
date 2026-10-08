@@ -1,7 +1,10 @@
 import { CHAT_API_BASE } from './apiServers'
+import { authedRequest } from './apiClient'
+import { getToken } from './userApi'
 
 // Server-push channel for non-chat notifications (news today; anything the
-// server broadcasts via broadcast_notification later). No auth. One shared
+// server broadcasts via broadcast_notification later). Public by default, with
+// an optional per-account upgrade (authenticateNotifications). One shared
 // socket, fanned out to listeners by frame `type`.
 
 export interface NotificationFrame {
@@ -35,6 +38,21 @@ let pathIndex = 0
 let retryTimer: number | null = null
 let pingTimer: number | null = null
 
+// The socket is public until it sends a one-time ticket; after that it also
+// receives events addressed to this account (new-device alerts, key traffic).
+// Tickets are short-lived, so every (re)connect asks for a fresh one.
+export async function authenticateNotifications(): Promise<void> {
+  const socket = ws
+  const token = getToken()
+  if (!token || !socket || socket.readyState !== WebSocket.OPEN) return
+  try {
+    const { ticket } = await authedRequest<{ ticket: string }>(`${CHAT_API_BASE}/notifications/ws-ticket/`, { method: 'POST' }, token)
+    if (ws === socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'auth', ticket }))
+  } catch {
+    // signed out or offline; the next reconnect tries again
+  }
+}
+
 function stopPing(): void {
   if (pingTimer !== null) window.clearInterval(pingTimer)
   pingTimer = null
@@ -53,6 +71,7 @@ function open(): void {
     pingTimer = window.setInterval(() => {
       if (socket.readyState === WebSocket.OPEN) socket.send('ping')
     }, PING_MS)
+    void authenticateNotifications()
     openListeners.forEach((fn) => fn())
   }
   socket.onmessage = (ev) => {

@@ -42,6 +42,10 @@ import {
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
+import { showPlaybackNotice } from '../lib/playbackNotice'
+import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 
 // Downloaded-for-offline audio always wins over streaming — same track id,
@@ -223,7 +227,14 @@ export default function Player(): JSX.Element {
   // crossfade preloaded) can be dropped when the element loads the new
   // media — which is what made a slowed/pitched track silently revert to 1x
   // partway through a playlist until some setting was toggled.
-  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => applyRate(e.currentTarget)
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
+    const audio = e.currentTarget
+    applyRate(audio)
+    // Both slots share this handler - only the active slot finishing its
+    // load means the current track is ready (a preload landing on the
+    // inactive slot doesn't unblock preloading the track after it).
+    if (audio === getActive()) setCurrentTrackReady(true)
+  }
 
 
   // FM elapsed time — ticks locally between WS updates
@@ -387,8 +398,13 @@ export default function Player(): JSX.Element {
   // pre-shuffled, so the next track is deterministic (queueIndex + 1) there
   // too. Radio's next track lives in radioNext, not the queue — nothing to
   // preload from here.
+  // Gated on currentTrackReady: starting this fetch before the current track
+  // has loaded would fight it for bandwidth, which is exactly backwards -
+  // the song actually playing should never be starved for one that's just
+  // getting a head start.
+  const [currentTrackReady, setCurrentTrackReady] = useState(false)
   useEffect(() => {
-    if (!crossfadeEnabled || radioMode || !isPlaying || queue.length === 0 || cfActive.current) return
+    if (!crossfadeEnabled || radioMode || !isPlaying || queue.length === 0 || cfActive.current || !currentTrackReady) return
     let nextIdx: number
     if (repeat === 'one') nextIdx = queueIndex
     else {
@@ -421,7 +437,7 @@ export default function Player(): JSX.Element {
     // Preloaded slots inherit the current rate too — the loadedmetadata
     // handler re-asserts it once this load settles.
     applyRate(na)
-  }, [queueIndex, queue.length, isPlaying, repeat, crossfadeEnabled, radioMode])
+  }, [queueIndex, queue.length, isPlaying, repeat, crossfadeEnabled, radioMode, currentTrackReady])
 
   // Route both slots through the shared Web Audio effects chain (EQ, balance,
   // mono, silence detection). Elements keep their own volume/rate handling.
@@ -578,6 +594,7 @@ export default function Player(): JSX.Element {
       // This slot was loaded by the crossfade preload, which never ran the
       // rate setup below — apply it now or the faded-in track plays at 1x.
       applyRate(audio)
+      setCurrentTrackReady(true)
       return
     }
 
@@ -585,6 +602,8 @@ export default function Player(): JSX.Element {
     // header) - fetch the blob first, then load it once it's ready.
     if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
       const trackId = currentTrack.id
+      const { streamUrl, title } = currentTrack
+      setCurrentTrackReady(false)
       cancelCF()
       cancelPauseFade()
       // Stop the previous track while the file downloads.
@@ -600,11 +619,18 @@ export default function Player(): JSX.Element {
         if (s.isPlaying) a.play().catch(console.error)
       }).catch((err) => {
         console.error('Could not load donor file', err)
-        if (useStore.getState().currentTrack?.id === trackId) setIsPlaying(false)
+        if (useStore.getState().currentTrack?.id !== trackId) return
+        setIsPlaying(false)
+        if (isSessionEditPlaceholder(streamUrl)) {
+          showPlaybackNotice(err instanceof SessionEditNotFoundError
+            ? `No session edit found for "${title}"`
+            : `Couldn't load the session edit for "${title}"`)
+        }
       })
       return
     }
 
+    setCurrentTrackReady(false)
     cancelCF()
     cancelPauseFade()
     const fileUrl = resolvePlaybackUrl(currentTrack)
@@ -1849,6 +1875,7 @@ export default function Player(): JSX.Element {
   return (
     <>
       <MediaSessionPosition active={mediaSessionActive} playbackSpeed={playbackSpeed} />
+      <PlaybackNotice />
       {/* crossOrigin: required for the Web Audio effects chain — without CORS
           clearance createMediaElementSource outputs pure silence. The API and
           the local-media:// protocol both send Access-Control-Allow-Origin. */}

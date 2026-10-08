@@ -39,7 +39,7 @@ export default function NowPlaying(): JSX.Element {
 
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab (this component itself unmounts when the Wrld tab is
-  // active — see App.tsx). The id is already right there in currentTrack.id
+  // active - see App.tsx). The id is already right there in currentTrack.id
   // (format 'jw-<id>'), so no fetch is needed just to open it.
   const handleInfo = (): void => {
     const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
@@ -54,7 +54,11 @@ export default function NowPlaying(): JSX.Element {
 
   return (
     <div
-      className="bg-surface-raised flex shrink-0 overflow-hidden animate-slide-in-right"
+      // bg-surface on mobile, not bg-surface-raised: this is `position: fixed;
+      // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
+      // element's background directly - bg-surface-raised made the status bar
+      // read visibly darker than the rest of the app while this panel is open.
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden animate-slide-in-right`}
       style={isMobile
         ? { position: 'fixed', inset: 0, zIndex: 50 }
         : { width: panelWidth, borderLeft: '1px solid var(--border)' }
@@ -67,10 +71,7 @@ export default function NowPlaying(): JSX.Element {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <div
-          className="flex items-center justify-between px-5 pb-3 shrink-0"
-          style={{ paddingTop: needsWindowControlClearance ? 36 : 20, paddingRight: needsWindowControlClearance ? 148 : undefined }}
-        >
+        <div className="flex items-center justify-between px-5 pb-3 pt-5 shrink-0">
           <h2 className="text-text-primary font-semibold text-sm uppercase tracking-widest truncate min-w-0">Now Playing</h2>
           <div className="flex items-center gap-2 shrink-0">
             {currentTrack && (

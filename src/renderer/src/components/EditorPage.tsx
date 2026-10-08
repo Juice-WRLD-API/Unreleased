@@ -1,71 +1,26 @@
-import { useState, useEffect, useRef, useCallback, memo, type ReactNode } from 'react'
+import { useState, useEffect, useRef, memo, type ReactNode } from 'react'
+import { IS_FLOAT_WINDOW } from '../store/useStore'
+import { attachToMainWindow } from '../lib/windowSync'
 import {
-  Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ChevronLeft,
-  ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2, PictureInPicture2, Minimize2,
-  FolderOpen, CalendarDays,
+  Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ChevronLeft, ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2, FolderOpen, PictureInPicture2, Minimize2,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
-import { useStore, useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
-import { attachToMainWindow } from '../lib/windowSync'
-import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
-import LyricsSyncTool from './LyricsSyncTool'
-import type { ViewType } from '../types'
+import { buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
-import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
-import { invalidateLyricsCache } from './Player'
 import type { EditorApplication } from '../lib/userApi'
+import { versionsEnabled } from '../lib/versionsApi'
+import type { SuggestField } from '../lib/fieldSuggestions'
+import { accountDisplayName, errorMessage } from '../lib/format'
 import {
-  versionsEnabled, getOwnVersionMeta, setSongVersion, setGroupVersionTitle, setOwnVersionTitle,
-  searchVersionTitles, joinVersionGroup, getVersionGroup,
-} from '../lib/versionsApi'
-import type { VersionTitleSuggestion } from '../lib/versionsApi'
-import { invalidateCompactGroupsCache } from '../lib/compactGroups'
-import { suggestFieldValues, type SuggestField } from '../lib/fieldSuggestions'
+  CATEGORIES, CAT_PILL, CAT_BADGE,
+  parseSynced, serializeSynced, type SyncedLine,
+} from '../lib/editorPageShared'
+import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
+import { useEditorPageState, type LyricsTab } from '../hooks/useEditorPageState'
+import { clickable } from '../lib/a11y'
+import LyricsSyncTool from './LyricsSyncTool'
 
-type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
-type LyricsTab = 'lyrics' | 'synced'
-
-const CATEGORIES = [
-  { value: 'released',          label: 'Released' },
-  { value: 'unreleased',        label: 'Unreleased' },
-  { value: 'unsurfaced',        label: 'Unsurfaced' },
-  { value: 'recording_session', label: 'Session' },
-]
-
-const CAT_PILL: Record<string, string> = {
-  released:          'bg-emerald-500 text-white',
-  unreleased:        'bg-accent text-white',
-  unsurfaced:        'bg-yellow-500 text-black',
-  recording_session: 'bg-zinc-500 text-white',
-}
-
-const CAT_BADGE: Record<string, string> = {
-  released:          'bg-emerald-500/20 text-emerald-400',
-  unreleased:        'bg-accent/20 text-accent',
-  unsurfaced:        'bg-yellow-500/20 text-yellow-400',
-  recording_session: 'bg-zinc-500/20 text-zinc-400',
-}
-
-// Exported for BulkEditModal, which has to derive the same baselines this page
-// does so a bulk change doesn't submit a no-op patch for a song that already
-// carries the value (dates come back from the API with a weekday prefix).
-export function cleanDate(raw: string | null | undefined): string {
-  if (!raw) return ''
-  return raw.replace(/^[A-Za-z][a-z]+\s+(?=[A-Z]|\d)/g, '').trim().replace(/\.$/, '').trim()
-}
-
-function diff(before: Record<string, unknown>, after: Record<string, unknown>): Record<string, unknown> {
-  const patch: Record<string, unknown> = {}
-  for (const k of Object.keys(after)) {
-    const a = after[k], b = before[k]
-    if (a === '' && (b === '' || b == null)) continue
-    if (a == null && b == null) continue
-    if (JSON.stringify(a) !== JSON.stringify(b)) patch[k] = a === '' ? null : a
-  }
-  return patch
-}
-
-/* ── Card — grouped section container ─────────────────────────────────────── */
+/* ── Card - grouped section container ─────────────────────────────────────── */
 export function Card({ title, icon, action, children, className = '', overflowVisible = false }: {
   title?: string; icon?: ReactNode; action?: ReactNode
   children: ReactNode; className?: string
@@ -87,9 +42,12 @@ export function Card({ title, icon, action, children, className = '', overflowVi
   )
 }
 
-/* ── Grid — responsive field grid for use inside a Card ───────────────────── */
-export function FieldGrid({ children, cols = 2 }: { children: ReactNode; cols?: 1 | 2 | 3 }): JSX.Element {
-  const colClass = cols === 3 ? 'sm:grid-cols-3' : cols === 1 ? '' : 'sm:grid-cols-2'
+/* ── Grid - responsive field grid for use inside a Card ───────────────────── */
+export function FieldGrid({ children, cols = 2 }: { children: ReactNode; cols?: 1 | 2 | 3 | 4 }): JSX.Element {
+  // The default (cols=2) grid picks up a third column once the window is wide
+  // enough to fit it (past the left rail) - the whole reason this component
+  // widened in the first place was to stop wasting that space.
+  const colClass = cols === 4 ? 'sm:grid-cols-4' : cols === 3 ? 'sm:grid-cols-3' : cols === 1 ? '' : 'sm:grid-cols-2 lg:grid-cols-3'
   return <div className={`grid grid-cols-1 ${colClass} gap-x-5 gap-y-4`}>{children}</div>
 }
 
@@ -109,29 +67,10 @@ const fieldInputClass = (changed: boolean, mono: boolean): string =>
   }`
 
 /* ── Field-value autocomplete ─────────────────────────────────────────────── */
-/* Shared by FieldRow and BasicRow — a value-matching dropdown fed from
+/* Shared by FieldRow and BasicRow - a value-matching dropdown fed from
  *  fieldSuggestions.ts (album/credits/location/leak type already used
  *  elsewhere in the catalog), same idea as the Versions card's title
  *  autocomplete but backed by song data instead of the /versions/ table. */
-function useValueSuggestions(field: SuggestField | undefined, value: string): {
-  matches: string[]; open: boolean; setOpen: (v: boolean) => void
-} {
-  const [matches, setMatches] = useState<string[]>([])
-  const [open, setOpen] = useState(false)
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (!field) return
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      suggestFieldValues(field, value, value).then(setMatches)
-    }, 200)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [field, value])
-
-  return { matches, open, setOpen }
-}
-
 function SuggestDropdown({ matches, onPick }: { matches: string[]; onPick: (v: string) => void }): JSX.Element | null {
   if (matches.length === 0) return null
   return (
@@ -151,45 +90,16 @@ function SuggestDropdown({ matches, onPick }: { matches: string[]; onPick: (v: s
   )
 }
 
-/* ── Date picker button ───────────────────────────────────────────────────── */
-/* A calendar icon that opens the browser's native date picker and appends the
- *  picked date to the field - fields hold free text (a date can be a range, a
- *  "TBD", or several dates on separate lines) so this augments rather than
- *  replaces typing. The date input itself stays invisible; only the button is
- *  seen, matching the folder-icon browse button elsewhere in these fields. */
-function DatePickerButton({ onPick, className }: { onPick: (date: string) => void; className: string }): JSX.Element {
-  const ref = useRef<HTMLInputElement>(null)
-  return (
-    <>
-      <button
-        type="button"
-        onClick={e => {
-          e.preventDefault()
-          const el = ref.current
-          if (!el) return
-          try { el.showPicker() } catch { el.focus() }
-        }}
-        title="Pick a date"
-        className={className}
-      >
-        <CalendarDays size={14} />
-      </button>
-      <input
-        ref={ref}
-        type="date"
-        onChange={e => { const v = e.target.value; if (v) onPick(v); e.target.value = '' }}
-        className="sr-only"
-        tabIndex={-1}
-        aria-hidden="true"
-      />
-    </>
-  )
-}
-
 /* ── Field ─────────────────────────────────────────────────────────────────── */
-export function FieldRow({ label, value, original, onChange, placeholder, mono = false, span, onBrowse, suggest }: {
+export function FieldRow({ label, value, original, onChange, placeholder, mono = false, span, full = false, onBrowse, suggest }: {
   label: string; value: string; original: string
-  onChange: (v: string) => void; placeholder?: string; mono?: boolean; span?: 2 | 3
+  onChange: (v: string) => void; placeholder?: string; mono?: boolean
+  /** Spans this many of the grid's own columns (2 of 3 pairs it with one more
+   *  single-width field, rather than claiming the whole row). */
+  span?: 2 | 3
+  /** Always takes the whole row, however many columns the grid currently has -
+   *  for fields (long paths, free-form notes) that never want a neighbor. */
+  full?: boolean
   /** Shows a folder button inside the field that opens a file picker. */
   onBrowse?: () => void
   /** Autocompletes from other songs' values for this field (e.g. "album"). */
@@ -198,7 +108,7 @@ export function FieldRow({ label, value, original, onChange, placeholder, mono =
   const changed = value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
+    <label className={`flex flex-col min-w-0 ${full ? 'sm:col-span-2 lg:col-span-3' : span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
       <FieldLabel label={label} changed={changed} />
       <div className="relative">
         <input
@@ -247,19 +157,29 @@ function SelectRow({ label, value, original, onChange, options, placeholder }: {
 }
 
 /* ── Textarea field ────────────────────────────────────────────────────────── */
-export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, dateInput = false }: {
+export function TextareaRow({ label, value, original, onChange, rows = 3, placeholder, mono = false, span, full = false, suggest, dateInput = false }: {
   label: string; value: string; original: string
-  onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean; span?: 2 | 3
+  onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean
+  /** Spans this many of the grid's own columns (2 of 3 pairs it with one more
+   *  single-width field, rather than claiming the whole row). */
+  span?: 2 | 3
+  /** Always takes the whole row, however many columns the grid currently has -
+   *  for fields (long paths, free-form notes) that never want a neighbor. */
+  full?: boolean
+  /** Autocompletes from other songs' values for this field (e.g. "leak_type"). */
+  suggest?: SuggestField
   /** Shows a calendar button that appends a picked date onto the field. */
   dateInput?: boolean
 }): JSX.Element {
   const changed = value !== original && !(value === '' && original === '')
+  const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`flex flex-col min-w-0 ${span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
+    <label className={`relative flex flex-col min-w-0 ${full ? 'sm:col-span-2 lg:col-span-3' : span === 2 ? 'sm:col-span-2' : span === 3 ? 'sm:col-span-3' : ''}`}>
       <FieldLabel label={label} changed={changed} />
       <div className="relative">
         <textarea
           rows={rows} value={value} onChange={e => onChange(e.target.value)}
+          onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
           placeholder={placeholder || '—'}
           className={`${fieldInputClass(changed, mono)} resize-none leading-relaxed py-2.5 ${dateInput ? 'pr-9' : ''}`}
         />
@@ -270,6 +190,7 @@ export function TextareaRow({ label, value, original, onChange, rows = 3, placeh
           />
         )}
       </div>
+      {suggest && open && <SuggestDropdown matches={matches} onPick={v => { onChange(v); setOpen(false) }} />}
     </label>
   )
 }
@@ -281,8 +202,8 @@ export function TextareaRow({ label, value, original, onChange, rows = 3, placeh
 const basicControlClass =
   'w-full bg-transparent border-0 p-0 text-[13px] leading-snug text-text-primary focus:outline-none placeholder:text-text-muted placeholder:opacity-40'
 
-const basicShellClass = (changed: boolean): string =>
-  `block rounded-md border px-2.5 py-1.5 transition-colors focus-within:border-accent/50 ${
+const basicShellClass = (changed: boolean, roomy = false): string =>
+  `block rounded-md border ${roomy ? 'pl-2.5 pr-3 pt-1.5 pb-3' : 'px-2.5 py-1.5'} transition-colors focus-within:border-accent/50 ${
     changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--border)] bg-surface-overlay/60'
   }`
 
@@ -302,7 +223,7 @@ export function BasicRow({ label, value, original, onChange, rows = 1, placehold
   const changed = original != null && value !== original && !(value === '' && original === '')
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
-    <label className={`${basicShellClass(changed)} relative ${open && matches.length > 0 ? 'z-20' : ''}`}
+    <label className={`${basicShellClass(changed, rows > 1)} relative ${open && matches.length > 0 ? 'z-20' : ''}`}
       onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}>
       <span className={basicLabelClass}>{label}</span>
       {rows > 1
@@ -369,7 +290,7 @@ export function BasicSelect({ label, value, original, onChange, options, placeho
     // z-20 while open keeps the popup above the rows that follow it, which are
     // themselves positioned and would otherwise paint on top.
     <div ref={ref} className={`${basicShellClass(changed)} relative cursor-pointer ${open ? 'z-20' : ''}`}
-      onClick={() => setOpen(v => !v)}>
+      {...clickable(() => setOpen(v => !v))} aria-expanded={open}>
       <span className={basicLabelClass}>{label}</span>
       <div className="flex items-center gap-1 pr-0.5">
         <span className={`flex-1 min-w-0 truncate text-[13px] leading-snug ${selected ? 'text-text-primary' : 'text-text-muted opacity-40'}`}>
@@ -402,25 +323,6 @@ export function BasicSelect({ label, value, original, onChange, options, placeho
 }
 
 /* ── Synced lyrics table ───────────────────────────────────────────────────── */
-/* Raw LRC ("[1:05.96] Animal, animal") is hard to read and easy to corrupt, so
-   the editor can show it as one row per line: timestamp field + text field.
-   The bracket contents are kept verbatim rather than normalised, so a partly
-   typed timestamp survives a re-render and metadata tags ([ar: …]) round-trip
-   untouched. */
-type SyncedLine = { time: string; text: string }
-
-function parseSynced(v: string): SyncedLine[] {
-  if (!v) return []
-  return v.split('\n').map(line => {
-    const m = /^\s*\[([^\]]*)\]\s?(.*)$/.exec(line)
-    return m ? { time: m[1], text: m[2] } : { time: '', text: line }
-  })
-}
-
-function serializeSynced(rows: SyncedLine[]): string {
-  return rows.map(r => (r.time.trim() ? `[${r.time.trim()}] ${r.text}`.trimEnd() : r.text)).join('\n')
-}
-
 export function SyncedLyricsTable({ value, onChange }: {
   value: string; onChange: (v: string) => void
 }): JSX.Element {
@@ -477,633 +379,42 @@ export function SyncedLyricsTable({ value, onChange }: {
   )
 }
 
-/* ── Genius lyrics helpers ─────────────────────────────────────────────────── */
-const isGeniusUrl = (s: string): boolean =>
-  /^https?:\/\/(www\.)?genius\.com\/.+/i.test(s.trim())
-
-function extractGeniusLyrics(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  const containers = Array.from(doc.querySelectorAll('[data-lyrics-container="true"]'))
-  if (!containers.length) throw new Error('No lyrics containers found')
-
-  const raw = containers
-    .map(c => {
-      const clone = c.cloneNode(true) as Element
-      clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'))
-      return clone.textContent ?? ''
-    })
-    .join('\n\n')
-
-  // The page injects contributor counts, translations, and a song description
-  // before the actual lyrics. Trim everything up to the first [Section] tag.
-  // Fall back to trimming after "Read More" (end of song description) if no tags.
-  let start = raw.indexOf('[')
-  if (start < 0) {
-    const rm = raw.lastIndexOf('Read More')
-    start = rm >= 0 ? rm + 9 : 0
-  }
-
-  return raw
-    .slice(start)
-    .replace(/^\[.*?\]\n?/gm, '')   // strip section tags
-    .replace(/\n{2,}/g, '\n\n')
-    .trim()
-}
-
 /* ── Main export ──────────────────────────────────────────────────────────── */
 export default function EditorPage({ initialSongId = null }: {
   /** Song to open on mount, for callers that know their target before this
-   *  page renders (the pop-out editor window boots straight into one). Known
-   *  during the first render, so it beats the currently-playing prefill
-   *  without depending on effect ordering. */
+   *  page renders. Known during the first render, so it beats the
+   *  currently-playing prefill without depending on effect ordering. */
   initialSongId?: number | null
 } = {}): JSX.Element {
   const {
-    account, currentTrack,
-    pendingEditorSongId, setPendingEditorSongId, setActiveView, previousView,
-    pendingEditProposal, setPendingEditProposal,
-    setShowUserAuth, logoutAccount, activeChannel, channels,
-  } = useStorePick('account', 'currentTrack', 'pendingEditorSongId', 'setPendingEditorSongId', 'setActiveView', 'previousView', 'pendingEditProposal', 'setPendingEditProposal', 'setShowUserAuth', 'logoutAccount', 'activeChannel', 'channels')
-  // Where "back"/"nothing to edit" should return to — wherever the user was
-  // before landing here, falling back to the editor dashboard when that's
-  // unknown (e.g. a deep link straight into the editor).
-  // The terminal doesn't count: the editor stays mounted underneath it, so
-  // coming back from it leaves previousView === 'terminal' - remember the last
-  // real origin instead so "back" doesn't dump the user into the terminal.
-  const lastOriginRef = useRef<ViewType | null>(null)
-  if (previousView && previousView !== 'editor' && previousView !== 'terminal') lastOriginRef.current = previousView
-  const backView = lastOriginRef.current ?? 'editor-profile'
-  // Mirrored into a ref so the redirect effect below can read the latest value
-  // without listing it as a dependency — setActiveView rewrites previousView,
-  // which would otherwise re-run that effect and make it call itself forever.
-  const backViewRef = useRef(backView)
-  backViewRef.current = backView
-  const isAdmin  = !!account?.is_administrator
-  const canEdit  = userApi.isChannelEditor(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
-
-  const [application, setApplication] = useState<EditorApplication | null>(null)
-  const [appLoading, setAppLoading]   = useState(false)
-
-  const [song,    setSong]    = useState<JWApiSong | null>(null)
-  const [loading, setLoading] = useState(false)
-  // Set when a manual load (Edit click / proposal open) fails, so the
-  // "nothing to edit" effect below doesn't silently bounce the user to My
-  // Proposals — it used to swallow the fetch error entirely, making it look
-  // like clicking Edit just redirected there for no reason.
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const lastLoadIdRef = useRef<number | null>(null)
-  const [eras,    setEras]    = useState<JWApiEra[]>([])
-  // Set synchronously the instant a manual load (Edit click / proposal open)
-  // is kicked off, before the async fetch resolves into `song`. Without this,
-  // there's a render in between where pendingEditorSongId has already been
-  // cleared to null but `song` hasn't been set yet — during that window the
-  // "prefill from currently-playing track" effect below would incorrectly
-  // fire and race the manual load, sometimes clobbering it with whatever's
-  // currently playing.
-  // Starts true when the caller already named a song (initialSongId), so the
-  // prefill effect is blocked from the very first render rather than from the
-  // first effect pass.
-  const manualLoadRef = useRef(initialSongId != null)
-  // Consumed once by the mount effect below; nulled so a later re-render can't
-  // reopen it after the user has closed the song.
-  const bootSongIdRef = useRef<number | null>(initialSongId)
-  // True once a song/draft has actually been opened in this visit — lets the
-  // "nothing to edit" redirect below tell "backed out of an edit" apart from
-  // "landed here fresh with nothing pending" (the latter still goes to the
-  // editor dashboard; the former should return to wherever the user came from).
-  const wasEditingRef = useRef(false)
-
-  const [name,     setName]     = useState('')
-  const [artists,  setArtists]  = useState('')
-  const [album,    setAlbum]    = useState('')
-  const [cat,      setCat]      = useState('')
-  const [eraId,    setEraId]    = useState('')
-  const [prod,     setProd]     = useState('')
-  const [eng,      setEng]      = useState('')
-  const [loc,      setLoc]      = useState('')
-  const [recDate,  setRecDate]  = useState('')
-  const [relDate,  setRelDate]  = useState('')
-  const [previewDate, setPreviewDate] = useState('')
-  const [leak,     setLeak]     = useState('')
-  const [dateLeaked, setDateLeaked] = useState('')
-  const [lyrics,   setLyrics]   = useState('')
-  const [synced,   setSynced]   = useState('')
-  const [addInfo,  setAddInfo]  = useState('')
-  const [notes,    setNotes]    = useState('')
-  const [edNotes,  setEdNotes]  = useState('')
-
-  const [imageUrl,          setImageUrl]          = useState('')
-  const [filePath,          setFilePath]          = useState('')
-  const [songLength,        setSongLength]        = useState('')
-  const [bitrate,           setBitrate]           = useState('')
-  const [bpm,               setBpm]               = useState('')
-  const [musicalKey,        setMusicalKey]        = useState('')
-  const [altNames,          setAltNames]          = useState('')
-  const [fileNames,         setFileNames]         = useState('')
-  const [instrumentals,     setInstrumentals]     = useState('')
-  const [instrumentalNames, setInstrumentalNames] = useState('')
-
-  const [lyricsTab,    setLyricsTab]    = useState<LyricsTab>('lyrics')
-  const [lyricsLoading, setLyricsLoading] = useState(false)
-  const [lyricsError,   setLyricsError]   = useState<string | null>(null)
-  const [submitState,  setSubmitState]  = useState<SubmitState>('idle')
-  const [submitError,  setSubmitError]  = useState<string | null>(null)
-  // The patch (JSON-stringified) last successfully submitted, so the button
-  // can stay disabled after submitState's 3s "submitted" flash resets back to
-  // idle. Without this, an untouched proposal could be resubmitted verbatim
-  // by clicking again once that flash wore off — nothing else marks the
-  // still-pending proposal as "already sent" for this exact set of edits.
-  // Cleared wherever the field state itself is reset (populate/cancel), since
-  // a stale value there would just as wrongly block a legitimately new patch.
-  const lastSubmittedPatchRef = useRef<string | null>(null)
-  const [deleteState,  setDeleteState]  = useState<'idle' | 'confirm' | 'submitting' | 'submitted' | 'error'>('idle')
-  const [deleteError,  setDeleteError]  = useState<string | null>(null)
-  const [showMore,     setShowMore]     = useState(false)
+    account, isAdmin, canEdit, backView, setActiveView, activeChannel, channels,
+    application, appLoading, onSubmitted, onSignOut, setShowUserAuth, logoutAccount,
+    song, loading, loadError, lastLoadIdRef, loadSong, eras,
+    isNewSongDraft, editingPropId, cancelEditProposal, closeSong,
+    name, setName, artists, setArtists, album, setAlbum, cat, setCat, eraId, setEraId,
+    prod, setProd, eng, setEng, loc, setLoc, recDate, setRecDate, relDate, setRelDate,
+    previewDate, setPreviewDate, leak, setLeak, dateLeaked, setDateLeaked,
+    lyrics, setLyrics, synced, setSynced, addInfo, setAddInfo, notes, setNotes, edNotes, setEdNotes,
+    imageUrl, setImageUrl, filePath, setFilePath, songLength, setSongLength, bitrate, setBitrate,
+    bpm, setBpm, musicalKey, setMusicalKey, altNames, setAltNames, fileNames, setFileNames,
+    instrumentals, setInstrumentals, instrumentalNames, setInstrumentalNames,
+    sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
+    lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
+    syncedTable, setSyncedTable, syncTool, setSyncTool,
+    submitState, submitError, submit,
+    deleteState, setDeleteState, deleteError, submitDeletion,
+    showMore, setShowMore,
+    pickingFile, setPickingFile, pickingImage, setPickingImage,
+    versionNum, setVersionNum, versionTitle, setVersionTitle,
+    loadedTitle, linkedCount, versionSaveStatus, linkError, saveVersionInfo,
+    titleSuggestions, showTitleSuggestions, setShowTitleSuggestions, handlePickTitleSuggestion,
+    base, current, patch, changedCount, alreadySubmitted,
+  } = useEditorPageState(initialSongId)
   // 'full' = the card/left-rail layout, 'basic' = one flat stacked form with
   // every field on screen. Remembered across sessions (and shared with the
-  // pop-out editor window, which reads the same key).
-  const [basicView,    setBasicView]    = useState(() => localStorage.getItem('editor:view') === 'basic')
-  // File picker for the audio path field (File URL / File path).
-  const [pickingFile, setPickingFile] = useState(false)
-  // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
-  const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
-  // Manual sync tool (stamp lines against the playing song) - session-only, unlike the Lines/Raw choice.
-  const [syncTool,     setSyncTool]     = useState(false)
-  const [editingPropId, setEditingPropId] = useState<number | null>(null)
-  // True while editing a 'create' proposal (new song) — has no backing song object yet
-  const [isNewSongDraft, setIsNewSongDraft] = useState(false)
-
-  // This song's own version label plus the group's shared version title —
-  // linking songs together happens from the Tracker's multi-select "Link
-  // versions" action (see ApiTrackerView.tsx), not here. These write
-  // straight to juicewrldapi.com's /versions/ table (see lib/versionsApi.ts),
-  // not through its proposal/review system, hence the separate save button
-  // below rather than piggybacking on "Submit proposal". Version is
-  // per-song ("v1", "TV Mix"); version title is written to every song in
-  // the group at once so they always match — read-only everywhere else
-  // (SongInfoModal no longer allows editing either field).
-  const [versionNum,   setVersionNum]   = useState('')
-  const [versionTitle, setVersionTitle] = useState('')
-  const [ownGroupId,   setOwnGroupId]   = useState<number | null>(null)
-  // The title as loaded, so a save can tell "renamed" from "left alone" — only
-  // a real change retitles (and possibly splits) the song.
-  const [loadedTitle,  setLoadedTitle]  = useState('')
-  // Other songs sharing this song's group.
-  const [linkedCount,  setLinkedCount]  = useState(0)
-  const [versionSaveStatus, setVersionSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [linkError, setLinkError] = useState<string | null>(null)
-  const [titleSuggestions, setTitleSuggestions] = useState<VersionTitleSuggestion[]>([])
-  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false)
-  const titleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const baseline = (s: JWApiSong | null): Record<string, unknown> => {
-    if (!s) return {}
-    return {
-      // `name` is the API's own canonical title — NOT track_titles[0]. They
-      // usually agree, but track_titles is an unordered alias list and for
-      // ~6% of released songs its first entry is an alias, not the title
-      // people know the song by (see heardle.ts's slim() for the same
-      // mismatch). Populating the Title field from track_titles[0] meant the
-      // editor sometimes showed — and would silently rewrite `name` to — an
-      // alt title if the user touched the field without noticing.
-      name:                   s.name,
-      credited_artists:       s.credited_artists || '',
-      album:                  s.album ?? s.era?.name ?? '',
-      category:               s.category || '',
-      era_id:                 s.era?.id ?? '',
-      producers:              s.producers || '',
-      engineers:              s.engineers || '',
-      recording_locations:    s.recording_locations || '',
-      record_dates:           s.record_dates || '',
-      release_date:           cleanDate(s.release_date),
-      preview_date:           cleanDate(s.preview_date),
-      leak_type:              s.leak_type || '',
-      date_leaked:            cleanDate(s.date_leaked),
-      lyrics:                 s.lyrics || '',
-      synced_lyrics:          s.synced_lyrics || '',
-      additional_information: s.additional_information || '',
-      notes:                  s.notes || '',
-      image_url:              s.image_url || '',
-      path:                   s.path || '',
-      length:                 s.length || '',
-      bitrate:                s.bitrate || '',
-      bpm:                    s.bpm ?? '',
-      key:                    s.key || '',
-      track_titles:           s.track_titles || [],
-      file_names:             s.file_names || '',
-      instrumentals:          s.instrumentals || '',
-      instrumental_names:     s.instrumental_names || '',
-    }
-  }
-
-  const populate = useCallback((s: JWApiSong): void => {
-    setName(s.name)
-    setArtists(s.credited_artists || '')
-    setAlbum(s.album ?? s.era?.name ?? '')
-    setCat(s.category || '')
-    setEraId(s.era?.id ? String(s.era.id) : '')
-    setProd(s.producers || '')
-    setEng(s.engineers || '')
-    setLoc(s.recording_locations || '')
-    setRecDate(s.record_dates || '')
-    setRelDate(cleanDate(s.release_date))
-    setPreviewDate(cleanDate(s.preview_date))
-    setLeak(s.leak_type || '')
-    setDateLeaked(cleanDate(s.date_leaked))
-    setLyrics(s.lyrics || '')
-    setSynced(s.synced_lyrics || '')
-    setAddInfo(s.additional_information || '')
-    setNotes(s.notes || '')
-    setImageUrl(s.image_url || '')
-    setFilePath(s.path || '')
-    setSongLength(s.length || '')
-    setBitrate(s.bitrate || '')
-    setBpm(s.bpm != null ? String(s.bpm) : '')
-    setMusicalKey(s.key || '')
-    setAltNames((s.track_titles || []).join('\n'))
-    setFileNames(s.file_names || '')
-    setInstrumentals(s.instrumentals || '')
-    setInstrumentalNames(s.instrumental_names || '')
-    setEdNotes('')
-    setSubmitState('idle')
-    setSubmitError(null)
-    setDeleteState('idle')
-    setDeleteError(null)
-    lastSubmittedPatchRef.current = null
-  }, [])
-
-  const loadSong = useCallback(async (id: number): Promise<void> => {
-    lastLoadIdRef.current = id
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const s = await apiFetch<JWApiSong>(`/songs/${id}/`)
-      setSong(s)
-      populate(s)
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : 'Failed to load song')
-    } finally {
-      setLoading(false)
-      // Once a load completes (success or failure), `song` (if set) already
-      // blocks the currently-playing prefill effect on its own — the ref's
-      // job was only to cover the race window while this was in flight.
-      manualLoadRef.current = false
-    }
-  }, [populate])
-
-  useEffect(() => {
-    if (!canEdit) return
-    apiFetch<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-      .then(d => setEras(Array.isArray(d) ? d : (d as { results: JWApiEra[] }).results ?? []))
-      .catch(() => undefined)
-  }, [canEdit])
-
-  useEffect(() => {
-    if (!versionsEnabled || !song) {
-      setVersionNum(''); setVersionTitle(''); setOwnGroupId(null)
-      setLoadedTitle(''); setLinkedCount(0)
-      return
-    }
-    getOwnVersionMeta(song.id).then(meta => {
-      setVersionNum(meta?.version ?? '')
-      setVersionTitle(meta?.versionTitle ?? '')
-      setLoadedTitle(meta?.versionTitle ?? '')
-      setOwnGroupId(meta?.groupId ?? null)
-    })
-    // How many other songs share this song's group — decides whether a retitle
-    // renames in place or splits this song out, and is shown as a hint below.
-    getVersionGroup(song.id).then(g => setLinkedCount(g.length))
-  }, [song])
-
-  useEffect(() => {
-    if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current)
-    titleDebounceRef.current = setTimeout(() => {
-      searchVersionTitles(versionTitle).then(setTitleSuggestions)
-    }, 250)
-    return () => { if (titleDebounceRef.current) clearTimeout(titleDebounceRef.current) }
-  }, [versionTitle])
-
-  const saveVersionInfo = async (): Promise<void> => {
-    if (!song) return
-    setVersionSaveStatus('saving')
-    setLinkError(null)
-    try {
-      const groupId = await setSongVersion(song.id, versionNum.trim() || null, ownGroupId)
-      const nextTitle = versionTitle.trim()
-      // Only touch titles when the field actually changed — saving a version
-      // number alone must not split the song out of its group. A changed title
-      // retitles this song only: setOwnVersionTitle moves it to a group of its
-      // own when it shares one, leaving the other members' title alone.
-      if (nextTitle !== loadedTitle) {
-        const nextGroupId = await setOwnVersionTitle(song.id, nextTitle || null, groupId)
-        setOwnGroupId(nextGroupId)
-        setLoadedTitle(nextTitle)
-        if (nextGroupId !== groupId) setLinkedCount(0)
-      } else {
-        setOwnGroupId(groupId)
-      }
-      invalidateCompactGroupsCache()
-      setVersionSaveStatus('saved')
-    } catch (e) {
-      setLinkError(e instanceof Error ? e.message : 'Failed to save version info')
-      setVersionSaveStatus('error')
-    }
-    setTimeout(() => setVersionSaveStatus('idle'), 2500)
-  }
-
-  // Picking an existing title from the autocomplete means "this song belongs
-  // with that group" — so it joins the group behind that title (merging like
-  // linkSongVersion does) rather than just copying the text, otherwise two
-  // songs could show the same title while sitting in different groups.
-  const handlePickTitleSuggestion = async (suggestion: VersionTitleSuggestion): Promise<void> => {
-    if (!song) return
-    setVersionTitle(suggestion.title)
-    setShowTitleSuggestions(false)
-    setVersionSaveStatus('saving')
-    setLinkError(null)
-    try {
-      const groupId = await joinVersionGroup(song.id, suggestion.groupId)
-      await setGroupVersionTitle(groupId, suggestion.title)
-      invalidateCompactGroupsCache()
-      setOwnGroupId(groupId)
-      // Joining adopts the group's title, so the next plain save mustn't read
-      // that as a rename and split the song straight back out.
-      setLoadedTitle(suggestion.title)
-      getVersionGroup(song.id).then(g => setLinkedCount(g.length))
-      setVersionSaveStatus('saved')
-    } catch (e) {
-      setLinkError(e instanceof Error ? e.message : 'Failed to join version group')
-      setVersionSaveStatus('error')
-    }
-    setTimeout(() => setVersionSaveStatus('idle'), 2500)
-  }
-
-  // The song this page was mounted for, if the caller named one. Kept until
-  // canEdit is known, since an account still loading would otherwise drop it.
-  useEffect(() => {
-    const id = bootSongIdRef.current
-    if (id == null || !canEdit) return
-    bootSongIdRef.current = null
-    loadSong(id)
-  }, [canEdit, loadSong])
-
-  useEffect(() => {
-    if (!pendingEditorSongId || !canEdit) return
-    manualLoadRef.current = true
-    const id = pendingEditorSongId
-    setPendingEditorSongId(null)
-    loadSong(id)
-  }, [pendingEditorSongId, canEdit, setPendingEditorSongId, loadSong])
-
-  useEffect(() => {
-    // Don't hijack a new-song draft (or an about-to-be-applied edit proposal)
-    // with whatever happens to be playing — this raced with the
-    // pendingEditProposal effect below and clobbered the draft once the
-    // currently-playing track's fetch resolved a moment later. manualLoadRef
-    // closes a second race: pendingEditorSongId/pendingEditProposal clear to
-    // null synchronously before their loadSong() promise resolves into
-    // `song`, leaving a render where this effect's guard would otherwise
-    // wrongly see "nothing pending" and prefill from whatever's playing.
-    if (!canEdit || song || pendingEditorSongId || isNewSongDraft || pendingEditProposal || manualLoadRef.current) return
-    if (!currentTrack) return
-    const id = userApi.trackIdToSongId(currentTrack.id)
-    if (id) loadSong(id)
-  }, [canEdit, song, currentTrack, pendingEditorSongId, isNewSongDraft, pendingEditProposal, loadSong])
-
-  // Landing here with nothing to edit (no song playing, no pending proposal/
-  // draft) used to show a static "No song selected" placeholder — send editors
-  // to My Proposals instead, which is actually useful to land on. Runs after
-  // the prefill effect above so `loading` is already true if a currently-
-  // playing track's song is still being fetched.
-  useEffect(() => {
-    // manualLoadRef guards a cross-store race: the Edit-click load effect above
-    // clears pendingEditorSongId (Zustand) and flips `loading` on (React state)
-    // in the same tick, but those commit in separate passes — leaving a render
-    // where pendingEditorSongId is already null yet `loading` is still false.
-    // Without this guard that window looked like "nothing to edit" and bounced
-    // the user to My Proposals the instant they clicked Edit. The ref is set
-    // synchronously before that window opens and cleared once loadSong settles
-    // (by which point `song`/`loadError` block this effect on their own).
-    //
-    // A pop-out editor window is exempt: it renders whatever its URL names, so
-    // activeView means nothing there and it never unmounts this page. It used
-    // to spin here — setActiveView changes previousView, previousView changes
-    // backView, backView re-ran this effect — until React gave up with
-    // "maximum update depth exceeded". It shows "No song selected" instead.
-    // backView is read from a ref for the same reason: it must not be able to
-    // re-trigger the very effect that changes it.
-    if (IS_FLOAT_WINDOW) return
-    if (!canEdit || loading || song || isNewSongDraft || pendingEditorSongId || pendingEditProposal || loadError || manualLoadRef.current) return
-    setActiveView(wasEditingRef.current ? backViewRef.current : 'editor-profile')
-  }, [canEdit, loading, song, isNewSongDraft, pendingEditorSongId, pendingEditProposal, loadError, setActiveView])
-
-  useEffect(() => {
-    if (song || isNewSongDraft) wasEditingRef.current = true
-  }, [song, isNewSongDraft])
-
-  useEffect(() => {
-    if (!pendingEditProposal || !canEdit) return
-    manualLoadRef.current = true
-    const { id, songId, proposedData: d, editorNotes } = pendingEditProposal
-    setPendingEditProposal(null)
-    setEditingPropId(id)
-
-    const applyProposedData = (): void => {
-      if ('name' in d)                   setName(String(d.name ?? ''))
-      if ('credited_artists' in d)        setArtists(String(d.credited_artists ?? ''))
-      if ('album' in d)                   setAlbum(String(d.album ?? ''))
-      if ('category' in d)               setCat(String(d.category ?? ''))
-      if ('era_id' in d)                 setEraId(d.era_id != null ? String(d.era_id) : '')
-      if ('producers' in d)              setProd(String(d.producers ?? ''))
-      if ('engineers' in d)              setEng(String(d.engineers ?? ''))
-      if ('recording_locations' in d)    setLoc(String(d.recording_locations ?? ''))
-      if ('record_dates' in d)           setRecDate(String(d.record_dates ?? ''))
-      if ('release_date' in d)           setRelDate(String(d.release_date ?? ''))
-      if ('preview_date' in d)           setPreviewDate(String(d.preview_date ?? ''))
-      if ('leak_type' in d)              setLeak(String(d.leak_type ?? ''))
-      if ('date_leaked' in d)            setDateLeaked(String(d.date_leaked ?? ''))
-      if ('lyrics' in d)                 setLyrics(String(d.lyrics ?? ''))
-      if ('synced_lyrics' in d)           setSynced(String(d.synced_lyrics ?? ''))
-      if ('additional_information' in d) setAddInfo(String(d.additional_information ?? ''))
-      if ('notes' in d)                  setNotes(String(d.notes ?? ''))
-      if ('image_url' in d)              setImageUrl(String(d.image_url ?? ''))
-      if ('path' in d)                   setFilePath(String(d.path ?? ''))
-      if ('length' in d)                 setSongLength(String(d.length ?? ''))
-      if ('bitrate' in d)                setBitrate(String(d.bitrate ?? ''))
-      if ('bpm' in d)                    setBpm(d.bpm != null ? String(d.bpm) : '')
-      if ('key' in d)                    setMusicalKey(String(d.key ?? ''))
-      if ('track_titles' in d)           setAltNames(Array.isArray(d.track_titles) ? (d.track_titles as string[]).join('\n') : String(d.track_titles ?? ''))
-      if ('file_names' in d)             setFileNames(String(d.file_names ?? ''))
-      if ('instrumentals' in d)          setInstrumentals(String(d.instrumentals ?? ''))
-      if ('instrumental_names' in d)     setInstrumentalNames(String(d.instrumental_names ?? ''))
-      setEdNotes(editorNotes)
-    }
-
-    if (songId == null) {
-      // 'create' proposal — new song, no backing song record exists yet
-      setSong(null)
-      setIsNewSongDraft(true)
-      // Doesn't go through populate() (there's no song to populate from), so
-      // clear this by hand — otherwise a leftover value from whatever was
-      // open before could, in a rare coincidence, match this draft's patch
-      // and wrongly show it as already submitted.
-      lastSubmittedPatchRef.current = null
-      applyProposedData()
-    } else {
-      setIsNewSongDraft(false)
-      loadSong(songId).then(applyProposedData)
-    }
-  }, [pendingEditProposal, canEdit, setPendingEditProposal, loadSong])
-
-  useEffect(() => {
-    if (!account || canEdit) { setApplication(null); return }
-    setAppLoading(true)
-    userApi.getMyApplication('editor', activeChannel)
-      .then(r => setApplication(r.application))
-      .catch(() => setApplication(null))
-      .finally(() => setAppLoading(false))
-  }, [account, canEdit, activeChannel])
-
-  const current: Record<string, unknown> = {
-    name, credited_artists: artists, album, category: cat,
-    era_id: eraId ? Number(eraId) : '',
-    producers: prod, engineers: eng,
-    recording_locations: loc, record_dates: recDate,
-    release_date: relDate, preview_date: previewDate, leak_type: leak,
-    date_leaked: dateLeaked,
-    lyrics, synced_lyrics: synced,
-    additional_information: addInfo, notes,
-    image_url: imageUrl,
-    path: filePath,
-    length: songLength,
-    bitrate,
-    bpm: bpm.trim() ? Number(bpm) : '',
-    key: musicalKey,
-    track_titles: altNames ? altNames.split('\n').map(s => s.trim()).filter(Boolean) : [],
-    file_names: fileNames,
-    instrumentals,
-    instrumental_names: instrumentalNames,
-  }
-  const patch        = diff(baseline(song), current)
-  const changedCount = Object.keys(patch).length
-  const base         = baseline(song)
-  // True once changedCount > 0 has already been sent and nothing has been
-  // edited since — see lastSubmittedPatchRef above.
-  const alreadySubmitted = changedCount > 0 && JSON.stringify(patch) === lastSubmittedPatchRef.current
-
-  const cancelEditProposal = (): void => {
-    setEditingPropId(null)
-    setIsNewSongDraft(false)
-    lastSubmittedPatchRef.current = null
-    if (song) populate(song)
-  }
-
-  const submit = async (): Promise<void> => {
-    if ((!song && !isNewSongDraft) || changedCount === 0 || alreadySubmitted) return
-    setSubmitState('submitting')
-    setSubmitError(null)
-    try {
-      if (editingPropId != null) {
-        await userApi.updateProposal(editingPropId, { proposed_data: patch, editor_notes: edNotes })
-        setEditingPropId(null)
-        setIsNewSongDraft(false)
-      } else if (song) {
-        await userApi.createProposal({
-          song: song.id, change_type: 'update',
-          title: name || song.name, proposed_data: patch, editor_notes: edNotes,
-          channel: activeChannel,
-        })
-      }
-      // Lyrics may have changed (and auto-approve admins make it live instantly)
-      // — drop the cached copy so the next play reflects the edit.
-      if (song && ('lyrics' in patch || 'synced_lyrics' in patch)) invalidateLyricsCache(song.id)
-      lastSubmittedPatchRef.current = JSON.stringify(patch)
-      setSubmitState('submitted')
-      setTimeout(() => setSubmitState('idle'), 3000)
-    } catch (e) {
-      setSubmitState('error')
-      setSubmitError(e instanceof Error ? e.message : 'Submission failed')
-      setTimeout(() => setSubmitState('idle'), 4000)
-    }
-  }
-
-  const submitDeletion = async (): Promise<void> => {
-    if (!song) return
-    if (deleteState !== 'confirm') { setDeleteState('confirm'); return }
-    setDeleteState('submitting')
-    setDeleteError(null)
-    try {
-      await userApi.createProposal({
-        song: song.id, change_type: 'delete',
-        title: name || song.name, proposed_data: {}, editor_notes: edNotes,
-        channel: activeChannel,
-      })
-      setDeleteState('submitted')
-      setTimeout(() => setDeleteState('idle'), 3000)
-    } catch (e) {
-      setDeleteState('error')
-      setDeleteError(e instanceof Error ? e.message : 'Submission failed')
-      setTimeout(() => setDeleteState('idle'), 4000)
-    }
-  }
-
-  const handleLyricsPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>): Promise<void> => {
-    const pasted = e.clipboardData.getData('text')
-    if (!pasted) return
-
-    // ── Genius URL → fetch lyrics ──────────────────────────────────────────
-    if (isGeniusUrl(pasted)) {
-      e.preventDefault()
-      setLyricsLoading(true)
-      setLyricsError(null)
-      try {
-        const url = pasted.trim()
-        // Try allorigins first, fall back to corsproxy
-        const proxies = [
-          `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-          `https://corsproxy.io/?${encodeURIComponent(url)}`,
-        ]
-        let html: string | null = null
-        let lastErr = ''
-        for (const proxy of proxies) {
-          try {
-            const res = await fetch(proxy)
-            if (!res.ok) { lastErr = `HTTP ${res.status}`; continue }
-            html = await res.text()
-            break
-          } catch (err) {
-            lastErr = String(err)
-          }
-        }
-        if (!html) throw new Error(lastErr || 'All proxies failed')
-        setLyrics(extractGeniusLyrics(html))
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        setLyricsError(`Could not fetch lyrics: ${msg}`)
-        setTimeout(() => setLyricsError(null), 6000)
-      } finally {
-        setLyricsLoading(false)
-      }
-      return
-    }
-
-    // ── Genius-style [tags] → strip ────────────────────────────────────────
-    if (!/\[.*?\]/.test(pasted)) return
-    e.preventDefault()
-    const cleaned = pasted
-      .replace(/\r\n/g, '\n')
-      .replace(/^\[.*?\]\n?/gm, '')
-      .replace(/\n{2,}/g, '\n\n')
-      .trim()
-    const el = e.currentTarget
-    const start = el.selectionStart ?? lyrics.length
-    const end   = el.selectionEnd   ?? lyrics.length
-    setLyrics(lyrics.substring(0, start) + cleaned + lyrics.substring(end))
-    requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = start + cleaned.length })
-  }
-
-  const onSubmitted = useCallback((a: EditorApplication) => setApplication(a), [])
-  const onSignOut   = useCallback(() => logoutAccount(), [logoutAccount])
+  // pop-out editor window, which reads the same key). Purely a desktop-only
+  // display mode, so it stays local rather than in the shared hook.
+  const [basicView, setBasicView] = useState(() => localStorage.getItem('editor:view') === 'basic')
 
   /* ── Guards ──────────────────────────────────────────────────────────────── */
   if (!account) return (
@@ -1136,9 +447,9 @@ export default function EditorPage({ initialSongId = null }: {
 
       {/* Top bar */}
       {/* 188px clears the window controls (132px) plus the fixed downloads
-          trigger next to them (right: 144px + 36px wide — see DownloadManager) */}
+          trigger next to them (right: 144px + 36px wide - see DownloadManager) */}
       <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]" style={(window as any).electron ? { paddingRight: '188px' } : undefined}>
-        {/* Back — only in the in-app editor; the pop-out window has nowhere to go back to */}
+        {/* Back - only in the in-app editor; the pop-out window has nowhere to go back to */}
         {!IS_FLOAT_WINDOW && (
           <button
             onClick={() => setActiveView(backView)}
@@ -1149,7 +460,7 @@ export default function EditorPage({ initialSongId = null }: {
           </button>
         )}
         <span className="font-bold text-[15px] text-text-primary">Song editor</span>
-        {/* Manual pop-out — detach the in-app editor into its own window.
+        {/* Manual pop-out - detach the in-app editor into its own window.
             Hidden inside the float window itself and when there's no saved
             song to hand off (e.g. a brand-new draft). */}
         {!IS_FLOAT_WINDOW && (window as any).electron?.openFloatWindow && song?.id != null && (
@@ -1159,8 +470,7 @@ export default function EditorPage({ initialSongId = null }: {
               const el = (window as any).electron
               el.openFloatWindow('editor', { songId: song.id })
               // Clear the in-app editor so the song isn't open in two places.
-              setSong(null); setEditingPropId(null); setIsNewSongDraft(false)
-              setDeleteState('idle'); setDeleteError(null)
+              closeSong()
             }}
             title="Open in a separate window"
             className="text-text-muted opacity-65 hover:opacity-100 transition-colors"
@@ -1168,7 +478,7 @@ export default function EditorPage({ initialSongId = null }: {
             <PictureInPicture2 size={15} />
           </button>
         )}
-        {/* Manual attach — from the pop-out editor window, dock back into the
+        {/* Manual attach - from the pop-out editor window, dock back into the
             main window (opens its in-app editor for this song), then close. */}
         {IS_FLOAT_WINDOW && song?.id != null && (
           <button
@@ -1184,7 +494,7 @@ export default function EditorPage({ initialSongId = null }: {
           </button>
         )}
         <span className="flex-1" />
-        {/* Layout switch — full cards vs. the flat basic form */}
+        {/* Layout switch - full cards vs. the flat basic form */}
         <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-overlay border border-[var(--border)]">
           {([['full', 'Full'], ['basic', 'Basic']] as const).map(([mode, label]) => {
             const active = (mode === 'basic') === basicView
@@ -1204,7 +514,7 @@ export default function EditorPage({ initialSongId = null }: {
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${isAdmin ? 'bg-accent/20 text-accent' : 'bg-emerald-500/20 text-emerald-400'}`}>
           {isAdmin ? 'admin' : 'editor'}
         </span>
-        <span className="text-text-muted opacity-75 text-xs truncate max-w-[140px]">{account.display_name || account.discord_username}</span>
+        <span className="text-text-muted opacity-75 text-xs truncate max-w-[140px]">{accountDisplayName(account)}</span>
         <button onClick={() => logoutAccount()} className="text-text-muted opacity-65 hover:opacity-100 text-xs transition-colors">Sign out</button>
       </div>
 
@@ -1244,7 +554,7 @@ export default function EditorPage({ initialSongId = null }: {
             </div>
           </div>
         ) : (
-          <div className={`mx-auto w-full ${basicView ? 'max-w-4xl px-5 py-4' : 'max-w-6xl px-6 py-6'}`}>
+          <div className={`mx-auto w-full ${basicView ? 'max-w-4xl px-5 py-4' : 'max-w-[1600px] px-6 py-6'}`}>
 
             {/* ── Editing proposal banner ── */}
             {editingPropId != null && (
@@ -1288,6 +598,12 @@ export default function EditorPage({ initialSongId = null }: {
                 </div>
                 <BasicRow label="Recording locations" value={loc} original={String(base.recording_locations || '')} onChange={setLoc} rows={2} suggest="recording_locations" />
                 <BasicRow label="Record dates" value={recDate} original={String(base.record_dates || '')} onChange={setRecDate} rows={2} dateInput />
+                {cat === 'recording_session' && (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <BasicRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} rows={2} />
+                    <BasicRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} rows={2} />
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-1.5">
                   <BasicRow label="Length" value={songLength} original={String(base.length || '')} onChange={setSongLength} mono />
                   <BasicRow label="BPM" value={bpm} original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} mono />
@@ -1303,11 +619,13 @@ export default function EditorPage({ initialSongId = null }: {
                   <BasicRow label="Preview date" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} mono dateInput />
                   <BasicRow label="Release date" value={relDate} original={String(base.release_date || '')} onChange={setRelDate} rows={2} mono dateInput />
                 </div>
+                <BasicRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} mono dateInput />
                 <div className="grid grid-cols-2 gap-1.5">
                   <BasicRow label="Instrumental names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} rows={2} />
-                  <BasicRow label="Notes" value={notes} original={String(base.notes || '')} onChange={setNotes} rows={2} />
+                  <BasicRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} suggest="leak_type" />
                 </div>
-                {/* One lyrics box, toggled between plain and synced — showing both
+                <BasicRow label="Notes" value={notes} original={String(base.notes || '')} onChange={setNotes} rows={2} />
+                {/* One lyrics box, toggled between plain and synced - showing both
                     at once was most of the form's remaining height. */}
                 {(() => {
                   const showSynced = lyricsTab === 'synced'
@@ -1370,11 +688,7 @@ export default function EditorPage({ initialSongId = null }: {
                   )
                 })()}
                 <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} mono dateInput />
-                  <BasicRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} suggest="leak_type" />
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Image URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} mono />
+                  <BasicRow label="Image URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} mono onBrowse={() => setPickingImage(true)} />
                   <BasicRow label="File path" value={filePath} original={String(base.path || '')} onChange={setFilePath} mono onBrowse={() => setPickingFile(true)} />
                 </div>
                 <BasicRow label="Notes for the reviewer (optional)" value={edNotes} onChange={setEdNotes} />
@@ -1403,10 +717,10 @@ export default function EditorPage({ initialSongId = null }: {
                     {submitState === 'submitting' && <Loader2 size={12} className="animate-spin" />}
                     {submitState === 'submitted'  && <Check size={12} />}
                     {submitState === 'error'      && <AlertCircle size={12} />}
-                    {submitState === 'idle' && alreadySubmitted && 'Submitted'}
-                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Submit update proposal')}
-                    {submitState === 'submitting' && 'Submitting…'}
-                    {submitState === 'submitted'  && 'Submitted!'}
+                    {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Staged')}
+                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Stage update proposal')}
+                    {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Staging…')}
+                    {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Staged!')}
                     {submitState === 'error'      && 'Try again'}
                   </button>
                   <span className="text-[11px] text-text-muted opacity-65 tabular-nums">
@@ -1418,7 +732,7 @@ export default function EditorPage({ initialSongId = null }: {
                       onClick={submitDeletion}
                       onBlur={() => { if (deleteState === 'confirm') setDeleteState('idle') }}
                       disabled={deleteState === 'submitting' || deleteState === 'submitted'}
-                      title="Propose that this song entry be deleted. Admins review before it's removed."
+                      title="Stage this song entry for deletion. Review it in the Uploads panel before it's proposed - admins review before it's removed."
                       className={`px-2.5 py-1.5 rounded-md text-[11px] font-bold transition-colors flex items-center gap-1.5 ${
                         deleteState === 'submitted' ? 'text-emerald-400' :
                         deleteState === 'error'     ? 'text-red-400' :
@@ -1428,13 +742,13 @@ export default function EditorPage({ initialSongId = null }: {
                       {deleteState === 'submitting' && <Loader2 size={12} className="animate-spin" />}
                       {deleteState === 'idle'       && 'Delete song'}
                       {deleteState === 'confirm'    && 'Click again to confirm'}
-                      {deleteState === 'submitting' && 'Submitting…'}
-                      {deleteState === 'submitted'  && 'Submitted!'}
+                      {deleteState === 'submitting' && 'Staging…'}
+                      {deleteState === 'submitted'  && 'Staged!'}
                       {deleteState === 'error'      && 'Try again'}
                     </button>
                   )}
                   <button
-                    onClick={() => { setSong(null); setEditingPropId(null); setIsNewSongDraft(false); setDeleteState('idle'); setDeleteError(null) }}
+                    onClick={closeSong}
                     className="px-2.5 py-1.5 text-[11px] font-bold text-text-muted opacity-65 hover:opacity-100 transition-opacity">
                     Close
                   </button>
@@ -1472,7 +786,7 @@ export default function EditorPage({ initialSongId = null }: {
                         {album && <p className="text-text-muted opacity-75 text-[11px] truncate mt-1">{album}</p>}
                       </div>
                       <button
-                        onClick={() => { setSong(null); setEditingPropId(null); setIsNewSongDraft(false); setDeleteState('idle'); setDeleteError(null) }}
+                        onClick={closeSong}
                         className="flex items-center gap-1.5 text-[11px] text-text-muted opacity-60 hover:opacity-100 transition-colors">
                         <X size={11} /> Close
                       </button>
@@ -1540,20 +854,20 @@ export default function EditorPage({ initialSongId = null }: {
                     {submitState === 'submitting' && <Loader2 size={12} className="animate-spin" />}
                     {submitState === 'submitted'  && <Check size={12} />}
                     {submitState === 'error'      && <AlertCircle size={12} />}
-                    {submitState === 'idle' && alreadySubmitted && 'Submitted'}
-                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Submit proposal')}
-                    {submitState === 'submitting' && 'Submitting…'}
-                    {submitState === 'submitted'  && 'Submitted!'}
+                    {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Staged')}
+                    {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Stage proposal')}
+                    {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Staging…')}
+                    {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Staged!')}
                     {submitState === 'error'      && 'Try again'}
                   </button>
 
-                  {/* Propose deletion — only for an existing song, not a new-song draft or an in-progress edit proposal */}
+                  {/* Stage deletion - only for an existing song, not a new-song draft or an in-progress edit proposal */}
                   {song && !isNewSongDraft && editingPropId == null && (
                     <button
                       onClick={submitDeletion}
                       onBlur={() => { if (deleteState === 'confirm') setDeleteState('idle') }}
                       disabled={deleteState === 'submitting' || deleteState === 'submitted'}
-                      title="Propose that this song entry be deleted. Admins review before it's removed."
+                      title="Stage this song entry for deletion. Review it in the Uploads panel before it's proposed - admins review before it's removed."
                       className={`w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                         deleteState === 'submitted' ? 'bg-emerald-500/20 text-emerald-400' :
                         deleteState === 'error'     ? 'bg-red-500/20 text-red-400' :
@@ -1564,10 +878,10 @@ export default function EditorPage({ initialSongId = null }: {
                       {deleteState === 'submitted'  && <Check size={12} />}
                       {(deleteState === 'idle' || deleteState === 'confirm') && <Trash2 size={12} />}
                       {deleteState === 'error'      && <AlertCircle size={12} />}
-                      {deleteState === 'idle'       && 'Propose deletion'}
+                      {deleteState === 'idle'       && 'Stage deletion'}
                       {deleteState === 'confirm'    && 'Click again to confirm'}
-                      {deleteState === 'submitting' && 'Submitting…'}
-                      {deleteState === 'submitted'  && 'Submitted!'}
+                      {deleteState === 'submitting' && 'Staging…'}
+                      {deleteState === 'submitted'  && 'Staged!'}
                       {deleteState === 'error'      && 'Try again'}
                     </button>
                   )}
@@ -1582,18 +896,16 @@ export default function EditorPage({ initialSongId = null }: {
                     <FieldRow label="Title"    value={name}     original={String(base.name || '')}    onChange={setName} />
                     <FieldRow label="Artists"  value={artists}  original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
                     <FieldRow label="Album"    value={album}    original={String(base.album || '')}   onChange={setAlbum} suggest="album" />
-                    <FieldRow label="Cover URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} placeholder="https://…" mono />
+                    <FieldRow label="Cover URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} placeholder="https://…" mono onBrowse={() => setPickingImage(true)} />
+                    <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
+                    <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
+                    <FieldRow label="Key"    value={musicalKey} original={String(base.key || '')}      onChange={setMusicalKey} placeholder="C# Minor" />
                     <FieldRow label="File URL"  value={filePath} original={String(base.path || '')}      onChange={setFilePath} placeholder="Path/URL to the audio file" mono span={2} onBrowse={() => setPickingFile(true)} />
-                    <div className="sm:col-span-2 grid grid-cols-3 gap-x-5 gap-y-4">
-                      <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
-                      <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
-                      <FieldRow label="Key"    value={musicalKey} original={String(base.key || '')}      onChange={setMusicalKey} placeholder="C# Minor" />
-                    </div>
-                    <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} rows={2} placeholder="320 kbps" mono span={2} />
+                    <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')} onChange={setBitrate} rows={2} placeholder="320 kbps" mono full />
                     <TextareaRow
                       label="Alt names" value={altNames}
                       original={(Array.isArray(base.track_titles) ? (base.track_titles as string[]).join('\n') : '')}
-                      onChange={setAltNames} rows={2} placeholder="One name per line" span={2}
+                      onChange={setAltNames} rows={2} placeholder="One name per line" full
                     />
                   </FieldGrid>
                 </Card>
@@ -1672,10 +984,10 @@ export default function EditorPage({ initialSongId = null }: {
                 </Card>
 
                 <Card title="Dates">
-                  <FieldGrid cols={3}>
+                  <FieldGrid cols={4}>
                     <TextareaRow label="Recorded"  value={recDate} original={String(base.record_dates || '')}  onChange={setRecDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
                     <TextareaRow label="Released"  value={relDate} original={String(base.release_date || '')}  onChange={setRelDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
-                    <TextareaRow label="Preview"   value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
+                    <TextareaRow label="Preview" value={previewDate} original={String(base.preview_date || '')} onChange={setPreviewDate} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
                     <TextareaRow label="Date leaked" value={dateLeaked} original={String(base.date_leaked || '')} onChange={setDateLeaked} rows={2} placeholder="YYYY-MM-DD" mono dateInput />
                   </FieldGrid>
                 </Card>
@@ -1692,12 +1004,18 @@ export default function EditorPage({ initialSongId = null }: {
                   <Card title="Additional details" overflowVisible>
                     <FieldGrid>
                       <FieldRow label="Location"   value={loc}              original={String(base.recording_locations || '')}   onChange={setLoc} placeholder="Studio / city" suggest="recording_locations" />
-                      <FieldRow label="Leak type"  value={leak}             original={String(base.leak_type || '')}             onChange={setLeak} placeholder="HQ, LQ, snippet…" suggest="leak_type" />
+                      <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ, snippet…" suggest="leak_type" span={2} />
                       <FieldRow label="File names" value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
                       <FieldRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')}       onChange={setInstrumentals} placeholder="Instrumental versions available" />
                       <FieldRow label="Inst. names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} />
-                      <TextareaRow label="Add. info" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} span={2} />
-                      <TextareaRow label="Notes"     value={notes}   original={String(base.notes || '')}                  onChange={setNotes}   rows={2} span={2} />
+                      {cat === 'recording_session' && (
+                        <>
+                          <FieldRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
+                          <FieldRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
+                        </>
+                      )}
+                      <TextareaRow label="Add. info" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} full />
+                      <TextareaRow label="Notes"     value={notes}   original={String(base.notes || '')}                  onChange={setNotes}   rows={2} full />
                     </FieldGrid>
                   </Card>
                 )}
@@ -1798,27 +1116,16 @@ export default function EditorPage({ initialSongId = null }: {
           onClose={() => setPickingFile(false)}
         />
       )}
-    </div>
-  )
-}
 
-/* ── AppField — hoisted to module scope so React never remounts inputs ──────── */
-function AppField({ label, value, onChange, rows, placeholder, hint }: {
-  label: string; value: string; onChange: (v: string) => void
-  rows?: number; placeholder?: string; hint?: string
-}): JSX.Element {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <label className="text-[11px] font-bold uppercase tracking-wider text-text-muted opacity-65">{label}</label>
-        {hint && <span className="text-[10px] text-text-muted opacity-55">{hint}</span>}
-      </div>
-      {(rows ?? 1) > 1
-        ? <textarea rows={rows} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-            className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40 resize-none placeholder:text-text-muted placeholder:opacity-30 transition-colors" />
-        : <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-            className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40 placeholder:text-text-muted placeholder:opacity-30 transition-colors" />
-      }
+      {pickingImage && (
+        <FilePickerModal
+          kind="image"
+          songTitle={name || song?.name}
+          altTitles={altNames.split('\n').map(s => s.trim()).filter(Boolean)}
+          onSelect={p => { setImageUrl(toSiteRelativeImageUrl(p)); setPickingImage(false) }}
+          onClose={() => setPickingImage(false)}
+        />
+      )}
     </div>
   )
 }
@@ -1844,7 +1151,7 @@ const ApplicationView = memo(function ApplicationView({ application, loading, on
     if (motivation.trim().length < 20) { setError('Motivation must be at least 20 characters.'); return }
     setSubmitting(true)
     try { onSubmitted(await userApi.submitApplication({ display_name: displayName, contact, experience, motivation, areas, channel })) }
-    catch (e) { setError(e instanceof Error ? e.message : 'Submission failed') }
+    catch (e) { setError(errorMessage(e, 'Submission failed')) }
     finally { setSubmitting(false) }
   }
 

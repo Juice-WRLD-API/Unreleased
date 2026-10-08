@@ -1,7 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useIsMobile } from '../hooks/useIsMobile'
 import {
   ChevronLeft, Newspaper, RefreshCw, AlertCircle, Plus, Settings2,
-  Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow, Share2,
+  Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow,
+  Share2,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import {
@@ -25,16 +27,23 @@ const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
 
 type NewsMode = 'news' | 'feed'
 
+// Post URLs are /news/<id> so an open article can be shared/refreshed/bookmarked.
+function postIdFromPath(pathname: string): number | null {
+  const m = pathname.match(/^\/news\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
+
 function formatDate(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return ''
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-// Crude markdown -> plain text for card previews: strips the syntax that
-// would otherwise show up as literal symbols (headings, emphasis, links,
-// code, bullets) and collapses all whitespace to single spaces so it reads
-// as one flowing blurb regardless of the source's line breaks.
+// Crude markdown -> plain text for the summary fallback below: strips the
+// syntax that would otherwise show up as literal symbols (headings,
+// emphasis, links, code, bullets) and collapses all whitespace to single
+// spaces so it reads as one flowing blurb regardless of the source's line
+// breaks.
 function stripMarkdown(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, ' ')
@@ -45,7 +54,8 @@ function stripMarkdown(md: string): string {
     .trim()
 }
 
-// Falls back to a snippet of the body when no summary was written.
+// Falls back to a snippet of the body when no summary was written - the
+// composer no longer requires one.
 function displaySummary(item: NewsItem): string {
   const trimmed = item.summary?.trim()
   return trimmed || stripMarkdown(item.body || '')
@@ -67,11 +77,13 @@ function CategoryTag({ label }: { label: string }) {
   )
 }
 
-// Edit/delete cluster, shown on hover for editors. Rendered as a sibling of the
-// card's clickable button (never nested — a button can't contain buttons).
+// Edit/delete cluster, shown on hover for editors on desktop; always visible on
+// mobile since touch has no hover state. Rendered as a sibling of the card's
+// clickable button (never nested - a button can't contain buttons).
 function ManageActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  const isMobile = useIsMobile()
   return (
-    <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div className={`absolute top-2 right-2 flex items-center gap-1 transition-opacity ${isMobile ? '' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
       <button onClick={onEdit} title="Edit" aria-label="Edit post" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"><Pencil size={13} /></button>
       <button onClick={onDelete} title="Delete" aria-label="Delete post" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"><Trash2 size={13} /></button>
     </div>
@@ -132,16 +144,6 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu
 }
 
 function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
-  // Cards in the same grid row stretch to match the tallest sibling (h-full),
-  // so a short summary next to a card with more content - or a taller image -
-  // otherwise leaves dead space beneath it. Filling that with a clipped
-  // preview of the full body reads as more content rather than empty air;
-  // overflow-hidden on the text column lets it get cut off naturally at
-  // whatever height the row actually ends up, without measuring anything.
-  const summary = displaySummary(item)
-  const bodyPreview = stripMarkdown(item.body || '')
-  const showBodyPreview = bodyPreview && !bodyPreview.startsWith(summary)
-
   return (
     <div className="relative group h-full">
       <button
@@ -159,7 +161,7 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: 
             />
           </div>
         )}
-        <div className="min-w-0 flex-1 p-3.5 pr-12 overflow-hidden">
+        <div className="min-w-0 flex-1 p-3.5 pr-12">
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             {item.category && <CategoryTag label={item.category} />}
             <span className="text-xs text-text-muted">{formatDate(item.published_at)}</span>
@@ -168,10 +170,7 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: 
             )}
           </div>
           <h3 className="text-text-primary text-sm font-semibold leading-snug mb-1 line-clamp-2">{item.title}</h3>
-          <p className="text-xs text-text-secondary leading-relaxed line-clamp-2">{summary}</p>
-          {showBodyPreview && (
-            <p className="text-xs text-text-muted leading-relaxed mt-1">{bodyPreview}</p>
-          )}
+          <p className="text-xs text-text-secondary leading-relaxed line-clamp-2">{displaySummary(item)}</p>
         </div>
       </button>
       {canManage && <ManageActions onEdit={() => onEdit(item)} onDelete={() => onDelete(item)} />}
@@ -355,8 +354,8 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewsView(): JSX.Element {
-  const { setActiveView, account } = useStorePick('setActiveView', 'account')
-  // News write access is its own role (is_news), separate from is_editor —
+  const { setActiveView, previousView, account } = useStorePick('setActiveView', 'previousView', 'account')
+  // News write access is its own role (is_news), separate from is_editor -
   // admins can post regardless. Only admins manage channels.
   const canPost = !!(account?.is_news || account?.is_administrator)
   const canManageChannels = !!account?.is_administrator
@@ -377,7 +376,7 @@ export default function NewsView(): JSX.Element {
   const [selected, setSelected] = useState<NewsItem | null>(null)
 
   // Whether the user follows the active channel (drives the bell toggle). "All"
-  // isn't subscribable — you follow specific channels.
+  // isn't subscribable - you follow specific channels.
   const [subscribed, setSubscribedState] = useState(false)
 
   // Modals
@@ -387,7 +386,6 @@ export default function NewsView(): JSX.Element {
   const [sharing, setSharing] = useState<NewsItem | null>(null)
   const [menu, setMenu] = useState<NewsMenuState | null>(null)
   const openMenu = (item: NewsItem, e: React.MouseEvent): void => setMenu({ item, x: e.clientX, y: e.clientY })
-  const openItem = (item: NewsItem): void => setSelected(item)
   const closeMenu = useCallback(() => setMenu(null), [])
 
   const loadChannels = useCallback(async () => {
@@ -395,7 +393,7 @@ export default function NewsView(): JSX.Element {
       const list = await fetchChannels()
       setChannels(list)
     } catch {
-      // Keep whatever we have (the static fallback) — a channels fetch failure
+      // Keep whatever we have (the static fallback) - a channels fetch failure
       // shouldn't blank out the tab bar.
     }
   }, [])
@@ -416,7 +414,7 @@ export default function NewsView(): JSX.Element {
       const res = await fetchNews({ channel, sort })
       setItems(res.results)
     } catch (err) {
-      if (!cached) setError(err instanceof Error ? err.message : 'Failed to load news')
+      if (!cached) setError(errorMessage(err, 'Failed to load news'))
     } finally {
       setLoading(false)
     }
@@ -425,17 +423,32 @@ export default function NewsView(): JSX.Element {
   useEffect(() => { loadChannels() }, [loadChannels])
 
   // Reload whenever the channel changes (and on mount). Close any open article
-  // so we don't strand the reader on a story from the previous channel.
-  useEffect(() => { setSelected(null); load() }, [load])
+  // so we don't strand the reader on a story from the previous channel - but
+  // not on the very first run, which needs to leave a URL-deep-linked post
+  // (see the effect below) alone.
+  const didMount = useRef(false)
+  useEffect(() => {
+    if (didMount.current) closeArticle()
+    else didMount.current = true
+    load()
+  }, [load])
 
   // Reflect the follow state of whatever channel is active.
   useEffect(() => { setSubscribedState(channel !== ALL_CHANNEL && isSubscribed(channel)) }, [channel])
 
   // Open a specific post when a notification is clicked (NewsNotifier routes
   // here then dispatches the id). Also honor an id left in sessionStorage if the
-  // view mounts after the event fired.
+  // view mounts after the event fired, or one baked into the URL (deep link /
+  // page refresh / shared /news/<id> link).
   useEffect(() => {
-    const openById = (id: number): void => { fetchNewsItem(id).then(setSelected).catch(() => undefined) }
+    const openById = (id: number): void => {
+      fetchNewsItem(id).then((it) => {
+        setSelected(it)
+        if (postIdFromPath(window.location.pathname) !== it.id) {
+          window.history.pushState({}, '', `/news/${it.id}`)
+        }
+      }).catch(() => undefined)
+    }
     const onOpen = (e: Event): void => {
       const id = (e as CustomEvent<number>).detail
       // Already-mounted path: consume the id so a later remount doesn't reopen it.
@@ -446,9 +459,39 @@ export default function NewsView(): JSX.Element {
     try {
       const pending = sessionStorage.getItem('news:openPostId')
       if (pending) { sessionStorage.removeItem('news:openPostId'); openById(Number(pending)) }
+      else {
+        const fromUrl = postIdFromPath(window.location.pathname)
+        if (fromUrl != null) openById(fromUrl)
+      }
     } catch {}
     return () => window.removeEventListener('news:open', onOpen)
   }, [])
+
+  // Keep the URL and the open article in sync with browser back/forward.
+  useEffect(() => {
+    const onPopState = (): void => {
+      const id = postIdFromPath(window.location.pathname)
+      if (id == null) { setSelected(null); return }
+      fetchNewsItem(id).then(setSelected).catch(() => undefined)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // Push/pop /news/<id> as an article opens and closes, so the URL always
+  // reflects what's on screen and a post can be shared or reloaded directly.
+  const openItem = (item: NewsItem): void => {
+    setSelected(item)
+    if (postIdFromPath(window.location.pathname) !== item.id) {
+      window.history.pushState({}, '', `/news/${item.id}`)
+    }
+  }
+  const closeArticle = (): void => {
+    setSelected(null)
+    if (postIdFromPath(window.location.pathname) != null) {
+      window.history.pushState({}, '', '/news')
+    }
+  }
 
   const toggleSubscribe = async (): Promise<void> => {
     if (channel === ALL_CHANNEL) return
@@ -468,9 +511,9 @@ export default function NewsView(): JSX.Element {
     try {
       await deleteNewsItem(item.id)
       setItems((prev) => prev.filter((i) => i.id !== item.id))
-      setSelected((s) => (s?.id === item.id ? null : s))
+      if (selected?.id === item.id) closeArticle()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
+      setError(errorMessage(err, 'Failed to delete'))
     }
   }
 
@@ -494,7 +537,7 @@ export default function NewsView(): JSX.Element {
       <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
         <div className="flex items-center gap-3 mb-4">
           <button
-            onClick={() => setActiveView('wrld')}
+            onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')}
             title="Back"
             aria-label="Back"
             className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -507,7 +550,7 @@ export default function NewsView(): JSX.Element {
             {channel !== ALL_CHANNEL && (
               <button
                 onClick={toggleSubscribe}
-                title={subscribed ? `Following — notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
+                title={subscribed ? `Following - notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
                 aria-label={subscribed ? 'Unfollow channel' : 'Follow channel for notifications'}
                 aria-pressed={subscribed}
                 className={`p-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${subscribed ? 'text-accent hover:bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`}
@@ -527,7 +570,7 @@ export default function NewsView(): JSX.Element {
             )}
             <button
               onClick={() => setSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
-              title={sort === 'newest' ? 'Newest first — switch to oldest' : 'Oldest first — switch to newest'}
+              title={sort === 'newest' ? 'Newest first - switch to oldest' : 'Oldest first - switch to newest'}
               aria-label={sort === 'newest' ? 'Sort: newest first, switch to oldest' : 'Sort: oldest first, switch to newest'}
               className="flex items-center gap-1 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
@@ -600,7 +643,7 @@ export default function NewsView(): JSX.Element {
           <ArticleDetail
             item={selected}
             channelLabel={channelLabel(selected.channel)}
-            onBack={() => setSelected(null)}
+            onBack={closeArticle}
             canManage={canManageItem(selected)}
             onEdit={openEdit}
             onDelete={handleDelete}

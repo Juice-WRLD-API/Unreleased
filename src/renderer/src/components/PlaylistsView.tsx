@@ -1,6 +1,10 @@
 import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
+import { usePlaylistDetailData, usePlaylistCoverEditing } from '../hooks/usePlaylistDetailData'
+import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
+import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { placeFlyout } from '../lib/menuFlyout'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft,
   X, Check, Heart, Shuffle, Music2, Clock, GripVertical, Rss,
@@ -9,6 +13,7 @@ import {
   CheckSquare2, Square, FileUp, FileDown, FileText, LayoutGrid, Rows3,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { getSkin } from '../lib/skins'
 import * as userApi from '../lib/userApi'
 import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
@@ -87,7 +92,7 @@ function FolderSlotImg({ src }: { src: string | null }): JSX.Element {
 // ── HeroBackdrop — Apple Music-style full-bleed blurred cover art behind the
 // playlist header, instead of a faint corner blob. Fades into the page's own
 // background at the bottom so the track list below sits on ordinary bg.
-function HeroBackdrop({ src }: { src?: string | null }): JSX.Element {
+function HeroBackdrop({ src, isDarkSkin }: { src?: string | null; isDarkSkin: boolean }): JSX.Element {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
       {src && (
@@ -97,10 +102,20 @@ function HeroBackdrop({ src }: { src?: string | null }): JSX.Element {
           src={smallCoverUrl(src)}
           alt=""
           className="absolute inset-0 w-full h-full object-cover"
-          style={{ filter: 'blur(50px) saturate(1.7) brightness(0.5)', transform: 'scale(1.3)' }}
+          style={{
+            filter: `blur(50px) saturate(1.7) brightness(${isDarkSkin ? 0.5 : 0.85})`,
+            transform: 'scale(1.3)',
+          }}
         />
       )}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/5 to-[var(--surface)]" />
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: isDarkSkin
+            ? 'linear-gradient(to bottom, rgb(0 0 0 / 0.10), rgb(0 0 0 / 0.05), var(--surface))'
+            : 'linear-gradient(to bottom, rgb(255 255 255 / 0.35), rgb(255 255 255 / 0.15), var(--surface))',
+        }}
+      />
     </div>
   )
 }
@@ -142,16 +157,18 @@ function totalDurationLabel(tracks: Track[]): string {
 // ── MenuItem helper ───────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing }: {
+function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing, innerRef }: {
   icon: React.ElementType<any>
   label: string
   onClick: () => void
   destructive?: boolean
   disabled?: boolean
   trailing?: React.ReactNode
+  innerRef?: React.Ref<HTMLButtonElement>
 }): JSX.Element {
   return (
     <button
+      ref={innerRef}
       onClick={onClick}
       disabled={disabled}
       className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors hover:bg-surface-overlay disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -427,7 +444,7 @@ export default function PlaylistsView(): JSX.Element {
     // Subscribed purely so the track memo below re-derives when a custom
     // name/cover changes — liteSongToTrack bakes the override in at conversion
     // time, so without this the rows keep the old name until a refetch.
-    songPrefs, openBulkEditor, fullEraNames } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'playNext', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'importM3uEntriesLocal', 'exportLocalPlaylistM3u', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistsOpenFolderId', 'setPlaylistsOpenFolderId', 'offlinePlaylists', 'offlineSync', 'offlineTracks', 'downloadPlaylistOffline', 'removePlaylistOffline', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'songPrefs', 'openBulkEditor', 'fullEraNames')
+    songPrefs, openBulkEditor, fullEraNames, theme, playlistHeroEnabledDark, playlistHeroEnabledLight } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'playNext', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'importM3uEntriesLocal', 'exportLocalPlaylistM3u', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistsOpenFolderId', 'setPlaylistsOpenFolderId', 'offlinePlaylists', 'offlineSync', 'offlineTracks', 'downloadPlaylistOffline', 'removePlaylistOffline', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'songPrefs', 'openBulkEditor', 'fullEraNames', 'theme', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight')
   // Cast back to the component's own SortField union — the store keeps the
   // field as a plain string so it doesn't have to import this component's type.
   const sort = sortRaw as SortState
@@ -435,10 +452,16 @@ export default function PlaylistsView(): JSX.Element {
   const canEdit = useCanEdit()
 
   useEffect(() => { loadEraFullNames().catch(() => {}) }, [])
+  // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
+  // "is this a dark look" - Ocean, Mocha, etc. need the dark treatment too.
+  // The playlist hero's white-on-dark text only makes sense while its own
+  // backdrop is actually dark; see heroLight at each hero render.
+  const isDarkSkin = getSkin(theme).dark
+  // The setting is tracked per skin darkness, not as one flag - see
+  // playlistHeroEnabledDark/Light in useStore.ts.
+  const playlistHeroEnabled = isDarkSkin ? playlistHeroEnabledDark : playlistHeroEnabledLight
 
   const [showLiked, setShowLiked] = useState(false)
-  const [detail, setDetail] = useState<PlaylistDetail | null>(null)
-  const [loadingDetail, setLoadingDetail] = useState(false)
   // Which donor playlist (if any) is open — a third, local-only kind beside
   // the store-backed selectedId/localSelectedId, mirroring the same "third
   // grid section" pattern donor files already got in the library grid below.
@@ -513,7 +536,11 @@ export default function PlaylistsView(): JSX.Element {
   // composite the multi-select already uses. Transient gesture state, so it's
   // fine as local state (unlike the store-backed selection that survives tab
   // switches).
-  const [draggedPlaylistKey, setDraggedPlaylistKey] = useState<string | null>(null)
+  const [draggedPlaylistKeys, setDraggedPlaylistKeys] = useState<string[]>([])
+  // Dropping one ungrouped playlist card directly onto another (as opposed to
+  // onto a folder tile, handled by dropTargetFolderId below) bundles the two
+  // into a brand-new folder - the "drag a playlist onto a playlist" gesture.
+  const [dropTargetPlaylistKey, setDropTargetPlaylistKey] = useState<string | null>(null)
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null)
 
   // Multi-select of tracks within an open playlist — mirrors the Tracker's
@@ -528,7 +555,13 @@ export default function PlaylistsView(): JSX.Element {
   const [localRenameVal, setLocalRenameVal] = useState('')
   const [showAddAllMenu, setShowAddAllMenu] = useState(false)
   const addAllMenuRef = useRef<HTMLDivElement>(null)
-  const [showExportMenu, setShowExportMenu] = useState(false)
+  const addAllItemRef = useRef<HTMLButtonElement>(null)
+  const [addAllSubPos, setAddAllSubPos] = useState({ top: 0, left: 0 })
+  const [showHeroExportMenu, setShowHeroExportMenu] = useState(false)
+  const heroExportItemRef = useRef<HTMLButtonElement>(null)
+  const heroExportMenuRef = useRef<HTMLDivElement>(null)
+  const [heroExportSubPos, setHeroExportSubPos] = useState({ top: 0, left: 0 })
+  const heroMenuBoxRef = useRef<HTMLDivElement>(null)
   // The open-playlist hero's "⋯" menu (replaces the old cluster of loose
   // action buttons next to Play/Shuffle).
   const [showHeroMenu, setShowHeroMenu] = useState(false)
@@ -560,8 +593,6 @@ export default function PlaylistsView(): JSX.Element {
   // Zip / share / bulk-add
   // Backend ZIP jobs are disabled, so the ZIP is built client-side (lib/clientZip).
   const { zipState, handleZipDownload } = usePlaylistZipDownload()
-  const [shareCopied, setShareCopied] = useState(false)
-  const [togglingPublic, setTogglingPublic] = useState(false)
   const [addingAll, setAddingAll] = useState(false)
   const [isSharedView, setIsSharedView] = useState(false)
   const [importState, setImportState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -735,17 +766,17 @@ export default function PlaylistsView(): JSX.Element {
 
   // Cover upload
   const coverInputRef = useRef<HTMLInputElement>(null)
-  const [coverUploading, setCoverUploading] = useState(false)
-  // Cover is fetched separately so tracks render without waiting for it
-  type CoverData = { cover_image?: string | null; cover_image_url?: string | null }
-  const [coverData, setCoverData] = useState<CoverData | null>(null)
-  const [coverLoading, setCoverLoading] = useState(false)
-  const [coverImgError, setCoverImgError] = useState(false)
 
   // Async cover thumbnails for the grid (keyed by playlist id)
   const [covers, setCovers] = useState<Record<number, string | null>>({})
   const [mosaicImages, setMosaicImages] = useState<Record<number, string[]>>({})
   const coversLoadedRef = useRef<Set<number>>(new Set())
+
+  const { detail, setDetail, loadingDetail, coverData, setCoverData, coverLoading, coverImgError, setCoverImgError, loadDetail } =
+    usePlaylistDetailData(selectedId, isSharedView)
+  const { shareCopied, togglingPublic, handleTogglePublic, handleShare } = usePlaylistSharing(selectedId, detail, setDetail)
+  const { coverUploading, handleCoverUpload, handleRemoveCover } =
+    usePlaylistCoverEditing(selectedId, refreshPlaylists, setCoverData, setCoverImgError, setCovers)
 
   // Description editing
   const [editingDesc, setEditingDesc] = useState(false)
@@ -753,9 +784,6 @@ export default function PlaylistsView(): JSX.Element {
 
   // Playlist membership cache: playlistId → Set<songId>
   const membershipCache = useRef<Map<number, Set<number>>>(new Map())
-
-  // Race-condition guard: each loadDetail call gets a generation ID; stale responses are discarded
-  const loadGen = useRef(0)
 
   // ── Async cover loading for grid ─────────────────────────────────────────
   useEffect(() => {
@@ -793,6 +821,27 @@ export default function PlaylistsView(): JSX.Element {
   const otherPlaylists = useMemo(() => playlists.filter(p => p.id !== selectedId), [playlists, selectedId])
   const isFollowingCurrent = useMemo(() => selectedId != null && followedPlaylists.some(f => f.id === selectedId), [followedPlaylists, selectedId])
   const dragEnabled = sort.field === 'default' && !search.trim()
+
+  // "Add all to playlist" opens a flyout beside the hero menu (matching
+  // SongContextMenu's "Add to playlist") instead of growing the menu inline -
+  // an inline list of playlist names has no width cap of its own, so a long
+  // name would keep stretching the menu out to the edge of the screen.
+  useLayoutEffect(() => {
+    if (!showAddAllMenu) return
+    const item = addAllItemRef.current, menu = heroMenuBoxRef.current, sub = addAllMenuRef.current
+    if (!item || !menu || !sub) return
+    const { top, left } = placeFlyout(item, menu, sub)
+    setAddAllSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [showAddAllMenu, otherPlaylists.length])
+
+  // "Export playlist" is the same kind of flyout as "Add all to playlist" above.
+  useLayoutEffect(() => {
+    if (!showHeroExportMenu) return
+    const item = heroExportItemRef.current, menu = heroMenuBoxRef.current, sub = heroExportMenuRef.current
+    if (!item || !menu || !sub) return
+    const { top, left } = placeFlyout(item, menu, sub)
+    setHeroExportSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [showHeroExportMenu])
 
   const displayTracks = useMemo(() => {
     let result = tracks
@@ -988,56 +1037,6 @@ export default function PlaylistsView(): JSX.Element {
   }, [trackMenu, cardMenu, showAddAllMenu, plBulkMenu, folderMenu])
 
 
-  const loadDetail = useCallback(async (id: number, shared = false) => {
-    const gen = ++loadGen.current
-    // A cached cover renders immediately (no null/spinner flash) instead of
-    // waiting on a network round trip for a playlist we've already opened.
-    const cached = userApi.peekPlaylistCover(id)
-    if (cached) {
-      setCoverImgError(false)
-      setCoverData({ cover_image: cached.cover_image, cover_image_url: cached.cover_image_url })
-      setCoverLoading(false)
-    } else {
-      setCoverData(null)
-      setCoverLoading(true)
-    }
-    // A cached detail (tracks + metadata) renders instantly too — then we
-    // still refetch in the background to pick up changes made elsewhere,
-    // swapping in the fresh result without ever showing a loading spinner.
-    const cachedDetail = userApi.peekPlaylistDetail(id)
-    if (cachedDetail) {
-      setDetail(cachedDetail)
-      setLoadingDetail(false)
-    } else {
-      setLoadingDetail(true)
-    }
-    try {
-      const result = shared ? await userApi.getPublicPlaylist(id) : await userApi.getPlaylist(id)
-      if (gen !== loadGen.current) return
-      setDetail(result)
-      setLoadingDetail(false)
-      if (!cached) {
-        // Load cover separately so tracks render immediately
-        const coverFetch = shared ? userApi.getPublicPlaylistCover(id) : userApi.getPlaylistCover(id)
-        coverFetch.then(c => {
-          if (gen !== loadGen.current) return
-          setCoverImgError(false)
-          setCoverData({ cover_image: c.cover_image, cover_image_url: c.cover_image_url })
-          setCoverLoading(false)
-        }).catch(() => { if (gen === loadGen.current) setCoverLoading(false) })
-      }
-    } catch {
-      if (gen === loadGen.current && !cachedDetail) setDetail(null)
-    } finally {
-      if (gen === loadGen.current) setLoadingDetail(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (selectedId != null) loadDetail(selectedId, isSharedView)
-    else setDetail(null)
-  }, [selectedId, loadDetail, isSharedView])
-
   // Keep a followed playlist's cached display fields (the grid card's name/
   // cover/track count) reasonably fresh. The detail view above already
   // re-fetches live on every open — this just makes sure the summary shown
@@ -1199,25 +1198,10 @@ export default function PlaylistsView(): JSX.Element {
   const togglePlaylistSelect = useCallback((key: string) => togglePlKeyRaw(key, key), [togglePlKeyRaw])
   const keyMap = (keys: string[]): Map<string, string> => new Map(keys.map(k => [k, k]))
 
-  const [bulkDeletingPlaylists, setBulkDeletingPlaylists] = useState(false)
-
-  const bulkDeletePlaylists = useCallback(async () => {
-    const keys = [...selectedPlaylistKeys.keys()]
-    if (!keys.length) return
-    setBulkDeletingPlaylists(true)
-    const apiIds = keys.filter(k => k.startsWith('api:')).map(k => Number(k.slice(4)))
-    const localIds = keys.filter(k => k.startsWith('local:')).map(k => k.slice(6))
-    try {
-      await Promise.all(apiIds.map(id => userApi.deletePlaylist(id).catch(() => {})))
-    } finally {
-      localIds.forEach(id => deleteLocalPlaylist(id))
-      if (selectedId != null && apiIds.includes(selectedId)) setSelectedId(null)
-      if (localSelectedId != null && localIds.includes(localSelectedId)) setLocalSelectedId(null)
-      await refreshPlaylists()
-      setBulkDeletingPlaylists(false)
-      exitPlaylistSelectMode()
-    }
-  }, [selectedPlaylistKeys, deleteLocalPlaylist, refreshPlaylists, selectedId, localSelectedId, setSelectedId, setLocalSelectedId, exitPlaylistSelectMode])
+  const { busy: bulkDeletingPlaylists, run: runBulkDeletePlaylists } = usePlaylistBulkDeletePlaylists(
+    refreshPlaylists, deleteLocalPlaylist, selectedId, setSelectedId, localSelectedId, setLocalSelectedId, exitPlaylistSelectMode,
+  )
+  const bulkDeletePlaylists = useCallback(() => runBulkDeletePlaylists([...selectedPlaylistKeys.keys()]), [runBulkDeletePlaylists, selectedPlaylistKeys])
 
   // "Add to playlist" only makes sense when every selected playlist is the
   // same kind, since a synced (api) target can't hold local-only tracks and
@@ -1227,37 +1211,14 @@ export default function PlaylistsView(): JSX.Element {
     return kinds.size === 1 ? ([...kinds][0] as 'api' | 'local') : null
   }, [selectedPlaylistKeys])
 
-  const [bulkAddingPlaylists, setBulkAddingPlaylists] = useState(false)
-
-  const bulkAddPlaylistsTo = useCallback(async (target: { kind: 'api'; id: number } | { kind: 'local'; id: string }) => {
-    const keys = [...selectedPlaylistKeys.keys()]
-    setBulkAddingPlaylists(true)
-    try {
-      if (target.kind === 'api') {
-        const srcIds = keys.filter(k => k.startsWith('api:')).map(k => Number(k.slice(4))).filter(id => id !== target.id)
-        for (const srcId of srcIds) {
-          const srcDetail = await userApi.getPlaylist(srcId).catch(() => null)
-          if (!srcDetail) continue
-          await Promise.all(srcDetail.items.map(item => userApi.addToPlaylist(target.id, item.song.id).catch(() => {})))
-        }
-        await refreshPlaylists()
-      } else {
-        const srcIds = keys.filter(k => k.startsWith('local:')).map(k => k.slice(6)).filter(id => id !== target.id)
-        const targetPl = localPlaylists.find(p => p.id === target.id)
-        const existing = new Set(targetPl?.trackIds ?? [])
-        for (const srcId of srcIds) {
-          const src = localPlaylists.find(p => p.id === srcId)
-          if (!src) continue
-          src.trackIds.filter(id => !existing.has(id)).forEach(id => { existing.add(id); addToLocalPlaylist(target.id, id) })
-        }
-      }
-    } finally {
-      setBulkAddingPlaylists(false)
-      setShowPlBulkAddMenu(false)
-      setPlBulkMenu(null)
-      exitPlaylistSelectMode()
-    }
-  }, [selectedPlaylistKeys, refreshPlaylists, localPlaylists, addToLocalPlaylist, exitPlaylistSelectMode])
+  const { busy: bulkAddingPlaylists, run: runBulkAddPlaylistsTo } = usePlaylistBulkAddPlaylistsTo(
+    refreshPlaylists, localPlaylists, addToLocalPlaylist, exitPlaylistSelectMode,
+    useCallback(() => { setShowPlBulkAddMenu(false); setPlBulkMenu(null) }, []),
+  )
+  const bulkAddPlaylistsTo = useCallback(
+    (target: { kind: 'api'; id: number } | { kind: 'local'; id: string }) => runBulkAddPlaylistsTo([...selectedPlaylistKeys.keys()], target),
+    [runBulkAddPlaylistsTo, selectedPlaylistKeys],
+  )
 
   const handleSort = (field: SortField) => {
     if (sort.field === field) {
@@ -1289,33 +1250,6 @@ export default function PlaylistsView(): JSX.Element {
     useStore.getState().setInfoSongId(songId)
   }, [])
 
-  const handleCoverUpload = useCallback(async (file: File) => {
-    if (!selectedId || coverUploading) return
-    setCoverUploading(true)
-    try {
-      const result = await userApi.uploadPlaylistCover(selectedId, file)
-      setCoverImgError(false)
-      setCoverData({ cover_image: result.cover_image, cover_image_url: result.cover_image_url })
-      setCovers(prev => ({ ...prev, [selectedId]: result.cover_image_url ?? result.cover_image ?? null }))
-      await refreshPlaylists()
-    } catch {}
-    setCoverUploading(false)
-  }, [selectedId, coverUploading, refreshPlaylists])
-
-  const handleRemoveCover = useCallback(async () => {
-    if (!selectedId) return
-    setCoverData(null) // optimistic clear
-    setCovers(prev => ({ ...prev, [selectedId]: null }))
-    try {
-      await userApi.removePlaylistCover(selectedId)
-      await refreshPlaylists()
-    } catch {
-      // restore on failure by re-fetching
-      const c = await userApi.getPlaylistCover(selectedId).catch(() => null)
-      if (c) setCoverData({ cover_image: c.cover_image, cover_image_url: c.cover_image_url })
-    }
-  }, [selectedId, refreshPlaylists])
-
   const saveDescription = useCallback(async () => {
     if (!selectedId) return
     setEditingDesc(false)
@@ -1345,30 +1279,6 @@ export default function PlaylistsView(): JSX.Element {
       await downloadPlaylistOffline(offlineKey, detail.name, detail.items.map((i) => i.song.id))
     }
   }, [offlineKey, isOffline, detail, downloadPlaylistOffline, removePlaylistOffline])
-
-  const handleTogglePublic = useCallback(async () => {
-    if (!selectedId || !detail) return
-    setTogglingPublic(true)
-    try {
-      const updated = await userApi.updatePlaylist(selectedId, { is_public: !detail.is_public })
-      setDetail(updated)
-    } catch (e) { console.error('toggle public failed', e) }
-    finally { setTogglingPublic(false) }
-  }, [selectedId, detail])
-
-  const handleShare = useCallback(async () => {
-    if (!selectedId || !detail) return
-    try {
-      // Ensure playlist is public before sharing
-      if (!detail.is_public) {
-        const updated = await userApi.updatePlaylist(selectedId, { is_public: true })
-        setDetail(updated)
-      }
-      await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${selectedId}&view=shared`)
-      setShareCopied(true)
-      setTimeout(() => setShareCopied(false), 2500)
-    } catch {}
-  }, [selectedId, detail])
 
   const handleExportJson = useCallback(() => {
     if (!detail) return
@@ -1773,11 +1683,56 @@ export default function PlaylistsView(): JSX.Element {
     onDragEnd: () => void
     isDragging: boolean
   } => ({
-    draggable: !plSelectMode,
-    onDragStart: e => { e.dataTransfer.effectAllowed = 'move'; setDraggedPlaylistKey(plKey) },
-    onDragEnd: () => { setDraggedPlaylistKey(null); setDropTargetFolderId(null) },
-    isDragging: draggedPlaylistKey === plKey,
+    draggable: true,
+    onDragStart: e => {
+      e.dataTransfer.effectAllowed = 'move'
+      // Dragging a card that's part of the current selection carries the whole
+      // selection along with it.
+      setDraggedPlaylistKeys(plSelectMode && selectedPlaylistKeys.has(plKey) ? [...selectedPlaylistKeys.keys()] : [plKey])
+    },
+    onDragEnd: () => { setDraggedPlaylistKeys([]); setDropTargetFolderId(null); setDropTargetPlaylistKey(null) },
+    isDragging: draggedPlaylistKeys.includes(plKey),
   })
+
+  // Dropping a dragged playlist card onto another (ungrouped) playlist card
+  // bundles both into a new folder - if the target is already in one, the
+  // dragged playlist(s) just join it instead of nesting folders.
+  const dropOntoPlaylistProps = (plKey: string): {
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: () => void
+    onDrop: (e: React.DragEvent) => void
+    isDropTarget: boolean
+  } => ({
+    onDragOver: e => {
+      if (draggedPlaylistKeys.length === 0 || draggedPlaylistKeys.includes(plKey)) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTargetPlaylistKey(plKey)
+    },
+    onDragLeave: () => setDropTargetPlaylistKey(prev => (prev === plKey ? null : prev)),
+    onDrop: e => {
+      e.preventDefault(); e.stopPropagation()
+      if (draggedPlaylistKeys.length > 0 && !draggedPlaylistKeys.includes(plKey)) {
+        const existingFolder = folderOfPlaylist(playlistFolders, plKey)
+        if (existingFolder) movePlaylistsToFolder(draggedPlaylistKeys, existingFolder.id)
+        else createFolder(uniqueFolderName(), [plKey, ...draggedPlaylistKeys])
+      }
+      setDraggedPlaylistKeys([]); setDropTargetFolderId(null); setDropTargetPlaylistKey(null)
+    },
+    isDropTarget: dropTargetPlaylistKey === plKey,
+  })
+
+  // Dropping a dragged folder member onto empty grid background (rather than
+  // onto a specific card or folder tile, both of which stopPropagation so
+  // this never double-fires) pulls it back out to ungrouped - the drag-out
+  // counterpart of dragging a playlist onto a folder tile to file it away.
+  // Harmless no-op if the dragged playlist(s) weren't in a folder already.
+  const gridBackgroundDropProps = {
+    onDragOver: (e: React.DragEvent): void => { if (draggedPlaylistKeys.length === 0) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move' },
+    onDrop: (e: React.DragEvent): void => {
+      e.preventDefault()
+      if (draggedPlaylistKeys.length > 0) movePlaylistsToFolder(draggedPlaylistKeys, null)
+      setDraggedPlaylistKeys([]); setDropTargetFolderId(null); setDropTargetPlaylistKey(null)
+    },
+  }
 
   const apiEntry = (p: PlaylistSummary, inFolder = false): GridEntry => {
     const plKey = `api:${p.id}`
@@ -1824,7 +1779,10 @@ export default function PlaylistsView(): JSX.Element {
             const trks = d ? d.items.map(i => userApi.liteSongToTrack(i.song)) : []
             if (trks.length) playCollection(trks)
           }}
+          onLongPress={() => togglePlaylistSelect(plKey)}
+          onDoubleClick={() => { if (!plSelectMode) { setExpandedKey(null); setSelectedId(p.id) } }}
           {...dragSourceProps(plKey)}
+          {...(inFolder ? {} : dropOntoPlaylistProps(plKey))}
         />
     )
     const panel = expandedKey === plKey ? (
@@ -1878,7 +1836,10 @@ export default function PlaylistsView(): JSX.Element {
             const qt = lp.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
             if (qt.length) playCollection(qt)
           }}
+          onLongPress={() => togglePlaylistSelect(plKey)}
+          onDoubleClick={() => { if (!plSelectMode) { setExpandedKey(null); setLocalSelectedId(lp.id) } }}
           {...dragSourceProps(plKey)}
+          {...(inFolder ? {} : dropOntoPlaylistProps(plKey))}
         />
     )
     const panel = expandedKey === plKey ? (
@@ -2056,12 +2017,12 @@ export default function PlaylistsView(): JSX.Element {
           onMenuButton={e => setFolderMenu({ folder: f, x: e.clientX, y: e.clientY })}
           onPlay={() => openFolder(f.id)}
           isDropTarget={dropTargetFolderId === f.id}
-          onDragOver={e => { if (!draggedPlaylistKey) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTargetFolderId(f.id) }}
+          onDragOver={e => { if (draggedPlaylistKeys.length === 0) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTargetFolderId(f.id) }}
           onDragLeave={() => setDropTargetFolderId(prev => (prev === f.id ? null : prev))}
           onDrop={e => {
             e.preventDefault()
-            if (draggedPlaylistKey) movePlaylistsToFolder([draggedPlaylistKey], f.id)
-            setDraggedPlaylistKey(null)
+            if (draggedPlaylistKeys.length > 0) movePlaylistsToFolder(draggedPlaylistKeys, f.id)
+            setDraggedPlaylistKeys([])
             setDropTargetFolderId(null)
           }}
         />
@@ -2139,12 +2100,13 @@ export default function PlaylistsView(): JSX.Element {
       if (!localPl) { setLocalSelectedId(null); return <div /> }
       const localTracks = localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean) as LibraryTrack[]
       const localQTracks: Track[] = localTracks.map(libTrackToTrack)
+      const heroLight = isDarkSkin && playlistHeroEnabled && !!(localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0])
       return (
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
           <div className="relative overflow-hidden px-6 pb-6 shrink-0">
-            <HeroBackdrop src={localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0] ?? null} />
+            {playlistHeroEnabled && <HeroBackdrop src={localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0] ?? null} isDarkSkin={isDarkSkin} />}
             <div className="relative z-10 pt-5">
-              <button onClick={() => setLocalSelectedId(null)} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm transition-colors">
+              <button onClick={() => setLocalSelectedId(null)} className={`flex items-center gap-1.5 text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}>
                 <ArrowLeft size={15} /> Playlists
               </button>
             </div>
@@ -2156,9 +2118,9 @@ export default function PlaylistsView(): JSX.Element {
                 }
               </div>
               <div className="pb-2">
-                <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wider mb-1">Local Playlist</p>
-                <h1 className="text-white text-3xl font-black mb-1">{localPl.name}</h1>
-                <p className="text-white/60 text-sm">{localTracks.length} songs</p>
+                <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>Local Playlist</p>
+                <h1 className={`text-3xl font-black mb-1 ${heroLight ? 'text-white' : 'text-text-primary'}`}>{localPl.name}</h1>
+                <p className={`text-sm ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>{localTracks.length} songs</p>
               </div>
             </div>
             <div className="relative z-10 flex items-center gap-3 mt-5">
@@ -2214,7 +2176,7 @@ export default function PlaylistsView(): JSX.Element {
                   synced-playlist ids) — folders holding only synced
                   playlists are hidden here since their members can't render
                   without an account. */}
-              <div ref={setAuthGridEl} className="grid gap-4 mb-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+              <div ref={setAuthGridEl} className="grid gap-4 mb-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
                 {layoutGridEntries([...folderTileEntries(true), ...ungroupedLocal.map(lp => localEntry(lp))], authGridCols)}
               </div>
             </>
@@ -2397,6 +2359,7 @@ export default function PlaylistsView(): JSX.Element {
       playTrack(shuffled[0], shuffled)
     }
 
+    const heroLight = isDarkSkin && playlistHeroEnabled && !!(playlistCoverUrl(coverData ?? {}) ?? tracks[0]?.imageUrl)
     return (
       <div ref={setListScrollEl} className="relative flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden" onClick={() => { setTrackMenu(null); setShowAddAllMenu(false); setShowHeroMenu(false) }}>
         {/* ── Hero (shown immediately using summary data) — the backdrop now
@@ -2406,13 +2369,13 @@ export default function PlaylistsView(): JSX.Element {
             backdrop is always a dark blurred image — theme-aware text colors
             (which flip to dark-on-light in light mode) were unreadable here. ── */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
-          <HeroBackdrop src={playlistCoverUrl(coverData ?? {}) ?? tracks[0]?.imageUrl ?? null} />
+          {playlistHeroEnabled && <HeroBackdrop src={playlistCoverUrl(coverData ?? {}) ?? tracks[0]?.imageUrl ?? null} isDarkSkin={isDarkSkin} />}
 
           <div className="relative z-10 px-0 pt-5">
             <button onClick={() => {
               setSelectedId(null); setRenaming(false)
               if (isSharedView) { setIsSharedView(false); window.history.pushState({}, '', '/playlists') }
-            }} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm transition-colors">
+            }} className={`flex items-center gap-1.5 text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}>
               <ArrowLeft size={15} /> Playlists
             </button>
           </div>
@@ -2469,20 +2432,20 @@ export default function PlaylistsView(): JSX.Element {
             </div>
 
             <div className="min-w-0 flex-1 pb-1">
-              <p className="text-white/60 text-xs uppercase tracking-widest font-semibold mb-2">Playlist</p>
+              <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>Playlist</p>
               {renaming ? (
                 <div className="flex items-center gap-2 mb-3">
-                  <input value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && renameSelected()} autoFocus className="bg-black/30 border border-white/20 rounded-lg px-3 py-2 text-white text-2xl font-black focus:outline-none focus:border-accent/50 w-full" />
+                  <input value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && renameSelected()} autoFocus className={`border rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border-white/20 text-white' : 'bg-surface-overlay border-[var(--border)] text-text-primary'}`} />
                   <button onClick={renameSelected} className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
-                  <button onClick={() => setRenaming(false)} className="p-2 rounded-lg text-white/60 hover:text-white shrink-0"><X size={16} /></button>
+                  <button onClick={() => setRenaming(false)} className={`p-2 rounded-lg shrink-0 ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={16} /></button>
                 </div>
               ) : (
-                <h1 className="text-white text-3xl md:text-4xl font-black truncate mb-2">
+                <h1 className={`text-3xl md:text-4xl font-black truncate mb-2 ${heroLight ? 'text-white' : 'text-text-primary'}`}>
                   {detail?.name ?? summary?.name ?? <span className="bg-white/10 rounded animate-pulse text-transparent select-none">Loading…</span>}
                 </h1>
               )}
-              <div className="flex items-center gap-1.5 text-white/60 text-sm mb-2">
-                <span className="font-medium text-white/85">{account.discord_username}</span>
+              <div className={`flex items-center gap-1.5 text-sm mb-2 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>
+                <span className={`font-medium ${heroLight ? 'text-white/85' : 'text-text-secondary'}`}>{account.discord_username}</span>
                 {!loadingDetail && (
                   <>
                     <span>·</span>
@@ -2503,16 +2466,16 @@ export default function PlaylistsView(): JSX.Element {
                     autoFocus
                     rows={2}
                     placeholder="Add a description…"
-                    className="flex-1 bg-black/30 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-accent/50 resize-none placeholder:text-white/40"
+                    className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50 resize-none ${heroLight ? 'bg-black/30 border-white/20 text-white placeholder:text-white/40' : 'bg-surface-overlay border-[var(--border)] text-text-primary placeholder:text-text-muted'}`}
                   />
                   <div className="flex flex-col gap-1 shrink-0">
                     <button onClick={saveDescription} className="p-1.5 rounded-lg bg-accent/15 text-accent"><Check size={14} /></button>
-                    <button onClick={() => setEditingDesc(false)} className="p-1.5 rounded-lg text-white/60 hover:text-white"><X size={14} /></button>
+                    <button onClick={() => setEditingDesc(false)} className={`p-1.5 rounded-lg ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={14} /></button>
                   </div>
                 </div>
               ) : isSharedView ? (
                 detail?.description ? (
-                  <p className="text-white/60 text-sm line-clamp-2 mb-3">{detail.description}</p>
+                  <p className={`text-sm line-clamp-2 mb-3 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>{detail.description}</p>
                 ) : null
               ) : (
                 <button
@@ -2521,11 +2484,11 @@ export default function PlaylistsView(): JSX.Element {
                 >
                   {detail?.description ? (
                     <>
-                      <p className="text-white/60 text-sm line-clamp-2 group-hover/desc:text-white/80 transition-colors">{detail.description}</p>
-                      <Pencil size={11} className="text-white/60 opacity-0 group-hover/desc:opacity-60 transition-opacity shrink-0 mt-1" />
+                      <p className={`text-sm line-clamp-2 transition-colors ${heroLight ? 'text-white/60 group-hover/desc:text-white/80' : 'text-text-muted group-hover/desc:text-text-secondary'}`}>{detail.description}</p>
+                      <Pencil size={11} className={`opacity-0 group-hover/desc:opacity-60 transition-opacity shrink-0 mt-1 ${heroLight ? 'text-white/60' : 'text-text-muted'}`} />
                     </>
                   ) : (
-                    <p className="text-white/60 text-sm opacity-40 hover:opacity-70 transition-opacity italic">+ Add description</p>
+                    <p className={`text-sm opacity-40 hover:opacity-70 transition-opacity italic ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>+ Add description</p>
                   )}
                 </button>
               )}
@@ -2585,9 +2548,9 @@ export default function PlaylistsView(): JSX.Element {
                   <div className="relative" ref={heroMenuRef}>
                     <button
                       ref={heroBtnRef}
-                      onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v); setShowAddAllMenu(false); setShowExportMenu(false) }}
+                      onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v); setShowAddAllMenu(false); setShowHeroExportMenu(false) }}
                       title="More"
-                      className={`p-2.5 rounded-full text-sm transition-colors ${showHeroMenu ? 'text-white bg-white/10' : 'text-white/60 hover:text-white hover:bg-white/10'}`}
+                      className={`p-2.5 rounded-full text-sm transition-colors ${heroLight ? (showHeroMenu ? 'text-white bg-white/10' : 'text-white/60 hover:text-white hover:bg-white/10') : (showHeroMenu ? 'text-text-primary bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay')}`}
                     >
                       <MoreHorizontal size={18} />
                     </button>
@@ -2596,42 +2559,78 @@ export default function PlaylistsView(): JSX.Element {
                         "Add all to playlist" list stays fully visible. */}
                     {showHeroMenu && createPortal(
                       <>
-                        <div className="fixed inset-0 z-[60]" onClick={() => { setShowHeroMenu(false); setShowAddAllMenu(false); setShowExportMenu(false) }} />
+                        <div className="fixed inset-0 z-[60]" onClick={() => { setShowHeroMenu(false); setShowAddAllMenu(false); setShowHeroExportMenu(false) }} />
                         {(() => {
                           const r = heroBtnRef.current?.getBoundingClientRect()
                           const top = r ? r.bottom + 6 : 0
                           const left = r ? Math.min(r.left, window.innerWidth - 218) : 0
                           return (
                             <div
-                              className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[210px] overflow-y-auto"
+                              ref={heroMenuBoxRef}
+                              className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[210px] overflow-x-hidden overflow-y-auto"
                               style={{ top, left, maxHeight: window.innerHeight - top - 8 }}
                               onClick={e => e.stopPropagation()}
                             >
-                              <MenuItem
-                                icon={zipState === 'loading' ? Loader2 : Archive}
-                                label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download as ZIP'}
-                                disabled={zipState === 'loading' || tracks.length === 0}
-                                onClick={() => { handleZipDownload(tracks, detail.name ?? summary?.name ?? 'playlist') }}
-                              />
-                              <MenuItem
-                                icon={FileDown}
-                                label="Export playlist"
-                                disabled={tracks.length === 0}
-                                trailing={<span className="text-text-muted text-xs">{showExportMenu ? '⌄' : '›'}</span>}
-                                onClick={() => setShowExportMenu(v => !v)}
-                              />
-                              {showExportMenu && (
-                                <div className="border-t border-b border-[var(--border)]">
-                                  <button onClick={() => { setShowExportMenu(false); setShowHeroMenu(false); handleExportJson() }}
-                                    className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                              {/* Rendered outside the hover-tracked div below
+                                  (but still inside the menu box) so moving the
+                                  mouse into a flyout doesn't count as "left
+                                  the trigger row" and close it. */}
+                              {showHeroExportMenu && (
+                                <div
+                                  ref={heroExportMenuRef}
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ position: 'fixed', zIndex: 62, top: heroExportSubPos.top, left: heroExportSubPos.left }}
+                                  className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
+                                >
+                                  <button onClick={() => { setShowHeroMenu(false); setShowHeroExportMenu(false); handleExportJson() }}
+                                    className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
                                     As JSON
                                   </button>
-                                  <button onClick={() => { setShowExportMenu(false); setShowHeroMenu(false); handleExportM3u() }}
-                                    className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
+                                  <button onClick={() => { setShowHeroMenu(false); setShowHeroExportMenu(false); handleExportM3u() }}
+                                    className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
                                     As M3U
                                   </button>
                                 </div>
                               )}
+                              {showAddAllMenu && otherPlaylists.length > 0 && tracks.length > 0 && (
+                                <div
+                                  ref={addAllMenuRef}
+                                  onClick={e => e.stopPropagation()}
+                                  style={{ position: 'fixed', zIndex: 62, top: addAllSubPos.top, left: addAllSubPos.left }}
+                                  className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
+                                >
+                                  <div className="max-h-44 overflow-y-auto">
+                                    {otherPlaylists.map(p => (
+                                      <button key={p.id} onClick={async () => { setShowAddAllMenu(false); setShowHeroMenu(false); await handleAddAllTo(p.id, detail) }}
+                                        title={p.name}
+                                        className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
+                                        {p.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div
+                                onMouseOver={(e) => {
+                                  const t = e.target as Node
+                                  setShowAddAllMenu(addAllItemRef.current?.contains(t) ?? false)
+                                  setShowHeroExportMenu(heroExportItemRef.current?.contains(t) ?? false)
+                                }}
+                              >
+                              <MenuItem
+                                icon={zipState === 'loading' ? Loader2 : Archive}
+                                label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all'}
+                                disabled={zipState === 'loading' || tracks.length === 0}
+                                onClick={() => { handleZipDownload(tracks, detail.name ?? summary?.name ?? 'playlist') }}
+                              />
+                              <MenuItem
+                                innerRef={heroExportItemRef}
+                                icon={Download}
+                                label="Export playlist"
+                                disabled={tracks.length === 0}
+                                trailing={<ChevronRight size={13} className="text-text-muted" />}
+                                onClick={() => setShowHeroExportMenu(v => !v)}
+                              />
                               {!!(window as any).electron && (
                                 <MenuItem
                                   icon={offlineSyncState?.state === 'syncing' ? Loader2 : Download}
@@ -2643,6 +2642,7 @@ export default function PlaylistsView(): JSX.Element {
                                   onClick={() => { handleToggleOffline() }}
                                 />
                               )}
+                              <div className="border-t border-[var(--border)] my-1" />
                               <MenuItem
                                 icon={shareCopied ? Check : Link}
                                 label={shareCopied ? 'Link copied!' : 'Copy share link'}
@@ -2655,33 +2655,23 @@ export default function PlaylistsView(): JSX.Element {
                                 disabled={togglingPublic}
                                 onClick={() => { handleTogglePublic() }}
                               />
-                              {otherPlaylists.length > 0 && tracks.length > 0 && (
-                                <>
-                                  <MenuItem
-                                    icon={FolderInput}
-                                    label="Add all to playlist"
-                                    disabled={addingAll}
-                                    trailing={<span className="text-text-muted text-xs">{showAddAllMenu ? '⌄' : '›'}</span>}
-                                    onClick={() => setShowAddAllMenu(v => !v)}
-                                  />
-                                  {showAddAllMenu && (
-                                    <div className="border-t border-b border-[var(--border)] max-h-40 overflow-y-auto">
-                                      {otherPlaylists.map(p => (
-                                        <button key={p.id} onClick={async () => { setShowAddAllMenu(false); setShowHeroMenu(false); await handleAddAllTo(p.id, detail) }}
-                                          title={p.name}
-                                          className="w-full text-left pl-9 pr-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
-                                          {p.name}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                </>
-                              )}
                               <div className="border-t border-[var(--border)] my-1" />
                               {!renaming && (
                                 <MenuItem icon={Pencil} label="Rename" onClick={() => { setShowHeroMenu(false); setRenameValue(detail.name); setRenaming(true) }} />
                               )}
+                              {otherPlaylists.length > 0 && tracks.length > 0 && (
+                                <MenuItem
+                                  innerRef={addAllItemRef}
+                                  icon={FolderInput}
+                                  label="Add all to playlist"
+                                  disabled={addingAll}
+                                  trailing={<ChevronRight size={13} className="text-text-muted" />}
+                                  onClick={() => setShowAddAllMenu(v => !v)}
+                                />
+                              )}
+                              <div className="border-t border-[var(--border)] my-1" />
                               <MenuItem icon={Trash2} label="Delete playlist" destructive onClick={() => { setShowHeroMenu(false); deleteSelected() }} />
+                              </div>
                             </div>
                           )
                         })()}
@@ -3135,14 +3125,15 @@ export default function PlaylistsView(): JSX.Element {
     const localTracks = localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean) as LibraryTrack[]
     const localQTracks: Track[] = localTracks.map(libTrackToTrack)
     const localDurLabel = totalDurationLabel(localQTracks)
+    const heroLight = isDarkSkin && playlistHeroEnabled && !!(localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0])
 
     return (
       <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
         {/* Hero */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
-          <HeroBackdrop src={localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0] ?? null} />
+          {playlistHeroEnabled && <HeroBackdrop src={localPl.coverImage ?? firstCovers(localTracks.map(t => t.id), libraryArt, 1)[0] ?? null} isDarkSkin={isDarkSkin} />}
           <div className="relative z-10 pt-5">
-            <button onClick={() => setLocalSelectedId(null)} className="flex items-center gap-1.5 text-white/60 hover:text-white text-sm transition-colors">
+            <button onClick={() => setLocalSelectedId(null)} className={`flex items-center gap-1.5 text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}>
               <ArrowLeft size={15} /> Playlists
             </button>
           </div>
@@ -3167,19 +3158,19 @@ export default function PlaylistsView(): JSX.Element {
               </div>
             </div>
             <div className="min-w-0 flex-1 pb-1">
-              <p className="text-white/60 text-xs uppercase tracking-widest font-semibold mb-2">Local Playlist</p>
+              <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>Local Playlist</p>
               {localRenaming ? (
                 <div className="flex items-center gap-2 mb-3">
                   <input value={localRenameVal} onChange={e => setLocalRenameVal(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { renameLocalPlaylist(localPl.id, localRenameVal.trim() || localPl.name); setLocalRenaming(false) } }}
-                    autoFocus className="bg-black/30 border border-white/20 rounded-lg px-3 py-2 text-white text-2xl font-black focus:outline-none focus:border-accent/50 w-full" />
+                    autoFocus className={`border rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border-white/20 text-white' : 'bg-surface-overlay border-[var(--border)] text-text-primary'}`} />
                   <button onClick={() => { renameLocalPlaylist(localPl.id, localRenameVal.trim() || localPl.name); setLocalRenaming(false) }} className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
-                  <button onClick={() => setLocalRenaming(false)} className="p-2 rounded-lg text-white/60 hover:text-white shrink-0"><X size={16} /></button>
+                  <button onClick={() => setLocalRenaming(false)} className={`p-2 rounded-lg shrink-0 ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={16} /></button>
                 </div>
               ) : (
-                <h1 className="text-white text-3xl md:text-4xl font-black truncate mb-2">{localPl.name}</h1>
+                <h1 className={`text-3xl md:text-4xl font-black truncate mb-2 ${heroLight ? 'text-white' : 'text-text-primary'}`}>{localPl.name}</h1>
               )}
-              <div className="flex items-center gap-1.5 text-white/60 text-sm mb-4">
+              <div className={`flex items-center gap-1.5 text-sm mb-4 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>
                 <HardDrive size={12} className="shrink-0" />
                 <span>Local</span>
                 <span>·</span>
@@ -3192,21 +3183,21 @@ export default function PlaylistsView(): JSX.Element {
                   <HeroShuffleButton onClick={() => { const s = fisherYates(localQTracks); playTrack(s[0], s) }} />
                 )}
                 {!localRenaming && (
-                  <button onClick={() => { setLocalRenameVal(localPl.name); setLocalRenaming(true) }} className="p-2.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 text-sm transition-colors" title="Rename">
+                  <button onClick={() => { setLocalRenameVal(localPl.name); setLocalRenaming(true) }} className={`p-2.5 rounded-full text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white hover:bg-white/10' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`} title="Rename">
                     <Pencil size={15} />
                   </button>
                 )}
                 {isElectron && localTracks.length > 0 && (
-                  <button onClick={() => exportLocalPlaylistM3u(localPl.id)} className="p-2.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 text-sm transition-colors" title="Export as M3U">
+                  <button onClick={() => exportLocalPlaylistM3u(localPl.id)} className={`p-2.5 rounded-full text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white hover:bg-white/10' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`} title="Export as M3U">
                     <FileDown size={15} />
                   </button>
                 )}
                 {localPl.coverImage && (
-                  <button onClick={() => updateLocalPlaylist(localPl.id, { coverImage: null })} className="p-2.5 rounded-full text-white/60 hover:text-white hover:bg-white/10 text-sm transition-colors" title="Remove custom cover">
+                  <button onClick={() => updateLocalPlaylist(localPl.id, { coverImage: null })} className={`p-2.5 rounded-full text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white hover:bg-white/10' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`} title="Remove custom cover">
                     <ImageOff size={15} />
                   </button>
                 )}
-                <button onClick={() => { deleteLocalPlaylist(localPl.id); setLocalSelectedId(null) }} className="p-2.5 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/10 text-sm transition-colors" title="Delete playlist">
+                <button onClick={() => { deleteLocalPlaylist(localPl.id); setLocalSelectedId(null) }} className={`p-2.5 rounded-full hover:text-red-400 hover:bg-red-500/10 text-sm transition-colors ${heroLight ? 'text-white/60' : 'text-text-muted'}`} title="Delete playlist">
                   <Trash2 size={15} />
                 </button>
               </div>
@@ -3425,7 +3416,7 @@ export default function PlaylistsView(): JSX.Element {
         {/* ── Playlists section — folders sit right in the same grid as the
             playlists they group, rather than a separate section above it. ── */}
         <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3">Playlists</h2>
-        <div ref={setMainGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+        <div ref={setMainGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
           {layoutGridEntries([
             {
               key: 'liked',
@@ -3483,7 +3474,7 @@ export default function PlaylistsView(): JSX.Element {
         {ungroupedLocal.length > 0 && (
           <>
             <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3 mt-9">On This Device</h2>
-            <div ref={setDeviceGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+            <div ref={setDeviceGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
               {layoutGridEntries(ungroupedLocal.map(lp => localEntry(lp)), deviceGridCols)}
             </div>
           </>

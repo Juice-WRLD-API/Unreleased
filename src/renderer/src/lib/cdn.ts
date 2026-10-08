@@ -160,8 +160,10 @@ class CdnService {
   ): Promise<CdnDownloadResult | null> {
     if (!this.enabled) { debug(filepath, 'CDN disabled in settings - using origin'); return null }
 
+    const resolveStarted = performance.now()
     const resolution = await this.resolve(filepath)
-    if (!resolution) { debug(filepath, 'resolve failed - using origin'); return null }
+    const resolveMs = Math.round(performance.now() - resolveStarted)
+    if (!resolution) { debug(filepath, `resolve failed after ${resolveMs} ms - using origin`); return null }
     if (resolution.node_count === 0) { debug(filepath, 'no nodes host this file - using origin'); return null }
     if (resolution.direct) {   // server says the origin beats every candidate
       debug(filepath, 'server flagged direct (no node fast enough) - using origin', resolution.nodes)
@@ -178,7 +180,7 @@ class CdnService {
       return null
     }
 
-    debug(filepath, `trying ${candidates.length} node(s)`, candidates.map((n) => `${n.name} (${n.node_id}, score ${n.score}, ${n.serve_url ? 'tunnel' : 'webrtc'})`))
+    debug(filepath, `resolved in ${resolveMs} ms, trying ${candidates.length} node(s)`, candidates.map((n) => `${n.name} (${n.node_id}, score ${n.score}, ${n.serve_url ? 'tunnel' : 'webrtc'})`))
     for (const node of candidates) {
       const attempts: Array<['tunnel' | 'webrtc', () => Promise<CdnNodeDownloadResult>]> = []
       if (node.serve_url) attempts.push(['tunnel', () => downloadViaTunnel(node, filepath, onProgress)])
@@ -205,7 +207,7 @@ class CdnService {
           break
         }
 
-        debug(filepath, `served by ${node.name} (${node.node_id}) via ${via}: ${result.bytesReceived} bytes in ${result.elapsedMs} ms, hash verified`)
+        debug(filepath, `served by ${node.name} (${node.node_id}) via ${via}: ${result.bytesReceived} bytes in ${result.elapsedMs} ms, hash verified, ${Math.round(performance.now() - resolveStarted)} ms since resolve started`)
         this.logDownload(node.node_id, filepath, result.bytesReceived, result.elapsedMs)
         return { blob: result.blob, node, verified: true, isDonor: resolution.is_donor }
       }

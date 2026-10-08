@@ -1,5 +1,5 @@
 /* Josefin Sans powers the sidebar wordmark and the "Display" font choice
-   (lib/fonts.ts) — the body weights are here for the latter, which needs more
+   (lib/fonts.ts) - the body weights are here for the latter, which needs more
    than the wordmark's hairline 100/200. Every other selectable font is a
    system stack, so this stays the only webfont and its failure to load just
    falls through to the next family in the stack.
@@ -46,17 +46,17 @@
 /* ─── Light theme ────────────────────────────────────────────────────────────────
    NOTE: these :root/.dark blocks are only the first-paint fallback (and the
    values Tailwind's color-scheme relies on before React mounts). The live
-   palette — including these two classic themes and every other skin — is
+   palette - including these two classic themes and every other skin - is
    defined in lib/skins.ts and written onto <html> as inline vars by App.tsx.
    Change palettes there, not here. */
 :root {
   /* Without this, native controls (mainly <select> dropdown popups) follow
-     the OS's own dark/light preference instead of this app's theme toggle —
+     the OS's own dark/light preference instead of this app's theme toggle -
      e.g. OS in dark mode + app in light mode renders the popup with a dark
      native background while the <option> text still inherits this theme's
      (black) color, making it unreadable. */
   color-scheme: light;
-  /* Font stacks — first-paint defaults; useThemeEffects overwrites these with
+  /* Font stacks - first-paint defaults; useThemeEffects overwrites these with
      the user's picks (lib/fonts.ts). --font-app also backs Tailwind's
      `font-sans`, which preflight applies to <html>. */
   --font-app: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -139,9 +139,13 @@ html.theme-animate {
 }
 
 /* ─── Gradient surfaces ──────────────────────────────────────────────────────────
-   Opt-in (Settings → Appearance → Gradient surfaces; useThemeEffects toggles
-   the `gradients` class). Accent-tinted washes layered as background-image on
-   top of the existing flat background-color, so no skin's palette changes —
+   Two independent opt-ins, both toggled by useThemeEffects:
+     .gradients          → Settings → Appearance → "App gradients"
+     .surface-gradients  → Settings → Appearance → "Control gradients"
+   (the class names predate the UI labels; the storage keys are load-bearing
+   for already-saved preferences, so only the labels were reworded.)
+   Accent-tinted washes layered as background-image on
+   top of the existing flat background-color, so no skin's palette changes -
    and because they ride rgb(var(--accent-rgb) / α), they recolor with the
    accent, follow the Now Playing skin's per-song accent, and animate through
    the same registered-property cross-fade as everything else. */
@@ -149,9 +153,11 @@ html.theme-animate {
 /* App shell: a glow from the top-right + a faint answering one bottom-left.
    Sidebar/player paint over their own strips, so this reads as depth behind
    the main content area. */
+.app-shell { height: var(--app-height); }
+
 html.gradients .app-shell {
   background-image:
-    radial-gradient(100% 80% at 100% 0%, rgb(var(--accent-rgb) / 0.14), transparent 55%),
+    radial-gradient(100% 80% at 100% 0%, rgb(var(--accent-rgb) / 0.09), transparent 55%),
     radial-gradient(80% 70% at 0% 100%, rgb(var(--accent-rgb) / 0.08), transparent 55%);
 }
 
@@ -160,28 +166,30 @@ html.gradients .app-sidebar {
   background-image: linear-gradient(180deg, rgb(var(--accent-rgb) / 0.10), rgb(var(--accent-rgb) / 0.03) 45%, transparent 75%);
 }
 
-/* Player bar: mirror of the sidebar, rising from the bottom edge. */
-html.gradients .app-player {
+/* Player bar: mirror of the sidebar, rising from the bottom edge. Grouped
+   with the controls below rather than the shell above - it reads as a
+   control strip, not as app chrome, so it follows that toggle. */
+html.surface-gradients .app-player {
   background-image: linear-gradient(0deg, rgb(var(--accent-rgb) / 0.10), transparent 80%);
 }
 
 /* Accent-filled controls get a subtle two-tone sheen (hover-accent → accent).
    background-image over Tailwind's background-color, so `bg-accent` keeps
-   working everywhere — tiny dots/indicators just look flat, buttons look lit. */
+   working everywhere - tiny dots/indicators just look flat, buttons look lit. */
 html.gradients .bg-accent {
   background-image: linear-gradient(135deg, rgb(var(--accent-hover-rgb) / 1), rgb(var(--accent-rgb) / 1) 70%);
 }
 
 /* Flat surface-overlay boxes (view-toggle groups, search bars, badges, menu
    panels, etc.) get a faint wash too, so they don't read as flatly
-   inconsistent next to the gradients above — top-down like the sidebar's,
+   inconsistent next to the gradients above - top-down like the sidebar's,
    not diagonal like bg-accent's, since these are mostly small/wide pills
    where a diagonal reads as an odd, randomly-placed highlight rather than
    "lit from the same direction as everything else". Much fainter than the
    others since surface-overlay covers far more of the UI at once.
 
    Its own `surface-gradients` class (Settings → Appearance → Surface
-   gradients), independent of `gradients` above — bg-surface-overlay is used
+   gradients), independent of `gradients` above - bg-surface-overlay is used
    everywhere, so someone who wants the big shell/sidebar/player washes
    doesn't necessarily want every small pill tinted too. Off by default
    behavior is just the flat --surface-overlay color, same as before either
@@ -196,13 +204,72 @@ html.surface-gradients .bg-surface-overlay {
    present) is handled per-component via Tailwind's focus:ring/focus:border
    utilities instead. */
 :focus { outline: none; }
+/* Every full-height box (html/body/#root and .app-shell) sizes off this, so
+   the dvh/lvh choice is made once. See main.tsx for why installed apps need
+   the other unit. */
+html { --app-height: 100dvh; }
+html.standalone { --app-height: 100lvh; }
+
+/* Top inset for anything that parks itself below the status bar, with a bit
+   of breathing room past it: iOS softens the top band of the screen in every
+   installed web app (not something this page causes or can turn off - see the
+   status-bar meta in index.html), and nothing moves content out of that band
+   entirely, so this just keeps titles and icon buttons off the worst of it.
+
+   Measured on a 59px-inset iPhone: the blur is total for the first ~60px,
+   fades through ~75px, and is gone by ~90px - i.e. it runs about 30px past
+   the inset itself. 1.6 lands just clear of that (~94px). Only those last
+   ~30px are a real cost; the 59px below the status bar was never usable
+   anyway. Dial the factor down to reclaim space at the price of a softer
+   first line.
+
+   The multiplier is what gates it - deliberately, rather than a standalone
+   check. The inset is only non-zero where content actually renders under a
+   status bar, so scaling it adds room exactly there and stays 0×n = 0 on
+   desktop and in browser tabs. */
+html { --top-inset: calc(env(safe-area-inset-top, 0px) * 1.6); }
 
 html, body, #root {
-  height: 100dvh;
+  height: var(--app-height);
   width: 100%;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+  /* Belt-and-suspenders: if either value still under-reports on some
+     device, this makes any exposed strip blend in instead of showing as an
+     obvious black bar. */
+  background: var(--surface, #121212);
+}
+
+/* Same wash as .app-shell (above), mirrored onto html/body/#root themselves.
+   iOS standalone mode extends content under the status bar/notch via
+   safe-area insets, and .app-shell doesn't always cover that sliver - without
+   this, Gradient Surfaces users see a flat patch there instead of the glow
+   the rest of the shell has. Keeping both copies in sync is fine: they're
+   cheap and only one is ever visible at a time. */
+html.gradients,
+html.gradients body,
+html.gradients #root {
+  background-image:
+    radial-gradient(100% 80% at 100% 0%, rgb(var(--accent-rgb) / 0.09), transparent 55%),
+    radial-gradient(80% 70% at 0% 100%, rgb(var(--accent-rgb) / 0.08), transparent 55%);
+}
+
+/* Same gap, same fix, for WRLD: its dark blurred-cover backdrop is the only
+   thing under that sliver while it's open, so leaking through to the raw
+   `var(--surface)` below reads as a wrong-colored (and theme-following)
+   patch sitting on top of an otherwise dark, immersive screen - much more
+   jarring than the Gradient Surfaces case above, since WRLD's backdrop is
+   always dark regardless of the active theme. `wrld-active` is toggled on
+   <html> for exactly as long as WrldView is mounted (mobile only - desktop
+   never fills the safe-area top inset this way). Can't replicate the actual
+   blurred-cover art here (this paints behind everything, before React has
+   anything to sample from), so a plain dark tone is the fix: close enough
+   to blend, and always closer than the theme surface color it replaces. */
+html.wrld-active,
+html.wrld-active body,
+html.wrld-active #root {
+  background: #000;
 }
 
 /* Custom scrollbar */
@@ -232,7 +299,7 @@ input[type='range'] {
   background: transparent;
   cursor: pointer;
   /* Taller than the thumb so the vertical grab/drag area is more forgiving
-     than the visible 4px track — dragging slightly off-track shouldn't feel
+     than the visible 4px track - dragging slightly off-track shouldn't feel
      like losing the slider. */
   height: 20px;
   display: block;
@@ -243,6 +310,18 @@ input[type='range']::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
   background: var(--surface-overlay);
+}
+/* Firefox draws none of the -webkit- pseudo-elements, so every rule below is
+   mirrored onto its -moz- counterpart. Keep the two in separate blocks: one
+   unrecognized pseudo-element invalidates a whole selector list, so merging
+   them would drop the styling in both engines. */
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-overlay);
+}
+input[type='range']::-moz-focus-outer {
+  border: 0;
 }
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -255,7 +334,7 @@ input[type='range']::-webkit-slider-thumb {
   opacity: 0;
   transition: opacity 0.15s;
 }
-/* Keep the thumb visible for the whole drag — :hover alone drops out the
+/* Keep the thumb visible for the whole drag - :hover alone drops out the
    moment the cursor strays vertically off the thin track, which reads as
    the slider "slipping away" even though the drag (native pointer capture)
    is still tracking correctly. :active persists for the whole mouse-down. */
@@ -263,17 +342,52 @@ input[type='range']:hover::-webkit-slider-thumb,
 input[type='range']:active::-webkit-slider-thumb {
   opacity: 1;
 }
+/* Firefox centers the thumb on the track itself, so no margin-top here - and
+   it draws a border on the default thumb that has to be cleared. */
+input[type='range']::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text-primary);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+input[type='range']:hover::-moz-range-thumb,
+input[type='range']:active::-moz-range-thumb {
+  opacity: 1;
+}
+/* Touch devices have no :hover at all, so a hover-gated thumb never becomes
+   visible except mid-drag (:active) - on a bare slider with no accent fill
+   (anything not wrapped in .progress-track/.eq-band, e.g. the crossfade
+   duration slider) that left nothing on screen at all until the user's
+   finger was already on it. Mobile browsers correctly report (hover: none)
+   for a touchscreen, so this only affects touch, not mouse/trackpad. */
+@media (hover: none) {
+  input[type='range']::-webkit-slider-thumb {
+    opacity: 1;
+  }
+  input[type='range']::-moz-range-thumb {
+    opacity: 1;
+  }
+}
 
 .progress-track input[type='range']::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
+}
+.progress-track input[type='range']::-moz-range-track {
   background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
 }
 /* Preserve gradient on disabled range (FM live bar) */
 .progress-track input[type='range']:disabled::-webkit-slider-runnable-track {
   background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
 }
+.progress-track input[type='range']:disabled::-moz-range-track {
+  background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
+}
 
 /* Equalizer band sliders. Unlike seek/volume, a band's setting has to be
-   readable at a glance without hovering each one — so the thumb stays
+   readable at a glance without hovering each one - so the thumb stays
    visible, and the track fills from the 0 dB center out to the current
    gain (--lo/--hi are the low/high ends of that span, set by the panel). */
 .eq-band input[type='range']::-webkit-slider-thumb { opacity: 1; }
@@ -287,6 +401,17 @@ input[type='range']:active::-webkit-slider-thumb {
   );
 }
 .eq-band input[type='range']:disabled::-webkit-slider-thumb { opacity: 0.5; }
+.eq-band input[type='range']::-moz-range-thumb { opacity: 1; }
+.eq-band input[type='range']::-moz-range-track {
+  background: linear-gradient(
+    to right,
+    var(--surface-overlay) var(--lo, 50%),
+    var(--accent) var(--lo, 50%),
+    var(--accent) var(--hi, 50%),
+    var(--surface-overlay) var(--hi, 50%)
+  );
+}
+.eq-band input[type='range']:disabled::-moz-range-thumb { opacity: 0.5; }
 
 /* Synced lyrics */
 .lyric-active { color: var(--text-primary); font-weight: 700; font-size: 1.25rem; }
@@ -341,6 +466,49 @@ input[type='range']:active::-webkit-slider-thumb {
   animation: scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ─── Bottom sheet ──────────────────────────────────────────────────────────────
+   components/mobile/Sheet - the sheet slides its full height up from the bottom
+   edge while the scrim fades. The entrance class is *removed* once it finishes
+   (see Sheet.tsx): with fill-mode `both` the animation's final transform would
+   outrank the inline one the drag-to-dismiss gesture writes.
+   Sheet.tsx's EXIT_MS is kept in sync with the sheet-out duration below. */
+@keyframes sheet-in {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+@keyframes sheet-out {
+  from { transform: translateY(0); }
+  to   { transform: translateY(100%); }
+}
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-sheet-in  { animation: sheet-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-sheet-out { animation: sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; }
+.animate-scrim-in  { animation: scrim-in 0.2s ease both; }
+.animate-scrim-out { animation: scrim-in 0.18s ease reverse both; }
+
+/* Playing-track equalizer bars - the animated "this row is the one you're
+   hearing" marker used in place of a static icon in file/track lists. */
+@keyframes eq-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.eq-bar {
+  transform-origin: bottom;
+  animation: eq-bar 0.9s ease-in-out infinite;
+}
+
+/* WRLD's mini lyric line under the cover - keyed on the active line index, so
+   this replays as a soft crossfade every time the line changes rather than a
+   hard text swap. */
+@keyframes lyric-line-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-lyric-line-in { animation: lyric-line-in 0.3s ease-out both; }
+
 @keyframes slide-in-right {
   from { transform: translateX(18px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
@@ -349,7 +517,7 @@ input[type='range']:active::-webkit-slider-thumb {
   animation: slide-in-right 0.28s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
-/* Track row stagger — cap delay at first 30 rows */
+/* Track row stagger - cap delay at first 30 rows */
 .track-row { animation: fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .track-row:nth-child(1)  { animation-delay:   0ms; }
 .track-row:nth-child(2)  { animation-delay:  20ms; }
@@ -386,7 +554,7 @@ input[type='range']:active::-webkit-slider-thumb {
   animation: wrld-queue-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Per-row reveal, staggered — layered on top of the panel entrance so the
+/* Per-row reveal, staggered - layered on top of the panel entrance so the
    list cascades in. `backwards` (not `both`) so the fill state is dropped
    once the animation ends, leaving the drag-reorder transforms free to apply. */
 @keyframes wrld-row-in {
@@ -406,7 +574,7 @@ input[type='range']:active::-webkit-slider-thumb {
 .wrld-q-row:nth-child(10)  { animation-delay: 166ms; }
 .wrld-q-row:nth-child(n+11) { animation-delay: 172ms; }
 
-/* App-menu dropdown / submenu entrance — a quick, subtle scale-fade. The panel
+/* App-menu dropdown / submenu entrance - a quick, subtle scale-fade. The panel
    sets transform-origin inline (top vs bottom) so it grows out of the trigger
    whether it opens downward or flips above it (bottom nav bar). */
 @keyframes menu-pop {
@@ -431,10 +599,87 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Collapsed rather than removed: these all use fill-mode `both`, so the
+     element's resting appearance is the animation's end state - dropping the
+     animation entirely would leave it stuck at `from` (invisible, offset, or
+     translated off-screen). A near-zero duration lands on `to` immediately. */
   .animate-wrld-queue-in,
   .wrld-q-row,
   .animate-wordle-shake,
-  .animate-menu-pop { animation-duration: 0.01ms; animation-delay: 0ms; }
+  .animate-menu-pop,
+  .animate-fade-in,
+  .animate-slide-in-right,
+  .animate-slide-up,
+  .animate-scale-in,
+  .animate-sheet-in,
+  .animate-sheet-out,
+  .animate-scrim-in,
+  .animate-scrim-out,
+  .animate-lyric-line-in,
+  .track-row,
+  .view-enter { animation-duration: 0.01ms; animation-delay: 0ms; }
+
+  /* Decorative loops with nothing to land on - just stop them. eq-bar keeps a
+     static mid-height so the "now playing" marker still reads as bars.
+     The chat.* classes get the same treatment next to their own definitions
+     in components/chat/chat.css, which loads after this file. */
+  .eq-bar { animation: none; transform: scaleY(0.7); }
+  .art-shimmer { animation: none; }
+
+  /* The palette cross-fade (see html.theme-animate above) is a transition, not
+     an animation, so it needs its own opt-out - a skin swap should land on the
+     new colours at once rather than sweeping every surface through 700ms. */
+  html.theme-animate { transition: none; }
+}
+
+/* Suspense fallback for a lazily-loaded view (components/ViewSkeleton).
+   Starts invisible and only fades in after a beat: a chunk that's already
+   warm (lib/lazyViews prefetches on nav hover/tap) resolves well inside the
+   delay, so the common case shows nothing at all instead of a flash of
+   skeleton. Pure CSS - no timer to keep in sync with React's own scheduling. */
+@keyframes view-skeleton-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.view-skeleton {
+  opacity: 0;
+  animation: view-skeleton-in 150ms ease 200ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the delay - it's what suppresses the flash, not decoration - but
+     drop the fade itself. Not folded into the block above, which zeroes
+     animation-delay for animations where the delay IS decoration. */
+  .view-skeleton { animation-duration: 0.01ms; }
+  .view-skeleton .animate-pulse { animation: none; }
+}
+
+/* ─── Clickable rows ─────────────────────────────────────────────────────────
+   Rows, cards and list items that take a click but can't be a <button>,
+   because they already contain buttons of their own. They opt in through
+   lib/a11y's clickable(), which makes them real tab stops - so they need the
+   focus ring a native control gets for free. Outline rather than a ring
+   utility so it traces whatever corner radius the element already has, and
+   never nudges the layout. */
+[role='button']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Fullscreen WRLD: once the mouse rests, WrldVisualizer sets data-viz-idle on
+   the fullscreen root. The cursor hides everywhere (important, or any element
+   with its own cursor-pointer would keep showing it) and the page's chrome
+   fades out along with the visualizer toolbar. */
+[data-viz-fade] {
+  transition: opacity 0.35s ease;
+}
+[data-viz-idle],
+[data-viz-idle] * {
+  cursor: none !important;
+}
+[data-viz-idle] [data-viz-fade] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Fullscreen WRLD: once the mouse rests, WrldVisualizer sets data-viz-idle on

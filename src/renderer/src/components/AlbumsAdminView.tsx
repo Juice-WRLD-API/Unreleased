@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
-  Plus, Trash2, Save, X, Search, Loader2, ChevronLeft, ChevronUp, ChevronDown,
+  Plus, Trash2, Save, Check, X, Search, Loader2, ChevronLeft, ChevronUp, ChevronDown,
   Music, Shield, AlertCircle,
 } from 'lucide-react'
 import { apiFetch, buildImageUrl, loadAllSongs } from '../lib/juicewrldApi'
@@ -431,7 +431,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function AlbumsAdminView(): JSX.Element {
-  const { account, setActiveView } = useStorePick('account', 'setActiveView')
+  const { account, setActiveView, setActiveAdminTab } = useStorePick('account', 'setActiveView', 'setActiveAdminTab')
   const isAdmin = !!account?.is_administrator
   const otpEnabled = !!account?.otp_enabled
   const pathIndex = usePathIndex()
@@ -471,7 +471,10 @@ export default function AlbumsAdminView(): JSX.Element {
       <Shield size={28} className="text-text-muted" />
       <p className="text-text-primary font-semibold text-sm">Two-factor authentication required</p>
       <p className="text-xs text-text-muted max-w-xs">Album management needs 2FA enabled on your account. Set it up from Admin → Security.</p>
-      <button onClick={() => setActiveView('admin')} className="text-xs text-accent hover:underline">Go to Admin</button>
+      <button
+        onClick={() => { setActiveAdminTab('security'); setActiveView('admin') }}
+        className="text-xs text-accent hover:underline"
+      >Go to Security</button>
     </div>
   )
 

@@ -2,6 +2,8 @@ import { useStore } from '../../store/useStore'
 import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, type PlaylistSummary } from '../userApi'
 import { getSongById, getSongsByIds, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { completeSongs, songFromArg } from './player'
+import { PLAYLIST_EDIT_SUBS, runPlaylistEdit } from './playlistEdit'
+import { pageRows } from './more'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -32,9 +34,9 @@ async function playlistTracks(id: number): Promise<{ name: string; tracks: Retur
   return { name: detail.name, tracks: found.map(songToTrack), songs: found.map((s) => ({ id: s.id, name: s.name })) }
 }
 
-const SUBS = ['play', 'shuffle', 'show', 'create', 'delete', 'add', 'remove', 'open']
+const SUBS = ['play', 'shuffle', 'show', 'create', 'delete', 'add', 'remove', 'open', ...PLAYLIST_EDIT_SUBS]
 // Subcommands whose first argument is a playlist (add/remove take it before `--`).
-const PLAYLIST_SUBS = new Set(['play', 'shuffle', 'show', 'ls', 'open', 'delete', 'rm', 'add', 'remove'])
+const PLAYLIST_SUBS = new Set(['play', 'shuffle', 'show', 'ls', 'open', 'delete', 'rm', 'add', 'remove', 'rename', 'describe', 'public', 'private', 'move', 'cover'])
 
 // Playlist titles for Tab. Like `shuffle <era>`, a title with spaces completes
 // one word at a time: only the words past what is already typed come back.
@@ -102,7 +104,12 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
   },
   {
     name: 'playlist', aliases: ['pl'], group: 'Library',
-    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  create <name>  ·  delete <name|N>  ·  add <name|N> -- <song>  ·  remove <name|N> -- <song>',
+    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
+    covers: [
+      'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
+      'userApi.renamePlaylist', 'userApi.updatePlaylist', 'userApi.reorderPlaylist', 'userApi.uploadPlaylistCover', 'userApi.removePlaylistCover',
+      'userApi.getPlaylistCover', 'userApi.getPublicPlaylist', 'userApi.getPublicPlaylistCover',
+    ],
     description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> or #N a number from playlists, <song> a title or a number from find',
     complete: completePlaylistNames,
     run: async (args, ctx) => {
@@ -121,7 +128,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
         case 'show': case 'ls': {
           const pl = await playlistFromArg(rest)
           const { songs } = await playlistTracks(pl.id)
-          ctx.print(`${pl.name}\n${songs.length ? songs.slice(0, 80).map((s, i) => `${String(i + 1).padStart(3)}  ${s.name}`).join('\n') : '(empty)'}${songs.length > 80 ? `\n  … ${songs.length - 80} more` : ''}`)
+          ctx.print(`${pl.name}\n${songs.length ? pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${songs[i].name}`, 80) : '(empty)'}`)
           return
         }
         case 'open': {
@@ -158,7 +165,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
           return
         }
         default:
-          fail('usage: playlist <play|shuffle|show|open|create|delete|add|remove> ...')
+          await runPlaylistEdit(sub.toLowerCase(), rest, ctx, playlistFromArg)
       }
     },
   },
@@ -176,7 +183,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
         ctx.print(`▶ ${songs.length} liked song${songs.length === 1 ? '' : 's'}`, 'ok')
         return
       }
-      ctx.print(`${songs.slice(0, 80).map((s, i) => `${String(i + 1).padStart(3)}  ${s.name}`).join('\n')}${songs.length > 80 ? `\n  … ${songs.length - 80} more` : ''}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)
+      ctx.print(`${pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${songs[i].name}`, 80)}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)
     },
   },
 ]

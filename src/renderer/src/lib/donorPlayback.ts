@@ -7,6 +7,8 @@ import type { Track } from '../types'
 import type { DonorFile } from './donorFilesApi'
 import { fetchDonorFileBlob, extensionOf } from './donorFilesApi'
 import { cachedDonorCover } from './donorCoverArt'
+import { isSessionEditPlaceholder } from './sessionEditLinksMirror'
+import { cachedSessionEditUrl, ensureSessionEditUrl } from './sessionEditsApi'
 
 const SCHEME = 'donor://'
 const MAX_CACHED = 3
@@ -17,8 +19,11 @@ const pending = new Map<string, Promise<string>>()
 
 export const donorTrackId = (fileId: string): string => `donor-file-${fileId}`
 
+// Also covers a not-yet-looked-up session song's `sessionedit://<id>` marker:
+// it takes the same "swap the marker for a playable URL before loading" path
+// as a donor file, just resolved by a file search instead of a blob fetch.
 export function isDonorStreamUrl(url: string | undefined): url is string {
-  return !!url && url.startsWith(SCHEME)
+  return (!!url && url.startsWith(SCHEME)) || isSessionEditPlaceholder(url)
 }
 
 export function donorFileIdFromUrl(url: string): string {
@@ -27,6 +32,7 @@ export function donorFileIdFromUrl(url: string): string {
 
 /** The object URL for a `donor://` marker, or null when it isn't fetched yet. */
 export function cachedDonorUrl(streamUrl: string): string | null {
+  if (isSessionEditPlaceholder(streamUrl)) return cachedSessionEditUrl(streamUrl)
   const id = donorFileIdFromUrl(streamUrl)
   const url = cache.get(id)
   if (!url) return null
@@ -37,6 +43,7 @@ export function cachedDonorUrl(streamUrl: string): string | null {
 }
 
 export function ensureDonorUrl(streamUrl: string): Promise<string> {
+  if (isSessionEditPlaceholder(streamUrl)) return ensureSessionEditUrl(streamUrl)
   const id = donorFileIdFromUrl(streamUrl)
   const hit = cachedDonorUrl(streamUrl)
   if (hit) return Promise.resolve(hit)

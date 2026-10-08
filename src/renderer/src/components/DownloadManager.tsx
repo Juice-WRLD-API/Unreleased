@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { Download, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, FolderOpen, ArrowDownToLine, ArrowUpFromLine, FolderPlus, FolderInput, Send } from 'lucide-react'
-import { useStore, useStorePick, DownloadItem, StagedFileChange } from '../store/useStore'
+import { Download, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, FolderOpen, ArrowDownToLine, ArrowUpFromLine, FolderPlus, FolderInput, Send, Trash2, Plus, Pencil } from 'lucide-react'
+import { useStore, useStorePick, DownloadItem, StagedFileChange, StagedSongChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
 import { cancelZipTask, isZipTaskId } from '../lib/clientZip'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
+import { proposeStagedSongChanges, stagedSongChangeLabel } from '../lib/compStagedSongChanges'
 
 export default function DownloadManager(): JSX.Element | null {
-  const { downloads, showDownloadManager, setShowDownloadManager, addDownload, updateDownload, clearCompletedDownloads, setUpdateStatus, wrldFullscreen, stagedFileChanges } = useStorePick('downloads', 'showDownloadManager', 'setShowDownloadManager', 'addDownload', 'updateDownload', 'clearCompletedDownloads', 'setUpdateStatus', 'wrldFullscreen', 'stagedFileChanges')
+  const { downloads, showDownloadManager, setShowDownloadManager, addDownload, updateDownload, clearCompletedDownloads, setUpdateStatus, wrldFullscreen, stagedFileChanges, stagedSongChanges } = useStorePick('downloads', 'showDownloadManager', 'setShowDownloadManager', 'addDownload', 'updateDownload', 'clearCompletedDownloads', 'setUpdateStatus', 'wrldFullscreen', 'stagedFileChanges', 'stagedSongChanges')
   // Lives out here rather than in StagedChanges: a fully successful propose
   // empties the queue, which unmounts that section - and with it the only
   // confirmation the user would ever see.
@@ -86,7 +87,7 @@ export default function DownloadManager(): JSX.Element | null {
   const active = downloads.filter((d) => d.state === 'downloading').length
   const hasDownloads = downloads.length > 0
   const activeUploads = downloads.filter((d) => d.type === 'upload' && d.state === 'downloading').length
-  const stagedCount = stagedFileChanges.length
+  const stagedCount = stagedFileChanges.length + stagedSongChanges.length
   const badgeCount = active + stagedCount
 
   return (
@@ -140,8 +141,8 @@ export default function DownloadManager(): JSX.Element | null {
           </div>
           {/* List */}
           <div className="max-h-72 overflow-y-auto">
-            {stagedFileChanges.length > 0 && (
-              <StagedChanges changes={stagedFileChanges} onResult={setProposeResult} />
+            {(stagedFileChanges.length > 0 || stagedSongChanges.length > 0) && (
+              <StagedChanges fileChanges={stagedFileChanges} songChanges={stagedSongChanges} onResult={setProposeResult} />
             )}
             {proposeResult && (
               <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border)]">
@@ -153,7 +154,7 @@ export default function DownloadManager(): JSX.Element | null {
               </div>
             )}
             {downloads.length === 0 ? (
-              stagedFileChanges.length === 0 && !proposeResult &&
+              stagedFileChanges.length === 0 && stagedSongChanges.length === 0 && !proposeResult &&
                 <p className="text-[var(--text-muted)] text-xs text-center py-6">No downloads</p>
             ) : (
               <div className="divide-y divide-[var(--border)]/40">
@@ -167,22 +168,33 @@ export default function DownloadManager(): JSX.Element | null {
   )
 }
 
-// Changes dragged together in the API Files tab, all waiting on one Propose.
-// They sit above the transfer list because they're the only rows here the
-// user still has to act on - everything below is already in flight or finished.
-function StagedChanges({ changes, onResult }: {
-  changes: StagedFileChange[]
+// Changes dragged together in the Files tab, plus song edits/deletions staged
+// from the Tracker's editors, all waiting on one Propose. They sit above the
+// transfer list because they're the only rows here the user still has to act
+// on - everything below is already in flight or finished.
+function StagedChanges({ fileChanges, songChanges, onResult }: {
+  fileChanges: StagedFileChange[]
+  songChanges: StagedSongChange[]
   onResult: (message: string | null) => void
 }): JSX.Element {
-  const { unstageFileChange, clearStagedFileChanges } = useStorePick('unstageFileChange', 'clearStagedFileChanges')
+  const { unstageFileChange, clearStagedFileChanges, unstageSongChange, clearStagedSongChanges } =
+    useStorePick('unstageFileChange', 'clearStagedFileChanges', 'unstageSongChange', 'clearStagedSongChanges')
   const [proposing, setProposing] = useState(false)
+
+  const total = fileChanges.length + songChanges.length
+  const discardAll = (): void => { clearStagedFileChanges(); clearStagedSongChanges() }
 
   const propose = async (): Promise<void> => {
     if (proposing) return
     setProposing(true)
     onResult(null)
-    const { proposed, failed } = await proposeStagedChanges()
+    const [fileResult, songResult] = await Promise.all([
+      fileChanges.length ? proposeStagedChanges() : Promise.resolve({ proposed: 0, failed: 0 }),
+      songChanges.length ? proposeStagedSongChanges() : Promise.resolve({ proposed: 0, failed: 0 }),
+    ])
     setProposing(false)
+    const proposed = fileResult.proposed + songResult.proposed
+    const failed = fileResult.failed + songResult.failed
     const parts = [`Proposed ${proposed}`]
     if (failed > 0) parts.push(`${failed} failed`)
     onResult(parts.join(' · '))
@@ -193,15 +205,15 @@ function StagedChanges({ changes, onResult }: {
       <div className="flex items-center gap-2 px-3 py-2">
         <span className="text-[var(--text-primary)] text-[11px] font-semibold flex-1">
           Staged changes
-          <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-[var(--accent)]/20 text-[var(--accent)] text-[10px] font-medium">{changes.length}</span>
+          <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-[var(--accent)]/20 text-[var(--accent)] text-[10px] font-medium">{total}</span>
         </span>
-        <button onClick={clearStagedFileChanges} disabled={proposing}
+        <button onClick={discardAll} disabled={proposing}
           className="text-[10px] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors px-1 rounded">
           Discard
         </button>
       </div>
       <div className="divide-y divide-[var(--border)]/40">
-        {changes.map((change) => (
+        {fileChanges.map((change) => (
           <div key={change.id} className="flex items-start gap-2 px-3 py-2">
             <div className="mt-0.5 shrink-0">
               {change.changeType === 'create_folder'
@@ -221,13 +233,37 @@ function StagedChanges({ changes, onResult }: {
             </button>
           </div>
         ))}
+        {songChanges.map((change) => (
+          <div key={change.id} className="flex items-start gap-2 px-3 py-2">
+            <div className="mt-0.5 shrink-0">
+              {change.changeType === 'delete'
+                ? <Trash2 size={13} className="text-red-400" />
+                : change.changeType === 'create'
+                  ? <Plus size={13} className="text-[var(--accent)]" />
+                  : <Pencil size={13} className="text-[var(--accent)]" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={change.title}>{stagedSongChangeLabel(change)}</p>
+              {(change.changeType === 'update' || change.changeType === 'create') && (
+                <p className="text-[var(--text-muted)] text-[10px] truncate">
+                  {Object.keys(change.proposedData).length} field{Object.keys(change.proposedData).length === 1 ? '' : 's'} changed
+                </p>
+              )}
+              {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
+            </div>
+            <button onClick={() => unstageSongChange(change.id)} disabled={proposing} title="Remove from queue"
+              className="shrink-0 p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors">
+              <X size={12} />
+            </button>
+          </div>
+        ))}
       </div>
       <div className="px-3 py-2 flex items-center gap-2">
         <button onClick={propose} disabled={proposing}
           className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity">
           {proposing
             ? <><Loader2 size={12} className="animate-spin" /> Proposing…</>
-            : <><Send size={12} /> Propose {changes.length} change{changes.length === 1 ? '' : 's'}</>}
+            : <><Send size={12} /> Propose {total} change{total === 1 ? '' : 's'}</>}
         </button>
       </div>
     </div>

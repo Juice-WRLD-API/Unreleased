@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { BookOpen, Link2, Pencil, Share2, Trash2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { shareOrigin } from '../lib/platform'
+import { useIsMobile } from '../hooks/useIsMobile'
 import type { NewsItem } from '../lib/newsApi'
 import { ClampedMenu } from './ClampedMenu'
+import { shareOrigin } from '../lib/platform'
+import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 
 export interface NewsMenuState { item: NewsItem; x: number; y: number }
 
@@ -18,9 +20,11 @@ export default function NewsContextMenu({ state, onClose, onOpen, onShare, onEdi
   onDelete?: () => void
 }): JSX.Element {
   const { item } = state
+  const isMobile = useIsMobile()
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (isMobile) return
     const onDown = (e: MouseEvent): void => { if (!menuRef.current?.contains(e.target as Node)) onClose() }
     const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
     const onScroll = (): void => onClose()
@@ -32,11 +36,24 @@ export default function NewsContextMenu({ state, onClose, onOpen, onShare, onEdi
       document.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', onScroll, true)
     }
-  }, [onClose])
+  }, [isMobile, onClose])
 
   const run = (fn?: () => void) => (): void => { onClose(); fn?.() }
   const copyLink = (): void => {
     void navigator.clipboard.writeText(`${shareOrigin()}/news/${item.id}`).catch(() => undefined)
+  }
+
+  if (isMobile) {
+    return (
+      <Sheet onClose={onClose} title={item.title}>
+        <SheetItem icon={BookOpen} label="Open" onClick={run(onOpen)} />
+        <SheetItem icon={Link2} label="Copy link" onClick={run(copyLink)} />
+        {onShare && <SheetItem icon={Share2} label="Share to chat" onClick={run(onShare)} />}
+        {(onEdit || onDelete) && <SheetDivider />}
+        {onEdit && <SheetItem icon={Pencil} label="Edit" onClick={run(onEdit)} />}
+        {onDelete && <SheetItem icon={Trash2} label="Delete" danger onClick={run(onDelete)} />}
+      </Sheet>
+    )
   }
 
   return (

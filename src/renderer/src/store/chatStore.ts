@@ -4,6 +4,7 @@ import * as api from '../lib/chatApi'
 import { isTimedOut } from '../lib/chatApi'
 import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerBan, ServerRoleDef } from '../lib/chatApi'
 import { splitForwardRef } from '../lib/chatForwardRef'
+import { subscribeNotifications } from '../lib/notificationSocket'
 import { splitReplyRef } from '../lib/chatReplyRef'
 import { decodeModerationNotice, encodeModerationNotice, moderationNoticeSelfText, moderationNoticeVerb, shareSummaryText, type ModerationNoticePayload } from '../lib/chatShare'
 import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
@@ -282,14 +283,12 @@ interface ChatState {
 
 let socket: ChatSocket | null = null
 let typingTimer: number | null = null
-let listPollTimer: number | null = null
 const seenNew = new Set<number>()
 // Ids already fetched or in flight for ensureNowPlaying - keyed globally
 // (not per-store-instance) so every caller (DM list, online members panel,
 // admin picker, etc.) asking about the same user shares one request instead
 // of each firing its own.
 const nowPlayingRequested = new Set<number>()
-const LIST_POLL_MS = 30_000
 // Rooms primeRoom has already fetched. The list poll can't use lastMessage
 // for this: an empty room never gets an entry there, so it was re-primed
 // (another limit=1 fetch) on every tick, forever.
@@ -303,6 +302,7 @@ const rerunResolve = new Set<number>()
 // per shared conversation.
 const seenDeviceLists = new Set<string>()
 let stopToDevice: (() => void) | null = null
+let stopNotifications: (() => void) | null = null
 // Last room open per server (-1 for DMs), so switching back lands where you were.
 const lastRoomBySpace = new Map<number, RoomRef>()
 
@@ -368,6 +368,21 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
         },
       })
+    }).catch(() => undefined)
+  }
+
+  // One of my devices just signed in (pushed on both the chat and the
+  // notification socket). If it isn't in my signed device list yet it needs
+  // approving: refresh the prompt and alert, without waiting for it to open a
+  // link session. Safe to run twice for one sign-in.
+  const onDeviceRegistered = (deviceId: string): void => {
+    const meId = get().meId
+    if (!meId || get().identity !== 'ready') return
+    set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+    void import('../lib/chatLinking').then(async (l) => {
+      const pending = await l.pendingDevices(meId)
+      const hit = pending.find((c) => c.session.device_id === deviceId)
+      if (hit) notifyLinkRequest(hit.session.device_id, hit.session.label)
     }).catch(() => undefined)
   }
 
@@ -712,6 +727,24 @@ export const useChatStore = create<ChatState>((set, get) => {
           for (const id of Object.keys(get().members)) void get().loadMembers(Number(id), true)
         }).catch(() => undefined)
         return
+      // Known rooms are already kept current by message.created, so this only
+      // matters for a room we have no record of yet (a brand-new DM/channel).
+      case 'room.updated': {
+        const known = ev.kind === 'conversation'
+          ? s.conversations.some((c) => c.id === ev.id)
+          : s.servers.some((sv) => sv.channels.some((c) => c.id === ev.id))
+        if (!known && s.initialized) {
+          void get().refreshLists().then(() => primeRoom(`${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`)).catch(() => undefined)
+        }
+        return
+      }
+      // Another of my devices read the room: mirror its authoritative count.
+      case 'unread.changed': {
+        const key = `${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`
+        if (s.active && roomKey(s.active) === key) return
+        set((st) => ({ unread: { ...st.unread, [key]: ev.unread } }))
+        return
+      }
       case 'server.updated':
         set((st) => ({ servers: st.servers.map((x) => x.id === ev.server.id ? { ...x, ...ev.server } : x) }))
         return
@@ -759,20 +792,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         return
       }
-      case 'device.registered': {
-        // One of my devices just signed in. If it isn't in my signed device
-        // list yet it needs approving: refresh the prompt and alert, without
-        // waiting for it to open a link session.
-        const meId = s.meId
-        if (!meId || s.identity !== 'ready') return
-        set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
-        void import('../lib/chatLinking').then(async (l) => {
-          const pending = await l.pendingDevices(meId)
-          const hit = pending.find((c) => c.session.device_id === ev.device_id)
-          if (hit) notifyLinkRequest(hit.session.device_id, hit.session.label)
-        }).catch(() => undefined)
+      case 'device.registered':
+        onDeviceRegistered(ev.device_id)
         return
-      }
       case 'key.committed':
         void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
           .then(() => get().resolveKey(ev.conversation))
@@ -1049,6 +1071,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           if (status === 'open' && prev === 'reconnecting') {
             void catchUp().catch(() => undefined)
             void reconcileKeys().catch(() => undefined)
+            // No list poll: room.updated / unread.changed / key events arrive live,
+            // and anything missed during the drop is re-read here.
+            void get().refreshLists().catch(() => undefined)
+            void pollKeys().catch(() => undefined)
+            const meId = get().meId
+            if (meId) void import('../lib/chatToDevice').then((td) => td.processInbox(meId)).catch(() => undefined)
             // catchUp only covers the open room - re-prime the rest so
             // anything sent while we were disconnected still bumps unread
             // and updates previews.
@@ -1076,26 +1104,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         if (changed) set({ typing: next })
       }, 1500)
-      // Rooms we already know about stay current via the socket (message.created
-      // updates lastMessage/unread directly); a real gap after a drop is handled
-      // by catchUp/reconcileKeys on reconnect. This timer only has to pick up
-      // rooms the socket never told us about yet: new DMs/channels from refreshLists.
-      listPollTimer = window.setInterval(() => {
-        if (!get().initialized || document.visibilityState !== 'visible') return
-        void get().refreshLists().then(() => {
-          const active = get().active
-          const known = get().lastMessage
-          const keys = [
-            ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
-            ...get().conversations.map((c) => `d:${c.id}`),
-          ].filter((k) => (!active || k !== roomKey(active)) && !(k in known) && !primedRooms.has(k))
-          return pool(keys, 4, primeRoom)
-        }).catch(() => undefined)
-        void pollKeys().catch(() => undefined)
-        const meId = get().meId
-        if (meId) void import('../lib/chatToDevice').then((td) => td.processInbox(meId)).catch(() => undefined)
-      }, LIST_POLL_MS)
-
       initPromise = (async () => {
         try {
           await get().refreshLists()
@@ -1122,6 +1130,18 @@ export const useChatStore = create<ChatState>((set, get) => {
                 set({ offerRestore: true })
               }
             })
+            // Account-addressed pushes on the notification socket: new-device
+            // sign-ins and key traffic reach us even if the chat socket is down.
+            stopNotifications?.()
+            stopNotifications = subscribeNotifications((frame) => {
+              if (get().meId !== account.id) return
+              if (frame.type === 'device' && frame.action === 'registered') {
+                onDeviceRegistered(String(frame.device_id))
+              } else if (frame.type === 'todevice' && frame.action === 'available') {
+                void m.localDeviceId(account.id).then((id) => (id === frame.device_id ? td.processInbox(account.id) : undefined))
+                  .catch((err) => console.warn('[chat] to-device inbox failed', err))
+              }
+            }, () => { void td.processInbox(account.id).catch(() => undefined) })
             await td.processInbox(account.id)
           }).catch((err) => console.warn('[chat] device setup failed', err))
           void reconcileKeys().catch(() => undefined)
@@ -1141,11 +1161,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       stopToDevice?.()
       stopToDevice = null
+      stopNotifications?.()
+      stopNotifications = null
       seenDeviceLists.clear()
       if (typingTimer !== null) window.clearInterval(typingTimer)
       typingTimer = null
-      if (listPollTimer !== null) window.clearInterval(listPollTimer)
-      listPollTimer = null
       seenNew.clear()
       primedRooms.clear()
       initPromise = null

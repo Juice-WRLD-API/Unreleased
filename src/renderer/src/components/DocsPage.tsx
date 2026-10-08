@@ -8,7 +8,10 @@ import { useDocsSearch } from '../hooks/useDocsSearch'
 
 export default function DocsPage(): JSX.Element {
   const { activeTab, setActiveTab, rawQuery, setRawQuery, query, register, hitsByTab, totalHits } = useDocsSearch()
-  const { setActiveView } = useStorePick('setActiveView')
+  const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
+
+  // Return to wherever Docs was opened from (e.g. Settings), not a fixed page.
+  const backView = previousView && previousView !== 'docs' ? previousView : 'wrld'
 
   const primitives = useMemo(() => ({ Code, Section, Endpoint, MethodPath }), [])
 
@@ -18,7 +21,7 @@ export default function DocsPage(): JSX.Element {
       <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
         <div className="flex items-baseline gap-3 mb-4">
           <button
-            onClick={() => setActiveView('wrld')}
+            onClick={() => setActiveView(backView)}
             title="Back"
             className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 self-center"
           >

@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore'
 import ReportForm from './ReportForm'
 
 // Global report dialog, mounted once at the app root and driven by the store's
-// `reportModal` target — opened from a song's context menu / info panel (song
+// `reportModal` target - opened from a song's context menu / info panel (song
 // mode) or anywhere a general feedback prompt is wired (feedback mode).
 export default function ReportModal(): JSX.Element | null {
   const target = useStore((s) => s.reportModal)
@@ -33,8 +33,8 @@ export default function ReportModal(): JSX.Element | null {
             <Icon size={15} className="text-accent" /> {title}
           </h2>
           <div className="flex items-center gap-1">
-            <LockToggle locked={locked} onClick={toggleLock} />
-            <button onClick={closeReport} className="text-text-muted hover:text-text-primary transition-colors">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={closeReport} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={18} />
             </button>
           </div>

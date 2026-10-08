@@ -1,33 +1,34 @@
-import { useEffect, useState } from 'react'
-import { RefreshCw, ChevronLeft, Plus, FolderOpen, Trophy, Pencil, Check, X, Loader2 } from 'lucide-react'
-import { useStore, useStorePick } from '../store/useStore'
+import { useState } from 'react'
+import { RefreshCw, ChevronLeft, Plus, FolderOpen, User, Trophy, Pencil, Check, X, Loader2 } from 'lucide-react'
 import { navigateFromWindow } from '../lib/windowSync'
-import * as userApi from '../lib/userApi'
-import { updateDisplayName } from '../lib/userApi'
-import type { CompFileProposal } from '../lib/userApi'
-import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
-import CompProposalList, { CompFilterBar, filterCompProposals, type CompFilterTab } from './CompProposalList'
+import { useStore, useStorePick } from '../store/useStore'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
+import { useStaffRoles } from '../hooks/useStaffRoles'
+import { useMyCompProposals } from '../hooks/useMyCompProposals'
+import CompProposalList, { CompFilterBar, filterCompProposals } from './CompProposalList'
+import { updateDisplayName } from '../lib/userApi'
+import { accountDisplayName, initial } from '../lib/format'
 
 // A contributor-only account's home. Reviewing other people's proposals is
-// deliberately NOT here — that queue lives in exactly one place, the Admin
+// deliberately NOT here - that queue lives in exactly one place, the Admin
 // page's "Comp files" tab, reachable from the editor profile.
 
-// Bento tile grid — mirrors the tile treatment EditorProfileView uses. A
-// simple responsive grid-cols-2 stack that escalates to 4 columns at `sm` —
-// this page has too little content to justify a height-filling bento like
-// EditorProfileView's.
+// Bento tile grid - mirrors the tile treatment EditorProfileView.desktop/
+// .mobile.tsx use (see "Visual Redesign v2 - Bento Dashboard Pivot" in the
+// rewrite plan), but this page stays a single file (no .desktop/.mobile
+// split, per the plan's explicit decision - it's the smallest surface and
+// doesn't need two layouts). The grid below is a simple responsive
+// `grid-cols-2` stack that escalates to 4 columns at `sm`, closer to
+// EditorProfileView.mobile.tsx's approach than the desktop file's
+// height-filling bento - there just isn't enough content here to justify a
+// dedicated per-platform layout.
 export default function ContributorProfileView(): JSX.Element {
-  const { account, activeChannel, channels } = useStorePick('account', 'activeChannel', 'channels')
+  const { account, setActiveView, activeChannel, channels } = useStorePick('account', 'setActiveView', 'activeChannel', 'channels')
   // Also renders as its own window (FloatApp's `profile` view), where
-  // setActiveView goes nowhere — see navigateFromWindow.
+  // setActiveView goes nowhere - see navigateFromWindow.
   const go = navigateFromWindow
-  const [proposals, setProposals] = useState<CompFileProposal[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<CompFilterTab>('all')
   const [refreshKey, setRefreshKey] = useState(0)
-  const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
 
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
@@ -35,7 +36,7 @@ export default function ContributorProfileView(): JSX.Element {
   const [nameError, setNameError] = useState<string | null>(null)
 
   function startEditName(): void {
-    setNameInput(account?.display_name || account?.discord_username || '')
+    setNameInput(accountDisplayName(account))
     setNameError(null)
     setEditingName(true)
   }
@@ -56,32 +57,11 @@ export default function ContributorProfileView(): JSX.Element {
     }
   }
 
-  const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
-  const isContributor = userApi.isChannelContributor(account, activeChannel, isPrimary)
-  const isAdmin = !!account?.is_administrator
-  const isManager = userApi.isChannelManager(account, activeChannel, isPrimary)
-  const isEditor = !!account?.is_editor
+  const { isContributor, isAdmin, isManager, isEditor } = useStaffRoles(account, activeChannel, channels)
 
-  useEffect(() => {
-    if (!isContributor) {
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    userApi.getMyCompProposals(activeChannel).then(setProposals).catch(() => {}).finally(() => setLoading(false))
-  }, [isContributor, refreshKey, activeChannel])
-
-  const withdraw = async (id: number): Promise<void> => {
-    setWithdrawingId(id)
-    try {
-      await userApi.withdrawCompProposal(id)
-      setProposals(prev => prev.filter(p => p.id !== id))
-    } catch {
-      setRefreshKey(k => k + 1)
-    } finally {
-      setWithdrawingId(null)
-    }
-  }
+  const {
+    compProposals: proposals, loading, filter, setFilter, withdrawingId, handleWithdraw: withdraw,
+  } = useMyCompProposals(isContributor, activeChannel, refreshKey, () => setRefreshKey(k => k + 1))
 
   const filtered = filterCompProposals(proposals, filter)
   const approvedCount = proposals.filter(p => p.status === 'approved').length
@@ -121,11 +101,9 @@ export default function ContributorProfileView(): JSX.Element {
             <div className="flex items-center gap-3">
               {account.avatar ? (
                 <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
-              ) : account.discord_avatar ? (
-                <img src={account.discord_avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-[var(--border)]" />
               ) : (
                 <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center text-lg font-bold shrink-0">
-                  {(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}
+                  {initial(accountDisplayName(account))}
                 </div>
               )}
               <div className="min-w-0">
@@ -162,7 +140,7 @@ export default function ContributorProfileView(): JSX.Element {
                   </div>
                 ) : (
                   <h2 className="text-text-primary text-base font-bold truncate flex items-center gap-1.5 group">
-                    {account.display_name || account.discord_username}
+                    {accountDisplayName(account)}
                     <button
                       onClick={startEditName}
                       className="p-0.5 rounded text-text-muted opacity-0 group-hover:opacity-100 hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
@@ -190,7 +168,7 @@ export default function ContributorProfileView(): JSX.Element {
           </Tile>
 
           {/* Quick actions */}
-          <Tile title="Quick actions" span="col-span-2 sm:col-span-4">
+          <Tile title="Quick actions" icon={<User size={13} />} span="col-span-2 sm:col-span-4">
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={() => go('contributor')} className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors">
                 <Plus size={12} /> New comp proposal
@@ -206,7 +184,7 @@ export default function ContributorProfileView(): JSX.Element {
             </div>
           </Tile>
 
-          {/* Comp Files — large */}
+          {/* Comp Files - large */}
           <Tile title="Comp Files" icon={<FolderOpen size={13} />} span="col-span-2 sm:col-span-4">
             <div className="flex items-center gap-2 mb-2 shrink-0">
               <CompFilterBar filter={filter} setFilter={setFilter} />

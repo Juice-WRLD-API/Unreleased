@@ -340,7 +340,8 @@ export default function HomeView(): JSX.Element {
   const showRecent = showSection('recent') && recent.length > 0
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
-  const showAlbums = showSection('albums') && albumRow.length > 0
+  // TEMP: albums hidden on the home page
+  const showAlbums = false && showSection('albums') && albumRow.length > 0
   const showRadio = showSection('radio')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')

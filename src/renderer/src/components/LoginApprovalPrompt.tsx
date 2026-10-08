@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { ShieldCheck, Loader2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
+import { subscribeNotifications } from '../lib/notificationSocket'
 import type { PendingLoginApproval } from '../lib/userApi'
 
-const POLL_MS = 5000
 
 /** Shown on an already-signed-in device when another device is logging in and asked for approval. */
 export default function LoginApprovalPrompt(): JSX.Element | null {
@@ -20,9 +20,15 @@ export default function LoginApprovalPrompt(): JSX.Element | null {
       userApi.listLoginApprovals().then((list) => { if (!cancelled) setPending(list) }).catch(() => undefined)
     }
     tick()
-    const id = window.setInterval(tick, POLL_MS)
+    // The notifications socket pushes a frame the moment a request is created.
+    // No timer: we catch up by refetching on every (re)connect and when the
+    // tab becomes visible again, which covers anything missed while offline.
+    const unsubscribe = subscribeNotifications(
+      (frame) => { if (/login[_-]?approval/i.test(frame.type)) tick() },
+      tick,
+    )
     document.addEventListener('visibilitychange', tick)
-    return () => { cancelled = true; window.clearInterval(id); document.removeEventListener('visibilitychange', tick) }
+    return () => { cancelled = true; unsubscribe(); document.removeEventListener('visibilitychange', tick) }
   }, [signedIn])
 
   const decide = useCallback(async (id: string, decision: 'approve' | 'deny') => {

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { CompFileProposal, ProposalStatus } from '../lib/userApi'
-import { getToken } from '../lib/userApi'
 import { errorMessage } from '../lib/format'
 
 /** Loads a comp-admin route's bytes into an object URL - the staging file
@@ -20,9 +19,7 @@ export function useAuthedBlobUrl(url: string | null): { src: string | null; load
     let cancelled = false
     let objectUrl: string | null = null
     setState({ src: null, loading: true, error: false, bytes: null })
-    const token = getToken()
-    fetch(url, { headers: token ? { Authorization: `Token ${token}` } : {} })
-      .then((r) => { if (!r.ok) throw new Error(); return r.blob() })
+    userApi.fetchAuthedBlob(url)
       .then((blob) => {
         if (cancelled) return
         objectUrl = URL.createObjectURL(blob)
@@ -174,10 +171,7 @@ export function useCompProposalsQueue(
   }, [activeChannel, applyOptimistic, applyReviewResult, reload])
 
   const downloadStaging = useCallback((p: CompFileProposal): void => {
-    const token = getToken()
-    const url = userApi.adminCompProposalStagingUrl(p.id, activeChannel)
-    fetch(url, { headers: token ? { Authorization: `Token ${token}` } : {} })
-      .then(r => r.blob())
+    userApi.adminFetchCompProposalStaging(p.id, activeChannel)
       .then(blob => {
         const href = URL.createObjectURL(blob)
         const a = document.createElement('a')

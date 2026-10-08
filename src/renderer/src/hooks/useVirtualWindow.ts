@@ -5,7 +5,7 @@ export interface VirtualWindow {
   start: number
   /** Last row index to render (exclusive). */
   end: number
-  /** Full scroll height of all rows — set on the positioned content container. */
+  /** Full scroll height of all rows - set on the positioned content container. */
   totalHeight: number
 }
 
@@ -36,7 +36,7 @@ export function useVirtualWindow(
     const el = scrollRef.current
     if (!el) return
     const onScroll = (): void => setScrollTop(el.scrollTop)
-    // clientHeight / offsetTop only change on layout, not on scroll — measure
+    // clientHeight / offsetTop only change on layout, not on scroll - measure
     // them via ResizeObserver to avoid layout reads on every scroll event.
     const measure = (): void => {
       setClientH(el.clientHeight)
@@ -62,7 +62,7 @@ export function useVirtualWindow(
 /**
  * Same windowing as useVirtualWindow, but takes the elements directly (from
  * callback refs held in state) instead of RefObjects. Needed when the scroll
- * container mounts and unmounts during the component's lifetime — the
+ * container mounts and unmounts during the component's lifetime - the
  * RefObject version attaches its listeners once on mount, so an element that
  * appears later (e.g. a detail view opened from a list) would never be
  * observed.

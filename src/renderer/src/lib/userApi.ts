@@ -7,7 +7,7 @@ import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
-import { apiRequest, authedRequest, cacheDelete } from './apiClient'
+import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
 import { cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
@@ -99,6 +99,9 @@ export interface UserSettings {
   playlist_hero_enabled_dark?: boolean
   playlist_hero_enabled_light?: boolean
   sidebar_position?: string
+  nav_style?: string
+  auto_hide_nav?: boolean
+  auto_hide_nav_zone?: number
 
   // ── Navigation/layout ───────────────────────────────────────────────────
   nav_order?: ViewType[]
@@ -563,9 +566,28 @@ export async function removeFavorite(songId: number): Promise<void> {
   return request(`${LIBRARY_BASE}/favorites/${songId}/`, { method: 'DELETE' })
 }
 
+// One request for the whole library: include_items=true makes the list endpoint
+// return each playlist's tracks too (omit_cover_image keeps the base64 covers
+// out). The per-playlist detail and cover caches are seeded from that response,
+// so opening a playlist or the startup prefetch needs no further requests.
+// Servers without include_items just return plain summaries (no items), in
+// which case nothing is seeded and callers fall back to per-playlist fetches.
 export async function getPlaylists(): Promise<PlaylistSummary[]> {
-  const url = `${LIBRARY_BASE}/playlists/?omit_cover_image=true`
-  return request(url, { method: 'GET' }, true, url)
+  const url = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
+  const rows = await request<Array<PlaylistSummary & { items?: PlaylistItemEntry[] }>>(url, { method: 'GET' }, true, url)
+  return rows.map((row) => {
+    const { items, ...summary } = row
+    if (Array.isArray(items)) {
+      const detail = { ...summary, items } as unknown as PlaylistDetail
+      playlistDetailCache.set(row.id, detail)
+      playlistCoverCache.set(row.id, {
+        cover_image_url: buildImageUrl(row.cover_image_url) ?? null,
+        cover_image: buildImageUrl(row.cover_image) ?? null,
+        trackImages: items.slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[],
+      })
+    }
+    return summary
+  })
 }
 
 type PlaylistCoverEntry = { cover_image_url?: string | null; cover_image?: string | null; trackImages: string[] }
@@ -1317,6 +1339,19 @@ export function adminCompProposalStagingUrl(id: number, channel?: string): strin
   const url = new URL(`${ACCOUNT_BASE}/admin/comp-proposals/${id}/staging/`)
   if (channel) url.searchParams.set('channel', channel)
   return url.toString()
+}
+
+/** A route's bytes behind the sign-in token (a staged comp file isn't public, so
+ *  a bare link can't fetch it). Throws on an HTTP error rather than handing
+ *  back the error page as if it were the file. */
+export async function fetchAuthedBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { headers: authHeaders(getToken()), signal })
+  if (!res.ok) throw new Error(`Request failed (${res.status})`)
+  return res.blob()
+}
+
+export function adminFetchCompProposalStaging(id: number, channel?: string, signal?: AbortSignal): Promise<Blob> {
+  return fetchAuthedBlob(adminCompProposalStagingUrl(id, channel), signal)
 }
 
 export async function adminCompFileHistory(filepath: string, channel?: string): Promise<{ filepath: string; revisions: CompFileRevision[] }> {

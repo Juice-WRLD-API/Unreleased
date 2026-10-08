@@ -5,6 +5,8 @@ import {
   BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useChatStore } from '../store/chatStore'
+import { subscribeNotifications } from '../lib/notificationSocket'
 import {
   getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
   adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
@@ -16,7 +18,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { shareOrigin } from '../lib/platform'
-import { playlistKey, parsePlaylistKey, allFolderedKeys } from '../lib/playlistFolders'
+import { playlistKey, parsePlaylistKey, folderOfPlaylist, allFolderedKeys } from '../lib/playlistFolders'
 import {
   prefsFromEvents, joinPlayedSongs, buildListeningStats, formatListeningTime, type ListeningStats,
 } from '../lib/listeningStats'
@@ -102,18 +104,9 @@ function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
 // this caps how many of the newest rows we bother resolving.
 const RECENT_PLAYS_DISPLAY_LIMIT = 10
 
-// The server itself expires now_playing after 5 minutes without a push - polling
-// well inside that window keeps the live indicator from lagging behind a track
-// change or a stop.
-const NOW_PLAYING_POLL_MS = 15_000
-
 // How many of the profile owner's top songs the compact Wrapped teaser shows -
 // the full breakdown lives behind "View full Wrapped" for the owner's own page.
 const WRAPPED_TOP_SONGS = 5
-
-// Message/Mute actions from web-dev's version aren't ported here - both need
-// the staff chat feature (startDm, per-user mute list), which doesn't exist
-// in the desktop app yet. Add them back alongside that batch.
 
 interface PlaylistMenuState { playlist: PlaylistSummary; x: number; y: number }
 
@@ -207,18 +200,20 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 
 export default function PublicProfileView(): JSX.Element {
   const {
-    playTrack, playCollection, playNext, addToQueue, setActiveView, account, playlistFolders, setPendingPlaylistId,
-    playlists: ownPlaylists,
+    playTrack, playCollection, playNext, addToQueue, setActiveView, previousView, account, playlistFolders, setPendingPlaylistId,
+    mutedUserIds, toggleMuteUser, playlists: ownPlaylists,
   } = useStorePick(
-    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'account', 'playlistFolders', 'setPendingPlaylistId',
-    'playlists',
+    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'previousView', 'account', 'playlistFolders', 'setPendingPlaylistId',
+    'mutedUserIds', 'toggleMuteUser', 'playlists',
   )
   const canEdit = useCanEdit()
+  const startDm = useChatStore((s) => s.startDm)
   const userId = Number(window.location.pathname.split('/u/')[1]?.split('/')[0] ?? '')
 
   const [profile, setProfile] = useState<PublicProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [messaging, setMessaging] = useState(false)
 
   const [recentTracks, setRecentTracks] = useState<Track[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
@@ -242,6 +237,7 @@ export default function PublicProfileView(): JSX.Element {
   const [adminActionLoading, setAdminActionLoading] = useState(false)
 
   const isOwnProfile = !!account && !!profile && account.id === profile.id
+  const isMuted = !!profile && mutedUserIds.includes(profile.id)
   const isAdmin = !!account?.is_administrator
 
   // The public profile endpoint is unauthenticated and strips play_history /
@@ -314,9 +310,8 @@ export default function PublicProfileView(): JSX.Element {
       .finally(() => setRecentLoading(false))
   }, [effectivePlayHistory])
 
-  // Live "currently listening" indicator - polled independently of the
-  // profile fetch since it's the one piece of this page that goes stale
-  // within seconds rather than staying fixed for the session.
+  // Live "currently listening" indicator: fetched once, refetched on every
+  // socket (re)connect, and otherwise driven by pushed now_playing frames.
   useEffect(() => {
     if (!profile?.public_now_playing || !Number.isFinite(userId) || userId <= 0) { setNowPlaying(null); return }
     let cancelled = false
@@ -326,8 +321,20 @@ export default function PublicProfileView(): JSX.Element {
         .catch(() => { if (!cancelled) setNowPlaying(null) })
     }
     poll()
-    const id = setInterval(poll, NOW_PLAYING_POLL_MS)
-    return () => { cancelled = true; clearInterval(id) }
+    // The chat socket pushes now_playing.updated into the chat store, but only
+    // for users it routes to us, so the mount-time fetch above stays the source
+    // of truth and the store is only followed for changes after it.
+    const unsubscribe = useChatStore.subscribe((state, prev) => {
+      if (cancelled || state.nowPlaying[userId] === prev.nowPlaying[userId] || !(userId in state.nowPlaying)) return
+      setNowPlaying(state.nowPlaying[userId])
+    })
+    // The backend also broadcasts song changes on the public notifications
+    // socket, so a profile viewer doesn't need to share a chat server.
+    const unsubscribeSocket = subscribeNotifications((frame) => {
+      if (cancelled || frame.type !== 'now_playing' || Number(frame.user_id) !== userId) return
+      setNowPlaying((frame.now_playing as typeof nowPlaying) ?? null)
+    }, poll)
+    return () => { cancelled = true; unsubscribe(); unsubscribeSocket() }
   }, [profile?.public_now_playing, userId])
 
   useEffect(() => {
@@ -373,6 +380,17 @@ export default function PublicProfileView(): JSX.Element {
 
   function openSongInfo(songId: number): void {
     useStore.getState().setInfoSongId(songId)
+  }
+
+  async function messageUser(): Promise<void> {
+    if (!profile || messaging) return
+    setMessaging(true)
+    try {
+      await startDm([profile.id])
+      setActiveView('chat')
+    } catch {
+      setMessaging(false)
+    }
   }
 
   function openTrackMenu(e: React.MouseEvent, track: Track): void {
@@ -437,7 +455,7 @@ export default function PublicProfileView(): JSX.Element {
         <User size={40} className="opacity-20" />
         <p className="text-sm">Profile not found.</p>
         <button
-          onClick={() => setActiveView('api-tracker')}
+          onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
           className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
@@ -521,7 +539,7 @@ export default function PublicProfileView(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
       <button
-        onClick={() => setActiveView('api-tracker')}
+        onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
         className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
       >
         <ChevronLeft size={15} /> Back to app
@@ -558,19 +576,41 @@ export default function PublicProfileView(): JSX.Element {
             </div>
           )}
         </div>
-        {!isOwnProfile && isAdmin && (
+        {!isOwnProfile && (
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setAdminOpen((v) => !v)}
-              title="Admin actions"
+              onClick={() => toggleMuteUser(profile.id)}
+              title={isMuted ? 'Unmute this user' : 'Mute this user'}
               className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
-                adminOpen
-                  ? 'bg-accent/15 text-accent'
+                isMuted
+                  ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
                   : 'bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-surface-raised'
               }`}
             >
-              <ShieldCheck size={15} /> Manage
+              {isMuted ? <BellOff size={15} /> : <Bell size={15} />}
+              {isMuted ? 'Muted' : 'Mute'}
             </button>
+            <button
+              onClick={() => void messageUser()}
+              disabled={messaging}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform disabled:opacity-60 disabled:pointer-events-none"
+            >
+              {messaging ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+              Message
+            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setAdminOpen((v) => !v)}
+                title="Admin actions"
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
+                  adminOpen
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+                }`}
+              >
+                <ShieldCheck size={15} /> Manage
+              </button>
+            )}
           </div>
         )}
       </div>

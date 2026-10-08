@@ -1,31 +1,77 @@
 import { Component, ReactNode } from 'react'
-import { AlertTriangle, Copy, Check } from 'lucide-react'
+import { AlertTriangle, Copy, Check, Flag, Loader2, CloudOff } from 'lucide-react'
+import { useStore } from '../store/useStore'
+import { isChunkLoadError } from '../lib/lazyView'
+
+// Strips anything a stack/component-stack shouldn't be carrying off-device
+// before an auto-report sends it anywhere: a dev server serves modules from
+// real absolute paths (Windows drive letters, /Users/, /home/), which would
+// otherwise leak the reporter's local folder structure verbatim. Bundle-
+// relative production paths (the normal case) pass through untouched.
+function redactLocalPaths(text: string): string {
+  return text
+    .replace(/[A-Za-z]:\\(?:[^\s\\]+\\)*[^\s\\]*/g, '<local-path>')
+    .replace(/\/(?:Users|home|root)\/[^\s)]*/g, '<local-path>')
+}
+
+// Query string / hash can carry short-lived but sensitive values (an OAuth
+// callback's `code`/`state`, a share token) - only the origin and path are
+// worth reporting for context anyway.
+function sanitizedUrl(): string {
+  const { origin, pathname } = window.location
+  return origin + pathname
+}
 
 interface Props {
   children: ReactNode
   fallback?: ReactNode
-  // 'inline' (default) — the error card fills its slot in the layout, for
+  // 'inline' (default) - the error card fills its slot in the layout, for
   // boundaries around a content pane.
-  // 'overlay' — for boundaries around modals and pop-out panels, which render
+  // 'overlay' - for boundaries around modals and pop-out panels, which render
   // as loose siblings at the root rather than inside a sized container. The
   // card is centered over a backdrop instead of stretching the root flex
   // column, and gets a Close button so a crashed modal can still be dismissed
-  // (`onDismiss` should flip whatever store flag mounts it — without that the
+  // (`onDismiss` should flip whatever store flag mounts it - without that the
   // card would sit over the app with no way out).
   variant?: 'inline' | 'overlay'
   onDismiss?: () => void
 }
-interface State { error: Error | null; copied: boolean }
+// 'sending' covers the queue + first delivery attempt; 'delivered' means it
+// actually reached the server this round; 'queued' means it only made it to
+// the local outbox (offline, API disabled, etc.) - same three-way status
+// ReportForm shows, so a crash report doesn't silently claim success when it
+// hasn't actually gone out yet.
+type ReportStatus = 'idle' | 'sending' | 'delivered' | 'queued'
+interface State { error: Error | null; copied: boolean; reportStatus: ReportStatus }
 
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, copied: false }
+  state: State = { error: null, copied: false, reportStatus: 'idle' }
+  private componentStack: string | null = null
+  // Guards against double-sending - the reportStatus 'sending' value alone
+  // can't do this, since it's also pre-set synchronously below (to avoid a
+  // flash of the manual button) before the actual send starts.
+  private reported = false
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { error }
+    // Pre-set 'sending' when auto-report is on so the card never flashes an
+    // idle "Report this error" button an instant before componentDidCatch
+    // (below) fires it automatically anyway.
+    return { error, reportStatus: useStore.getState().autoReportErrors ? 'sending' : 'idle' }
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }): void {
     console.error('ErrorBoundary caught:', error, info)
+    this.componentStack = info.componentStack
+    this.reported = false
+    if (useStore.getState().autoReportErrors) void this.reportError(true)
+  }
+
+  // A failed chunk import can't be retried in place: React.lazy caches the
+  // rejected promise, so clearing the error just re-throws it. Only a reload
+  // picks up the current build's chunk names.
+  private retry = (): void => {
+    if (isChunkLoadError(this.state.error)) window.location.reload()
+    else this.setState({ error: null })
   }
 
   private copyError = (): void => {
@@ -36,6 +82,26 @@ export default class ErrorBoundary extends Component<Props, State> {
       this.setState({ copied: true })
       setTimeout(() => this.setState({ copied: false }), 2000)
     }).catch(() => {/* ignore */})
+  }
+
+  /** `auto` distinguishes componentDidCatch firing this on its own (the
+   *  autoReportErrors setting) from a person clicking "Report this error" -
+   *  only the former is genuinely unattended, so only that gets the API's
+   *  `automated` field. */
+  private reportError = async (auto = false): Promise<void> => {
+    const { error } = this.state
+    if (!error || this.reported) return
+    this.reported = true
+    this.setState({ reportStatus: 'sending' })
+    const message = [
+      `Crash: ${redactLocalPaths(error.message)}`,
+      error.stack ? `\nStack:\n${redactLocalPaths(error.stack)}` : '',
+      this.componentStack ? `\nComponent stack:\n${redactLocalPaths(this.componentStack)}` : '',
+      `\nURL: ${sanitizedUrl()}`,
+      `User agent: ${navigator.userAgent}`,
+    ].join('\n')
+    const delivered = await useStore.getState().submitFeedback('bug', message, undefined, auto)
+    this.setState({ reportStatus: delivered ? 'delivered' : 'queued' })
   }
 
   private dismiss = (): void => {
@@ -66,12 +132,34 @@ export default class ErrorBoundary extends Component<Props, State> {
                 {this.state.copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
               </button>
             </div>
+            {this.state.reportStatus === 'delivered' ? (
+              <p className="flex items-center gap-1.5 text-xs text-accent mt-1">
+                <Check size={13} /> Reported - thanks
+              </p>
+            ) : this.state.reportStatus === 'queued' ? (
+              <p className="flex items-center gap-1.5 text-xs text-amber-500 mt-1">
+                <CloudOff size={13} /> Saved - will send once back online
+              </p>
+            ) : (
+              <button
+                // Not `onClick={this.reportError}` directly - that would
+                // hand the click's SyntheticEvent to `auto` (truthy), wrongly
+                // marking a manual report as automated.
+                onClick={() => this.reportError()}
+                disabled={this.state.reportStatus === 'sending'}
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary underline mt-1 disabled:opacity-50"
+              >
+                {this.state.reportStatus === 'sending'
+                  ? <><Loader2 size={13} className="animate-spin" /> Reporting…</>
+                  : <><Flag size={13} /> Report this error</>}
+              </button>
+            )}
             <div className="flex items-center gap-4 mt-1">
               <button
                 className="text-xs text-accent hover:text-accent-hover underline"
-                onClick={() => this.setState({ error: null })}
+                onClick={this.retry}
               >
-                Try again
+                {isChunkLoadError(this.state.error) ? 'Reload' : 'Try again'}
               </button>
               {overlay && this.props.onDismiss && (
                 <button className="text-xs text-text-muted hover:text-text-primary underline" onClick={this.dismiss}>

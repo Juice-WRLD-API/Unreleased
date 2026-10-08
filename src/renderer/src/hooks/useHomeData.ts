@@ -43,12 +43,14 @@ export interface HomePlaylistCard {
   open: () => void
   /** Only set for the account's own API playlists - lets the caller offer the
    *  full PlaylistContextMenu (rename/delete/export/…) on right-click, same
-   *  as the sidebar's playlist list. Followed playlists don't have a
+   *  as the sidebar's playlist list. Followed/guest playlists don't have a
    *  PlaylistSummary to hand it, so they just don't get a menu. */
   playlist?: PlaylistSummary
 }
 
-// Everything the Home dashboard shows.
+// Everything the Home dashboard shows, shared by the mobile and desktop
+// shells so the two can never drift on what a section means or contains -
+// they differ only in layout.
 //
 // It's a dashboard over things the app already knows, not a new data source:
 // every field below reads from the store or localStorage synchronously, so
@@ -62,12 +64,12 @@ export interface HomePlaylistCard {
 // genuinely needs song durations, so it isn't shown here - /stats owns that.
 export function useHomeData() {
   const {
-    account, playlists, followedPlaylists, likedTrackIds,
+    account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
     listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
     homeSectionVisibility, refreshPlaylists, setIsPlaying, recentTracksRev,
   } = useStorePick(
-    'account', 'playlists', 'followedPlaylists', 'likedTrackIds',
+    'account', 'playlists', 'guestPlaylists', 'followedPlaylists', 'likedTrackIds',
     'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
     'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
     'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying', 'recentTracksRev',
@@ -76,12 +78,13 @@ export function useHomeData() {
   const showSection = (id: string): boolean => isHomeSectionVisible(id, homeSectionVisibility)
 
   // On a fresh app launch, playlists load as one step of loadAccount()'s long
-  // sequential chain - Home routinely finishes mounting before that chain gets
-  // to its playlists step, and it's just one more await away from never
-  // getting there at all if an earlier step throws. Rather than depend on
-  // that chain, Home asks for its own copy directly; refreshPlaylists()
-  // already no-ops without an account and collapses concurrent callers, so
-  // this is free when the chain already covered it.
+  // sequential chain (getMe → favorites → prefs → folders → reports → THEN
+  // playlists) - Home routinely finishes mounting before that chain gets to
+  // its playlists step, and it's just one more await away from never getting
+  // there at all if an earlier step throws. Rather than depend on that chain,
+  // Home asks for its own copy directly; refreshPlaylists() already no-ops
+  // without an account and collapses concurrent callers (see its _inFlight
+  // guard), so this is free when the chain already covered it.
   useEffect(() => {
     if (account) refreshPlaylists()
   }, [account, refreshPlaylists])
@@ -174,9 +177,8 @@ export function useHomeData() {
     [listeningPlays],
   )
 
-  // Server playlists need an account; signed out we just show what exists
-  // locally (Library's local playlists aren't part of this row - see
-  // LibraryTab for those).
+  // Server playlists need an account; the local kinds don't. Signed out we just
+  // show what exists locally rather than prompting to sign in.
   const ownPlaylists = account ? playlists : []
   const playlistRow: HomePlaylistCard[] = [
     ...ownPlaylists.filter((p) => p.track_count > 0).map((p) => {
@@ -208,11 +210,25 @@ export function useHomeData() {
       mosaic: null,
       open: () => { setPendingPlaylistId(p.id); setActiveView('playlists') },
     })),
+    ...guestPlaylists.filter((p) => p.tracks.length > 0).map((p) => {
+      const mosaicUrls = p.tracks.slice(0, 4).map((t) => t.imageUrl).filter((u): u is string => !!u)
+      const useMosaic = mosaicUrls.length >= 4
+      return {
+        key: `g${p.id}`,
+        name: p.name,
+        subtitle: `${p.tracks.length} song${p.tracks.length === 1 ? '' : 's'}`,
+        cover: useMosaic ? null : (p.tracks[0]?.imageUrl ?? null),
+        mosaic: useMosaic ? mosaicUrls : null,
+        open: () => setActiveView('playlists'),
+      }
+    }),
   ]
   // Recently opened first (Array.sort is stable, so never-opened playlists
-  // keep their existing order after them).
+  // keep their existing order after them). Guest playlists have no numeric id
+  // in the recents list and stay at the end.
   const recentIds = loadRecentPlaylistIds()
   const recencyRank = (c: HomePlaylistCard): number => {
+    if (c.key.startsWith('g')) return recentIds.length
     const i = recentIds.indexOf(Number(c.key.slice(1)))
     return i < 0 ? recentIds.length : i
   }

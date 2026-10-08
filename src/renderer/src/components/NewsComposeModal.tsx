@@ -7,6 +7,7 @@ import {
   createNewsItem, updateNewsItem, uploadAttachment, isImageAttachment, MAX_ATTACHMENT_BYTES,
   type NewsItem, type NewsChannel, type NewsAttachment,
 } from '../lib/newsApi'
+import { errorMessage } from '../lib/format'
 
 // An attachment row in the composer: either one already hosted on the post
 // (kept as-is) or a freshly-picked local file (uploaded on publish).
@@ -105,7 +106,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
         : await createNewsItem(payload)
       onSaved(saved)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
+      setError(errorMessage(err, 'Failed to save'))
       setSaving(false)
     }
   }
@@ -121,7 +122,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
       minWidth={420} minHeight={420}
     >
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
-      <div className="bg-surface w-full h-full overflow-y-auto">
+      <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
         <div
           className={`shrink-0 flex items-center justify-between px-5 py-4 border-b border-[var(--border)] bg-surface ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
@@ -130,14 +131,14 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
             <FileText size={15} className="text-accent" /> {editing ? 'Edit post' : 'New post'}
           </h2>
           <div className="flex items-center gap-1">
-            <LockToggle locked={locked} onClick={toggleLock} />
-            <button onClick={onClose} disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={onClose} title="Close" disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
               <X size={18} />
             </button>
           </div>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
           {/* Lead image */}
           <div>
             <span className={label}>Cover image</span>
@@ -163,29 +164,29 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
             )}
           </div>
 
-          <div>
-            <label className={label}>Title</label>
+          <label className="block">
+            <span className={label}>Title</span>
             <input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What's the news?" maxLength={200} />
-          </div>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Channel</label>
+            <label className="block">
+              <span className={label}>Channel</span>
               <select className={field} value={channel} onChange={(e) => setChannel(e.target.value)}>
                 {channels.length === 0 && <option value="">No channels</option>}
                 {channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
-            </div>
-            <div>
-              <label className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></label>
+            </label>
+            <label className="block">
+              <span className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></span>
               <input className={field} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Release" maxLength={40} />
-            </div>
+            </label>
           </div>
 
-          <div>
-            <label className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></label>
+          <label className="block">
+            <span className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></span>
             <textarea className={`${field} resize-none`} rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="One or two lines shown in the feed" maxLength={280} />
-          </div>
+          </label>
 
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -258,7 +259,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)] sticky bottom-0 bg-surface">
+        <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)] bg-surface">
           <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50">
             Cancel
           </button>

@@ -13,11 +13,11 @@ export interface Track {
   // API-sourced tracks
   streamUrl?: string  // if set, Player streams this URL instead of the local `path` (via toFileUrl)
   imageUrl?: string   // if set, AlbumArtThumbnail uses this instead of getAlbumArt IPC
-  era?: string        // API era abbreviation (e.g. "WOD") — shown on Discord RPC instead of album
+  era?: string        // API era abbreviation (e.g. "WOD") - shown on Discord RPC instead of album
   // The song's own title and cover as the API returns them. `title`/`imageUrl`
   // above may be a user's per-song override (see lib/songPrefs), and a Track
-  // outlives the conversion that built it — it sits in the queue until the
-  // user moves on — so the originals are kept here to let an override be
+  // outlives the conversion that built it - it sits in the queue until the
+  // user moves on - so the originals are kept here to let an override be
   // applied, changed, or removed in place without refetching the song. Only
   // set for API-sourced tracks; treat an absent value as "same as title".
   apiTitle?: string
@@ -28,12 +28,15 @@ export interface FullTrack extends Track {
   albumArt: string | null
   lyrics: string | null
   syncedLyrics: string | null
+  // True for the brief window between a track change and the /songs/ fetch
+  // resolving: lyrics are null but not yet confirmed absent, so WRLD's
+  // layout should hold its current arrangement rather than read this as a
+  // lyrics-less song. See Player's metadata-load effect.
+  lyricsPending?: boolean
   producer: string | null
   notes: string | null
   ext: string
   error?: string
-  /** Lyrics are still being fetched - keeps WRLD from collapsing to its no-lyrics layout meanwhile. */
-  lyricsPending?: boolean
   // File technical info
   sampleRate?: number
   bitrate?: number
@@ -63,7 +66,7 @@ export interface LibraryTrack {
   lastModified: number
   hasAlbumArt: boolean
   addedAt: number
-  // Cover art is NOT stored here — it lives in the store's `libraryArt` map
+  // Cover art is NOT stored here - it lives in the store's `libraryArt` map
   // (keyed by track id) so a streaming cover never mutates this list. This
   // optional field is only a transient seed some callers still read; treat the
   // map as the source of truth.
@@ -87,11 +90,11 @@ export interface LocalPlaylist {
   coverImage?: string | null  // base64 data URL or null
 }
 
-// A playlist of donor cloud files (see lib/donorFilesApi). Entries are donor
-// file_ids rather than embedded tracks: the file list is the source of truth
-// for names/sizes, and a file that's since been deleted just drops out of the
-// resolved list. Local-only for now (unlike web-dev's, which syncs via
-// user_settings.donor_playlists — app has no cross-device settings sync yet).
+// A playlist of donor cloud files (see lib/donorFilesApi). Stored in the
+// account's `user_settings.donor_playlists`, so it syncs across devices.
+// Entries are donor file_ids rather than embedded tracks: the file list is the
+// source of truth for names/sizes, and a file that's since been deleted just
+// drops out of the resolved list.
 export interface DonorPlaylist {
   id: string
   name: string
@@ -99,13 +102,24 @@ export interface DonorPlaylist {
   createdAt: number
 }
 
+// A playlist for signed-out users - stored in localStorage, not tied to an
+// account or to local-file scanning (unlike LocalPlaylist). Tracks are
+// embedded directly rather than referenced by id, since a guest playlist can
+// hold synced-catalog tracks a LibraryTrack lookup couldn't resolve.
+export interface GuestPlaylist {
+  id: string
+  name: string
+  tracks: Track[]
+  createdAt: number
+}
+
 // A live pointer to someone else's synced playlist, saved from a share link
-// without cloning its songs — opening it always re-fetches the owner's
+// without cloning its songs - opening it always re-fetches the owner's
 // current playlist (see PlaylistsView's shared-view load path), so edits the
 // owner makes later show up here too. Local-only: the account profile has no
 // field for this yet, so unlike an owned playlist it doesn't sync across
 // devices. name/trackCount/coverUrl are a display cache, refreshed
-// opportunistically whenever this playlist is opened — never authoritative,
+// opportunistically whenever this playlist is opened - never authoritative,
 // just enough for the grid card to render before that fetch resolves.
 export interface FollowedPlaylist {
   id: number
@@ -116,10 +130,10 @@ export interface FollowedPlaylist {
 }
 
 // ─── Offline playlist sync (Electron only) ─────────────────────────────────
-// A downloaded API song, kept fully playable without network — the audio
+// A downloaded API song, kept fully playable without network - the audio
 // file plus a snapshot of the song's own metadata at download time.
 export interface OfflineTrackMeta {
-  path: string                // API song.path — changing this means the audio itself changed
+  path: string                // API song.path - changing this means the audio itself changed
   title: string
   artist: string
   album: string
@@ -143,4 +157,4 @@ export interface SyncedLyricLine {
   text: string
 }
 
-export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'local-editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'editor-profile' | 'docs' | 'wrld' | 'library' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'public-profile' | 'chat' | 'terminal' | 'track' | 'not-found'
+export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'local-editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'editor-profile' | 'docs' | 'wrld' | 'library' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'public-profile' | 'chat' | 'terminal' | 'track' | 'download' | 'thanks' | 'settings' | 'not-found'

@@ -4,7 +4,6 @@ import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle } from './lib/platform'
 import { applySeo } from './lib/seo'
-import { loadSessionEditLinks } from './lib/sessionEditsApi'
 import { lazyView } from './lib/lazyView'
 import { ViewType } from './types'
 
@@ -13,6 +12,15 @@ import { ViewType } from './types'
 // route-driven side effects - Admin pushes its own history entries and Heardle/
 // Wordle play audio, so those are left to remount.
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'chat']
+
+// Footprint of the floating nav pill (40px icons + 6px padding each side + the
+// 12px inset AutoHideNav wraps it in), reserved on the edge the pill sits on.
+const PILL_RESERVE_STYLE: Record<string, React.CSSProperties> = {
+  top: { paddingTop: 'calc(var(--top-inset) + 4.75rem)' },
+  bottom: { paddingBottom: '4.75rem' },
+  left: { paddingLeft: '4.75rem' },
+  right: { paddingRight: '4.75rem' },
+}
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/' || pathname === '/tracker') return 'api-tracker'
@@ -28,7 +36,8 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/heardle') return 'heardle'
   if (pathname === '/wordle') return 'wordle'
   if (pathname === '/tierlist') return 'tierlist'
-  if (pathname === '/stats') return 'stats'
+  if (pathname === '/stats' || pathname === '/wrapped') return 'stats'
+  if (pathname === '/thank-you') return 'thanks'
   if (pathname === '/statistics') return 'statistics'
   if (pathname.startsWith('/u/')) return 'public-profile'
   if (pathname.startsWith('/chat')) return 'chat'
@@ -104,6 +113,7 @@ const Settings = lazyView(() => import('./components/Settings'))
 const DiagnosticsModal = lazyView(() => import('./components/DiagnosticsModal'))
 const TerminalPage = lazyView(() => import('./components/TerminalPage'))
 const TrackView = lazyView(() => import('./components/TrackView'))
+const ThankYouView = lazyView(() => import('./components/ThankYouView'))
 const LoginApprovalPrompt = lazy(() => import('./components/LoginApprovalPrompt'))
 
 function WindowControls(): JSX.Element {
@@ -135,8 +145,8 @@ function WindowControls(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav')
   // Keep the panel mounted after its first open instead of unmounting on
   // close - unmounting destroyed every cover <img>, so reopening the queue
   // made them all reload/re-decode from scratch instead of just reappearing.
@@ -157,11 +167,6 @@ export default function App(): JSX.Element {
   const isMobile = useIsMobile()
   useThemeEffects()
 
-  // Warms the session-edit auto-match mirror so any view that resolves a
-  // recording_session song's playback (songToTrack, ApiTrackerView, etc.)
-  // sees it filled in without depending on the Tracker having been opened
-  // first this session.
-  useEffect(() => { loadSessionEditLinks(activeChannel).catch(() => {}) }, [activeChannel])
   // Seed auth token from env in local dev only — import.meta.env.DEV is false in production
   // builds, so this never runs for real users even if the token is baked into the bundle.
   useEffect(() => {
@@ -278,6 +283,7 @@ export default function App(): JSX.Element {
   const isElectron = navigator.userAgent.includes("Electron")
 
   const titleBarMenu = isElectron && !wrldFullscreen && appMenuPosition === 'title-bar'
+  const pillReserve = !isMobile && navStyle === 'pill' && !autoHideNav
 
   return (
     <UserCardHost>
@@ -302,10 +308,10 @@ export default function App(): JSX.Element {
           : sidebarPosition === 'bottom' ? 'flex-col-reverse'
           : 'flex-row'
       }`}>
-        {autoHideNav && !isMobile
-          ? <AutoHideNav position={sidebarPosition}><Sidebar /></AutoHideNav>
+        {!isMobile && (autoHideNav || navStyle === 'pill')
+          ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
           : <Sidebar />}
-        <main className="flex-1 overflow-hidden flex flex-col relative">
+        <main className="flex-1 overflow-hidden flex flex-col relative" style={pillReserve ? PILL_RESERVE_STYLE[sidebarPosition] : undefined}>
           {/* Frameless-window drag strip — when the nav bar sits on top (md+
               only; it's hidden on narrow windows) the bar touches the window
               edge instead and carries its own strip. mr-[188px] clears the
@@ -341,6 +347,7 @@ export default function App(): JSX.Element {
               : activeView === 'liked' ? <LikedSongsView />
               : activeView === 'shared-playlist' ? <SharedPlaylistView />
               : activeView === 'track' ? <TrackView />
+              : activeView === 'thanks' ? <ThankYouView />
               : activeView === 'editor-profile' ? <EditorProfileView />
               : activeView === 'docs' ? <DocsPage />
               : activeView === 'wrld' ? <WrldView />

@@ -16,7 +16,8 @@
     "electron:dev:wayland": "concurrently \"npm run dev\" \"wait-on http://localhost:3018 && electron . --ozone-platform=wayland\"",
     "electron:dev:x11": "concurrently \"npm run dev\" \"wait-on http://localhost:3018 && electron . --ozone-platform=x11\"",
     "electron:build": "npm run build && electron-builder",
-    "electron:smoke": "electron . --smoke-test"
+    "electron:smoke": "electron . --smoke-test",
+    "terminal:check-coverage": "node scripts/check-terminal-coverage.mjs"
   },
   "keywords": [],
   "author": "leanwrldd",

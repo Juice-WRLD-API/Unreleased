@@ -1,5 +1,5 @@
 import { ReactEventHandler, useEffect, useState } from 'react'
-import { hasSmallCoverVariant, smallCoverUrl } from '../lib/juicewrldApi'
+import { fullCoverUrl, hasSmallCoverVariant, smallCoverUrl } from '../lib/juicewrldApi'
 
 interface Props {
   src: string | null | undefined
@@ -15,27 +15,43 @@ interface Props {
 // the big PNG takes.
 //
 // For URLs with no degraded variant (site assets, local files, data URLs) this
-// is just an <img> — one load, no placeholder step.
-export function ProgressiveCover({ src, alt = '', className = '', onError }: Props): JSX.Element | null {
-  const placeholder = hasSmallCoverVariant(src) ? smallCoverUrl(src) : undefined
+// is just an <img> - one load, no placeholder step.
+//
+// Module-level (not component state) so it survives the component unmounting
+// and remounting - e.g. leaving and reentering the WRLD tab, which tears down
+// this component entirely. Without it, a cover that already loaded full-res
+// once would replay the low-res placeholder every time WRLD remounts, even
+// though the browser already has the full image cached.
+const fullyLoadedSrcs = new Set<string>()
+
+export function ProgressiveCover({ src: rawSrc, alt = '', className = '', onError }: Props): JSX.Element | null {
+  // The full step goes through the size cap; the placeholder is derived from
+  // the raw URL since `small` is a /files/download/ param.
+  const src = fullCoverUrl(rawSrc)
+  const placeholder = hasSmallCoverVariant(rawSrc) ? smallCoverUrl(rawSrc) : undefined
   // Stored as the src it belongs to rather than a bare boolean: a boolean is
   // only reset inside the effect, which runs *after* the first render with the
-  // new src — so that render still saw `true` from the previous track and
+  // new src - so that render still saw `true` from the previous track and
   // pointed the <img> straight at the new full-size original, skipping the
   // placeholder step entirely. Since an <img> keeps painting its old frame
   // until the new src decodes, a track change sat on the previous song's cover
   // for however long the ~1MB PNG took. Deriving it from `src` can't go stale.
-  const [fullLoadedSrc, setFullLoadedSrc] = useState<string | null>(null)
-  const fullLoaded = !!src && fullLoadedSrc === src
+  const [fullLoadedSrc, setFullLoadedSrc] = useState<string | null>(
+    src && fullyLoadedSrcs.has(src) ? src : null
+  )
+  const fullLoaded = !!src && (fullLoadedSrc === src || fullyLoadedSrcs.has(src))
 
   useEffect(() => {
-    if (!src || !placeholder) return
+    if (!src || !placeholder || fullyLoadedSrcs.has(src)) return
     // Preloading in an off-DOM Image (rather than swapping the <img> src and
-    // waiting) keeps the placeholder painted until the full copy is decoded —
+    // waiting) keeps the placeholder painted until the full copy is decoded -
     // swapping src directly blanks the element while the new one loads.
     const img = new Image()
     let cancelled = false
-    img.onload = () => { if (!cancelled) setFullLoadedSrc(src) }
+    img.onload = () => {
+      fullyLoadedSrcs.add(src)
+      if (!cancelled) setFullLoadedSrc(src)
+    }
     // A failed full load is not an error state: the placeholder is a perfectly
     // good cover, so leave it up and let the caller's onError stay unfired.
     img.src = src

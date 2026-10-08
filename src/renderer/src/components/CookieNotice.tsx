@@ -10,8 +10,8 @@ const STORAGE_KEY = 'cookie-notice-ack'
 export const COOKIE_NOTICE_ACK_EVENT = 'cookie-notice-ack'
 
 // A one-time, informational storage notice. The App only uses strictly
-// necessary local storage (settings, session, cache) — there's no third-party
-// ad tracking to consent to — so this discloses and dismisses rather than
+// necessary local storage (settings, session, cache) - there's no third-party
+// ad tracking to consent to - so this discloses and dismisses rather than
 // gating anything. The acknowledgement is remembered so it never shows twice.
 export default function CookieNotice(): JSX.Element | null {
   const [ack, setAck] = useState<boolean>(() => {
@@ -27,7 +27,7 @@ export default function CookieNotice(): JSX.Element | null {
     try {
       localStorage.setItem(STORAGE_KEY, '1')
     } catch {
-      // best effort — dismiss for this session regardless
+      // best effort - dismiss for this session regardless
     }
     window.dispatchEvent(new Event(COOKIE_NOTICE_ACK_EVENT))
     setAck(true)
@@ -44,8 +44,9 @@ export default function CookieNotice(): JSX.Element | null {
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-text-secondary text-xs leading-relaxed">
-              This app stores data locally on your device — settings, your session if you sign in, and cached content —
-              so it can work. It doesn&apos;t use third-party advertising or tracking cookies.{' '}
+              This app stores data on your device - settings, your session if you sign in, and cached content - so it
+              can work. If you sign in, your settings are also saved to your account so they follow you across devices.
+              It doesn&apos;t use third-party advertising or tracking cookies.{' '}
               <button
                 onClick={() => { useSandboxStore.getState().expand(); setShowPrivacy(true) }}
                 className="text-accent hover:underline font-medium"

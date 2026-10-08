@@ -42,6 +42,8 @@ export type ChatEvent =
   | { type: 'link.claimed'; session_id: string }
   | { type: 'link.requested'; device_id: string; label: string; expires_at: string }
   | { type: 'backup.updated' }
+  | { type: 'room.updated'; kind: RoomKind; id: number; server?: number; last_message_id: number | null; last_message_at: string | null; author_id: number | null }
+  | { type: 'unread.changed'; kind: RoomKind; id: number; last_read_message_id: number | null; unread: number }
   | { type: 'role.created' | 'role.updated'; server: number; role: ServerRoleDef }
   | { type: 'role.deleted'; server: number; role_id: number }
   | { type: 'channel.override.updated'; server: number; channel: number; override: ChannelOverride }

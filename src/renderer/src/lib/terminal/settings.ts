@@ -1,6 +1,6 @@
 import { useStore } from '../../store/useStore'
 import { FONTS } from '../fonts'
-import { allSkins } from '../skins'
+import { allSkins, getSkin } from '../skins'
 import { HOME_SECTIONS, isHomeSectionVisible } from '../homeSections'
 import {
   DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY,
@@ -8,6 +8,13 @@ import {
 } from '../navItems'
 import type { ViewType } from '../../types'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, getRouteRules, normalizePrefix, setRouteRules, setServerOverride } from '../apiServers'
+import cdnService from '../cdn'
+import { useSandboxStore } from '../../components/Modal'
+import { useChatStore } from '../../store/chatStore'
+import { useVizStore, type CaptionPos, type VizCycle } from '../../store/vizStore'
+import { VISUALIZERS, type Boost, type Quality } from '../viz'
+import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
+import { updatePrivacySettings } from '../userApi'
 import { fail, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -22,10 +29,10 @@ interface Setting {
   unit?: string
   options?: () => { value: string; label: string }[]
   get: () => string | number | boolean | null
-  set: (value: string | number | boolean | null) => void
+  set: (value: string | number | boolean | null) => void | Promise<void>
 }
 
-const bool = (key: string, desc: string, get: () => boolean, set: (v: boolean) => void): Setting =>
+const bool = (key: string, desc: string, get: () => boolean, set: (v: boolean) => void | Promise<void>): Setting =>
   ({ key, desc, kind: 'bool', get, set: (v) => set(v as boolean) })
 
 const num = (key: string, desc: string, min: number, max: number, get: () => number, set: (v: number) => void, unit = ''): Setting =>
@@ -40,11 +47,35 @@ const color = (key: string, desc: string, get: () => string | null, set: (v: str
 // Everything in Settings that is a plain on/off, number, choice or colour. The
 // values go through the same store setters the Settings screen uses, so they
 // persist and sync to the account exactly the same way.
+const vz = (): ReturnType<typeof useVizStore.getState> => useVizStore.getState()
+const pills = (...values: string[]): Setting['options'] => () => values.map((v) => ({ value: v, label: v }))
+
+// The Settings screen lists output devices from enumerateDevices(), which is
+// async; keep the last answer here so the (sync) option list has something.
+let audioDevices: MediaDeviceInfo[] = []
+navigator.mediaDevices?.enumerateDevices().then((d) => { audioDevices = d.filter((x) => x.kind === 'audiooutput') }).catch(() => {})
+
+type PrivacyField = 'public_play_history' | 'public_playlists' | 'public_now_playing'
+// Optimistic like the Settings toggles; a failed save puts the old value back.
+const privacy = (key: string, desc: string, field: PrivacyField): Setting =>
+  bool(key, desc, () => !!st().account?.[field], async (v) => {
+    const account = st().account ?? fail('sign in first (login)')
+    useStore.setState({ account: { ...account, [field]: v } })
+    try {
+      useStore.setState({ account: await updatePrivacySettings({ [field]: v }) })
+    } catch (e) {
+      useStore.setState({ account })
+      throw e
+    }
+  })
+
 const SETTINGS: Setting[] = [
   choice('theme', 'Colour theme', () => allSkins().map((s) => ({ value: s.id, label: s.name })), () => st().theme, (v) => st().setTheme(v)),
   color('accent', 'Accent colour (#rrggbb)', () => st().accentColor, (v) => { if (v) st().setAccentColor(v) }),
   choice('sidebar', 'Where the navigation sits', () => ['left', 'right', 'top', 'bottom'].map((v) => ({ value: v, label: v })), () => st().sidebarPosition, (v) => st().setSidebarPosition(v as 'left' | 'right' | 'top' | 'bottom')),
+  choice('nav-style', 'Navigation style (classic or floating pill)', () => ['classic', 'pill'].map((v) => ({ value: v, label: v })), () => st().navStyle, (v) => st().setNavStyle(v as 'classic' | 'pill')),
   bool('auto-hide-nav', 'Hide the navigation until you reach for it', () => st().autoHideNav, (v) => st().setAutoHideNav(v)),
+  num('auto-hide-nav-zone', 'Width of the edge strip that reveals the hidden navigation', 4, 120, () => st().autoHideNavZone, (v) => st().setAutoHideNavZone(v), 'px'),
   bool('lyrics-override', 'Use your own lyrics colours over the theme', () => st().lyricsOverride, (v) => st().setLyricsOverride(v)),
   num('text-scale', 'App-wide text size', 0.75, 1.5, () => st().appTextScale, (v) => st().setAppTextScale(v), 'x'),
   choice('font', 'App font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().appFont, (v) => st().setAppFont(v)),
@@ -79,6 +110,23 @@ const SETTINGS: Setting[] = [
   num('hotkey-seek', 'Seconds the skip shortcuts jump', 1, 120, () => st().hotkeySeekSeconds, (v) => st().setHotkeySeekSeconds(v), 's'),
   bool('global-hotkeys', 'OS-wide keyboard shortcuts (desktop app)', () => st().globalHotkeysEnabled, (v) => st().setGlobalHotkeysEnabled(v)),
   bool('media-overlay', 'Windows media overlay (desktop app)', () => st().mediaOverlayEnabled, (v) => st().setMediaOverlayEnabled(v)),
+  bool('sandbox', 'Dock modals into a collapsible pill instead of a centered popup', () => useSandboxStore.getState().sandboxEnabled, (v) => useSandboxStore.getState().setSandboxEnabled(v)),
+  choice('viz', 'WRLD visualizer', () => VISUALIZERS.map((v) => ({ value: v.id, label: v.name })), () => vz().vizMode, (v) => vz().selectMode(v, true)),
+  choice('viz-quality', 'Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
+  choice('viz-boost', 'Visualizer input boost', pills('off', 'auto', '2', '4', '8'), () => vz().vizBoost, (v) => vz().setVizBoost(v as Boost)),
+  choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
+  bool('viz-minimal', 'Fullscreen shows the visualizer only', () => vz().immMinimal, (v) => vz().setImmMinimal(v)),
+  choice('viz-caption', 'Where the caption sits in visualizer-only mode', pills('tl', 'tr', 'bl', 'br'), () => vz().immCaptionPos, (v) => vz().setImmCaptionPos(v as CaptionPos)),
+  bool('viz-artwork', 'Visualizer uses colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
+  choice('audio-output', 'Audio output device (default = system)', () => [{ value: 'default', label: 'system default' }, ...audioDevices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` }))], () => st().audioOutput || 'default', (v) => st().setAudioOutput(v === 'default' ? '' : v)),
+  choice('notification-sound', 'Sound for chat and news notifications', () => NOTIFICATION_SOUNDS.map((x) => ({ value: x.id, label: x.label })), () => getNotificationSoundId(), (v) => { setNotificationSoundId(v); playNotificationSound(v) }),
+  bool('lastfm', 'Last.fm scrobbling (connect it in Settings first)', () => st().lastfmEnabled, (v) => { if (!st().lastfmUser) fail('connect Last.fm in Settings > Playback first'); st().setLastfmEnabled(v) }),
+  privacy('public-history', 'Show your listening history on your profile', 'public_play_history'),
+  privacy('public-playlists', 'Show your public playlists on your profile', 'public_playlists'),
+  privacy('public-now-playing', 'Show what you are listening to on your profile', 'public_now_playing'),
+  bool('chat-presence', 'Request and show who is online', () => useChatStore.getState().presenceEnabled, (v) => useChatStore.getState().setPresenceEnabled(v)),
+  bool('chat-read-receipts', 'Send read receipts', () => useChatStore.getState().readEnabled, (v) => useChatStore.getState().setReadEnabled(v)),
+  bool('cdn', 'Distributed CDN downloads (off always uses the origin server)', () => cdnService.enabled, (v) => cdnService.setEnabled(v)),
   bool('developer-mode', 'Developer tab in Settings', () => st().developerMode, (v) => st().setDeveloperMode(v)),
 ]
 
@@ -105,29 +153,29 @@ function findSetting(key: string): Setting {
   return SETTINGS.find((s) => s.key === k) ?? pickByName(SETTINGS, (s) => s.key, k) ?? fail(`no setting "${key}" (try: settings)`)
 }
 
-function applySetting(s: Setting, raw: string): void {
+async function applySetting(s: Setting, raw: string): Promise<void> {
   const value = raw.trim()
   if (s.kind === 'bool') {
     const b = value.toLowerCase() === 'toggle' ? !s.get() : parseBool(value)
     if (b === null) fail(`${s.key}: use on or off`)
-    s.set(b)
+    await s.set(b)
   } else if (s.kind === 'number') {
     const n = Number(value.replace(/[x%s]$/i, ''))
     if (!Number.isFinite(n)) fail(`${s.key}: expected a number (${describeRange(s)})`)
     if (n < (s.min ?? -Infinity) || n > (s.max ?? Infinity)) fail(`${s.key}: out of range (${describeRange(s)})`)
-    s.set(n)
+    await s.set(n)
   } else if (s.kind === 'color') {
     if (/^(auto|default|none)$/i.test(value)) {
       if (s.key === 'accent') fail('accent: give a colour like #7c5cff')
-      s.set(null)
-    } else if (/^#[0-9a-f]{6}$/i.test(value)) s.set(value.toLowerCase())
+      await s.set(null)
+    } else if (/^#[0-9a-f]{6}$/i.test(value)) await s.set(value.toLowerCase())
     else fail(`${s.key}: use a hex colour like #7c5cff${s.key === 'accent' ? '' : ' or auto'}`)
   } else {
     const options = s.options?.() ?? []
     const match = options.find((o) => o.value.toLowerCase() === value.toLowerCase())
       ?? pickByName(options, (o) => o.value, value) ?? pickByName(options, (o) => o.label, value)
     if (!match) fail(`${s.key}: choose one of ${describeRange(s)}`)
-    s.set(match!.value)
+    await s.set(match!.value)
   }
 }
 
@@ -340,12 +388,12 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       }
       return []
     },
-    run: (args, ctx) => {
+    run: async (args, ctx) => {
       const [key, ...rest] = args.trim().split(/\s+/)
       if (!key) fail('usage: set <setting> [value]  (settings lists them)')
       const setting = findSetting(key)
       if (rest.length === 0) { ctx.print(`${setting.key} = ${show(setting)}\n  ${setting.desc} · ${describeRange(setting)}`); return }
-      applySetting(setting, rest.join(' '))
+      await applySetting(setting, rest.join(' '))
       ctx.print(`${setting.key} = ${show(setting)}`, 'ok')
     },
   },
