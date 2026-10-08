@@ -15,9 +15,14 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
   const info = useRoomInfo(room)
   const pinCount = useChatStore((s) => s.rooms[`${room.kind === 'channel' ? 'c' : 'd'}:${room.id}`]?.items.filter((m) => m.pinned && !m.deleted_at).length ?? 0)
   const toggle = (p: SidePanel): void => onPanel(panel === p ? null : p)
+  // The frameless window's min/max/close buttons float over the top 28px of the
+  // window; drop the header below them instead of letting the two rows overlap
+  // (unless the app menu already reserves its own title bar row).
+  const appMenuPosition = useStore((s) => s.appMenuPosition)
+  const clearControls = navigator.userAgent.includes('Electron') && appMenuPosition !== 'title-bar'
 
   return (
-    <header className="h-14 shrink-0 flex items-center gap-2 px-2 md:px-4 border-b border-[var(--border)] bg-surface/80 backdrop-blur" style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
+    <header className={`${clearControls ? 'h-[68px] pt-7' : 'h-14'} shrink-0 flex items-center gap-2 px-2 md:px-4 border-b border-[var(--border)] bg-surface/80 backdrop-blur`} style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
       {onBack && (
         <button onClick={onBack} aria-label="Back" className="w-9 h-9 -ml-1 rounded-lg flex items-center justify-center text-text-secondary active:bg-surface-overlay">
           <ChevronLeft size={22} />
