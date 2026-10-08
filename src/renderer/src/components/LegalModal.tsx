@@ -214,8 +214,9 @@ function PrivacyContent(): JSX.Element {
       <List
         items={[
           'Your Discord username, ID, and avatar, used to identify your account.',
-          'Your playlists, favorites, folders, and per-song preferences, synced so they follow you across devices.',
-          'Your app settings (theme, layout, playback, equalizer, hotkeys, muted users/servers, etc.), synced the same way so they follow you across devices.',
+          'Your account profile: your display name, login username, avatar, and bio. These are stored on the API and shown on your public profile.',
+          'Your playlists, favorites, folders, and per-song preferences, synced so they follow you across devices. Any custom cover image you upload for a playlist is stored on the API with it, and is visible to others if the playlist is public.',
+          'Your app settings, stored on the API as a single settings record on your account (not just on your device) so they follow you across devices. This includes your theme, custom skins, accent color, fonts and text sizes, lyrics display options, navigation and home page layout, playback options (speed, crossfade, equalizer, reverb, and similar), hotkey bindings, the chat users, servers and conversations you have muted, your favorited chat GIFs, and your donor cloud playlists if applicable.',
           'Editor-related submissions (applications, edit proposals, reports) if you use those features.',
         ]}
       />
