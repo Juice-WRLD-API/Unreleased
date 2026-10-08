@@ -63,7 +63,7 @@ function LeaderboardRows({ entries, myUsername }: {
             key={entry.user_id}
             onClick={(e) => openUserCard({ id: entry.user_id, username: entry.discord_username || entry.username, display_name: entry.username || entry.discord_username, avatar: entry.discord_avatar, role: '' }, e)}
             className={`cursor-pointer flex items-center gap-3 px-2 py-2 rounded-xl transition-colors ${
-              isMe ? 'bg-accent/8 ring-1 ring-accent/20' : ''
+              isMe ? 'bg-accent/8 ring-1 ring-inset ring-accent/20' : ''
             }`}
           >
             <span className="w-5 shrink-0 flex items-center justify-center">

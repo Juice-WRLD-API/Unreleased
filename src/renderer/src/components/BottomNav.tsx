@@ -28,8 +28,8 @@ import { useChatUiStore } from '../store/chatUiStore'
 // tab in this bar - see useMobileNavSplit for the shared tabs/moreTabs split.
 
 export default function BottomNav(): JSX.Element {
-  const { activeView, setActiveView, toggleSettings } =
-    useStorePick('activeView', 'setActiveView', 'toggleSettings')
+  const { activeView, setActiveView, setShowSettings } =
+    useStorePick('activeView', 'setActiveView', 'setShowSettings')
   const showSettings = activeView === 'settings'
   const { tabs } = useMobileNavSplit()
   const mobileRoomOpen = useChatUiStore((s) => s.mobileRoomOpen)
@@ -110,8 +110,10 @@ export default function BottomNav(): JSX.Element {
       })}
 
       {/* Never hideable or counted against the cap: on mobile this is the
-          only route into Settings. */}
-      <button onPointerDown={() => preloadView('settings')} onClick={() => toggleSettings()} className={tabCls(showSettings)}>
+          only route into Settings. Behaves like the other tabs - re-tapping
+          while open is a no-op (setShowSettings(true) is "always open"),
+          not a toggle; Settings' own back control closes it. */}
+      <button onPointerDown={() => preloadView('settings')} onClick={() => setShowSettings(true)} className={tabCls(showSettings)}>
         {marker(showSettings)}
         <Settings size={24} />
         <span className={labelCls}>Settings</span>

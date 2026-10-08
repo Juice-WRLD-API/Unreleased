@@ -23,7 +23,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
    *  inside a tile rather than a full AdminPage panel. */
   compact?: boolean
 }): JSX.Element {
-  const { actionId, notes, setNotes, setSelected, songLabel, doReview, r, rSong } = useReportsTabState(reports, onChanged)
+  const { actionId, notes, setNotes, setSelected, songLabel, doReview, r, rSong } = useReportsTabState(reports, onChanged, !compact)
 
   if (compact) {
     if (r) return (

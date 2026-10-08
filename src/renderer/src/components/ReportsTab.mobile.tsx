@@ -18,7 +18,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
   setStatus: (s: SongReportStatus | '') => void
   onChanged: () => void
 }): JSX.Element {
-  const { actionId, notes, setNotes, setSelected, songLabel, doReview, r, rSong } = useReportsTabState(reports, onChanged)
+  const { actionId, notes, setNotes, setSelected, songLabel, doReview, r, rSong } = useReportsTabState(reports, onChanged, false)
 
   useBackToClose(() => setSelected(null), r != null)
 

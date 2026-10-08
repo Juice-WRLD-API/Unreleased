@@ -12,7 +12,11 @@ export const REPORT_FILTERS: { id: SongReportStatus | ''; label: string }[] = [
   { id: '',         label: 'All'      },
 ]
 
-export function useReportsTabState(reports: SongReportRow[], onChanged: () => void): {
+// autoSelect: the master-detail split (desktop full page) always shows a
+// detail pane, so it opens on the first report. The single-pane list<->detail
+// layouts (mobile, compact tiles) must not - there the first report would
+// open straight past the list every time.
+export function useReportsTabState(reports: SongReportRow[], onChanged: () => void, autoSelect = true): {
   actionId: number | null
   notes: Record<number, string>
   setNotes: React.Dispatch<React.SetStateAction<Record<number, string>>>
@@ -27,7 +31,12 @@ export function useReportsTabState(reports: SongReportRow[], onChanged: () => vo
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<SongReportRow | null>(null)
 
-  useEffect(() => { setSelected(reports[0] ?? null) }, [reports])
+  useEffect(() => {
+    if (autoSelect) { setSelected(reports[0] ?? null); return }
+    // Keep an open report in sync with refreshed data (e.g. after resolving
+    // it); drop it if it's no longer in the list.
+    setSelected(cur => (cur ? reports.find(x => x.id === cur.id) ?? null : null))
+  }, [reports, autoSelect])
 
   // Song names for rows that only carry an id - one bulk catalog fetch (the
   // same ?all=true mode compact view uses) instead of a request per report.
