@@ -299,7 +299,7 @@ export default function App(): JSX.Element {
           : 'flex-row'
       }`}>
         {!isMobile && (autoHideNav || navStyle === 'pill')
-          ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
+          ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav || navStyle === 'pill'} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
           : <Sidebar />}
         <main className="flex-1 overflow-hidden flex flex-col relative">
           {/* Frameless-window drag strip — when the nav bar sits on top (md+
