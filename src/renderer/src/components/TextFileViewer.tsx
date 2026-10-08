@@ -1,9 +1,11 @@
 import { useEffect, useState, useMemo } from 'react'
 import { X, Download, Loader2, AlertCircle, Check, Clipboard, WrapText } from 'lucide-react'
+import { errorMessage } from '../lib/format'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 // In-app viewer for plain-text files in the Files tab. Two sources feed it:
 // API files (fetched over HTTP from the stream URL) and local files (read in
-// the main process, which is the only side that can touch the disk) — the
+// the main process, which is the only side that can touch the disk) - the
 // caller owns that difference and hands us a `load` function, so this stays a
 // pure presentation component.
 
@@ -39,19 +41,15 @@ export default function TextFileViewer({ source, onClose }: Props): JSX.Element 
         setTruncated(!!res.truncated)
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to read file')
+        if (!cancelled) setError(errorMessage(err, 'Failed to read file'))
       })
     return () => { cancelled = true }
   // The caller rebuilds `source` each render, so key off the file name rather
-  // than the object identity — otherwise this refetches on every parent render.
+  // than the object identity - otherwise this refetches on every parent render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source.name])
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  useEscapeToClose(onClose)
 
   const lineCount = useMemo(() => (text ? text.split('\n').length : 0), [text])
 

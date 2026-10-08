@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import PlaylistsViewDesktop from './PlaylistsView.desktop'
-import PlaylistsViewMobile from './PlaylistsView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function PlaylistsView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <PlaylistsViewMobile /> : <PlaylistsViewDesktop />
-}
+export default responsiveView(() => import('./PlaylistsView.desktop'), () => import('./PlaylistsView.mobile'))

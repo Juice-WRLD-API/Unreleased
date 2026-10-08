@@ -5,7 +5,7 @@ import { getActiveRadioClient } from '../lib/radioSocketService'
 
 // App-wide 999 FM vote popup. The WRLD view has its own inline vote panel, but
 // a skip/queue vote is time-limited and listeners aren't always looking at that
-// page — this floats over every other view so people actually see when it's
+// page - this floats over every other view so people actually see when it's
 // time to vote. Suppressed on the WRLD view itself to avoid a double control.
 export default function RadioVotePopup(): JSX.Element | null {
   const {
@@ -34,7 +34,7 @@ export default function RadioVotePopup(): JSX.Element | null {
 
   // Time the warning out the way the WRLD panel times out its propose error.
   // The rising-edge reset above only fires when a brand new ballot arrives,
-  // which can be a long way off — long enough for a stale "didn't send" to sit
+  // which can be a long way off - long enough for a stale "didn't send" to sit
   // under a vote the listener has since cast successfully.
   useEffect(() => {
     if (!voteError) return
@@ -111,7 +111,7 @@ export default function RadioVotePopup(): JSX.Element | null {
       </p>
 
       {voteError && (
-        <p className="text-red-400 text-xs">Vote didn't send — tune in to 999 FM and try again.</p>
+        <p className="text-red-400 text-xs">Vote didn't send - tune in to 999 FM and try again.</p>
       )}
 
       <div className="flex gap-2">

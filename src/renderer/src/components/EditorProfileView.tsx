@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import EditorProfileViewDesktop from './EditorProfileView.desktop'
-import EditorProfileViewMobile from './EditorProfileView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function EditorProfileView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <EditorProfileViewMobile /> : <EditorProfileViewDesktop />
-}
+export default responsiveView(() => import('./EditorProfileView.desktop'), () => import('./EditorProfileView.mobile'))

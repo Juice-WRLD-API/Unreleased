@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import EditorPageDesktop from './EditorPage.desktop'
-import EditorPageMobile from './EditorPage.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function EditorPage(props: { initialSongId?: number | null }): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <EditorPageMobile {...props} /> : <EditorPageDesktop {...props} />
-}
+export default responsiveView(() => import('./EditorPage.desktop'), () => import('./EditorPage.mobile'))

@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import EqualizerPanelDesktop from './EqualizerPanel.desktop'
-import EqualizerPanelMobile from './EqualizerPanel.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function EqualizerPanel(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <EqualizerPanelMobile /> : <EqualizerPanelDesktop />
-}
+export default responsiveView(() => import('./EqualizerPanel.desktop'), () => import('./EqualizerPanel.mobile'))

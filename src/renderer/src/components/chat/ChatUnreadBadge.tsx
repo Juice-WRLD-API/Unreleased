@@ -1,0 +1,19 @@
+import { useChatStore } from '../../store/chatStore'
+
+// Split out of ChatNavIcon so the nav can render the icon without importing
+// the chat store - this (and the store with it) only loads for staff, the only
+// accounts the chat nav item is shown to.
+export default function ChatUnreadBadge(): JSX.Element | null {
+  const total = useChatStore((s) => Object.values(s.unread).reduce((a, b) => a + b, 0))
+  const mentions = useChatStore((s) => Object.values(s.mentions).reduce((a, b) => a + b, 0))
+  if (total <= 0) return null
+  return (
+    <span
+      className={`absolute -top-1.5 -right-2 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] font-bold leading-none flex items-center justify-center tabular-nums ring-2 ring-[var(--surface)] ${
+        mentions > 0 ? 'bg-red-500 text-white' : 'bg-accent text-white'
+      }`}
+    >
+      {total > 99 ? '99+' : total}
+    </span>
+  )
+}

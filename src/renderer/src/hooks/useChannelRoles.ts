@@ -3,7 +3,7 @@ import { isChannelEditor, isChannelContributor, isChannelManager } from '../lib/
 import type { JWApiChannel } from '../lib/juicewrldApi'
 
 // The global role flags only cover the primary channel (see isChannelEditor
-// et al. in userApi.ts) — this resolves whether the active channel actually
+// et al. in userApi.ts) - this resolves whether the active channel actually
 // is primary so callers can pass that through. Defaults to true when the
 // channel list hasn't loaded yet or the slug isn't recognized, matching the
 // safe default already baked into the isChannel* functions.
@@ -14,18 +14,18 @@ export function isPrimaryChannelSlug(channels: JWApiChannel[], slug: string | nu
 }
 
 // The primary channel's slug, regardless of which channel is currently
-// selected in the Files tab — see useCanEdit below for why this matters.
+// selected in the Files tab - see useCanEdit below for why this matters.
 function primaryChannelSlug(channels: JWApiChannel[]): string | undefined {
   return channels.find((c) => c.is_primary)?.slug
 }
 
 // Wraps isChannelEditor/isChannelContributor/isChannelManager with the
-// account + channel lookup every call site otherwise had to repeat — keeps
+// account + channel lookup every call site otherwise had to repeat - keeps
 // the actual permission rule (global flag on primary OR per-channel
 // membership, see userApi.ts) defined in exactly one place.
 //
 // Deliberately checked against the *primary* channel rather than whichever
-// channel is active — these hooks back views (Tracker, Playlists, Liked
+// channel is active - these hooks back views (Tracker, Playlists, Liked
 // Songs, Now Playing, Player, SongInfoModal, StatsView, WrldView) that only
 // ever show primary-channel songs, so editing there shouldn't be gated by
 // whatever channel the Files tab happens to have selected. Views that

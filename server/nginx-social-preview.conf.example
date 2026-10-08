@@ -1,0 +1,87 @@
+# Bot-only social-preview routing for player.juicewrldapi.com.
+#
+# The site itself is a static SPA build served by nginx as-is. This snippet
+# adds ONE thing: requests from known link-unfurling bots (Discord, Twitter/X,
+# Slack, iMessage, ...) to /track/:id, /shared/:id, /news/:id and /u/:id are proxied
+# to the social-preview Node service (server/social-preview.mjs) instead of
+# the SPA's index.html, so those bots see real per-item og:/twitter: tags.
+# Every other request - including a real browser hitting the exact same URLs
+# - is completely unaffected and keeps getting the normal SPA build.
+#
+# This is NOT a copy-paste drop-in file; merge the two blocks below into your
+# actual server {} block for player.juicewrldapi.com (paths, root, etc. are
+# whatever your existing config already uses).
+
+# 1) Put this near the top of the http {} block (once, not per-server).
+map $http_user_agent $is_social_bot {
+    default 0;
+    "~*discordbot|twitterbot|facebookexternalhit|slackbot|telegrambot|whatsapp|linkedinbot|skypeuripreview|redditbot|vkshare|applebot|iframely|embedly|pinterest|discord" 1;
+}
+
+# 2) Inside the server {} block for player.juicewrldapi.com, ABOVE the
+#    existing `location / { try_files $uri /index.html; }` (or whatever your
+#    SPA fallback looks like) - order matters, nginx uses the first
+#    matching `location`.
+#
+#    The `if` + `error_page`/named-location dance below is the standard way
+#    to make a conditional proxy_pass in nginx without hitting the
+#    "if is evil" pitfalls of `if` directly wrapping `proxy_pass`.
+# Profile avatars are stored as base64 in the API; the service re-serves
+# them as real images for embeds. Not bot-gated - Discord's media proxy
+# fetches it, and the SPA has no such path. Must come before the block below
+# (regex locations match in file order).
+location ~ ^/u/\d+/avatar\.(jpg|png|webp|gif)$ {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+}
+
+# Playable track embeds: the service renders each song once as an MP4 (cover
+# + audio, needs ffmpeg on this box) that Discord plays inline. Not bot-gated
+# either, and the first request for a song can wait on the transcode.
+# X-Real-IP feeds the service's per-client render budget.
+location ~ ^/track/\d+/video\.mp4$ {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 180s;
+}
+
+# Chat link previews: the SPA asks GET /unfurl?url=<link> (same origin, so no
+# CORS) and the service fetches that page's og: tags on its behalf - see the
+# SSRF notes above serveUnfurl() in social-preview.mjs. Not bot-gated; real
+# browsers call it. nginx keeps the query string when proxy_pass has no URI.
+# X-Real-IP feeds the per-client fetch budget.
+location = /unfurl {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 15s;
+}
+
+# One block for every previewable route: the /track, /shared, /news and /u
+# prefixes, plus the exact pages / , /home, /playlists, /statistics and /wrld
+# (the site card, 999 FM, and /playlists?id=:id&view=shared public
+# playlists - nginx locations never see the query string, the service reads
+# it). It relies on the
+# `location @social_preview` block below existing in the SAME server {} -
+# without it nginx -t still passes, but every bot request 500s at runtime
+# with "could not find named location".
+location ~ ^/((track|shared|news|u)/|(home|playlists|statistics|wrld)/?$|$) {
+    error_page 418 = @social_preview;
+    recursive_error_pages on;
+    if ($is_social_bot) {
+        return 418;
+    }
+    try_files $uri /index.html;
+}
+
+location @social_preview {
+    proxy_pass http://127.0.0.1:8788;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# After editing your real config:
+#   sudo nginx -t && sudo systemctl reload nginx

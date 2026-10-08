@@ -2,29 +2,39 @@ import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } fr
 import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle,
   PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud,
-  FolderOpen, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
+  FolderOpen, Monitor, BellOff, Bell, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
   PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search,
+  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
+  AudioLines, SlidersHorizontal, LogIn,
 } from 'lucide-react'
+import VizControls, { Pills, Toggle } from './VizControls'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
-import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
+import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
+import { hasChatAccess, useChatStore } from '../store/chatStore'
+import ChatDevices from './chat/ChatDevices'
+import MyCdnNodes from './MyCdnNodes'
+import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
-import { getToken, CONTRIBUTOR_ENABLED, staffProfileLabel, staffProfileView, showStaffProfile } from '../lib/userApi'
-import { APP_VERSION } from '../lib/appVersion'
-import {
-  lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
-} from '../lib/lastfm'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
+import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
+import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
+import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
+import { lastfmConfigured } from '../lib/lastfm'
+import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
-import { formatBytes } from '../lib/format'
+import { NOTIFICATION_SOUNDS } from '../lib/notifications'
+import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import type { ViewType } from '../types'
-import ReportForm from './ReportForm'
 import LegalModal, { type LegalDoc } from './LegalModal'
-import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
+import { useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import { useSettingsAccount } from '../hooks/useSettingsAccount'
+import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
+import { useLastfmConnect } from '../hooks/useLastfmConnect'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -58,13 +68,22 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'appearance' | 'playback' | 'shortcuts' | 'feedback' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
-// jump straight to the tab a match lives on. `electronOnly`/`devOnly` mirror
-// the same gates the rows themselves are rendered behind, so a search never
-// offers to jump somewhere the tab doesn't actually exist.
-const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOnly?: boolean; devOnly?: boolean }[] = [
+// jump straight to the tab a match lives on. `devOnly` mirrors the same gate
+// the rows themselves are rendered behind, so a search never offers to jump
+// somewhere the tab doesn't actually exist.
+const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: boolean }[] = [
+  // Account
+  { tab: 'account', label: 'Display name' },
+  { tab: 'account', label: 'Profile photo' },
+  { tab: 'account', label: 'Bio' },
+  { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
+  { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
+  { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
+  { tab: 'account', label: 'Log out' },
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
@@ -78,11 +97,14 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
-  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits — left, right, top, bottom' },
-  { tab: 'appearance', label: 'App menu button', sub: 'Where the File / Edit / View… menu opens from', electronOnly: true },
-  { tab: 'appearance', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
-  { tab: 'appearance', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
+  // Preferences
+  { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
+  { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
+  { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
+  { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
@@ -92,16 +114,18 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'playback', label: 'Rotate suggested covers' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
   { tab: 'playback', label: 'Sleep timer' },
+  { tab: 'playback', label: 'Notification sound' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
+  { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Shortcuts
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
-  { tab: 'shortcuts', label: 'Global shortcuts', sub: 'Work while the app is in the background', electronOnly: true },
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
   // Feedback / About
-  { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
+  { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
+  { tab: 'about', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
-  { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
+  { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -111,11 +135,11 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'about', label: 'FAQ', sub: 'What is this? Who are you? Why did you build this? Technical stuff?' },
 ]
 
-// ── Flat row primitive — no card/box, just an icon + label on the left and
+// ── Flat row primitive - no card/box, just an icon + label on the left and
 // a control on the right, separated by a hairline. Used inside each tab's
 // content pane (macOS System Settings' detail-pane idiom, not the boxed
 // inset-grouped list). The icon sits in a colored badge (iOS Settings-style)
-// — a fixed color + white icon reads correctly in both themes, unlike the
+// - a fixed color + white icon reads correctly in both themes, unlike the
 // plain `text-muted` icon this replaced, which nearly disappeared in light
 // mode. ──
 
@@ -124,7 +148,7 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
   iconColor: string
   label: string
   sub?: string
-  // Rendered immediately after the label, on the left — for controls that
+  // Rendered immediately after the label, on the left - for controls that
   // are conceptually part of the label (e.g. an on/off toggle right next
   // to "Crossfade"), as opposed to `children`, which sits at the row's
   // right edge (e.g. the crossfade duration slider).
@@ -149,7 +173,7 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
 }
 
 // One line of the "Lyric colors" setting: presets + a custom picker, with
-// "Auto" (value === null) meaning "leave it to the surface's own colors" —
+// "Auto" (value === null) meaning "leave it to the surface's own colors" -
 // the theme's text vars in the mini/now-playing lyrics, the cover-art-derived
 // ones in the WRLD tab. The <input type="color"> always needs a concrete hex,
 // so `fallback` is what it shows while the setting is on Auto.
@@ -201,47 +225,207 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
   )
 }
 
-function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
+const SERVER_INPUT_CLASS = 'min-w-0 bg-[var(--surface-overlay)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-1.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors'
+const SERVER_SAVE_CLASS = 'px-3 py-1.5 rounded-lg bg-accent/10 hover:bg-accent/15 disabled:opacity-40 disabled:hover:bg-accent/10 border border-accent/25 text-accent text-xs font-medium transition-colors shrink-0'
+const SERVER_GHOST_CLASS = 'px-3 py-1.5 rounded-lg bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors shrink-0'
+
+// The "Main API" row of the API servers section in About - moves the whole
+// app to a different API instance.
+function ApiServerRow(): JSX.Element {
+  const [value, setValue] = useState(() => getServerOverride() ?? '')
+  const current = getServerOverride() ?? ''
+  return (
+    <div>
+      <p className="text-text-muted text-[11px] font-medium mb-1">Main API</p>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={DEFAULT_JWAPI_BASE}
+          spellCheck={false}
+          className={`flex-1 ${SERVER_INPUT_CLASS}`}
+        />
+        <button
+          onClick={() => setServerOverride(value)}
+          disabled={value.trim().replace(/\/+$/, '') === current}
+          className={SERVER_SAVE_CLASS}
+        >
+          Save &amp; reload
+        </button>
+        {current && (
+          <button onClick={() => setServerOverride(null)} className={SERVER_GHOST_CLASS}>
+            Reset
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Route rules under the main API: each sends one path prefix (`/cdn`,
+// `/chat`, ...) to its own server. Edited as a draft and saved together,
+// since saving reloads the app.
+function RouteRulesEditor(): JSX.Element {
+  const [saved] = useState(getRouteRules)
+  const [draft, setDraft] = useState<RouteRule[]>(saved)
+  const dirty = JSON.stringify(cleanRouteRules(draft)) !== JSON.stringify(saved)
+  const update = (i: number, patch: Partial<RouteRule>): void =>
+    setDraft((d) => d.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="mt-2.5 pt-2.5 border-t border-[var(--border)]">
+      <p className="text-text-muted text-[11px] font-medium mb-1">Route rules</p>
+      <datalist id="route-prefix-options">
+        {KNOWN_ROUTE_PREFIXES.map((o) => (
+          <option key={o.prefix} value={o.prefix}>{o.label}</option>
+        ))}
+      </datalist>
+      <div className="flex flex-col gap-1.5">
+        {draft.map((rule, i) => (
+          <div key={i} className="flex gap-2">
+            <input
+              type="text"
+              value={rule.prefix}
+              onChange={(e) => update(i, { prefix: e.target.value })}
+              placeholder="/cdn"
+              list="route-prefix-options"
+              spellCheck={false}
+              className={`w-32 ${SERVER_INPUT_CLASS}`}
+            />
+            <input
+              type="text"
+              value={rule.base}
+              onChange={(e) => update(i, { base: e.target.value })}
+              placeholder={JWAPI_BASE}
+              spellCheck={false}
+              className={`flex-1 ${SERVER_INPUT_CLASS}`}
+            />
+            <button
+              onClick={() => setDraft((d) => d.filter((_, j) => j !== i))}
+              title="Remove rule"
+              className="p-1.5 rounded-lg text-text-muted hover:text-red-500 hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button onClick={() => setDraft((d) => [...d, { prefix: '', base: '' }])} className={`flex items-center gap-1 ${SERVER_GHOST_CLASS}`}>
+          <Plus size={12} />
+          Add rule
+        </button>
+        <div className="flex-1" />
+        {dirty && (
+          <button onClick={() => setDraft(saved)} className={SERVER_GHOST_CLASS}>
+            Discard
+          </button>
+        )}
+        <button onClick={() => setRouteRules(draft)} disabled={!dirty} className={SERVER_SAVE_CLASS}>
+          Save &amp; reload
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function VizSettings(): JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className={`flex items-center gap-2.5 w-full text-left ${open ? 'mb-2.5' : ''}`}
+      >
+        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
+          <AudioLines size={13} className="text-white" strokeWidth={2.25} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="text-text-primary text-sm">WRLD visualizer</span>
+          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → and V work in fullscreen: ← → switches visualizer, V toggles visualizer only</p>
+        </div>
+        <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+      <div className="pl-[34px]"><VizControls /></div>
+      )}
+    </div>
+  )
+}
+
+// Green when this build's commit is the latest on the deploy branch, yellow
+// when the site is already serving a newer build (reload to get it), red when
+// GitHub has a newer commit that isn't live yet.
+function CommitFreshnessBulb(): JSX.Element | null {
+  const [status, refresh] = useCommitStatus()
+  if (status === 'unknown') return null
+  const checking = status === 'checking'
+  const color = checking ? 'bg-gray-400' : {
+    latest: 'bg-green-500',
+    'refresh-needed': 'bg-yellow-500',
+    outdated: 'bg-red-500',
+    error: 'bg-blue-500',
+  }[status]
+  const label = checking ? 'Checking for updates…' : {
+    latest: 'Running the latest commit',
+    'refresh-needed': 'A newer version is already live - refresh to run it',
+    outdated: 'A newer commit exists but is not live on the site yet',
+    error: "Couldn't check for updates (rate-limited or offline)",
+  }[status]
   return (
     <button
-      onClick={onClick}
-      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'}`}
-    >
-      {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
-          block centering trick) instead of a manual top offset — a fixed
-          `top-0.5` still relied on the button having zero padding/border to
-          land exactly right, and browsers don't zero those out on <button>
-          by default. auto-margin centering can't drift regardless of the
-          button's own box model. No shadow on the knob either — its default
-          downward offset (0 1px 3px) reads as visual weight sitting low,
-          making it look off-center even when it's geometrically centered. */}
-      <span className={`absolute inset-y-0 my-auto w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
-    </button>
+      type="button"
+      onClick={refresh}
+      disabled={checking}
+      aria-label={`${label} - click to re-check`}
+      title={`${label} - click to re-check`}
+      className={`inline-block w-2 h-2 rounded-full shrink-0 border-0 p-0 ${color} ${checking ? 'cursor-default' : 'cursor-pointer'}`}
+    />
   )
 }
 
 export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
+  const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [tokenCopied, setTokenCopied] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const {
+    avatarUploading, avatarError, handleAvatarFile, handleAvatarRemove,
+    bioDraft, setBioDraft, bioSaving, saveBio,
+    privacyError, togglePublicPlayHistory, togglePublicPlaylists, togglePublicNowPlaying,
+  } = useSettingsAccount()
+  const chatPresenceEnabled = useChatStore((s) => s.presenceEnabled)
+  const chatReadEnabled = useChatStore((s) => s.readEnabled)
+  const setChatPresenceEnabled = useChatStore((s) => s.setPresenceEnabled)
+  const setChatReadEnabled = useChatStore((s) => s.setReadEnabled)
+  const [editingName, setEditingName] = useState(false)
+  const [nameInput, setNameInput] = useState('')
+  const [savingName, setSavingName] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
-  // otherwise re-expand it — see the matching comment on setShowSettings.
+  // otherwise re-expand it - see the matching comment on setShowSettings.
   const openLegal = (doc: LegalDoc): void => { useSandboxStore.getState().expand(); setLegalDoc(doc) }
   const sandboxEnabled = useSandboxStore((s) => s.sandboxEnabled)
   const setSandboxEnabled = useSandboxStore((s) => s.setSandboxEnabled)
   const {
     setShowSettings, setActiveView,
-    account,
+    account, logoutAccount, setShowUserAuth,
     theme, setTheme,
     customSkins, saveCustomSkin, deleteCustomSkin,
     accentColor, setAccentColor,
     settingsTab, setSettingsTab,
     sidebarPosition, setSidebarPosition,
+    navStyle, setNavStyle,
+    autoHideNav, setAutoHideNav,
+    autoHideNavZone, setAutoHideNavZone,
     navOrder, setNavOrder,
     navVisibility, setNavItemVisible,
     navControlOrder, setNavControlOrder,
     navControlVisibility, setNavControlVisible,
+    homeSectionVisibility, setHomeSectionVisible,
     audioOutput, setAudioOutput,
     crossfadeEnabled, crossfadeDuration, setCrossfade,
     pauseFadeEnabled, setPauseFade,
@@ -265,80 +449,54 @@ export default function Settings(): JSX.Element {
     gradientsEnabled, setGradientsEnabled,
     surfaceGradientsEnabled, setSurfaceGradientsEnabled,
     wrldThemeBackground, setWrldThemeBackground,
+    playlistHeroEnabledDark, playlistHeroEnabledLight, setPlaylistHeroEnabled,
     refreshPlaylists, fullEraNames, setFullEraNames,
-  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames')
+    autoReportErrors, setAutoReportErrors,
+    uploads,
+  } = useStorePick('navStyle', 'setNavStyle', 'setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'uploads')
 
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
-  const [customAccent, setCustomAccent] = useState(accentColor)
-  // Drag-to-reorder state for the "Menu order" list — indices into the visible
+  function startEditName(): void {
+    setNameInput(accountDisplayName(account))
+    setNameError(null)
+    setEditingName(true)
+  }
+
+  const saveDisplayName = async (): Promise<void> => {
+    const trimmed = nameInput.trim()
+    if (!trimmed) { setNameError('Name cannot be empty.'); return }
+    setSavingName(true)
+    setNameError(null)
+    try {
+      const updated = await updateDisplayName(trimmed)
+      useStore.setState({ account: updated })
+      setEditingName(false)
+    } catch {
+      setNameError('Could not save. Try again.')
+    } finally {
+      setSavingName(false)
+    }
+  }
+
+  const {
+    customAccent, setCustomAccent, setAccentDebounced,
+    editingSkinId, setEditingSkinId, skinImportRef, skinImportError, createSkin, importSkinFile,
+    navRows, navIsDefault, resetNav, homeIsDefault, resetHome, moveNavItem,
+    notificationSound, chooseNotificationSound,
+    sleepMinutes, setSleepMinutes,
+    devices,
+  } = useSettingsAppearance()
+  // Drag-to-reorder state for the "Menu order" list - indices into the visible
   // nav list (see shownNav below). null = nothing being dragged / hovered.
   const [navDragIdx, setNavDragIdx] = useState<number | null>(null)
   const [navOverIdx, setNavOverIdx] = useState<number | null>(null)
   // Same, for the separate "Menu controls" list below.
   const [ctrlDragIdx, setCtrlDragIdx] = useState<number | null>(null)
   const [ctrlOverIdx, setCtrlOverIdx] = useState<number | null>(null)
-  const [sleepMinutes, setSleepMinutes] = useState(30)
-  const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Custom skins — which one the editor modal is open on (null = closed), the
-  // hidden file input for Import, and a transient "that file wasn't a skin"
-  // message shown under the section.
-  const [editingSkinId, setEditingSkinId] = useState<string | null>(null)
-  const skinImportRef = useRef<HTMLInputElement>(null)
-  const [skinImportError, setSkinImportError] = useState<string | null>(null)
 
-  // Clone the current look into a new editable skin, make it active (so the
-  // editor previews live), and open the editor on it.
-  const createSkin = (): void => {
-    const skin = createCustomSkin(getSkin(theme), 'My skin')
-    saveCustomSkin(skin)
-    setTheme(skin.id)
-    if (skin.accent) setCustomAccent(skin.accent)
-    setEditingSkinId(skin.id)
-  }
-
-  const importSkinFile = async (file: File): Promise<void> => {
-    setSkinImportError(null)
-    const skin = parseSkinFile(await file.text())
-    if (!skin) { setSkinImportError('That file isn’t a valid skin.'); return }
-    saveCustomSkin(skin)
-    setTheme(skin.id)
-    if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
-    setEditingSkinId(skin.id)
-  }
-  // ── Menu items (Appearance) ──────────────────────────────────────────────
-  // Every nav item in saved order — visible ones and the toggled-off extras
-  // alike — so the list is where you both reorder and show/hide.
-  const navRows = orderedNavItems(navOrder)
-  const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
-  const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
-  const navIsDefault = navOrderIsDefault && navVisIsDefault
-  const resetNav = (): void => {
-    setNavOrder(DEFAULT_NAV_ORDER)
-    for (const item of navRows) {
-      const def = DEFAULT_NAV_VISIBILITY[item.view] ?? true
-      if ((navVisibility[item.view] ?? true) !== def) setNavItemVisible(item.view, def)
-    }
-  }
-  // Move a row to sit adjacent to a target row. Reordering happens on the FULL
-  // order (including any web-hidden items) so their relative spots are preserved
-  // even when a web user rearranges the visible ones.
-  const moveNavItem = (fromRow: number, toRow: number): void => {
-    if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
-    const dragView = navRows[fromRow].view
-    const targetView = navRows[toRow].view
-    const from = full.indexOf(dragView)
-    const next = [...full]
-    next.splice(from, 1)
-    const targetIdx = next.indexOf(targetView)
-    next.splice(toRow > fromRow ? targetIdx + 1 : targetIdx, 0, dragView)
-    setNavOrder(next)
-  }
-
-  // ── Menu controls — the foot-of-menu buttons (Profile, Log out, Diagnostics,
+  // ── Menu controls - the foot-of-menu buttons (Profile, Uploads, Diagnostics,
   // Download, Settings). Same reorder/hide model, filtered to the controls
   // that actually apply to this session (account state, platform, dev mode).
-  const controlCtx = { account: !!account, isElectron: false, developerMode }
+  const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads: uploads.length > 0 }
   const ctrlRows = orderedNavControls(navControlOrder).filter((c) => isNavControlAvailable(c.id, controlCtx))
   const ctrlOrderIsDefault = navControlOrder.length === DEFAULT_NAV_CONTROL_ORDER.length && navControlOrder.every((v, i) => v === DEFAULT_NAV_CONTROL_ORDER[i])
   const ctrlVisIsDefault = ctrlRows.every((c) => (navControlVisibility[c.id] ?? true) === (DEFAULT_NAV_CONTROL_VISIBILITY[c.id] ?? true))
@@ -364,58 +522,14 @@ export default function Settings(): JSX.Element {
   }
 
   const closeSettings = (): void => setShowSettings(false)
-  const openMainView = (view: ViewType): void => { setShowSettings(false); setActiveView(view) }
+  // setActiveView alone leaves Settings now that it's a real page in the same
+  // slot as every other view - no separate close step, and no extra history
+  // entry from one.
+  const openMainView = (view: ViewType): void => setActiveView(view)
 
-  // ── Last.fm connect flow (desktop token auth): fetch a token, send the user
-  // to last.fm to approve it, then poll getSession until approval lands (it
-  // returns null while the token is still unapproved). window.open reaches the
-  // system browser in every context — the Electron windows' window-open
-  // handlers route it through shell.openExternal.
-  const [lastfmBusy, setLastfmBusy] = useState(false)
-  const [lastfmWaiting, setLastfmWaiting] = useState(false)
-  const [lastfmError, setLastfmError] = useState<string | null>(null)
-  const lastfmPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const stopLastfmPoll = (): void => {
-    if (lastfmPollRef.current) clearInterval(lastfmPollRef.current)
-    lastfmPollRef.current = null
-    setLastfmWaiting(false)
-  }
-  useEffect(() => () => { if (lastfmPollRef.current) clearInterval(lastfmPollRef.current) }, [])
-
-  const connectLastfm = async (): Promise<void> => {
-    setLastfmError(null)
-    setLastfmBusy(true)
-    try {
-      const token = await lastfmGetAuthToken()
-      window.open(lastfmAuthUrl(token), '_blank', 'noopener')
-      setLastfmWaiting(true)
-      const startedAt = Date.now()
-      lastfmPollRef.current = setInterval(() => {
-        // Tokens live ~60 minutes but nobody waits that long — give up well before.
-        if (Date.now() - startedAt > 5 * 60_000) {
-          stopLastfmPoll()
-          setLastfmError('Authorization timed out — try again.')
-          return
-        }
-        lastfmTryGetSession(token).then((session) => {
-          if (session) { stopLastfmPoll(); setLastfmUser(session.name) }
-        }).catch((e: unknown) => {
-          stopLastfmPoll()
-          setLastfmError(e instanceof Error ? e.message : 'Connection failed')
-        })
-      }, 5000)
-    } catch (e) {
-      setLastfmError(e instanceof Error ? e.message : 'Connection failed')
-    } finally {
-      setLastfmBusy(false)
-    }
-  }
-
-  const disconnectLastfm = (): void => {
-    lastfmDisconnect()
-    setLastfmUser(null)
-  }
+  const {
+    lastfmBusy, lastfmWaiting, lastfmError, connectLastfm, disconnectLastfm, stopLastfmPoll,
+  } = useLastfmConnect(setLastfmUser)
 
   // Which shortcut cell is currently "listening" for a key combo (null = none).
   const [recording, setRecording] = useState<{ id: string } | null>(null)
@@ -436,7 +550,7 @@ export default function Settings(): JSX.Element {
         return
       }
       const combo = eventToCombo(e)
-      if (!combo) return // modifier held on its own — keep waiting for a real key
+      if (!combo) return // modifier held on its own - keep waiting for a real key
       setHotkeyBinding(recording.id, combo)
       setRecording(null)
     }
@@ -444,24 +558,24 @@ export default function Settings(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [recording, setHotkeyBinding])
 
-  const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
+  const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'account')
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
+    { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-    { id: 'feedback', label: 'Feedback', icon: MessageCircle },
     { id: 'about', label: 'About', icon: Info },
   ]
 
-  // ── Settings search — a flat filter over SETTINGS_SEARCH_INDEX rather than
+  // ── Settings search - a flat filter over SETTINGS_SEARCH_INDEX rather than
   // per-tab content, since matches can live on a tab you're not currently
-  // viewing. Gated the same way the rows themselves are (electron/dev mode)
-  // so a result never points at a tab that doesn't exist in this build.
+  // viewing. Gated the same way the rows themselves are (dev mode) so a
+  // result never points at a tab that doesn't exist in this build.
   const [settingsQuery, setSettingsQuery] = useState('')
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
-        !r.electronOnly &&
         (!r.devOnly || developerMode) &&
         (r.label.toLowerCase().includes(settingsQueryTrimmed) || r.sub?.toLowerCase().includes(settingsQueryTrimmed))
       )
@@ -476,15 +590,10 @@ export default function Settings(): JSX.Element {
   // the user last was rather than snapping back here.
   useEffect(() => {
     if (!settingsTab) return
-    setTab(settingsTab as Tab)
+    // Feedback used to be its own tab; it now lives under About.
+    setTab(((settingsTab as string) === 'feedback' ? 'about' : settingsTab) as Tab)
     setSettingsTab(null)
   }, [settingsTab, setSettingsTab])
-
-  useEffect(() => {
-    navigator.mediaDevices?.enumerateDevices().then((devs) => {
-      setDevices(devs.filter((d) => d.kind === 'audiooutput'))
-    }).catch(() => {})
-  }, [])
 
   const toggleSleepTimer = (): void => {
     if (sleepTimerEnd) setSleepTimer(null)
@@ -492,14 +601,7 @@ export default function Settings(): JSX.Element {
   }
 
   return (
-    <ModalOverlay
-      onClose={closeSettings}
-      zIndexClassName="z-50"
-      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[760px] h-[600px] max-h-[85vh]"
-      minWidth={520} minHeight={420}
-    >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
-      <>
+    <>
       {/* Custom-skin editor (portals to <body>, so placement here is fine) */}
       {editingSkinId && (
         <SkinEditorModal
@@ -509,22 +611,18 @@ export default function Settings(): JSX.Element {
         />
       )}
       <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
-        <div
-          className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 select-none cursor-grab active:cursor-grabbing"
-          onMouseDown={onHandleMouseDown}
-        >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 select-none">
           <div className="flex items-center gap-2" >
             <h2 className="text-text-primary font-black text-xl tracking-tight">Settings</h2>
           </div>
           <div className="flex items-center gap-3" >
-            <LockToggle locked={locked} onClick={toggleLock} />
-            <button onClick={closeSettings} className="text-text-muted hover:text-text-primary transition-colors">
+            <button onClick={closeSettings} title="Back" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={20} />
             </button>
           </div>
         </div>
 
-        {/* Search — a flat filter over every setting row (see
+        {/* Search - a flat filter over every setting row (see
             SETTINGS_SEARCH_INDEX), not just the current tab, since the row
             you're after might live somewhere you're not currently looking. */}
         <div className="shrink-0 px-4 sm:px-3 pt-3 pb-2 border-b border-[var(--border)]">
@@ -535,6 +633,7 @@ export default function Settings(): JSX.Element {
               value={settingsQuery}
               onChange={(e) => setSettingsQuery(e.target.value)}
               placeholder="Search settings"
+              autoComplete="off"
               className="w-full bg-[var(--surface-overlay)] text-text-primary text-sm rounded-lg pl-8 pr-8 py-1.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
             />
             {settingsQuery && (
@@ -549,7 +648,7 @@ export default function Settings(): JSX.Element {
           </div>
         </div>
 
-        {/* Mobile tab bar — the sidebar collapses below sm, so categories
+        {/* Mobile tab bar - the sidebar collapses below sm, so categories
             move into a horizontal scroller instead. */}
         <div className="sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
           {tabs.map((t) => (
@@ -566,7 +665,7 @@ export default function Settings(): JSX.Element {
           ))}
         </div>
 
-        {/* Body — sidebar category list + flat content pane, mirroring
+        {/* Body - sidebar category list + flat content pane, mirroring
             macOS System Settings / Apple Music's own preferences window. */}
         <div className="flex flex-1 min-h-0">
           <div className="w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
@@ -584,7 +683,7 @@ export default function Settings(): JSX.Element {
             ))}
           </div>
 
-          <div className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -616,6 +715,183 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
+            {/* ── Account ── */}
+            {!settingsQueryTrimmed && tab === 'account' && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-3">Account</h3>
+                {account ? (
+                  <>
+                    <div className="flex items-center gap-3 mb-4">
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAvatarFile(f); e.target.value = '' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        disabled={avatarUploading}
+                        className="relative w-16 h-16 shrink-0 rounded-full group"
+                      >
+                        {account.avatar ? (
+                          <img src={account.avatar} alt="" className="w-16 h-16 rounded-full object-cover ring-2 ring-[var(--border)]" />
+                        ) : (
+                          <div className="w-16 h-16 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xl font-bold">
+                            {initial(accountDisplayName(account))}
+                          </div>
+                        )}
+                        <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface opacity-0 group-hover:opacity-100 transition-opacity">
+                          {avatarUploading ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
+                        </span>
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        {avatarError && <p className="text-[11px] text-red-400 mb-0.5">{avatarError}</p>}
+                        {editingName ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              autoFocus
+                              value={nameInput}
+                              onChange={(e) => setNameInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') saveDisplayName()
+                                if (e.key === 'Escape') setEditingName(false)
+                              }}
+                              maxLength={50}
+                              disabled={savingName}
+                              className="min-w-0 w-48 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                            />
+                            <button onClick={saveDisplayName} disabled={savingName} className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40" title="Save">
+                              {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                            </button>
+                            <button onClick={() => setEditingName(false)} disabled={savingName} className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40" title="Cancel">
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={startEditName} className="flex items-center gap-1.5 group/name">
+                            <span className="text-text-primary text-base font-bold truncate">{accountDisplayName(account)}</span>
+                            <Pencil size={11} className="text-text-muted opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />
+                          </button>
+                        )}
+                        {nameError && <p className="text-[11px] text-red-400 mt-0.5">{nameError}</p>}
+                        <p className="text-text-muted text-xs mt-0.5">{account.discord_id ? 'Signed in with Discord' : 'Signed in'}</p>
+                      </div>
+                    </div>
+
+                    {account.is_donor && (
+                      <div className="flex items-center gap-2.5 mb-4 px-3 py-2.5 rounded-xl border border-pink-500/20 bg-pink-500/5">
+                        <Heart size={16} className="text-pink-400 shrink-0" fill="currentColor" />
+                        <div className="min-w-0">
+                          <p className="text-text-primary text-xs font-semibold">
+                            Donor{account.donor_since ? ` since ${new Date(account.donor_since).toLocaleDateString()}` : ''}
+                          </p>
+                          <p className="text-text-muted text-[11px]">Priority CDN downloads — your files get matched to faster nodes first</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1.5 px-0.5">Bio</p>
+                    <textarea
+                      value={bioDraft}
+                      onChange={(e) => setBioDraft(e.target.value.slice(0, 500))}
+                      onBlur={() => void saveBio()}
+                      placeholder="Tell people about yourself"
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted resize-none focus:outline-none focus:border-accent/50"
+                    />
+                    <div className="flex items-center justify-between px-0.5 mb-4">
+                      <span className="text-text-muted text-[11px]">{bioSaving ? 'Saving…' : `${bioDraft.length}/500`}</span>
+                    </div>
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1.5 px-0.5">Public profile</p>
+                    <Row icon={History} iconColor="#0f766e" label="Show listening history" sub="Visible to anyone with your profile link">
+                      <Toggle on={!!account.public_play_history} onClick={() => void togglePublicPlayHistory()} />
+                    </Row>
+                    <Row icon={Music2} iconColor="#0f766e" label="Show public playlists" sub="Lists playlists already marked public">
+                      <Toggle on={!!account.public_playlists} onClick={() => void togglePublicPlaylists()} />
+                    </Row>
+                    <Row icon={Radio} iconColor="#0f766e" label="Share what you're listening to" sub="Shows the track you're currently playing on your profile">
+                      <Toggle on={!!account.public_now_playing} onClick={() => void togglePublicNowPlaying()} />
+                    </Row>
+                    {privacyError && <p className="text-red-400 text-[11px] mt-1">{privacyError}</p>}
+
+                    {hasChatAccess(account) && (
+                      <>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Chat privacy</p>
+                        <Row icon={Radio} iconColor="#0f766e" label="Online status" sub="Turn off to stop requesting and showing who's online">
+                          <Toggle on={chatPresenceEnabled} onClick={() => setChatPresenceEnabled(!chatPresenceEnabled)} />
+                        </Row>
+                        <Row icon={Check} iconColor="#0f766e" label="Read receipts" sub="Turn off to stop sending read marks to the server">
+                          <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
+                        </Row>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Chat devices</p>
+                        <ChatDevices userId={account.id} />
+                        <ChatKeyTransfer userId={account.id} />
+                      </>
+                    )}
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
+                    <MyCdnNodes />
+
+                    <div className="mt-4 rounded-xl border border-[var(--border)] overflow-hidden">
+                      <button
+                        onClick={() => setShowToken(v => !v)}
+                        className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] text-text-secondary text-sm font-medium transition-colors"
+                      >
+                        <KeyRound size={15} />
+                        <span className="flex-1 text-left">Auth Token</span>
+                        {showToken ? <EyeOff size={14} className="text-text-muted" /> : <Eye size={14} className="text-text-muted" />}
+                      </button>
+                      {showToken && (
+                        <button
+                          onClick={() => {
+                            const t = getToken()
+                            if (t) {
+                              navigator.clipboard.writeText(t)
+                              setTokenCopied(true)
+                              setTimeout(() => setTokenCopied(false), 2000)
+                            }
+                          }}
+                          className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-raised)] transition-colors border-t border-[var(--border)] group"
+                          title="Click to copy"
+                        >
+                          <code className="flex-1 text-left text-[10px] font-mono text-text-muted truncate">
+                            {getToken() ?? '&#8212;'}
+                          </code>
+                          <span className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium transition-colors ${tokenCopied ? 'text-emerald-500' : 'text-text-muted group-hover:text-text-primary'}`}>
+                            {tokenCopied ? 'Copied!' : <><Copy size={11} /> Copy</>}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => logoutAccount()}
+                      className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/25 text-text-secondary hover:text-red-400 text-sm font-medium transition-colors mt-2"
+                    >
+                      <LogOut size={15} />
+                      Log out
+                    </button>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-start gap-3">
+                    <p className="text-text-muted text-sm max-w-sm">
+                      Log in to save favorite tracks and playlists that follow you on every device.
+                    </p>
+                    <button
+                      onClick={() => setShowUserAuth(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                    >
+                      <LogIn size={15} />
+                      Log in
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── Appearance ── */}
             {!settingsQueryTrimmed && tab === 'appearance' && (
               <div>
@@ -627,7 +903,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0 flex-1">
                       <span className="text-text-primary text-sm">Skin</span>
-                      <p className="text-text-muted text-[11px]">Skins with a signature color also set the accent — or build your own below</p>
+                      <p className="text-text-muted text-[11px]">Skins with a signature color also set the accent - or build your own below</p>
                     </div>
                     <button
                       onClick={() => skinImportRef.current?.click()}
@@ -651,7 +927,7 @@ export default function Settings(): JSX.Element {
                   {skinImportError && (
                     <p className="text-red-400 text-[11px] mb-2 pl-[34px]">{skinImportError}</p>
                   )}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
+                  <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2 pl-[34px]">
                     {[...SKINS, ...customSkins].map((skin) => {
                       const active = theme === skin.id
                       return (
@@ -666,7 +942,7 @@ export default function Settings(): JSX.Element {
                             title={skin.dynamic ? 'Palette follows the current song’s cover art' : skin.name}
                           >
                             {/* Mini app mock: sidebar strip, two "text" lines, and a
-                                player bar with the skin's accent — a live swatch of
+                                player bar with the skin's accent - a live swatch of
                                 the actual palette values, not approximations. */}
                             <div
                               className="h-14 rounded-lg overflow-hidden flex border transition-transform group-hover:scale-[1.03] group-active:scale-[0.98]"
@@ -684,7 +960,7 @@ export default function Settings(): JSX.Element {
                                   <div
                                     className="w-2.5 h-2.5 rounded-full shrink-0"
                                     style={{
-                                      // Dynamic skin has no fixed accent — a color wheel
+                                      // Dynamic skin has no fixed accent - a color wheel
                                       // signals "follows the song's cover art".
                                       background: skin.dynamic
                                         ? 'conic-gradient(#f43f5e, #f59e0b, #10b981, #38bdf8, #a78bfa, #f43f5e)'
@@ -749,8 +1025,7 @@ export default function Settings(): JSX.Element {
                       value={customAccent}
                       onChange={(e) => {
                         setCustomAccent(e.target.value)
-                        if (accentDebounceRef.current) clearTimeout(accentDebounceRef.current)
-                        accentDebounceRef.current = setTimeout(() => setAccentColor(e.target.value), 80)
+                        setAccentDebounced(e.target.value)
                       }}
                       className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 bg-transparent"
                       title="Custom color"
@@ -760,16 +1035,16 @@ export default function Settings(): JSX.Element {
                 <Row
                   icon={Waves}
                   iconColor="#8b5cf6"
-                  label="Gradient surfaces"
-                  sub="Accent-tinted gradients behind the app, sidebar, and player"
+                  label="App gradients"
+                  sub="Accent-tinted gradients behind the app and sidebar"
                 >
                   <Toggle on={gradientsEnabled} onClick={() => setGradientsEnabled(!gradientsEnabled)} />
                 </Row>
                 <Row
                   icon={Waves}
                   iconColor="#8b5cf6"
-                  label="Surface gradients"
-                  sub="Accent-tinted gradients on toggle groups, search bars, badges, and menus"
+                  label="Control gradients"
+                  sub="Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus"
                 >
                   <Toggle on={surfaceGradientsEnabled} onClick={() => setSurfaceGradientsEnabled(!surfaceGradientsEnabled)} />
                 </Row>
@@ -781,6 +1056,22 @@ export default function Settings(): JSX.Element {
                 >
                   <Toggle on={wrldThemeBackground} onClick={() => setWrldThemeBackground(!wrldThemeBackground)} />
                 </Row>
+                <Row
+                  icon={Images}
+                  iconColor="#8b5cf6"
+                  label="Playlist header art"
+                  sub="Full-bleed blurred cover art behind a playlist's header - off falls back to a plain header. Tracked separately for light and dark skins."
+                >
+                  {/* Tracked per skin darkness (playlistHeroEnabledDark/Light)
+                      rather than one flag, so a choice made on a dark skin
+                      doesn't silently carry over to a light one and vice
+                      versa - this toggle always shows/writes the value for
+                      whichever skin is active right now. */}
+                  {(() => {
+                    const heroOn = getSkin(theme).dark ? playlistHeroEnabledDark : playlistHeroEnabledLight
+                    return <Toggle on={heroOn} onClick={() => setPlaylistHeroEnabled(!heroOn)} />
+                  })()}
+                </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#7c3aed' }}>
@@ -788,7 +1079,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">App font</span>
-                      <p className="text-text-muted text-[11px]">Typeface for the whole app — each option previews in its own font</p>
+                      <p className="text-text-muted text-[11px]">Typeface for the whole app - each option previews in its own font</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
@@ -895,7 +1186,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">Lyrics text size</span>
-                      <p className="text-text-muted text-[11px]">Synced and plain lyrics everywhere — WRLD tab, now playing, mini player</p>
+                      <p className="text-text-muted text-[11px]">Synced and plain lyrics everywhere - WRLD tab, now playing, mini player</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap pl-[34px]">
@@ -969,21 +1260,6 @@ export default function Settings(): JSX.Element {
                     </div>
                   )}
                 </Row>
-                <Row
-                  icon={BookOpen}
-                  iconColor="#0891b2"
-                  label="Full era names"
-                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
-                />
-                <Row
-                  icon={FlaskConical}
-                  iconColor="#f59e0b"
-                  label="Sandbox"
-                  sub="Dock modals into a collapsible pill at the top of the window instead of a centered popup. Off restores the plain popup for every modal."
-                >
-                  <Toggle on={sandboxEnabled} onClick={() => setSandboxEnabled(!sandboxEnabled)} />
-                </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#9333ea' }}>
@@ -991,7 +1267,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">Lyric colors</span>
-                      <p className="text-text-muted text-[11px]">Color the line being sung and the ones that aren't — WRLD tab, now playing, mini player</p>
+                      <p className="text-text-muted text-[11px]">Color the line being sung and the ones that aren't - WRLD tab, now playing, mini player</p>
                     </div>
                   </div>
                   <div className="flex flex-col gap-2.5 pl-[34px]">
@@ -1011,6 +1287,29 @@ export default function Settings(): JSX.Element {
                     />
                   </div>
                 </div>
+                <VizSettings />
+              </div>
+            )}
+
+            {/* ── Preferences ── */}
+            {!settingsQueryTrimmed && tab === 'preferences' && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-4">Preferences</h3>
+                <Row
+                  icon={BookOpen}
+                  iconColor="#0891b2"
+                  label="Full era names"
+                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
+                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
+                />
+                <Row
+                  icon={FlaskConical}
+                  iconColor="#f59e0b"
+                  label="Sandbox"
+                  sub="Dock modals into a collapsible pill at the top of the window instead of a centered popup. Off restores the plain popup for every modal."
+                >
+                  <Toggle on={sandboxEnabled} onClick={() => setSandboxEnabled(!sandboxEnabled)} />
+                </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
@@ -1018,7 +1317,7 @@ export default function Settings(): JSX.Element {
                     </div>
                     <div className="min-w-0">
                       <span className="text-text-primary text-sm">Navigation position</span>
-                      <p className="text-text-muted text-[11px]">Where the nav menu sits on desktop — phones keep the bottom tabs</p>
+                      <p className="text-text-muted text-[11px]">Where the nav menu sits on desktop - phones keep the bottom tabs</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap pl-[34px]">
@@ -1041,6 +1340,58 @@ export default function Settings(): JSX.Element {
                     })}
                   </div>
                 </div>
+                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
+                      <PanelLeft size={13} className="text-white" strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-text-primary text-sm">Navigation style</span>
+                      <p className="text-text-muted text-[11px]">Classic docks the menu to an edge; Pill floats a compact rounded bar over the page. Follows the position and auto-hide settings. Desktop only.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                    {([['classic', 'Classic'], ['pill', 'Pill']] as const).map(([id, label]) => (
+                      <button
+                        key={id}
+                        onClick={() => setNavStyle(id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          navStyle === id
+                            ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                            : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <Row
+                  icon={Minimize2}
+                  iconColor="#0d9488"
+                  label="Auto-hide navigation"
+                  sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
+                >
+                  <Toggle on={autoHideNav} onClick={() => setAutoHideNav(!autoHideNav)} />
+                </Row>
+                {autoHideNav && (
+                  <Row
+                    icon={Minimize2}
+                    iconColor="#0d9488"
+                    label="Reveal area"
+                    sub="How close to the edge the pointer needs to get to bring the menu back"
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={4} max={120} step={4}
+                        value={autoHideNavZone}
+                        onChange={(e) => setAutoHideNavZone(parseInt(e.target.value))}
+                        className="w-28 accent-[var(--accent)]"
+                      />
+                      <span className="text-text-muted text-xs tabular-nums w-10 text-right">{autoHideNavZone}px</span>
+                    </div>
+                  </Row>
+                )}
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">
                     <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#6366f1' }}>
@@ -1082,9 +1433,53 @@ export default function Settings(): JSX.Element {
                           <GripVertical size={14} className="text-text-muted shrink-0" />
                           <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{item.icon}</span>
                           <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{item.label}</span>
+                          {item.alwaysVisible ? (
+                            <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
+                              Always shown
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setNavItemVisible(item.view, !shown)}
+                              title={shown ? 'Hide from menu' : 'Add to menu'}
+                              className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+                            >
+                              {shown ? <Eye size={15} /> : <EyeOff size={15} />}
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#059669' }}>
+                      <House size={13} className="text-white" strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-text-primary text-sm">Home screen</span>
+                      <p className="text-text-muted text-[11px]">Choose which sections show on the Home tab</p>
+                    </div>
+                    {!homeIsDefault && (
+                      <button
+                        onClick={resetHome}
+                        title="Restore all Home sections"
+                        className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors shrink-0"
+                      >
+                        <RotateCcw size={11} /> Reset
+                      </button>
+                    )}
+                  </div>
+                  <div className="pl-[34px] space-y-1.5">
+                    {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
+                      const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
+                      return (
+                        <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">
+                          <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{section.icon}</span>
+                          <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{section.label}</span>
                           <button
-                            onClick={() => setNavItemVisible(item.view, !shown)}
-                            title={shown ? 'Hide from menu' : 'Add to menu'}
+                            onClick={() => setHomeSectionVisible(section.id, !shown)}
+                            title={shown ? 'Hide from Home' : 'Show on Home'}
                             className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
                           >
                             {shown ? <Eye size={15} /> : <EyeOff size={15} />}
@@ -1094,53 +1489,6 @@ export default function Settings(): JSX.Element {
                     })}
                   </div>
                 </div>
-                {/* Editor/admin-only tabs on the mobile bottom bar (Albums, and
-                    the Editor/Admin profile tab). They aren't part of the
-                    NAV_ITEMS registry above (which drives the desktop side
-                    menu) — desktop reaches those views via the profile avatar /
-                    "Edit albums" button — so they get their own toggle here,
-                    shown only to editors/admins on the web build where the
-                    bottom bar exists. Reuses the shared navVisibility map. */}
-                {showStaffProfile(account) && (
-                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                    <div className="flex items-center gap-2.5 mb-2.5">
-                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#f59e0b' }}>
-                        <ShieldCheck size={13} className="text-white" strokeWidth={2.25} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-text-primary text-sm">Staff tabs (mobile)</span>
-                        <p className="text-text-muted text-[11px]">Show or hide staff tabs in the mobile bottom bar</p>
-                      </div>
-                    </div>
-                    <div className="pl-[34px] space-y-1.5">
-                      {([
-                        // Albums stays editor/admin-only; the profile tab keys
-                        // off the same helpers BottomNav routes with, so the
-                        // toggle can't end up pointing at a different view than
-                        // the tab it's meant to hide.
-                        ...((account?.is_editor || account?.is_administrator)
-                          ? [{ view: 'albums-admin' as ViewType, label: 'Albums', icon: <Disc size={18} /> }]
-                          : []),
-                        { view: staffProfileView(account), label: staffProfileLabel(account), icon: <ShieldCheck size={18} /> },
-                      ]).map((item) => {
-                        const shown = navVisibility[item.view] ?? true
-                        return (
-                          <div key={item.view} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">
-                            <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{item.icon}</span>
-                            <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{item.label}</span>
-                            <button
-                              onClick={() => setNavItemVisible(item.view, !shown)}
-                              title={shown ? 'Hide from menu' : 'Show in menu'}
-                              className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-                            >
-                              {shown ? <Eye size={15} /> : <EyeOff size={15} />}
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
                 {ctrlRows.length > 0 && (
                   <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                     <div className="flex items-center gap-2.5 mb-2.5">
@@ -1149,7 +1497,7 @@ export default function Settings(): JSX.Element {
                       </div>
                       <div className="min-w-0 flex-1">
                         <span className="text-text-primary text-sm">Menu controls</span>
-                        <p className="text-text-muted text-[11px]">The buttons at the foot of the menu — reorder or hide them</p>
+                        <p className="text-text-muted text-[11px]">The buttons at the foot of the menu - reorder or hide them</p>
                       </div>
                       {!ctrlIsDefault && (
                         <button
@@ -1313,12 +1661,42 @@ export default function Settings(): JSX.Element {
                     </button>
                   </div>
                 </Row>
+                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#f59e0b' }}>
+                      <Bell size={13} className="text-white" strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-text-primary text-sm">Notification sound</span>
+                      <p className="text-text-muted text-[11px]">Plays when a chat message or news post notification fires - click one to preview it</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap pl-[34px]">
+                    {NOTIFICATION_SOUNDS.map((s) => {
+                      const active = notificationSound === s.id
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={() => chooseNotificationSound(s.id)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
+                            active
+                              ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                          }`}
+                        >
+                          {s.notes.length > 0 ? <Volume2 size={11} /> : <BellOff size={11} />}
+                          {s.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
                 <Row
                   icon={CloudUpload}
                   iconColor="#d51007"
                   label="Last.fm scrobbling"
                   sub={
-                    !lastfmConfigured() ? 'Unavailable — this build has no Last.fm API key'
+                    !lastfmConfigured() ? 'Unavailable - this build has no Last.fm API key'
                     : lastfmError ? lastfmError
                     : lastfmUser ? `Connected as ${lastfmUser}`
                     : lastfmWaiting ? 'Approve access on last.fm, then come back here'
@@ -1356,6 +1734,21 @@ export default function Settings(): JSX.Element {
                       </button>
                     )
                   )}
+                </Row>
+                <Row
+                  icon={Server}
+                  iconColor="#0ea5e9"
+                  label="Distributed CDN downloads"
+                  sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
+                >
+                  <Toggle
+                    on={cdnEnabled}
+                    onClick={() => {
+                      const next = !cdnEnabled
+                      cdnService.setEnabled(next)
+                      setCdnEnabled(next)
+                    }}
+                  />
                 </Row>
               </div>
             )}
@@ -1449,29 +1842,29 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
-            {/* ── Feedback ── */}
-            {!settingsQueryTrimmed && tab === 'feedback' && (
-              <div>
-                <h3 className="text-text-primary text-lg font-bold mb-1">Feedback</h3>
-                <p className="text-text-muted text-xs mb-4 leading-relaxed max-w-md">
-                  Found a bug or have an idea? Let us know. To report a problem with a
-                  specific song's info or lyrics, open that song and choose “Report”.
-                </p>
-                <div className="max-w-md">
-                  <ReportForm mode={{ kind: 'feedback' }} />
-                </div>
-              </div>
-            )}
-
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
                 <h3 className="text-text-primary text-lg font-bold mb-3">About</h3>
-                <p className="text-text-muted text-xs mb-3">
+                <p className="text-text-muted text-xs mb-1">
                   unreleased v{APP_VERSION} &mdash; powered by{' '}
                   <a href="https://juicewrldapi.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
                     juicewrldapi.com
                   </a>
+                </p>
+                <p className="text-text-muted text-xs mb-3 flex items-center gap-1.5">
+                  <span>
+                    Last updated to commit{' '}
+                    <a
+                      href={`https://github.com/Juice-WRLD-API/Unreleased/commit/${COMMIT_HASH}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent font-mono hover:underline"
+                    >
+                      {COMMIT_HASH}
+                    </a>
+                  </span>
+                  <CommitFreshnessBulb />
                 </p>
                 <div className="flex flex-wrap gap-2 mb-4">
                   <a
@@ -1503,6 +1896,36 @@ export default function Settings(): JSX.Element {
                   </a>
                 </div>
 
+                <div className="mb-4 rounded-xl border border-[var(--border)] p-3 max-w-md">
+                  <button
+                    onClick={() => useStore.getState().openReport({ kind: 'feedback' })}
+                    className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-accent/10 hover:bg-accent/15 border border-accent/25 text-accent text-sm font-medium transition-colors mb-2"
+                  >
+                    <MessageCircle size={15} />
+                    Send feedback
+                  </button>
+                  <Row
+                    icon={Bug}
+                    iconColor="#ef4444"
+                    label="Auto-report app errors"
+                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                  >
+                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
+                </div>
+
+                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
+                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
+                    <Server size={13} />
+                    API servers
+                  </div>
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] mt-2.5">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
+                  </p>
+                </div>
+
                 {(!account || (!account.is_editor && !account.is_administrator)) && (
                   <button
                     onClick={() => openMainView('editor')}
@@ -1521,46 +1944,20 @@ export default function Settings(): JSX.Element {
                     Become a Contributor
                   </button>
                 )}
-                {account && (
-                  <div className="mt-2 rounded-xl border border-[var(--border)] overflow-hidden">
-                    <button
-                      onClick={() => setShowToken(v => !v)}
-                      className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] text-text-secondary text-sm font-medium transition-colors"
-                    >
-                      <KeyRound size={15} />
-                      <span className="flex-1 text-left">Auth Token</span>
-                      {showToken ? <EyeOff size={14} className="text-text-muted" /> : <Eye size={14} className="text-text-muted" />}
-                    </button>
-                    {showToken && (
-                      <button
-                        onClick={() => {
-                          const t = getToken()
-                          if (t) {
-                            navigator.clipboard.writeText(t)
-                            setTokenCopied(true)
-                            setTimeout(() => setTokenCopied(false), 2000)
-                          }
-                        }}
-                        className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-raised)] transition-colors border-t border-[var(--border)] group"
-                        title="Click to copy"
-                      >
-                        <code className="flex-1 text-left text-[10px] font-mono text-text-muted truncate">
-                          {getToken() ?? '&#8212;'}
-                        </code>
-                        <span className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium transition-colors ${tokenCopied ? 'text-emerald-500' : 'text-text-muted group-hover:text-text-primary'}`}>
-                          {tokenCopied ? 'Copied!' : <><Copy size={11} /> Copy</>}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                )}
-
                 <button
                   onClick={() => openMainView('docs')}
                   className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
                 >
                   <BookOpen size={15} />
                   API Docs
+                </button>
+
+                <button
+                  onClick={() => openMainView('thanks')}
+                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
+                >
+                  <Heart size={15} />
+                  Thank You
                 </button>
 
                 <div className="grid grid-cols-2 gap-2 mt-2">
@@ -1630,8 +2027,6 @@ export default function Settings(): JSX.Element {
       </div>
 
       {legalDoc && <LegalModal initialDoc={legalDoc} onClose={() => setLegalDoc(null)} />}
-      </>
-      )}
-    </ModalOverlay>
+    </>
   )
 }

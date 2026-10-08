@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useResizablePanel } from '../hooks/useResizablePanel'
-import { X, Music, ChevronUp, ChevronDown, Pencil, Info } from 'lucide-react'
+import { X, Music, ChevronUp, ChevronDown, Pencil, Info, MicVocal } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import LyricsDisplay from './LyricsDisplay'
+import { lazyOverlay } from '../lib/lazyView'
 import { smallCoverUrl } from '../lib/juicewrldApi'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { useLyricsVisible } from '../lib/lyrics'
+
+// Pulls in html-to-image for the export - only worth downloading once opened.
+const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
 
 export default function NowPlaying(): JSX.Element {
   const {
@@ -17,6 +21,7 @@ export default function NowPlaying(): JSX.Element {
   } = useStorePick('currentTrack', 'currentTrackFull', 'setShowNowPlaying', 'lyricsOverride')
 
   const [artCollapsed, setArtCollapsed] = useState(false)
+  const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [panelWidth, dragHandle] = useResizablePanel(360, 280, 520)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
@@ -28,7 +33,7 @@ export default function NowPlaying(): JSX.Element {
 
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab (this component itself unmounts when the Wrld tab is
-  // active — see App.tsx). The id is already right there in currentTrack.id
+  // active - see App.tsx). The id is already right there in currentTrack.id
   // (format 'jw-<id>'), so no fetch is needed just to open it.
   const handleInfo = (): void => {
     const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
@@ -43,7 +48,11 @@ export default function NowPlaying(): JSX.Element {
 
   return (
     <div
-      className="bg-surface-raised flex shrink-0 overflow-hidden animate-slide-in-right"
+      // bg-surface on mobile, not bg-surface-raised: this is `position: fixed;
+      // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
+      // element's background directly - bg-surface-raised made the status bar
+      // read visibly darker than the rest of the app while this panel is open.
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden animate-slide-in-right`}
       style={isMobile
         ? { position: 'fixed', inset: 0, zIndex: 50 }
         : { width: panelWidth, borderLeft: '1px solid var(--border)' }
@@ -66,6 +75,15 @@ export default function NowPlaying(): JSX.Element {
                 title={artCollapsed ? 'Show artwork' : 'Hide artwork'}
               >
                 {artCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+              </button>
+            )}
+            {hasLyrics && (
+              <button
+                onClick={() => setShowShareLyrics(true)}
+                className="text-text-muted hover:text-text-primary transition-colors"
+                title="Share lyrics"
+              >
+                <MicVocal size={16} />
               </button>
             )}
             {jwMatch && (
@@ -151,6 +169,15 @@ export default function NowPlaying(): JSX.Element {
           </div>
         )}
       </div>
+      {showShareLyrics && currentTrack && currentTrackFull && (
+        <ShareLyricsModal
+          title={currentTrack.title}
+          artist={currentTrack.artist}
+          imageUrl={currentTrackFull.albumArt ?? currentTrack.imageUrl}
+          rawLyrics={currentTrackFull.syncedLyrics || currentTrackFull.lyrics}
+          onClose={() => setShowShareLyrics(false)}
+        />
+      )}
     </div>
   )
 }

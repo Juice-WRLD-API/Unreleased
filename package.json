@@ -1,25 +1,28 @@
 {
   "name": "unreleased",
-  "version": "2.0.9",
+  "version": "2.1.0",
   "description": "A music player for Juice WRLD",
-  "main": "electron/main.js",
   "scripts": {
-    "dev": "vite --port 3018 --strictPort --host",
+    "dev": "vite --port 5173 --strictPort --host",
     "build": "tsc --noEmit && vite build",
-    "typecheck:electron": "tsc -p tsconfig.electron.json",
     "preview": "vite preview",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3018 && electron .\"",
-    "electron:build": "npm run build && electron-builder"
+    "docs:check-drift": "node scripts/check-docs-drift.mjs",
+    "terminal:check-coverage": "node scripts/check-terminal-coverage.mjs",
+    "social-preview": "node server/social-preview.mjs"
   },
   "keywords": [],
   "author": "leanwrldd",
   "license": "MIT",
   "private": true,
   "dependencies": {
-    "@xhayper/discord-rpc": "^1.3.4",
-    "electron-updater": "^6.8.9",
+    "@types/qrcode": "^1.5.6",
+    "browser-id3-writer": "^6.4.0",
+    "client-zip": "^2.5.1",
+    "jsmediatags": "^3.9.7",
     "music-metadata": "^11.13.0",
-    "node-id3": "^0.2.9"
+    "node-id3": "^0.2.9",
+    "qrcode": "^1.5.4",
+    "remark-breaks": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
@@ -27,127 +30,27 @@
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
-    "concurrently": "^10.0.3",
-    "electron": "^42.9.2",
-    "electron-builder": "^26.15.3",
+    "emoji-datasource-apple": "^16.0.0",
     "ffmpeg-static": "^5.3.0",
+    "html-to-image": "^1.11.11",
+    "libsodium-wrappers": "^0.8.4",
     "lucide-react": "^0.469.0",
     "postcss": "^8.5.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.35.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "vite": "^6.3.5",
-    "wait-on": "^9.0.10",
     "youtube-dl-exec": "^3.1.9",
     "zustand": "^5.0.14"
   },
   "overrides": {
     "js-yaml": "4.3.1",
-    "@discordjs/rest": { "undici": "6.28.0" },
-    "@electron/get": { "undici": "7.29.0" }
-  },
-  "build": {
-    "appId": "com.juicewrldapi.player",
-    "productName": "Unreleased",
-    "icon": "electron/icon.ico",
-    "compression": "maximum",
-    "electronLanguages": [
-      "en-US"
-    ],
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "**/*",
-      "!src/**/*",
-      "!build/**/*",
-      "!out/**/*",
-      "!release/**/*",
-      "!beta-builds/**/*",
-      "!scripts/**/*",
-      "!.github/**/*",
-      "!.git/**/*",
-      "!.claude/**/*",
-      "!node_modules/.bin/**/*",
-      "!**/*.bat",
-      "!**/*.log",
-      "!**/*.d.ts",
-      "!**/*.map",
-      "!.env*",
-      "!*.md",
-      "!tsconfig*.json",
-      "!*.tsbuildinfo",
-      "!postcss.config.js",
-      "!tailwind.config.js",
-      "!vite.config.ts",
-      "!icons/**/*",
-      "!dist/robots.txt",
-      "!dist/sitemap.xml",
-      "!**/.DS_Store",
-      "!**/Thumbs.db"
-    ],
-    "mac": {
-      "icon": "resources/icon-512.png",
-      "category": "public.app-category.music",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
-      ]
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "nsis-web",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "${productName}-Setup-${version}.${ext}",
-      "extraResources": [
-        {
-          "from": "build/bundled/Unreleased-Setup.exe",
-          "to": "Unreleased-Setup.exe"
-        },
-        {
-          "from": "electron/icon.ico",
-          "to": "icon.ico"
-        }
-      ]
-    },
-    "nsis": {
-      "include": "build/installer.nsh",
-      "oneClick": false
-    },
-    "nsisWeb": {
-      "artifactName": "${productName}-Setup.${ext}"
-    },
-    "linux": {
-      "icon": "resources/icon-512.png",
-      "category": "Audio",
-      "target": [
-        "AppImage"
-      ],
-      "artifactName": "${productName}-${version}.${ext}"
-    },
-    "publish": {
-      "provider": "github",
-      "owner": "leanwrldd",
-      "repo": "unreleased"
+    "@discordjs/rest": {
+      "undici": "6.28.0"
     }
   }
 }

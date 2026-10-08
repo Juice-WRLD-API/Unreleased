@@ -8,7 +8,7 @@ import logo from '../assets/logo.png'
 import { IS_ANDROID, IS_IOS, IS_MOBILE } from '../lib/platform'
 import { hasPwaInstallPrompt, onPwaInstallPromptChange, showPwaInstallPrompt } from './InstallPrompt'
 
-// Download page for the desktop app (web build only — the sidebar hides the
+// Download page for the desktop app (web build only - the sidebar hides the
 // entry point inside Electron). Versions, sizes and download URLs come from
 // the GitHub Releases API so the page never goes stale between releases; if
 // that fetch fails (rate limit, offline) every button falls back to the
@@ -16,21 +16,21 @@ import { hasPwaInstallPrompt, onPwaInstallPromptChange, showPwaInstallPrompt } f
 //
 // macOS builds don't ship with every release (they need a Mac to build), so
 // the page scans the recent release list and serves the newest release that
-// carries .dmg assets — possibly older than the Windows/Linux one.
+// carries .dmg assets - possibly older than the Windows/Linux one.
 //
 // The Android APK and iOS IPA are each their own release train off their own
-// branch (tagged `android-vX.Y.Z` / `ios-vX.Y.Z` — neither is store-listed,
+// branch (tagged `android-vX.Y.Z` / `ios-vX.Y.Z` - neither is store-listed,
 // since both ship `unreleased`-catalog content), interleaved with the desktop
 // `vX.Y.Z` tags in the same releases list. Every platform is picked out by
 // which asset extensions each release carries, not by tag string. The iOS
-// build is unsigned (no Apple Developer account behind it) — installed via
+// build is unsigned (no Apple Developer account behind it) - installed via
 // AltStore/Sideloadly, which re-sign it locally with the user's own free
 // Apple ID.
 
 const REPO_URL = 'https://github.com/Juice-WRLD-API/Unreleased'
 const LATEST_URL = `${REPO_URL}/releases/latest`
 
-// The original desktop app this project succeeded — unmaintained, but some
+// The original desktop app this project succeeded - unmaintained, but some
 // people still ask for it, so it gets a small, clearly-labeled spot here
 // rather than the main grid.
 const LEGACY_REPO_URL = 'https://github.com/HackinHood/juicewrldapi-desktop'
@@ -48,7 +48,7 @@ interface ReleaseInfo {
   assets: ReleaseAsset[]
 }
 
-// One fetch per session — the GitHub API is unauthenticated here (60 req/hr
+// One fetch per session - the GitHub API is unauthenticated here (60 req/hr
 // per IP), so revisiting the page must not burn another request.
 let cachedReleases: ReleaseInfo[] | null = null
 
@@ -139,12 +139,19 @@ function AssetButton({ asset, label, primary }: { asset: ReleaseAsset; label: st
     <a
       href={asset.browser_download_url}
       className={primary
-        ? 'flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors'
-        : 'flex items-center justify-center gap-2 w-full py-2 rounded-xl text-xs font-semibold border border-[var(--border)] text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors'}
+        ? 'flex items-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors'
+        : 'flex items-center gap-2 w-full px-4 py-2 rounded-xl text-xs font-semibold border border-[var(--border)] text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors'}
     >
-      <Download size={primary ? 15 : 13} />
-      <span>{label}</span>
-      <span className={primary ? 'font-medium text-white/70' : 'text-text-muted'}>· {fmtMB(asset.size)}</span>
+      <Download size={primary ? 15 : 13} className="shrink-0" />
+      {/* Label on its own row, size below it - squeezing both onto one line
+          either truncated the label (not enough room next to the size) or
+          wrapped unpredictably (mid-word breaks, different heights) once
+          label length varied across buttons. Stacking keeps every button
+          the same shape regardless of how long its label is. */}
+      <span className="flex-1 min-w-0 text-left leading-tight">
+        <span className="block truncate">{label}</span>
+        <span className={`block text-[11px] font-normal ${primary ? 'text-white/70' : 'text-text-muted'}`}>{fmtMB(asset.size)}</span>
+      </span>
     </a>
   )
 }
@@ -171,7 +178,11 @@ function PlatformCard({ icon, name, requirement, detected, children }: {
         </div>
         <div className="min-w-0">
           <p className="text-text-primary text-sm font-semibold">{name}</p>
-          <p className="text-text-muted text-[11px]">{requirement}</p>
+          {/* min-h reserves room for 2 lines - some requirement strings
+              ("macOS · Apple Silicon & Intel") wrap while shorter ones don't,
+              which was pushing each card's buttons down by a different
+              amount and left them misaligned across the row. */}
+          <p className="text-text-muted text-[11px] leading-snug min-h-[28px]">{requirement}</p>
         </div>
       </div>
       <div className="mt-3.5 space-y-2">
@@ -212,7 +223,7 @@ export default function DownloadAppView(): JSX.Element {
   // Release assets by platform. Windows/Linux come off the newest desktop
   // release; the macOS .dmg pair comes from the newest desktop release that
   // has one (Mac builds skip some versions). The web installer is the tiny
-  // nsis-web stub that pulls the rest during setup — offered next to the
+  // nsis-web stub that pulls the rest during setup - offered next to the
   // full offline installer.
   const desktopReleases = releases?.filter((r) => r.assets.some((a) => /\.(exe|AppImage|dmg)$/i.test(a.name))) ?? null
   const release = desktopReleases?.[0] ?? null
@@ -227,12 +238,12 @@ export default function DownloadAppView(): JSX.Element {
   const macDmg = macArm ?? macIntel
   const macLagging = !!macRelease && !!release && macRelease.version !== release.version
 
-  // Android ships from its own tag train (`android-vX.Y.Z`) — pick the newest
+  // Android ships from its own tag train (`android-vX.Y.Z`) - pick the newest
   // release carrying an .apk regardless of where it falls in the combined list.
   const androidRelease = releases?.find((r) => r.assets.some((a) => a.name.endsWith('.apk'))) ?? null
   const androidApk = androidRelease?.assets.find((a) => a.name.endsWith('.apk'))
 
-  // Same idea for iOS's own `ios-vX.Y.Z` train — an unsigned .ipa, sideloaded
+  // Same idea for iOS's own `ios-vX.Y.Z` train - an unsigned .ipa, sideloaded
   // via AltStore/Sideloadly rather than the App Store.
   const iosRelease = releases?.find((r) => r.assets.some((a) => a.name.endsWith('.ipa'))) ?? null
   const iosIpa = iosRelease?.assets.find((a) => a.name.endsWith('.ipa'))
@@ -251,7 +262,7 @@ export default function DownloadAppView(): JSX.Element {
 
         {/* ── Hero ── */}
         <div className="relative text-center">
-          {/* Accent glow behind the hero — pure decoration. */}
+          {/* Accent glow behind the hero - pure decoration. */}
           <div aria-hidden className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[540px] max-w-full h-[340px] rounded-full bg-accent/20 blur-[110px]" />
 
           <div className="relative">
@@ -265,8 +276,8 @@ export default function DownloadAppView(): JSX.Element {
             </h1>
             <p className="text-text-secondary text-base md:text-lg max-w-xl mx-auto leading-relaxed mb-5">
               {os === 'android'
-                ? 'Everything from the web player, plus offline downloads, background playback and Discord Rich Presence — in a fast native app.'
-                : 'Everything from the web player, plus offline downloads, a local library, audio effects and Discord Rich Presence — in a fast native app.'}
+                ? 'Everything from the web player, plus offline downloads, background playback and Discord Rich Presence - in a fast native app.'
+                : 'Everything from the web player, plus offline downloads, a local library, audio effects and Discord Rich Presence - in a fast native app.'}
             </p>
 
             {/* Version pill */}
@@ -285,7 +296,7 @@ export default function DownloadAppView(): JSX.Element {
                     {androidRelease.publishedAt && <span className="text-text-muted">· {fmtDate(androidRelease.publishedAt)}</span>}
                   </a>
                 ) : (
-                  <span className="text-text-muted text-xs">Latest version info unavailable — buttons below go to GitHub.</span>
+                  <span className="text-text-muted text-xs">Latest version info unavailable - buttons below go to GitHub.</span>
                 )
               ) : release ? (
                 <a
@@ -298,7 +309,7 @@ export default function DownloadAppView(): JSX.Element {
                   {release.publishedAt && <span className="text-text-muted">· {fmtDate(release.publishedAt)}</span>}
                 </a>
               ) : (
-                <span className="text-text-muted text-xs">Latest version info unavailable — buttons below go to GitHub.</span>
+                <span className="text-text-muted text-xs">Latest version info unavailable - buttons below go to GitHub.</span>
               )}
             </div>
 
@@ -325,12 +336,12 @@ export default function DownloadAppView(): JSX.Element {
 
             {os === 'mac' && heroAsset && heroAsset === macArm && macIntel && (
               <p className="text-text-muted text-xs mt-4">
-                Apple Silicon build — on an Intel Mac, grab the Intel version below.
+                Apple Silicon build - on an Intel Mac, grab the Intel version below.
               </p>
             )}
             {os === 'android' && heroAsset && (
               <p className="text-text-muted text-xs mt-4">
-                Sideloaded APK — Android will ask you to allow installs from this source the first time.
+                Sideloaded APK - Android will ask you to allow installs from this source the first time.
               </p>
             )}
           </div>
@@ -356,7 +367,7 @@ export default function DownloadAppView(): JSX.Element {
                   {winWeb && <p className="text-text-muted text-[11px] leading-snug">The web installer is a small stub that fetches the app during setup.</p>}
                 </>
               ) : (
-                <a href={LATEST_URL} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
+                <a href={LATEST_URL} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
                   <Download size={15} /> Get from GitHub
                 </a>
               )}
@@ -368,10 +379,10 @@ export default function DownloadAppView(): JSX.Element {
               ) : linuxAppImage ? (
                 <>
                   <AssetButton asset={linuxAppImage} label="AppImage" primary />
-                  <p className="text-text-muted text-[11px] leading-snug">Mark it executable (<code className="text-text-secondary">chmod +x</code>), then run — no install step.</p>
+                  <p className="text-text-muted text-[11px] leading-snug">Mark it executable (<code className="text-text-secondary">chmod +x</code>), then run - no install step.</p>
                 </>
               ) : (
-                <a href={LATEST_URL} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
+                <a href={LATEST_URL} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
                   <Download size={15} /> Get from GitHub
                 </a>
               )}
@@ -386,12 +397,12 @@ export default function DownloadAppView(): JSX.Element {
                   {macIntel && <AssetButton asset={macIntel} label="Intel" primary={!macArm} />}
                   {macLagging && (
                     <p className="text-text-muted text-[11px] leading-snug">
-                      Latest Mac build is v{macRelease!.version} — it updates itself when the next one ships.
+                      Latest Mac build is v{macRelease!.version} - it updates itself when the next one ships.
                     </p>
                   )}
                 </>
               ) : (
-                <a href={`${REPO_URL}/releases`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
+                <a href={`${REPO_URL}/releases`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
                   <Download size={15} /> Get from GitHub
                 </a>
               )}
@@ -404,11 +415,11 @@ export default function DownloadAppView(): JSX.Element {
                 <>
                   <AssetButton asset={androidApk} label="Download APK" primary />
                   <p className="text-text-muted text-[11px] leading-snug">
-                    Not on the Play Store — you&rsquo;ll need to allow installs from this source when prompted.
+                    Not on the Play Store - you&rsquo;ll need to allow installs from this source when prompted.
                   </p>
                 </>
               ) : (
-                <a href={`${REPO_URL}/releases`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
+                <a href={`${REPO_URL}/releases`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
                   <Download size={15} /> Get from GitHub
                 </a>
               )}
@@ -421,18 +432,18 @@ export default function DownloadAppView(): JSX.Element {
                 <>
                   <AssetButton asset={iosIpa} label="Download IPA" primary />
                   <p className="text-text-muted text-[11px] leading-snug">
-                    Unsigned — install with <a href="https://altstore.io" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">AltStore</a> or <a href="https://sideloadly.io" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Sideloadly</a>.
+                    Unsigned - install with <a href="https://altstore.io" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">AltStore</a> or <a href="https://sideloadly.io" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Sideloadly</a>.
                   </p>
                 </>
               ) : (
-                <a href={`${REPO_URL}/releases`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
+                <a href={`${REPO_URL}/releases`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
                   <Download size={15} /> Get from GitHub
                 </a>
               )}
             </PlatformCard>
           </div>
 
-          {/* ── Phone / PWA — the web-app-to-home-screen route. The lighter
+          {/* ── Phone / PWA - the web-app-to-home-screen route. The lighter
               alternative to sideloading on both Android (no "unknown sources"
               prompt) and iOS (no AltStore/Sideloadly + re-signing needed). ── */}
           <div id="mobile-install" className="scroll-mt-8 mt-4 rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-5 md:p-6 flex flex-col md:flex-row md:items-center gap-5">
@@ -446,8 +457,8 @@ export default function DownloadAppView(): JSX.Element {
                 </p>
                 <p className="text-text-secondary text-[13px] leading-relaxed">
                   {os === 'android'
-                    ? 'Skip the APK and install the web app to your home screen instead — same look, updates itself, no "unknown sources" prompt.'
-                    : 'Install the web app to your home screen for a fullscreen, app-like experience — no app store needed.'}
+                    ? 'Skip the APK and install the web app to your home screen instead - same look, updates itself, no "unknown sources" prompt.'
+                    : 'Install the web app to your home screen for a fullscreen, app-like experience - no app store needed.'}
                   {!IS_MOBILE && ' Open this site on your phone to install it there.'}
                 </p>
               </div>
@@ -484,12 +495,12 @@ export default function DownloadAppView(): JSX.Element {
             <FeatureCard
               icon={<Library size={19} />}
               title="Local library"
-              desc="Point the app at your own folders — browse, search and tag-edit your files right next to the catalog."
+              desc="Point the app at your own folders - browse, search and tag-edit your files right next to the catalog."
             />
             <FeatureCard
               icon={<Globe size={19} />}
               title="URL import"
-              desc="Drop in a direct file link — or a link from around 1,800 supported sites — and it lands in your library."
+              desc="Drop in a direct file link - or a link from around 1,800 supported sites - and it lands in your library."
             />
             <FeatureCard
               icon={<FileAudio size={19} />}
@@ -504,7 +515,7 @@ export default function DownloadAppView(): JSX.Element {
             <FeatureCard
               icon={<RefreshCw size={19} />}
               title="Automatic updates"
-              desc="New releases download in the background and install on the next launch — you're always current."
+              desc="New releases download in the background and install on the next launch - you're always current."
             />
           </div>
         </div>

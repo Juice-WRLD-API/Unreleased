@@ -1,4 +1,5 @@
 import { apiFetch } from './juicewrldApi'
+import { createTtlCache } from './ttlCache'
 
 export interface TrackerChange {
   id: string
@@ -41,3 +42,17 @@ export async function fetchCompChanges(limit = 60): Promise<CompChange[]> {
   const res = await apiFetch<Results<CompChange>>('/feeds/comp.json', { limit })
   return res.results ?? []
 }
+
+async function buildRecentlyAddedMap(): Promise<Map<string, string>> {
+  const changes = await fetchCompChanges(200)
+  const map = new Map<string, string>()
+  for (const c of changes) {
+    if (c.is_folder || !c.timestamp) continue
+    if (c.action !== 'create' && c.action !== 'upload') continue
+    const existing = map.get(c.path)
+    if (!existing || c.timestamp < existing) map.set(c.path, c.timestamp)
+  }
+  return map
+}
+
+export const loadRecentlyAddedMap = createTtlCache(5 * 60_000, buildRecentlyAddedMap)

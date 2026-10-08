@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import WrldViewDesktop from './WrldView.desktop'
-import WrldViewMobile from './WrldView.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function WrldView(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <WrldViewMobile /> : <WrldViewDesktop />
-}
+export default responsiveView(() => import('./WrldView.desktop'), () => import('./WrldView.mobile'))

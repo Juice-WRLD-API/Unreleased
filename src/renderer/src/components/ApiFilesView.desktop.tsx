@@ -1,42 +1,53 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
-  X, Pencil, PackageOpen, CheckSquare2, Square, Globe, Search,
+  X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import type { StagedFileChange } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { useTrackChannel } from '../hooks/useTrackChannel'
 import { placeFlyout } from '../lib/menuFlyout'
 import {
   apiFetch,
-  apiPeek,
   buildStreamUrl,
   buildCoverArtUrl,
   smallCoverUrl,
   apiFileTrackId,
-  apiFilePathToTrack,
-  parseBrowseEntries as parseEntries,
   JWApiFileEntry,
-  JWApiBrowseResponse,
   JWApiPaginatedResponse,
-  JWAPI_BASE,
 } from '../lib/juicewrldApi'
 import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
+import {
+  breadcrumbs, parentFolder, fileToTrack, sortEntries, fileEntryLinkUrl, findSongByFilename, triggerDownload,
+  type ViewMode, type SortBy, type SortDir,
+} from '../lib/apiFilesShared'
+import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
+import { CdnDownloadToast } from './CdnDownloadToast'
+import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
+import { useApiFilesZip } from '../hooks/useApiFilesZip'
+import { useTrackerMatches } from '../hooks/useTrackerMatches'
+import { useAddFileToPlaylist } from '../hooks/useAddFileToPlaylist'
+import { usePlayFileEntry } from '../hooks/usePlayFileEntry'
+import { useFileLightbox } from '../hooks/useFileLightbox'
 import { useMultiSelect } from '../hooks/useMultiSelect'
+import { useLongPress } from '../hooks/useLongPress'
+import { basename } from '../lib/compStagedChanges'
+import { queueCompUploads } from '../lib/compUploads'
+import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
+import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
+import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } from '../lib/droppedFiles'
 import { ClampedMenu } from './ClampedMenu'
 import { Track } from '../types'
 import { ProgressiveCover } from './ProgressiveCover'
-import MediaLightbox, { LightboxItem } from './MediaLightbox'
+import MediaLightbox from './MediaLightbox'
 import TextFileViewer, { TextFileSource } from './TextFileViewer'
 
-type ViewMode = 'list' | 'grid'
-type SortBy = 'name' | 'type' | 'size'
-type SortDir = 'asc' | 'desc'
-type ZipStatus = 'idle' | 'starting' | 'zipping' | 'done' | 'error'
 type MediaFilter = 'all' | 'audio' | 'image' | 'video' | 'text'
 
 // Mirrors the main process's read-text-file cap, so an API file and a local
@@ -55,21 +66,6 @@ const MEDIA_FILTERS: { key: MediaFilter; label: string; icon: typeof Filter }[] 
   { key: 'video', label: 'Videos', icon: Video },
   { key: 'text', label: 'Text', icon: FileText },
 ]
-
-function breadcrumbs(path: string): { label: string; path: string }[] {
-  if (!path) return []
-  const parts = path.split('/').filter(Boolean)
-  return parts.map((label, i) => ({ label, path: parts.slice(0, i + 1).join('/') }))
-}
-
-function parentFolder(path: string): string {
-  const i = path.lastIndexOf('/')
-  return i > 0 ? path.slice(0, i) : ''
-}
-
-function fileToTrack(entry: JWApiFileEntry, channel?: string): Track {
-  return apiFilePathToTrack(entry.path, entry.name, channel)
-}
 
 function localFileToTrack(entry: { name: string; path: string; size: number | null }): Track {
   const title = entry.name.replace(/\.[^.]+$/, '')
@@ -124,7 +120,7 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   }
   return (
     <img
-      // Image entries are served whole by /files/download/ — a browse folder of
+      // Image entries are served whole by /files/download/ - a browse folder of
       // cover art is hundreds of KB per row at full size, so thumbnails take the
       // degraded copy. The lightbox still opens the original.
       src={smallCoverUrl(buildStreamUrl(path, activeChannel))}
@@ -136,85 +132,70 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   )
 }
 
-function sortEntries(entries: JWApiFileEntry[], by: SortBy, dir: SortDir): JWApiFileEntry[] {
-  return [...entries].sort((a, b) => {
-    // Dirs always first
-    const aDir = a.type === 'directory'
-    const bDir = b.type === 'directory'
-    if (aDir !== bDir) return aDir ? -1 : 1
-
-    let cmp = 0
-    if (by === 'name') {
-      cmp = a.name.localeCompare(b.name)
-    } else if (by === 'type') {
-      const aExt = getFileExt(a.name)
-      const bExt = getFileExt(b.name)
-      cmp = aExt.localeCompare(bExt) || a.name.localeCompare(b.name)
-    } else if (by === 'size') {
-      cmp = (a.size ?? 0) - (b.size ?? 0)
-    }
-    return dir === 'asc' ? cmp : -cmp
-  })
-}
-
-function pathToUrl(folderPath: string): string {
-  if (!folderPath) return '/files'
-  return '/files/' + folderPath.split('/').map(encodeURIComponent).join('/')
-}
-
-function urlToPath(pathname: string): string {
-  if (!pathname.startsWith('/files/')) return ''
-  return decodeURIComponent(pathname.slice('/files/'.length))
-}
-
 export default function ApiFilesView(): JSX.Element {
-  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, stagedFileChanges, stageFileChanges, setShowUploadManager } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'stagedFileChanges', 'stageFileChanges', 'setShowUploadManager')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
+  const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
+  // Bails rather than guessing: writing an id built from an unknown channel is
+  // what orphans a like. The affordances below are disabled until the list is
+  // known, so the id written here always matches the one just rendered.
+  const toggleApiFileLike = async (path: string): Promise<void> => {
+    const ch = await resolveTrackChannel()
+    if (ch === null) return
+    toggleLike(apiFileTrackId(path, ch))
+  }
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
-  // Set lookup for the per-row liked check — .includes on the array made the
+  // Set lookup for the per-row liked check - .includes on the array made the
   // listing O(rows × likes).
   const likedSet = useMemo(() => new Set(likedTrackIds), [likedTrackIds])
 
-  const [currentPath, setCurrentPath] = useState('')
-  const [entries, setEntries] = useState<JWApiFileEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [history, setHistory] = useState<string[]>([])
-  const [playing, setPlaying] = useState<string | null>(null)
-  const [downloading, setDownloading] = useState<string | null>(null)
   const [textFile, setTextFile] = useState<TextFileSource | null>(null)
-  const [lightboxItems, setLightboxItems] = useState<LightboxItem[]>([])
-  const [lightboxIndex, setLightboxIndex] = useState(-1)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
+  const [boostToast, setBoostToast] = useState(false)
   // "Add to playlist" flyout, opened from the context menu.
   const [playlistsOpen, setPlaylistsOpen] = useState(false)
-  const [playlistBusyId, setPlaylistBusyId] = useState<number | null>(null)
-  const [playlistDoneId, setPlaylistDoneId] = useState<number | null>(null)
   const playlistItemRef = useRef<HTMLButtonElement>(null)
   const playlistFlyoutRef = useRef<HTMLDivElement>(null)
   const [playlistFlyoutPos, setPlaylistFlyoutPos] = useState({ top: 0, left: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
-  // Whether a right-clicked audio file actually has a matching song in the
-  // Tracker — resolved lazily per path on menu-open (not for every row up
-  // front) so "Find in Tracker" can be hidden for files with no match instead
-  // of opening the info modal on nothing. undefined = not looked up yet,
-  // null = looked up, no match.
-  const [trackerMatches, setTrackerMatches] = useState<Map<string, number | null>>(new Map())
-  // Position clamping is handled by the shared <ClampedMenu> at render time —
+  // Right-click on empty listing space, rather than a specific entry.
+  const [bgCtxMenu, setBgCtxMenu] = useState<{ x: number; y: number } | null>(null)
+  const [newFolderPrompt, setNewFolderPrompt] = useState<string | null>(null)
+  // Position clamping is handled by the shared <ClampedMenu> at render time -
   // this ref is kept only so the playlist flyout below can measure it.
   const ctxMenuRef = useRef<HTMLDivElement>(null)
   const [ctxMenuPos, setCtxMenuPos] = useState({ left: 0, top: 0 })
+
+  // Data layer (browse/history/search/channel-switch) - shared with the
+  // mobile build, see useApiFilesBrowse.
+  const {
+    currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
+    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
+  } = useApiFilesBrowse({
+    activeChannel, setActiveChannel, channels, loadChannels,
+    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
+  })
+
+  // Whether a right-clicked audio file actually has a matching song in the
+  // Tracker - resolved lazily per path on menu-open (not for every row up
+  // front) so "Find in Tracker" can be hidden for files with no match instead
+  // of opening the info modal on nothing. undefined = not looked up yet,
+  // null = looked up, no match.
+  const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
+  const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
+  const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
 
   // Closing/reopening the menu resets the playlist flyout so it never
   // re-opens against a different entry than the one it was populated for.
   useEffect(() => {
     setPlaylistsOpen(false)
-    setPlaylistDoneId(null)
-  }, [ctxMenu])
+    resetPlaylistDone()
+  }, [ctxMenu]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Flyout sits beside the menu, flipping left when it'd run off the edge —
+  // Flyout sits beside the menu, flipping left when it'd run off the edge -
   // same placement helper the song context menu's submenus use.
   useLayoutEffect(() => {
     if (!playlistsOpen) return
@@ -224,21 +205,9 @@ export default function ApiFilesView(): JSX.Element {
     setPlaylistFlyoutPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
   }, [playlistsOpen, ctxMenuPos, playlists.length])
 
-  // Search — recursive across the whole file tree via /files/browse/'s
-  // `search` param (same endpoint findSessionZips uses), not scoped to the
-  // current folder. Results replace the browsed folder's entries while
-  // active rather than living in a separate list, so sorting/select-mode/
-  // context menus all keep working on it unchanged.
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [searchResults, setSearchResults] = useState<JWApiFileEntry[]>([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const isSearching = debouncedSearch.trim().length > 0
-
-  // Multi-select state — see the useMultiSelect() call further down (needs
+  // Multi-select state - see the useMultiSelect() call further down (needs
   // filteredEntries, which isn't defined yet here) for
   // selectMode/selectedPaths/enterSelectMode/toggleSelect/exitSelectMode.
-  const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Persisted view settings
@@ -269,123 +238,6 @@ export default function ApiFilesView(): JSX.Element {
     }
   }
 
-  const navigateRequestId = useRef(0)
-
-  const browseParams = useCallback((path: string): Record<string, string> => {
-    const p: Record<string, string> = {}
-    if (path) p.path = path
-    if (activeChannel) p.channel = activeChannel
-    return p
-  }, [activeChannel])
-
-  const navigate = useCallback(async (path: string, pushHistory = true) => {
-    // Navigating to a folder (including clicking a directory result while
-    // searching) always exits search mode and lands in normal browsing.
-    setSearch(''); setDebouncedSearch('')
-    // Guard against a slower in-flight request (e.g. for a channel or folder
-    // the user has since navigated away from) landing after a newer one and
-    // clobbering the view with stale/wrong-channel data.
-    const requestId = ++navigateRequestId.current
-    // Stale-while-revalidate: if this folder is already in the offline cache,
-    // paint it instantly (no spinner) and refresh silently in the background.
-    // Only show the loading state when there's nothing cached to fall back on.
-    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
-    if (cached) {
-      setEntries(parseEntries(cached))
-      setCurrentPath(path)
-      setError(null)
-      setLoading(false)
-    } else {
-      setLoading(true)
-      setError(null)
-    }
-    try {
-      const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', browseParams(path))
-      if (requestId !== navigateRequestId.current) return
-      const items = parseEntries(data)
-      if (pushHistory) {
-        setHistory((h) => [...h, currentPath])
-        window.history.pushState({ view: 'api-files', folderPath: path }, '', pathToUrl(path))
-      }
-      setCurrentPath(path)
-      setEntries(items)
-    } catch (err) {
-      if (requestId !== navigateRequestId.current) return
-      // Keep the cached listing visible on a network failure — only surface the
-      // error when we had nothing to show in the first place.
-      if (!cached) setError(err instanceof Error ? err.message : 'Failed to load')
-    } finally {
-      if (requestId === navigateRequestId.current) setLoading(false)
-    }
-  }, [currentPath, browseParams])
-
-  // Keep a ref to navigate so popstate listener always has the latest version
-  const navigateRef = useRef(navigate)
-  useEffect(() => { navigateRef.current = navigate }, [navigate])
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(search), 300)
-    return () => clearTimeout(t)
-  }, [search])
-
-  useEffect(() => {
-    if (!isSearching) { setSearchResults([]); return }
-    let cancelled = false
-    setSearchLoading(true)
-    const params: Record<string, string> = { search: debouncedSearch.trim() }
-    if (activeChannel) params.channel = activeChannel
-    apiFetch<JWApiBrowseResponse>('/files/browse/', params)
-      .then(data => { if (!cancelled) setSearchResults(parseEntries(data)) })
-      .catch(() => { if (!cancelled) setSearchResults([]) })
-      .finally(() => { if (!cancelled) setSearchLoading(false) })
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, isSearching, activeChannel])
-
-  // Remember the browsed folder in the store so switching to another tab and
-  // back restores it — the component unmounts on tab switch, so local state
-  // alone doesn't survive that round trip.
-  useEffect(() => {
-    setApiFilesLastPath(currentPath)
-  }, [currentPath]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // On mount: read path from URL, or an explicit deep-link (apiFilesPath), or
-  // fall back to wherever the user last browsed to (apiFilesLastPath).
-  useEffect(() => {
-    const urlPath = urlToPath(window.location.pathname)
-    const initialPath = apiFilesPath || urlPath || apiFilesLastPath
-    if (apiFilesPath) setApiFilesPath('')  // consume it
-    navigateRef.current(initialPath, false)
-
-    const handlePopstate = (): void => {
-      const p = window.location.pathname
-      if (p.startsWith('/files')) {
-        const fp = urlToPath(p)
-        setHistory([])
-        navigateRef.current(fp, false)
-      }
-    }
-    window.addEventListener('popstate', handlePopstate)
-    return () => window.removeEventListener('popstate', handlePopstate)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (channels.length === 0) loadChannels().catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onChannelChange = (slug: string): void => {
-    if (slug === activeChannel) return
-    setActiveChannel(slug)
-    setHistory([])
-    setSearch(''); setDebouncedSearch('')
-    setCurrentPath('')
-    window.history.pushState({ view: 'api-files', folderPath: '' }, '', pathToUrl(''))
-  }
-
-  useEffect(() => {
-    navigateRef.current('', false)
-  }, [activeChannel]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // ESC closes an open context menu, like a native one. Registered separately
   // from the select-mode handler so it works whether or not that's active.
   useEffect(() => {
@@ -398,40 +250,21 @@ export default function ApiFilesView(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [ctxMenu])
 
-  const goBack = (): void => {
-    if (history.length > 0) {
-      const prev = history[history.length - 1]
-      setHistory((h) => h.slice(0, -1))
-      navigate(prev, false)
-    } else if (currentPath) {
-      navigate(parentFolder(currentPath), false)
+  useEffect(() => {
+    if (!bgCtxMenu) return
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setBgCtxMenu(null)
     }
-  }
-
-  const goHome = (): void => { setHistory([]); navigate('', true) }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [bgCtxMenu])
 
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
-    const title = entry.name.replace(/\.[^.]+$/, '')
-    try {
-      const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 5 })
-      const match = data.results[0] ?? null
-      // Global infoSongId (not local state) so the info panel survives
-      // switching to another tab, which unmounts this view.
-      if (match) useStore.getState().setInfoSongId(match.id)
-    } catch { /* no match — leave whatever's already open (if anything) alone */ }
-  }
-
-  // Resolves (and caches) whether an audio file has a matching Tracker entry,
-  // so the context menu can hide "Find in Tracker" when there isn't one.
-  const resolveTrackerMatch = (entry: JWApiFileEntry): void => {
-    if (getMediaType(entry.name) !== 'audio' || trackerMatches.has(entry.path)) return
-    const title = entry.name.replace(/\.[^.]+$/, '')
-    apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
-      .then((data) => {
-        const id = data.results[0]?.id ?? null
-        setTrackerMatches((prev) => new Map(prev).set(entry.path, id))
-      })
-      .catch(() => setTrackerMatches((prev) => new Map(prev).set(entry.path, null)))
+    const match = await findSongByFilename(entry.name)
+    // Global infoSongId (not local state) so the info panel survives
+    // switching to another tab, which unmounts this view.
+    if (match) useStore.getState().setInfoSongId(match.id)
   }
 
   const openContextMenu = (entry: JWApiFileEntry, x: number, y: number): void => {
@@ -439,7 +272,7 @@ export default function ApiFilesView(): JSX.Element {
     resolveTrackerMatch(entry)
   }
 
-  // `marker` only drives the confirmation toast — any non-empty string will do.
+  // `marker` only drives the confirmation toast - any non-empty string will do.
   const copyTextToClipboard = (text: string, what: 'link' | 'path', marker = text): void => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedPath(marker)
@@ -451,76 +284,26 @@ export default function ApiFilesView(): JSX.Element {
   const copyToClipboard = (entry: JWApiFileEntry, text: string, what: 'link' | 'path'): void =>
     copyTextToClipboard(text, what, entry.path)
 
-  const copyLink = (entry: JWApiFileEntry): void => {
-    const url = entry.type === 'file'
-      ? buildStreamUrl(entry.path, activeChannel)
-      : window.location.origin + pathToUrl(entry.path)
-    copyToClipboard(entry, url, 'link')
-  }
+  const copyLink = (entry: JWApiFileEntry): void => copyToClipboard(entry, fileEntryLinkUrl(entry, activeChannel), 'link')
 
-  // The API-relative path ("Compilation/Folder/song.mp3") — what every
+  // The API-relative path ("Compilation/Folder/song.mp3") - what every
   // /files/* endpoint takes as its `path` param, unlike Copy link's full URL.
   const copyPath = (entry: JWApiFileEntry): void => copyToClipboard(entry, entry.path, 'path')
 
-  // ── Add to playlist ────────────────────────────────────────────────────────
-  // Server playlists are keyed by numeric Tracker song id, so this only works
-  // for audio files that resolved to a Tracker match (same lookup that gates
-  // "Find in Tracker") — the item stays hidden otherwise.
-  const addToPlaylist = async (playlistId: number, songId: number): Promise<void> => {
-    setPlaylistBusyId(playlistId)
-    try {
-      await userApi.addToPlaylist(playlistId, songId)
-      setPlaylistDoneId(playlistId)
-      await refreshPlaylists()
-    } catch {} finally { setPlaylistBusyId(null) }
-  }
-
-  const handlePlay = async (entry: JWApiFileEntry): Promise<void> => {
-    if (playing === entry.path) return
-    setPlaying(entry.path)
-    try {
-      const track = fileToTrack(entry, activeChannel)
-      const queue = entries
-        .filter((e) => e.type === 'file' && getMediaType(e.name) === 'audio')
-        .map((e) => fileToTrack(e, activeChannel))
-      playTrack(track, queue.length > 0 ? queue : [track])
-    } finally {
-      setPlaying(null)
-    }
-  }
-
+  // Tries the P2P CDN first (primary channel only - /cdn/resolve/ has no
+  // channel param, so a non-primary path could collide with a different
+  // file of the same name) and falls back to the direct stream URL.
   const handleDownload = (entry: JWApiFileEntry): void => {
-    const url = buildStreamUrl(entry.path, activeChannel)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = entry.name
-    a.target = '_blank'
-    a.rel = 'noopener noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
-
-  const openLightbox = (entry: JWApiFileEntry): void => {
-    // While searching, the clicked entry can live in a folder other than the
-    // one currently browsed — `entries` (the current folder's listing) won't
-    // contain it, so the gallery has to be built from the search results
-    // themselves instead.
-    const mediaEntries = (isSearching ? searchResults : entries).filter((e) => {
-      const mt = getMediaType(e.name)
-      return e.type === 'file' && (mt === 'image' || mt === 'video')
+    const streamUrl = buildStreamUrl(entry.path, activeChannel)
+    if (!isPrimary) { triggerDownload(streamUrl, entry.name); return }
+    startCdnFileDownload(entry.path, entry.name, streamUrl).then((isDonor) => {
+      if (!isDonor) return
+      setBoostToast(true)
+      setTimeout(() => setBoostToast(false), 1800)
     })
-    const items: LightboxItem[] = mediaEntries.map((e) => ({
-      url: buildStreamUrl(e.path, activeChannel),
-      type: getMediaType(e.name) as 'image' | 'video',
-      name: e.name,
-    }))
-    const idx = mediaEntries.findIndex((e) => e.path === entry.path)
-    setLightboxItems(items)
-    setLightboxIndex(idx >= 0 ? idx : 0)
   }
 
-  // Text viewer — API files come over HTTP from the same stream URL the
+  // Text viewer - API files come over HTTP from the same stream URL the
   // player uses, capped client-side to match the local reader's 2 MB limit.
   const openApiText = (entry: JWApiFileEntry): void => {
     setTextFile({
@@ -540,7 +323,7 @@ export default function ApiFilesView(): JSX.Element {
 
   // ── Selection helpers ──────────────────────────────────────────────────────
   // enterSelectMode/toggleSelect/exitSelectMode are defined further down,
-  // right after the useMultiSelect() call (needs filteredEntries) — this
+  // right after the useMultiSelect() call (needs filteredEntries) - this
   // closure only runs later, on an actual long-press, so referencing them
   // here before that point is fine.
 
@@ -552,51 +335,6 @@ export default function ApiFilesView(): JSX.Element {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
   }
 
-  // Backend zips a folder path recursively with its subfolder structure
-  // intact (see /files/zip-selection/'s `{ "paths": ["Compilation/Folder"] }`
-  // shape in the docs), so a single directory path is enough — no need to
-  // walk and flatten the tree client-side.
-  const startZip = async (paths: string[], filename: string): Promise<void> => {
-    if (paths.length === 0) return
-    setZipStatus('starting')
-    try {
-      const res = await fetch(`${JWAPI_BASE}/start-zip-job/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(activeChannel ? { paths, channel: activeChannel } : { paths }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const { job_id } = await res.json() as { job_id: string }
-      setZipStatus('zipping')
-      const poll = async (): Promise<void> => {
-        const st = await apiFetch<{ status: string; download_url?: string; error?: string }>(`/zip-job-status/${job_id}/`)
-        if (st.status === 'completed' && st.download_url) {
-          const a = document.createElement('a')
-          a.href = st.download_url
-          a.download = filename
-          a.target = '_blank'
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          setZipStatus('done')
-          setTimeout(() => setZipStatus('idle'), 3000)
-        } else if (st.status === 'failed') {
-          throw new Error(st.error || 'ZIP job failed')
-        } else {
-          setTimeout(() => { poll().catch(() => { setZipStatus('error'); setTimeout(() => setZipStatus('idle'), 3000) }) }, 1500)
-        }
-      }
-      await poll()
-    } catch {
-      setZipStatus('error')
-      setTimeout(() => setZipStatus('idle'), 3000)
-    }
-  }
-
-  const downloadZip = (): Promise<void> => startZip([...selectedPaths.keys()], 'selection.zip')
-
-  const downloadFolder = (entry: JWApiFileEntry): Promise<void> => startZip([entry.path], `${entry.name}.zip`)
-
   // ── Sorted entries ─────────────────────────────────────────────────────────
 
   const sortedEntries = useMemo(
@@ -604,7 +342,7 @@ export default function ApiFilesView(): JSX.Element {
     [isSearching, searchResults, entries, sortBy, sortDir]
   )
 
-  // Type filter — folders stay visible regardless of filter so navigation
+  // Type filter - folders stay visible regardless of filter so navigation
   // still works; only files are matched against the selected media type.
   const filteredEntries = useMemo(
     () => typeFilter === 'all'
@@ -613,16 +351,24 @@ export default function ApiFilesView(): JSX.Element {
     [sortedEntries, typeFilter]
   )
 
-  // Multi-select — select mode, the selected-paths Map, Escape-to-exit, and
+  // The user's own pending comp proposals, as ghost rows in the folder they'd
+  // land in - same type filter as the real entries.
+  const { ghosts, pendingFor } = usePendingCompGhosts({ enabled: canPropose, activeChannel, currentPath, entries, isSearching })
+  const visibleGhosts = useMemo(
+    () => typeFilter === 'all' ? ghosts : ghosts.filter((g) => g.type === 'directory' || getMediaType(g.name) === typeFilter),
+    [ghosts, typeFilter]
+  )
+
+  // Multi-select - select mode, the selected-paths Map, Escape-to-exit, and
   // Ctrl/Cmd+A "select all" are handled by the shared hook. Value === key
-  // (path) here since there's nothing extra to carry per entry — `.has()`/
+  // (path) here since there's nothing extra to carry per entry - `.has()`/
   // `.size` behave the same as the old Set<string>; only spreads need
   // `.keys()` now instead of spreading the Map itself.
   const {
     selectMode, selected: selectedPaths, selectMany: selectManyPaths, toggle,
     exitSelectMode, selectAll: selectAllEntries, clear: clearSelection,
   } = useMultiSelect<string>({
-    onExit: () => setZipStatus('idle'),
+    onExit: () => resetZip(),
     ctrlA: {
       getAll: () => new Map(filteredEntries.map(e => [e.path, e.path])),
     },
@@ -632,6 +378,212 @@ export default function ApiFilesView(): JSX.Element {
     setCtxMenu(null)
   }
   const toggleSelect = (path: string): void => toggle(path, path)
+  // Mouse press-and-hold - the desktop equivalent of the touch long-press
+  // above, as a second way into select mode alongside Ctrl/Cmd+click.
+  const mouseLongPress = useLongPress()
+
+  const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
+    activeChannel,
+    getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
+  })
+
+  // ── Drag-and-drop reorganizing ─────────────────────────────────────────────
+  // Contributors can drag entries onto a folder to move them in, or onto a
+  // file to bundle both into a new folder. Nothing is proposed on drop: the
+  // intended changes are staged (store.stagedFileChanges) and reviewed in the
+  // Uploads panel, which is where Propose lives - see lib/compStagedChanges.
+  type DragItem = { path: string; isDir: boolean }
+  const [draggedItems, setDraggedItems] = useState<DragItem[]>([])
+  // Path of the row currently under the cursor, or '..' for the parent row.
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [bundlePrompt, setBundlePrompt] = useState<{ target: DragItem; items: DragItem[]; name: string } | null>(null)
+
+  // Moves already queued for this channel, keyed by the path being moved, so
+  // a row can show where it's headed instead of looking untouched.
+  const stagedMoves = useMemo(() => {
+    const m = new Map<string, StagedFileChange>()
+    for (const c of stagedFileChanges) {
+      if (c.channel === activeChannel && c.changeType !== 'create_folder') m.set(c.path, c)
+    }
+    return m
+  }, [stagedFileChanges, activeChannel])
+  const stagedCount = useMemo(
+    () => stagedFileChanges.filter(c => c.channel === activeChannel).length,
+    [stagedFileChanges, activeChannel],
+  )
+
+  /** A folderPath that doesn't exist yet is fine: the new folder is just part
+   *  of each move's destination path, so no separate create_folder proposal. */
+  const stageMovesInto = (folderPath: string, items: DragItem[]): void => {
+    const changes = items
+      .filter(d => parentFolder(d.path) !== folderPath)
+      .map(d => ({
+        changeType: (d.isDir ? 'move_folder' : 'move') as 'move_folder' | 'move',
+        path: d.path,
+        destination: folderPath ? `${folderPath}/${basename(d.path)}` : basename(d.path),
+        channel: activeChannel,
+      }))
+    if (changes.length === 0) return
+    stageFileChanges(changes)
+    // Only pop the panel open for the first drop of a batch - it shows where
+    // queued changes live, and after that the header pill carries the count
+    // without the panel covering the listing on every subsequent drag.
+    if (stagedFileChanges.length === 0) setShowUploadManager(true)
+    // A drag out of select mode consumed the whole selection, so drop out of
+    // it rather than keeping rows checked that are now queued to move away.
+    if (selectMode) exitSelectMode()
+  }
+
+  const dragSourceProps = (entry: JWApiFileEntry): {
+    draggable: boolean
+    onDragStart: (e: React.DragEvent) => void
+    onDragEnd: () => void
+  } => ({
+    draggable: canPropose,
+    onDragStart: e => {
+      // A hold long enough to start a drag would otherwise also trip
+      // hold-to-select, leaving the row selected once the drag ends.
+      mouseLongPress.cancel()
+      e.dataTransfer.effectAllowed = 'move'
+      const byPath = new Map(filteredEntries.map(x => [x.path, x]))
+      // Dragging one of the selected rows takes the whole selection with it;
+      // dragging an unselected row moves just that one.
+      const paths = selectedPaths.has(entry.path) ? [...selectedPaths.keys()] : [entry.path]
+      setDraggedItems(paths.map(p => ({ path: p, isDir: (byPath.get(p) ?? entry).type === 'directory' })))
+    },
+    onDragEnd: () => { setDraggedItems([]); setDropTarget(null) },
+  })
+
+  /** Whether the current drag can land on `entry`: not onto itself, not a
+   *  folder into its own subtree, and not into the folder it already sits in. */
+  const dropAllowed = (entry: JWApiFileEntry): boolean => {
+    if (draggedItems.length === 0) return false
+    if (draggedItems.some(d => d.path === entry.path)) return false
+    if (entry.type !== 'directory') return true
+    if (draggedItems.some(d => d.isDir && entry.path.startsWith(`${d.path}/`))) return false
+    return draggedItems.some(d => parentFolder(d.path) !== entry.path)
+  }
+
+  // ── Uploading local files ──────────────────────────────────────────────────
+  // Files or whole folders dragged in from the OS, or picked from the context
+  // menu, go straight to the background upload queue as one upload proposal
+  // per file. A dropped folder keeps its nesting under the target folder.
+  const [fileDragOver, setFileDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  // Folder the next picker selection uploads into.
+  const uploadTargetRef = useRef('')
+
+  const uploadLocalFiles = (folder: string, files: LocalUpload[]): void => {
+    if (files.length === 0) return
+    queueCompUploads(files.map(({ file, relPath }) => {
+      const path = folder ? `${folder}/${relPath}` : relPath
+      const form = new FormData()
+      form.append('file_path', path)
+      form.append('change_type', 'upload')
+      form.append('contributor_notes', '')
+      form.append('file', file)
+      if (activeChannel) form.append('channel', activeChannel)
+      return { label: relPath, form, bytes: file.size }
+    }))
+  }
+
+  const openUploadPicker = (folder: string, kind: 'files' | 'folder'): void => {
+    uploadTargetRef.current = folder
+    const input = kind === 'folder' ? folderInputRef.current : fileInputRef.current
+    if (!input) return
+    input.value = ''
+    input.click()
+  }
+
+  /** An OS file drag, as opposed to dragging rows around inside the listing. */
+  const isExternalDrag = (e: React.DragEvent): boolean =>
+    canPropose && draggedItems.length === 0 && isFileDrag(e.dataTransfer)
+
+  const dropTargetProps = (entry: JWApiFileEntry): {
+    onDragOver: (e: React.DragEvent) => void
+    onDragLeave: () => void
+    onDrop: (e: React.DragEvent) => void
+  } => ({
+    onDragOver: e => {
+      if (isExternalDrag(e) && entry.type === 'directory') {
+        e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'
+        setFileDragOver(false)
+        setDropTarget(entry.path)
+        return
+      }
+      if (!dropAllowed(entry)) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+      setDropTarget(entry.path)
+    },
+    onDragLeave: () => setDropTarget(prev => (prev === entry.path ? null : prev)),
+    onDrop: e => {
+      e.preventDefault(); e.stopPropagation()
+      if (isExternalDrag(e)) {
+        setDropTarget(null); setFileDragOver(false)
+        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(entry.path, files)).catch(() => {})
+        return
+      }
+      if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
+      if (entry.type === 'directory') stageMovesInto(entry.path, draggedItems)
+      // Onto a file: both sides move into a folder that doesn't exist yet, so
+      // ask for its name before anything is staged.
+      else setBundlePrompt({ target: { path: entry.path, isDir: false }, items: draggedItems, name: 'New Folder' })
+      setDraggedItems([]); setDropTarget(null)
+    },
+  })
+
+  /** The ".." row doubles as a drop target for moving entries up a level. */
+  const parentDropProps = {
+    onDragOver: (e: React.DragEvent): void => {
+      if (draggedItems.length === 0) return
+      const parent = parentFolder(currentPath)
+      if (!draggedItems.some(d => parentFolder(d.path) !== parent)) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+      setDropTarget('..')
+    },
+    onDragLeave: (): void => setDropTarget(prev => (prev === '..' ? null : prev)),
+    onDrop: (e: React.DragEvent): void => {
+      e.preventDefault(); e.stopPropagation()
+      stageMovesInto(parentFolder(currentPath), draggedItems)
+      setDraggedItems([]); setDropTarget(null)
+    },
+  }
+
+  const confirmBundle = (): void => {
+    if (!bundlePrompt) return
+    const name = bundlePrompt.name.trim().replace(/[/\\]/g, '')
+    if (!name) return
+    const parent = parentFolder(bundlePrompt.target.path)
+    const folderPath = parent ? `${parent}/${name}` : name
+    stageMovesInto(folderPath, [bundlePrompt.target, ...bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path)])
+    setBundlePrompt(null)
+  }
+
+  const confirmNewFolder = (): void => {
+    if (newFolderPrompt === null) return
+    const name = newFolderPrompt.trim().replace(/[/\\]/g, '')
+    if (!name) return
+    const folderPath = currentPath ? `${currentPath}/${name}` : name
+    stageFileChanges([{ changeType: 'create_folder', path: folderPath, channel: activeChannel }])
+    if (stagedFileChanges.length === 0) setShowUploadManager(true)
+    setNewFolderPrompt(null)
+  }
+
+  /** Row classes/badge for an entry with a queued move, so staged work is
+   *  visible in the listing and not only in the Uploads panel. */
+  const stagedBadge = (path: string): JSX.Element | null => {
+    const staged = stagedMoves.get(path)
+    if (!staged) return null
+    return (
+      <span
+        className="shrink-0 flex items-center gap-1 text-[10px] font-medium text-accent bg-accent/15 px-1.5 py-0.5 rounded-md"
+        title={`Queued: move to ${staged.destination}`}
+      >
+        <FolderInput size={9} /> Queued
+      </span>
+    )
+  }
 
   const crumbs = breadcrumbs(currentPath)
   const channelDescription = channels.find((c) => c.slug === activeChannel)?.description?.trim() || ''
@@ -654,6 +606,18 @@ export default function ApiFilesView(): JSX.Element {
                 <p className="text-text-muted text-sm truncate max-w-xl">{channelDescription}</p>
               )}
             </div>
+            {/* Queued drag-and-drop changes live in the Uploads panel (that's
+                where Propose is), so this is a pointer to them rather than a
+                second place to act. */}
+            {stagedCount > 0 && (
+              <button
+                onClick={() => setShowUploadManager(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-medium hover:bg-accent/25 transition-colors shrink-0"
+                title="Review staged changes in the Uploads panel"
+              >
+                <FolderInput size={13} /> {stagedCount} staged change{stagedCount === 1 ? '' : 's'}
+              </button>
+            )}
             <div className="flex items-center gap-3 ml-auto">
               {channels.length > 0 && (
                 <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
@@ -713,7 +677,7 @@ export default function ApiFilesView(): JSX.Element {
             </div>
           </div>
 
-          {/* Search — recursive across the whole file tree (same /files/browse/
+          {/* Search - recursive across the whole file tree (same /files/browse/
               `search` param the session-ZIP lookup uses), not scoped to the
               current folder. */}
           {(
@@ -781,7 +745,33 @@ export default function ApiFilesView(): JSX.Element {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 pb-4">
+        <div
+          className={`flex-1 overflow-y-auto px-5 pb-4 transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
+          // Dropping OS files/folders on empty space uploads into the folder
+          // being browsed; folder rows handle drops onto themselves.
+          onDragOver={e => {
+            if (isSearching || !isExternalDrag(e)) return
+            e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
+            setFileDragOver(true)
+          }}
+          onDragLeave={e => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileDragOver(false)
+          }}
+          onDrop={e => {
+            if (isSearching || !isExternalDrag(e)) return
+            e.preventDefault()
+            setFileDragOver(false)
+            const folder = currentPath
+            collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(folder, files)).catch(() => {})
+          }}
+          onContextMenu={e => {
+            // Entry rows stop propagation on their own context menu, so this
+            // only fires for a right-click on actual empty space.
+            if (isSearching) return
+            e.preventDefault()
+            setBgCtxMenu({ x: e.clientX, y: e.clientY })
+          }}
+        >
           {(isSearching ? searchLoading : loading) ? (
             <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
               <Loader2 size={18} className="animate-spin" /><span className="text-sm">{isSearching ? 'Searching…' : 'Loading…'}</span>
@@ -791,12 +781,12 @@ export default function ApiFilesView(): JSX.Element {
               <p className="text-text-muted text-sm">{error}</p>
               <button onClick={() => navigate(currentPath, false)} className="text-accent text-sm underline">Retry</button>
             </div>
-          ) : sortedEntries.length === 0 ? (
+          ) : sortedEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Music2 size={32} className="text-text-muted opacity-30" />
               <p className="text-text-muted text-sm">{isSearching ? `No files match "${debouncedSearch.trim()}"` : 'Nothing here'}</p>
             </div>
-          ) : filteredEntries.length === 0 ? (
+          ) : filteredEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Filter size={32} className="text-text-muted opacity-30" />
               <p className="text-text-muted text-sm">No {typeFilter} files here</p>
@@ -805,9 +795,21 @@ export default function ApiFilesView(): JSX.Element {
             /* ── List view ────────────────────────────────────────────────────── */
             <div className="space-y-0.5">
               {currentPath && !isSearching && (
-                <button onClick={goBack} className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-surface-overlay transition-colors text-left">
-                  <div className="w-9 h-9 flex items-center justify-center shrink-0"><FolderOpen size={18} className="text-text-muted" /></div>
-                  <span className="text-text-muted text-sm">..</span>
+                <button
+                  onClick={goBack}
+                  {...parentDropProps}
+                  className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg transition-colors text-left ${
+                    dropTarget === '..' ? 'bg-accent/15 ring-2 ring-accent/50' : 'hover:bg-surface-overlay'
+                  }`}
+                >
+                  <div className="w-9 h-9 flex items-center justify-center shrink-0">
+                    {dropTarget === '..'
+                      ? <CornerLeftUp size={18} className="text-accent" />
+                      : <FolderOpen size={18} className="text-text-muted" />}
+                  </div>
+                  <span className={`text-sm ${dropTarget === '..' ? 'text-accent' : 'text-text-muted'}`}>
+                    {dropTarget === '..' ? 'Move up a level' : '..'}
+                  </span>
                 </button>
               )}
               {filteredEntries.map((entry) => {
@@ -816,13 +818,21 @@ export default function ApiFilesView(): JSX.Element {
                 const ext = getFileExt(entry.name).slice(1).toUpperCase()
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
-                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path))
+                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
+                const isDropTarget = dropTarget === entry.path
+                const isStaged = stagedMoves.has(entry.path)
                 return (
                   <div key={entry.path}
+                    {...dragSourceProps(entry)}
+                    {...dropTargetProps(entry)}
                     className={`group flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-default ${
-                      isSelected ? 'bg-accent/10 hover:bg-accent/15' : 'hover:bg-surface-overlay'
+                      isDropTarget ? 'bg-accent/15 ring-2 ring-accent/50'
+                        : isSelected ? 'bg-accent/10 hover:bg-accent/15'
+                        : isStaged ? 'bg-accent/[0.06] ring-1 ring-accent/30 hover:bg-accent/10'
+                        : 'hover:bg-surface-overlay'
                     }`}
                     onClick={(e) => {
+                      if (mouseLongPress.consumeFired()) return
                       if (e.ctrlKey || e.metaKey) {
                         toggleSelect(entry.path)
                         return
@@ -833,7 +843,8 @@ export default function ApiFilesView(): JSX.Element {
                       else if (mt === 'text') openApiText(entry)
                     }}
                     onDoubleClick={() => { if (!selectMode && mt === 'audio') handlePlay(entry) }}
-                    onContextMenu={e => { e.preventDefault(); openContextMenu(entry, e.clientX, e.clientY) }}
+                    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openContextMenu(entry, e.clientX, e.clientY) }}
+                    {...mouseLongPress.bind(() => enterSelectMode(entry))}
                     onTouchStart={() => handleLongPressStart(entry)}
                     onTouchEnd={handleLongPressEnd}
                   >
@@ -880,10 +891,13 @@ export default function ApiFilesView(): JSX.Element {
                         <span className="block text-text-muted text-[10px] truncate">{parentFolder(entry.path)}</span>
                       )}
                     </span>
+                    {stagedBadge(entry.path)}
+                    {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
                     {isLiked && (
                       <button
-                        className="shrink-0 p-1 text-accent"
-                        onClick={(e) => { e.stopPropagation(); toggleLike(apiFileTrackId(entry.path)) }}
+                        className="shrink-0 p-1 text-accent disabled:opacity-40"
+                        disabled={!channelsReady}
+                        onClick={(e) => { e.stopPropagation(); toggleApiFileLike(entry.path) }}
                         title="Unlike"
                       >
                         <Heart size={13} fill="currentColor" />
@@ -909,14 +923,27 @@ export default function ApiFilesView(): JSX.Element {
                   </div>
                 )
               })}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="row" />)}
             </div>
           ) : (
             /* ── Grid view ────────────────────────────────────────────────────── */
             <div className="grid gap-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
               {currentPath && !isSearching && (
-                <button onClick={goBack} className="flex flex-col items-center gap-2 p-3 rounded-xl bg-surface-overlay hover:bg-surface-raised transition-colors">
-                  <div className="w-full aspect-square flex items-center justify-center"><FolderOpen size={40} className="text-text-muted" /></div>
-                  <span className="text-text-muted text-xs">..</span>
+                <button
+                  onClick={goBack}
+                  {...parentDropProps}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-colors ${
+                    dropTarget === '..' ? 'bg-accent/15 ring-2 ring-accent/50' : 'bg-surface-overlay hover:bg-surface-raised'
+                  }`}
+                >
+                  <div className="w-full aspect-square flex items-center justify-center">
+                    {dropTarget === '..'
+                      ? <CornerLeftUp size={40} className="text-accent" />
+                      : <FolderOpen size={40} className="text-text-muted" />}
+                  </div>
+                  <span className={`text-xs ${dropTarget === '..' ? 'text-accent' : 'text-text-muted'}`}>
+                    {dropTarget === '..' ? 'Move up' : '..'}
+                  </span>
                 </button>
               )}
               {filteredEntries.map((entry) => {
@@ -925,13 +952,21 @@ export default function ApiFilesView(): JSX.Element {
                 const ext = getFileExt(entry.name).slice(1).toUpperCase()
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
-                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path))
+                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
+                const isDropTarget = dropTarget === entry.path
+                const isStaged = stagedMoves.has(entry.path)
                 return (
                   <div key={entry.path}
+                    {...dragSourceProps(entry)}
+                    {...dropTargetProps(entry)}
                     className={`group flex flex-col rounded-xl overflow-hidden transition-colors cursor-default ${
-                      isSelected ? 'bg-accent/10 ring-2 ring-accent/40' : 'bg-surface-overlay hover:bg-surface-raised'
+                      isDropTarget ? 'bg-accent/15 ring-2 ring-accent/60'
+                        : isSelected ? 'bg-accent/10 ring-2 ring-accent/40'
+                        : isStaged ? 'bg-accent/[0.06] ring-1 ring-accent/30'
+                        : 'bg-surface-overlay hover:bg-surface-raised'
                     }`}
                     onClick={(e) => {
+                      if (mouseLongPress.consumeFired()) return
                       if (e.ctrlKey || e.metaKey) {
                         toggleSelect(entry.path)
                         return
@@ -942,7 +977,8 @@ export default function ApiFilesView(): JSX.Element {
                       else if (mt === 'audio') handlePlay(entry)
                       else if (mt === 'text') openApiText(entry)
                     }}
-                    onContextMenu={e => { e.preventDefault(); openContextMenu(entry, e.clientX, e.clientY) }}
+                    onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openContextMenu(entry, e.clientX, e.clientY) }}
+                    {...mouseLongPress.bind(() => enterSelectMode(entry))}
                     onTouchStart={() => handleLongPressStart(entry)}
                     onTouchEnd={handleLongPressEnd}
                   >
@@ -1010,8 +1046,9 @@ export default function ApiFilesView(): JSX.Element {
                       {/* Liked indicator */}
                       {isLiked && (
                         <button
-                          className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center"
-                          onClick={(e) => { e.stopPropagation(); toggleLike(apiFileTrackId(entry.path)) }}
+                          className="absolute top-1.5 right-1.5 z-10 w-6 h-6 rounded-full bg-black/60 flex items-center justify-center disabled:opacity-40"
+                          disabled={!channelsReady}
+                          onClick={(e) => { e.stopPropagation(); toggleApiFileLike(entry.path) }}
                           title="Unlike"
                         >
                           <Heart size={12} fill="currentColor" className="text-accent" />
@@ -1024,7 +1061,9 @@ export default function ApiFilesView(): JSX.Element {
                         <p className="text-text-primary text-xs font-medium truncate">{entry.name}</p>
                         {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
                       </div>
-                      {/* Same visible context-menu trigger as the list rows —
+                      {stagedBadge(entry.path)}
+                      {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
+                      {/* Same visible context-menu trigger as the list rows -
                           right-click/long-press aren't discoverable on touch. */}
                       {!selectMode && (
                         <button
@@ -1039,6 +1078,7 @@ export default function ApiFilesView(): JSX.Element {
                   </div>
                 )
               })}
+              {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="tile" />)}
             </div>
           )}
         </div>
@@ -1063,7 +1103,7 @@ export default function ApiFilesView(): JSX.Element {
             </button>
             {/* Deletion only: a replace swaps one file's body for another,
                 which has no meaning across a selection. Directories are
-                dropped — proposals target files. */}
+                dropped - proposals target files. */}
             {canPropose && (
               <button
                 onClick={() => {
@@ -1087,13 +1127,13 @@ export default function ApiFilesView(): JSX.Element {
               className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
             >
               {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : 'Zipping…'}</>
+                <><Loader2 size={13} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Downloading…'}</>
               ) : zipStatus === 'done' ? (
                 <><Check size={13} /> Done</>
               ) : zipStatus === 'error' ? (
                 <><X size={13} /> Error</>
               ) : (
-                <><PackageOpen size={13} /> Download ZIP</>
+                <><PackageOpen size={13} /> Download</>
               )}
             </button>
             <button
@@ -1113,20 +1153,71 @@ export default function ApiFilesView(): JSX.Element {
         </div>
       )}
 
-      {/* Folder-download progress toast — the selection bar above already
-          shows zip status while selectMode is active, so this only covers
-          the single-folder "Download folder" context-menu action. */}
+      {boostToast && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+          <Heart size={13} className="text-pink-400" fill="currentColor" /> Priority routing active
+        </div>
+      )}
+
+      {/* Folder-download progress toast - the selection bar above already
+          shows download status while selectMode is active, so this only
+          covers the single-folder "Download folder" context-menu action. */}
       {!selectMode && zipStatus !== 'idle' && (
         <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
-            <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting ZIP…' : 'Zipping folder…'}</>
+            <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Downloading folder…'}</>
           ) : zipStatus === 'done' ? (
             <><Check size={13} className="text-accent" /> Downloaded</>
           ) : (
-            <><X size={13} className="text-red-400" /> ZIP failed</>
+            <><X size={13} className="text-red-400" /> Download failed</>
           )}
         </div>
       )}
+
+      {/* Single-file CDN download progress, above the folder toast when both show. */}
+      <CdnDownloadToast raised={!selectMode && zipStatus !== 'idle'} />
+
+      {/* Name prompt for the drop-a-file-onto-a-file gesture: both files move
+          into a folder that doesn't exist yet, and its name is the one thing
+          the drag itself can't say. */}
+      {bundlePrompt && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setBundlePrompt(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
+            <p className="text-text-muted text-xs mb-3">
+              Queues a new folder holding {bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path).length + 1} items, in {parentFolder(bundlePrompt.target.path) || 'the root folder'}.
+            </p>
+            <input
+              autoFocus
+              value={bundlePrompt.name}
+              onChange={e => setBundlePrompt(prev => prev && { ...prev, name: e.target.value })}
+              onKeyDown={e => {
+                if (e.key === 'Enter') confirmBundle()
+                if (e.key === 'Escape') setBundlePrompt(null)
+              }}
+              onFocus={e => e.target.select()}
+              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/50"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setBundlePrompt(null)} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary transition-colors">Cancel</button>
+              <button
+                onClick={confirmBundle}
+                disabled={!bundlePrompt.name.trim()}
+                className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >Queue folder</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden pickers behind the context menu's upload items. */}
+      <input ref={fileInputRef} type="file" multiple className="hidden"
+        onChange={e => uploadLocalFiles(uploadTargetRef.current, filesFromInput(e.target.files))} />
+      <input
+        ref={el => { folderInputRef.current = el; el?.setAttribute('webkitdirectory', '') }}
+        type="file" multiple className="hidden"
+        onChange={e => uploadLocalFiles(uploadTargetRef.current, filesFromInput(e.target.files))}
+      />
 
       {textFile && <TextFileViewer source={textFile} onClose={() => setTextFile(null)} />}
 
@@ -1149,7 +1240,7 @@ export default function ApiFilesView(): JSX.Element {
             className="min-w-[180px]"
             onPositioned={setCtxMenuPos}
           >
-            {/* Playlist flyout — a child of the menu so the click-away overlay
+            {/* Playlist flyout - a child of the menu so the click-away overlay
                 still counts clicks in it as "inside", but positioned beside it. */}
             {playlistsOpen && (
               <div
@@ -1199,7 +1290,7 @@ export default function ApiFilesView(): JSX.Element {
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
                   <Play size={14} className="text-text-muted" /> Play
                 </button>
-                <button onClick={() => { addToQueue(fileToTrack(ctxMenu.entry, activeChannel)); setCtxMenu(null) }}
+                <button onClick={async () => { const e = ctxMenu.entry; setCtxMenu(null); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)) }}
                   className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
                   <ListPlus size={14} className="text-text-muted" /> Add to queue
                 </button>
@@ -1212,11 +1303,12 @@ export default function ApiFilesView(): JSX.Element {
                     <ChevronRight size={13} className="ml-auto text-text-muted" />
                   </button>
                 )}
-                <button onClick={() => { toggleLike(apiFileTrackId(ctxMenu.entry.path)); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Heart size={14} fill={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path)) ? 'currentColor' : 'none'}
-                    className={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path)) ? 'text-accent' : 'text-text-muted'} />
-                  {likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path)) ? 'Unlike' : 'Like'}
+                <button onClick={() => { toggleApiFileLike(ctxMenu.entry.path); setCtxMenu(null) }}
+                  disabled={!channelsReady}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40">
+                  <Heart size={14} fill={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'currentColor' : 'none'}
+                    className={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'text-accent' : 'text-text-muted'} />
+                  {likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'Unlike' : 'Like'}
                 </button>
                 {trackerMatches.get(ctxMenu.entry.path) != null && (
                   <button onClick={() => { openSongInfo(ctxMenu.entry); setCtxMenu(null) }}
@@ -1258,7 +1350,7 @@ export default function ApiFilesView(): JSX.Element {
               className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
               <Clipboard size={14} className="text-text-muted" /> Copy path
             </button>
-            {/* Contributor actions — proposals target a file, so directories
+            {/* Contributor actions - proposals target a file, so directories
                 are excluded. Both land on the contributor page prefilled. */}
             {canPropose && ctxMenu.entry.type !== 'directory' && (
               <>
@@ -1280,11 +1372,25 @@ export default function ApiFilesView(): JSX.Element {
                 <div className="border-t border-[var(--border)] my-1" />
               </>
             )}
+            {canPropose && ctxMenu.entry.type === 'directory' && (
+              <>
+                <div className="border-t border-[var(--border)] my-1" />
+                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'files'); setCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <Upload size={14} className="text-text-muted" /> Upload files here
+                </button>
+                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'folder'); setCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FolderInput size={14} className="text-text-muted" /> Upload folder here
+                </button>
+                <div className="border-t border-[var(--border)] my-1" />
+              </>
+            )}
             {ctxMenu.entry.type === 'directory' ? (
               <button onClick={() => { downloadFolder(ctxMenu.entry); setCtxMenu(null) }}
                 disabled={zipStatus === 'starting' || zipStatus === 'zipping'}
                 className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50">
-                <PackageOpen size={14} className="text-text-muted" /> Download folder (ZIP)
+                <PackageOpen size={14} className="text-text-muted" /> Download folder
               </button>
             ) : (
               <button onClick={() => { handleDownload(ctxMenu.entry); setCtxMenu(null) }}
@@ -1294,6 +1400,73 @@ export default function ApiFilesView(): JSX.Element {
             )}
           </ClampedMenu>
         </>
+      )}
+
+      {bgCtxMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setBgCtxMenu(null)} />
+          <ClampedMenu x={bgCtxMenu.x} y={bgCtxMenu.y} className="min-w-[180px]">
+            <button onClick={() => { navigate(currentPath, false); setBgCtxMenu(null) }}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+              <RefreshCw size={14} className="text-text-muted" /> Refresh
+            </button>
+            {canPropose && (
+              <>
+                <div className="border-t border-[var(--border)] my-1" />
+                <button onClick={() => { openUploadPicker(currentPath, 'files'); setBgCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <Upload size={14} className="text-text-muted" /> Upload files
+                </button>
+                <button onClick={() => { openUploadPicker(currentPath, 'folder'); setBgCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FolderInput size={14} className="text-text-muted" /> Upload folder
+                </button>
+                {/* The Contributor page is still where an upload gets notes or a
+                    rename before it's proposed. */}
+                <button onClick={() => {
+                  setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                  setBgCtxMenu(null)
+                  setActiveView('contributor')
+                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FileText size={14} className="text-text-muted" /> Upload with notes…
+                </button>
+                <button onClick={() => { setNewFolderPrompt(''); setBgCtxMenu(null) }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
+                  <FolderPlus size={14} className="text-text-muted" /> New folder
+                </button>
+              </>
+            )}
+          </ClampedMenu>
+        </>
+      )}
+
+      {newFolderPrompt !== null && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setNewFolderPrompt(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
+            <p className="text-text-muted text-xs mb-3">
+              Queues a new folder in {currentPath || 'the root folder'}.
+            </p>
+            <input
+              autoFocus
+              value={newFolderPrompt}
+              onChange={e => setNewFolderPrompt(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') confirmNewFolder()
+                if (e.key === 'Escape') setNewFolderPrompt(null)
+              }}
+              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/50"
+            />
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setNewFolderPrompt(null)} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary transition-colors">Cancel</button>
+              <button
+                onClick={confirmNewFolder}
+                disabled={!newFolderPrompt.trim()}
+                className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >Queue folder</button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )

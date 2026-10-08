@@ -1,0 +1,915 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3,
+} from 'lucide-react'
+import { useStore, useStorePick } from '../store/useStore'
+import { useChatStore } from '../store/chatStore'
+import { subscribeNotifications } from '../lib/notificationSocket'
+import {
+  getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
+  adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
+} from '../lib/userApi'
+import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser } from '../lib/userApi'
+import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
+import { Track } from '../types'
+import { AlbumArtThumbnail } from './AlbumArtThumbnail'
+import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
+import { useCanEdit } from '../hooks/useChannelRoles'
+import { shareOrigin } from '../lib/platform'
+import { playlistKey, parsePlaylistKey, folderOfPlaylist, allFolderedKeys } from '../lib/playlistFolders'
+import {
+  prefsFromEvents, joinPlayedSongs, buildListeningStats, formatListeningTime, type ListeningStats,
+} from '../lib/listeningStats'
+import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import { clickable } from '../lib/a11y'
+import { initial } from '../lib/format'
+import { relativeTime } from './adminShared'
+
+type ProposalRow = { key: string; kind: 'edit' | 'comp'; title: string; status: string; created_at: string }
+
+const PROPOSAL_STATUS_STYLE: Record<string, string> = {
+  pending: 'text-amber-400 bg-amber-500/15',
+  approved: 'text-emerald-400 bg-emerald-500/15',
+  rejected: 'text-red-400 bg-red-500/15',
+  reversed: 'text-text-muted bg-surface-raised',
+}
+
+const PROPOSAL_HISTORY_LIMIT = 8
+
+// Manage panel's per-user proposal history. The admin list endpoints have no
+// per-user filter, so both queues are fetched and narrowed by id here.
+function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
+  const [rows, setRows] = useState<ProposalRow[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    Promise.all([adminListProposals(), adminListCompProposals().catch(() => [])])
+      .then(([edits, comps]) => {
+        if (!alive) return
+        const merged: ProposalRow[] = [
+          ...edits.filter((p) => p.editor_id === userId).map((p): ProposalRow => ({
+            key: `e${p.id}`, kind: 'edit', title: p.title || `${p.change_type} song`, status: p.status, created_at: p.created_at,
+          })),
+          ...comps.filter((p) => p.contributor_id === userId).map((p): ProposalRow => ({
+            key: `c${p.id}`, kind: 'comp', title: p.file_path, status: p.status, created_at: p.created_at,
+          })),
+        ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+        setRows(merged)
+      })
+      .catch(() => { if (alive) setError(true) })
+    return () => { alive = false }
+  }, [userId])
+
+  const count = (st: string): number => rows?.filter((r) => r.status === st).length ?? 0
+
+  return (
+    <div className="mt-3 space-y-1.5">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Proposals</p>
+      {error ? (
+        <p className="text-text-muted text-xs italic">Couldn't load proposals.</p>
+      ) : !rows ? (
+        <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+      ) : rows.length === 0 ? (
+        <p className="text-text-muted text-xs italic">No proposals yet.</p>
+      ) : (
+        <>
+          <p className="text-xs text-text-muted">
+            <span className="text-amber-400 font-semibold">{count('pending')} pending</span> · {count('approved')} approved · {count('rejected')} rejected
+            {count('reversed') > 0 && <> · {count('reversed')} reversed</>}
+          </p>
+          <ul className="space-y-1">
+            {rows.slice(0, PROPOSAL_HISTORY_LIMIT).map((r) => (
+              <li key={r.key} className="flex items-center gap-2 text-xs">
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${PROPOSAL_STATUS_STYLE[r.status] ?? 'text-text-muted bg-surface-raised'}`}>{r.status}</span>
+                <span className="min-w-0 flex-1 truncate text-text-secondary">{r.kind === 'comp' && <span className="text-text-muted">Comp · </span>}{r.title}</span>
+                <span className="shrink-0 text-text-muted">{relativeTime(r.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+          {rows.length > PROPOSAL_HISTORY_LIMIT && (
+            <p className="text-[11px] text-text-muted">+{rows.length - PROPOSAL_HISTORY_LIMIT} older</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// Recent plays render actual track info, but the profile payload only carries
+// {song, played_at} - resolving every row would mean one fetch per play, so
+// this caps how many of the newest rows we bother resolving.
+const RECENT_PLAYS_DISPLAY_LIMIT = 10
+
+// How many of the profile owner's top songs the compact Wrapped teaser shows -
+// the full breakdown lives behind "View full Wrapped" for the owner's own page.
+const WRAPPED_TOP_SONGS = 5
+
+interface PlaylistMenuState { playlist: PlaylistSummary; x: number; y: number }
+
+// Trimmed, read-only playlist menu for a public profile - unlike
+// PlaylistContextMenu (rename/delete/toggle-public), every playlist here
+// might belong to someone else, so only actions that work against the public
+// endpoint and don't assume ownership are offered.
+function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
+  state: PlaylistMenuState
+  onClose: () => void
+  onOpenInLibrary?: () => void
+}): JSX.Element {
+  const { playCollection, addToQueue } = useStorePick('playCollection', 'addToQueue')
+  const [copied, setCopied] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const MENU_W = 200
+  const [pos, setPos] = useState(() => ({
+    left: Math.max(8, Math.min(state.x, window.innerWidth - MENU_W - 8)),
+    top: Math.max(8, Math.min(state.y, window.innerHeight - 180 - 8)),
+  }))
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const top = Math.max(8, Math.min(state.y, window.innerHeight - rect.height - 8))
+    const left = Math.max(8, Math.min(state.x, window.innerWidth - rect.width - 8))
+    setPos((prev) => (prev.top === top && prev.left === left ? prev : { top, left }))
+  }, [state.x, state.y])
+
+  useEscapeToClose(onClose)
+
+  const loadTracks = async (): Promise<Track[]> => {
+    const d = await getPublicPlaylist(state.playlist.id)
+    return d.items.map((i) => liteSongToTrack(i.song))
+  }
+
+  const copyLink = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${state.playlist.id}&view=shared`)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
+      <div
+        ref={ref}
+        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[200px]"
+        style={{ left: pos.left, top: pos.top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={async () => { const t = await loadTracks(); if (t.length) playCollection(t); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
+        >
+          <Play size={14} className="text-text-muted" /> Play all
+        </button>
+        <button
+          onClick={async () => { const t = await loadTracks(); t.forEach((tr) => addToQueue(tr)); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
+        >
+          <ListEnd size={14} className="text-text-muted" /> Add all to queue
+        </button>
+        <button
+          onClick={copyLink}
+          title="Copy link"
+          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
+        >
+          <LinkIcon size={14} className="text-text-muted" /> {copied ? 'Link copied!' : 'Copy link'}
+        </button>
+        {onOpenInLibrary && (
+          <>
+            <div className="my-1 border-t border-[var(--border)]" />
+            <button
+              onClick={onOpenInLibrary}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
+            >
+              <ListMusic size={14} className="text-text-muted" /> Open in your library
+            </button>
+          </>
+        )}
+      </div>
+    </>,
+    document.body,
+  )
+}
+
+export default function PublicProfileView(): JSX.Element {
+  const {
+    playTrack, playCollection, playNext, addToQueue, setActiveView, previousView, account, playlistFolders, setPendingPlaylistId,
+    mutedUserIds, toggleMuteUser, playlists: ownPlaylists,
+  } = useStorePick(
+    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'previousView', 'account', 'playlistFolders', 'setPendingPlaylistId',
+    'mutedUserIds', 'toggleMuteUser', 'playlists',
+  )
+  const canEdit = useCanEdit()
+  const startDm = useChatStore((s) => s.startDm)
+  const userId = Number(window.location.pathname.split('/u/')[1]?.split('/')[0] ?? '')
+
+  const [profile, setProfile] = useState<PublicProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+  const [messaging, setMessaging] = useState(false)
+
+  const [recentTracks, setRecentTracks] = useState<Track[]>([])
+  const [recentLoading, setRecentLoading] = useState(false)
+
+  const [nowPlaying, setNowPlaying] = useState<NowPlayingState | null>(null)
+  const [nowPlayingTrack, setNowPlayingTrack] = useState<Track | null>(null)
+
+  const [wrappedStats, setWrappedStats] = useState<ListeningStats | null>(null)
+  const [wrappedLoading, setWrappedLoading] = useState(false)
+
+  const [expandedPlaylistId, setExpandedPlaylistId] = useState<number | null>(null)
+  const [expandedDetail, setExpandedDetail] = useState<PlaylistDetail | null>(null)
+  const [expandedLoading, setExpandedLoading] = useState(false)
+
+  const [trackMenu, setTrackMenu] = useState<SongContextMenuState | null>(null)
+  const [playlistMenu, setPlaylistMenu] = useState<PlaylistMenuState | null>(null)
+
+  const [adminOpen, setAdminOpen] = useState(false)
+  const [adminUser, setAdminUser] = useState<AdminUser | null>(null)
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminActionLoading, setAdminActionLoading] = useState(false)
+
+  const isOwnProfile = !!account && !!profile && account.id === profile.id
+  const isMuted = !!profile && mutedUserIds.includes(profile.id)
+  const isAdmin = !!account?.is_administrator
+
+  // The public profile endpoint is unauthenticated and strips play_history /
+  // playlists whenever the corresponding privacy flag is off, with no
+  // exception for the owner looking at their own page. When it's your own
+  // profile, fall back to data the app already has through authenticated
+  // routes (account.listening_plays, the playlists store) instead of trusting
+  // that stripped-down public payload.
+  const showPlayHistory = isOwnProfile || !!profile?.public_play_history
+  const showPlaylists = isOwnProfile || !!profile?.public_playlists
+  const effectivePlayHistory = isOwnProfile ? account?.listening_plays : profile?.play_history
+  // The server's profile serializer currently returns *every* playlist once
+  // public_playlists is on, private ones included (docs promise is_public
+  // only) - filter here too so a private playlist's name never shows.
+  const effectivePlaylists = isOwnProfile ? ownPlaylists : profile?.playlists?.filter((p) => p.is_public)
+  const publicTierlists = profile?.tierlists ?? []
+
+  // The tier list view picks up ?id= on mount and opens that list read-only
+  // (or, for your own, straight into editing).
+  function openTierlist(id: number): void {
+    setActiveView('tierlist')
+    window.history.replaceState({ view: 'tierlist' }, '', `/tierlist?id=${id}`)
+  }
+
+  useEffect(() => {
+    if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
+    getPublicProfile(userId)
+      .then(setProfile)
+      .catch(() => setNotFound(true))
+      .finally(() => setLoading(false))
+  }, [userId])
+
+  // Admins get a "Manage" panel with the same role/status controls as the
+  // admin console's Users tab - fetched only for admins viewing someone
+  // else's profile, since a non-admin's request would just 403.
+  useEffect(() => {
+    if (!isAdmin || isOwnProfile || !profile) { setAdminUser(null); return }
+    setAdminLoading(true)
+    adminGetUser(profile.id)
+      .then(setAdminUser)
+      .catch(() => setAdminUser(null))
+      .finally(() => setAdminLoading(false))
+  }, [isAdmin, isOwnProfile, profile])
+
+  const doAdminUpdate = async (payload: Parameters<typeof adminUpdateUser>[1]): Promise<void> => {
+    if (!adminUser) return
+    setAdminActionLoading(true)
+    try {
+      const updated = await adminUpdateUser(adminUser.user_id, payload)
+      setAdminUser(updated)
+    } catch {} finally {
+      setAdminActionLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const plays = effectivePlayHistory
+    if (!plays || plays.length === 0) { setRecentTracks([]); return }
+    const newest = [...plays]
+      .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at))
+      .slice(0, RECENT_PLAYS_DISPLAY_LIMIT)
+    setRecentLoading(true)
+    getSongsByIds(newest.map(p => p.song))
+      .then(songs => {
+        const byId = new Map(songs.map(s => [s.id, s]))
+        const tracks = newest.map(p => byId.get(p.song)).filter((s): s is NonNullable<typeof s> => !!s).map(songToTrack)
+        setRecentTracks(tracks)
+      })
+      .catch(() => setRecentTracks([]))
+      .finally(() => setRecentLoading(false))
+  }, [effectivePlayHistory])
+
+  // Live "currently listening" indicator: fetched once, refetched on every
+  // socket (re)connect, and otherwise driven by pushed now_playing frames.
+  useEffect(() => {
+    if (!profile?.public_now_playing || !Number.isFinite(userId) || userId <= 0) { setNowPlaying(null); return }
+    let cancelled = false
+    const poll = (): void => {
+      getNowPlaying(userId)
+        .then((res) => { if (!cancelled) setNowPlaying(res.now_playing) })
+        .catch(() => { if (!cancelled) setNowPlaying(null) })
+    }
+    poll()
+    // The chat socket pushes now_playing.updated into the chat store, but only
+    // for users it routes to us, so the mount-time fetch above stays the source
+    // of truth and the store is only followed for changes after it.
+    const unsubscribe = useChatStore.subscribe((state, prev) => {
+      if (cancelled || state.nowPlaying[userId] === prev.nowPlaying[userId] || !(userId in state.nowPlaying)) return
+      setNowPlaying(state.nowPlaying[userId])
+    })
+    // The backend also broadcasts song changes on the public notifications
+    // socket, so a profile viewer doesn't need to share a chat server.
+    const unsubscribeSocket = subscribeNotifications((frame) => {
+      if (cancelled || frame.type !== 'now_playing' || Number(frame.user_id) !== userId) return
+      setNowPlaying((frame.now_playing as typeof nowPlaying) ?? null)
+    }, poll)
+    return () => { cancelled = true; unsubscribe(); unsubscribeSocket() }
+  }, [profile?.public_now_playing, userId])
+
+  useEffect(() => {
+    if (!nowPlaying) { setNowPlayingTrack(null); return }
+    let cancelled = false
+    getSongsByIds([nowPlaying.song])
+      .then((songs) => { if (!cancelled) setNowPlayingTrack(songs[0] ? songToTrack(songs[0]) : null) })
+      .catch(() => { if (!cancelled) setNowPlayingTrack(null) })
+    return () => { cancelled = true }
+  }, [nowPlaying?.song])
+
+  // Compact "Wrapped" teaser - built entirely from the same timestamped
+  // play_history the "Recently played" section uses, all-time (the profile
+  // payload carries no period info). The full per-period breakdown stays
+  // behind StatsView, which only ever reads the *viewer's own* local log.
+  useEffect(() => {
+    const plays = effectivePlayHistory
+    if (!plays || plays.length === 0) { setWrappedStats(null); return }
+    const prefs = prefsFromEvents(plays)
+    const ids = prefs.map((p) => p.song)
+    let cancelled = false
+    setWrappedLoading(true)
+    resolveStatsSongs(ids, () => {}, () => cancelled)
+      .then((songs) => {
+        if (cancelled) return
+        setWrappedStats(buildListeningStats(joinPlayedSongs(prefs, songs)))
+      })
+      .catch(() => { if (!cancelled) setWrappedStats(null) })
+      .finally(() => { if (!cancelled) setWrappedLoading(false) })
+    return () => { cancelled = true }
+  }, [effectivePlayHistory])
+
+  function toggleExpandPlaylist(playlist: PlaylistSummary): void {
+    if (expandedPlaylistId === playlist.id) { setExpandedPlaylistId(null); setExpandedDetail(null); return }
+    setExpandedPlaylistId(playlist.id)
+    setExpandedDetail(null)
+    setExpandedLoading(true)
+    getPublicPlaylist(playlist.id)
+      .then(setExpandedDetail)
+      .catch(() => setExpandedDetail(null))
+      .finally(() => setExpandedLoading(false))
+  }
+
+  function openSongInfo(songId: number): void {
+    useStore.getState().setInfoSongId(songId)
+  }
+
+  async function messageUser(): Promise<void> {
+    if (!profile || messaging) return
+    setMessaging(true)
+    try {
+      await startDm([profile.id])
+      setActiveView('chat')
+    } catch {
+      setMessaging(false)
+    }
+  }
+
+  function openTrackMenu(e: React.MouseEvent, track: Track): void {
+    e.preventDefault()
+    e.stopPropagation()
+    const songId = trackIdToSongId(track.id)
+    setTrackMenu((prev) => (prev?.track.id === track.id ? null : { track, songId, x: e.clientX, y: e.clientY }))
+  }
+
+  // Folders are a per-account, local/synced grouping blob (see
+  // lib/playlistFolders) - the public profile endpoint never returns them, so
+  // they can only be reconstructed here when the viewer IS the profile owner
+  // (their own store already holds the same folders that produced this list).
+  // For anyone else's profile there's no folder data to show, so it stays flat.
+  const folderGroups = useMemo(() => {
+    const playlists = effectivePlaylists ?? []
+    if (!isOwnProfile || playlists.length === 0) return { folders: [], ungrouped: playlists }
+    const byId = new Map(playlists.map((p) => [p.id, p]))
+    const folders = playlistFolders
+      .map((folder) => ({
+        folder,
+        playlists: folder.playlistKeys
+          .map((k) => {
+            const parsed = parsePlaylistKey(k)
+            return parsed?.kind === 'api' ? byId.get(Number(parsed.id)) : undefined
+          })
+          .filter((p): p is PlaylistSummary => !!p),
+      }))
+      .filter((g) => g.playlists.length > 0)
+    const foldered = allFolderedKeys(playlistFolders)
+    const ungrouped = playlists.filter((p) => !foldered.has(playlistKey('api', p.id)))
+    return { folders, ungrouped }
+  }, [isOwnProfile, effectivePlaylists, playlistFolders])
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6 animate-pulse">
+        <div className="h-5 w-20 rounded bg-surface-overlay mb-4" />
+        <div className="flex items-center gap-4 mb-2">
+          <div className="w-16 h-16 rounded-full bg-surface-overlay shrink-0" />
+          <div className="space-y-2">
+            <div className="h-6 w-40 rounded bg-surface-overlay" />
+            <div className="h-4 w-24 rounded-full bg-surface-overlay" />
+          </div>
+        </div>
+        <div className="mt-8 space-y-3">
+          <div className="h-4 w-32 rounded bg-surface-overlay" />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2">
+              <div className="w-9 h-9 rounded-lg bg-surface-overlay shrink-0" />
+              <div className="h-4 flex-1 max-w-[220px] rounded bg-surface-overlay" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (notFound || !profile) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
+        <User size={40} className="opacity-20" />
+        <p className="text-sm">Profile not found.</p>
+        <button
+          onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
+          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
+        >
+          <ChevronLeft size={15} /> Back to app
+        </button>
+      </div>
+    )
+  }
+
+  const expandedTracks = expandedDetail ? expandedDetail.items.map(i => liteSongToTrack(i.song)) : []
+  const wrappedTopTracks = wrappedStats ? wrappedStats.played.slice(0, WRAPPED_TOP_SONGS).map((p) => statsSongToTrack(p.song)) : []
+
+  function renderPlaylistRow(p: PlaylistSummary): JSX.Element {
+    const coverUrl = buildImageUrl(p.cover_image_url)
+    return (
+      <div key={p.id}>
+        <div
+          className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
+          {...clickable(() => toggleExpandPlaylist(p))}
+          onContextMenu={(e) => { e.preventDefault(); setPlaylistMenu({ playlist: p, x: e.clientX, y: e.clientY }) }}
+        >
+          <div className="w-10 h-10 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
+            {coverUrl
+              ? <img src={coverUrl} alt="" className="w-full h-full object-cover" />
+              : <Music2 size={16} className="text-text-muted opacity-40" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-text-primary text-sm font-medium truncate">{p.name}</p>
+            <p className="text-text-muted text-xs">{p.track_count} tracks</p>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); setPlaylistMenu((prev) => prev?.playlist.id === p.id ? null : { playlist: p, x: e.clientX, y: e.clientY }) }}
+            className="p-1.5 text-text-muted hover:text-text-primary transition-colors shrink-0"
+            title="More options"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+        </div>
+
+        {expandedPlaylistId === p.id && (
+          <div className="pl-6 pr-2 py-1">
+            {expandedLoading ? (
+              <div className="flex items-center gap-2 text-text-muted text-sm py-2"><Loader2 size={13} className="animate-spin" /> Loading…</div>
+            ) : expandedTracks.length === 0 ? (
+              <p className="text-text-muted text-sm py-2">Empty playlist.</p>
+            ) : (
+              <>
+                <button
+                  onClick={() => playCollection(expandedTracks)}
+                  className="flex items-center gap-2 mb-2 mt-1 px-4 py-1.5 rounded-full bg-accent text-black text-xs font-bold hover:scale-105 active:scale-95 transition-transform"
+                >
+                  <Play size={13} fill="currentColor" /> Play all
+                </button>
+                <div className="space-y-0.5">
+                  {expandedTracks.map((t, i) => (
+                    <div
+                      key={`${t.id}-${i}`}
+                      className="group flex items-center gap-3 px-2 py-1.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
+                      {...clickable(() => playTrack(t, expandedTracks))}
+                      onContextMenu={(e) => openTrackMenu(e, t)}
+                    >
+                      <AlbumArtThumbnail track={t} size={28} className="rounded-md" />
+                      <span className="text-text-primary text-sm flex-1 truncate" title={t.title}>{t.title}</span>
+                      <button
+                        onClick={(e) => openTrackMenu(e, t)}
+                        className="p-1 text-text-muted hover:text-text-primary transition-colors shrink-0"
+                        title="More options"
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
+      <button
+        onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
+        className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
+      >
+        <ChevronLeft size={15} /> Back to app
+      </button>
+
+      {/* Header */}
+      <div className="flex items-center gap-4 mb-2">
+        <div className="w-16 h-16 rounded-full bg-surface-overlay flex items-center justify-center shrink-0 overflow-hidden ring-2 ring-[var(--border)]">
+          {profile.avatar
+            ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
+            : <div className="w-full h-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{initial(profile.display_name || profile.username)}</div>}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
+          <p className="text-text-muted text-sm truncate">@{profile.username}</p>
+          {(profile.is_editor || profile.is_contributor || profile.is_donor) && (
+            <div className="flex items-center gap-2 mt-1">
+              {profile.is_editor && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded-full">
+                  <ShieldCheck size={12} /> Editor
+                </span>
+              )}
+              {profile.is_contributor && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-text-secondary bg-surface-overlay px-2 py-0.5 rounded-full">
+                  <Wrench size={12} /> Contributor
+                </span>
+              )}
+              {profile.is_donor && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-pink-400 bg-pink-500/10 px-2 py-0.5 rounded-full">
+                  <Heart size={12} fill="currentColor" />
+                  Donor{profile.donor_since && ` since ${new Date(profile.donor_since).toLocaleDateString()}`}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        {!isOwnProfile && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => toggleMuteUser(profile.id)}
+              title={isMuted ? 'Unmute this user' : 'Mute this user'}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
+                isMuted
+                  ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
+                  : 'bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+              }`}
+            >
+              {isMuted ? <BellOff size={15} /> : <Bell size={15} />}
+              {isMuted ? 'Muted' : 'Mute'}
+            </button>
+            <button
+              onClick={() => void messageUser()}
+              disabled={messaging}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform disabled:opacity-60 disabled:pointer-events-none"
+            >
+              {messaging ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+              Message
+            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setAdminOpen((v) => !v)}
+                title="Admin actions"
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
+                  adminOpen
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+                }`}
+              >
+                <ShieldCheck size={15} /> Manage
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isAdmin && !isOwnProfile && adminOpen && (
+        <div className="mb-4 p-4 rounded-xl border border-[var(--border)] bg-surface-overlay/50 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Admin actions</p>
+          {adminLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+          ) : !adminUser ? (
+            <p className="text-text-muted text-xs italic">Couldn't load admin details for this user.</p>
+          ) : adminActionLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Updating…</div>
+          ) : adminUser.role === 'administrator' ? (
+            <p className="text-text-muted text-xs italic">Administrators can only be modified from the admin console.</p>
+          ) : (
+            <>
+            {(adminUser.role === 'editor' || adminUser.contributor_enabled) && (
+              <div className="space-y-1.5 mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                {adminUser.role === 'editor' && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Song edit proposals
+                    <input type="checkbox" checked={adminUser.auto_approve_proposals}
+                      onChange={(e) => void doAdminUpdate({ auto_approve_proposals: e.target.checked })}
+                      className="w-4 h-4 accent-[var(--accent)]" />
+                  </label>
+                )}
+                {adminUser.contributor_enabled && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Comp file proposals
+                    <input type="checkbox" checked={adminUser.auto_approve_comp_proposals}
+                      onChange={(e) => void doAdminUpdate({ auto_approve_comp_proposals: e.target.checked })}
+                      className="w-4 h-4 accent-[var(--accent)]" />
+                  </label>
+                )}
+              </div>
+            )}
+            <div className="space-y-1.5 mb-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+              {([
+                ['Editor', adminUser.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
+                ['Contributor', !!adminUser.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
+                ['Manager', !!adminUser.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
+                ['News', !!adminUser.news_enabled, (on: boolean) => ({ news_enabled: on })],
+              ] as const).map(([label, checked, payload]) => (
+                <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                  {label}
+                  <input type="checkbox" checked={checked}
+                    onChange={(e) => void doAdminUpdate(payload(e.target.checked))}
+                    className="w-4 h-4 accent-[var(--accent)]" />
+                </label>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => void doAdminUpdate({ is_active: !adminUser.is_active })}
+                className="col-span-2 px-3 py-2 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised transition-colors">
+                {adminUser.is_active ? 'Disable account' : 'Enable account'}
+              </button>
+            </div>
+            <AdminProposalHistory userId={adminUser.user_id} />
+            </>
+          )}
+        </div>
+      )}
+
+      {profile.bio && (
+        <p className="text-text-secondary text-sm leading-relaxed mt-3 mb-2 max-w-xl whitespace-pre-wrap">{profile.bio}</p>
+      )}
+
+      {nowPlaying && nowPlayingTrack && (
+        <div
+          className="group flex items-center gap-3 mt-4 px-3 py-2.5 rounded-xl border border-accent/30 bg-accent/5 hover:bg-accent/10 cursor-pointer transition-colors"
+          {...clickable(() => playTrack(nowPlayingTrack))}
+          onContextMenu={(e) => openTrackMenu(e, nowPlayingTrack)}
+        >
+          <div className="relative w-10 h-10 rounded-lg overflow-hidden bg-surface-overlay shrink-0">
+            <AlbumArtThumbnail track={nowPlayingTrack} fill className="w-full h-full" />
+            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+              <Play size={13} fill="white" className="text-white ml-0.5" />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="flex items-center gap-1.5 text-accent text-[10px] font-bold uppercase tracking-widest">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent" />
+              </span>
+              Listening now
+            </p>
+            <p className="text-text-primary text-sm truncate" title={nowPlayingTrack.title}>{nowPlayingTrack.title}</p>
+          </div>
+          <button
+            onClick={(e) => openTrackMenu(e, nowPlayingTrack)}
+            className="p-1.5 text-text-muted hover:text-text-primary transition-colors shrink-0"
+            title="More options"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+        </div>
+      )}
+
+      {!showPlayHistory && !showPlaylists && publicTierlists.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-2 text-text-muted mt-16">
+          <Lock size={28} className="opacity-30" />
+          <p className="text-sm">This profile is private.</p>
+        </div>
+      )}
+
+      {/* Recently played, Wrapped, Playlists - side by side on wide screens to cut down on scrolling */}
+      {(showPlayHistory || showPlaylists || publicTierlists.length > 0) && (
+      <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch auto-rows-fr">
+
+      {/* Recently played */}
+      {showPlayHistory && (
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
+            <History size={15} /> Recently played
+          </h2>
+          <div className="overflow-y-auto max-h-[420px] -mx-1 px-1">
+          {recentLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+          ) : recentTracks.length === 0 ? (
+            <p className="text-text-muted text-sm">No plays yet.</p>
+          ) : (
+            <div className="space-y-0.5">
+              {recentTracks.map((t, i) => (
+                <div
+                  key={`${t.id}-${i}`}
+                  className="group flex items-center gap-3 px-3 py-2 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
+                  {...clickable(() => playTrack(t, recentTracks))}
+                  onContextMenu={(e) => openTrackMenu(e, t)}
+                >
+                  <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
+                    <AlbumArtThumbnail track={t} fill className="w-full h-full" />
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Play size={12} fill="white" className="text-white ml-0.5" />
+                    </div>
+                  </div>
+                  <span className="text-text-primary text-sm flex-1 truncate" title={t.title}>{t.title}</span>
+                  <button
+                    onClick={(e) => openTrackMenu(e, t)}
+                    className="p-1.5 text-text-muted hover:text-text-primary transition-colors shrink-0"
+                    title="More options"
+                  >
+                    <MoreHorizontal size={16} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          </div>
+        </div>
+      )}
+
+      {/* Wrapped */}
+      {showPlayHistory && (
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide">
+              <BarChart3 size={15} /> Wrapped
+            </h2>
+            {isOwnProfile && (
+              <button
+                onClick={() => setActiveView('stats')}
+                className="text-accent hover:underline text-xs font-medium"
+              >
+                View full Wrapped →
+              </button>
+            )}
+          </div>
+          {wrappedLoading ? (
+            <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+          ) : !wrappedStats || wrappedStats.played.length === 0 ? (
+            <p className="text-text-muted text-sm">Not enough listening data yet.</p>
+          ) : (
+            <>
+              <div className="flex gap-3 mb-3">
+                <div className="flex-1 rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-3.5 py-2.5">
+                  <p className="text-text-muted text-[10px] font-semibold uppercase tracking-widest mb-1">Total plays</p>
+                  <p className="text-text-primary text-lg font-bold tabular-nums">{wrappedStats.totalPlays.toLocaleString()}</p>
+                </div>
+                <div className="flex-1 rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-3.5 py-2.5">
+                  <p className="text-text-muted text-[10px] font-semibold uppercase tracking-widest mb-1">Listening time</p>
+                  <p className="text-text-primary text-lg font-bold tabular-nums">{formatListeningTime(wrappedStats.totalSeconds)}</p>
+                </div>
+              </div>
+              <div className="space-y-0.5">
+                {wrappedStats.played.slice(0, WRAPPED_TOP_SONGS).map((played, i) => {
+                  const t = wrappedTopTracks[i]
+                  return (
+                    <div
+                      key={`${played.song.id}-${i}`}
+                      className="group flex items-center gap-3 px-2 py-1.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
+                      {...clickable(() => playTrack(t, wrappedTopTracks))}
+                      onContextMenu={(e) => openTrackMenu(e, t)}
+                    >
+                      <span className="text-text-muted text-xs tabular-nums w-4 text-center shrink-0">{i + 1}</span>
+                      <AlbumArtThumbnail track={t} size={32} className="rounded-md" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-text-primary text-sm truncate" title={t.title}>{t.title}</p>
+                      </div>
+                      <span className="text-text-muted text-xs tabular-nums shrink-0">{played.playcount.toLocaleString()} plays</span>
+                      <button
+                        onClick={(e) => openTrackMenu(e, t)}
+                        className="p-1 text-text-muted hover:text-text-primary transition-colors shrink-0"
+                        title="More options"
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Public playlists */}
+      {showPlaylists && (
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
+            <ListMusic size={15} /> Playlists
+          </h2>
+          {!effectivePlaylists || effectivePlaylists.length === 0 ? (
+            <p className="text-text-muted text-sm">No public playlists.</p>
+          ) : (
+            <div className="overflow-y-auto max-h-[420px] -mx-1 px-1 space-y-4">
+              {folderGroups.folders.map(({ folder, playlists }) => (
+                <div key={folder.id}>
+                  <div className="flex items-center gap-1.5 mb-1.5 px-1">
+                    <Folder size={13} className="text-text-muted" />
+                    <span className="text-text-secondary text-xs font-semibold">{folder.name}</span>
+                  </div>
+                  <div className="space-y-2 pl-2 border-l border-[var(--border)]/60 ml-1.5">
+                    {playlists.map((p) => renderPlaylistRow(p))}
+                  </div>
+                </div>
+              ))}
+              <div className="space-y-2">
+                {folderGroups.ungrouped.map((p) => renderPlaylistRow(p))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Public tier lists - each list is opted in on its own (is_public),
+          so there's no profile-wide flag gating this card. */}
+      {publicTierlists.length > 0 && (
+        <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/20 p-4 flex flex-col min-h-0">
+          <h2 className="flex items-center gap-2 text-text-primary text-sm font-bold uppercase tracking-wide mb-3 shrink-0">
+            <Rows3 size={15} /> Tier lists
+          </h2>
+          <div className="overflow-y-auto max-h-[420px] -mx-1 px-1 space-y-1">
+            {publicTierlists.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => openTierlist(t.id)}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-overlay text-left transition-colors"
+              >
+                <Rows3 size={16} className="text-text-muted shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-text-primary text-sm truncate">{t.name}</span>
+                  <span className="block text-text-muted text-xs">{t.ranked_count} ranked</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      </div>
+      )}
+
+      {trackMenu && (
+        <SongContextMenu
+          state={trackMenu}
+          onClose={() => setTrackMenu(null)}
+          canEdit={canEdit}
+          onInfo={() => trackMenu.songId != null && openSongInfo(trackMenu.songId)}
+          onPlay={() => playTrack(trackMenu.track)}
+          onPlayNext={() => playNext(trackMenu.track)}
+          onAddToQueue={() => addToQueue(trackMenu.track)}
+        />
+      )}
+
+      {playlistMenu && (
+        <PlaylistQuickMenu
+          state={playlistMenu}
+          onClose={() => setPlaylistMenu(null)}
+          onOpenInLibrary={isOwnProfile ? () => {
+            setPendingPlaylistId(playlistMenu.playlist.id)
+            setActiveView('playlists')
+            setPlaylistMenu(null)
+          } : undefined}
+        />
+      )}
+    </div>
+  )
+}

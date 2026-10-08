@@ -6,24 +6,27 @@
 //   POST /juicewrld/feedback/  { message, contact?, automated? }
 //   GET  /juicewrld/feedback/  (?automated=true|false, editor token)
 //   POST /juicewrld/reports/   { song_id | public_id, message, contact? }
+// `automated` flags a feedback report ErrorBoundary sent on its own (see
+// autoReportErrors) rather than one a person actually wrote, so the API can
+// tell them apart on the review side.
 // Neither takes structured category/issue fields, so the form's category and
 // issue checkboxes are folded into the message text, with the app version on
-// the last line — that context is what makes a bug report actionable.
+// the last line - that context is what makes a bug report actionable.
 //
 // There is no idempotency key server-side, so the store only flushes the
 // outbox from the MAIN window (pop-outs share localStorage and would
 // double-send every queued report otherwise).
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authHeaders } from './apiClient'
 import { FEEDBACK_CATEGORY_LABELS, SONG_ISSUE_LABELS } from './reports'
 import type { PendingFeedback, PendingSongReport } from './reports'
 
 /** Live since /feedback/ and /reports/ shipped (2026-07-17). */
 export const reportsApiEnabled = true
 
-const FEEDBACK_URL = `${JWAPI_BASE}/feedback/`
-const SONG_REPORTS_URL = `${JWAPI_BASE}/reports/`
+const FEEDBACK_URL = routeUrl('/feedback/')
+const SONG_REPORTS_URL = routeUrl('/reports/')
 
 async function post(url: string, body: unknown): Promise<void> {
   // No cacheKey: a report is a mutation, so it must hit the network and fail
@@ -44,12 +47,8 @@ export interface FeedbackRow {
 }
 
 export async function submitFeedback(r: PendingFeedback, contact?: string | null): Promise<void> {
-  const message = `[${FEEDBACK_CATEGORY_LABELS[r.category]}] ${r.message}\n\n— Unreleased v${r.appVersion}`
-  await post(FEEDBACK_URL, {
-    message,
-    automated: r.automated ?? false,
-    ...(contact ? { contact } : {}),
-  })
+  const message = `[${FEEDBACK_CATEGORY_LABELS[r.category]}] ${r.message}\n\n - Unreleased v${r.appVersion}`
+  await post(FEEDBACK_URL, { message, ...(contact ? { contact } : {}), ...(r.automated ? { automated: true } : {}) })
 }
 
 export async function listFeedback(automated?: boolean): Promise<FeedbackRow[]> {
@@ -57,7 +56,7 @@ export async function listFeedback(automated?: boolean): Promise<FeedbackRow[]> 
   if (automated !== undefined) url.searchParams.set('automated', automated ? 'true' : 'false')
   const data = await apiRequest<FeedbackRow[] | { results?: FeedbackRow[] }>(url.toString(), {
     method: 'GET',
-    headers: authHeaders(),
+    headers: authHeaders(getToken()),
   })
   return Array.isArray(data) ? data : (data?.results ?? [])
 }
@@ -94,17 +93,12 @@ export function reportSongId(r: SongReportRow): number | null {
   return r.song ?? r.song_id ?? null
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getToken()
-  return token ? { Authorization: `Token ${token}` } : {}
-}
-
 export async function listSongReports(status?: SongReportStatus): Promise<SongReportRow[]> {
   const url = new URL(SONG_REPORTS_URL)
   if (status) url.searchParams.set('status', status)
   const data = await apiRequest<SongReportRow[] | { results?: SongReportRow[] }>(url.toString(), {
     method: 'GET',
-    headers: authHeaders(),
+    headers: authHeaders(getToken()),
   })
   // Tolerate either a bare array or DRF-style pagination.
   return Array.isArray(data) ? data : (data?.results ?? [])
@@ -116,7 +110,7 @@ export async function reviewSongReport(
 ): Promise<void> {
   await apiRequest<unknown>(`${SONG_REPORTS_URL}${id}/`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
     body: JSON.stringify(patch),
   })
 }
@@ -129,7 +123,7 @@ export async function submitSongReport(r: PendingSongReport, contact?: string | 
     issues ? `Issues: ${issues}` : null,
     `Song: ${r.songName}`,
     r.message || null,
-    `— Unreleased v${r.appVersion}`,
+    ` - Unreleased v${r.appVersion}`,
   ].filter(Boolean).join('\n\n')
   await post(SONG_REPORTS_URL, { song_id: r.songId, message, ...(contact ? { contact } : {}) })
 }

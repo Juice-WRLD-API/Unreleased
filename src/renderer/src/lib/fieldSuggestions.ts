@@ -1,40 +1,24 @@
 // Autocomplete for free-text song fields that are actually shared across many
-// songs — album, credits, recording location, leak type. Same idea as
+// songs - album, credits, recording location, leak type. Same idea as
 // versionsApi's title suggestions, but sourced from the song catalog itself
 // rather than a dedicated table: there's no server-side "distinct values for
 // field X" endpoint, so this fetches the whole catalog once (same `?all=true`
-// bulk mode compactGroups.ts uses — the catalog is small enough, ~2500 songs,
+// bulk mode compactGroups.ts uses - the catalog is small enough, ~2500 songs,
 // that this is simpler and cheaper than a search-as-you-type request per
 // keystroke) and indexes it client-side.
 //
-// Matching is whole-field, not per-name — "Dominic Miller & Nick Mira" is one
+// Matching is whole-field, not per-name - "Dominic Miller & Nick Mira" is one
 // suggestion, not two. Splitting multi-credit fields into individual names
 // would need a real delimiter convention this data doesn't consistently have
 // (" & ", ", ", "/" all show up), and whole-field matching is what the
 // version-title suggestions already do, so it stays consistent.
-import { apiFetch, JWApiSong } from './juicewrldApi'
+import { loadAllSongs, JWApiSong } from './juicewrldApi'
 
 export type SuggestField =
   | 'album' | 'credited_artists' | 'producers' | 'engineers'
   | 'recording_locations' | 'leak_type'
 
-const CATALOG_TTL = 5 * 60_000
-let catalogCache: { promise: Promise<JWApiSong[]>; ts: number } | null = null
-
-async function getCatalog(): Promise<JWApiSong[]> {
-  const now = Date.now()
-  if (!catalogCache || now - catalogCache.ts > CATALOG_TTL) {
-    catalogCache = { promise: apiFetch<JWApiSong[]>('/songs/', { all: 'true' }), ts: now }
-  }
-  try {
-    return await catalogCache.promise
-  } catch (e) {
-    catalogCache = null
-    throw e
-  }
-}
-
-// Built once per catalog fetch and reused across every field/query — indexing
+// Built once per catalog fetch and reused across every field/query - indexing
 // all six fields costs one pass over ~2500 songs, and repeating that per
 // keystroke was the difference between instant and noticeably laggy.
 let indexCache: { forCatalog: Promise<JWApiSong[]>; byField: Map<SuggestField, Map<string, number>> } | null = null
@@ -54,7 +38,11 @@ function buildIndex(catalog: JWApiSong[]): Map<SuggestField, Map<string, number>
 }
 
 async function getIndex(): Promise<Map<SuggestField, Map<string, number>>> {
-  const catalogPromise = getCatalog()
+  // juicewrldApi's shared bulk-catalogue cache rather than a private copy -
+  // this module used to keep its own identical 5-minute TTL cache of the same
+  // ?all=true fetch, so opening an edit form after any view that had already
+  // loaded the catalogue paid for it a second time.
+  const catalogPromise = loadAllSongs()
   if (indexCache?.forCatalog !== catalogPromise) {
     indexCache = { forCatalog: catalogPromise, byField: buildIndex(await catalogPromise) }
   }

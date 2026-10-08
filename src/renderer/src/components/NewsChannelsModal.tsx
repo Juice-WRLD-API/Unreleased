@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Plus, Check, Trash2, Pencil, Hash } from 'lucide-react'
 import { createChannel, updateChannel, deleteChannel, type NewsChannel } from '../lib/newsApi'
+import { errorMessage } from '../lib/format'
 
 interface Props {
   channels: NewsChannel[]
@@ -26,7 +27,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
       await fn()
       onChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setError(errorMessage(err, 'Something went wrong'))
     } finally {
       setBusy(false)
     }
@@ -61,18 +62,18 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md max-h-[92svh]"
       minWidth={380} minHeight={380}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full overflow-y-auto">
         <div
-          className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 cursor-grab active:cursor-grabbing"
+          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">
             <Hash size={15} className="text-accent" /> Manage channels
           </h2>
           <div className="flex items-center gap-1">
-            <LockToggle locked={locked} onClick={toggleLock} />
-            <button onClick={onClose} disabled={busy} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={onClose} title="Close" disabled={busy} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
               <X size={18} />
             </button>
           </div>
@@ -81,7 +82,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
         <div className="px-5 py-4 space-y-3">
           {/* Existing channels */}
           {channels.length === 0 ? (
-            <p className="text-sm text-text-muted py-4 text-center">No channels yet — add one below.</p>
+            <p className="text-sm text-text-muted py-4 text-center">No channels yet - add one below.</p>
           ) : (
             <ul className="space-y-1.5">
               {channels.map((c) => (
@@ -93,7 +94,10 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
                         className={field}
                         value={editLabel}
                         onChange={(e) => setEditLabel(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(c.id); if (e.key === 'Escape') setEditingId(null) }}
+                        // Escape cancels the rename and stops there - without
+                        // stopPropagation it would also reach the modal's own
+                        // Escape handling and close the whole dialog.
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(c.id); if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null) } }}
                         maxLength={40}
                       />
                       <button onClick={() => saveEdit(c.id)} disabled={busy} className={iconBtn} title="Save"><Check size={16} /></button>

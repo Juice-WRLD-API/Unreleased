@@ -1,0 +1,1893 @@
+import { useEffect, useMemo, useState } from 'react'
+import { create } from 'zustand'
+import * as api from '../lib/chatApi'
+import { isTimedOut } from '../lib/chatApi'
+import type { AttachmentInput, ChatMember, ChatMessage, ChatServer, ChatUserBrief, Conversation, ServerBan, ServerRoleDef } from '../lib/chatApi'
+import { splitForwardRef } from '../lib/chatForwardRef'
+import { subscribeNotifications } from '../lib/notificationSocket'
+import { splitReplyRef } from '../lib/chatReplyRef'
+import { decodeModerationNotice, encodeModerationNotice, moderationNoticeSelfText, moderationNoticeVerb, shareSummaryText, type ModerationNoticePayload } from '../lib/chatShare'
+import { ChatSocket, type ChatEvent, type RoomKind, type SocketStatus } from '../lib/chatSocket'
+import type { AccountUser, NowPlayingState } from '../lib/userApi'
+import { getNowPlaying } from '../lib/userApi'
+import { chatNotificationsEnabled, fireChatNotification } from '../lib/chatNotifications'
+import { ensureNotifyPermission } from '../lib/notifications'
+import { useStore } from './useStore'
+
+export interface RoomRef { kind: RoomKind; id: number }
+
+export const roomKey = (r: RoomRef): string => `${r.kind === 'channel' ? 'c' : 'd'}:${r.id}`
+export const parseRoomKey = (key: string): RoomRef => ({
+  kind: key.startsWith('c:') ? 'channel' : 'conversation',
+  id: Number(key.slice(2)),
+})
+const messageRoom = (m: { channel: number | null; conversation: number | null }): string | null =>
+  m.channel != null ? `c:${m.channel}` : m.conversation != null ? `d:${m.conversation}` : null
+
+export type SendState = 'sending' | 'failed'
+
+export interface UiMessage extends ChatMessage {
+  localId?: string
+  sendState?: SendState
+  retry?: () => void
+  // Client-only notices (e.g. /help's command list) never touch the server -
+  // they're pushed straight into this device's room items and can only ever
+  // be seen or dismissed by the person who triggered them.
+  local?: boolean
+}
+
+export interface RoomMessages {
+  items: UiMessage[]
+  hasMore: boolean
+  loading: boolean
+  loaded: boolean
+  error: string | null
+}
+
+export type KeyState = 'unknown' | 'resolving' | 'ready' | 'waiting' | 'error'
+// `unverified`: a v2 message whose signature, sender device or attachment
+// list didn't check out - still shown, with a "couldn't verify" badge.
+export type Decrypted = { text: string; unverified?: boolean } | { error: 'missing-key' | 'failed' }
+// E2E v2 status of this device: 'disabled' until the identity phase is on,
+// 'needs-link' when another of our devices holds the security key.
+export type IdentityState = 'unknown' | 'disabled' | 'ready' | 'needs-link'
+
+const PAGE = 40
+const TYPING_TTL_MS = 6000
+
+function emptyRoom(): RoomMessages {
+  return { items: [], hasMore: true, loading: false, loaded: false, error: null }
+}
+
+function upsert(items: UiMessage[], msg: UiMessage): UiMessage[] {
+  const idx = items.findIndex((m) => m.id === msg.id)
+  if (idx >= 0) {
+    const next = items.slice()
+    next[idx] = { ...items[idx], ...msg, sendState: undefined, localId: items[idx].localId }
+    return next
+  }
+  const next = items.concat(msg)
+  // Temp messages carry negative ids and always belong at the end.
+  next.sort((a, b) => (a.id < 0 ? Infinity : a.id) - (b.id < 0 ? Infinity : b.id))
+  return next
+}
+
+function loadLastRead(userId: number): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(`unreleased:chat:lastRead:${userId}`) ?? '{}') as Record<string, number>
+  } catch {
+    return {}
+  }
+}
+
+function saveLastRead(userId: number, map: Record<string, number>): void {
+  try { localStorage.setItem(`unreleased:chat:lastRead:${userId}`, JSON.stringify(map)) } catch {}
+}
+
+interface PinnedIds { servers: number[]; conversations: number[] }
+
+function loadPinned(userId: number): PinnedIds {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:pinned:${userId}`) ?? '{}') as Partial<PinnedIds>
+    return { servers: raw.servers ?? [], conversations: raw.conversations ?? [] }
+  } catch {
+    return { servers: [], conversations: [] }
+  }
+}
+
+function savePinned(userId: number, pinned: PinnedIds): void {
+  try { localStorage.setItem(`unreleased:chat:pinned:${userId}`, JSON.stringify(pinned)) } catch {}
+}
+
+interface MutedIds { servers: number[]; conversations: number[] }
+
+function loadMuted(userId: number): MutedIds {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:muted:${userId}`) ?? '{}') as Partial<MutedIds>
+    return { servers: raw.servers ?? [], conversations: raw.conversations ?? [] }
+  } catch {
+    return { servers: [], conversations: [] }
+  }
+}
+
+function saveMuted(userId: number, muted: MutedIds): void {
+  try { localStorage.setItem(`unreleased:chat:muted:${userId}`, JSON.stringify(muted)) } catch {}
+}
+
+// Categories with no channels yet don't exist server-side (category is just
+// a free-text field on ChatChannel), so an "empty" one is a client-only,
+// per-device placeholder kept here until a real channel adopts its name.
+function loadLocalCategories(userId: number): Record<number, string[]> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:localCategories:${userId}`) ?? '{}') as Record<number, string[]>
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveLocalCategories(userId: number, map: Record<number, string[]>): void {
+  try { localStorage.setItem(`unreleased:chat:localCategories:${userId}`, JSON.stringify(map)) } catch {}
+}
+
+const PRESENCE_KEY = 'unreleased:chatPresenceEnabled'
+const READ_KEY = 'unreleased:chatReadEnabled'
+
+function loadFlag(key: string): boolean {
+  try { return localStorage.getItem(key) !== 'false' } catch { return true }
+}
+
+function saveFlag(key: string, on: boolean): void {
+  try { localStorage.setItem(key, String(on)) } catch {}
+}
+
+interface OrderIds { servers: number[]; conversations: number[] }
+
+function loadOrder(userId: number): OrderIds {
+  try {
+    const raw = JSON.parse(localStorage.getItem(`unreleased:chat:order:${userId}`) ?? '{}') as Partial<OrderIds>
+    return { servers: raw.servers ?? [], conversations: raw.conversations ?? [] }
+  } catch {
+    return { servers: [], conversations: [] }
+  }
+}
+
+function saveOrder(userId: number, order: OrderIds): void {
+  try { localStorage.setItem(`unreleased:chat:order:${userId}`, JSON.stringify(order)) } catch {}
+}
+
+async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const item = items[i++]
+      await fn(item).catch(() => undefined)
+    }
+  })
+  await Promise.all(workers)
+}
+
+const e2e = () => import('../lib/chatE2E')
+
+export { hasChatAccess } from '../lib/chatAccess'
+
+interface ChatState {
+  status: SocketStatus
+  me: ChatUserBrief | null
+  meId: number | null
+  initialized: boolean
+  loadError: string | null
+
+  servers: ChatServer[]
+  members: Record<number, ChatMember[]>
+  roles: Record<number, ServerRoleDef[]>
+  // Per-server ban lists, only fetched when the bans panel is opened (needs
+  // ban_members) - kept live afterwards by member.banned/member.unbanned.
+  bans: Record<number, ServerBan[]>
+  conversations: Conversation[]
+  pinnedServers: number[]
+  pinnedConversations: number[]
+  mutedServers: number[]
+  mutedConversations: number[]
+  serverOrder: number[]
+  conversationOrder: number[]
+  // Empty categories (no channels yet), keyed by server id. See
+  // loadLocalCategories - these are a client-only placeholder, not synced.
+  localCategories: Record<number, string[]>
+
+  activeServerId: number | null
+  active: RoomRef | null
+  // (Whether a mobile room overlay is open lives in chatUiStore, not here, so
+  // BottomNav can read it without loading this store.)
+  threadRootId: number | null
+  threads: Record<number, { items: UiMessage[]; loading: boolean }>
+  panel: 'members' | 'pins' | null
+
+  rooms: Record<string, RoomMessages>
+  lastMessage: Record<string, ChatMessage>
+  lastRead: Record<string, number>
+  unread: Record<string, number>
+  mentions: Record<string, number>
+  receipts: Record<string, Record<number, number>>
+  typing: Record<string, Record<number, number>>
+  online: Record<number, true>
+  // Live "listening to" state per user, keyed by id. Filled lazily (one REST
+  // fetch per id the first time anyone asks, deduped via nowPlayingRequested
+  // below) and kept current after that purely by the socket's
+  // now_playing.updated push - no polling.
+  nowPlaying: Record<number, NowPlayingState | null>
+  // Client-side opt-outs. Presence off: never request/track/show online state.
+  // Read off: unread still clears locally, but no read mark is sent to the server.
+  presenceEnabled: boolean
+  readEnabled: boolean
+
+  keyState: Record<number, KeyState>
+  plain: Record<number, Decrypted>
+  identity: IdentityState
+  // Bumped whenever someone's security key or device list may have changed,
+  // so trust banners re-check.
+  trustEpoch: number
+  // A key request went unanswered and a backup exists: offer the code.
+  offerRestore: boolean
+  refreshIdentity: () => Promise<void>
+  dismissRestoreOffer: () => void
+
+  init: (account: AccountUser) => Promise<void>
+  teardown: () => void
+  refreshLists: () => Promise<void>
+
+  selectServer: (id: number | null) => void
+  togglePinServer: (id: number) => void
+  togglePinConversation: (id: number) => void
+  toggleMuteServer: (id: number) => void
+  toggleMuteConversation: (id: number) => void
+  setServerOrder: (ids: number[]) => void
+  setConversationOrder: (ids: number[]) => void
+  addLocalCategory: (serverId: number, name: string) => void
+  removeLocalCategory: (serverId: number, name: string) => void
+  renameLocalCategory: (serverId: number, from: string, to: string) => void
+  openRoom: (room: RoomRef) => void
+  loadOlder: (room: RoomRef) => Promise<void>
+  setPanel: (panel: 'members' | 'pins' | null) => void
+  openThread: (rootId: number | null) => void
+
+  send: (room: RoomRef, input: { text: string; files: File[]; parent?: number | null; mentions?: number[] }) => Promise<void>
+  // Posts a command's answer as a server-built card. Not an optimistic send: the
+  // server may refuse it (privacy, administrators only), and that's an error to
+  // show, not a failed message to retry.
+  sendCommandCard: (room: RoomRef, command: api.CardCommand) => Promise<void>
+  postLocalNotice: (room: RoomRef, content: string) => void
+  announceModeration: (serverId: number | null, payload: ModerationNoticePayload) => void
+  dismissLocalNotice: (room: RoomRef, id: number) => void
+  edit: (message: ChatMessage, text: string) => Promise<void>
+  /** `purge` also drops the message from the room list instead of leaving a "deleted" placeholder. */
+  remove: (message: ChatMessage, opts?: { purge?: boolean }) => Promise<void>
+  togglePin: (message: ChatMessage) => Promise<void>
+  toggleReaction: (message: ChatMessage, emoji: string) => Promise<void>
+  markRead: (room: RoomRef) => void
+  sendTyping: (room: RoomRef, active: boolean) => void
+
+  loadMembers: (serverId: number, force?: boolean) => Promise<ChatMember[]>
+  loadRoles: (serverId: number, force?: boolean) => Promise<ServerRoleDef[]>
+  loadBans: (serverId: number, force?: boolean) => Promise<ServerBan[]>
+  startDm: (userIds: number[], name?: string) => Promise<Conversation>
+  resolveKey: (conversationId: number) => Promise<void>
+  decryptRoom: (conversationId: number) => Promise<void>
+  adoptKeys: (conversationIds: number[]) => Promise<void>
+  ensureNowPlaying: (userIds: number[]) => void
+  setPresenceEnabled: (on: boolean) => void
+  setReadEnabled: (on: boolean) => void
+
+  totalUnread: () => number
+}
+
+let socket: ChatSocket | null = null
+let typingTimer: number | null = null
+const seenNew = new Set<number>()
+// Ids already fetched or in flight for ensureNowPlaying - keyed globally
+// (not per-store-instance) so every caller (DM list, online members panel,
+// admin picker, etc.) asking about the same user shares one request instead
+// of each firing its own.
+const nowPlayingRequested = new Set<number>()
+// Rooms primeRoom has already fetched. The list poll can't use lastMessage
+// for this: an empty room never gets an entry there, so it was re-primed
+// (another limit=1 fetch) on every tick, forever.
+const primedRooms = new Set<string>()
+// primeRoom calls still in flight, so the startup prime pool and the key
+// check (reconcileKeys -> resolveKey) share one limit=1 fetch per room.
+const primesInFlight = new Map<string, Promise<void>>()
+let initPromise: Promise<void> | null = null
+const rerunResolve = new Set<number>()
+// (user, list_version) pairs already handled - devices.updated fans out once
+// per shared conversation.
+const seenDeviceLists = new Set<string>()
+let stopToDevice: (() => void) | null = null
+let stopNotifications: (() => void) | null = null
+// Last room open per server (-1 for DMs), so switching back lands where you were.
+const lastRoomBySpace = new Map<number, RoomRef>()
+
+export const useChatStore = create<ChatState>((set, get) => {
+  const patchRoom = (key: string, fn: (r: RoomMessages) => Partial<RoomMessages>): void => {
+    set((s) => {
+      const cur = s.rooms[key] ?? emptyRoom()
+      return { rooms: { ...s.rooms, [key]: { ...cur, ...fn(cur) } } }
+    })
+  }
+
+  const setPlain = (id: number, value: Decrypted): void => {
+    set((s) => ({ plain: { ...s.plain, [id]: value } }))
+  }
+
+  const decryptOne = async (msg: ChatMessage): Promise<void> => {
+    const meId = get().meId
+    if (!meId || !msg.is_encrypted || msg.id < 0) return
+    const existing = get().plain[msg.id]
+    if (existing && 'text' in existing && !msg.edited_at) return
+    try {
+      const { decryptMessageFull } = await e2e()
+      setPlain(msg.id, await decryptMessageFull(meId, msg))
+    } catch (err) {
+      setPlain(msg.id, { error: String((err as Error)?.message) === 'missing-key' ? 'missing-key' : 'failed' })
+    }
+  }
+
+  const isViewing = (key: string): boolean => {
+    const a = get().active
+    return !!a && roomKey(a) === key && document.visibilityState === 'visible'
+  }
+
+  const isMuted = (key: string): boolean => {
+    const room = parseRoomKey(key)
+    if (room.kind === 'conversation') return get().mutedConversations.includes(room.id)
+    const server = get().servers.find((s) => s.channels.some((c) => c.id === room.id))
+    return !!server && get().mutedServers.includes(server.id)
+  }
+
+  // A new sign-in on this account wants keys. Only a device that can approve
+  // (identity ready) alerts, and not for a device "Not now" already hid.
+  const notifyLinkRequest = (deviceId: string, label: string): void => {
+    const meId = get().meId
+    if (!meId || get().identity !== 'ready') return
+    try {
+      if ((JSON.parse(localStorage.getItem('unrlsd-link-dismissed') ?? '[]') as string[]).includes(deviceId)) return
+    } catch { /* ignore */ }
+    void e2e().then(async (m) => {
+      if (deviceId === await m.localDeviceId(meId)) return
+      fireChatNotification({
+        id: 0,
+        tag: `chat-link-${deviceId}`,
+        title: 'New device wants to link',
+        body: `${label || 'A new device'} signed in to your account. Open chat to compare its number and approve. If this wasn't you, decline.`,
+        level: 'warning',
+        onOpen: () => {
+          useStore.setState({ activeView: 'chat' })
+          // The approve prompt lives in the room pane, so make sure one is open.
+          if (!get().active) {
+            const conv = get().conversations[0]
+            if (conv) get().openRoom({ kind: 'conversation', id: conv.id })
+          }
+        },
+      })
+    }).catch(() => undefined)
+  }
+
+  // One of my devices just signed in (pushed on both the chat and the
+  // notification socket). If it isn't in my signed device list yet it needs
+  // approving: refresh the prompt and alert, without waiting for it to open a
+  // link session. Safe to run twice for one sign-in.
+  const onDeviceRegistered = (deviceId: string): void => {
+    const meId = get().meId
+    if (!meId || get().identity !== 'ready') return
+    set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+    void import('../lib/chatLinking').then(async (l) => {
+      const pending = await l.pendingDevices(meId)
+      const hit = pending.find((c) => c.session.device_id === deviceId)
+      if (hit) notifyLinkRequest(hit.session.device_id, hit.session.label)
+    }).catch(() => undefined)
+  }
+
+  const notifyNewMessage = (key: string, msg: ChatMessage): void => {
+    const room = parseRoomKey(key)
+    let title: string
+    if (room.kind === 'channel') {
+      const server = get().servers.find((s) => s.channels.some((c) => c.id === room.id))
+      const channel = server?.channels.find((c) => c.id === room.id)
+      title = channel ? `${displayName(msg.author)} in #${channel.name}` : displayName(msg.author)
+    } else {
+      const conv = get().conversations.find((c) => c.id === room.id)
+      title = conv?.is_group ? `${displayName(msg.author)} in ${conv.name || 'Group chat'}` : displayName(msg.author)
+    }
+    const plainBody = splitForwardRef(splitReplyRef(msg.content ?? '').body).body.trim()
+    // A moderation card aimed at us reads in the second person ("You were
+    // timed out"), which beats seeing our own name in the third.
+    const decoded = msg.is_encrypted ? null : decodeModerationNotice(plainBody)
+    // Same gate as the card itself: a forged payload must not get to phrase
+    // someone's notification either.
+    // Strict: a notification fires once and can't be taken back once the
+    // member list arrives, so an unverifiable card must not phrase one.
+    const moderation = decoded && noticeAuthorMayModerate(get(), msg, decoded, true) ? decoded : null
+    const body = msg.is_encrypted
+      ? 'Sent a new message'
+      : moderation
+        ? (moderation.userId === get().meId ? moderationNoticeSelfText(moderation) : `${moderation.name} ${moderationNoticeVerb(moderation)}`)
+        : (shareSummaryText(plainBody) ?? plainBody) || (msg.attachments.length ? 'Sent an attachment' : 'Sent a new message')
+    fireChatNotification({
+      id: msg.id,
+      title,
+      body,
+      icon: msg.author.avatar,
+      onOpen: () => {
+        useStore.setState({ activeView: 'chat' })
+        const path = room.kind === 'channel' ? `/chat/c/${room.id}` : `/chat/dm/${room.id}`
+        if (window.location.pathname !== path) window.history.pushState({ view: 'chat' }, '', path)
+        get().openRoom(room)
+      },
+    })
+  }
+
+  const bumpUnread = (msg: ChatMessage): void => {
+    const key = messageRoom(msg)
+    const meId = get().meId
+    if (!key || msg.author.id === meId || msg.parent) return
+    if (isViewing(key)) {
+      get().markRead(parseRoomKey(key))
+      return
+    }
+    if (isMuted(key)) return
+    set((s) => ({
+      unread: { ...s.unread, [key]: (s.unread[key] ?? 0) + 1 },
+      mentions: meId && msg.mentions.includes(meId)
+        ? { ...s.mentions, [key]: (s.mentions[key] ?? 0) + 1 }
+        : s.mentions,
+    }))
+    notifyNewMessage(key, msg)
+  }
+
+  // Our own message echoed back by the socket while its REST call is still in
+  // flight: the send() completion swaps the temp row for it, so inserting here
+  // too would flash a duplicate.
+  const ownEchoPending = (msg: ChatMessage, key: string): boolean => {
+    if (msg.author.id !== get().meId) return false
+    const list = msg.parent ? get().threads[msg.parent]?.items : get().rooms[key]?.items
+    return !!list?.some((m) => m.sendState === 'sending' && m.parent === msg.parent) && !list.some((m) => m.id === msg.id)
+  }
+
+  const applyMessage = (msg: ChatMessage, isNew: boolean): void => {
+    const key = messageRoom(msg)
+    if (!key) return
+    // The same message can arrive from both the socket and the REST poll;
+    // only the first sighting may bump unread/reply counts or notify.
+    if (isNew) {
+      if (seenNew.has(msg.id)) isNew = false
+      else seenNew.add(msg.id)
+    }
+    if (isNew && ownEchoPending(msg, key)) {
+      // reply_count for our own pending reply was already bumped optimistically
+      // when the temp message was placed (see send()); nothing more to do here.
+      if (!msg.parent) set((s) => ({ lastMessage: { ...s.lastMessage, [key]: msg } }))
+      return
+    }
+    if (msg.parent) {
+      set((s) => {
+        const thread = s.threads[msg.parent!]
+        // Already counted (via the optimistic bump in send(), or a prior event
+        // for this same message) if this id is already sitting in the thread.
+        const alreadyCounted = thread?.items.some((m) => m.id === msg.id) ?? false
+        const threads = thread ? { ...s.threads, [msg.parent!]: { ...thread, items: upsert(thread.items, msg) } } : s.threads
+        const room = s.rooms[key]
+        const rooms = room && isNew && !alreadyCounted
+          ? { ...s.rooms, [key]: { ...room, items: room.items.map((m) => m.id === msg.parent ? { ...m, reply_count: m.reply_count + 1 } : m) } }
+          : s.rooms
+        return { threads, rooms }
+      })
+    } else {
+      patchRoom(key, (r) => r.loaded ? { items: upsert(r.items, msg) } : {})
+      set((s) => {
+        const prev = s.lastMessage[key]
+        return !prev || prev.id <= msg.id ? { lastMessage: { ...s.lastMessage, [key]: msg } } : {}
+      })
+    }
+    if (msg.is_encrypted) void decryptOne(msg)
+    if (isNew) bumpUnread(msg)
+  }
+
+  const findMessage = (messageId: number): ChatMessage | undefined => {
+    const s = get()
+    for (const r of Object.values(s.rooms)) {
+      const hit = r.items.find((m) => m.id === messageId)
+      if (hit) return hit
+    }
+    for (const t of Object.values(s.threads)) {
+      const hit = t.items.find((m) => m.id === messageId)
+      if (hit) return hit
+    }
+    return undefined
+  }
+
+  // Removes a hard-deleted (purged) message outright instead of leaving a
+  // "deleted" placeholder, and keeps the thread reply count and the room
+  // preview (lastMessage) consistent.
+  const dropMessage = (messageId: number): void => {
+    set((s) => {
+      const rooms: Record<string, RoomMessages> = {}
+      const lastMessage = { ...s.lastMessage }
+      let parentId: number | null = null
+      for (const [k, r] of Object.entries(s.rooms)) {
+        const hit = r.items.find((m) => m.id === messageId)
+        if (!hit) { rooms[k] = r; continue }
+        parentId = hit.parent ?? parentId
+        const items = r.items.filter((m) => m.id !== messageId)
+        rooms[k] = { ...r, items }
+        if (lastMessage[k]?.id === messageId) {
+          const prev = items.filter((m) => m.id > 0 && !m.parent).slice(-1)[0]
+          if (prev) lastMessage[k] = prev
+          else delete lastMessage[k]
+        }
+      }
+      const threads: ChatState['threads'] = {}
+      for (const [k, t] of Object.entries(s.threads)) {
+        const hit = t.items.find((m) => m.id === messageId)
+        if (hit) parentId = hit.parent ?? parentId
+        threads[Number(k)] = hit ? { ...t, items: t.items.filter((m) => m.id !== messageId) } : t
+      }
+      if (parentId != null) {
+        for (const [k, r] of Object.entries(rooms)) {
+          if (r.items.some((m) => m.id === parentId)) rooms[k] = { ...r, items: r.items.map((m) => m.id === parentId ? { ...m, reply_count: Math.max(0, m.reply_count - 1) } : m) }
+        }
+      }
+      return { rooms, threads, lastMessage }
+    })
+    dropPlain(messageId)
+  }
+
+  const mapMessage = (messageId: number, fn: (m: UiMessage) => UiMessage): void => {
+    set((s) => {
+      const rooms: Record<string, RoomMessages> = {}
+      for (const [k, r] of Object.entries(s.rooms)) {
+        if (r.items.some((m) => m.id === messageId)) rooms[k] = { ...r, items: r.items.map((m) => m.id === messageId ? fn(m) : m) }
+      }
+      const threads: ChatState['threads'] = {}
+      for (const [k, t] of Object.entries(s.threads)) {
+        if (t.items.some((m) => m.id === messageId)) threads[Number(k)] = { ...t, items: t.items.map((m) => m.id === messageId ? fn(m) : m) }
+      }
+      // Room/Home previews read lastMessage directly, so an edit or delete has
+      // to reach it too or the list keeps showing the old text.
+      const lastMessage: Record<string, ChatMessage> = {}
+      for (const [k, m] of Object.entries(s.lastMessage)) {
+        if (m.id === messageId) lastMessage[k] = fn(m)
+      }
+      return { rooms: { ...s.rooms, ...rooms }, threads: { ...s.threads, ...threads }, lastMessage: { ...s.lastMessage, ...lastMessage } }
+    })
+  }
+
+  const dropPlain = (id: number): void => {
+    set((st) => {
+      if (!(id in st.plain)) return {}
+      const plain = { ...st.plain }
+      delete plain[id]
+      return { plain }
+    })
+  }
+
+  const handleEvent = (ev: ChatEvent): void => {
+    const s = get()
+    switch (ev.type) {
+      case 'presence.snapshot':
+        if (!s.presenceEnabled) return
+        set({ online: Object.fromEntries(ev.online.map((id) => [id, true as const])) })
+        return
+      case 'presence.update': {
+        if (!s.presenceEnabled) return
+        const cameOnline = ev.online && !s.online[ev.user_id]
+        set((st) => {
+          const online = { ...st.online }
+          if (ev.online) online[ev.user_id] = true
+          else delete online[ev.user_id]
+          return { online }
+        })
+        // A missed device.added/envelope push only heals when someone is next
+        // online at the same time as us - reconcile both directions here since
+        // key sharing otherwise never retries once that one-shot event is lost.
+        if (cameOnline && s.meId) {
+          for (const conv of s.conversations) {
+            if (!conv.participants.some((p) => p.user.id === ev.user_id)) continue
+            // Sharing is a no-op when we hold no key, so it doesn't need to
+            // wait on keyState (only set once a room has been resolved).
+            void e2e().then((m) => m.shareKeyWithUser(s.meId!, conv, ev.user_id)).catch(() => undefined)
+            if (s.keyState[conv.id] !== 'ready') void get().resolveKey(conv.id)
+          }
+        }
+        return
+      }
+      case 'now_playing.updated':
+        set((st) => ({ nowPlaying: { ...st.nowPlaying, [ev.user_id]: ev.now_playing } }))
+        return
+      case 'message.created': {
+        // The socket has no "conversation created" push - a brand-new DM only
+        // ever surfaces as a message event, so a first-time recipient has no
+        // local record of the conversation to hang it on. Backfill it here.
+        const convId = ev.message.conversation
+        if (convId != null && !s.conversations.some((c) => c.id === convId)) {
+          void api.getConversation(convId)
+            .then((conv) => set((st) => st.conversations.some((c) => c.id === conv.id) ? {} : { conversations: [conv, ...st.conversations] }))
+            .catch(() => undefined)
+        }
+        applyMessage(ev.message, true)
+        return
+      }
+      case 'message.updated':
+      case 'message.pinned':
+      case 'message.unpinned':
+        mapMessage(ev.message.id, (m) => ({ ...m, ...ev.message }))
+        if (ev.message.is_encrypted && ev.type === 'message.updated') {
+          dropPlain(ev.message.id)
+          void decryptOne(ev.message)
+        }
+        return
+      case 'message.purged':
+        dropMessage(ev.message_id)
+        return
+      case 'message.deleted':
+        mapMessage(ev.message_id, (m) => ({ ...m, content: '', ciphertext: '', nonce: '', attachments: [], deleted_at: new Date().toISOString() }))
+        dropPlain(ev.message_id)
+        return
+      case 'reaction.added':
+      case 'reaction.removed': {
+        const added = ev.type === 'reaction.added'
+        mapMessage(ev.message_id, (m) => {
+          const mine = ev.user_id === s.meId
+          const reactions = m.reactions.map((r) => ({ ...r, user_ids: [...r.user_ids] }))
+          let r = reactions.find((x) => x.emoji === ev.emoji)
+          if (added) {
+            if (r?.user_ids.includes(ev.user_id)) return m
+            if (!r) { r = { emoji: ev.emoji, count: 0, user_ids: [], me: false }; reactions.push(r) }
+            r.user_ids.push(ev.user_id)
+            r.count = r.user_ids.length
+            if (mine) r.me = true
+          } else if (r) {
+            if (!r.user_ids.includes(ev.user_id)) return m
+            r.user_ids = r.user_ids.filter((id) => id !== ev.user_id)
+            r.count = r.user_ids.length
+            if (mine) r.me = false
+          }
+          return { ...m, reactions: reactions.filter((x) => x.count > 0) }
+        })
+        return
+      }
+      case 'read.receipt': {
+        const key = ev.channel != null ? `c:${ev.channel}` : ev.conversation != null ? `d:${ev.conversation}` : null
+        if (!key || ev.last_read_message_id == null) return
+        if (ev.user_id === s.meId) {
+          set((st) => {
+            const lastRead = { ...st.lastRead, [key]: Math.max(st.lastRead[key] ?? 0, ev.last_read_message_id!) }
+            if (st.meId) saveLastRead(st.meId, lastRead)
+            const latest = st.lastMessage[key]?.id ?? 0
+            return latest <= ev.last_read_message_id!
+              ? { lastRead, unread: { ...st.unread, [key]: 0 }, mentions: { ...st.mentions, [key]: 0 } }
+              : { lastRead }
+          })
+        } else {
+          set((st) => ({ receipts: { ...st.receipts, [key]: { ...st.receipts[key], [ev.user_id]: ev.last_read_message_id! } } }))
+        }
+        return
+      }
+      case 'typing': {
+        if (ev.user_id === s.meId) return
+        const key = `${ev.kind === 'channel' ? 'c' : 'd'}:${ev.id}`
+        set((st) => {
+          const room = { ...st.typing[key] }
+          if (ev.active) room[ev.user_id] = Date.now() + TYPING_TTL_MS
+          else delete room[ev.user_id]
+          return { typing: { ...st.typing, [key]: room } }
+        })
+        return
+      }
+      case 'member.joined':
+      case 'member.updated':
+      case 'member.timeout':
+        set((st) => {
+          const list = st.members[ev.server]
+          if (!list) return {}
+          const others = list.filter((m) => m.user.id !== ev.member.user.id)
+          return { members: { ...st.members, [ev.server]: [...others, ev.member] } }
+        })
+        if (ev.type === 'member.joined' && ev.member.user.id === s.meId) void get().refreshLists()
+        return
+      case 'member.left':
+        if (ev.user_id === s.meId) {
+          set((st) => ({
+            servers: st.servers.filter((x) => x.id !== ev.server),
+            activeServerId: st.activeServerId === ev.server ? null : st.activeServerId,
+            active: st.activeServerId === ev.server ? null : st.active,
+          }))
+          return
+        }
+        set((st) => st.members[ev.server]
+          ? { members: { ...st.members, [ev.server]: st.members[ev.server].filter((m) => m.user.id !== ev.user_id) } }
+          : {})
+        return
+      // A ban always arrives after its own member.left, so the member list is
+      // already correct here - this only maintains the bans panel's cache.
+      case 'member.banned':
+        set((st) => st.bans[ev.server]
+          ? { bans: { ...st.bans, [ev.server]: [ev.ban, ...st.bans[ev.server].filter((b) => b.user.id !== ev.ban.user.id)] } }
+          : {})
+        return
+      case 'member.unbanned':
+        set((st) => st.bans[ev.server]
+          ? { bans: { ...st.bans, [ev.server]: st.bans[ev.server].filter((b) => b.user.id !== ev.user_id) } }
+          : {})
+        return
+      // Our own access changed (moderation, override edits): re-fetch the
+      // server list so channels we just lost or regained appear correctly.
+      // Members are refreshed too so our own muted/timeout_until - which gates
+      // the composer - reflects the action that triggered this.
+      case 'resync':
+        void get().refreshLists().then(() => {
+          for (const id of Object.keys(get().members)) void get().loadMembers(Number(id), true)
+        }).catch(() => undefined)
+        return
+      // Known rooms are already kept current by message.created, so this only
+      // matters for a room we have no record of yet (a brand-new DM/channel).
+      case 'room.updated': {
+        const known = ev.kind === 'conversation'
+          ? s.conversations.some((c) => c.id === ev.id)
+          : s.servers.some((sv) => sv.channels.some((c) => c.id === ev.id))
+        if (!known && s.initialized) {
+          void get().refreshLists().then(() => primeRoom(`${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`)).catch(() => undefined)
+        }
+        return
+      }
+      // Another of my devices read the room: mirror its authoritative count.
+      case 'unread.changed': {
+        const key = `${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`
+        if (s.active && roomKey(s.active) === key) return
+        set((st) => ({ unread: { ...st.unread, [key]: ev.unread } }))
+        return
+      }
+      case 'server.updated':
+        set((st) => ({ servers: st.servers.map((x) => x.id === ev.server.id ? { ...x, ...ev.server } : x) }))
+        return
+      case 'channel.created':
+      case 'channel.updated':
+        set((st) => ({
+          servers: st.servers.map((x) => x.id !== ev.server ? x : {
+            ...x,
+            channels: [...x.channels.filter((c) => c.id !== ev.channel.id), ev.channel],
+          }),
+        }))
+        return
+      case 'channel.deleted':
+        set((st) => ({
+          servers: st.servers.map((x) => x.id !== ev.server ? x : { ...x, channels: x.channels.filter((c) => c.id !== ev.channel_id) }),
+          active: st.active?.kind === 'channel' && st.active.id === ev.channel_id ? null : st.active,
+        }))
+        return
+      case 'conversation.updated': {
+        const stillIn = ev.conversation.participants.some((p) => p.user.id === s.meId)
+        set((st) => ({
+          conversations: stillIn
+            ? [ev.conversation, ...st.conversations.filter((c) => c.id !== ev.conversation.id)]
+            : st.conversations.filter((c) => c.id !== ev.conversation.id),
+          active: !stillIn && st.active?.kind === 'conversation' && st.active.id === ev.conversation.id ? null : st.active,
+        }))
+        return
+      }
+      case 'key.rotated':
+        set((st) => ({
+          conversations: st.conversations.map((c) => c.id === ev.conversation ? { ...c, current_key_version: Math.max(c.current_key_version, ev.key_version) } : c),
+        }))
+        void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
+          .then(() => get().resolveKey(ev.conversation))
+        return
+      case 'envelope.available':
+        void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
+          .then(() => get().resolveKey(ev.conversation))
+          .then(() => get().decryptRoom(ev.conversation))
+        return
+      case 'device.added': {
+        const conv = s.conversations.find((c) => c.id === ev.conversation)
+        if (conv && s.meId && ev.user_id !== undefined) {
+          void e2e().then((m) => m.shareKeyWithUser(s.meId!, conv, ev.user_id)).catch(() => undefined)
+        }
+        return
+      }
+      case 'device.registered':
+        onDeviceRegistered(ev.device_id)
+        return
+      case 'key.committed':
+        void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
+          .then(() => get().resolveKey(ev.conversation))
+        return
+      case 'devices.updated': {
+        // Sent once per shared conversation (and once to the user's own
+        // devices), so act on the first copy of each list version only.
+        const meId = s.meId
+        const seen = `${ev.user_id}:${ev.list_version}`
+        if (!meId || seenDeviceLists.has(seen)) return
+        seenDeviceLists.add(seen)
+        void e2e().then((m) => m.onDevicesUpdated(meId, ev.user_id, ev.dropped, get().conversations))
+          .catch((err) => console.warn('[chat] device list update failed', err))
+          .then(() => {
+            set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+            if (ev.user_id === meId) void get().refreshIdentity()
+          })
+        return
+      }
+      case 'identity.changed': {
+        const meId = s.meId
+        if (!meId) return
+        void import('../lib/chatIdentity').then((m) => m.invalidateTrust(meId, ev.user_id))
+          .then(() => set((st) => ({ trustEpoch: st.trustEpoch + 1 })))
+        if (ev.user_id === meId) void get().refreshIdentity()
+        return
+      }
+      case 'todevice.available': {
+        const meId = s.meId
+        if (!meId) return
+        void e2e().then(async (m) => {
+          if (ev.device_id !== await m.localDeviceId(meId)) return
+          const td = await import('../lib/chatToDevice')
+          await td.processInbox(meId)
+        }).catch((err) => console.warn('[chat] to-device inbox failed', err))
+        return
+      }
+      case 'link.requested':
+        // One of my devices just asked to be linked: LinkApprovals refetches
+        // the pending list whenever the trust epoch moves, so the approve
+        // prompt shows up now instead of on its next poll.
+        set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+        notifyLinkRequest(ev.device_id, ev.label)
+        return
+      case 'link.claimed':
+      case 'backup.updated':
+        return
+      case 'role.created':
+      case 'role.updated':
+        set((st) => {
+          const list = st.roles[ev.server]
+          if (!list) return {}
+          return { roles: { ...st.roles, [ev.server]: [...list.filter((r) => r.id !== ev.role.id), ev.role] } }
+        })
+        return
+      case 'role.deleted':
+        set((st) => {
+          const list = st.roles[ev.server]
+          if (!list) return {}
+          return {
+            roles: { ...st.roles, [ev.server]: list.filter((r) => r.id !== ev.role_id) },
+            members: st.members[ev.server]
+              ? { ...st.members, [ev.server]: st.members[ev.server].map((m) => ({ ...m, roles: m.roles.filter((r) => r.id !== ev.role_id) })) }
+              : st.members,
+          }
+        })
+        return
+      // Channel overrides aren't cached in the store - the channel-edit modal
+      // that manages them fetches on open, and a live edit while that modal is
+      // closed has nothing else to invalidate.
+      case 'channel.override.updated':
+      case 'channel.override.deleted':
+        return
+      default:
+        return
+    }
+  }
+
+  const catchUp = async (): Promise<void> => {
+    const active = get().active
+    if (!active) return
+    const key = roomKey(active)
+    const room = get().rooms[key]
+    const newest = room?.items.filter((m) => m.id > 0).slice(-1)[0]
+    if (!room?.loaded || !newest) return
+    const page = active.kind === 'channel'
+      ? await api.listChannelMessages(active.id, { after: newest.id, limit: 100 })
+      : await api.listDmMessages(active.id, { after: newest.id, limit: 100 })
+    for (const m of page.results) applyMessage(m, false)
+  }
+
+  // Re-derives key state for every conversation and, for ones we already hold
+  // the key on, re-shares it to any currently-online participant. Covers gaps
+  // left by the one-shot device.added/envelope.available push: a device that
+  // was offline when that event fired never gets another chance otherwise.
+  const reconcileKeys = async (): Promise<void> => {
+    const s = get()
+    const meId = s.meId
+    if (!meId) return
+    const m = await e2e()
+    for (const conv of s.conversations) {
+      for (const p of conv.participants) {
+        if (p.user.id === meId || !s.online[p.user.id]) continue
+        void m.shareKeyWithUser(meId, conv, p.user.id).catch(() => undefined)
+      }
+      if (s.keyState[conv.id] !== 'ready') void get().resolveKey(conv.id)
+    }
+  }
+
+  // A device still missing keys asks again each tick: nothing is pushed to it
+  // if the holder's share raced its registration, and a device that isn't the
+  // primary one only gets keys when they're imported into it.
+  const pollKeys = async (): Promise<void> => {
+    const s = get()
+    const meId = s.meId
+    if (!meId) return
+    const m = await e2e()
+    for (const conv of s.conversations) {
+      const missing = s.keyState[conv.id] === 'waiting'
+        || (s.rooms[`d:${conv.id}`]?.items ?? []).some((x) => { const p = s.plain[x.id]; return !!p && 'error' in p && p.error === 'missing-key' })
+      if (!missing) continue
+      m.forgetPendingKeyFetches(conv.id)
+      if (s.keyState[conv.id] === 'ready') void get().decryptRoom(conv.id)
+      else void get().resolveKey(conv.id)
+    }
+  }
+
+  // Whether anything has been said under the conversation's current key
+  // version - a key someone already used must never be replaced by a fresh
+  // one. Loaded rooms answer from their items; anything else is primed (or
+  // joins the prime already in flight) and answers from lastMessage.
+  const hasMessagesAtCurrentVersion = async (conv: Conversation): Promise<boolean> => {
+    const key = `d:${conv.id}`
+    if (!get().rooms[key]?.loaded && !primedRooms.has(key)) await primeRoom(key)
+    return (get().rooms[key]?.items ?? []).some((x) => x.id > 0 && x.key_version === conv.current_key_version)
+      || get().lastMessage[key]?.key_version === conv.current_key_version
+  }
+
+  const primeRoom = (key: string): Promise<void> => {
+    const pending = primesInFlight.get(key)
+    if (pending) return pending
+    const p = fetchPrime(key).finally(() => primesInFlight.delete(key))
+    primesInFlight.set(key, p)
+    return p
+  }
+
+  const fetchPrime = async (key: string): Promise<void> => {
+    const ref = parseRoomKey(key)
+    const meId = get().meId
+    const page = ref.kind === 'channel'
+      ? await api.listChannelMessages(ref.id, { limit: 1 })
+      : await api.listDmMessages(ref.id, { limit: 1 })
+    primedRooms.add(key)
+    const latest = page.results.slice(-1)[0]
+    if (!latest) return
+    set((s) => ({ lastMessage: { ...s.lastMessage, [key]: latest } }))
+    if (latest.is_encrypted) void decryptOne(latest)
+    const read = get().lastRead[key]
+    if (read == null) {
+      set((s) => {
+        const lastRead = { ...s.lastRead, [key]: latest.id }
+        if (meId) saveLastRead(meId, lastRead)
+        return { lastRead }
+      })
+      return
+    }
+    if (latest.id <= read) return
+    const after = ref.kind === 'channel'
+      ? await api.listChannelMessages(ref.id, { after: read, limit: 100 })
+      : await api.listDmMessages(ref.id, { after: read, limit: 100 })
+    const fresh = after.results.filter((m) => m.author.id !== meId && !m.parent && !m.deleted_at)
+    set((s) => ({
+      unread: { ...s.unread, [key]: fresh.length },
+      mentions: { ...s.mentions, [key]: fresh.filter((m) => meId && m.mentions.includes(meId)).length },
+    }))
+  }
+
+  return {
+    status: 'idle',
+    me: null,
+    meId: null,
+    initialized: false,
+    loadError: null,
+    servers: [],
+    members: {},
+    roles: {},
+    bans: {},
+    conversations: [],
+    pinnedServers: [],
+    pinnedConversations: [],
+    mutedServers: [],
+    mutedConversations: [],
+    serverOrder: [],
+    conversationOrder: [],
+    localCategories: {},
+    activeServerId: null,
+    active: null,
+    threadRootId: null,
+    threads: {},
+    panel: 'members',
+    rooms: {},
+    lastMessage: {},
+    lastRead: {},
+    unread: {},
+    mentions: {},
+    receipts: {},
+    typing: {},
+    online: {},
+    nowPlaying: {},
+    presenceEnabled: loadFlag(PRESENCE_KEY),
+    readEnabled: loadFlag(READ_KEY),
+    keyState: {},
+    plain: {},
+    identity: 'unknown',
+    trustEpoch: 0,
+    offerRestore: false,
+
+    refreshIdentity: async () => {
+      const meId = get().meId
+      if (!meId) return
+      const m = await e2e()
+      const { resetIdentity } = await import('../lib/chatIdentity')
+      resetIdentity()
+      try {
+        set({ identity: await m.identityStatus(meId) })
+      } catch (err) {
+        console.warn('[chat] identity check failed', err)
+      }
+    },
+
+    dismissRestoreOffer: () => set({ offerRestore: false }),
+
+    init: (account) => {
+      if (get().meId === account.id && initPromise) return initPromise
+      get().teardown()
+      set({
+        meId: account.id,
+        me: { id: account.id, username: account.discord_username || account.username || account.display_name || '', display_name: account.display_name, avatar: account.avatar ?? account.discord_avatar, role: account.is_administrator ? 'administrator' : 'manager' },
+        lastRead: loadLastRead(account.id),
+      })
+      const pinned = loadPinned(account.id)
+      const order = loadOrder(account.id)
+      const localMuted = loadMuted(account.id)
+      // Union with the server's copy (in user_settings, synced from any other
+      // device) rather than "server wins" - muting a server/conversation
+      // should stick regardless of which device did it. Same reasoning as
+      // useStore's mutedUserIds/syncUserSettings, but done here since this
+      // store owns the local per-account copy.
+      const settings = account.user_settings
+      const muted: MutedIds = settings
+        ? {
+            servers: Array.from(new Set([...(settings.muted_servers ?? []), ...localMuted.servers])),
+            conversations: Array.from(new Set([...(settings.muted_conversations ?? []), ...localMuted.conversations])),
+          }
+        : localMuted
+      if (muted.servers.length !== localMuted.servers.length || muted.conversations.length !== localMuted.conversations.length) {
+        saveMuted(account.id, muted)
+      }
+      set({
+        pinnedServers: pinned.servers, pinnedConversations: pinned.conversations,
+        serverOrder: order.servers, conversationOrder: order.conversations,
+        mutedServers: muted.servers, mutedConversations: muted.conversations,
+        localCategories: loadLocalCategories(account.id),
+      })
+      useStore.getState()._syncChatMutes(muted.servers, muted.conversations)
+      socket = new ChatSocket(
+        (ev) => {
+          if (ev.type === 'connected') set({ meId: ev.user_id })
+          handleEvent(ev)
+        },
+        (status) => {
+          const prev = get().status
+          set({ status })
+          if (status === 'open' && prev === 'reconnecting') {
+            void catchUp().catch(() => undefined)
+            void reconcileKeys().catch(() => undefined)
+            // No list poll: room.updated / unread.changed / key events arrive live,
+            // and anything missed during the drop is re-read here.
+            void get().refreshLists().catch(() => undefined)
+            void pollKeys().catch(() => undefined)
+            const meId = get().meId
+            if (meId) void import('../lib/chatToDevice').then((td) => td.processInbox(meId)).catch(() => undefined)
+            // catchUp only covers the open room - re-prime the rest so
+            // anything sent while we were disconnected still bumps unread
+            // and updates previews.
+            const active = get().active
+            const keys = [
+              ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
+              ...get().conversations.map((c) => `d:${c.id}`),
+            ].filter((k) => !active || k !== roomKey(active))
+            for (const k of keys) primedRooms.delete(k)
+            void pool(keys, 4, primeRoom)
+          }
+        },
+      )
+      socket.connect()
+      if (chatNotificationsEnabled()) void ensureNotifyPermission()
+      typingTimer = window.setInterval(() => {
+        const now = Date.now()
+        const typing = get().typing
+        let changed = false
+        const next: ChatState['typing'] = {}
+        for (const [k, users] of Object.entries(typing)) {
+          const live = Object.fromEntries(Object.entries(users).filter(([, exp]) => exp > now))
+          if (Object.keys(live).length !== Object.keys(users).length) changed = true
+          next[k] = live
+        }
+        if (changed) set({ typing: next })
+      }, 1500)
+      initPromise = (async () => {
+        try {
+          await get().refreshLists()
+          set({ initialized: true, loadError: null })
+          const keys = [
+            ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
+            ...get().conversations.map((c) => `d:${c.id}`),
+          ]
+          void pool(keys, 6, primeRoom)
+          void e2e().then(async (m) => {
+            await m.ensureDevice(account.id)
+            set({ identity: await m.identityStatus(account.id) })
+            const td = await import('../lib/chatToDevice')
+            stopToDevice?.()
+            stopToDevice = td.onToDeviceEvent((ev) => {
+              if (get().meId !== account.id) return
+              if (ev.type === 'key-arrived') {
+                void get().resolveKey(ev.conversation).then(() => get().decryptRoom(ev.conversation))
+              } else if (ev.type === 'linked') {
+                void get().refreshIdentity().then(() => {
+                  for (const c of get().conversations) void get().resolveKey(c.id).then(() => get().decryptRoom(c.id))
+                })
+              } else if (ev.type === 'offer-restore') {
+                set({ offerRestore: true })
+              }
+            })
+            // Account-addressed pushes on the notification socket: new-device
+            // sign-ins and key traffic reach us even if the chat socket is down.
+            stopNotifications?.()
+            stopNotifications = subscribeNotifications((frame) => {
+              if (get().meId !== account.id) return
+              if (frame.type === 'device' && frame.action === 'registered') {
+                onDeviceRegistered(String(frame.device_id))
+              } else if (frame.type === 'todevice' && frame.action === 'available') {
+                void m.localDeviceId(account.id).then((id) => (id === frame.device_id ? td.processInbox(account.id) : undefined))
+                  .catch((err) => console.warn('[chat] to-device inbox failed', err))
+              }
+            }, () => { void td.processInbox(account.id).catch(() => undefined) })
+            await td.processInbox(account.id)
+          }).catch((err) => console.warn('[chat] device setup failed', err))
+          void reconcileKeys().catch(() => undefined)
+        } catch (err) {
+          set({ initialized: true, loadError: (err as Error).message || 'Could not load chat' })
+          initPromise = null
+        }
+      })()
+      return initPromise
+    },
+
+    teardown: () => {
+      if (socket) {
+        socket.dispose()
+        socket = null
+        void e2e().then((m) => m.resetDevice())
+      }
+      stopToDevice?.()
+      stopToDevice = null
+      stopNotifications?.()
+      stopNotifications = null
+      seenDeviceLists.clear()
+      if (typingTimer !== null) window.clearInterval(typingTimer)
+      typingTimer = null
+      seenNew.clear()
+      primedRooms.clear()
+      initPromise = null
+      rerunResolve.clear()
+      lastRoomBySpace.clear()
+      nowPlayingRequested.clear()
+      set({
+        status: 'idle', me: null, meId: null, initialized: false, loadError: null,
+        servers: [], members: {}, roles: {}, bans: {}, conversations: [], pinnedServers: [], pinnedConversations: [], mutedServers: [], mutedConversations: [], serverOrder: [], conversationOrder: [], localCategories: {}, activeServerId: null, active: null,
+        threadRootId: null, threads: {}, rooms: {}, lastMessage: {}, lastRead: {}, unread: {},
+        mentions: {}, receipts: {}, typing: {}, online: {}, nowPlaying: {}, keyState: {}, plain: {},
+        identity: 'unknown', offerRestore: false,
+      })
+    },
+
+    refreshLists: async () => {
+      const [servers, conversations, online] = await Promise.all([
+        api.listServers(),
+        api.listConversations(),
+        get().presenceEnabled ? api.getPresence().catch(() => null) : Promise.resolve(null),
+      ])
+      conversations.sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      set((s) => ({
+        servers,
+        conversations,
+        // Once the socket is open, presence.snapshot/presence.update keep `online`
+        // current; overwriting it here with a REST snapshot that can race those
+        // live events wipes users who are actually online and flaps the UI.
+        online: online && s.status !== 'open' ? Object.fromEntries(online.map((id) => [id, true as const])) : s.online,
+      }))
+    },
+
+    selectServer: (id) => {
+      const current = get().active
+      if (current) lastRoomBySpace.set(current.kind === 'channel' ? get().activeServerId ?? -1 : -1, current)
+      set({ activeServerId: id, threadRootId: null })
+      const remembered = lastRoomBySpace.get(id ?? -1)
+      if (id == null) {
+        if (remembered?.kind === 'conversation' && get().conversations.some((c) => c.id === remembered.id)) get().openRoom(remembered)
+        else set({ active: null })
+        return
+      }
+      const server = get().servers.find((s) => s.id === id)
+      if (current?.kind === 'channel' && server?.channels.some((c) => c.id === current.id)) return
+      const target = remembered?.kind === 'channel' && server?.channels.some((c) => c.id === remembered.id)
+        ? remembered.id
+        : server?.channels.slice().sort((a, b) => a.position - b.position)[0]?.id
+      if (target != null) get().openRoom({ kind: 'channel', id: target })
+      else set({ active: null })
+      void get().loadMembers(id)
+    },
+
+    togglePinServer: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const pinnedServers = s.pinnedServers.includes(id) ? s.pinnedServers.filter((x) => x !== id) : [...s.pinnedServers, id]
+        savePinned(meId, { servers: pinnedServers, conversations: s.pinnedConversations })
+        return { pinnedServers }
+      })
+    },
+
+    togglePinConversation: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const pinnedConversations = s.pinnedConversations.includes(id) ? s.pinnedConversations.filter((x) => x !== id) : [...s.pinnedConversations, id]
+        savePinned(meId, { servers: s.pinnedServers, conversations: pinnedConversations })
+        return { pinnedConversations }
+      })
+    },
+
+    toggleMuteServer: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const mutedServers = s.mutedServers.includes(id) ? s.mutedServers.filter((x) => x !== id) : [...s.mutedServers, id]
+        saveMuted(meId, { servers: mutedServers, conversations: s.mutedConversations })
+        useStore.getState()._syncChatMutes(mutedServers, s.mutedConversations)
+        return { mutedServers }
+      })
+    },
+
+    toggleMuteConversation: (id) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const mutedConversations = s.mutedConversations.includes(id) ? s.mutedConversations.filter((x) => x !== id) : [...s.mutedConversations, id]
+        saveMuted(meId, { servers: s.mutedServers, conversations: mutedConversations })
+        useStore.getState()._syncChatMutes(s.mutedServers, mutedConversations)
+        return { mutedConversations }
+      })
+    },
+
+    setServerOrder: (ids) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        saveOrder(meId, { servers: ids, conversations: s.conversationOrder })
+        return { serverOrder: ids }
+      })
+    },
+
+    setConversationOrder: (ids) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        saveOrder(meId, { servers: s.serverOrder, conversations: ids })
+        return { conversationOrder: ids }
+      })
+    },
+
+    addLocalCategory: (serverId, name) => {
+      const meId = get().meId
+      const trimmed = name.trim()
+      if (!meId || !trimmed) return
+      set((s) => {
+        const existing = s.localCategories[serverId] ?? []
+        if (existing.includes(trimmed)) return s
+        const localCategories = { ...s.localCategories, [serverId]: [...existing, trimmed] }
+        saveLocalCategories(meId, localCategories)
+        return { localCategories }
+      })
+    },
+
+    removeLocalCategory: (serverId, name) => {
+      const meId = get().meId
+      if (!meId) return
+      set((s) => {
+        const existing = s.localCategories[serverId] ?? []
+        if (!existing.includes(name)) return s
+        const localCategories = { ...s.localCategories, [serverId]: existing.filter((c) => c !== name) }
+        saveLocalCategories(meId, localCategories)
+        return { localCategories }
+      })
+    },
+
+    renameLocalCategory: (serverId, from, to) => {
+      const meId = get().meId
+      const trimmed = to.trim()
+      if (!meId || !trimmed) return
+      set((s) => {
+        const existing = s.localCategories[serverId] ?? []
+        if (!existing.includes(from)) return s
+        const localCategories = { ...s.localCategories, [serverId]: existing.map((c) => (c === from ? trimmed : c)) }
+        saveLocalCategories(meId, localCategories)
+        return { localCategories }
+      })
+    },
+
+    openRoom: (room) => {
+      const key = roomKey(room)
+      if (room.kind === 'channel') {
+        const server = get().servers.find((s) => s.channels.some((c) => c.id === room.id))
+        set({ activeServerId: server?.id ?? get().activeServerId })
+        if (server) void get().loadMembers(server.id)
+      } else {
+        set({ activeServerId: null })
+        void get().resolveKey(room.id)
+      }
+      set({ active: room, threadRootId: null })
+      const existing = get().rooms[key]
+      if (!existing?.loaded && !existing?.loading) void get().loadOlder(room)
+      else get().markRead(room)
+    },
+
+
+    loadOlder: async (room) => {
+      const key = roomKey(room)
+      const cur = get().rooms[key] ?? emptyRoom()
+      if (cur.loading || (cur.loaded && !cur.hasMore)) return
+      patchRoom(key, () => ({ loading: true, error: null }))
+      const oldest = cur.items.find((m) => m.id > 0)
+      try {
+        const opts = { limit: PAGE, before: cur.loaded ? oldest?.id : undefined }
+        const page = room.kind === 'channel'
+          ? await api.listChannelMessages(room.id, opts)
+          : await api.listDmMessages(room.id, opts)
+        const top = page.results.filter((m) => !m.parent)
+        patchRoom(key, (r) => {
+          let items = r.items
+          for (const m of top) items = upsert(items, m)
+          return { items, hasMore: page.has_more, loading: false, loaded: true }
+        })
+        const newest = page.results.slice(-1)[0]
+        if (!cur.loaded && newest) {
+          set((s) => {
+            const prev = s.lastMessage[key]
+            return !prev || prev.id <= newest.id ? { lastMessage: { ...s.lastMessage, [key]: newest } } : {}
+          })
+          get().markRead(room)
+        }
+        if (room.kind === 'conversation') {
+          for (const m of top) void decryptOne(m)
+        }
+      } catch (err) {
+        patchRoom(key, () => ({ loading: false, error: (err as Error).message || 'Failed to load messages' }))
+      }
+    },
+
+    setPanel: (panel) => set({ panel }),
+
+    openThread: (rootId) => {
+      set({ threadRootId: rootId })
+      if (rootId == null) return
+      set((s) => ({ threads: { ...s.threads, [rootId]: { items: s.threads[rootId]?.items ?? [], loading: true } } }))
+      api.listThread(rootId)
+        .then((items) => {
+          set((s) => ({ threads: { ...s.threads, [rootId]: { items, loading: false } } }))
+          for (const m of items) if (m.is_encrypted) void decryptOne(m)
+        })
+        .catch(() => set((s) => ({ threads: { ...s.threads, [rootId]: { items: s.threads[rootId]?.items ?? [], loading: false } } })))
+    },
+
+    sendCommandCard: async (room, command) => {
+      if (room.kind !== 'channel') throw new Error('Command cards only work in server channels')
+      const created = await api.createChannelCard(room.id, command)
+      applyMessage(created, false)
+      get().markRead(room)
+    },
+
+    send: async (room, input) => {
+      const key = roomKey(room)
+      const meId = get().meId
+      const me = get().me
+      if (!meId || !me) return
+      const text = input.text.trim()
+      if (!text && input.files.length === 0) return
+
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const tempId = -Date.now() - Math.floor(Math.random() * 1000)
+      const now = new Date().toISOString()
+      const temp: UiMessage = {
+        id: tempId, localId, sendState: 'sending',
+        channel: room.kind === 'channel' ? room.id : null,
+        conversation: room.kind === 'conversation' ? room.id : null,
+        author: me, content: room.kind === 'channel' ? text : '', is_encrypted: room.kind === 'conversation',
+        ciphertext: '', nonce: '', key_version: null, parent: input.parent ?? null, mentions: input.mentions ?? [],
+        attachments: input.files.map((f, i) => ({ id: -(i + 1), name: f.name, url: '', mime: f.type, size: f.size, encrypted_name: '', nonce: '', key_version: null })),
+        reactions: [], reply_count: 0, pinned: false, pinned_by: null, pinned_at: null, edited_at: null, deleted_at: null, created_at: now,
+      }
+      if (room.kind === 'conversation') setPlain(tempId, { text })
+
+      const place = (fn: (items: UiMessage[]) => UiMessage[]): void => {
+        if (temp.parent) {
+          set((s) => {
+            const t = s.threads[temp.parent!]
+            return t ? { threads: { ...s.threads, [temp.parent!]: { ...t, items: fn(t.items) } } } : {}
+          })
+        } else {
+          patchRoom(key, (r) => ({ items: fn(r.items) }))
+        }
+      }
+      place((items) => items.concat(temp))
+      if (temp.parent) {
+        patchRoom(key, (r) => ({ items: r.items.map((m) => m.id === temp.parent ? { ...m, reply_count: m.reply_count + 1 } : m) }))
+      }
+
+      // Stable across retries, so a send that landed but whose response was
+      // lost comes back as the same message rather than a duplicate.
+      const clientId = crypto.randomUUID()
+
+      const attempt = async (): Promise<void> => {
+        place((items) => items.map((m) => m.id === tempId ? { ...m, sendState: 'sending' } : m))
+        try {
+          let created: ChatMessage
+          if (room.kind === 'channel') {
+            const attachments: AttachmentInput[] = []
+            for (const f of input.files) attachments.push(await api.uploadChatFile(f, f.name))
+            created = await api.createChannelMessage(room.id, { content: text, parent: input.parent ?? null, mentions: input.mentions, attachments })
+          } else {
+            const m = await e2e()
+            const conv = get().conversations.find((c) => c.id === room.id)
+            if (!conv) throw new Error('Conversation not found')
+            const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv), { forSend: true })
+            if (res.state !== 'ready') throw new Error('Waiting for an encryption key')
+            set((s) => ({ keyState: { ...s.keyState, [room.id]: 'ready' } }))
+            const attachments: AttachmentInput[] = []
+            if (await m.sendsV2()) {
+              const manifest: import('../lib/chatE2E').AttachmentManifest[] = []
+              for (const [i, f] of input.files.entries()) {
+                const up = await m.uploadEncryptedFileV2(f, res.key, room.id, res.version, clientId, i)
+                attachments.push(up.input)
+                manifest.push(up.manifest)
+              }
+              const parentMsg = input.parent != null ? findMessage(input.parent) : undefined
+              const sealed = await m.sealMessageV2(meId, {
+                conversationId: room.id, key: res.key, version: res.version, text, mentions: input.mentions ?? [],
+                clientId, editSeq: 0, replyTo: m.clientIdOf(parentMsg), att: manifest,
+              })
+              created = await api.createDmMessage(room.id, { ...sealed, parent: input.parent ?? null, attachments })
+            } else {
+              for (const f of input.files) attachments.push(await m.uploadEncryptedFile(f, res.key, res.version))
+              const sealed = text ? await m.encryptForSend(text, res.key) : null
+              created = await api.createDmMessage(room.id, {
+                ciphertext: sealed?.ciphertext, nonce: sealed?.nonce, key_version: res.version,
+                parent: input.parent ?? null, mentions: input.mentions, attachments,
+              })
+            }
+            setPlain(created.id, { text })
+          }
+          // Replace in place rather than re-sorting by id: if two messages are
+          // sent in quick succession, whichever request's response lands first
+          // must not jump ahead of one sent earlier but still in flight.
+          place((items) => items.map((m) => m.id === tempId ? { ...created, localId } : m))
+          if (!created.parent) {
+            set((s) => ({ lastMessage: { ...s.lastMessage, [key]: created } }))
+            get().markRead(room)
+          }
+        } catch (err) {
+          console.warn('[chat] send failed', err)
+          place((items) => items.map((m) => m.id === tempId ? { ...m, sendState: 'failed', retry: () => void attempt() } : m))
+        }
+      }
+      await attempt()
+    },
+
+    // Posts the moderation card as a real message into the channel the
+    // moderator is looking at, so it lands in history for everyone and is
+    // still there after a reload. It goes out under the moderator's token -
+    // the API has no way to post as anything else - which is why the row
+    // renders as "Server · via <them>" rather than claiming to be unattributed
+    // (see MessageItem): a card anyone else forges by typing the payload names
+    // whoever typed it. Falls back to the server's first channel when the
+    // action came from somewhere with no channel open, and gives up quietly if
+    // there's nowhere to post - the moderation itself already succeeded.
+    announceModeration: (serverId, payload) => {
+      const st = get()
+      const active = st.active
+      const belongs = (channelId: number): boolean => serverId == null
+        || !!st.servers.find((x) => x.id === serverId)?.channels.some((c) => c.id === channelId)
+      const room: RoomRef | null = active?.kind === 'channel' && belongs(active.id)
+        ? active
+        : (() => {
+            const server = serverId != null ? st.servers.find((x) => x.id === serverId) : undefined
+            const channel = server?.channels.slice().sort((a, b) => a.position - b.position)[0]
+            return channel ? { kind: 'channel' as const, id: channel.id } : null
+          })()
+      if (!room) return
+      // Mentions the target so it reaches them as a mention rather than an
+      // ordinary unread - being muted or timed out is the one thing they most
+      // need to see, and they keep read access for both.
+      void get().send(room, {
+        text: encodeModerationNotice(payload),
+        files: [],
+        mentions: [payload.userId],
+      }).catch(() => undefined)
+    },
+
+    postLocalNotice: (room, content) => {
+      const me = get().me
+      if (!me) return
+      const key = roomKey(room)
+      const id = -Date.now() - Math.floor(Math.random() * 1000)
+      const notice: UiMessage = {
+        id, local: true,
+        channel: room.kind === 'channel' ? room.id : null,
+        conversation: room.kind === 'conversation' ? room.id : null,
+        author: me, content, is_encrypted: false,
+        ciphertext: '', nonce: '', key_version: null, parent: null, mentions: [],
+        attachments: [], reactions: [], reply_count: 0, pinned: false, pinned_by: null, pinned_at: null,
+        edited_at: null, deleted_at: null, created_at: new Date().toISOString(),
+      }
+      patchRoom(key, (r) => ({ items: r.items.concat(notice) }))
+    },
+
+    dismissLocalNotice: (room, id) => {
+      const key = roomKey(room)
+      patchRoom(key, (r) => ({ items: r.items.filter((m) => m.id !== id) }))
+    },
+
+    edit: async (message, text) => {
+      const meId = get().meId
+      if (!meId) return
+      if (message.is_encrypted && message.conversation) {
+        const m = await e2e()
+        const conv = get().conversations.find((c) => c.id === message.conversation)
+        if (!conv) return
+        const res = await m.resolveRoomKey(meId, conv, true)
+        if (res.state !== 'ready') throw new Error('Waiting for an encryption key')
+        const updated = message.format === 2
+          ? await api.editMessage(message.id, await m.sealEditV2(meId, message, text, res.key, res.version))
+          : await api.editMessage(message.id, { ...await m.encryptForSend(text, res.key), key_version: res.version })
+        setPlain(updated.id, { text })
+        mapMessage(updated.id, (x) => ({ ...x, ...updated }))
+      } else {
+        const updated = await api.editMessage(message.id, { content: text })
+        mapMessage(updated.id, (x) => ({ ...x, ...updated }))
+      }
+    },
+
+    remove: async (message, opts) => {
+      if (message.id < 0) {
+        set((s) => {
+          const rooms: Record<string, RoomMessages> = {}
+          for (const [k, r] of Object.entries(s.rooms)) rooms[k] = { ...r, items: r.items.filter((m) => m.id !== message.id) }
+          const threads = { ...s.threads }
+          if (message.parent != null && threads[message.parent]) {
+            threads[message.parent] = { ...threads[message.parent], items: threads[message.parent].items.filter((m) => m.id !== message.id) }
+            const key = messageRoom(message)
+            const room = key ? rooms[key] ?? s.rooms[key] : undefined
+            if (key && room) rooms[key] = { ...room, items: room.items.map((m) => m.id === message.parent ? { ...m, reply_count: Math.max(0, m.reply_count - 1) } : m) }
+          }
+          return { rooms, threads }
+        })
+        return
+      }
+      await api.deleteMessage(message.id, !!opts?.purge)
+      if (opts?.purge) { dropMessage(message.id); return }
+      mapMessage(message.id, (m) => ({ ...m, content: '', ciphertext: '', nonce: '', attachments: [], deleted_at: new Date().toISOString() }))
+      dropPlain(message.id)
+    },
+
+    togglePin: async (message) => {
+      const updated = message.pinned ? await api.unpinMessage(message.id) : await api.pinMessage(message.id)
+      mapMessage(message.id, (m) => ({ ...m, ...updated }))
+    },
+
+    toggleReaction: async (message, emoji) => {
+      const meId = get().meId
+      if (!meId) return
+      const had = message.reactions.some((r) => r.emoji === emoji && r.me)
+      handleEvent({ type: had ? 'reaction.removed' : 'reaction.added', message_id: message.id, emoji, user_id: meId, channel: message.channel, conversation: message.conversation })
+      try {
+        if (had) await api.removeReaction(message.id, emoji)
+        else await api.addReaction(message.id, emoji)
+      } catch (err) {
+        handleEvent({ type: had ? 'reaction.added' : 'reaction.removed', message_id: message.id, emoji, user_id: meId, channel: message.channel, conversation: message.conversation })
+        throw err
+      }
+    },
+
+    markRead: (room) => {
+      const key = roomKey(room)
+      const s = get()
+      const latest = s.rooms[key]?.items.filter((m) => m.id > 0).slice(-1)[0]?.id ?? s.lastMessage[key]?.id
+      if (!latest || !s.meId) return
+      const had = (s.unread[key] ?? 0) > 0 || (s.mentions[key] ?? 0) > 0
+      if (!had && (s.lastRead[key] ?? 0) >= latest) return
+      const lastRead = { ...s.lastRead, [key]: latest }
+      saveLastRead(s.meId, lastRead)
+      set({ lastRead, unread: { ...s.unread, [key]: 0 }, mentions: { ...s.mentions, [key]: 0 } })
+      if (!s.readEnabled) return
+      const sent = socket?.send(room.kind === 'channel'
+        ? { type: 'read', channel: room.id, message_id: latest }
+        : { type: 'read', conversation: room.id, message_id: latest })
+      if (sent) return
+      const call = room.kind === 'channel' ? api.markChannelRead(room.id, latest) : api.markDmRead(room.id, latest)
+      call.catch(() => undefined)
+    },
+
+    setPresenceEnabled: (on) => {
+      saveFlag(PRESENCE_KEY, on)
+      set({ presenceEnabled: on, ...(on ? {} : { online: {} }) })
+      if (on && !socket?.send({ type: 'presence' })) void api.getPresence().then((ids) => {
+        set({ online: Object.fromEntries(ids.map((id) => [id, true as const])) })
+      }).catch(() => undefined)
+    },
+
+    setReadEnabled: (on) => {
+      saveFlag(READ_KEY, on)
+      set({ readEnabled: on })
+    },
+
+    sendTyping: (room, active) => {
+      socket?.send({ type: active ? 'typing.start' : 'typing.stop', target: { kind: room.kind, id: room.id } })
+    },
+
+    loadMembers: async (serverId, force = false) => {
+      const cached = get().members[serverId]
+      if (cached && !force) return cached
+      const list = await api.listMembers(serverId)
+      set((s) => ({ members: { ...s.members, [serverId]: list } }))
+      return list
+    },
+
+    loadRoles: async (serverId, force = false) => {
+      const cached = get().roles[serverId]
+      if (cached && !force) return cached
+      const list = await api.listRoles(serverId)
+      set((s) => ({ roles: { ...s.roles, [serverId]: list } }))
+      return list
+    },
+
+    loadBans: async (serverId, force = false) => {
+      const cached = get().bans[serverId]
+      if (cached && !force) return cached
+      const list = await api.listBans(serverId)
+      set((s) => ({ bans: { ...s.bans, [serverId]: list } }))
+      return list
+    },
+
+    startDm: async (userIds, name) => {
+      const conv = await api.createConversation({
+        participant_ids: userIds,
+        is_group: userIds.length > 1,
+        name: userIds.length > 1 ? name ?? '' : '',
+      })
+      set((s) => ({ conversations: [conv, ...s.conversations.filter((c) => c.id !== conv.id)] }))
+      get().openRoom({ kind: 'conversation', id: conv.id })
+      return conv
+    },
+
+    resolveKey: async (conversationId) => {
+      const meId = get().meId
+      if (!meId) return
+      if (get().keyState[conversationId] === 'resolving') {
+        rerunResolve.add(conversationId)
+        return
+      }
+      set((s) => ({ keyState: { ...s.keyState, [conversationId]: 'resolving' } }))
+      try {
+        let conv = get().conversations.find((c) => c.id === conversationId)
+        if (!conv) {
+          conv = await api.getConversation(conversationId)
+          set((s) => ({ conversations: [conv!, ...s.conversations] }))
+        }
+        const m = await e2e()
+        const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv))
+        set((s) => ({ keyState: { ...s.keyState, [conversationId]: res.state } }))
+        if (res.state === 'ready') void get().decryptRoom(conversationId)
+      } catch (err) {
+        console.warn('[chat] key resolution failed', err)
+        set((s) => ({ keyState: { ...s.keyState, [conversationId]: 'error' } }))
+      }
+      if (rerunResolve.delete(conversationId)) void get().resolveKey(conversationId)
+    },
+
+    decryptRoom: async (conversationId) => {
+      const key = `d:${conversationId}`
+      const plain = get().plain
+      const targets = [
+        ...(get().rooms[key]?.items ?? []),
+        ...Object.values(get().threads).flatMap((t) => t.items.filter((x) => x.conversation === conversationId)),
+        ...(get().lastMessage[key] ? [get().lastMessage[key]] : []),
+      ].filter((msg) => msg.id > 0 && msg.is_encrypted && !(plain[msg.id] && 'text' in plain[msg.id]))
+      await pool(targets, 8, decryptOne)
+    },
+
+    // Keys imported from another browser of ours: re-run every room they
+    // cover so anything that was stuck on "waiting" decrypts straight away.
+    adoptKeys: async (conversationIds) => {
+      const m = await e2e()
+      await m.adoptImportedKeys(conversationIds)
+      await pool(conversationIds, 4, async (id) => {
+        await get().resolveKey(id)
+        await get().decryptRoom(id)
+      })
+    },
+
+    ensureNowPlaying: (userIds) => {
+      const known = get().nowPlaying
+      const ids = userIds.filter((id) => !(id in known) && !nowPlayingRequested.has(id))
+      if (ids.length === 0) return
+      for (const id of ids) nowPlayingRequested.add(id)
+      void pool(ids, 6, async (id) => {
+        const { now_playing } = await getNowPlaying(id)
+        set((st) => ({ nowPlaying: { ...st.nowPlaying, [id]: now_playing } }))
+      })
+    },
+
+    totalUnread: () => Object.values(get().unread).reduce((a, b) => a + b, 0),
+  }
+})
+
+export function displayName(user: Pick<ChatUserBrief, 'display_name' | 'username'>): string {
+  return user.display_name || user.username || 'Unknown'
+}
+
+// Live "now playing" for a set of users. Backed by the store's nowPlaying
+// map, which is filled once per id (ensureNowPlaying dedupes across every
+// caller) and kept fresh after that by the socket's now_playing.updated
+// push - no per-caller polling interval.
+export function useNowPlayingByIds(ids: number[]): Record<number, NowPlayingState | null> {
+  const key = [...new Set(ids)].sort((a, b) => a - b).join(',')
+  const ensureNowPlaying = useChatStore((s) => s.ensureNowPlaying)
+  const nowPlaying = useChatStore((s) => s.nowPlaying)
+
+  useEffect(() => {
+    if (key) ensureNowPlaying(key.split(',').map(Number))
+  }, [key, ensureNowPlaying])
+
+  const list = key ? key.split(',').map(Number) : []
+  return Object.fromEntries(list.map((id) => [id, nowPlaying[id] ?? null]))
+}
+
+// Looks up a message by id across whichever room/thread lists are currently
+// loaded, so a reply reference can reflect the live message (e.g. deleted)
+// without a dedicated lookup endpoint.
+export function useMessageById(id: number | null): UiMessage | undefined {
+  return useChatStore((s) => {
+    if (id == null) return undefined
+    for (const room of Object.values(s.rooms)) {
+      const found = room.items.find((m) => m.id === id)
+      if (found) return found
+    }
+    for (const thread of Object.values(s.threads)) {
+      const found = thread.items.find((m) => m.id === id)
+      if (found) return found
+    }
+    return undefined
+  })
+}
+
+// Re-renders once the given instant passes, so a timeout countdown/banner
+// clears itself without waiting for an unrelated event to come through.
+// Nothing scheduled when the instant is absent or already behind us.
+export function useExpiryTick(at: string | null | undefined): void {
+  const [, force] = useState(0)
+  const ms = at ? new Date(at).getTime() - Date.now() : -1
+  useEffect(() => {
+    if (ms <= 0) return
+    // setTimeout saturates past ~24.8 days; re-arm in chunks below that so a
+    // long (up to 28-day) timeout doesn't fire immediately instead.
+    const wait = Math.min(ms + 500, 60_000 * 60 * 12)
+    const id = window.setTimeout(() => force((n) => n + 1), wait)
+    return () => window.clearTimeout(id)
+  }, [ms])
+}
+
+// Why the composer should be locked for this room, or null if it shouldn't.
+// Mirrors the server-side "Posting in a channel" rules we can see from here:
+// our own ServerMember.muted and timeout_until. Site-wide restrictions aren't
+// readable by the client, so those still surface as a 403 on send.
+export function useMyPostingRestriction(room: RoomRef | null): string | null {
+  const meId = useChatStore((s) => s.meId)
+  const loadMembers = useChatStore((s) => s.loadMembers)
+  const serverId = useChatStore((s) => (room && room.kind === 'channel'
+    ? s.servers.find((x) => x.channels.some((c) => c.id === room.id))?.id ?? null
+    : null))
+  const member = useChatStore((s) => (serverId != null && s.meId
+    ? s.members[serverId]?.find((m) => m.user.id === s.meId)
+    : undefined))
+  // The member list is what carries our own muted/timeout_until, and nothing
+  // else guarantees it has been fetched for this server yet (the members panel
+  // may never have been opened). loadMembers caches, so this is one request per
+  // server; the resync handler re-fetches it after any moderation action.
+  useEffect(() => {
+    if (serverId != null) void loadMembers(serverId).catch(() => undefined)
+  }, [serverId, loadMembers])
+  useExpiryTick(member?.timeout_until)
+  if (!meId || !member) return null
+  if (member.muted) return 'You’re muted in this server'
+  if (isTimedOut(member)) return `You’re timed out until ${new Date(member.timeout_until!).toLocaleString()}`
+  return null
+}
+
+// Which permission a moderation card's author must actually hold for that card
+// to be genuine. Site-wide actions aren't in the bitmask at all - they're
+// platform-administrator only - so they're handled separately below.
+const NOTICE_PERMISSION: Record<ModerationNoticePayload['action'], number> = {
+  mute: api.CHAT_PERMISSIONS.manage_server,
+  unmute: api.CHAT_PERMISSIONS.manage_server,
+  timeout: api.CHAT_PERMISSIONS.kick_members,
+  untimeout: api.CHAT_PERMISSIONS.kick_members,
+  kick: api.CHAT_PERMISSIONS.kick_members,
+  ban: api.CHAT_PERMISSIONS.ban_members,
+  unban: api.CHAT_PERMISSIONS.ban_members,
+}
+
+// Decodes a moderation card only if the account that posted it could actually
+// have performed the action it claims. The API can't post as anything but the
+// caller, so the payload is just text any member could type - this is what
+// stops a copied "X was banned" card from rendering as one. Returns null for
+// anything unverified, which drops the message back to being shown as the
+// plain text it really is.
+//
+// Mirrors the documented Permission Resolution steps 1-4 at server level:
+// owner and platform admin pass outright, otherwise @everyone's permissions
+// OR'd with those of the author's assigned roles. Channel overrides aren't
+// folded in, so a card is never rejected over a channel-scoped grant.
+function noticeAuthorMayModerate(
+  state: ChatState,
+  message: Pick<UiMessage, 'channel' | 'author'>,
+  payload: ModerationNoticePayload,
+  // Unknown (member list not loaded) counts as unverified instead of allowed.
+  strict = false,
+): boolean {
+  if (message.author.role === 'administrator') return true
+  // Only a platform administrator can act site-wide.
+  if (payload.site) return false
+  if (message.channel == null) return false
+  const server = state.servers.find((x) => x.channels.some((c) => c.id === message.channel))
+  if (!server) return false
+  if (server.owner === message.author.id) return true
+  const members = state.members[server.id]
+  // Roles haven't been fetched yet: can't judge, so don't accuse - unless the
+  // caller can't revisit the answer later (strict).
+  if (!members) return !strict
+  const member = members.find((m) => m.user.id === message.author.id)
+  if (!member) return false
+  const assigned = new Set(member.roles.map((r) => r.id))
+  const mask = server.roles.reduce(
+    (acc, role) => (role.is_default || assigned.has(role.id) ? acc | role.permissions : acc),
+    0,
+  )
+  return api.hasPermission(mask, NOTICE_PERMISSION[payload.action])
+    || api.hasPermission(mask, api.CHAT_PERMISSIONS.manage_server)
+}
+
+export function useModerationNotice(message: Pick<UiMessage, 'content' | 'channel' | 'author' | 'is_encrypted'>): ModerationNoticePayload | null {
+  const payload = useMemo(
+    () => (message.is_encrypted ? null : decodeModerationNotice(message.content)),
+    [message.content, message.is_encrypted],
+  )
+  const loadMembers = useChatStore((s) => s.loadMembers)
+  const serverId = useChatStore((s) => (message.channel != null
+    ? s.servers.find((x) => x.channels.some((c) => c.id === message.channel))?.id ?? null
+    : null))
+  const allowed = useChatStore((s) => !!payload && noticeAuthorMayModerate(s, message, payload))
+
+  // Verification needs the author's roles, which the member list carries.
+  useEffect(() => {
+    if (payload && serverId != null) void loadMembers(serverId).catch(() => undefined)
+  }, [payload, serverId, loadMembers])
+
+  return payload && allowed ? payload : null
+}
+
+export function conversationTitle(conv: Conversation, meId: number | null): string {
+  if (conv.name) return conv.name
+  const others = conv.participants.filter((p) => p.user.id !== meId)
+  if (others.length === 0) return 'Just you'
+  return others.map((p) => displayName(p.user)).join(', ')
+}

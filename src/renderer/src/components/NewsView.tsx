@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import {
   ChevronLeft, Newspaper, RefreshCw, AlertCircle, Plus, Settings2,
   Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow,
+  Share2,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import {
@@ -12,12 +13,25 @@ import {
   type NewsItem, type NewsChannel, type NewsAttachment, type NewsSort,
 } from '../lib/newsApi'
 import { isSubscribed, setSubscribed, ensureNotifyPermission } from '../lib/newsNotifications'
+import { errorMessage } from '../lib/format'
+import { hasChatAccess } from '../lib/chatAccess'
 import NewsComposeModal from './NewsComposeModal'
 import NewsChannelsModal from './NewsChannelsModal'
+import NewsContextMenu, { type NewsMenuState } from './NewsContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
 
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
+
 type NewsMode = 'news' | 'feed'
+
+// Post URLs are /news/<id> so an open article can be shared/refreshed/bookmarked.
+function postIdFromPath(pathname: string): number | null {
+  const m = pathname.match(/^\/news\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
@@ -40,7 +54,7 @@ function stripMarkdown(md: string): string {
     .trim()
 }
 
-// Falls back to a snippet of the body when no summary was written — the
+// Falls back to a snippet of the body when no summary was written - the
 // composer no longer requires one.
 function displaySummary(item: NewsItem): string {
   const trimmed = item.summary?.trim()
@@ -65,7 +79,7 @@ function CategoryTag({ label }: { label: string }) {
 
 // Edit/delete cluster, shown on hover for editors on desktop; always visible on
 // mobile since touch has no hover state. Rendered as a sibling of the card's
-// clickable button (never nested — a button can't contain buttons).
+// clickable button (never nested - a button can't contain buttons).
 function ManageActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
   const isMobile = useIsMobile()
   return (
@@ -82,13 +96,15 @@ interface CardProps {
   canManage: boolean
   onEdit: (item: NewsItem) => void
   onDelete: (item: NewsItem) => void
+  onContextMenu: (item: NewsItem, e: React.MouseEvent) => void
 }
 
-function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
+function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
   return (
     <div className="relative group">
       <button
         onClick={() => onOpen(item)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
         className="w-full text-left rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 transition-all duration-200 block cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {item.image_url ? (
@@ -127,11 +143,12 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) 
   )
 }
 
-function NewsCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
+function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
   return (
     <div className="relative group h-full">
       <button
         onClick={() => onOpen(item)}
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
         className="w-full h-full text-left flex flex-col rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {item.image_url && (
@@ -284,13 +301,15 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
 
 // ─── Article detail ───────────────────────────────────────────────────────────
 
-function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete }: {
+function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete, canShareToChat, onShare }: {
   item: NewsItem
   channelLabel: string | null
   onBack: () => void
   canManage: boolean
   onEdit: (item: NewsItem) => void
   onDelete: (item: NewsItem) => void
+  canShareToChat: boolean
+  onShare: (item: NewsItem) => void
 }) {
   return (
     <div className="max-w-3xl mx-auto">
@@ -301,12 +320,17 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
         >
           <ChevronLeft size={16} /> Back to news
         </button>
-        {canManage && (
-          <div className="ml-auto flex items-center gap-1">
-            <button onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Pencil size={13} /> Edit</button>
-            <button onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-red-400 hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Trash2 size={13} /> Delete</button>
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-1">
+          {canShareToChat && (
+            <button onClick={() => onShare(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Share2 size={13} /> Share to chat</button>
+          )}
+          {canManage && (
+            <>
+              <button onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Pencil size={13} /> Edit</button>
+              <button onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-red-400 hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Trash2 size={13} /> Delete</button>
+            </>
+          )}
+        </div>
       </div>
       {item.image_url && (
         <div className="aspect-[16/7] w-full overflow-hidden rounded-2xl bg-[var(--surface-overlay)] mb-5">
@@ -330,8 +354,8 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewsView(): JSX.Element {
-  const { setActiveView, account } = useStorePick('setActiveView', 'account')
-  // News write access is its own role (is_news), separate from is_editor —
+  const { setActiveView, previousView, account } = useStorePick('setActiveView', 'previousView', 'account')
+  // News write access is its own role (is_news), separate from is_editor -
   // admins can post regardless. Only admins manage channels.
   const canPost = !!(account?.is_news || account?.is_administrator)
   const canManageChannels = !!account?.is_administrator
@@ -340,6 +364,7 @@ export default function NewsView(): JSX.Element {
   // buttons don't offer an action the API would reject.
   const canManageItem = (item: NewsItem): boolean =>
     !!account && (account.is_administrator || (!!account.is_news && item.author_id != null && item.author_id === account.id))
+  const canShareToChat = hasChatAccess(account)
 
   const [mode, setMode] = useState<NewsMode>('news')
   const [channel, setChannel] = useState<string>(DEFAULT_NEWS_CHANNEL)
@@ -351,20 +376,24 @@ export default function NewsView(): JSX.Element {
   const [selected, setSelected] = useState<NewsItem | null>(null)
 
   // Whether the user follows the active channel (drives the bell toggle). "All"
-  // isn't subscribable — you follow specific channels.
+  // isn't subscribable - you follow specific channels.
   const [subscribed, setSubscribedState] = useState(false)
 
   // Modals
   const [composeOpen, setComposeOpen] = useState(false)
   const [editing, setEditing] = useState<NewsItem | null>(null)
   const [channelsOpen, setChannelsOpen] = useState(false)
+  const [sharing, setSharing] = useState<NewsItem | null>(null)
+  const [menu, setMenu] = useState<NewsMenuState | null>(null)
+  const openMenu = (item: NewsItem, e: React.MouseEvent): void => setMenu({ item, x: e.clientX, y: e.clientY })
+  const closeMenu = useCallback(() => setMenu(null), [])
 
   const loadChannels = useCallback(async () => {
     try {
       const list = await fetchChannels()
       setChannels(list)
     } catch {
-      // Keep whatever we have (the static fallback) — a channels fetch failure
+      // Keep whatever we have (the static fallback) - a channels fetch failure
       // shouldn't blank out the tab bar.
     }
   }, [])
@@ -385,7 +414,7 @@ export default function NewsView(): JSX.Element {
       const res = await fetchNews({ channel, sort })
       setItems(res.results)
     } catch (err) {
-      if (!cached) setError(err instanceof Error ? err.message : 'Failed to load news')
+      if (!cached) setError(errorMessage(err, 'Failed to load news'))
     } finally {
       setLoading(false)
     }
@@ -394,17 +423,32 @@ export default function NewsView(): JSX.Element {
   useEffect(() => { loadChannels() }, [loadChannels])
 
   // Reload whenever the channel changes (and on mount). Close any open article
-  // so we don't strand the reader on a story from the previous channel.
-  useEffect(() => { setSelected(null); load() }, [load])
+  // so we don't strand the reader on a story from the previous channel - but
+  // not on the very first run, which needs to leave a URL-deep-linked post
+  // (see the effect below) alone.
+  const didMount = useRef(false)
+  useEffect(() => {
+    if (didMount.current) closeArticle()
+    else didMount.current = true
+    load()
+  }, [load])
 
   // Reflect the follow state of whatever channel is active.
   useEffect(() => { setSubscribedState(channel !== ALL_CHANNEL && isSubscribed(channel)) }, [channel])
 
   // Open a specific post when a notification is clicked (NewsNotifier routes
   // here then dispatches the id). Also honor an id left in sessionStorage if the
-  // view mounts after the event fired.
+  // view mounts after the event fired, or one baked into the URL (deep link /
+  // page refresh / shared /news/<id> link).
   useEffect(() => {
-    const openById = (id: number): void => { fetchNewsItem(id).then(setSelected).catch(() => undefined) }
+    const openById = (id: number): void => {
+      fetchNewsItem(id).then((it) => {
+        setSelected(it)
+        if (postIdFromPath(window.location.pathname) !== it.id) {
+          window.history.pushState({}, '', `/news/${it.id}`)
+        }
+      }).catch(() => undefined)
+    }
     const onOpen = (e: Event): void => {
       const id = (e as CustomEvent<number>).detail
       // Already-mounted path: consume the id so a later remount doesn't reopen it.
@@ -415,9 +459,39 @@ export default function NewsView(): JSX.Element {
     try {
       const pending = sessionStorage.getItem('news:openPostId')
       if (pending) { sessionStorage.removeItem('news:openPostId'); openById(Number(pending)) }
+      else {
+        const fromUrl = postIdFromPath(window.location.pathname)
+        if (fromUrl != null) openById(fromUrl)
+      }
     } catch {}
     return () => window.removeEventListener('news:open', onOpen)
   }, [])
+
+  // Keep the URL and the open article in sync with browser back/forward.
+  useEffect(() => {
+    const onPopState = (): void => {
+      const id = postIdFromPath(window.location.pathname)
+      if (id == null) { setSelected(null); return }
+      fetchNewsItem(id).then(setSelected).catch(() => undefined)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // Push/pop /news/<id> as an article opens and closes, so the URL always
+  // reflects what's on screen and a post can be shared or reloaded directly.
+  const openItem = (item: NewsItem): void => {
+    setSelected(item)
+    if (postIdFromPath(window.location.pathname) !== item.id) {
+      window.history.pushState({}, '', `/news/${item.id}`)
+    }
+  }
+  const closeArticle = (): void => {
+    setSelected(null)
+    if (postIdFromPath(window.location.pathname) != null) {
+      window.history.pushState({}, '', '/news')
+    }
+  }
 
   const toggleSubscribe = async (): Promise<void> => {
     if (channel === ALL_CHANNEL) return
@@ -437,9 +511,9 @@ export default function NewsView(): JSX.Element {
     try {
       await deleteNewsItem(item.id)
       setItems((prev) => prev.filter((i) => i.id !== item.id))
-      setSelected((s) => (s?.id === item.id ? null : s))
+      if (selected?.id === item.id) closeArticle()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
+      setError(errorMessage(err, 'Failed to delete'))
     }
   }
 
@@ -463,7 +537,7 @@ export default function NewsView(): JSX.Element {
       <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
         <div className="flex items-center gap-3 mb-4">
           <button
-            onClick={() => setActiveView('wrld')}
+            onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')}
             title="Back"
             aria-label="Back"
             className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -476,7 +550,7 @@ export default function NewsView(): JSX.Element {
             {channel !== ALL_CHANNEL && (
               <button
                 onClick={toggleSubscribe}
-                title={subscribed ? `Following — notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
+                title={subscribed ? `Following - notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
                 aria-label={subscribed ? 'Unfollow channel' : 'Follow channel for notifications'}
                 aria-pressed={subscribed}
                 className={`p-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${subscribed ? 'text-accent hover:bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`}
@@ -496,7 +570,7 @@ export default function NewsView(): JSX.Element {
             )}
             <button
               onClick={() => setSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
-              title={sort === 'newest' ? 'Newest first — switch to oldest' : 'Oldest first — switch to newest'}
+              title={sort === 'newest' ? 'Newest first - switch to oldest' : 'Oldest first - switch to newest'}
               aria-label={sort === 'newest' ? 'Sort: newest first, switch to oldest' : 'Sort: oldest first, switch to newest'}
               className="flex items-center gap-1 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
@@ -569,10 +643,12 @@ export default function NewsView(): JSX.Element {
           <ArticleDetail
             item={selected}
             channelLabel={channelLabel(selected.channel)}
-            onBack={() => setSelected(null)}
+            onBack={closeArticle}
             canManage={canManageItem(selected)}
             onEdit={openEdit}
             onDelete={handleDelete}
+            canShareToChat={canShareToChat}
+            onShare={setSharing}
           />
         ) : (
           <div className="max-w-6xl mx-auto">
@@ -598,10 +674,10 @@ export default function NewsView(): JSX.Element {
               <EmptyState canManage={canPost} onCompose={openNew} />
             ) : (
               <div className="space-y-5">
-                {featured && <FeaturedCard item={featured} onOpen={setSelected} canManage={canManageItem(featured)} onEdit={openEdit} onDelete={handleDelete} />}
+                {featured && <FeaturedCard item={featured} onOpen={openItem} canManage={canManageItem(featured)} onEdit={openEdit} onDelete={handleDelete} onContextMenu={openMenu} />}
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                   {rest.map((item) => (
-                    <NewsCard key={item.id} item={item} onOpen={setSelected} canManage={canManageItem(item)} onEdit={openEdit} onDelete={handleDelete} />
+                    <NewsCard key={item.id} item={item} onOpen={openItem} canManage={canManageItem(item)} onEdit={openEdit} onDelete={handleDelete} onContextMenu={openMenu} />
                   ))}
                 </div>
               </div>
@@ -626,6 +702,17 @@ export default function NewsView(): JSX.Element {
           onChanged={loadChannels}
         />
       )}
+      {menu && (
+        <NewsContextMenu
+          state={menu}
+          onClose={closeMenu}
+          onOpen={() => openItem(menu.item)}
+          onShare={canShareToChat ? () => setSharing(menu.item) : undefined}
+          onEdit={canManageItem(menu.item) ? () => openEdit(menu.item) : undefined}
+          onDelete={canManageItem(menu.item) ? () => { void handleDelete(menu.item) } : undefined}
+        />
+      )}
+      {sharing && <ShareNewsModal item={sharing} onClose={() => setSharing(null)} />}
     </div>
   )
 }

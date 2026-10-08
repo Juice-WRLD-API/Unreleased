@@ -3,30 +3,39 @@ import {
   Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, Check,
   PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, ChevronRight, ArrowLeft, KeyRound, Globe, RefreshCw,
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
-  PanelLeft, PanelTop, PanelBottom, Waves, RotateCcw, ExternalLink,
+  Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
 } from 'lucide-react'
-import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
-import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
+import { useStore, useStorePick } from '../store/useStore'
+import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { FONTS } from '../lib/fonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
-import { getToken, CONTRIBUTOR_ENABLED } from '../lib/userApi'
-import { APP_VERSION } from '../lib/appVersion'
-import {
-  lastfmConfigured, lastfmGetAuthToken, lastfmAuthUrl, lastfmTryGetSession, lastfmDisconnect,
-} from '../lib/lastfm'
+import { hasChatAccess, useChatStore } from '../store/chatStore'
+import ChatDevices from './chat/ChatDevices'
+import MyCdnNodes from './MyCdnNodes'
+import ChatKeyTransfer from './chat/ChatKeyTransfer'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
+import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
+import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
+import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
+import { lastfmConfigured } from '../lib/lastfm'
+import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
-import { formatBytes } from '../lib/format'
+import { NOTIFICATION_SOUNDS } from '../lib/notifications'
+import { IS_IOS } from '../lib/platform'
+import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { Sheet } from './mobile/Sheet'
 import { useDragReorder } from './mobile/useDragReorder'
 import type { ViewType } from '../types'
-import ReportForm from './ReportForm'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import EraCoversSection from './EraCoversSection'
+import { useSettingsAccount } from '../hooks/useSettingsAccount'
+import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
+import { useLastfmConnect } from '../hooks/useLastfmConnect'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -51,7 +60,7 @@ const LYRIC_ACTIVE_PRESETS = ['#ffffff', '#1db954', '#a78bfa', '#60a5fa', '#f472
 const LYRIC_INACTIVE_PRESETS = ['#9ca3af', '#6b7280', '#94a3b8', '#c4b5fd', '#7dd3fc', '#fda4af']
 
 // One row of the "Lyric colors" setting: presets + a custom picker, with
-// "Auto" (value === null) meaning "leave it to the surface's own colors" —
+// "Auto" (value === null) meaning "leave it to the surface's own colors" -
 // the theme's text vars in the mini/now-playing lyrics, the cover-art-derived
 // ones in the WRLD tab. The native color input always needs a concrete hex,
 // so `fallback` is what it shows while the setting is on Auto.
@@ -102,22 +111,13 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
   )
 }
 
-// A vertical rail doesn't fit a phone, so only the two edges the tab bar can
-// actually take are offered. `left`/`right` still exist in the store (a value
-// saved on desktop, or a synced profile) and render as bottom tabs — see how
-// `active` is derived below.
-const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[] = [
-  { id: 'top', label: 'Top', icon: PanelTop },
-  { id: 'bottom', label: 'Bottom', icon: PanelBottom },
-]
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'about'
 
-type Tab = 'account' | 'appearance' | 'playback' | 'feedback' | 'about'
-
-const SECTION_IDS: Tab[] = ['account', 'appearance', 'playback', 'feedback', 'about']
+const SECTION_IDS: Tab[] = ['account', 'appearance', 'preferences', 'playback', 'about']
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. Only lists rows that actually
-// exist on the mobile layout — no Shortcuts/Library/App/Developer tabs here
+// exist on the mobile layout - no Shortcuts/Library/App/Developer tabs here
 // (keyboard shortcuts and Electron-only settings don't apply on mobile).
 const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   // Appearance
@@ -133,24 +133,35 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'Navigation position', sub: 'Where the nav menu sits' },
-  { tab: 'appearance', label: 'Menu items', sub: 'Reorder or hide nav tabs' },
-  { tab: 'appearance', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  // Preferences
+  { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits' },
+  { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide nav tabs' },
+  { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
+  { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
   { tab: 'playback', label: 'Crossfade' },
-  { tab: 'playback', label: 'Smooth fade when pausing' },
+  // Smooth fade when pausing is iOS-excluded further down (Safari ignores
+  // <audio>.volume), so it's filtered out of this index below rather than
+  // listed unconditionally here.
+  ...(IS_IOS ? [] : [{ tab: 'playback' as const, label: 'Smooth fade when pausing' }]),
   { tab: 'playback', label: 'Prefer OG version' },
   { tab: 'playback', label: 'Rotate suggested covers' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
+  { tab: 'playback', label: 'Notification sound' },
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
+  { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Feedback / About
-  { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
+  { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
+  { tab: 'about', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
+  { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
+  { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -164,7 +175,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
 // Every section is built from these three, inside a SettingsCard: `Row` for a
 // label with its control on the right, `Block` for a label whose control is too
 // wide to sit beside it, and `Segmented` for a small closed set of choices.
-// The icon sits in a colored badge (iOS Settings-style) — a fixed color + white
+// The icon sits in a colored badge (iOS Settings-style) - a fixed color + white
 // icon reads correctly in both themes, unlike the plain `text-muted` icon this
 // replaced, which nearly disappeared in light mode.
 
@@ -173,7 +184,7 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
   iconColor: string
   label: string
   sub?: string
-  // Rendered immediately after the label, on the left — for controls that
+  // Rendered immediately after the label, on the left - for controls that
   // are conceptually part of the label (e.g. an on/off toggle right next
   // to "Crossfade"), as opposed to `children`, which sits at the row's
   // right edge (e.g. the crossfade duration slider).
@@ -243,7 +254,7 @@ function LinkRow({ icon: Icon, iconColor, label, href }: {
   )
 }
 
-// A label whose control can't fit beside it — a swatch grid, a segmented
+// A label whose control can't fit beside it - a swatch grid, a segmented
 // control, a reorderable list. Same badge, label and hairline as `Row`, but the
 // control goes underneath at full card width instead of at the right edge.
 //
@@ -311,9 +322,117 @@ function Segmented<T extends string | number>({ value, options, onChange }: {
 // Related rows grouped into one inset card, the platform idiom on both iOS and
 // Android. Without it the pane is a bare list of rows with hairlines between
 // them, which reads as options floating on the page rather than a settings
-// screen. `title` is the small caption above the group — worth setting on any
+// screen. `title` is the small caption above the group - worth setting on any
 // pane long enough to scroll, so the groups are findable rather than an
 // undifferentiated stack of cards.
+const SERVER_INPUT_CLASS = 'w-full min-w-0 bg-[var(--surface-raised)] text-text-primary text-xs font-mono rounded-lg px-2.5 py-2 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors'
+const SERVER_SAVE_CLASS = 'flex-1 px-3 py-2 rounded-lg bg-accent/10 disabled:opacity-40 border border-accent/25 text-accent text-xs font-medium active:opacity-70'
+const SERVER_GHOST_CLASS = 'px-3 py-2 rounded-lg bg-[var(--surface-raised)] border border-[var(--border)] text-text-secondary text-xs font-medium active:opacity-70'
+
+// The "Main API" row of the API servers card in About - moves the whole app
+// to a different API instance.
+function ApiServerRow(): JSX.Element {
+  const [value, setValue] = useState(() => getServerOverride() ?? '')
+  const current = getServerOverride() ?? ''
+  return (
+    <div className="py-3 border-b border-[var(--border)]">
+      <p className="text-text-primary text-[13px] font-medium mb-1.5">Main API</p>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={DEFAULT_JWAPI_BASE}
+        spellCheck={false}
+        className={SERVER_INPUT_CLASS}
+      />
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={() => setServerOverride(value)}
+          disabled={value.trim().replace(/\/+$/, '') === current}
+          className={SERVER_SAVE_CLASS}
+        >
+          Save &amp; reload
+        </button>
+        {current && (
+          <button onClick={() => setServerOverride(null)} className={SERVER_GHOST_CLASS}>
+            Reset
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Route rules under the main API: each sends one path prefix (`/cdn`,
+// `/chat`, ...) to its own server. Edited as a draft and saved together,
+// since saving reloads the app.
+function RouteRulesEditor(): JSX.Element {
+  const [saved] = useState(getRouteRules)
+  const [draft, setDraft] = useState<RouteRule[]>(saved)
+  const dirty = JSON.stringify(cleanRouteRules(draft)) !== JSON.stringify(saved)
+  const update = (i: number, patch: Partial<RouteRule>): void =>
+    setDraft((d) => d.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="py-3">
+      <p className="text-text-primary text-[13px] font-medium mb-1.5">Route rules</p>
+      <datalist id="route-prefix-options">
+        {KNOWN_ROUTE_PREFIXES.map((o) => (
+          <option key={o.prefix} value={o.prefix}>{o.label}</option>
+        ))}
+      </datalist>
+      <div className="flex flex-col gap-3">
+        {draft.map((rule, i) => (
+          <div key={i} className="flex flex-col gap-1.5">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={rule.prefix}
+                onChange={(e) => update(i, { prefix: e.target.value })}
+                placeholder="/cdn"
+                list="route-prefix-options"
+                spellCheck={false}
+                className={SERVER_INPUT_CLASS}
+              />
+              <button
+                onClick={() => setDraft((d) => d.filter((_, j) => j !== i))}
+                aria-label="Remove rule"
+                className="p-2 rounded-lg text-text-muted active:text-red-500 active:bg-[var(--surface-raised)] shrink-0"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={rule.base}
+              onChange={(e) => update(i, { base: e.target.value })}
+              placeholder={JWAPI_BASE}
+              spellCheck={false}
+              className={SERVER_INPUT_CLASS}
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={() => setDraft((d) => [...d, { prefix: '', base: '' }])}
+        className={`flex items-center justify-center gap-1 w-full mt-2.5 ${SERVER_GHOST_CLASS}`}
+      >
+        <Plus size={13} />
+        Add rule
+      </button>
+      <div className="flex gap-2 mt-2">
+        <button onClick={() => setRouteRules(draft)} disabled={!dirty} className={SERVER_SAVE_CLASS}>
+          Save &amp; reload
+        </button>
+        {dirty && (
+          <button onClick={() => setDraft(saved)} className={SERVER_GHOST_CLASS}>
+            Discard
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function SettingsCard({ title, children }: { title?: string; children: ReactNode }): JSX.Element {
   return (
     <div className="mb-4">
@@ -331,7 +450,7 @@ function SettingsCard({ title, children }: { title?: string; children: ReactNode
 }
 
 // Collapses a bulky inline picker (skin swatches, a 7-item font list) down to
-// one summary row — current value + chevron — that opens a bottom sheet with
+// one summary row - current value + chevron - that opens a bottom sheet with
 // the full picker. This is what actually shortens the Appearance page instead
 // of just tidying it: three ~250-450px sections become three ~50px rows.
 function PickerRow({ preview, title, sub, onClick }: {
@@ -355,36 +474,69 @@ function PickerRow({ preview, title, sub, onClick }: {
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
   return (
     // A thumb-sized switch, with the tap target extended past it by padding so
-    // the whole 44px is live without the switch itself looking oversized.
-    // The knob is centred with inset-y-0 + my-auto rather than a fixed top
-    // offset, which only lands right if the parent has zero padding/border,
-    // and carries no shadow — a default downward-offset shadow reads as weight
-    // sitting low, making a geometrically centred knob look off-centre. The
-    // off state sits on surface-highest: against a card that is already
-    // surface-overlay, an off switch in that same colour vanished.
+    // the whole 44px is live without the switch itself looking oversized. The
+    // knob slides via flexbox justify-content (not absolute + translate) so it
+    // can never land outside the track regardless of rounding - it's always a
+    // flex child inset by the track's own padding. The off state sits on
+    // surface-highest: against a card that is already surface-overlay, an off
+    // switch in that same colour vanished.
     <button onClick={onClick} aria-pressed={on} className="shrink-0 -m-2 p-2">
-      <span className={`relative block w-[46px] h-[26px] rounded-full transition-colors ${on ? 'bg-accent' : 'bg-[var(--surface-highest)]'}`}>
-        <span className={`absolute inset-y-0 my-auto w-[20px] h-[20px] rounded-full bg-white transition-all ${on ? 'left-[23px]' : 'left-[3px]'}`} />
+      <span className={`flex items-center w-[46px] h-[26px] p-[3px] rounded-full transition-colors ${
+        on ? 'bg-accent justify-end' : 'bg-[var(--surface-highest)] justify-start'
+      }`}>
+        <span className="w-5 h-5 rounded-full bg-white" />
       </span>
     </button>
+  )
+}
+
+// Green when this build's commit is the latest on the deploy branch, yellow
+// when the site is already serving a newer build (reload to get it), red when
+// GitHub has a newer commit that isn't live yet.
+function CommitFreshnessBulb(): JSX.Element | null {
+  const [status, refresh] = useCommitStatus()
+  if (status === 'unknown') return null
+  const checking = status === 'checking'
+  const color = checking ? 'bg-gray-400' : {
+    latest: 'bg-green-500',
+    'refresh-needed': 'bg-yellow-500',
+    outdated: 'bg-red-500',
+    error: 'bg-blue-500',
+  }[status]
+  const label = checking ? 'Checking for updates…' : {
+    latest: 'Running the latest commit',
+    'refresh-needed': 'A newer version is already live - refresh to run it',
+    outdated: 'A newer commit exists but is not live on the site yet',
+    error: "Couldn't check for updates (rate-limited or offline)",
+  }[status]
+  return (
+    <button
+      type="button"
+      onClick={refresh}
+      disabled={checking}
+      aria-label={`${label} - tap to re-check`}
+      title={`${label} - tap to re-check`}
+      className={`inline-block w-2 h-2 rounded-full shrink-0 border-0 p-0 ${color} ${checking ? 'cursor-default' : 'cursor-pointer'}`}
+    />
   )
 }
 
 export default function Settings(): JSX.Element {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
+  const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   const {
-    setShowSettings, setActiveView,
+    setShowSettings, setActiveView, openProfile,
     account, setShowUserAuth, logoutAccount,
     theme, setTheme,
     customSkins, saveCustomSkin, deleteCustomSkin,
     accentColor, setAccentColor,
     settingsTab, setSettingsTab,
-    sidebarPosition, setSidebarPosition,
     navOrder, setNavOrder,
     navVisibility, setNavItemVisible,
+    homeSectionVisibility, setHomeSectionVisible,
     audioOutput, setAudioOutput,
     crossfadeEnabled, crossfadeDuration, setCrossfade,
     pauseFadeEnabled, setPauseFade,
@@ -405,134 +557,63 @@ export default function Settings(): JSX.Element {
     appFont, setAppFont,
     lyricsFont, setLyricsFont,
     gradientsEnabled, setGradientsEnabled,
+    surfaceGradientsEnabled, setSurfaceGradientsEnabled,
+    wrldThemeBackground, setWrldThemeBackground,
+    playlistHeroEnabledDark, playlistHeroEnabledLight, setPlaylistHeroEnabled,
     fullEraNames, setFullEraNames,
-  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'setShowUserAuth', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'fullEraNames', 'setFullEraNames')
+    autoReportErrors, setAutoReportErrors,
+  } = useStorePick('setShowSettings', 'setActiveView', 'openProfile', 'account', 'setShowUserAuth', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors')
 
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
-  const [customAccent, setCustomAccent] = useState(accentColor)
-  const [sleepMinutes, setSleepMinutes] = useState(30)
-  const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Custom skins — which one the editor modal is open on (null = closed), the
-  // hidden file input for Import, and a transient "that file wasn't a skin"
-  // message shown under the section.
-  const [editingSkinId, setEditingSkinId] = useState<string | null>(null)
-  const skinImportRef = useRef<HTMLInputElement>(null)
-  const [skinImportError, setSkinImportError] = useState<string | null>(null)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
+  const {
+    avatarUploading, avatarError, handleAvatarFile, handleAvatarRemove,
+    bioDraft, setBioDraft, bioSaving, saveBio,
+    privacyError, togglePublicPlayHistory, togglePublicPlaylists, togglePublicNowPlaying,
+  } = useSettingsAccount()
+  const chatPresenceEnabled = useChatStore((s) => s.presenceEnabled)
+  const chatReadEnabled = useChatStore((s) => s.readEnabled)
+  const setChatPresenceEnabled = useChatStore((s) => s.setPresenceEnabled)
+  const setChatReadEnabled = useChatStore((s) => s.setReadEnabled)
 
-  // Clone the current look into a new editable skin, make it active (so the
-  // editor previews live), and open the editor on it.
-  const createSkin = (): void => {
-    const skin = createCustomSkin(getSkin(theme), 'My skin')
-    saveCustomSkin(skin)
-    setTheme(skin.id)
-    if (skin.accent) setCustomAccent(skin.accent)
-    setEditingSkinId(skin.id)
-  }
-
-  const importSkinFile = async (file: File): Promise<void> => {
-    setSkinImportError(null)
-    const skin = parseSkinFile(await file.text())
-    if (!skin) { setSkinImportError('That file isn’t a valid skin.'); return }
-    saveCustomSkin(skin)
-    setTheme(skin.id)
-    if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
-    setEditingSkinId(skin.id)
-  }
   // ── Menu items (Appearance) ──────────────────────────────────────────────
-  // Every platform-eligible nav item in saved order — visible ones and the
-  // toggled-off extras alike — so the list is where you both reorder and
-  // show/hide.
-  const navRows = orderedNavItems(navOrder)
-  const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
-  const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
-  const navIsDefault = navOrderIsDefault && navVisIsDefault
-  const resetNav = (): void => {
-    setNavOrder(DEFAULT_NAV_ORDER)
-    for (const item of navRows) {
-      const def = DEFAULT_NAV_VISIBILITY[item.view] ?? true
-      if ((navVisibility[item.view] ?? true) !== def) setNavItemVisible(item.view, def)
-    }
-  }
-  // Move a row to sit adjacent to a target row. Reordering happens on the FULL
-  // order (including any web-hidden items) so their relative spots are preserved
-  // even when a web user rearranges the visible ones.
-  const moveNavItem = (fromRow: number, toRow: number): void => {
-    if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
-    const dragView = navRows[fromRow].view
-    const targetView = navRows[toRow].view
-    const from = full.indexOf(dragView)
-    const next = [...full]
-    next.splice(from, 1)
-    const targetIdx = next.indexOf(targetView)
-    next.splice(toRow > fromRow ? targetIdx + 1 : targetIdx, 0, dragView)
-    setNavOrder(next)
-  }
+  // Games ('heardle' - see NAV_ITEMS) and Playlists are dropped from the
+  // reorder/show-hide list here: both are unconditionally excluded from the
+  // actual mobile nav now that Home covers them directly (see
+  // useMobileNavTabs' MOBILE_HIDDEN_VIEWS), so a row for either here would
+  // toggle something with no visible effect. Desktop's Settings keeps them -
+  // Sidebar still has its own tabs for both.
+  const {
+    customAccent, setCustomAccent, setAccentDebounced,
+    editingSkinId, setEditingSkinId, skinImportRef, skinImportError, createSkin, importSkinFile,
+    navRows, navIsDefault, resetNav, homeIsDefault, resetHome, moveNavItem,
+    notificationSound, chooseNotificationSound,
+    sleepMinutes, setSleepMinutes,
+    devices,
+  } = useSettingsAppearance({
+    filterNavRows: (i) => i.view !== 'heardle' && i.view !== 'playlists',
+    onSkinCreated: () => setPickerOpen(null),
+  })
   const navDrag = useDragReorder(navRows.length, moveNavItem)
 
   // The foot-of-menu controls (Profile, Log out, Diagnostics, Download) had a
   // reorder/hide list here too. They belong to the desktop side menu; the phone
-  // bar has no equivalent row — Settings is pinned there and the profile entry
-  // is role-gated by the card below — so the list configured nothing you could
+  // bar has no equivalent row - Settings is pinned there and the profile entry
+  // is role-gated by the card below - so the list configured nothing you could
   // see. It's gone, along with its drag handlers; the store keys it wrote
   // (navControlOrder / navControlVisibility) are untouched and still drive the
   // desktop build off their defaults.
 
   const closeSettings = (): void => setShowSettings(false)
-  const openMainView = (view: ViewType): void => { setShowSettings(false); setActiveView(view) }
+  // setActiveView alone leaves Settings now that it's a real page in the same
+  // slot as every other view - no separate close step, and no extra history
+  // entry from one.
+  const openMainView = (view: ViewType): void => setActiveView(view)
 
-  // ── Last.fm connect flow (desktop token auth): fetch a token, send the user
-  // to last.fm to approve it, then poll getSession until approval lands (it
-  // returns null while the token is still unapproved). window.open reaches the
-  // system browser in every context — the Electron windows' window-open
-  // handlers route it through shell.openExternal.
-  const [lastfmBusy, setLastfmBusy] = useState(false)
-  const [lastfmWaiting, setLastfmWaiting] = useState(false)
-  const [lastfmError, setLastfmError] = useState<string | null>(null)
-  const lastfmPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const {
+    lastfmBusy, lastfmWaiting, lastfmError, connectLastfm, disconnectLastfm, stopLastfmPoll,
+  } = useLastfmConnect(setLastfmUser)
 
-  const stopLastfmPoll = (): void => {
-    if (lastfmPollRef.current) clearInterval(lastfmPollRef.current)
-    lastfmPollRef.current = null
-    setLastfmWaiting(false)
-  }
-  useEffect(() => () => { if (lastfmPollRef.current) clearInterval(lastfmPollRef.current) }, [])
-
-  const connectLastfm = async (): Promise<void> => {
-    setLastfmError(null)
-    setLastfmBusy(true)
-    try {
-      const token = await lastfmGetAuthToken()
-      window.open(lastfmAuthUrl(token), '_blank', 'noopener')
-      setLastfmWaiting(true)
-      const startedAt = Date.now()
-      lastfmPollRef.current = setInterval(() => {
-        // Tokens live ~60 minutes but nobody waits that long — give up well before.
-        if (Date.now() - startedAt > 5 * 60_000) {
-          stopLastfmPoll()
-          setLastfmError('Authorization timed out — try again.')
-          return
-        }
-        lastfmTryGetSession(token).then((session) => {
-          if (session) { stopLastfmPoll(); setLastfmUser(session.name) }
-        }).catch((e: unknown) => {
-          stopLastfmPoll()
-          setLastfmError(e instanceof Error ? e.message : 'Connection failed')
-        })
-      }, 5000)
-    } catch (e) {
-      setLastfmError(e instanceof Error ? e.message : 'Connection failed')
-    } finally {
-      setLastfmBusy(false)
-    }
-  }
-
-  const disconnectLastfm = (): void => {
-    lastfmDisconnect()
-    setLastfmUser(null)
-  }
-
-  // The Shortcuts section — a key-combo recorder over every hotkey action —
+  // The Shortcuts section - a key-combo recorder over every hotkey action -
   // is gone: there's no keyboard here to record from, and the recorder listened
   // on `window` for a keydown that a touch device never sends. The bindings
   // themselves are untouched in the store, so a paired Bluetooth keyboard still
@@ -544,11 +625,11 @@ export default function Settings(): JSX.Element {
   // at a time. `inSection` = a section is open.
   const [inSection, setInSection] = useState(!!settingsTab)
 
-  // Which picker sheet is open (see PickerRow) — null when none.
+  // Which picker sheet is open (see PickerRow) - null when none.
   const [pickerOpen, setPickerOpen] = useState<'skin' | 'appFont' | 'lyricsFont' | null>(null)
   useBackToClose(() => setPickerOpen(null), pickerOpen !== null)
 
-  // ── Settings search — a flat filter over SETTINGS_SEARCH_INDEX rather than
+  // ── Settings search - a flat filter over SETTINGS_SEARCH_INDEX rather than
   // per-tab content, since matches can live on a tab you're not currently
   // viewing. Gated the same way the rows themselves are (electron/dev mode)
   // so a result never points at a tab that doesn't exist in this build.
@@ -568,11 +649,11 @@ export default function Settings(): JSX.Element {
   // `sub` shows under the label in the category list; `color` is the badge
   // tint, matching the iOS-Settings idiom the Row primitive already uses.
   const tabs: { id: Tab; label: string; icon: ElementType; color: string; sub: string }[] = [
-    { id: 'account', label: 'Account', icon: User, color: '#1d4ed8', sub: account ? (account.display_name || account.discord_username) : 'Not signed in' },
-    { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, layout' },
+    { id: 'account', label: 'Account', icon: User, color: '#1d4ed8', sub: account ? accountDisplayName(account) : 'Not signed in' },
+    { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, lyrics' },
+    { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal, color: '#0d9488', sub: 'Navigation, home screen, eras' },
     { id: 'playback', label: 'Playback', icon: Volume2, color: '#2563eb', sub: 'Output, crossfade, lyrics' },
-    { id: 'feedback', label: 'Feedback', icon: MessageCircle, color: '#db2777', sub: 'Report a problem or idea' },
-    { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, legal' },
+    { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, feedback, legal' },
   ]
 
   const openSection = (id: Tab): void => {
@@ -596,16 +677,12 @@ export default function Settings(): JSX.Element {
   // rendering a blank pane.
   useEffect(() => {
     if (!settingsTab) return
-    const known = SECTION_IDS.includes(settingsTab as Tab)
-    if (known) { setTab(settingsTab as Tab); setInSection(true) }
+    // Feedback used to be its own section; it now lives under About.
+    const target = (settingsTab as string) === 'feedback' ? 'about' : settingsTab
+    const known = SECTION_IDS.includes(target as Tab)
+    if (known) { setTab(target as Tab); setInSection(true) }
     setSettingsTab(null)
   }, [settingsTab, setSettingsTab])
-
-  useEffect(() => {
-    navigator.mediaDevices?.enumerateDevices().then((devs) => {
-      setDevices(devs.filter((d) => d.kind === 'audiooutput'))
-    }).catch(() => {})
-  }, [])
 
   const toggleSleepTimer = (): void => {
     if (sleepTimerEnd) setSleepTimer(null)
@@ -632,12 +709,12 @@ export default function Settings(): JSX.Element {
                 setTheme(skin.id)
                 if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
               }}
-              onDoubleClick={() => { if (skin.custom) setEditingSkinId(skin.id) }}
+              onDoubleClick={() => { if (skin.custom) { setEditingSkinId(skin.id); setPickerOpen(null) } }}
               className="w-full text-left"
               title={skin.dynamic ? 'Palette follows the current song’s cover art' : skin.name}
             >
               {/* Mini app mock: sidebar strip, two "text" lines, and a
-                  player bar with the skin's accent — a live swatch of
+                  player bar with the skin's accent - a live swatch of
                   the actual palette values, not approximations. */}
               <div
                 className="h-16 rounded-xl overflow-hidden flex border transition-transform group-active:scale-[0.97]"
@@ -655,7 +732,7 @@ export default function Settings(): JSX.Element {
                     <div
                       className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{
-                        // Dynamic skin has no fixed accent — a color wheel
+                        // Dynamic skin has no fixed accent - a color wheel
                         // signals "follows the song's cover art".
                         background: skin.dynamic
                           ? 'conic-gradient(#f43f5e, #f59e0b, #10b981, #38bdf8, #a78bfa, #f43f5e)'
@@ -672,11 +749,11 @@ export default function Settings(): JSX.Element {
             </button>
             {/* Custom skins get an edit button (sibling, not nested, to keep
                 the markup button-in-button free). It used to be a hover
-                reveal, with double-click as the alternative — neither exists
+                reveal, with double-click as the alternative - neither exists
                 on touch, so it stays visible. */}
             {skin.custom && (
               <button
-                onClick={(e) => { e.stopPropagation(); setEditingSkinId(skin.id) }}
+                onClick={(e) => { e.stopPropagation(); setEditingSkinId(skin.id); setPickerOpen(null) }}
                 className="absolute top-1.5 right-1.5 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center active:bg-black/70 transition-colors"
                 aria-label={`Edit ${skin.name}`}
               >
@@ -727,7 +804,7 @@ export default function Settings(): JSX.Element {
   return (
     // A page, not a dialog. This used to be a fixed overlay covering the whole
     // viewport, which meant the player bar disappeared the moment you opened
-    // Settings — you couldn't see or control what was playing while changing
+    // Settings - you couldn't see or control what was playing while changing
     // playback settings, which is exactly when you'd want to. It now renders
     // inside the app's content area like every other tab, so the player and the
     // nav bar stay put, the status-bar inset is already handled upstream, and
@@ -743,9 +820,9 @@ export default function Settings(): JSX.Element {
         />
       )}
 
-      {/* App bar — same shape as the other tabs', and no background of its own
+      {/* App bar - same shape as the other tabs', and no background of its own
           so the shell's (optionally accent-gradient) backdrop runs unbroken. */}
-      <div className="shrink-0 flex items-center gap-1 px-2">
+      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-2">
         {inSection && (
           <button
             onClick={() => setInSection(false)}
@@ -759,18 +836,18 @@ export default function Settings(): JSX.Element {
           <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">
             {inSection ? (activeTab?.label ?? 'Settings') : 'Settings'}
           </h1>
-          <p className="text-text-muted text-xs truncate">
-            {inSection ? (activeTab?.sub ?? '') : `unreleased v${APP_VERSION}`}
-          </p>
+          {inSection && (
+            <p className="text-text-muted text-xs truncate">{activeTab?.sub ?? ''}</p>
+          )}
         </div>
       </div>
 
-        {/* Root — the category list. Tapping a row drills into that section
+        {/* Root - the category list. Tapping a row drills into that section
             (the header grows a back arrow), so each pane gets the whole screen
             instead of sharing it with a pill scroller. */}
         {!inSection && (
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6 space-y-4">
-            {/* Search — a flat filter over every setting row (see
+            {/* Search - a flat filter over every setting row (see
                 SETTINGS_SEARCH_INDEX), not just the active tab; picking a
                 result drills straight into its section. */}
             <div className="relative">
@@ -821,7 +898,7 @@ export default function Settings(): JSX.Element {
               </div>
             ) : (
               <>
-            {/* Account gets a profile header rather than a list row — the
+            {/* Account gets a profile header rather than a list row - the
                 platform idiom (iOS's Apple ID card, Android's account chip),
                 and it makes signing in discoverable instead of buried as one
                 more identical row. It's pulled out of the list below. */}
@@ -829,18 +906,18 @@ export default function Settings(): JSX.Element {
               onClick={() => openSection('account')}
               className="w-full flex items-center gap-3.5 p-3.5 rounded-2xl bg-[var(--surface-overlay)] text-left active:bg-[var(--surface-raised)] transition-colors"
             >
-              {account?.discord_avatar
-                ? <img src={account.discord_avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+              {account?.avatar
+                ? <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
                 : (
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${account ? 'bg-accent/20 text-accent text-lg font-semibold' : 'bg-[var(--surface-raised)] text-text-muted'}`}>
                     {account
-                      ? (account.display_name || account.discord_username || '?').charAt(0).toUpperCase()
+                      ? initial(accountDisplayName(account))
                       : <User size={22} />}
                   </div>
                 )}
               <div className="min-w-0 flex-1">
                 <p className="text-text-primary text-base font-semibold truncate">
-                  {account ? (account.display_name || account.discord_username) : 'Not signed in'}
+                  {account ? accountDisplayName(account) : 'Not signed in'}
                 </p>
                 <p className="text-text-muted text-xs truncate">
                   {account ? 'Account, token, sign out' : 'Sign in to sync likes and playlists'}
@@ -875,32 +952,159 @@ export default function Settings(): JSX.Element {
           </div>
         )}
 
-        {/* The drilled-into section — one category owns the whole screen. */}
+        {/* The drilled-into section - one category owns the whole screen. */}
         {inSection && (
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
+          <div key={tab} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
 
             {/* ── Account ── */}
             {tab === 'account' && (
               <div>
                 {account ? (
                   <>
-                    {/* Identity as a centred header rather than a list row —
+                    {/* Identity as a centred header rather than a list row -
                         the platform idiom, and there's nothing to compare it
                         against on a screen it has to itself. */}
                     <div className="flex flex-col items-center text-center pt-2 pb-6">
-                      {account.discord_avatar
-                        ? <img src={account.discord_avatar} alt="" className="w-20 h-20 rounded-full object-cover" />
-                        : <div className="w-20 h-20 rounded-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
-                      <p className="mt-3 text-text-primary text-lg font-semibold truncate max-w-full">{account.display_name || account.discord_username}</p>
-                      <p className="text-text-muted text-xs">Signed in with Discord</p>
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) void handleAvatarFile(file)
+                          e.target.value = ''
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        disabled={avatarUploading}
+                        className="relative w-20 h-20 rounded-full active:opacity-80 transition-opacity"
+                      >
+                        {account.avatar
+                          ? <img src={account.avatar} alt="" className="w-20 h-20 rounded-full object-cover" />
+                          : <div className="w-20 h-20 rounded-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{initial(accountDisplayName(account))}</div>}
+                        <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface">
+                          {avatarUploading ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
+                        </span>
+                      </button>
+                      <p className="mt-3 text-text-primary text-lg font-semibold truncate max-w-full">{accountDisplayName(account)}</p>
+                      <p className="text-text-muted text-xs">{account.discord_id ? 'Signed in with Discord' : 'Signed in'}</p>
+                      {avatarError && <p className="text-red-400 text-xs mt-1">{avatarError}</p>}
+                      {account.avatar && !avatarUploading && (
+                        <button
+                          type="button"
+                          onClick={() => void handleAvatarRemove()}
+                          className="mt-2 text-xs text-text-muted hover:text-red-400 transition-colors"
+                        >
+                          Remove photo
+                        </button>
+                      )}
                     </div>
+
+                    {account.is_donor && (
+                      <div className="flex items-center gap-2.5 mb-4 px-3 py-2.5 rounded-xl border border-pink-500/20 bg-pink-500/5">
+                        <Heart size={16} className="text-pink-400 shrink-0" fill="currentColor" />
+                        <div className="min-w-0">
+                          <p className="text-text-primary text-xs font-semibold">
+                            Donor{account.donor_since ? ` since ${new Date(account.donor_since).toLocaleDateString()}` : ''}
+                          </p>
+                          <p className="text-text-muted text-[11px]">Priority CDN downloads — your files get matched to faster nodes first</p>
+                        </div>
+                      </div>
+                    )}
+
+                    <SettingsCard title="Bio">
+                      <textarea
+                        value={bioDraft}
+                        onChange={(e) => setBioDraft(e.target.value.slice(0, 500))}
+                        onBlur={() => void saveBio()}
+                        placeholder="Tell people about yourself"
+                        rows={3}
+                        className="w-full py-3 bg-transparent text-text-primary text-[15px] placeholder:text-text-muted resize-none focus:outline-none"
+                      />
+                      <div className="flex items-center justify-between pb-1">
+                        <span className="text-text-muted text-xs">{bioSaving ? 'Saving…' : `${bioDraft.length}/500`}</span>
+                      </div>
+                    </SettingsCard>
+
+                    <SettingsCard title="Public profile">
+                      <Row
+                        icon={History}
+                        iconColor="#0f766e"
+                        label="Show listening history"
+                        sub="Let anyone with your profile link see your recently played tracks"
+                      >
+                        <Toggle on={!!account.public_play_history} onClick={() => void togglePublicPlayHistory()} />
+                      </Row>
+                      <Row
+                        icon={Music2}
+                        iconColor="#0f766e"
+                        label="Show public playlists"
+                        sub="List your playlists that are already marked public on your profile"
+                      >
+                        <Toggle on={!!account.public_playlists} onClick={() => void togglePublicPlaylists()} />
+                      </Row>
+                      <Row
+                        icon={Radio}
+                        iconColor="#0f766e"
+                        label="Share what you're listening to"
+                        sub="Shows the track you're currently playing on your profile"
+                      >
+                        <Toggle on={!!account.public_now_playing} onClick={() => void togglePublicNowPlaying()} />
+                      </Row>
+                      {privacyError && <p className="text-red-400 text-xs pb-2">{privacyError}</p>}
+                    </SettingsCard>
+
+                    {hasChatAccess(account) && (
+                      <SettingsCard title="Chat privacy">
+                        <Row
+                          icon={Radio}
+                          iconColor="#0f766e"
+                          label="Online status"
+                          sub="Turn off to stop requesting and showing who's online"
+                        >
+                          <Toggle on={chatPresenceEnabled} onClick={() => setChatPresenceEnabled(!chatPresenceEnabled)} />
+                        </Row>
+                        <Row
+                          icon={Check}
+                          iconColor="#0f766e"
+                          label="Read receipts"
+                          sub="Turn off to stop sending read marks to the server"
+                        >
+                          <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
+                        </Row>
+                      </SettingsCard>
+                    )}
+                    {hasChatAccess(account) && (
+                      <SettingsCard title="Chat devices">
+                        <ChatDevices userId={account.id} />
+                        <ChatKeyTransfer userId={account.id} />
+                      </SettingsCard>
+                    )}
+                    <SettingsCard title="My CDN nodes">
+                      <MyCdnNodes />
+                    </SettingsCard>
+
+                    {showStaffProfile(account) && (
+                      <SettingsCard>
+                        <button
+                          onClick={() => openProfile()}
+                          className="w-full flex items-center gap-3 py-3 min-h-[52px] active:opacity-70"
+                        >
+                          <ShieldCheck size={18} className="text-accent shrink-0" />
+                          <span className="flex-1 text-left text-text-primary text-[15px] font-medium">{staffProfileLabel(account)} profile</span>
+                        </button>
+                      </SettingsCard>
+                    )}
 
                     <SettingsCard title="Auth token">
                       <Row
                         icon={KeyRound}
                         iconColor="#0f766e"
                         label="Show token"
-                        sub="Paste it on a device where Discord sign-in can't complete — like this app, where the redirect can't come back in-app"
+                        sub="Paste it on a device where Discord sign-in can't complete - like this app, where the redirect can't come back in-app"
                       >
                         <Toggle on={showToken} onClick={() => setShowToken(v => !v)} />
                       </Row>
@@ -946,16 +1150,16 @@ export default function Settings(): JSX.Element {
                       </div>
                       <p className="mt-3 text-text-primary text-lg font-semibold">Not signed in</p>
                       <p className="text-text-muted text-xs leading-relaxed mt-1 max-w-[280px]">
-                        Log in with Discord to save favorite tracks and playlists that follow you on every device.
+                        Log in to save favorite tracks and playlists that follow you on every device.
                       </p>
                     </div>
 
                     <button
                       onClick={() => setShowUserAuth(true)}
-                      className="w-full h-12 rounded-xl bg-[#5865F2] text-white text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 transition-opacity mb-4"
+                      className="w-full h-12 rounded-xl bg-accent text-white text-[15px] font-semibold flex items-center justify-center gap-2 active:opacity-80 transition-opacity mb-4"
                     >
                       <LogIn size={17} />
-                      Continue with Discord
+                      Log in
                     </button>
                   </>
                 )}
@@ -1014,7 +1218,7 @@ export default function Settings(): JSX.Element {
                         swatches are 40px (a 28px circle is a mouse target, not
                         a finger one), and eight presets plus the custom one
                         wrap to an even 5 + 4. The active preset carries a check
-                        — at this size an outline ring around a saturated circle
+                        - at this size an outline ring around a saturated circle
                         is easy to miss. */}
                     <div className="grid grid-cols-5 gap-x-2 gap-y-3 justify-items-center">
                       {ACCENT_PRESETS.map((c) => (
@@ -1029,7 +1233,7 @@ export default function Settings(): JSX.Element {
                           {accentColor === c && <Check size={18} className="text-white" strokeWidth={3} />}
                         </button>
                       ))}
-                      {/* The custom swatch is the color input itself — you
+                      {/* The custom swatch is the color input itself - you
                           can't put a check inside one, so this is the one that
                           shows selection as a ring. `color-dot` strips the
                           native bordered square Chrome draws inside the
@@ -1041,15 +1245,14 @@ export default function Settings(): JSX.Element {
                           value={customAccent}
                           onChange={(e) => {
                             setCustomAccent(e.target.value)
-                            if (accentDebounceRef.current) clearTimeout(accentDebounceRef.current)
-                            accentDebounceRef.current = setTimeout(() => setAccentColor(e.target.value), 80)
+                            setAccentDebounced(e.target.value)
                           }}
                           className="color-dot absolute inset-0 w-10 h-10 rounded-full"
                           style={{ outline: accentColor === customAccent && !ACCENT_PRESETS.includes(accentColor) ? '2px solid var(--text-primary)' : 'none', outlineOffset: '2px' }}
                           aria-label="Custom accent color"
                         />
                         {/* Otherwise this is just a ninth coloured circle with
-                            no hint that it opens a picker — and it starts out
+                            no hint that it opens a picker - and it starts out
                             holding the current accent, so it can be an exact
                             duplicate of the swatch beside it. */}
                         <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 w-[18px] h-[18px] rounded-full bg-[var(--surface-overlay)] flex items-center justify-center">
@@ -1061,10 +1264,40 @@ export default function Settings(): JSX.Element {
                   <Row
                     icon={Waves}
                     iconColor="#8b5cf6"
-                    label="Gradient surfaces"
-                    sub="Accent-tinted gradients behind the app, nav, and player"
+                    label="App gradients"
+                    sub="Accent-tinted gradients behind the app and nav"
                   >
                     <Toggle on={gradientsEnabled} onClick={() => setGradientsEnabled(!gradientsEnabled)} />
+                  </Row>
+                  <Row
+                    icon={Waves}
+                    iconColor="#8b5cf6"
+                    label="Control gradients"
+                    sub="Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus"
+                  >
+                    <Toggle on={surfaceGradientsEnabled} onClick={() => setSurfaceGradientsEnabled(!surfaceGradientsEnabled)} />
+                  </Row>
+                  <Row
+                    icon={Disc}
+                    iconColor="#8b5cf6"
+                    label="Theme background in WRLD"
+                    sub="Use the app's theme behind the WRLD tab instead of the playing song's cover"
+                  >
+                    <Toggle on={wrldThemeBackground} onClick={() => setWrldThemeBackground(!wrldThemeBackground)} />
+                  </Row>
+                  <Row
+                    icon={Images}
+                    iconColor="#8b5cf6"
+                    label="Playlist header art"
+                    sub="Full-bleed blurred cover art behind a playlist's header - off falls back to a plain header. Tracked separately for light and dark skins."
+                  >
+                    {/* Tracked per skin darkness (playlistHeroEnabledDark/
+                        Light) rather than one flag - this always shows/writes
+                        the value for whichever skin is active right now. */}
+                    {(() => {
+                      const heroOn = getSkin(theme).dark ? playlistHeroEnabledDark : playlistHeroEnabledLight
+                      return <Toggle on={heroOn} onClick={() => setPlaylistHeroEnabled(!heroOn)} />
+                    })()}
                   </Row>
                 </SettingsCard>
 
@@ -1091,7 +1324,7 @@ export default function Settings(): JSX.Element {
                       onClick={() => setPickerOpen('lyricsFont')}
                     />
                   </Block>
-                  <Block icon={FileText} iconColor="#db2777" label="Lyrics text size" sub="Synced and plain lyrics everywhere — WRLD tab, now playing, mini player">
+                  <Block icon={FileText} iconColor="#db2777" label="Lyrics text size" sub="Synced and plain lyrics everywhere - WRLD tab, now playing, mini player">
                     <Segmented value={lyricsScale} options={LYRIC_TEXT_SIZES.map(({ label, value }) => ({ value, label }))} onChange={setLyricsScale} />
                   </Block>
                   <Block icon={AlignCenter} iconColor="#0ea5e9" label="Lyrics alignment" sub="How lyric lines line up">
@@ -1123,7 +1356,7 @@ export default function Settings(): JSX.Element {
                       </div>
                     )}
                   </Row>
-                  <Block icon={Palette} iconColor="#9333ea" label="Lyric colors" sub="Color the line being sung and the ones that aren't — WRLD tab, now playing, mini player">
+                  <Block icon={Palette} iconColor="#9333ea" label="Lyric colors" sub="Color the line being sung and the ones that aren't - WRLD tab, now playing, mini player">
                     <div className="flex flex-col gap-3">
                       <LyricColorRow
                         label="Current line"
@@ -1141,6 +1374,14 @@ export default function Settings(): JSX.Element {
                       />
                     </div>
                   </Block>
+                </SettingsCard>
+              </div>
+            )}
+
+            {/* ── Preferences ── */}
+            {!settingsQueryTrimmed && tab === 'preferences' && (
+              <div>
+                <SettingsCard title="General">
                   <Row
                     icon={BookOpen}
                     iconColor="#0891b2"
@@ -1151,16 +1392,6 @@ export default function Settings(): JSX.Element {
                 </SettingsCard>
 
                 <SettingsCard title="Navigation">
-                  <Block icon={PanelLeft} iconColor="#0d9488" label="Tab bar position" sub="Which edge the nav tabs sit on">
-                    <Segmented
-                      // A left/right value saved on desktop renders as bottom
-                      // tabs here, so Bottom is what's really selected —
-                      // without this, neither option would look picked at all.
-                      value={sidebarPosition === 'top' ? 'top' : 'bottom'}
-                      options={NAV_POSITIONS.map(({ id, label, icon }) => ({ value: id, label, icon }))}
-                      onChange={setSidebarPosition}
-                    />
-                  </Block>
                   <Block
                     icon={ListOrdered}
                     iconColor="#6366f1"
@@ -1177,7 +1408,7 @@ export default function Settings(): JSX.Element {
                   >
                     {/* HTML5 drag events never fire for touch, so this is a
                         real touch drag (see mobile/useDragReorder) driven by
-                        the grip handle, not the row itself — the row still
+                        the grip handle, not the row itself - the row still
                         needs to host the visibility toggle without that tap
                         being mistaken for the start of a drag. */}
                     <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
@@ -1202,9 +1433,54 @@ export default function Settings(): JSX.Element {
                             </button>
                             <span className={`w-6 h-6 shrink-0 flex items-center justify-center ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{item.icon}</span>
                             <span className={`flex-1 min-w-0 truncate text-sm ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{item.label}</span>
+                            {item.alwaysVisible ? (
+                              <span
+                                title="Always shown"
+                                className="shrink-0 w-11 h-11 flex items-center justify-center text-text-muted/50"
+                              >
+                                <Lock size={15} />
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setNavItemVisible(item.view, !shown)}
+                                aria-label={shown ? `Hide ${item.label}` : `Show ${item.label}`}
+                                className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
+                              >
+                                {shown ? <Eye size={16} /> : <EyeOff size={16} />}
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </Block>
+                  <Block
+                    icon={House}
+                    iconColor="#059669"
+                    label="Home screen"
+                    sub="Choose which sections show on the Home tab"
+                    action={!homeIsDefault ? (
+                      <button
+                        onClick={resetHome}
+                        className="flex items-center gap-1 px-2 py-2 -my-1 text-xs text-text-muted active:text-text-primary transition-colors shrink-0"
+                      >
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                    ) : undefined}
+                  >
+                    <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
+                      {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
+                        const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
+                        return (
+                          <div
+                            key={section.id}
+                            className="flex items-center gap-2 pl-3 pr-1 py-1 border-b border-[var(--border)] last:border-b-0 bg-[var(--surface-highest)]"
+                          >
+                            <span className={`w-6 h-6 shrink-0 flex items-center justify-center ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{section.icon}</span>
+                            <span className={`flex-1 min-w-0 truncate text-sm ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{section.label}</span>
                             <button
-                              onClick={() => setNavItemVisible(item.view, !shown)}
-                              aria-label={shown ? `Hide ${item.label}` : `Show ${item.label}`}
+                              onClick={() => setHomeSectionVisible(section.id, !shown)}
+                              aria-label={shown ? `Hide ${section.label}` : `Show ${section.label}`}
                               className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
                             >
                               {shown ? <Eye size={16} /> : <EyeOff size={16} />}
@@ -1214,19 +1490,6 @@ export default function Settings(): JSX.Element {
                       })}
                     </div>
                   </Block>
-                  {/* The Editor/Admin tab isn't in the NAV_ITEMS registry the
-                      list above is built from, so it gets its own switch —
-                      shown only to the accounts that have it. */}
-                  {(account?.is_editor || account?.is_administrator) && ([
-                    { view: 'editor-profile' as ViewType, label: account?.is_administrator ? 'Admin' : 'Editor', icon: ShieldCheck },
-                  ]).map((item) => {
-                    const shown = navVisibility[item.view] ?? true
-                    return (
-                      <Row key={item.view} icon={item.icon} iconColor="#f59e0b" label={`${item.label} tab`} sub="Editor-only tab in the nav bar">
-                        <Toggle on={shown} onClick={() => setNavItemVisible(item.view, !shown)} />
-                      </Row>
-                    )
-                  })}
                 </SettingsCard>
               </div>
             )}
@@ -1272,9 +1535,14 @@ export default function Settings(): JSX.Element {
                       <span className="text-text-muted text-xs tabular-nums w-8 text-right shrink-0">{crossfadeDuration}s</span>
                     </div>
                   )}
-                  <Row icon={Waves} iconColor="#0ea5e9" label="Smooth fade when pausing">
-                    <Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} />
-                  </Row>
+                  {/* Hidden on iOS: Safari ignores <audio>.volume entirely (locked
+                      to the hardware buttons), so the fade ramp has nothing to
+                      animate there - same restriction that hides the EQ. */}
+                  {!IS_IOS && (
+                    <Row icon={Waves} iconColor="#0ea5e9" label="Smooth fade when pausing">
+                      <Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} />
+                    </Row>
+                  )}
                   <Row icon={FileText} iconColor="#059669" label="Prefer OG version">
                     <Toggle on={preferOgVersion} onClick={() => setPreferOgVersion(!preferOgVersion)} />
                   </Row>
@@ -1340,7 +1608,7 @@ export default function Settings(): JSX.Element {
                       </button>
                     ) : (
                       <>
-                        {/* Was a native <select> beside a Start button — two
+                        {/* Was a native <select> beside a Start button - two
                             taps and an OS dialog to pick one of five values. */}
                         <Segmented
                           value={sleepMinutes}
@@ -1357,11 +1625,36 @@ export default function Settings(): JSX.Element {
                     )}
                   </Block>
                   <Block
+                    icon={Bell}
+                    iconColor="#f59e0b"
+                    label="Notification sound"
+                    sub="Plays when a chat message or news post notification fires - tap one to preview it"
+                  >
+                    <div className="flex flex-wrap gap-1.5">
+                      {NOTIFICATION_SOUNDS.map((s) => {
+                        const active = notificationSound === s.id
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => chooseNotificationSound(s.id)}
+                            aria-pressed={active}
+                            className={`flex items-center gap-1.5 px-3 h-9 rounded-full text-[13px] font-medium transition-colors ${
+                              active ? 'bg-accent text-white' : 'bg-[var(--surface-highest)] text-text-secondary active:bg-[var(--surface-overlay)]'
+                            }`}
+                          >
+                            {s.notes.length > 0 ? <Volume2 size={13} /> : <BellOff size={13} />}
+                            {s.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </Block>
+                  <Block
                     icon={CloudUpload}
                     iconColor="#d51007"
                     label="Last.fm scrobbling"
                     sub={
-                      !lastfmConfigured() ? 'Unavailable — this build has no Last.fm API key'
+                      !lastfmConfigured() ? 'Unavailable - this build has no Last.fm API key'
                       : lastfmError ? lastfmError
                       : lastfmUser ? `Connected as ${lastfmUser}`
                       : lastfmWaiting ? 'Approve access on last.fm, then come back here'
@@ -1385,7 +1678,7 @@ export default function Settings(): JSX.Element {
                           className="w-full h-11 rounded-xl text-sm font-semibold bg-[var(--surface-highest)] text-text-secondary flex items-center justify-center gap-2 active:bg-[var(--surface-raised)] transition-colors"
                         >
                           <Loader2 size={15} className="animate-spin" />
-                          Waiting — tap to cancel
+                          Waiting - tap to cancel
                         </button>
                       ) : (
                         <button
@@ -1398,29 +1691,50 @@ export default function Settings(): JSX.Element {
                       )
                     )}
                   </Block>
+                  <Block
+                    icon={Server}
+                    iconColor="#0ea5e9"
+                    label="Distributed CDN downloads"
+                    sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
+                    action={
+                      <Toggle
+                        on={cdnEnabled}
+                        onClick={() => {
+                          const next = !cdnEnabled
+                          cdnService.setEnabled(next)
+                          setCdnEnabled(next)
+                        }}
+                      />
+                    }
+                  >
+                    <></>
+                  </Block>
                 </SettingsCard>
-              </div>
-            )}
-
-            {/* ── Feedback ── */}
-            {!settingsQueryTrimmed && tab === 'feedback' && (
-              <div>
-                <p className="text-text-muted text-xs mb-4 leading-relaxed">
-                  Found a bug or have an idea? Let us know. To report a problem with a
-                  specific song's info or lyrics, open that song and choose “Report”.
-                </p>
-                <ReportForm mode={{ kind: 'feedback' }} />
               </div>
             )}
 
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
-                <p className="text-text-muted text-xs mb-3">
+                <p className="text-text-muted text-xs mb-1">
                   unreleased v{APP_VERSION} &mdash; powered by{' '}
                   <a href="https://juicewrldapi.com" target="_blank" rel="noopener noreferrer" className="text-accent">
                     juicewrldapi.com
                   </a>
+                </p>
+                <p className="text-text-muted text-xs mb-3 flex items-center gap-1.5">
+                  <span>
+                    Last updated to commit{' '}
+                    <a
+                      href={`https://github.com/Juice-WRLD-API/Unreleased/commit/${COMMIT_HASH}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent font-mono"
+                    >
+                      {COMMIT_HASH}
+                    </a>
+                  </span>
+                  <CommitFreshnessBulb />
                 </p>
 
                 <SettingsCard title="Links">
@@ -1428,9 +1742,30 @@ export default function Settings(): JSX.Element {
                   <LinkRow icon={MessageCircle} iconColor="#5865F2" label="Discord" href="https://discord.gg/jwa" />
                   <LinkRow icon={Globe} iconColor="#0891b2" label="API" href="https://juicewrldapi.com" />
                   <ActionRow icon={BookOpen} iconColor="#6366f1" label="API Docs" onClick={() => openMainView('docs')} />
+                  <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
 
-                {/* Only shown to accounts that aren't already one — these are
+                <SettingsCard title="Feedback">
+                  <ActionRow icon={MessageCircle} iconColor="#db2777" label="Send feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
+                  <Row
+                    icon={Bug}
+                    iconColor="#ef4444"
+                    label="Auto-report app errors"
+                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                  >
+                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
+                </SettingsCard>
+
+                <SettingsCard title="API servers">
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] pb-1 leading-snug">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
+                  </p>
+                </SettingsCard>
+
+                {/* Only shown to accounts that aren't already one - these are
                     the application pages, not a status display. */}
                 {((!account || (!account.is_editor && !account.is_administrator))
                   || (CONTRIBUTOR_ENABLED && (!account || (!account.is_contributor && !account.is_administrator)))) && (
@@ -1499,7 +1834,7 @@ export default function Settings(): JSX.Element {
 
       {legalDoc && <LegalModal initialDoc={legalDoc} onClose={() => setLegalDoc(null)} />}
 
-      {/* Picker sheet — the expanded form of whichever PickerRow was tapped
+      {/* Picker sheet - the expanded form of whichever PickerRow was tapped
           (Skin / App font / Lyrics font), on the app's shared bottom-sheet
           primitive rather than a hand-rolled portal. */}
       {pickerOpen && (

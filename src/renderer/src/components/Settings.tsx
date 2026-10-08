@@ -1,8 +1,3 @@
-import { useIsMobile } from '../hooks/useIsMobile'
-import SettingsDesktop from './Settings.desktop'
-import SettingsMobile from './Settings.mobile'
+import { responsiveView } from '../lib/lazyView'
 
-export default function Settings(): JSX.Element {
-  const isMobile = useIsMobile()
-  return isMobile ? <SettingsMobile /> : <SettingsDesktop />
-}
+export default responsiveView(() => import('./Settings.desktop'), () => import('./Settings.mobile'))

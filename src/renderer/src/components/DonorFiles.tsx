@@ -1,0 +1,737 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowDown, ArrowUp, Check, Copy, Download, FileAudio, FileImage, ImagePlus, Link2, Link2Off,
+  ListPlus, Loader2, Music2, Pause, Pencil, Play, Search, Tag, Trash2, Upload, X,
+} from 'lucide-react'
+import {
+  DONOR_ALLOWED_EXTENSIONS, deleteDonorFile, isImageFile, listDonorFiles,
+  updateDonorFile, uploadDonorFile, validateDonorUpload, fetchDonorFileBlob,
+} from '../lib/donorFilesApi'
+import type { DonorFile, DonorQuota } from '../lib/donorFilesApi'
+import { DONOR_UPLOADS_CHANGED, queueDonorUploads } from '../lib/donorUploads'
+import { cachedDonorImageUrl, ensureDonorImageUrl } from '../lib/donorImageCache'
+import { cachedDonorCover, ensureDonorCover, forgetDonorCover } from '../lib/donorCoverArt'
+import { formatBytes } from '../lib/format'
+import { donorFileToTrack, donorTrackId, isDonorAudio } from '../lib/donorPlayback'
+import { useStore } from '../store/useStore'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { canEditTags, readMp3Tags, writeMp3Tags } from '../lib/mp3Tags'
+import type { Mp3Tags } from '../lib/mp3Tags'
+import DonorContextMenu from './DonorContextMenu'
+import type { DonorMenuState } from './DonorContextMenu'
+
+const ACCEPT = DONOR_ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(',')
+type SortBy = 'date' | 'name' | 'size'
+
+// Donor cloud storage: upload, rename, share by link, play, download, delete.
+// Own-file downloads need the auth header, so playback/preview/download go
+// through a fetched blob instead of pointing an element straight at the URL.
+export default function DonorFiles(): JSX.Element {
+  const isMobile = useIsMobile()
+  const [files, setFiles] = useState<DonorFile[] | null>(null)
+  const [quota, setQuota] = useState<DonorQuota | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ id: string; url: string } | null>(null)
+  const [tagEdit, setTagEdit] = useState<{ id: string; tags: Mp3Tags | null; saving: boolean } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<SortBy>('date')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [ctxMenu, setCtxMenu] = useState<DonorMenuState | null>(null)
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), [])
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const res = await listDonorFiles()
+      setFiles(res.files)
+      setQuota(res.quota)
+      setError(null)
+    } catch (err) {
+      setError((err as Error).message || 'Could not load files')
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  // Playlists resolve their entries against the store's copy of this list.
+  const setDonorFiles = useStore((s) => s.setDonorFiles)
+  const replaceDonorFileId = useStore((s) => s.replaceDonorFileId)
+  const donorPlaylists = useStore((s) => s.donorPlaylists)
+  const createDonorPlaylist = useStore((s) => s.createDonorPlaylist)
+  const addToDonorPlaylist = useStore((s) => s.addToDonorPlaylist)
+  const removeFromDonorPlaylist = useStore((s) => s.removeFromDonorPlaylist)
+  const [playlistPicker, setPlaylistPicker] = useState<string | null>(null)
+  const [newPlaylistName, setNewPlaylistName] = useState('')
+  useEffect(() => { if (files) setDonorFiles(files) }, [files, setDonorFiles])
+
+  // Playback goes through the normal queue/player rather than a local <audio>
+  // element - a local element dies the instant this component unmounts (e.g.
+  // switching away from Files), and never showed up in Now Playing/the mini
+  // player to begin with.
+  const currentTrackId = useStore((s) => s.currentTrack?.id)
+  const isPlayingGlobal = useStore((s) => s.isPlaying)
+  const setIsPlayingGlobal = useStore((s) => s.setIsPlaying)
+  const playTrack = useStore((s) => s.playTrack)
+  const togglePlay = (f: DonorFile): void => {
+    const trackId = donorTrackId(f.file_id)
+    if (currentTrackId === trackId) { setIsPlayingGlobal(!isPlayingGlobal); return }
+    const queueTracks = (files ?? []).filter(isDonorAudio).map(donorFileToTrack)
+    const track = queueTracks.find((t) => t.id === trackId)
+    if (track) playTrack(track, queueTracks)
+  }
+
+  // Uploads run through lib/donorUploads (module-scoped, like comp proposal
+  // uploads) so they show progress in the Uploads panel and survive this
+  // component unmounting. This just reflects the result once each finishes.
+  useEffect(() => {
+    const handler = (e: Event): void => {
+      const { file, quota: q } = (e as CustomEvent<{ file: DonorFile; quota: DonorQuota }>).detail
+      setFiles((prev) => [file, ...(prev ?? [])])
+      setQuota(q)
+    }
+    window.addEventListener(DONOR_UPLOADS_CHANGED, handler)
+    return () => window.removeEventListener(DONOR_UPLOADS_CHANGED, handler)
+  }, [])
+
+  const visibleFiles = useMemo(() => {
+    if (!files) return null
+    const q = search.trim().toLowerCase()
+    const filtered = q ? files.filter((f) => f.filename.toLowerCase().includes(q)) : files
+    const sorted = [...filtered].sort((a, b) => {
+      const cmp = sortBy === 'name' ? a.filename.localeCompare(b.filename)
+        : sortBy === 'size' ? a.size - b.size
+        : new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return sorted
+  }, [files, search, sortBy, sortDir])
+
+  const toggleSort = (by: SortBy): void => {
+    if (sortBy === by) { setSortDir((d) => (d === 'asc' ? 'desc' : 'asc')); return }
+    setSortBy(by)
+    setSortDir(by === 'name' ? 'asc' : 'desc')
+  }
+
+  // Validated up front so a bad pick never occupies a row in the Uploads
+  // panel - the actual transfer is queued there (see lib/donorUploads) rather
+  // than run inline, so it keeps going if this page is closed.
+  const upload = (picked: FileList | null): void => {
+    if (!picked || picked.length === 0) return
+    setError(null)
+    let remaining = quota?.remaining
+    const valid: File[] = []
+    for (const file of Array.from(picked)) {
+      const problem = validateDonorUpload(file, quota && remaining !== undefined ? { ...quota, remaining } : null)
+      if (problem) { setError(problem); continue }
+      if (remaining !== undefined) remaining -= file.size
+      valid.push(file)
+    }
+    queueDonorUploads(valid)
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  const patch = async (f: DonorFile, body: { filename?: string; is_shared?: boolean }): Promise<DonorFile | null> => {
+    setBusy(f.file_id)
+    try {
+      const updated = await updateDonorFile(f.file_id, body)
+      setFiles((prev) => prev?.map((x) => (x.file_id === f.file_id ? updated : x)) ?? prev)
+      setError(null)
+      return updated
+    } catch (err) {
+      setError((err as Error).message || 'Could not update file')
+      return null
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const commitRename = async (f: DonorFile): Promise<void> => {
+    const draft = renaming?.draft.trim() ?? ''
+    setRenaming(null)
+    if (!draft || draft === f.filename) return
+    await patch(f, { filename: draft })
+  }
+
+  const toggleShare = async (f: DonorFile): Promise<void> => {
+    await patch(f, { is_shared: !f.is_shared })
+  }
+
+  const copyLink = async (f: DonorFile): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(f.share_url)
+      setCopied(f.file_id)
+      setTimeout(() => setCopied((c) => (c === f.file_id ? null : c)), 1500)
+    } catch {
+      setError('Could not copy the link')
+    }
+  }
+
+  const remove = async (f: DonorFile): Promise<void> => {
+    setBusy(f.file_id)
+    try {
+      const res = await deleteDonorFile(f.file_id)
+      setQuota(res.quota)
+      setFiles((prev) => prev?.filter((x) => x.file_id !== f.file_id) ?? prev)
+      replaceDonorFileId(f.file_id, null)
+      forgetDonorCover(f.file_id)
+      if (preview?.id === f.file_id) setPreview(null)
+      setConfirmDelete(null)
+    } catch (err) {
+      setError((err as Error).message || 'Could not delete file')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Reuses the same cached blob the row thumbnail uses (see
+  // lib/donorImageCache), so opening the preview after the thumbnail has
+  // already loaded is instant and doesn't re-fetch the file.
+  const togglePreview = async (f: DonorFile): Promise<void> => {
+    if (preview?.id === f.file_id) { setPreview(null); return }
+    setBusy(f.file_id)
+    try {
+      const url = await ensureDonorImageUrl(f.file_id)
+      setPreview({ id: f.file_id, url })
+      setError(null)
+    } catch (err) {
+      setError((err as Error).message || 'Could not load image')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const openTagEditor = async (f: DonorFile): Promise<void> => {
+    if (tagEdit?.id === f.file_id) { setTagEdit(null); return }
+    setTagEdit({ id: f.file_id, tags: null, saving: false })
+    try {
+      const tags = await readMp3Tags(await fetchDonorFileBlob(f.file_id))
+      setTagEdit((cur) => (cur?.id === f.file_id ? { ...cur, tags } : cur))
+    } catch (err) {
+      setTagEdit(null)
+      setError((err as Error).message || 'Could not read tags')
+    }
+  }
+
+  // The API can't rewrite a stored file, so saving tags means uploading the
+  // retagged copy and removing the original. That gives the file a new id and
+  // share token; the old link stops working.
+  const saveTags = async (f: DonorFile, tags: Mp3Tags): Promise<void> => {
+    setTagEdit({ id: f.file_id, tags, saving: true })
+    setError(null)
+    setNotice(null)
+    let original: Blob | null = null
+    let deletedOld = false
+    try {
+      original = await fetchDonorFileBlob(f.file_id)
+      const tagged = new File([await writeMp3Tags(original, tags)], f.filename, { type: 'audio/mpeg' })
+      if (quota && quota.remaining < tagged.size) {
+        // No room for both copies: free the original first (kept in memory to restore on failure).
+        await deleteDonorFile(f.file_id)
+        deletedOld = true
+      }
+      const up = await uploadDonorFile(tagged)
+      let newQuota = up.quota
+      if (!deletedOld) {
+        try {
+          newQuota = (await deleteDonorFile(f.file_id)).quota
+        } catch (err) {
+          throw new Error(`Saved the new copy but could not remove the old one: ${(err as Error).message}`)
+        }
+      }
+      let saved = up.file
+      if (f.is_shared) saved = await updateDonorFile(saved.file_id, { is_shared: true }).catch(() => saved)
+      setQuota(newQuota)
+      setFiles((prev) => [saved, ...(prev ?? []).filter((x) => x.file_id !== f.file_id)])
+      replaceDonorFileId(f.file_id, saved.file_id)
+      setTagEdit(null)
+      setNotice(f.is_shared ? 'Tags saved. This file has a new share link - the old one no longer works.' : 'Tags saved.')
+    } catch (err) {
+      const message = (err as Error).message
+      if (deletedOld && original) {
+        try {
+          const restored = await uploadDonorFile(new File([original], f.filename, { type: 'audio/mpeg' }))
+          setQuota(restored.quota)
+          setFiles((prev) => [restored.file, ...(prev ?? []).filter((x) => x.file_id !== f.file_id)])
+          replaceDonorFileId(f.file_id, restored.file.file_id)
+          setError(`Could not save tags (${message}). The original file was restored.`)
+        } catch {
+          setError(`Could not save tags and the original could not be restored: ${message}. Re-upload it from your device.`)
+          void load()
+        }
+        setTagEdit(null)
+        return
+      }
+      setError(message || 'Could not save tags')
+      setTagEdit({ id: f.file_id, tags, saving: false })
+      void load()
+    }
+  }
+
+  const download = async (f: DonorFile): Promise<void> => {
+    setBusy(f.file_id)
+    try {
+      const blob = await fetchDonorFileBlob(f.file_id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = f.filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    } catch (err) {
+      setError((err as Error).message || 'Could not download file')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const pct = quota && quota.quota > 0 ? Math.min(100, (quota.used / quota.quota) * 100) : 0
+  const thumbSize = 44
+
+  return (
+    <div>
+      {quota && (
+        <div className="py-2">
+          <div className="flex items-baseline justify-between text-[11px] text-text-muted mb-1">
+            <span>{formatBytes(quota.used)} of {formatBytes(quota.quota)} used</span>
+            <span>{formatBytes(quota.remaining)} free</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-[var(--surface-overlay)] overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${pct > 90 ? 'bg-red-400' : 'bg-accent'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2 my-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ACCEPT}
+          multiple
+          className="hidden"
+          onChange={(e) => upload(e.target.files)}
+        />
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-60"
+        >
+          <Upload size={13} />Upload files
+        </button>
+        <p className="text-text-muted text-[11px]">
+          Audio and images, up to 100 MB each. Progress shows in the Uploads panel.
+        </p>
+      </div>
+      {error && <p className="text-red-400 text-[11px] py-1">{error}</p>}
+      {notice && <p className="text-accent text-[11px] py-1">{notice}</p>}
+
+      {!files && !error && (
+        <div className="flex items-center gap-2 py-6 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Loading files…</div>
+      )}
+      {files && files.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-2 py-14 text-center">
+          <Music2 className="text-text-muted opacity-20" size={36} />
+          <p className="text-text-muted text-sm">No files yet.</p>
+          <p className="text-text-muted text-xs">Upload audio or images above - they're private unless you turn on a share link.</p>
+        </div>
+      )}
+
+      {files && files.length > 0 && (
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1 min-w-[160px] max-w-sm">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search your files…"
+              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 pr-8 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                title="Clear search"
+              ><X size={14} /></button>
+            )}
+          </div>
+          <div className="flex items-center gap-0.5 text-text-muted shrink-0">
+            {(['date', 'name', 'size'] as SortBy[]).map((by) => (
+              <button
+                key={by}
+                onClick={() => toggleSort(by)}
+                className={`flex items-center gap-0.5 text-xs px-2 py-1.5 rounded-md transition-colors capitalize ${
+                  sortBy === by ? 'bg-surface-raised text-text-primary' : 'hover:text-text-secondary hover:bg-surface-overlay'
+                }`}
+                title={`Sort by ${by === 'date' ? 'date added' : by}`}
+              >
+                {by === 'date' ? 'Newest' : by}
+                {sortBy === by && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {files && files.length > 0 && visibleFiles?.length === 0 && (
+        <p className="text-text-muted text-sm text-center py-8">No files match &quot;{search.trim()}&quot;</p>
+      )}
+
+      <div>
+        {visibleFiles?.map((f) => {
+          const image = isImageFile(f)
+          const isBusy = busy === f.file_id
+          const isRenaming = renaming?.id === f.file_id
+          const isCurrent = currentTrackId === donorTrackId(f.file_id)
+          const panelOpen = playlistPicker === f.file_id || tagEdit?.id === f.file_id || preview?.id === f.file_id
+            || confirmDelete === f.file_id || ctxMenu?.file.file_id === f.file_id
+          return (
+            <div
+              key={f.file_id}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ file: f, x: e.clientX, y: e.clientY }) }}
+              className={`group rounded-xl px-2 py-2 transition-colors ${isCurrent ? 'bg-accent/5' : ctxMenu?.file.file_id === f.file_id ? 'bg-[var(--surface-overlay)]' : 'hover:bg-[var(--surface-overlay)]'}`}
+            >
+              <div className="flex items-center gap-3">
+                {image ? (
+                  <button
+                    onClick={() => void togglePreview(f)}
+                    className="shrink-0"
+                    title={preview?.id === f.file_id ? 'Hide preview' : 'Preview'}
+                  >
+                    <DonorImageThumb fileId={f.file_id} size={thumbSize} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => togglePlay(f)}
+                    className="relative shrink-0 rounded-lg"
+                    title={isCurrent && isPlayingGlobal ? 'Pause' : 'Play'}
+                  >
+                    <DonorAudioTile fileId={f.file_id} filename={f.filename} size={thumbSize} />
+                    <div className={`absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg transition-opacity ${
+                      isCurrent ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    }`}>
+                      {isCurrent && isPlayingGlobal
+                        ? <Pause size={16} className="text-white" fill="currentColor" />
+                        : <Play size={16} className="text-white ml-0.5" fill="currentColor" />}
+                    </div>
+                  </button>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      value={renaming.draft}
+                      maxLength={255}
+                      onChange={(e) => setRenaming({ id: f.file_id, draft: e.target.value })}
+                      onBlur={() => void commitRename(f)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void commitRename(f)
+                        if (e.key === 'Escape') setRenaming(null)
+                      }}
+                      className="w-full bg-[var(--surface-overlay)] rounded px-1.5 py-0.5 text-sm text-text-primary focus:outline-none"
+                    />
+                  ) : (
+                    <p className={`text-sm truncate ${isCurrent ? 'text-accent font-medium' : 'text-text-primary'}`} title={f.filename}>
+                      {f.filename}
+                    </p>
+                  )}
+                  <p className="text-text-muted text-[11px] truncate">
+                    {formatBytes(f.size)} · {new Date(f.created_at).toLocaleDateString()}
+                    {f.is_shared && <span className="ml-1.5 text-accent">· Shared</span>}
+                  </p>
+                </div>
+
+                <div className={`flex items-center gap-0.5 shrink-0 transition-opacity ${
+                  isMobile || panelOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+                }`}>
+                  <IconBtn label="Download" disabled={isBusy} onClick={() => void download(f)}><Download size={13} /></IconBtn>
+                  {isDonorAudio(f) && (
+                    <IconBtn label="Add to playlist" onClick={() => { setPlaylistPicker((c) => (c === f.file_id ? null : f.file_id)); setNewPlaylistName('') }}>
+                      <ListPlus size={13} />
+                    </IconBtn>
+                  )}
+                  {!image && canEditTags(f.filename) && (
+                    <IconBtn label="Edit tags" disabled={isBusy || tagEdit?.saving} onClick={() => void openTagEditor(f)}><Tag size={13} /></IconBtn>
+                  )}
+                  <IconBtn label="Rename" disabled={isBusy} onClick={() => setRenaming({ id: f.file_id, draft: f.filename })}><Pencil size={13} /></IconBtn>
+                  <IconBtn label={f.is_shared ? 'Stop sharing' : 'Share link'} disabled={isBusy} onClick={() => void toggleShare(f)}>
+                    {f.is_shared ? <Link2Off size={13} /> : <Link2 size={13} />}
+                  </IconBtn>
+                  {f.is_shared && f.share_url && (
+                    <IconBtn label={copied === f.file_id ? 'Copied' : 'Copy link'} onClick={() => void copyLink(f)}>
+                      {copied === f.file_id ? <Check size={13} /> : <Copy size={13} />}
+                    </IconBtn>
+                  )}
+                  {confirmDelete === f.file_id ? (
+                    <span className="inline-flex items-center gap-2 ml-1">
+                      <button onClick={() => setConfirmDelete(null)} className="text-xs text-text-muted hover:text-text-primary">Cancel</button>
+                      <button
+                        onClick={() => void remove(f)}
+                        disabled={isBusy}
+                        className="inline-flex items-center gap-1 rounded-lg bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/25 disabled:opacity-60"
+                      >
+                        {isBusy && <Loader2 size={11} className="animate-spin" />}Delete
+                      </button>
+                    </span>
+                  ) : (
+                    <IconBtn label="Delete" danger disabled={isBusy} onClick={() => setConfirmDelete(f.file_id)}><Trash2 size={13} /></IconBtn>
+                  )}
+                </div>
+              </div>
+
+              {playlistPicker === f.file_id && (
+                <div className="mt-2 ml-[56px] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-2">
+                  {donorPlaylists.length === 0 && <p className="text-text-muted text-[11px] px-1 pb-1">No donor playlists yet.</p>}
+                  {donorPlaylists.map((p) => {
+                    const inList = p.fileIds.includes(f.file_id)
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => (inList ? removeFromDonorPlaylist(p.id, f.file_id) : addToDonorPlaylist(p.id, f.file_id))}
+                        className="w-full flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-text-primary hover:bg-[var(--surface-overlay)]"
+                      >
+                        <span className="truncate">{p.name}</span>
+                        {inList && <Check size={13} className="text-accent shrink-0" />}
+                      </button>
+                    )
+                  })}
+                  <div className="flex items-center gap-2 pt-1.5">
+                    <input
+                      value={newPlaylistName}
+                      onChange={(e) => setNewPlaylistName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') }
+                      }}
+                      placeholder="New playlist…"
+                      className="flex-1 min-w-0 bg-[var(--surface-overlay)] rounded px-2 py-1 text-sm text-text-primary focus:outline-none"
+                    />
+                    <button
+                      onClick={() => { if (newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') } }}
+                      disabled={!newPlaylistName.trim()}
+                      className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-50"
+                    >Create</button>
+                  </div>
+                </div>
+              )}
+              {tagEdit?.id === f.file_id && (
+                <div className="ml-[56px]">
+                  {tagEdit.tags
+                    ? <TagEditor file={f} initial={tagEdit.tags} saving={tagEdit.saving} onCancel={() => setTagEdit(null)} onSave={(t) => void saveTags(f, t)} />
+                    : <div className="flex items-center gap-2 pt-2 text-text-muted text-xs"><Loader2 size={13} className="animate-spin" />Reading tags…</div>}
+                </div>
+              )}
+              {preview?.id === f.file_id && (
+                <img src={preview.url} alt={f.filename} className="mt-2 ml-[56px] max-h-64 rounded-lg object-contain" />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {ctxMenu && (() => {
+        const f = ctxMenu.file
+        const image = isImageFile(f)
+        return (
+          <DonorContextMenu
+            key={f.file_id}
+            state={ctxMenu}
+            onClose={closeCtxMenu}
+            onPlay={isDonorAudio(f)
+              ? () => (currentTrackId === donorTrackId(f.file_id) ? setIsPlayingGlobal(true) : togglePlay(f))
+              : undefined}
+            onDownload={() => void download(f)}
+            onRename={() => setRenaming({ id: f.file_id, draft: f.filename })}
+            onEditTags={!image && canEditTags(f.filename) ? () => void openTagEditor(f) : undefined}
+            onToggleShare={() => void toggleShare(f)}
+            onCopyLink={() => void copyLink(f)}
+            onDelete={() => setConfirmDelete(f.file_id)}
+          />
+        )
+      })()}
+    </div>
+  )
+}
+
+/** Own-file downloads need the auth header, so this can't be a plain
+ *  `<img src>` - it fetches lazily (only once scrolled near) and caches the
+ *  blob URL (see lib/donorImageCache), shared with the "preview" panel. */
+function DonorImageThumb({ fileId, size }: { fileId: string; size: number }): JSX.Element {
+  const [url, setUrl] = useState<string | null>(() => cachedDonorImageUrl(fileId))
+  const [errored, setErrored] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (url || errored) return
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      io.disconnect()
+      ensureDonorImageUrl(fileId).then(setUrl).catch(() => setErrored(true))
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [fileId, url, errored])
+
+  return (
+    <div
+      ref={ref}
+      className="rounded-lg overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {url
+        ? <img src={url} alt="" className="w-full h-full object-cover" />
+        : errored
+          ? <FileImage size={size * 0.45} className="text-text-muted opacity-40" />
+          : <Loader2 size={size * 0.35} className="text-text-muted animate-spin opacity-40" />}
+    </div>
+  )
+}
+
+/** Embedded MP3 art, read from just the file's ID3 tag once the row scrolls
+ *  near (see lib/donorCoverArt). Anything without art - or any non-MP3 -
+ *  gets the generic tile used for playlists with no cover. */
+export function DonorAudioTile({ fileId, filename, size }: { fileId: string; filename: string; size: number }): JSX.Element {
+  const [url, setUrl] = useState<string | null | undefined>(() => cachedDonorCover(fileId))
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (url !== undefined) return
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      if (!entries[0]?.isIntersecting) return
+      io.disconnect()
+      void ensureDonorCover(fileId, filename).then(setUrl)
+    }, { rootMargin: '200px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [fileId, filename, url])
+
+  return (
+    <div
+      ref={ref}
+      className="rounded-lg overflow-hidden bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {url
+        ? <img src={url} alt="" className="w-full h-full object-cover" onError={() => setUrl(null)} />
+        : <Music2 size={size * 0.45} className="text-accent/70" />}
+    </div>
+  )
+}
+
+const TAG_FIELDS: { key: 'title' | 'artist' | 'album' | 'year' | 'genre'; label: string }[] = [
+  { key: 'title', label: 'Title' },
+  { key: 'artist', label: 'Artist' },
+  { key: 'album', label: 'Album' },
+  { key: 'year', label: 'Year' },
+  { key: 'genre', label: 'Genre' },
+]
+
+function TagEditor({ file, initial, saving, onCancel, onSave }: {
+  file: DonorFile
+  initial: Mp3Tags
+  saving: boolean
+  onCancel: () => void
+  onSave: (t: Mp3Tags) => void
+}): JSX.Element {
+  const [tags, setTags] = useState<Mp3Tags>(initial)
+  const [coverUrl, setCoverUrl] = useState<string | null>(null)
+  const coverInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!tags.cover) { setCoverUrl(null); return }
+    const url = URL.createObjectURL(new Blob([tags.cover.data], { type: tags.cover.mime || 'image/jpeg' }))
+    setCoverUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [tags.cover])
+
+  const pickCover = async (f: File | undefined): Promise<void> => {
+    if (!f || !f.type.startsWith('image/')) return
+    const data = await f.arrayBuffer()
+    setTags((t) => ({ ...t, cover: { mime: f.type, data } }))
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0">
+          <div className="w-20 h-20 rounded-lg bg-[var(--surface-overlay)] overflow-hidden flex items-center justify-center">
+            {coverUrl ? <img src={coverUrl} alt="" className="w-full h-full object-cover" /> : <FileAudio size={22} className="text-text-muted" />}
+          </div>
+          <input ref={coverInput} type="file" accept="image/*" className="hidden" onChange={(e) => void pickCover(e.target.files?.[0])} />
+          <button
+            type="button"
+            onClick={() => coverInput.current?.click()}
+            className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-text-secondary hover:text-text-primary"
+          ><ImagePlus size={12} />{tags.cover ? 'Change' : 'Add cover'}</button>
+          {tags.cover && (
+            <button type="button" onClick={() => setTags((t) => ({ ...t, cover: null }))} className="block text-[11px] text-text-muted hover:text-red-400">Remove</button>
+          )}
+        </div>
+        <div className="flex-1 min-w-0 grid grid-cols-1 gap-1.5">
+          {TAG_FIELDS.map(({ key, label }) => (
+            <label key={key} className="flex items-center gap-2">
+              <span className="w-12 shrink-0 text-[11px] text-text-muted">{label}</span>
+              <input
+                value={tags[key]}
+                maxLength={key === 'year' ? 4 : 200}
+                inputMode={key === 'year' ? 'numeric' : undefined}
+                onChange={(e) => setTags((t) => ({ ...t, [key]: e.target.value }))}
+                className="flex-1 min-w-0 bg-[var(--surface-overlay)] rounded px-2 py-1 text-sm text-text-primary focus:outline-none"
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+      <p className="text-text-muted text-[11px] mt-2">
+        Saves by re-uploading {file.filename} with the new tags, so it gets a new file ID
+        {file.is_shared ? ' and a new share link (the old link stops working)' : ''}. Other embedded data such as lyrics is not kept.
+      </p>
+      <div className="flex items-center justify-end gap-2 mt-2">
+        <button onClick={onCancel} disabled={saving} className="text-xs text-text-muted hover:text-text-primary disabled:opacity-50">Cancel</button>
+        <button
+          onClick={() => onSave(tags)}
+          disabled={saving}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-60"
+        >
+          {saving && <Loader2 size={12} className="animate-spin" />}Save tags
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function IconBtn({ label, onClick, disabled, danger, children }: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  danger?: boolean
+  children: React.ReactNode
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-lg p-1.5 text-text-secondary hover:bg-[var(--surface-overlay)] disabled:opacity-50 ${
+        danger ? 'hover:text-red-400' : 'hover:text-text-primary'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}

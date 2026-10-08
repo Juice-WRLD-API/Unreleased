@@ -1,11 +1,25 @@
 import { Track } from '../types'
-import { apiRequest } from './apiClient'
+import { apiRequest, untilAborted } from './apiClient'
 import { cacheGet } from './apiCache'
 import { peekSongPref } from './songPrefs'
 import { peekRotatedCover } from './coverRotation'
 import { peekEraCover } from './eraCovers'
+import { createTtlCache } from './ttlCache'
+import { peekSessionEditOverride } from './sessionEditOverrides'
+import { peekActiveChannel } from './activeChannelState'
+import { peekSessionEditLink, sessionEditPlaceholder, isSessionEditPlaceholder } from './sessionEditLinksMirror'
+import { JWAPI_BASE, baseFor, routeUrl } from './apiServers'
 
-export const JWAPI_BASE = 'https://juicewrldapi.com/juicewrld'
+export { JWAPI_BASE, baseFor, routeUrl }
+
+/** The one host everything the API serves lives on - its endpoints under
+ *  JWAPI_BASE, and the site's own static cover images under /assets/, which
+ *  a song's `image_url` points at (see buildImageUrl). */
+export const JWAPI_HOST = new URL(JWAPI_BASE).hostname
+
+// Backend zip endpoints are temporarily disabled - flip this back to true to restore
+// the ZIP download UI (playlist/song/file-browser download-as-ZIP buttons and menu items).
+export const ZIP_OPERATIONS_ENABLED = false
 
 // ─── API Types ────────────────────────────────────────────────────────────────
 
@@ -30,6 +44,8 @@ export interface JWApiSong {
   recording_locations?: string | null
   record_dates?: string | null
   bitrate?: string | null
+  bpm?: number | null
+  key?: string | null
   additional_information?: string | null
   file_names?: string | null
   instrumentals?: string | null
@@ -69,6 +85,55 @@ export interface JWApiStats {
   era_stats: Record<string, number>
 }
 
+// ─── Site-wide play stats (GET /plays/stats/) ──────────────────────────────────
+// Distinct from JWApiStats (GET /stats/) above: that one counts catalog rows,
+// this one counts plays across every listener. top_albums is documented but
+// comes back empty in practice - typed loosely since its shape is unverified.
+
+export interface JWApiPlaysCategoryCount {
+  category: JWApiSong['category']
+  count: number
+}
+
+export interface JWApiTopSong {
+  id: number
+  public_id: number
+  name: string
+  era_name: string | null
+  category: JWApiSong['category']
+  play_count: number
+}
+
+export interface JWApiTopEra {
+  id: number
+  name: string
+  play_count: number
+}
+
+export interface JWApiRecentPlay {
+  id: number
+  song_id: number
+  public_id: number
+  title: string
+  era_name: string | null
+  category: JWApiSong['category']
+  album_name: string | null
+  source: string
+  played_at: string
+}
+
+export interface JWApiPlaysStats {
+  total_plays: number
+  total_songs_with_plays: number
+  total_albums_with_plays: number
+  total_eras_with_plays: number
+  category_breakdown: JWApiPlaysCategoryCount[]
+  top_songs: JWApiTopSong[]
+  top_albums: unknown[]
+  top_eras: JWApiTopEra[]
+  recent_plays: JWApiRecentPlay[]
+}
+
 export interface JWApiRadioResponse {
   title: string
   path: string
@@ -83,12 +148,13 @@ export interface JWApiFileEntry {
   type: 'file' | 'directory'
   size?: number | null
   modified?: string | null
+  duration?: string | null
 }
 
 // /files/browse/ may return { items: [...] } or a flat array
 export type JWApiBrowseResponse = JWApiFileEntry[] | { items: JWApiFileEntry[]; current_path?: string }
 
-/** Normalizes a /files/browse/ response to a flat entry array — shared by
+/** Normalizes a /files/browse/ response to a flat entry array - shared by
  *  every view that hits that endpoint (ApiFilesView, CoverPickerModal). */
 export function parseBrowseEntries(data: JWApiBrowseResponse): JWApiFileEntry[] {
   if (Array.isArray(data)) return data
@@ -96,8 +162,38 @@ export function parseBrowseEntries(data: JWApiBrowseResponse): JWApiFileEntry[] 
   return []
 }
 
+/** Recursively walks a folder via repeated /files/browse/ calls and returns
+ *  every file (not directory) entry underneath it, subfolders included. Used
+ *  to expand a folder into an individual-file download list now that backend
+ *  ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the API has no
+ *  recursive-listing endpoint of its own. */
+export async function listFilesRecursive(path: string, channel?: string): Promise<JWApiFileEntry[]> {
+  const params: Record<string, string> = {}
+  if (path) params.path = path
+  if (channel) params.channel = channel
+  const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', params)
+  const entries = parseBrowseEntries(data)
+  const files: JWApiFileEntry[] = []
+  for (const entry of entries) {
+    if (entry.type === 'file') files.push(entry)
+    else files.push(...await listFilesRecursive(entry.path, channel))
+  }
+  return files
+}
+
+/** Everything under a folder (files and subfolders, any depth) in ONE request
+ *  via /files/list-all/?path= - the server walks its cached index instead of
+ *  the client listing folder by folder. Paths are relative to the channel root.
+ *  Resolves null while the server is still building its index, so callers can
+ *  fall back to per-folder listings. */
+export async function listSubtree(path: string, channel?: string): Promise<JWApiFileEntry[] | null> {
+  const data = await apiFetch<{ items?: JWApiFileEntry[]; building?: boolean }>('/files/list-all/', { path: path || undefined, channel })
+  if (data.building && !data.items?.length) return null
+  return data.items ?? []
+}
+
 /** Strips trailing qualifiers ("(feat. X)", "[Prod. Y]") from a song title so
- *  a /files/browse/ search hits the file tree's naming — folders/images are
+ *  a /files/browse/ search hits the file tree's naming - folders/images are
  *  rarely filed under the full bracketed title. Same idea as
  *  findSessionZips' strip() below, shared with CoverPickerModal and
  *  SongPrefsSection's inline cover search. */
@@ -110,23 +206,52 @@ function escapeRegExp(s: string): string {
 }
 
 /** Filters /files/browse/ search results down to entries whose path contains
- *  the query as a whole word — the API's `search` param is a plain substring
+ *  the query as a whole word - the API's `search` param is a plain substring
  *  match, so a short title like "Rental" also turns up unrelated files like
  *  "Parental Advisory.png" (which literally contains "rental"). Shared by
  *  CoverPickerModal and SongPrefsSection's inline cover search. */
 export function filterSearchResults(entries: JWApiFileEntry[], term: string): JWApiFileEntry[] {
-  const t = term.trim()
+  const t = normalizeForSearch(term)
   if (!t) return entries
-  const re = new RegExp(`\\b${escapeRegExp(t)}\\b`, 'i')
-  return entries.filter((e) => re.test(e.path))
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(t)}(?![\\p{L}\\p{N}])`, 'u')
+  return entries.filter((e) => re.test(normalizeForSearch(e.path)))
+}
+
+/** Lowercases and drops punctuation (apostrophes vanish, everything else
+ *  becomes a space) so "Wouldn't" / "Wouldnt" / "Would-nt" compare alike. */
+export function normalizeForSearch(s: string): string {
+  return s.toLowerCase().replace(/['’‘`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+/** Query variants to send to the server's plain-substring `search` param so a
+ *  title with punctuation still finds files named without it (and vice
+ *  versa): the raw term, apostrophes stripped, and punctuation as spaces. */
+export function searchVariants(term: string): string[] {
+  const t = term.trim()
+  if (!t) return []
+  const noApos = t.replace(/['’‘`]/g, '')
+  const spaced = noApos.replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  return [t, noApos, spaced].filter((v, i, a) => v && a.indexOf(v) === i)
+}
+
+/** Recursive /files/browse/ search that ignores punctuation: queries every
+ *  variant of the term and merges the results by path. */
+export async function searchFiles(term: string, extra: Record<string, string> = {}): Promise<JWApiFileEntry[]> {
+  const lists = await Promise.all(searchVariants(term).map((v, i) =>
+    apiFetch<JWApiBrowseResponse>('/files/browse/', { ...extra, search: v })
+      .then(parseBrowseEntries)
+      .catch((err) => { if (i === 0) throw err; return [] as JWApiFileEntry[] })
+  ))
+  const seen = new Set<string>()
+  return lists.flat().filter((e) => !seen.has(e.path) && !!seen.add(e.path))
 }
 
 // ─── Fetch util ───────────────────────────────────────────────────────────────
 
 // Builds the same URL/cache key apiFetch uses, so apiPeek below can read the
 // exact entry apiFetch wrote for a given path+params.
-function apiUrl(path: string, params: Record<string, string | number | null | undefined> = {}): string {
-  const url = new URL(JWAPI_BASE + path)
+export function apiUrl(path: string, params: Record<string, string | number | null | undefined> = {}): string {
+  const url = new URL(routeUrl(path))
   for (const [k, v] of Object.entries(params)) {
     if (v != null) url.searchParams.set(k, String(v))
   }
@@ -135,10 +260,12 @@ function apiUrl(path: string, params: Record<string, string | number | null | un
 
 export async function apiFetch<T>(
   path: string,
-  params: Record<string, string | number | null | undefined> = {}
+  params: Record<string, string | number | null | undefined> = {},
+  signal?: AbortSignal,
 ): Promise<T> {
   const cacheKey = apiUrl(path, params)
   return apiRequest<T>(cacheKey, {
+    signal,
     // 'no-cache', not 'no-store': both guarantee the response is revalidated
     // with the server on every call (never a silently stale read), but
     // no-cache lets an unchanged response come back as a 304 against the HTTP
@@ -151,7 +278,66 @@ export async function apiFetch<T>(
   })
 }
 
-// Synchronous read of the offline cache for a path+params — returns the last
+export const loadAllSongs = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[]>('/songs/', { all: 'true' }))
+
+// loadAllSongs, but cancellable. A warm or in-flight shared copy is just waited
+// on (it belongs to whoever started it, so the wait stops but the fetch runs
+// on); with none, this makes its own request and the signal really aborts it.
+export function loadAllSongsAbortable(signal?: AbortSignal): Promise<JWApiSong[]> {
+  const shared = loadAllSongs.peek()
+  return shared ? untilAborted(shared, signal) : apiFetch<JWApiSong[]>('/songs/', { all: 'true' }, signal)
+}
+
+// Shared TTL + in-flight cache for single-song lookups by id. Player's lyrics
+// fetch and RadioFmPlayer's now-playing match both resolve the full song
+// object for whatever's currently playing, and often for the same song at
+// once (e.g. the FM-matched track happens to be the one already queued).
+// apiFetch's own dedup only collapses requests that overlap in time - once
+// the first settles, a second caller a moment later still hits the network.
+// Routing both through this cache instead lets that second caller reuse the
+// still-fresh result.
+const SONG_BY_ID_TTL_MS = 60_000
+const songByIdCache = new Map<number, { promise: Promise<JWApiSong>; ts: number }>()
+
+export function getSongById(id: number, signal?: AbortSignal): Promise<JWApiSong> {
+  // A cancellable lookup skips the shared cache: aborting it must not fail the
+  // same promise for another caller.
+  if (signal) return apiFetch<JWApiSong>(`/songs/${id}/`, {}, signal)
+  const now = Date.now()
+  const cached = songByIdCache.get(id)
+  if (cached && now - cached.ts < SONG_BY_ID_TTL_MS) return cached.promise
+  const entry = { promise: apiFetch<JWApiSong>(`/songs/${id}/`), ts: now }
+  songByIdCache.set(id, entry)
+  entry.promise.catch(() => { if (songByIdCache.get(id) === entry) songByIdCache.delete(id) })
+  return entry.promise
+}
+
+// ─── Batch fetch (GET /songs/?ids=...) ─────────────────────────────────────
+// The docs page (and this comment, formerly) claimed `ids=` filters by
+// internal `id` and replies with CSV. Neither is true any more: live probes
+// against the API show `ids=` actually filters by `public_id`, replies with
+// the normal JSON envelope, and caps `results` at a default page size - and
+// most songs in this catalogue (anything unreleased) have no `public_id` at
+// all, so the "batch" path silently resolved nothing for them. See
+// project_jwa_api_docs_drift in memory: the docs page is hand-written and
+// drifts from the live API.
+//
+// Until the API grows a real batch-by-id endpoint, this just fans out to the
+// single-song endpoint (GET /songs/{id}/, confirmed still keyed by internal
+// id) in parallel and drops ids that don't exist - same contract callers
+// already relied on (no error, no null placeholder).
+export async function getSongsByIds(ids: number[], signal?: AbortSignal): Promise<JWApiSong[]> {
+  const unique = Array.from(new Set(ids))
+  if (unique.length === 0) return []
+  const results = await Promise.all(unique.map((id) => getSongById(id, signal).catch((err) => {
+    // A missing id is dropped; a cancel is not a missing id.
+    if (signal?.aborted) throw err
+    return null
+  })))
+  return results.filter((s): s is JWApiSong => s !== null)
+}
+
+// Synchronous read of the offline cache for a path+params - returns the last
 // successful apiFetch response for that exact key, or undefined. Lets views do
 // stale-while-revalidate: render the cached copy instantly on mount, then let
 // their normal apiFetch refresh it in the background.
@@ -166,7 +352,7 @@ export function apiPeek<T>(
 
 export function buildStreamUrl(path: string, channel?: string): string {
   const c = channel ? `&channel=${encodeURIComponent(channel)}` : ''
-  return `${JWAPI_BASE}/files/download/?path=${encodeURIComponent(path)}${c}`
+  return `${routeUrl('/files/download/')}?path=${encodeURIComponent(path)}${c}`
 }
 
 export interface JWApiChannel {
@@ -185,17 +371,25 @@ export async function fetchChannels(): Promise<JWApiChannel[]> {
   }
 }
 
-// The API serves cover art at full size — /files/cover-art/ hands back the art
-// embedded in an audio file (often a ~1MB 600x600 PNG) and /files/download/
-// hands back a standalone image file whole (a few hundred KB). Either is absurd
-// for a 36px list row, and it adds up fast when a virtualized list paints dozens
-// at once. `small=1` asks for a degraded ~128px JPEG instead (a few KB, same
-// image): plenty for anything drawn at thumbnail size, and a good first paint
-// for anything bigger.
+// The API serves cover art at full size - /files/cover-art/ hands back the art
+// embedded in an audio file, and /files/download/ hands back a standalone
+// image file whole. Most of these are a modest ~1MB 600x600 PNG, but some
+// source files carry cover art at absurd resolutions (20MB+ isn't
+// hypothetical) - either is overkill for a 36px list row, and it adds up fast
+// when a virtualized list paints dozens at once. `small=1` asks for a
+// degraded ~128px JPEG instead (a few KB, same image): plenty for anything
+// drawn at thumbnail size, and a good first paint for anything bigger.
 const SMALL_COVER_PARAM = 'small=1'
 
+// Every "full" (non-thumbnail) cover-art request is still capped at this px
+// size rather than asking for the raw embedded original - the API re-encodes
+// down to a JPEG at this resolution, which keeps even a 20MB source well
+// under a few hundred KB. Matches the documented max for the sibling
+// /files/image-thumbnail/ endpoint (same underlying resize path).
+const FULL_COVER_SIZE = 1024
+
 // Endpoints that honour `small`. /files/download/ only degrades when the path is
-// an image — for audio the API ignores the param — so it's matched by extension
+// an image - for audio the API ignores the param - so it's matched by extension
 // rather than blanket-applied, keeping stream URLs untouched.
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|avif|heic|tiff?)(&|$)/i
 
@@ -206,9 +400,14 @@ function degradable(url: string): boolean {
 }
 
 export function buildCoverArtUrl(path: string, small = false, channel?: string): string {
-  const url = `${JWAPI_BASE}/files/cover-art/?path=${encodeURIComponent(path)}`
-  const c = channel ? `&channel=${encodeURIComponent(channel)}` : ''
-  return small ? `${url}&${SMALL_COVER_PARAM}${c}` : `${url}${c}`
+  const url = new URL(routeUrl('/files/cover-art/'))
+  url.searchParams.set('path', path)
+  if (channel) url.searchParams.set('channel', channel)
+  // size and small both degrade the same embedded original - size wins when
+  // both are passed (per the API), so only ever send one of the two.
+  if (small) url.searchParams.set('small', '1')
+  else url.searchParams.set('size', String(FULL_COVER_SIZE))
+  return url.toString()
 }
 
 /** Rewrites an already-built cover URL to the API's degraded variant.
@@ -216,14 +415,48 @@ export function buildCoverArtUrl(path: string, small = false, channel?: string):
  *  Most cover URLs in the app arrive as opaque strings (a Track's imageUrl, a
  *  preference's resolved cover, a song's `image_url`) with no path to rebuild
  *  from, so degrading happens at the point of render rather than at the source.
- *  Anything the API can't degrade — a site asset, a data/blob URL, a local
- *  file's extracted art, an audio stream URL — passes through untouched. */
+ *  Anything the API can't degrade - a site asset, a data/blob URL, a local
+ *  file's extracted art, an audio stream URL - passes through untouched. */
 export function smallCoverUrl(url: string | null | undefined): string | undefined {
   if (!url) return undefined
-  return degradable(url) ? `${url}&${SMALL_COVER_PARAM}` : url
+  if (!degradable(url)) return url
+  try {
+    // buildCoverArtUrl's "full" variant already carries `size=1024` - size
+    // wins over small on the API side, so that has to come out first or this
+    // would silently stay at 1024px instead of actually degrading.
+    const u = new URL(url)
+    u.searchParams.delete('size')
+    u.searchParams.set('small', '1')
+    return u.toString()
+  } catch {
+    return `${url}&${SMALL_COVER_PARAM}`
+  }
 }
 
-/** True when `url` has a cheaper degraded variant worth loading first — the
+/** Caps a full-size cover at FULL_COVER_SIZE.
+ *
+ *  /files/cover-art/ already carries `size` from buildCoverArtUrl, but
+ *  /files/download/ ignores `size` and serves an image file whole - a custom
+ *  cover under "Cover Arts/" can be a 30MB+ PNG. /files/image-thumbnail/ takes
+ *  the same path + channel and re-encodes to a JPEG at up to 1024px. GIFs stay
+ *  on /files/download/ so they keep their animation. */
+export function fullCoverUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined
+  if (!url.includes('/files/download/') || url.includes(SMALL_COVER_PARAM)) return url
+  if (!IMAGE_EXT.test(url) || /\.gif(&|$)/i.test(url)) return url
+  try {
+    // Rebuilt on the image-thumbnail route rather than edited in place, so a
+    // route rule for either endpoint picks the right host.
+    const u = new URL(routeUrl('/files/image-thumbnail/'))
+    new URL(url).searchParams.forEach((v, k) => u.searchParams.set(k, v))
+    u.searchParams.set('size', String(FULL_COVER_SIZE))
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
+/** True when `url` has a cheaper degraded variant worth loading first - the
  *  signal ProgressiveCover uses to decide whether a two-step load buys anything. */
 export function hasSmallCoverVariant(url: string | null | undefined): boolean {
   return !!url && degradable(url)
@@ -232,18 +465,45 @@ export function hasSmallCoverVariant(url: string | null | undefined): boolean {
 // ─── API file → track (for liking raw file-browser entries) ───────────────────
 //
 // Files browsed in ApiFilesView don't correspond to a numeric song id, so they
-// can't go through the favorites API — they're liked purely locally, the same
+// can't go through the favorites API - they're liked purely locally, the same
 // way locally-scanned library tracks are. The path is encoded directly into the
 // track id so a liked entry can be reconstructed (e.g. in LikedSongsView)
 // without re-fetching the folder it came from.
 const API_FILE_ID_PREFIX = 'jw-file-'
 
-export function apiFileTrackId(path: string): string {
-  return `${API_FILE_ID_PREFIX}${path}`
+// Each non-primary channel has its own file tree and those trees reuse the same
+// paths ("Session Edits/..." exists in several), so the id has to carry the
+// channel too - rebuilt from the path alone, a Legacy file streams against the
+// primary tree and 404s. "//" can't occur in a browse path (no empty segments,
+// never a leading slash), so it can't be forged by a real path. An id with no
+// channel predates this and means the primary tree, which /files/ serves by
+// default - leaving those untouched keeps likes made before this fix working.
+const API_FILE_CHANNEL_SEP = '//'
+
+/** The file a `jw-file-` track id points at: a path, plus the channel whose
+ *  tree to resolve it against (absent for the primary one). */
+export interface ApiFileRef {
+  path: string
+  channel?: string
 }
 
-export function apiFileIdToPath(trackId: string): string | null {
-  return trackId.startsWith(API_FILE_ID_PREFIX) ? trackId.slice(API_FILE_ID_PREFIX.length) : null
+export function apiFileTrackId(path: string, channel?: string): string {
+  const prefix = channel ? `${channel}${API_FILE_CHANNEL_SEP}` : ''
+  return `${API_FILE_ID_PREFIX}${prefix}${path}`
+}
+
+export function apiFileIdToRef(trackId: string): ApiFileRef | null {
+  if (!trackId.startsWith(API_FILE_ID_PREFIX)) return null
+  const rest = trackId.slice(API_FILE_ID_PREFIX.length)
+  const sep = rest.indexOf(API_FILE_CHANNEL_SEP)
+  if (sep <= 0) return { path: rest }
+  const channel = rest.slice(0, sep)
+  if (!/^[A-Za-z0-9_-]+$/.test(channel)) return { path: rest }
+  return { path: rest.slice(sep + API_FILE_CHANNEL_SEP.length), channel }
+}
+
+export function apiFileRefToTrack(ref: ApiFileRef): Track {
+  return apiFilePathToTrack(ref.path, undefined, ref.channel)
 }
 
 export function apiFilePathToTrack(path: string, name?: string, channel?: string): Track {
@@ -253,7 +513,7 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
   const parent = slashIdx > 0 ? path.slice(0, slashIdx) : ''
   const album = parent.split('/').pop() ?? ''
   return {
-    id: apiFileTrackId(path),
+    id: apiFileTrackId(path, channel),
     path,
     streamUrl: buildStreamUrl(path, channel),
     imageUrl: buildCoverArtUrl(path, false, channel),
@@ -271,7 +531,7 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
 
 // ─── Recording session ZIP lookup ──────────────────────────────────────────────
 //
-// "recording_session" songs have no `path` — the actual Pro Tools/Logic
+// "recording_session" songs have no `path` - the actual Pro Tools/Logic
 // project is a pre-built .zip sitting elsewhere in the file tree (under
 // "Studio Sessions/..."), not a single streamable audio file. There's no
 // field on the song object that points at it directly, so this falls back to
@@ -280,14 +540,13 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
 export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]> {
   const term = song.original_key || song.name
   if (!term) return []
-  const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', { search: term })
-  const entries = Array.isArray(data) ? data : (data?.items ?? [])
+  const entries = await searchFiles(term)
   const zips = entries.filter(e => e.type === 'file' && e.name.toLowerCase().endsWith('.zip'))
   if (zips.length <= 1) return zips
 
   // Same search term can turn up session zips for unrelated songs that
   // happen to share a prefix (e.g. "Money Hunt" vs "Money Hunt (with Dripface
-  // Hottie)") — only auto-pick when exactly one candidate's name (stripped of
+  // Hottie)") - only auto-pick when exactly one candidate's name (stripped of
   // extension and any trailing parenthetical/bracket qualifier) matches the
   // song title exactly; otherwise let the caller show all candidates.
   const strip = (name: string): string => name.replace(/\.[^.]+$/, '').replace(/\s*[[(].*$/, '').trim().toLowerCase()
@@ -297,15 +556,33 @@ export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]
 }
 
 export function buildImageUrl(imageUrl: string | null | undefined): string | undefined {
-  if (!imageUrl) return undefined
+  // Songs with no cover set sometimes come back from the API with
+  // `image_url` as the literal string "null" rather than JSON null (see
+  // project_jwa_api_docs_drift) - falls through the falsy check below and
+  // gets built into a real-looking but bogus "/null" URL otherwise, which the
+  // API resolves to a placeholder that visibly reads "null".
+  if (!imageUrl || imageUrl === 'null') return undefined
   if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-  // Relative path — ensure single leading slash
+  // Relative path - ensure single leading slash
   const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl
-  return `https://juicewrldapi.com${rel}`
+  return `https://${JWAPI_HOST}${rel}`
 }
 
-/** Resolves a preference's `cover_url` — a user's chosen cover, pointing into
- *  the API's own storage — to a loadable URL.
+/** The inverse of buildImageUrl: strips the API host off an absolute URL so
+ *  it's stored site-relative ("/juicewrld/files/download/?path=…"), the same
+ *  shape a song's own `image_url` uses ("/assets/wod.jpg"). URLs on any other
+ *  host (a custom server override included) stay absolute, since
+ *  buildImageUrl would otherwise resolve them against the wrong host. */
+export function toSiteRelativeImageUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'https:' && u.hostname === JWAPI_HOST) return u.pathname + u.search
+  } catch {}
+  return url
+}
+
+/** Resolves a preference's `cover_url` - a user's chosen cover, pointing into
+ *  the API's own storage - to a loadable URL.
  *
  *  Three forms are accepted, because a cover can plausibly be picked from
  *  either place the app already shows images from: an absolute/data URL passes
@@ -313,7 +590,7 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
  *  song's own `image_url` uses ("/assets/youtube.webp"); anything else is
  *  treated as a path into the file storage ApiFilesView browses and goes
  *  through the cover-art endpoint. Worth re-checking against the real column
- *  once /library/preferences/ ships — this is the one place that has to know. */
+ *  once /library/preferences/ ships - this is the one place that has to know. */
 export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string | undefined {
   if (!coverUrl) return undefined
   if (/^(https?:|data:|blob:)/.test(coverUrl)) return coverUrl
@@ -322,7 +599,7 @@ export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string
 }
 
 // Discord's classic (local IPC) Rich Presence only reliably applies a
-// `large_url` up to roughly this many characters — longer ones get silently
+// `large_url` up to roughly this many characters - longer ones get silently
 // ignored, leaving the static fallback logo. There's no way to shorten the
 // query path itself, since /files/cover-art/ needs the song's exact path to
 // resolve the file, so this gates whether we send the per-track cover at all
@@ -330,7 +607,7 @@ export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string
 const DISCORD_RPC_URL_LIMIT = 256
 
 /** Cover art URL for Discord RPC: prefers the curated `image_url`, and falls
- *  back to the file's own cover art by path — but only when that URL fits
+ *  back to the file's own cover art by path - but only when that URL fits
  *  under Discord's length limit. Returns undefined (static logo) otherwise.
  *
  *  `path` must be a path into the API's file storage. Callers holding a
@@ -352,7 +629,7 @@ export function discordCoverUrl(
 // ─── Local file → API song cover match ────────────────────────────────────────
 //
 // Discord resolves an activity's image server-side, through its own media
-// proxy, so it can only ever display a publicly-reachable URL — a local file's
+// proxy, so it can only ever display a publicly-reachable URL - a local file's
 // embedded art (a base64 data URI on this machine) can't be handed to it at
 // all. Since this library is Juice WRLD material, the way to give local files
 // real cover art is to recognise which song the file *is* and borrow that
@@ -362,7 +639,7 @@ export function discordCoverUrl(
  *  up with the API's song name: drops a file extension (titles that fell back
  *  to the filename) and a leading track number, then flattens
  *  punctuation/spacing to single spaces between lowercase alphanumerics. */
-function normalizeSongTitle(title: string): string {
+export function normalizeSongTitle(title: string): string {
   return stripFileTitleCruft(title)
     .replace(/[^a-z0-9]+/gi, ' ')
     .trim()
@@ -371,15 +648,15 @@ function normalizeSongTitle(title: string): string {
 
 /** As above, but also drops bracketed qualifiers ("(feat. X)", "[Prod. Y]",
  *  "(v1)"). Local tags and the API disagree constantly about these, so a loose
- *  comparison catches far more real matches — at the cost of collapsing a
+ *  comparison catches far more real matches - at the cost of collapsing a
  *  song's versions together, which is why it's only the fallback. */
 function normalizeSongTitleLoose(title: string): string {
   return normalizeSongTitle(stripFileTitleCruft(title).replace(/[[(][^)\]]*[)\]]/g, ' '))
 }
 
-/** Drops the two things a local title picks up from being a file — a trailing
+/** Drops the two things a local title picks up from being a file - a trailing
  *  extension (when the title fell back to the filename) and a leading track
- *  number ("01. ", "03 - ") — without touching the title itself. Applied
+ *  number ("01. ", "03 - ") - without touching the title itself. Applied
  *  before the API search too, so those artifacts don't end up in the query. */
 function stripFileTitleCruft(title: string): string {
   return title
@@ -387,7 +664,7 @@ function stripFileTitleCruft(title: string): string {
     .replace(/^\s*\d{1,3}\s*[-._)]\s+/, '')
 }
 
-// Matches are memoized by normalized title, misses included — a local track
+// Matches are memoized by normalized title, misses included - a local track
 // that isn't in the API would otherwise re-search every time it plays, and the
 // answer doesn't change within a session.
 const localCoverMatches = new Map<string, LocalSongCover | null>()
@@ -402,8 +679,8 @@ export interface LocalSongCover {
  *  when there's no confident match.
  *
  *  Deliberately strict: a wrong cover on someone's status is worse than the
- *  fallback logo, so a candidate only counts when its name — or one of its
- *  `track_titles` aliases — normalizes to exactly the same string as the local
+ *  fallback logo, so a candidate only counts when its name - or one of its
+ *  `track_titles` aliases - normalizes to exactly the same string as the local
  *  title. The API's `search` is a loose substring match, so its top hit alone
  *  is not evidence of anything. An exact match is preferred over a loose one
  *  so a plain "Lucid Dreams" doesn't take the cover of the first alternate
@@ -437,7 +714,7 @@ export async function matchLocalSongCover(title: string | null | undefined): Pro
       if (url) result = { imageUrl: url, era: song.era?.name ?? null }
     }
   } catch {
-    // Offline or API down — no cover this time. Not cached, so a later play
+    // Offline or API down - no cover this time. Not cached, so a later play
     // of the same track can still resolve it.
     return null
   }
@@ -450,11 +727,11 @@ export async function matchLocalSongCover(title: string | null | undefined): Pro
  *  API song it names, or null when the API has nothing that matches. Uses the
  *  same strict exact→loose comparison as matchLocalSongCover: the API's
  *  `search` is a loose substring match, so its top hit is not proof of
- *  anything — a candidate only counts when its name or one of its
+ *  anything - a candidate only counts when its name or one of its
  *  `track_titles` aliases normalizes to the same string. Returning null (rather
  *  than a wrong guess) is what lets the importer report "not in the API".
  *
- *  'unsurfaced' and 'recording_session' songs are never returned — same
+ *  'unsurfaced' and 'recording_session' songs are never returned - same
  *  exclusion as handleImportPlaylist/handleAddAllTo elsewhere in the app, since
  *  those categories aren't meant to be dropped into a normal playlist. A title
  *  that only matches one of those reports as "not found" rather than adding it. */
@@ -476,6 +753,23 @@ export async function resolveTitleToSong(title: string): Promise<JWApiSong | nul
     )
   } catch {
     return null
+  }
+}
+
+/** Free-text song search for the chat `/search` command: unlike
+ *  resolveTitleToSong this doesn't require an exact (or loose-exact) name
+ *  match - it returns the API's own loose-substring results as-is (same
+ *  unsurfaced/recording_session exclusion), so the caller can present a
+ *  handful of candidates for a person to pick from. */
+export async function searchSongs(title: string, limit = 8): Promise<JWApiSong[]> {
+  const raw = (title ?? '').trim()
+  if (!raw) return []
+  const search = cleanTitleForSearch(stripFileTitleCruft(raw)) || raw
+  try {
+    const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search, page_size: limit })
+    return (data.results ?? []).filter((s) => !['unsurfaced', 'recording_session'].includes(s.category)).slice(0, limit)
+  } catch {
+    return []
   }
 }
 
@@ -505,27 +799,40 @@ export function parseDuration(length: string | null | undefined): number {
 // ─── Convert API song to Track ────────────────────────────────────────────────
 
 // A Track is what the app plays and displays, so this is where a user's
-// per-song overrides get applied — every surface (queue, player, mini player,
+// per-song overrides get applied - every surface (queue, player, mini player,
 // Discord RPC, lists built from Tracks) then picks them up for free. The
 // canonical values stay on the Track as apiTitle/apiImageUrl.
 //
 // JWApiSong deliberately keeps the API's own data untouched: the editor views
 // work from that shape, so an editor never sees another user's personal rename
 // in a field they might propose upstream.
+export function resolveSessionEditSource(song: { id: number; category: string; path: string; length: string }): { path: string; length: string; channel: string | undefined } {
+  if (song.category !== 'recording_session') return { path: song.path, length: song.length, channel: undefined }
+  const channel = peekActiveChannel()
+  const override = peekSessionEditOverride(song.id, channel)
+  if (override) return { path: override.path, length: override.duration ?? song.length, channel }
+  if (song.path && !isSessionEditPlaceholder(song.path)) return { path: song.path, length: song.length, channel }
+  const link = peekSessionEditLink(song.id, channel)
+  if (link) return { path: link.path, length: link.duration ?? song.length, channel }
+  // Not looked up yet: playable, resolved by the Player when it's actually played.
+  return { path: sessionEditPlaceholder(song.id), length: song.length, channel: undefined }
+}
+
 export function songToTrack(song: JWApiSong): Track {
   const apiTitle = song.name
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
   // A user-set cover always wins; a rotated suggestion fills in next; an era
-  // cover override fills in after that — and only for songs that aren't
+  // cover override fills in after that - and only for songs that aren't
   // released, since released songs have their own real art JWA already shows.
   const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
     ?? peekRotatedCover(song.id)
     ?? (song.category !== 'released' ? resolvePrefCoverUrl(peekEraCover(song.era?.name)) : undefined)
+  const { path: resolvedPath, length: resolvedLength, channel: streamChannel } = resolveSessionEditSource(song)
   return {
     id: `jw-${song.id}`,
-    path: song.path,
-    streamUrl: buildStreamUrl(song.path),
+    path: resolvedPath,
+    streamUrl: isSessionEditPlaceholder(resolvedPath) ? resolvedPath : buildStreamUrl(resolvedPath, streamChannel),
     imageUrl: coverUrl ?? apiImageUrl,
     title: pref?.name || apiTitle,
     apiTitle,
@@ -536,7 +843,7 @@ export function songToTrack(song: JWApiSong): Track {
     albumArtist: 'Juice WRLD',
     year: null,
     trackNumber: null,
-    duration: parseDuration(song.length),
+    duration: parseDuration(resolvedLength),
     genre: song.category,
     hasAlbumArt: !!song.image_url || !!coverUrl,
   }

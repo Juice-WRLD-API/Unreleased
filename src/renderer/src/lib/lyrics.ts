@@ -4,24 +4,28 @@ import { SyncedLyricLine } from '../types'
 /**
  * Whether a lyrics section should be shown, debounced against the
  * lyrics-null placeholder `currentTrackFull` briefly holds while the real
- * lyrics for a newly-started track are still loading in — collapsing
+ * lyrics for a newly-started track are still loading in - collapsing
  * immediately on that placeholder made the lyrics panel flash shut and
  * reopen on every track change. Expanding is instant (nothing to hide);
  * collapsing waits a beat in case lyrics show up before it commits to "no
  * lyrics."
  */
-export function useLyricsVisible(hasLyricsNatural: boolean, override: boolean): boolean {
+export function useLyricsVisible(hasLyricsNatural: boolean, override: boolean, pending = false): boolean {
   const wantVisible = hasLyricsNatural !== override
   const [visible, setVisible] = useState(wantVisible)
 
   useEffect(() => {
+    // Lyrics are still being fetched for the current track - hold whatever
+    // arrangement was already on screen instead of collapsing to the
+    // no-lyrics layout just because they haven't loaded yet.
+    if (pending) return
     if (wantVisible) {
       setVisible(true)
       return
     }
     const t = setTimeout(() => setVisible(false), 250)
     return () => clearTimeout(t)
-  }, [wantVisible])
+  }, [wantVisible, pending])
 
   return visible
 }
@@ -84,13 +88,13 @@ export const ADLIB_OPACITY = 0.7
 /**
  * Split a lyric line into plain runs and parenthesized ad-lib runs, so the
  * renderers can dim the ad-libs ("I'm still here (still here)"). The
- * brackets stay in the output — they're part of how ad-libs read.
+ * brackets stay in the output - they're part of how ad-libs read.
  *
  * Only balanced `(...)` pairs on a single line count; an unclosed bracket is
  * left as ordinary text rather than swallowing the rest of the lyrics (this
  * also runs over whole multi-line plain-text lyrics, where a stray "(" would
  * otherwise shrink everything down to the next line's ")"). Nesting isn't
- * handled — it doesn't occur in practice, and the failure mode is just a
+ * handled - it doesn't occur in practice, and the failure mode is just a
  * normally-sized fragment.
  */
 export function splitAdLibs(text: string): { text: string; adLib: boolean }[] {
@@ -106,8 +110,32 @@ export function splitAdLibs(text: string): { text: string; adLib: boolean }[] {
   return parts.length > 0 ? parts : [{ text, adLib: false }]
 }
 
+export interface ColorWordRule { phrase: string; color: string }
+
+/** Hardcoded word/phrase -> color easter egg for the synced lyrics view.
+ *  Edit this list directly to add or change pairs. */
+export const LYRIC_COLOR_WORDS: ColorWordRule[] = [
+  { phrase: 'R Kelly', color: '#fcba03' },
+    { phrase: 'R. Kelly', color: '#fcba03' },
+]
+
 /**
- * Save a synced (LRC) lyrics string as a local .lrc file — a plain client-side
+ * Split a run of lyric text around any configured color-word phrases, so the
+ * renderer can color just the matched text and leave the rest untouched.
+ * Case-insensitive; matched phrases keep their original casing in the output.
+ */
+export function splitColorWords(text: string, rules: ColorWordRule[] = LYRIC_COLOR_WORDS): { text: string; color?: string }[] {
+  if (rules.length === 0 || !text) return [{ text }]
+  const pattern = rules.map(r => r.phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  const parts = text.split(new RegExp(`(${pattern})`, 'gi')).filter(p => p !== undefined && p !== '')
+  return parts.map(part => {
+    const rule = rules.find(r => r.phrase.toLowerCase() === part.toLowerCase())
+    return rule ? { text: part, color: rule.color } : { text: part }
+  })
+}
+
+/**
+ * Save a synced (LRC) lyrics string as a local .lrc file - a plain client-side
  * Blob download, not a server fetch, since the lyrics text is already in
  * memory (loaded with the track).
  */

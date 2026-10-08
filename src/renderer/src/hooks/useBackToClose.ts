@@ -9,7 +9,7 @@ import { registerBackHandler } from '../lib/backHandlers'
 // lasts exactly as long as the UI does, and because handlers run
 // last-registered-first, a modal opened on top of another gets the press.
 //
-// `active` is for components that stay mounted and render null while closed —
+// `active` is for components that stay mounted and render null while closed -
 // without it they'd swallow a back press while invisible.
 export function useBackToClose(onClose: () => void, active = true): void {
   useEffect(() => {

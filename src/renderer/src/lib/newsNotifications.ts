@@ -2,23 +2,28 @@
 //
 // Subscriptions live in localStorage (source of truth, works signed-out and
 // offline) and are mirrored to the user profile's `news_subscriptions` blob
-// once the backend supports it — same pattern as song prefs / playlist folders.
+// once the backend supports it - same pattern as song prefs / playlist folders.
 // Delivery uses the Web Notifications API, which the Electron renderer maps to
 // native OS notifications, so no IPC is needed. Detection is a poll that diffs
 // the latest feed against the highest post id we've already shown.
 //
-// All of it is inert until NEWS_ENABLED (see newsApi) — the poll returns nothing
+// All of it is inert until NEWS_ENABLED (see newsApi) - the poll returns nothing
 // and the profile push no-ops, so this ships dormant with the rest of the
 // prepared frontend.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, authHeaders } from './apiClient'
 import { fetchNews, NEWS_ENABLED, type NewsItem } from './newsApi'
+import { notificationsSupported, notificationPermission, ensureNotifyPermission, focusAppWindow, playNotificationSound } from './notifications'
+
+import { showNotificationBanner } from './chatNotifications'
+
+export { notificationsSupported, notificationPermission, ensureNotifyPermission }
 
 const SUBS_KEY = 'unreleased:newsSubscriptions'
 const ENABLED_KEY = 'unreleased:newsNotificationsEnabled'
 const LAST_SEEN_KEY = 'unreleased:newsLastSeenId'
-const ME_URL = `${JWAPI_BASE}/accounts/account/me/`
+const ME_URL = routeUrl('/accounts/account/me/')
 
 // ─── Subscriptions ────────────────────────────────────────────────────────────
 
@@ -36,7 +41,7 @@ function writeSubscriptions(ids: string[]): void {
   try {
     localStorage.setItem(SUBS_KEY, JSON.stringify([...new Set(ids)]))
   } catch {}
-  // Best-effort profile sync — never blocks the local write.
+  // Best-effort profile sync - never blocks the local write.
   void pushSubscriptions()
 }
 
@@ -67,11 +72,11 @@ export async function pushSubscriptions(): Promise<void> {
   try {
     await apiRequest<unknown>(ME_URL, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
       body: JSON.stringify({ news_subscriptions: getSubscriptions() }),
     })
   } catch {
-    // A failed sync is non-fatal — localStorage already holds the truth.
+    // A failed sync is non-fatal - localStorage already holds the truth.
   }
 }
 
@@ -94,47 +99,35 @@ export function setNotificationsEnabled(on: boolean): void {
 
 // ─── Permission + delivery ────────────────────────────────────────────────────
 
-export function notificationsSupported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window
-}
-
-export function notificationPermission(): NotificationPermission {
-  return notificationsSupported() ? Notification.permission : 'denied'
-}
-
-// Asks the OS/browser for permission if we don't have it yet. Returns whether
-// notifications are usable afterwards.
-export async function ensureNotifyPermission(): Promise<boolean> {
-  if (!notificationsSupported()) return false
-  if (Notification.permission === 'granted') return true
-  if (Notification.permission === 'denied') return false
-  try {
-    return (await Notification.requestPermission()) === 'granted'
-  } catch {
-    return false
-  }
-}
-
 // Fires a single OS notification for a post. Clicking it focuses the app (in
 // Electron) and routes to News via the callback.
 export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) => void): void {
+  const body = item.summary?.trim() || item.body?.trim().slice(0, 140) || ''
+  // In-app banner shows regardless of OS permission.
+  showNotificationBanner({
+    id: item.id,
+    title: item.title,
+    body,
+    icon: item.image_url,
+    onOpen: () => { focusAppWindow(); onOpen(item) },
+  })
+  // Chime goes with the banner, not the OS notification, so it plays even when
+  // OS permission was never granted (same as chat).
+  playNotificationSound()
   if (!notificationsSupported() || Notification.permission !== 'granted') return
   try {
-    const body = item.summary?.trim() || item.body?.trim().slice(0, 140) || ''
     const n = new Notification(item.title, {
       body,
       icon: item.image_url ?? undefined,
       tag: `news-${item.id}`, // dedupes if the same post somehow fires twice
     })
     n.onclick = () => {
-      const el = (window as unknown as { electron?: { focusMainWindow?: () => void } }).electron
-      el?.focusMainWindow?.()
-      window.focus()
+      focusAppWindow()
       onOpen(item)
       n.close()
     }
   } catch {
-    // Some environments throw on construction (e.g. permission race) — ignore.
+    // Some environments throw on construction (e.g. permission race) - ignore.
   }
 }
 
@@ -155,10 +148,21 @@ function setLastSeenId(id: number): void {
   } catch {}
 }
 
+// A post pushed over the notifications socket. Returns it if it should raise a
+// notification (subscribed channel, notifications on, not already shown), and
+// advances the high-water mark so the catch-up fetch won't refire it.
+export function acceptPushedPost(item: NewsItem): NewsItem | null {
+  if (!NEWS_ENABLED || !notificationsEnabled()) return null
+  const lastSeen = getLastSeenId()
+  if (lastSeen !== null && item.id <= lastSeen) return null
+  setLastSeenId(item.id)
+  return getSubscriptions().includes(item.channel) ? item : null
+}
+
 // Polls the latest feed and returns posts in subscribed channels that are newer
 // than anything we've shown before. Advances the high-water mark to the newest
 // id seen (any channel) so nothing re-fires. On the very first run it just
-// seeds the mark and returns nothing — we don't want to blast the whole backlog.
+// seeds the mark and returns nothing - we don't want to blast the whole backlog.
 export async function checkForNewPosts(): Promise<NewsItem[]> {
   if (!NEWS_ENABLED || !notificationsEnabled()) return []
   const subs = getSubscriptions()

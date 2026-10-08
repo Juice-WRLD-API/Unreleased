@@ -1,6 +1,6 @@
 // Opt-in stack for the Android hardware back button (see
 // hooks/useAndroidBackButton). Most dismissable UI is store-backed and handled
-// centrally there, but some surfaces keep their step state locally — Settings'
+// centrally there, but some surfaces keep their step state locally - Settings'
 // mobile drill-down, for instance, where back should return to the category
 // list rather than close the whole page. Those register a handler here.
 //

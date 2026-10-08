@@ -4,11 +4,13 @@ import {
   X, Music2, Pencil, Flag,
   Clock, Hash, MicVocal, Music, Wrench, FileText, Piano, MapPin,
   Calendar, CalendarClock, CalendarDays, Droplets, Gauge, Layers,
-  GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon
+  GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon,
+  Activity, Music4
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useDragToDismiss } from '../hooks/useDragToDismiss'
 import { useCanEdit } from '../hooks/useChannelRoles'
-import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import { versionsEnabled, getVersionGroup, SongVersionMeta } from '../lib/versionsApi'
 import { formatDuration } from '../lib/format'
 import { copyCoverImage, saveCoverImage } from '../lib/coverImage'
@@ -76,15 +78,15 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
   const openReport = useStore((s) => s.openReport)
 
   // Clicking a linked version swaps the displayed song in place, without the
-  // caller needing to manage that — falls back to the `song` prop otherwise.
+  // caller needing to manage that - falls back to the `song` prop otherwise.
   const [overrideSong, setOverrideSong] = useState<JWApiSong | null>(null)
   useEffect(() => { setOverrideSong(null) }, [song?.id])
   const displaySong = overrideSong ?? song
 
-  // "Other versions" — a separate database from juicewrldapi.com (see
+  // "Other versions" - a separate database from juicewrldapi.com (see
   // lib/versionsApi.ts), since that API has no concept of grouping e.g.
   // "Song (v1)" / "(v2)" / "(TV Mix)" together as the same underlying song.
-  // Linking/unlinking only happens from the editor (Edit song → Versions) —
+  // Linking/unlinking only happens from the editor (Edit song → Versions) -
   // this view is read-only.
   const [versions, setVersions] = useState<{ song: JWApiSong; meta: SongVersionMeta }[]>([])
   const [loadingVersions, setLoadingVersions] = useState(false)
@@ -99,10 +101,17 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
     if (!versionsEnabled) return
     setLoadingVersions(true)
     getVersionGroup(id)
-      .then(metas => Promise.all(metas.map(meta =>
-        apiFetch<JWApiSong>(`/songs/${meta.songId}/`).then(song => ({ song, meta })).catch(() => null)
-      )))
-      .then(entries => setVersions(entries.filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)))
+      .then(async metas => {
+        const songs = await getSongsByIds(metas.map(m => m.songId))
+        const byId = new Map(songs.map(s => [s.id, s]))
+        return metas
+          .map((meta): { song: JWApiSong; meta: SongVersionMeta } | null => {
+            const song = byId.get(meta.songId)
+            return song ? { song, meta } : null
+          })
+          .filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)
+      })
+      .then(entries => setVersions(entries))
       .finally(() => setLoadingVersions(false))
   }
 
@@ -119,18 +128,30 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
     } catch {}
   }
 
+  // Swipe-down-to-dismiss on mobile, same curtain gesture as WRLD's full-
+  // screen player. Only armed from the hero (cover/header) area - same
+  // region the desktop drag-handle uses - so it doesn't fight the scrollable
+  // info list below. dragY/dragging get handed to ModalOverlay so it can
+  // translate the backdrop *with* the panel - otherwise the panel would slide
+  // away while an opaque backdrop stayed put, hiding the app behind it until
+  // the modal actually closed.
+  // Called before the `!displaySong` early return below (hooks must run
+  // unconditionally on every render) even though it's only used once we know
+  // we're actually rendering the modal.
+  const { dragY, dragging, handlers: dragHandlers } = useDragToDismiss(onClose)
+
   if (!displaySong) return null
 
   // The user's per-song override (custom name/cover). Subscribing to the whole
   // map keeps the hero in step when it's edited from the Personalize section
-  // below (or another window) — the map's reference only changes on a write,
+  // below (or another window) - the map's reference only changes on a write,
   // so this modal isn't re-rendering on unrelated store churn.
   const pref = songPrefs[displaySong.id]
   const apiCoverUrl = buildImageUrl(displaySong.image_url)
   const coverUrl = resolvePrefCoverUrl(pref?.cover_url) ?? apiCoverUrl
   const apiPrimaryTitle = displaySong.name
   const primaryTitle = pref?.name || apiPrimaryTitle
-  // Every OTHER known title, not just track_titles[1:] — track_titles is an
+  // Every OTHER known title, not just track_titles[1:] - track_titles is an
   // unordered alias list, so its first entry isn't reliably the primary name
   // (see EditorPage's baseline() for the same mismatch). Excluding by value
   // rather than by index keeps a real alias from vanishing off this list just
@@ -184,7 +205,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
 
   // ModalOverlay portals to <body> so the overlay is never trapped inside a
   // caller with a CSS transform/animation/overflow (e.g. NowPlaying's
-  // slide-in panel) — a transformed ancestor becomes the containing block for
+  // slide-in panel) - a transformed ancestor becomes the containing block for
   // position: fixed, which would otherwise render this "modal" clipped
   // inside that panel.
   return (
@@ -193,14 +214,19 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
       zIndexClassName="z-[160]"
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg max-h-[92svh] md:max-h-[86vh]"
       minWidth={420} minHeight={480}
+      dragY={dragY} dragging={dragging}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div
-        className="select-text bg-surface w-full h-full flex flex-col overflow-hidden"
+        className="select-text bg-surface w-full flex-1 min-h-0 flex flex-col overflow-hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
 
-        <div className="relative shrink-0 overflow-hidden cursor-grab active:cursor-grabbing" onMouseDown={onHandleMouseDown}>
+        <div
+          className={`relative shrink-0 overflow-hidden ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          onMouseDown={onHandleMouseDown}
+          {...dragHandlers}
+        >
           {coverUrl && (
             <div
               className="absolute inset-0 bg-cover bg-center scale-110"
@@ -209,13 +235,15 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
           )}
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-surface" />
           <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
-            <LockToggle
-              locked={locked}
-              onClick={toggleLock}
-              className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
-                locked ? 'bg-accent/80 text-white' : 'bg-black/40 text-white/70 hover:text-white'
-              }`}
-            />
+            {canLock && (
+              <LockToggle
+                locked={locked}
+                onClick={toggleLock}
+                className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
+                  locked ? 'bg-accent/80 text-white' : 'bg-black/40 text-white/70 hover:text-white'
+                }`}
+              />
+            )}
             {onEdit && (
               <button
                 onClick={() => { onEdit(displaySong.id); onClose() }}
@@ -227,6 +255,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             )}
             <button
               onClick={onClose}
+              title="Close"
               className="w-7 h-7 flex items-center justify-center rounded-full bg-black/40 text-white/70 hover:text-white transition-colors"
             >
               <X size={15} />
@@ -246,7 +275,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
                   <span className="text-white text-[10px] font-semibold">{coverMsg}</span>
                 </div>
               ) : (
-                // Copy/save actions — always visible (no hover on touch),
+                // Copy/save actions - always visible (no hover on touch),
                 // tucked in the bottom-right corner so they don't compete with
                 // the cover itself.
                 <div className="absolute bottom-1 right-1 flex items-center gap-1">
@@ -299,7 +328,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
         </div>
 
         {/* Scrollable info */}
-        <div className="overflow-y-auto flex-1 px-5 py-4">
+        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4">
 
           <SongPrefsSection
             songId={displaySong.id}
@@ -311,7 +340,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             altTitles={altTitles}
           />
 
-          {/* Alt names as chips right under the hero, like the reference —
+          {/* Alt names as chips right under the hero, like the reference -
               they're also what widens the cover picker's search (see
               SongPrefsSection's altTitles prop). */}
           {altTitles.length > 0 && (
@@ -370,6 +399,8 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
           )}
 
           <TextSection icon={Gauge} label="Bitrate" value={displaySong.bitrate} />
+          <TextSection icon={Activity} label="BPM" value={displaySong.bpm != null ? String(displaySong.bpm) : null} />
+          <TextSection icon={Music4} label="Key" value={displaySong.key} />
 
           {hasSession && (
             <Section icon={Layers} label="Session">
@@ -396,7 +427,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
                     >
                       <span className="text-text-primary text-xs truncate block">
                         {v.name}
-                        {meta.version && <span className="text-text-muted"> ({meta.version}{meta.versionTitle ? ` — ${meta.versionTitle}` : ''})</span>}
+                        {meta.version && <span className="text-text-muted"> ({meta.version}{meta.versionTitle ? ` - ${meta.versionTitle}` : ''})</span>}
                         {!meta.version && meta.versionTitle && <span className="text-text-muted"> ({meta.versionTitle})</span>}
                       </span>
                     </button>
