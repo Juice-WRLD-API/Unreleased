@@ -293,11 +293,13 @@ function VizSettings(): JSX.Element {
   )
 }
 
-function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
+function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => void; locked?: boolean }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'}`}
+      disabled={locked}
+      title={locked ? 'Locked on while the Pill navigation style is selected' : undefined}
+      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
           block centering trick) instead of a manual top offset — a fixed
@@ -1807,9 +1809,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                   label="Auto-hide navigation"
                   sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
                 >
-                  <Toggle on={autoHideNav} onClick={() => setAutoHideNav(!autoHideNav)} />
+                  <Toggle on={autoHideNav || navStyle === 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
                 </Row>
-                {autoHideNav && (
+                {(autoHideNav || navStyle === 'pill') && (
                   <Row
                     icon={Minimize2}
                     iconColor="#0d9488"
