@@ -8,6 +8,7 @@
 import { useEffect } from 'react'
 import { useStorePick } from '../store/useStore'
 import { rememberTabView } from '../lib/navItems'
+import { useIsMobile } from '../hooks/useIsMobile'
 import type { ViewType } from '../types'
 
 export type GameId = Extract<ViewType, 'heardle' | 'wordle' | 'tierlist'>
@@ -22,11 +23,15 @@ const GAMES: { id: GameId; label: string }[] = [
  *  corner controls own the very top of the pane, so this is the first thing in
  *  the scroll flow rather than another floating layer to dodge them. */
 export function GameSwitcher({ current }: { current: GameId }): JSX.Element {
-  const { setActiveView } = useStorePick('setActiveView')
+  const { setActiveView, navStyle, sidebarPosition, autoHideNav } = useStorePick('setActiveView', 'navStyle', 'sidebarPosition', 'autoHideNav')
+  const isMobile = useIsMobile()
   // Whichever game is on screen is the one the Games tab reopens on.
   useEffect(() => { rememberTabView(current) }, [current])
+  // A visible floating nav pill on the top edge is centred over this row, so
+  // drop the row below it. (Mobile has no pill; its caller already offsets.)
+  const belowPill = !isMobile && navStyle === 'pill' && sidebarPosition === 'top' && !autoHideNav
   return (
-    <div className="flex justify-center mb-5">
+    <div className={`flex justify-center mb-5 ${belowPill ? 'mt-14' : ''}`}>
       <div className="inline-flex rounded-full border border-[var(--border)] bg-[var(--surface-raised)]/60 p-0.5">
         {GAMES.map((g) => (
           <button
