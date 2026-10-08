@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import { buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication } from '../lib/userApi'
 import { versionsEnabled } from '../lib/versionsApi'
@@ -448,7 +449,7 @@ export default function EditorPage({ initialSongId = null }: {
       {/* Top bar */}
       {/* 188px clears the window controls (132px) plus the fixed downloads
           trigger next to them (right: 144px + 36px wide - see DownloadManager) */}
-      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]" style={(window as any).electron ? { paddingRight: '188px' } : undefined}>
+      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]" style={(window as any).electron ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
         {/* Back - only in the in-app editor; the pop-out window has nowhere to go back to */}
         {!IS_FLOAT_WINDOW && (
           <button

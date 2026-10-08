@@ -9,6 +9,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { LibraryTrack } from '../types'
 import { libraryTrackToTrack as toQueueTrack } from '../lib/fileTypes'
 import { loadAllSongs, normalizeSongTitle } from '../lib/juicewrldApi'
+import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 import { fisherYates } from '../store/queueSlice'
 import * as userApi from '../lib/userApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
@@ -851,7 +852,7 @@ export default function LibraryTab(): JSX.Element {
              regions as flat rect math (drag minus no-drag, stacking ignored), so a
              full-width no-drag bar here erased App's titlebar drag strip and made
              the window unmovable on this view. Only the controls punch holes. */
-          <div className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-2 px-5 py-3 border-b border-[var(--border)]" style={{ paddingRight: (window as any).electron ? 188 : undefined }}>
+          <div className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-2 px-5 py-3 border-b border-[var(--border)]" style={{ paddingRight: (window as any).electron ? ELECTRON_TITLEBAR_CLEARANCE_X : undefined }}>
             <h2 className="text-text-primary text-xl font-bold shrink-0">{title}</h2>
             <div className="relative flex-1 min-w-[120px] max-w-xs ml-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
@@ -914,7 +915,7 @@ export default function LibraryTab(): JSX.Element {
         ) : nav.kind === 'lib' && nav.key === 'songs' ? (
           <SongList tracks={songs} onContext={openCtx}
             header={
-              <div className="flex items-center gap-3 px-4 py-1.5 mb-1">
+              <div className="flex items-center gap-3 pl-[18px] pr-[14px] py-1.5 mb-1">
                 <div className="w-5 text-[10px] text-text-muted uppercase tracking-wider text-center">#</div>
                 <div className="w-10 shrink-0" />
                 <button onClick={() => toggleSort('title')} className="flex-1 flex items-center gap-1 text-[10px] text-text-muted uppercase tracking-wider hover:text-text-primary transition-colors">

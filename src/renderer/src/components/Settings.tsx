@@ -175,6 +175,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'about', label: 'Become an Editor' },
   { tab: 'about', label: 'Become a Contributor' },
   { tab: 'about', label: 'FAQ', sub: 'What is this? Who are you? Why did you build this? Technical stuff?' },
+  { tab: 'about', label: 'Credits' },
 ]
 
 // ── Flat row primitive — no card/box, just an icon + label on the left and
@@ -2900,6 +2901,13 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       )}
                     </div>
                   ))}
+                </div>
+
+                <h3 className="text-text-primary text-lg font-bold mt-5 mb-3">Credits</h3>
+                <div className="rounded-xl border border-[var(--border)] px-3 py-2.5">
+                  <p className="text-text-secondary text-xs leading-relaxed">
+                    X, saint, Q_scal, xig, bleed
+                  </p>
                 </div>
               </div>
             )}

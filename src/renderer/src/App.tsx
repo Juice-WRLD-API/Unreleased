@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
-import { runWhenIdle } from './lib/platform'
+import { runWhenIdle, ELECTRON_TITLEBAR_CLEARANCE_X } from './lib/platform'
 import { applySeo } from './lib/seo'
 import { lazyView } from './lib/lazyView'
 import { ViewType } from './types'
@@ -304,13 +304,13 @@ export default function App(): JSX.Element {
         <main className="flex-1 overflow-hidden flex flex-col relative">
           {/* Frameless-window drag strip — when the nav bar sits on top (md+
               only; it's hidden on narrow windows) the bar touches the window
-              edge instead and carries its own strip. mr-[188px] clears the
-              min/max/close buttons (132px) plus the fixed downloads trigger
-              next to them (right: 144px + 36px wide — see DownloadManager). */}
+              edge instead and carries its own strip. ELECTRON_TITLEBAR_CLEARANCE_X
+              clears the min/max/close buttons (132px) plus the fixed downloads
+              trigger next to them (right: 144px + 36px wide — see DownloadManager). */}
           {isElectron && appMenuPosition !== 'title-bar' && (
             <div
-              className={`absolute top-0 left-0 right-0 h-7 z-20 select-none mr-[188px] pointer-events-none ${sidebarPosition === 'top' ? 'md:hidden' : ''}`}
-              style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+              className={`absolute top-0 left-0 right-0 h-7 z-20 select-none pointer-events-none ${sidebarPosition === 'top' ? 'md:hidden' : ''}`}
+              style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties}
             />
           )}
           <div className="flex-1 overflow-hidden flex">

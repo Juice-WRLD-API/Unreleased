@@ -531,7 +531,7 @@ function createFloatWindow(view, params) {
   if (existing && !existing.isDestroyed()) {
     if (existing.isMinimized()) existing.restore()
     existing.show()
-    existing.focus()
+    if (view !== 'mini-player') existing.focus()
     existing.webContents.send('float-params', query)
     if (view === 'mini-player' && appSettings.miniPlayerHidesWindows) hideWindowsForMiniPlayer()
     return
@@ -556,6 +556,7 @@ function createFloatWindow(view, params) {
   broadcastFloatWindows()
   win.once('ready-to-show', () => {
     win.show()
+    if (view !== 'mini-player') win.focus()
     if (view === 'mini-player') {
       // Upgrade from the constructor's default 'floating' level to the one
       // that actually clears fullscreen games, and start holding it there.

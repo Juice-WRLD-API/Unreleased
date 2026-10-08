@@ -6,6 +6,7 @@ import {
   Share2,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
+import { IS_ELECTRON, ELECTRON_TITLEBAR_CLEARANCE_Y } from '../lib/platform'
 import {
   fetchNews, peekNews, fetchChannels, fetchNewsItem, deleteNewsItem, isImageAttachment, isAudioAttachment,
   buildNewsAttachmentStreamUrl, ensureHttpsMediaUrl,
@@ -354,7 +355,7 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewsView(): JSX.Element {
-  const { setActiveView, previousView, account } = useStorePick('setActiveView', 'previousView', 'account')
+  const { setActiveView, previousView, account, appMenuPosition } = useStorePick('setActiveView', 'previousView', 'account', 'appMenuPosition')
   // News write access is its own role (is_news), separate from is_editor -
   // admins can post regardless. Only admins manage channels.
   const canPost = !!(account?.is_news || account?.is_administrator)
@@ -534,7 +535,7 @@ export default function NewsView(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
+      <div className="flex-shrink-0 px-6 pb-0 border-b border-[var(--border)]" style={{ paddingTop: IS_ELECTRON && appMenuPosition !== 'title-bar' ? ELECTRON_TITLEBAR_CLEARANCE_Y : 24 }}>
         <div className="flex items-center gap-3 mb-4">
           <button
             onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')}

@@ -636,11 +636,11 @@ const SongRow = memo(function SongRow({
           {CATEGORY_LABELS[song.category] ?? song.category}
         </button>
       )}
-      <span className="hidden md:block text-text-muted text-xs w-12 text-right shrink-0 tabular-nums">{formatDuration(parseDuration(song.length), '--:--')}</span>
+      <span className="hidden md:block text-text-muted text-xs w-12 shrink-0 tabular-nums">{formatDuration(parseDuration(song.length), '--:--')}</span>
 
       {/* Desktop action buttons */}
       {!selectMode && (
-        <div className="hidden md:flex items-center gap-0.5 shrink-0">
+        <div className="hidden md:flex items-center justify-end gap-0.5 shrink-0 w-14">
           <SongActions onInfo={() => onInfo(song)} onContextMenu={(e) => onContextMenu(song, e)} />
         </div>
       )}
@@ -3333,7 +3333,7 @@ export default function ApiTrackerView(): JSX.Element {
               at an identical y-offset and nothing jumps when toggling. */}
           {viewMode === 'list' && (
             <div className="hidden md:block px-5 pb-1 shrink-0">
-              <div className="flex items-center gap-3 px-3 py-1">
+              <div className="flex items-center gap-3 pl-3 pr-[18px] py-1">
                 <div className="w-9 shrink-0" />
                 {compactView ? (
                   <>
@@ -3368,7 +3368,7 @@ export default function ApiTrackerView(): JSX.Element {
                     <SortBtn field="credited_artists" label="Artist" className="w-32 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
                     <SortBtn field="era__name" label="Era" className="w-36 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
                     <SortBtn field="category" label="Category" className="w-24 shrink-0 justify-center" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="length" label="Time" className="w-12 shrink-0 justify-end" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
+                    <SortBtn field="length" label="Time" className="w-12 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
                     <div className="w-14 shrink-0" />
                   </>
                 )}

@@ -22,6 +22,9 @@ export const IS_ELECTRON =
   typeof window !== 'undefined' &&
   !!(window as unknown as { electron?: unknown }).electron
 
+export const ELECTRON_TITLEBAR_CLEARANCE_X = 188
+export const ELECTRON_TITLEBAR_CLEARANCE_Y = 40
+
 /** Runs `fn` once the browser is idle, or after `timeoutMs` at the latest.
  *  Returns a canceller.
  *

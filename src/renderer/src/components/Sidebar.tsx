@@ -12,6 +12,7 @@ import { hasChatAccess } from '../lib/chatAccess'
 import type { PlaylistContextMenuState } from './PlaylistContextMenu'
 import { lazyOverlay } from '../lib/lazyView'
 import { accountDisplayName, initial } from '../lib/format'
+import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 
 // Right-click only - fetched on first open rather than with the app shell.
 const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
@@ -310,13 +311,13 @@ export default function Sidebar(): JSX.Element {
       <aside className={`app-sidebar hidden md:flex flex-col w-full bg-sidebar shrink-0 border-[var(--border)] ${sidebarPosition === 'top' ? 'border-b' : 'border-t'}`}>
         {/* Bar touches the frameless window's top edge, so it carries the
             drag strip that main's overlay provides in the other layouts.
-            mr-[188px] keeps the strip clear of the min/max/close buttons
-            (132px) plus the fixed downloads trigger next to them (right:
-            144px + 36px wide — see DownloadManager) — a drag rect under
-            them would win the draggable-region ordering and swallow their
-            clicks (see WindowControls in App.tsx). */}
+            ELECTRON_TITLEBAR_CLEARANCE_X keeps the strip clear of the
+            min/max/close buttons (132px) plus the fixed downloads trigger
+            next to them (right: 144px + 36px wide — see DownloadManager) —
+            a drag rect under them would win the draggable-region ordering
+            and swallow their clicks (see WindowControls in App.tsx). */}
         {isElectron && sidebarPosition === 'top' && appMenuPosition !== 'title-bar' && (
-          <div className="shrink-0 h-7 mr-[188px] select-none" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
+          <div className="shrink-0 h-7 select-none" style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties} />
         )}
         <div className="flex items-center gap-1 px-3 py-1.5 min-w-0">
           {isElectron && appMenuPosition === 'sidebar' && (
@@ -379,8 +380,11 @@ export default function Sidebar(): JSX.Element {
           collapsed still tucks under the min/max/close cluster). */}
       {isElectron && appMenuPosition !== 'title-bar' && (
         <div
-          className={`shrink-0 select-none ${sidebarPosition === 'right' ? 'h-9 mr-[188px]' : 'h-7'}`}
-          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          className={`shrink-0 select-none ${sidebarPosition === 'right' ? 'h-9' : 'h-7'}`}
+          style={{
+            WebkitAppRegion: 'drag',
+            marginRight: sidebarPosition === 'right' ? ELECTRON_TITLEBAR_CLEARANCE_X : undefined,
+          } as React.CSSProperties}
         />
       )}
       {/* Logo — collapses to zero height (redundant with the WRLD tab icon) */}

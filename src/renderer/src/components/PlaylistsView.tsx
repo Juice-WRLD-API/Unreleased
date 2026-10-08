@@ -486,6 +486,31 @@ export default function PlaylistsView(): JSX.Element {
     if (closeFolder) setPlaylistsOpenFolderId(null)
     setExpandedKey(k => k === key ? null : key)
   }, [setPlaylistsOpenFolderId])
+  const pendingExpandClick = useRef<{ key: string; closeFolder: boolean; timer: ReturnType<typeof setTimeout> } | null>(null)
+  const handleCardClick = useCallback((key: string, closeFolder: boolean) => {
+    if (pendingExpandClick.current) {
+      const pending = pendingExpandClick.current
+      clearTimeout(pending.timer)
+      pendingExpandClick.current = null
+      if (pending.key === key) return
+      toggleExpanded(pending.key, pending.closeFolder)
+    }
+    pendingExpandClick.current = {
+      key, closeFolder,
+      timer: setTimeout(() => { pendingExpandClick.current = null; toggleExpanded(key, closeFolder) }, 400),
+    }
+  }, [toggleExpanded])
+  const cancelPendingExpandClick = useCallback((key: string) => {
+    if (pendingExpandClick.current?.key === key) {
+      clearTimeout(pendingExpandClick.current.timer)
+      pendingExpandClick.current = null
+    }
+  }, [])
+  useEffect(() => {
+    return () => {
+      if (pendingExpandClick.current) clearTimeout(pendingExpandClick.current.timer)
+    }
+  }, [])
   // One column-count measurement per distinct grid container that can host a
   // quick-view panel — see useGridColumnCount above. State (not useRef) so
   // the measuring effect re-fires when the element actually mounts — needed
@@ -1196,6 +1221,12 @@ export default function PlaylistsView(): JSX.Element {
     toggle: togglePlKeyRaw, exitSelectMode: exitPlaylistSelectMode,
   } = useMultiSelect<string>({ onExit: () => setShowPlBulkAddMenu(false) })
   const togglePlaylistSelect = useCallback((key: string) => togglePlKeyRaw(key, key), [togglePlKeyRaw])
+  useEffect(() => {
+    if (plSelectMode && pendingExpandClick.current) {
+      clearTimeout(pendingExpandClick.current.timer)
+      pendingExpandClick.current = null
+    }
+  }, [plSelectMode])
   const keyMap = (keys: string[]): Map<string, string> => new Map(keys.map(k => [k, k]))
 
   const { busy: bulkDeletingPlaylists, run: runBulkDeletePlaylists } = usePlaylistBulkDeletePlaylists(
@@ -1762,10 +1793,12 @@ export default function PlaylistsView(): JSX.Element {
           onClick={e => {
             if (e.ctrlKey || e.metaKey) { togglePlaylistSelect(plKey); return }
             if (plSelectMode) { togglePlaylistSelect(plKey); return }
-            toggleExpanded(plKey, !inFolder)
+            handleCardClick(plKey, !inFolder)
           }}
+          onDoubleClick={() => { if (!plSelectMode) { cancelPendingExpandClick(plKey); setSelectedId(p.id) } }}
           onContextMenu={e => {
             e.preventDefault(); e.stopPropagation()
+            cancelPendingExpandClick(plKey)
             if (plSelectMode) {
               if (!plSelected) setSelectedPlaylistKeys(prev => prev.has(plKey) ? prev : new Map(prev).set(plKey, plKey))
               setPlBulkMenu({ x: e.clientX, y: e.clientY })
@@ -1773,14 +1806,13 @@ export default function PlaylistsView(): JSX.Element {
               setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY, showPlaylists: false })
             }
           }}
-          onMenuButton={e => setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY, showPlaylists: false })}
+          onMenuButton={e => { cancelPendingExpandClick(plKey); setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY, showPlaylists: false }) }}
           onPlay={async () => {
             const d = await userApi.getPlaylist(p.id).catch(() => null)
             const trks = d ? d.items.map(i => userApi.liteSongToTrack(i.song)) : []
             if (trks.length) playCollection(trks)
           }}
           onLongPress={() => togglePlaylistSelect(plKey)}
-          onDoubleClick={() => { if (!plSelectMode) { setExpandedKey(null); setSelectedId(p.id) } }}
           {...dragSourceProps(plKey)}
           {...(inFolder ? {} : dropOntoPlaylistProps(plKey))}
         />
@@ -1820,10 +1852,12 @@ export default function PlaylistsView(): JSX.Element {
           onClick={e => {
             if (e.ctrlKey || e.metaKey) { togglePlaylistSelect(plKey); return }
             if (plSelectMode) { togglePlaylistSelect(plKey); return }
-            toggleExpanded(plKey, !inFolder)
+            handleCardClick(plKey, !inFolder)
           }}
+          onDoubleClick={() => { if (!plSelectMode) { cancelPendingExpandClick(plKey); setLocalSelectedId(lp.id) } }}
           onContextMenu={e => {
             e.preventDefault(); e.stopPropagation()
+            cancelPendingExpandClick(plKey)
             if (plSelectMode) {
               if (!plSelected) setSelectedPlaylistKeys(prev => prev.has(plKey) ? prev : new Map(prev).set(plKey, plKey))
               setPlBulkMenu({ x: e.clientX, y: e.clientY })
@@ -1831,13 +1865,12 @@ export default function PlaylistsView(): JSX.Element {
               setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY, showPlaylists: false })
             }
           }}
-          onMenuButton={e => setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY, showPlaylists: false })}
+          onMenuButton={e => { cancelPendingExpandClick(plKey); setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY, showPlaylists: false }) }}
           onPlay={() => {
             const qt = lp.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
             if (qt.length) playCollection(qt)
           }}
           onLongPress={() => togglePlaylistSelect(plKey)}
-          onDoubleClick={() => { if (!plSelectMode) { setExpandedKey(null); setLocalSelectedId(lp.id) } }}
           {...dragSourceProps(plKey)}
           {...(inFolder ? {} : dropOntoPlaylistProps(plKey))}
         />
@@ -3421,7 +3454,7 @@ export default function PlaylistsView(): JSX.Element {
             {
               key: 'liked',
               tile: (
-                <button key="liked" onClick={() => toggleExpanded('liked')} className="group text-left cursor-pointer">
+                <button key="liked" onClick={() => handleCardClick('liked', true)} onDoubleClick={() => { cancelPendingExpandClick('liked'); setShowLiked(true) }} className="group text-left cursor-pointer">
                   <div className="aspect-square rounded-2xl bg-gradient-to-br from-accent/50 to-accent/10 flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200">
                     <Heart size={44} className="text-accent" fill="currentColor" />
                   </div>
