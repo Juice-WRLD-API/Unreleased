@@ -177,7 +177,14 @@ export const USER_COMMANDS: TermCommand[] = [
         fail(`no user matching "${q}"`)
       }
       if (hits.length === 1 || exact) { ctx.print(await describeUser(hits[0])); return }
-      ctx.print(`${hits.slice(0, 25).map((u) => `${String(u.id).padEnd(7)}${u.username.padEnd(22)}${(u.display || u.discord).padEnd(22)}${u.role}`).join('\n')}\n${hits.length} match${hits.length === 1 ? '' : 'es'}${hits.length > 25 ? ' (showing 25)' : ''} · user <exact name or id> for details`)
+      const shown = hits.slice(0, 25)
+      // The account list carries no display names, so anyone not already known
+      // from chat is looked up by profile to fill the name column.
+      await Promise.all(shown.filter((u) => !u.display).map(async (u) => {
+        const p = await getPublicProfile(u.id).catch(() => null)
+        if (p?.display_name) u.display = p.display_name
+      }))
+      ctx.print(`${shown.map((u) => `${String(u.id).padEnd(7)}${u.username.padEnd(22)}${(u.display || u.discord).padEnd(22)}${u.role}`).join('\n')}\n${hits.length} match${hits.length === 1 ? '' : 'es'}${hits.length > 25 ? ' (showing 25)' : ''} · user <exact name or id> for details`)
     },
   },
   {
