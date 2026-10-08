@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
   Search, Play, Loader2, Music2, X, Check,
   LayoutList, Rows3, Info, ListPlus, ListFilter,
@@ -9,6 +9,7 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
+import { lazyView } from '../lib/lazyView'
 import SongContextMenu from './SongContextMenu'
 import FilePickerModal from './FilePickerModal'
 import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
@@ -46,6 +47,8 @@ import {
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
 import { useLyricSearch } from '../lib/useLyricSearch'
+
+const StatisticsPanel = lazyView(() => import('./StatisticsPanel.desktop'))
 
 const LS_TRACKER_VIEW = 'api-tracker:viewMode'
 const LS_TRACKER_COMPACT = 'api-tracker:compactView'
@@ -1706,7 +1709,7 @@ function VersionTitlePromptModal({
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 function warmStatistics(): void {
-  preloadView('statistics')
+  import('./StatisticsPanel.desktop').catch(() => undefined)
   apiFetch('/stats/').catch(() => undefined)
   apiFetch('/plays/stats/').catch(() => undefined)
 }
@@ -2725,12 +2728,16 @@ export default function ApiTrackerView(): JSX.Element {
             <Users size={11} /> Producers
           </button>
           <button
-            onClick={() => setActiveView('statistics')}
+            onClick={() => setTrackerTab('statistics')}
             // Warm the chunk and both endpoints so the first open doesn't
-            // flash the generic skeleton and then Statistics' own.
+            // flash a skeleton and then Statistics' own.
             onPointerEnter={warmStatistics}
             onFocus={warmStatistics}
-            className="flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors text-text-muted hover:text-text-secondary"
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
+              trackerTab === 'statistics'
+                ? 'bg-surface-raised text-text-primary'
+                : 'text-text-muted hover:text-text-secondary'
+            }`}
           >
             <BarChart3 size={11} /> Statistics
           </button>
@@ -3155,6 +3162,10 @@ export default function ApiTrackerView(): JSX.Element {
             </div>
           )}
         </div>
+      ) : trackerTab === 'statistics' ? (
+        <Suspense fallback={<div className="flex items-center justify-center h-40 gap-2 text-text-muted"><Loader2 size={18} className="animate-spin" /></div>}>
+          <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />
+        </Suspense>
       ) : trackerTab === 'producers' ? (
         <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4">
           {calendarLoading ? (

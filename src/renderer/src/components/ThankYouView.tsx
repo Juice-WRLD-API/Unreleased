@@ -1,4 +1,5 @@
-import { Heart, Code2 } from 'lucide-react'
+import { Heart, Code2, ChevronLeft } from 'lucide-react'
+import { useStorePick } from '../store/useStore'
 import logo from '../assets/logo.png'
 
 // Placeholder donor list - replace with the real names. Order here is
@@ -23,9 +24,23 @@ const OTHERS: string[] = [
 ]
 
 export default function ThankYouView(): JSX.Element {
+  const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
+  // Back to wherever this was opened from (Settings, most likely), like the
+  // app's other pushed pages.
+  const backView = previousView && previousView !== 'thanks' ? previousView : 'wrld'
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
-      <div className="relative w-full max-w-3xl mx-auto px-5 md:px-8 pt-16 md:pt-24 pb-16 text-center">
+      <div className="md:hidden sticky top-0 z-10 shrink-0 px-2 pt-2">
+        <button
+          onClick={() => setActiveView(backView)}
+          aria-label="Back"
+          className="w-11 h-11 flex items-center justify-center rounded-full bg-surface/80 backdrop-blur text-text-primary active:bg-surface-overlay"
+        >
+          <ChevronLeft size={20} />
+        </button>
+      </div>
+      <div className="relative w-full max-w-3xl mx-auto px-5 md:px-8 pt-6 md:pt-24 pb-16 text-center">
         <div aria-hidden className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[480px] max-w-full h-[300px] rounded-full bg-accent/20 blur-[110px]" />
 
         <div className="relative">

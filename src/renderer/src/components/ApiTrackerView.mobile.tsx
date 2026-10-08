@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
   Search, Loader2, Music2, X, Check, ListPlus, ChevronDown, ChevronLeft,
   ChevronRight, MoreVertical, Plus, ListMusic, PackageOpen, Link2, Layers, LayoutGrid,
@@ -9,6 +9,7 @@ import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import SongInfoModal from './SongInfoModal'
+import { lazyView } from '../lib/lazyView'
 import SongContextMenu from './SongContextMenu'
 import { useExpandedGroups } from './CompactGroupRow'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
@@ -39,6 +40,8 @@ import {
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
 import { useLyricSearch } from '../lib/useLyricSearch'
+
+const StatisticsPanel = lazyView(() => import('./StatisticsPanel.mobile'))
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
 // Phone-first rewrite of the catalog browser. Every fetch path is unchanged -
@@ -1446,6 +1449,7 @@ export default function ApiTrackerView(): JSX.Element {
     { key: 'lyrics', label: 'Lyrics', icon: Mic2 },
     { key: 'calendar', label: 'Overview', icon: CalendarDays },
     { key: 'producers', label: 'Credits', icon: Users },
+    { key: 'statistics', label: 'Statistics', icon: BarChart3 },
   ]
 
   const subtitle = trackerTab === 'songs'
@@ -1457,6 +1461,7 @@ export default function ApiTrackerView(): JSX.Element {
     : trackerTab === 'lyrics'
       ? debouncedLyricsQuery.trim() ? `${lyricsCount.toLocaleString()} matches` : 'Search the catalog by lyric'
       : trackerTab === 'calendar' ? `${calendarByDate.size.toLocaleString()} recording dates`
+      : trackerTab === 'statistics' ? 'Catalog and play counts'
       : `${producersByName.length} producers · ${engineersByName.length} engineers`
 
   const viewLabel = compactView ? 'Version groups' : viewMode === 'list' ? 'List' : viewMode === 'detail' ? 'Detailed' : 'Grid'
@@ -1541,12 +1546,6 @@ export default function ApiTrackerView(): JSX.Element {
                 </button>
               )
             })}
-            <button
-              onClick={() => setActiveView('statistics')}
-              className="shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[13px] font-medium transition-colors bg-surface-overlay text-text-secondary active:bg-surface-highest"
-            >
-              <BarChart3 size={14} />Statistics
-            </button>
           </div>
 
           {/* Search */}
@@ -1753,6 +1752,10 @@ export default function ApiTrackerView(): JSX.Element {
               </>
             )}
         </div>
+      ) : trackerTab === 'statistics' ? (
+        <Suspense fallback={spinner('Loading statistics…')}>
+          <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />
+        </Suspense>
       ) : trackerTab === 'producers' ? (
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 pt-2 pb-6">
           {calendarLoading ? spinner('Loading credits…')

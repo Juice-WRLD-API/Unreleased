@@ -175,15 +175,15 @@ export function CategoryCard({ label, songCount, catalogTotal, playCount, playsT
   const songPct = catalogTotal > 0 ? Math.round((songCount / catalogTotal) * 100) : 0
   const playPct = playsTotal > 0 ? Math.round((playCount / playsTotal) * 100) : 0
   return (
-    <div className={`rounded-xl border px-4 py-3.5 text-center ${colorClass}`}>
-      <p className="text-[10px] font-semibold uppercase tracking-widest opacity-80 mb-1.5">{label}</p>
-      <div className="flex items-end justify-center gap-4">
-        <div>
-          <p className="text-2xl font-bold tabular-nums">{songCount.toLocaleString()}</p>
+    <div className={`rounded-xl border px-3 sm:px-4 py-3.5 text-center min-w-0 overflow-hidden ${colorClass}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-widest opacity-80 mb-1.5 truncate">{label}</p>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-center gap-2 sm:gap-4">
+        <div className="min-w-0">
+          <p className="text-xl sm:text-2xl font-bold tabular-nums truncate">{songCount.toLocaleString()}</p>
           <p className="text-xs opacity-70 mt-0.5">{songPct}% of catalog</p>
         </div>
-        <div className="pl-4 border-l border-current/15">
-          <p className="text-2xl font-bold tabular-nums">{playCount.toLocaleString()}</p>
+        <div className="min-w-0 pt-2 sm:pt-0 sm:pl-4 border-t sm:border-t-0 sm:border-l border-current/15">
+          <p className="text-xl sm:text-2xl font-bold tabular-nums truncate">{playCount.toLocaleString()}</p>
           <p className="text-xs opacity-70 mt-0.5">{playPct}% of plays</p>
         </div>
       </div>
@@ -258,8 +258,8 @@ export function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu, isMo
       />
       <div className="min-w-0 flex-1">
         <p className="text-text-primary text-sm font-medium truncate" title={song.name}>{song.name}</p>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {song.era_name && <span className="text-text-muted text-[11px] truncate">{song.era_name}</span>}
+        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+          {song.era_name && <span className="text-text-muted text-[11px] truncate min-w-0">{song.era_name}</span>}
           <CategoryBadge category={song.category} />
         </div>
       </div>
@@ -271,7 +271,7 @@ export function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu, isMo
           />
         </div>
       </div>
-      <span className="text-text-muted text-xs tabular-nums shrink-0 w-16 text-right">
+      <span className="text-text-muted text-xs tabular-nums shrink-0 min-w-10 text-right">
         {song.play_count.toLocaleString()}
       </span>
       {isMobile && (
@@ -306,8 +306,8 @@ export function RecentPlayRow({ play, cover, onPlay, onContextMenu, isMobile }: 
       />
       <div className="min-w-0 flex-1">
         <p className="text-text-primary text-sm font-medium truncate" title={play.title}>{play.title}</p>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {play.era_name && <span className="text-text-muted text-[11px] truncate">{play.era_name}</span>}
+        <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+          {play.era_name && <span className="text-text-muted text-[11px] truncate min-w-0">{play.era_name}</span>}
           <CategoryBadge category={play.category} />
         </div>
       </div>

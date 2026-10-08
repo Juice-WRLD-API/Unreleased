@@ -1,31 +1,21 @@
-import { ArrowLeft, BarChart3, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
+import { BarChart3 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { CATEGORY_LABELS, CATEGORY_COLORS } from '../lib/juicewrldApi'
 import { useStatisticsData } from '../hooks/useStatisticsData'
 import { CATEGORY_ORDER, EraTimeline, CategoryCard, Bar, TopSongRow, RecentPlayRow } from '../lib/statisticsShared'
 import SongContextMenu from './SongContextMenu'
 
-// The mobile Statistics screen. Same data as the desktop layout
-// (hooks/useStatisticsData) and the same row/bar building blocks
-// (lib/statisticsShared) - laid out to match the rest of the mobile shell
-// (HomeView.mobile, ApiTrackerView.mobile) instead of just narrowing the
-// desktop grid: a back-header, pill tabs instead of the compact tab strip,
-// and Section-style labels instead of dense bordered cards.
-
-const TABS = [
-  { key: 'songs', label: 'Songs', icon: Music2 },
-  { key: 'lyrics', label: 'Lyrics', icon: Mic2 },
-  { key: 'calendar', label: 'Overview', icon: CalendarDays },
-  { key: 'producers', label: 'Producers', icon: Users },
-] as const
+// The mobile Statistics tab of the Tracker (same slot as Overview/Credits).
+// Data comes from hooks/useStatisticsData, rows/bars from lib/statisticsShared.
+// Header and tab pills belong to ApiTrackerView.mobile - this is just the body.
 
 function SectionLabel({ children }: { children: React.ReactNode }): JSX.Element {
   return <h2 className="text-text-primary text-[15px] font-bold px-4 mb-2.5">{children}</h2>
 }
 
-export default function StatisticsViewMobile(): JSX.Element {
+export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraName: string) => void }): JSX.Element {
   const {
-    canEdit, playTrack, playNext, openEraInTracker, openTrackerTab,
+    canEdit, playTrack, playNext,
     stats, playStats, songMap, playById, ctxMenu, setCtxMenu, openContextMenu,
     eraRows, maxEraCount, timelineRows, timelineStart, timelineEnd,
     topEraRows, maxTopEraPlays, maxTopSongPlays, loading,
@@ -33,36 +23,7 @@ export default function StatisticsViewMobile(): JSX.Element {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* Header - no top padding of its own: the shell already absorbs the
-          status-bar inset before this mounts. */}
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-2">
-        <button
-          onClick={() => window.history.back()}
-          aria-label="Back"
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
-        ><ArrowLeft size={20} /></button>
-        <h1 className="flex-1 min-w-0 px-0.5 text-text-primary text-[20px] font-bold leading-tight truncate">Statistics</h1>
-      </div>
-
-      {/* Tab pills - same shape as the Tracker's own tab bar, so jumping
-          between the two feels like one screen rather than a hop out to a
-          different page style. */}
-      <div className="shrink-0 flex items-center gap-2 px-4 pb-2 overflow-x-auto no-scrollbar">
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => openTrackerTab(key)}
-            className="shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[13px] font-medium bg-surface-overlay text-text-secondary active:bg-surface-highest transition-colors"
-          >
-            <Icon size={14} />{label}
-          </button>
-        ))}
-        <button className="shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[13px] font-medium bg-accent text-white transition-colors">
-          <BarChart3 size={14} />Statistics
-        </button>
-      </div>
-
-      <div className="flex-1 min-h-0 overflow-y-auto pb-4">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-3 pb-6">
         {loading ? (
           <div className="px-4 space-y-3">
             <div className="h-20 bg-surface-raised animate-pulse rounded-xl" />
@@ -77,15 +38,15 @@ export default function StatisticsViewMobile(): JSX.Element {
                 <BarChart3 size={20} className="text-accent" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-text-primary text-2xl font-bold tabular-nums leading-tight">{(stats?.total_songs ?? 0).toLocaleString()}</p>
-                <p className="text-text-muted text-xs">songs in the catalog</p>
+                <p className="text-text-primary text-xl font-bold tabular-nums leading-tight truncate">{(stats?.total_songs ?? 0).toLocaleString()}</p>
+                <p className="text-text-muted text-xs truncate">songs in catalog</p>
               </div>
               {playStats && (
                 <>
                   <div className="w-px h-9 bg-[var(--border)] shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-text-primary text-2xl font-bold tabular-nums leading-tight">{playStats.total_plays.toLocaleString()}</p>
-                    <p className="text-text-muted text-xs">plays, every listener</p>
+                    <p className="text-text-primary text-xl font-bold tabular-nums leading-tight truncate">{playStats.total_plays.toLocaleString()}</p>
+                    <p className="text-text-muted text-xs truncate">total plays</p>
                   </div>
                 </>
               )}
@@ -116,7 +77,7 @@ export default function StatisticsViewMobile(): JSX.Element {
               <section className="mb-6">
                 <SectionLabel>Timeline · {timelineRows.length} eras</SectionLabel>
                 <div className="px-4">
-                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} onSelect={openEraInTracker} />
+                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} onSelect={onOpenEra} />
                 </div>
               </section>
             )}

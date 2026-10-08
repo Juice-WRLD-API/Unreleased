@@ -13,36 +13,18 @@ import type { SongContextMenuState } from '../components/SongContextMenu'
 // Catalog-wide numbers from GET /stats/ and GET /plays/stats/ - everyone sees
 // the same thing here, unlike StatsView ("Your Wrapped"), which is personal
 // listening history built from this user's own play log. Reached from Home's
-// hero stat row (see HomeView.desktop/.mobile), the Tracker's tab bar, and by
+// hero stat row (see HomeView.desktop/.mobile), the Tracker's Statistics tab, and by
 // direct URL; not a persistent bottom-nav destination.
 //
 // /stats/ counts catalog rows (how many songs exist); /plays/stats/ counts
 // plays across every listener (how much they've been played) - two different
 // endpoints, shown as two different sections below.
 //
-// Shared by StatisticsView.desktop/.mobile so the two layouts can't drift on
+// Shared by StatisticsPanel.desktop/.mobile so the two layouts can't drift on
 // what the data means or how it's derived, only on how it's arranged.
 export function useStatisticsData() {
-  const { setActiveView, playTrack, playNext, setApiTrackerEra, setApiTrackerTab } = useStorePick(
-    'setActiveView', 'playTrack', 'playNext', 'setApiTrackerEra', 'setApiTrackerTab',
-  )
+  const { playTrack, playNext } = useStorePick('playTrack', 'playNext')
   const canEdit = useCanEdit()
-
-  // Consumed by ApiTrackerView on mount (see its own effect reading
-  // apiTrackerEra/setApiTrackerEra) — the same deep-link slot other flows
-  // already had ready-made in the store, just previously unused.
-  const openEraInTracker = (eraName: string): void => {
-    setApiTrackerEra(eraName)
-    setActiveView('api-tracker')
-  }
-
-  // Tab bar deep-links into the Tracker's own tab of the same name
-  // (ApiTrackerView reads apiTrackerTab once on mount) rather than always
-  // landing on Songs.
-  const openTrackerTab = (tab: string): void => {
-    setApiTrackerTab(tab)
-    setActiveView('api-tracker')
-  }
 
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   useEffect(() => {
@@ -152,7 +134,6 @@ export function useStatisticsData() {
 
   return {
     canEdit, playTrack, playNext,
-    openEraInTracker, openTrackerTab,
     stats, playStats, songMap, playById,
     ctxMenu, setCtxMenu, openContextMenu,
     eraRows, maxEraCount,

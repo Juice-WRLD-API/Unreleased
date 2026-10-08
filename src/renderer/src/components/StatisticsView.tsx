@@ -1,6 +1,20 @@
-import { responsiveView } from '../lib/lazyView'
+import { useEffect } from 'react'
+import { useStore } from '../store/useStore'
+import { preloadView } from '../lib/lazyViews'
 
-// Statistics has a shell per breakpoint: the same data (hooks/useStatisticsData)
-// and the same row/bar building blocks (lib/statisticsShared), laid out as a
-// phone screen or a desktop dashboard - same split as Home (HomeView.tsx).
-export default responsiveView(() => import('./StatisticsView.desktop'), () => import('./StatisticsView.mobile'))
+// Statistics is a tab of the Tracker (see StatisticsPanel.desktop/.mobile), not
+// a page of its own. This stays only so existing entry points - Home's hero
+// stats, the terminal and the /statistics URL - keep working: it hands off to
+// the Tracker with its Statistics tab preselected.
+function StatisticsView(): null {
+  useEffect(() => {
+    const s = useStore.getState()
+    s.setApiTrackerTab('statistics')
+    s.setActiveView('api-tracker')
+  }, [])
+  return null
+}
+
+StatisticsView.preload = (): Promise<unknown> => Promise.resolve(preloadView('api-tracker'))
+
+export default StatisticsView

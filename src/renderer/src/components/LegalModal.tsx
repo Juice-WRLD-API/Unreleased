@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { X, ScrollText, ShieldCheck } from 'lucide-react'
 import { ModalOverlay, LockToggle } from './Modal'
+import { useDragToDismiss } from '../hooks/useDragToDismiss'
 
 export type LegalDoc = 'terms' | 'privacy'
 
@@ -297,6 +298,9 @@ function PrivacyContent(): JSX.Element {
 
 export default function LegalModal({ initialDoc = 'terms', onClose }: { initialDoc?: LegalDoc; onClose: () => void }): JSX.Element {
   const [doc, setDoc] = useState<LegalDoc>(initialDoc)
+  // Swipe-down-to-dismiss on mobile, armed from the header only so it doesn't
+  // fight the scrollable body.
+  const { dragY, dragging, handlers: dragHandlers } = useDragToDismiss(onClose)
 
   const Tab = ({ id, icon: Icon, label }: { id: LegalDoc; icon: typeof ScrollText; label: string }): JSX.Element => (
     <button
@@ -316,14 +320,16 @@ export default function LegalModal({ initialDoc = 'terms', onClose }: { initialD
     <ModalOverlay
       onClose={onClose}
       zIndexClassName="z-[70]"
-      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[520px] h-[640px] max-h-[85vh]"
+      panelClassName="bg-surface border border-[var(--border)] rounded-t-3xl md:rounded-3xl shadow-2xl w-full max-w-[520px] h-[640px] max-h-[85vh]"
       minWidth={420} minHeight={420}
+      dragY={dragY} dragging={dragging}
     >
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
         <div className="w-full h-full flex flex-col overflow-hidden">
           <div
             className={`flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
             onMouseDown={onHandleMouseDown}
+            {...dragHandlers}
           >
             <div className="flex items-center gap-2">
               {doc === 'terms' ? <ScrollText size={16} className="text-accent" /> : <ShieldCheck size={16} className="text-accent" />}

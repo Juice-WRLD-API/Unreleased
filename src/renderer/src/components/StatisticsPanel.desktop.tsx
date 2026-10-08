@@ -1,4 +1,4 @@
-import { BarChart3, Music2, Mic2, CalendarDays, Users } from 'lucide-react'
+import { BarChart3 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { CATEGORY_LABELS, CATEGORY_COLORS } from '../lib/juicewrldApi'
 import { useStatisticsData } from '../hooks/useStatisticsData'
@@ -8,45 +8,18 @@ import {
 } from '../lib/statisticsShared'
 import SongContextMenu from './SongContextMenu'
 
-// Both top_songs and recent_plays lists render their full data (up to 50
-// rows, the API's own cap) inside a fixed-height scroll area sized to ~15
-// rows - same visible count, same max-height, so the two sit at equal height
-// side by side instead of one stopping short or growing to chase the other's
-// content.
-const tabBtn = (icon: React.ReactNode, label: string, onClick: () => void, active = false): JSX.Element => (
-  <button
-    onClick={onClick}
-    className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors shrink-0 ${
-      active ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'
-    }`}
-  >
-    {icon} {label}
-  </button>
-)
-
-export default function StatisticsViewDesktop(): JSX.Element {
+// The desktop Statistics tab of the Tracker. Header and tab strip belong to
+// ApiTrackerView.desktop - this is just the body.
+export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraName: string) => void }): JSX.Element {
   const {
-    canEdit, playTrack, playNext, openEraInTracker, openTrackerTab,
+    canEdit, playTrack, playNext,
     stats, playStats, songMap, playById, ctxMenu, setCtxMenu, openContextMenu,
     eraRows, maxEraCount, timelineRows, timelineStart, timelineEnd,
     topEraRows, maxTopEraPlays, maxTopSongPlays, loading,
   } = useStatisticsData()
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
-      {/* Header */}
-      <div className="flex-shrink-0 px-4 md:px-5 pt-4 md:pt-5 pb-3 border-b border-[var(--border)]">
-        <h1 className="text-text-primary text-xl font-bold mb-1">Statistics</h1>
-
-        <div className="flex items-center gap-0.5 bg-surface-overlay rounded-md p-0.5 overflow-x-auto no-scrollbar w-fit max-w-full">
-          {tabBtn(<Music2 size={11} />, 'Songs', () => openTrackerTab('songs'))}
-          {tabBtn(<Mic2 size={11} />, 'Lyrics', () => openTrackerTab('lyrics'))}
-          {tabBtn(<CalendarDays size={11} />, 'Overview', () => openTrackerTab('calendar'))}
-          {tabBtn(<Users size={11} />, 'Producers', () => openTrackerTab('producers'))}
-          {tabBtn(<BarChart3 size={11} />, 'Statistics', () => undefined, true)}
-        </div>
-      </div>
-
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-[1600px] mx-auto space-y-5 md:space-y-6">
@@ -107,7 +80,7 @@ export default function StatisticsViewDesktop(): JSX.Element {
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-3">
                     Timeline ({timelineRows.length} eras)
                   </p>
-                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} onSelect={openEraInTracker} />
+                  <EraTimeline rows={timelineRows} start={timelineStart} end={timelineEnd} onSelect={onOpenEra} />
                 </div>
               )}
 
