@@ -264,6 +264,12 @@ export default function Sidebar(): JSX.Element {
       <aside
         className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
+        {isElectron && appMenuPosition === 'sidebar' && (
+          <>
+            <div className="w-10 h-10 shrink-0 flex items-center justify-center"><AppMenu variant="sidebar-icon" /></div>
+            <div className={`shrink-0 bg-[var(--border)] ${horizontal ? 'w-px h-6 mx-1' : 'h-px w-6 my-1'}`} />
+          </>
+        )}
         {items.map(({ icon, label, view }, idx) => (
           <button
             key={view}
