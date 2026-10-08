@@ -1078,6 +1078,9 @@ function buildUserSettings(s: AppStore): UserSettings {
     playlist_hero_enabled_dark: s.playlistHeroEnabledDark,
     playlist_hero_enabled_light: s.playlistHeroEnabledLight,
     sidebar_position: s.sidebarPosition,
+    nav_style: s.navStyle,
+    auto_hide_nav: s.autoHideNav,
+    auto_hide_nav_zone: s.autoHideNavZone,
     nav_order: s.navOrder,
     nav_visibility: s.navVisibility,
     nav_control_order: s.navControlOrder,
@@ -1496,11 +1499,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
-  setNavStyle: (navStyle) => { set({ navStyle }); ls.set('navStyle', navStyle) },
-  setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav) },
+  setNavStyle: (navStyle) => { set({ navStyle }); ls.set('navStyle', navStyle); get()._scheduleProfilePush(['userSettings']) },
+  setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav); get()._scheduleProfilePush(['userSettings']) },
   setAutoHideNavZone: (px) => {
     const autoHideNavZone = Math.max(4, Math.min(120, Math.round(px)))
     set({ autoHideNavZone }); ls.set('autoHideNavZone', autoHideNavZone)
+    get()._scheduleProfilePush(['userSettings'])
   },
   setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder); get()._scheduleProfilePush(['userSettings']) },
   setNavItemVisible: (view, visible) => {
@@ -1840,6 +1844,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
       set({ playlistHeroEnabledLight: serverSettings.playlist_hero_enabled_light }); ls.set('playlistHeroEnabledLight', serverSettings.playlist_hero_enabled_light)
     }
     if (serverSettings.sidebar_position && serverSettings.sidebar_position !== s.sidebarPosition) s.setSidebarPosition(serverSettings.sidebar_position as SidebarPosition)
+    if ((serverSettings.nav_style === 'classic' || serverSettings.nav_style === 'pill') && serverSettings.nav_style !== s.navStyle) s.setNavStyle(serverSettings.nav_style)
+    if (serverSettings.auto_hide_nav !== undefined && serverSettings.auto_hide_nav !== s.autoHideNav) s.setAutoHideNav(serverSettings.auto_hide_nav)
+    if (serverSettings.auto_hide_nav_zone !== undefined && serverSettings.auto_hide_nav_zone !== s.autoHideNavZone) s.setAutoHideNavZone(serverSettings.auto_hide_nav_zone)
     if (serverSettings.nav_order && JSON.stringify(serverSettings.nav_order) !== JSON.stringify(s.navOrder)) s.setNavOrder(serverSettings.nav_order)
     if (serverSettings.nav_visibility) { set({ navVisibility: { ...s.navVisibility, ...serverSettings.nav_visibility } }); ls.set('navVisibility', get().navVisibility) }
     if (serverSettings.nav_control_order && JSON.stringify(serverSettings.nav_control_order) !== JSON.stringify(s.navControlOrder)) s.setNavControlOrder(serverSettings.nav_control_order)

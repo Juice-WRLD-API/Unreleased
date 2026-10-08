@@ -99,6 +99,9 @@ export interface UserSettings {
   playlist_hero_enabled_dark?: boolean
   playlist_hero_enabled_light?: boolean
   sidebar_position?: string
+  nav_style?: string
+  auto_hide_nav?: boolean
+  auto_hide_nav_zone?: number
 
   // ── Navigation/layout ───────────────────────────────────────────────────
   nav_order?: ViewType[]

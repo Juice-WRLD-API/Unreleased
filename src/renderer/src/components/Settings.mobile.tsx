@@ -156,7 +156,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
-  { tab: 'about', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
@@ -653,7 +653,7 @@ export default function Settings(): JSX.Element {
     { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, lyrics' },
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal, color: '#0d9488', sub: 'Navigation, home screen, eras' },
     { id: 'playback', label: 'Playback', icon: Volume2, color: '#2563eb', sub: 'Output, crossfade, lyrics' },
-    { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, feedback, legal' },
+    { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, legal' },
   ]
 
   const openSection = (id: Tab): void => {
@@ -1389,6 +1389,14 @@ export default function Settings(): JSX.Element {
                     sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
                     labelExtra={<Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} />}
                   />
+                  <Row
+                    icon={Bug}
+                    iconColor="#ef4444"
+                    label="Auto-report app errors"
+                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                  >
+                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
                 </SettingsCard>
 
                 <SettingsCard title="Navigation">
@@ -1742,19 +1750,8 @@ export default function Settings(): JSX.Element {
                   <LinkRow icon={MessageCircle} iconColor="#5865F2" label="Discord" href="https://discord.gg/jwa" />
                   <LinkRow icon={Globe} iconColor="#0891b2" label="API" href="https://juicewrldapi.com" />
                   <ActionRow icon={BookOpen} iconColor="#6366f1" label="API Docs" onClick={() => openMainView('docs')} />
+                  <ActionRow icon={MessageCircle} iconColor="#db2777" label="Send Feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
-                </SettingsCard>
-
-                <SettingsCard title="Feedback">
-                  <ActionRow icon={MessageCircle} iconColor="#db2777" label="Send feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
-                  <Row
-                    icon={Bug}
-                    iconColor="#ef4444"
-                    label="Auto-report app errors"
-                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
-                  >
-                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
-                  </Row>
                 </SettingsCard>
 
                 <SettingsCard title="API servers">
