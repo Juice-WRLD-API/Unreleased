@@ -1,40 +1,53 @@
-// Tier List — rank songs into S/A/B/C/D (or whatever tiers the user builds)
+// Tier List - rank songs into S/A/B/C/D (or whatever tiers the user builds)
 // by dragging them into rows, or by tap-to-select then tap-a-row on touch.
 // Unlike Heardle/Wordle there's no daily puzzle or score: it's a personal
 // ranking, persisted locally (see lib/tierlist) with no server round-trip.
-import { useEffect, useMemo, useState } from 'react'
+import { useId, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
-  ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Check,
+  ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Disc3, Library,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
-import { loadPools, POOL_LABELS } from '../lib/heardle'
-import type { HeardleSong, PoolId } from '../lib/heardle'
+import type { HeardleSong } from '../lib/heardle'
 import { smallCoverUrl } from '../lib/juicewrldApi'
-import {
-  loadTierlistState, saveTierlistState, resetTierlistState, newTierId,
-  unsortedSongs, songsInTier, TIER_COLOR_PRESETS,
-} from '../lib/tierlist'
-import type { Tier, TierlistState } from '../lib/tierlist'
+import { TIER_COLOR_PRESETS } from '../lib/tierlist'
+import type { Tier, DropPosition } from '../lib/tierlist'
 import { GameSwitcher, GameBackdrop } from './gameShell'
-
-const DEFAULT_CATEGORIES: PoolId[] = ['released', 'unreleased']
+import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
+import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 
-function SongChip({ song, selected, onClick, onDragStart }: {
+function SongChip({ song, selected, dropSide, onClick, onDragStart, onDragEnd, onChipDragOver, onChipDrop }: {
   song: HeardleSong
   selected: boolean
+  /** Where a drop on this chip would land, for the insertion marker. */
+  dropSide?: DropPosition['side'] | null
   onClick: () => void
   onDragStart: (e: React.DragEvent) => void
+  onDragEnd?: () => void
+  /** Only set on chips inside a tier - dropping on one inserts next to it. */
+  onChipDragOver?: (e: React.DragEvent) => void
+  onChipDrop?: (e: React.DragEvent) => void
 }) {
   return (
     <div
       draggable
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onChipDragOver}
+      onDrop={onChipDrop}
       onClick={(e) => { e.stopPropagation(); onClick() }}
       title={song.name}
-      className="shrink-0 w-14 sm:w-16 cursor-pointer"
+      className="relative shrink-0 w-14 sm:w-16 cursor-pointer"
     >
+      {dropSide && (
+        <span
+          className={`absolute top-0 h-14 sm:h-16 w-1 rounded-full bg-accent pointer-events-none ${
+            dropSide === 'before' ? '-left-[5px]' : '-right-[5px]'
+          }`}
+        />
+      )}
       <div
         className={`relative w-14 h-14 sm:w-16 sm:h-16 rounded-lg overflow-hidden border-2 transition-all ${
           selected ? 'border-accent ring-2 ring-accent/50 scale-95' : 'border-[var(--border)] hover:border-accent/50'
@@ -55,18 +68,18 @@ function SongChip({ song, selected, onClick, onDragStart }: {
   )
 }
 
-function TierRow({ tier, songs, isFirst, isLast, selectedSongId, onDrop, onClickRow, onSelectSong, onMoveUp, onMoveDown, onEdit }: {
+function TierRow({ tier, isFirst, isLast, selectedSongId, onDragOverRow, onDrop, onClickRow, onMoveUp, onMoveDown, onEdit, children }: {
   tier: Tier
-  songs: HeardleSong[]
   isFirst: boolean
   isLast: boolean
   selectedSongId: number | null
+  onDragOverRow: (e: React.DragEvent) => void
   onDrop: (e: React.DragEvent) => void
   onClickRow: () => void
-  onSelectSong: (id: number) => void
   onMoveUp: () => void
   onMoveDown: () => void
   onEdit: () => void
+  children: ReactNode
 }) {
   return (
     <div className="flex rounded-xl overflow-hidden border border-[var(--border)]">
@@ -79,22 +92,14 @@ function TierRow({ tier, songs, isFirst, isLast, selectedSongId, onDrop, onClick
         {tier.label}
       </button>
       <div
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={onDragOverRow}
         onDrop={onDrop}
         onClick={onClickRow}
         className={`flex-1 min-h-[6.5rem] bg-[var(--surface-overlay)]/30 p-1.5 flex flex-wrap gap-1.5 content-start ${
           selectedSongId !== null ? 'cursor-copy' : ''
         }`}
       >
-        {songs.map((s) => (
-          <SongChip
-            key={s.id}
-            song={s}
-            selected={selectedSongId === s.id}
-            onClick={() => onSelectSong(s.id)}
-            onDragStart={(e) => e.dataTransfer.setData('text/plain', String(s.id))}
-          />
-        ))}
+        {children}
       </div>
       <div className="w-8 shrink-0 flex flex-col border-l border-[var(--border)]">
         <button
@@ -125,6 +130,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
   onDelete: () => void
   onClose: () => void
 }) {
+  const colorLabelId = useId()
   return (
     <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
@@ -133,19 +139,20 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
       >
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-text-primary font-bold text-sm">Edit tier</h3>
-          <button onClick={onClose} className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+          <button onClick={onClose} title="Close" className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
             <X size={16} />
           </button>
         </div>
-        <label className="text-xs text-text-muted mb-1 block">Label</label>
+        <label className="block"><span className="text-xs text-text-muted mb-1 block">Label</span>
         <input
           value={tier.label}
           maxLength={20}
           onChange={(e) => onChange({ ...tier, label: e.target.value })}
           className="w-full mb-3 px-2.5 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-sm text-text-primary focus:outline-none focus:border-accent/50"
         />
-        <label className="text-xs text-text-muted mb-1 block">Color</label>
-        <div className="flex flex-wrap gap-2 mb-4">
+        </label>
+        <span className="text-xs text-text-muted mb-1 block" id={colorLabelId}>Color</span>
+        <div role="group" aria-labelledby={colorLabelId} className="flex flex-wrap gap-2 mb-4">
           {TIER_COLOR_PRESETS.map((c) => (
             <button
               key={c}
@@ -171,138 +178,113 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
 
 // ─── View ───────────────────────────────────────────────────────────────────
 
+function Modal({ title, onClose, children, wide }: {
+  title: string
+  onClose: () => void
+  children: ReactNode
+  wide?: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className={`w-full ${wide ? 'max-w-md' : 'max-w-sm'} max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-text-primary font-bold text-sm">{title}</h3>
+          <button onClick={onClose} title="Close" className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 export default function TierlistView(): JSX.Element {
-  const { setActiveView } = useStorePick('setActiveView')
-  const isElectron = navigator.userAgent.includes('Electron')
+  const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
 
-  const [state, setState] = useState<TierlistState>(() => loadTierlistState())
-  const [categories, setCategories] = useState<PoolId[]>(DEFAULT_CATEGORIES)
-  const [pool, setPool] = useState<HeardleSong[]>([])
-  const [poolLoading, setPoolLoading] = useState(true)
-  const [poolError, setPoolError] = useState<string | null>(null)
-  const [search, setSearch] = useState('')
-  const [selectedSongId, setSelectedSongId] = useState<number | null>(null)
-  const [editingTier, setEditingTier] = useState<Tier | null>(null)
-  const [showFilters, setShowFilters] = useState(false)
+  const data = useTierlistData()
+  const {
+    list, tiers, album, filters, poolLoading, poolError, search, setSearch,
+    selectedSongId, setSelectedSongId, editingTier, setEditingTier, showFilters, setShowFilters,
+    showLists, setShowLists, visiblePool, songsInTier, placeSong, clickRow, moveTier, addTier,
+    updateTier, deleteTier, handleReset, filteredCount, rankedInFilter,
+  } = data
 
-  useEffect(() => {
-    let cancelled = false
-    setPoolLoading(true)
-    setPoolError(null)
-    loadPools(categories)
-      .then((songs) => { if (!cancelled) setPool(songs) })
-      .catch((err) => { if (!cancelled) setPoolError(err instanceof Error ? err.message : 'Failed to load songs') })
-      .finally(() => { if (!cancelled) setPoolLoading(false) })
-    return () => { cancelled = true }
-  }, [categories])
+  // Insertion marker while dragging over a ranked chip.
+  const [dropHint, setDropHint] = useState<DropPosition | null>(null)
 
-  useEffect(() => { saveTierlistState(state) }, [state])
-
-  const { tiers, assignments } = state
-
-  const visiblePool = useMemo(() => {
-    const unsorted = unsortedSongs(pool, assignments)
-    const q = search.trim().toLowerCase()
-    if (!q) return unsorted
-    return unsorted.filter((s) => s.titles.some((t) => t.toLowerCase().includes(q)))
-  }, [pool, assignments, search])
-
-  // Selecting the tier a song currently belongs to (or the pool, for
-  // unassigning) is meant as a no-op, not a nudge to re-render — keeping the
-  // state identity-equal skips the save effect that would otherwise fire.
-  const assignSong = (songId: number, tierId: string | null): void => {
-    setState((prev) => {
-      const current = prev.assignments[songId] ?? null
-      if (current === tierId) return prev
-      const next = { ...prev.assignments }
-      if (tierId) next[songId] = tierId
-      else delete next[songId]
-      return { ...prev, assignments: next }
-    })
-    setSelectedSongId(null)
+  const draggedId = (e: React.DragEvent): number | null => {
+    const id = Number(e.dataTransfer.getData('text/plain'))
+    return e.dataTransfer.getData('text/plain') && Number.isFinite(id) ? id : null
   }
 
   const handleDrop = (tierId: string | null) => (e: React.DragEvent): void => {
     e.preventDefault()
-    const id = Number(e.dataTransfer.getData('text/plain'))
-    if (Number.isFinite(id)) assignSong(id, tierId)
+    setDropHint(null)
+    const id = draggedId(e)
+    if (id !== null) placeSong(id, tierId)
   }
 
-  const clickRow = (tierId: string | null) => (): void => {
-    if (selectedSongId !== null) assignSong(selectedSongId, tierId)
+  const handleRowDragOver = (e: React.DragEvent): void => {
+    e.preventDefault()
+    if (dropHint) setDropHint(null)
   }
 
-  const moveTier = (index: number, dir: -1 | 1): void => {
-    setState((prev) => {
-      const next = [...prev.tiers]
-      const target = index + dir
-      if (target < 0 || target >= next.length) return prev
-      ;[next[index], next[target]] = [next[target], next[index]]
-      return { ...prev, tiers: next }
-    })
+  const sideOf = (e: React.DragEvent): DropPosition['side'] => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    return e.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
   }
 
-  const addTier = (): void => {
-    setState((prev) => ({
-      ...prev,
-      tiers: [
-        ...prev.tiers,
-        { id: newTierId(), label: 'New', color: TIER_COLOR_PRESETS[prev.tiers.length % TIER_COLOR_PRESETS.length] },
-      ],
-    }))
+  const chipDragOver = (targetId: number) => (e: React.DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const side = sideOf(e)
+    if (dropHint?.targetId !== targetId || dropHint.side !== side) setDropHint({ targetId, side })
   }
 
-  const updateTier = (tier: Tier): void => {
-    setState((prev) => ({ ...prev, tiers: prev.tiers.map((t) => (t.id === tier.id ? tier : t)) }))
-    setEditingTier(tier)
+  const chipDrop = (tierId: string, targetId: number) => (e: React.DragEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDropHint(null)
+    const id = draggedId(e)
+    if (id !== null) placeSong(id, tierId, { targetId, side: sideOf(e) })
   }
 
-  const deleteTier = (tierId: string): void => {
-    setState((prev) => {
-      const nextAssignments = { ...prev.assignments }
-      for (const [songId, tid] of Object.entries(nextAssignments)) {
-        if (tid === tierId) delete nextAssignments[Number(songId)]
-      }
-      return { tiers: prev.tiers.filter((t) => t.id !== tierId), assignments: nextAssignments }
-    })
-    setEditingTier(null)
+  const dragStart = (id: number) => (e: React.DragEvent): void => {
+    e.dataTransfer.setData('text/plain', String(id))
+    e.dataTransfer.effectAllowed = 'move'
   }
 
-  const toggleCategory = (cat: PoolId): void => {
-    setCategories((prev) => {
-      const next = prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
-      return next.length > 0 ? next : prev // never leave nothing to draw from
-    })
-  }
+  const toggleSelect = (id: number): void => setSelectedSongId((cur) => (cur === id ? null : id))
 
-  const handleReset = (): void => {
-    if (!window.confirm('Clear the whole tier list? This removes every ranking and custom tier.')) return
-    setState(resetTierlistState())
-    setSelectedSongId(null)
-  }
+  const poolLabel = album
+    ? album.title
+    : filters.eras.length ? filters.eras.join(', ') : null
 
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       <GameBackdrop />
 
-      {/* Corner controls — see HeardleView for why these are absolutely
-          positioned and why the right one dodges the Electron window buttons. */}
-      <div
-        className="absolute top-4 left-4 z-20"
-        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
+      <div className="absolute top-4 left-4 z-20">
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(previousView && previousView !== 'tierlist' ? previousView : 'wrld')}
           title="Back"
           className="p-2.5 rounded-xl text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
         >
           <ChevronLeft size={22} />
         </button>
       </div>
-      <div
-        className="absolute top-4 z-20 flex items-center gap-1.5"
-        style={{ right: isElectron ? 'calc(1rem + 132px)' : '1rem', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-      >
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-1.5">
+        <button
+          onClick={() => setShowLists(true)}
+          title="Your tier lists"
+          className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)]/60 text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors"
+        >
+          <Library size={20} />
+        </button>
         <button
           onClick={() => setShowFilters(true)}
           title="Song pool"
@@ -312,7 +294,7 @@ export default function TierlistView(): JSX.Element {
         </button>
         <button
           onClick={handleReset}
-          title="Clear tier list"
+          title="Clear this tier list's rankings"
           className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)]/60 text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors"
         >
           <RotateCcw size={20} />
@@ -323,12 +305,27 @@ export default function TierlistView(): JSX.Element {
         <div className="mx-auto w-full max-w-3xl">
           <GameSwitcher current="tierlist" />
 
+          {data.viewing ? (
+            <TierlistViewer data={data} touch={false} />
+          ) : (
+          <>
           <div className="text-center mb-6">
             <h1 className="text-text-primary text-4xl sm:text-5xl font-black tracking-tight">Tier List</h1>
+            <button
+              onClick={() => setShowLists(true)}
+              title="Switch tier list"
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)]/60 hover:border-accent/40 transition-colors"
+            >
+              <span className="text-sm font-semibold text-text-primary max-w-[18rem] truncate">{list.name}</span>
+              {!poolLoading && (
+                <span className="text-xs text-text-muted">{rankedInFilter}/{filteredCount}</span>
+              )}
+              <ChevronDown size={14} className="text-text-muted" />
+            </button>
             <p className="text-text-muted text-sm mt-2">
               {selectedSongId !== null
-                ? 'Tap a row to place it — tap the song again to cancel.'
-                : 'Drag a song into a row, or tap it and then tap a row.'}
+                ? 'Click a row to place it - click the song again to cancel.'
+                : 'Drag a song into a row, or onto another song to put it next to it.'}
             </p>
           </div>
 
@@ -343,23 +340,44 @@ export default function TierlistView(): JSX.Element {
               <TierRow
                 key={tier.id}
                 tier={tier}
-                songs={songsInTier(pool, assignments, tier.id)}
                 isFirst={i === 0}
                 isLast={i === tiers.length - 1}
                 selectedSongId={selectedSongId}
+                onDragOverRow={handleRowDragOver}
                 onDrop={handleDrop(tier.id)}
                 onClickRow={clickRow(tier.id)}
-                onSelectSong={(id) => setSelectedSongId((cur) => (cur === id ? null : id))}
                 onMoveUp={() => moveTier(i, -1)}
                 onMoveDown={() => moveTier(i, 1)}
                 onEdit={() => setEditingTier(tier)}
-              />
+              >
+                {songsInTier(tier.id).map((s) => (
+                  <SongChip
+                    key={s.id}
+                    song={s}
+                    selected={selectedSongId === s.id}
+                    dropSide={dropHint?.targetId === s.id ? dropHint.side : null}
+                    onClick={() => {
+                      // With another song picked up, clicking a ranked song
+                      // drops the picked one in right before it.
+                      if (selectedSongId !== null && selectedSongId !== s.id) {
+                        placeSong(selectedSongId, tier.id, { targetId: s.id, side: 'before' })
+                      } else toggleSelect(s.id)
+                    }}
+                    onDragStart={dragStart(s.id)}
+                    onDragEnd={() => setDropHint(null)}
+                    onChipDragOver={chipDragOver(s.id)}
+                    onChipDrop={chipDrop(tier.id, s.id)}
+                  />
+                ))}
+              </TierRow>
             ))}
           </div>
 
           <button
             onClick={addTier}
-            className="w-full mb-8 py-2.5 rounded-xl border border-dashed border-[var(--border)] text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
+            disabled={tiers.length >= MAX_TIERS}
+            title={tiers.length >= MAX_TIERS ? `A tier list can have at most ${MAX_TIERS} tiers` : undefined}
+            className="w-full mb-8 py-2.5 rounded-xl disabled:opacity-40 border border-dashed border-[var(--border)] text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
           >
             <Plus size={14} /> Add tier
           </button>
@@ -369,18 +387,37 @@ export default function TierlistView(): JSX.Element {
               <Music2 size={14} className="text-text-muted shrink-0" />
               <span className="text-xs font-bold uppercase tracking-widest text-text-muted">Unranked</span>
               <span className="text-xs text-text-muted">({visiblePool.length})</span>
+              {poolLabel && (
+                <button
+                  onClick={() => setShowFilters(true)}
+                  title="Change song pool"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-accent/30 bg-accent/10 text-[11px] text-text-primary max-w-[12rem] truncate"
+                >
+                  {album && <Disc3 size={11} className="shrink-0" />}
+                  <span className="truncate">{poolLabel}</span>
+                </button>
+              )}
               <div className="ml-auto relative w-40 sm:w-56">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search songs"
-                  className="w-full pl-7 pr-2 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                  placeholder="Search songs or eras"
+                  className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
                 />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    title="Clear search"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
             </div>
             <div
-              onDragOver={(e) => e.preventDefault()}
+              onDragOver={handleRowDragOver}
               onDrop={handleDrop(null)}
               onClick={clickRow(null)}
               className={`min-h-[7.5rem] flex flex-wrap gap-1.5 content-start ${selectedSongId !== null ? 'cursor-copy' : ''}`}
@@ -389,7 +426,11 @@ export default function TierlistView(): JSX.Element {
                 <span className="text-xs text-text-muted py-4">Loading songs…</span>
               ) : visiblePool.length === 0 ? (
                 <span className="text-xs text-text-muted py-4">
-                  {search ? 'No songs match that search.' : 'Every song has been ranked.'}
+                  {search
+                    ? 'No songs match that search.'
+                    : filters.albumId !== null && !album
+                      ? 'Loading album…'
+                      : filteredCount === 0 ? 'No songs match this pool - check the filters.' : 'Every song has been ranked.'}
                 </span>
               ) : (
                 visiblePool.map((s) => (
@@ -397,46 +438,29 @@ export default function TierlistView(): JSX.Element {
                     key={s.id}
                     song={s}
                     selected={selectedSongId === s.id}
-                    onClick={() => setSelectedSongId((cur) => (cur === s.id ? null : s.id))}
-                    onDragStart={(e) => e.dataTransfer.setData('text/plain', String(s.id))}
+                    onClick={() => toggleSelect(s.id)}
+                    onDragStart={dragStart(s.id)}
+                    onDragEnd={() => setDropHint(null)}
                   />
                 ))
               )}
             </div>
           </div>
+          </>
+          )}
         </div>
       </div>
 
+      {showLists && (
+        <Modal title="Your tier lists" onClose={() => setShowLists(false)} wide>
+          <ListsPanelBody data={data} touch={false} onDone={() => setShowLists(false)} />
+        </Modal>
+      )}
+
       {showFilters && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowFilters(false)}>
-          <div
-            className="w-full max-w-xs rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-text-primary font-bold text-sm">Song pool</h3>
-              <button onClick={() => setShowFilters(false)} className="p-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex flex-col gap-2">
-              {(['released', 'unreleased'] as PoolId[]).map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => toggleCategory(cat)}
-                  className={`flex items-center justify-between px-3 py-2 rounded-lg border text-sm transition-colors ${
-                    categories.includes(cat)
-                      ? 'border-accent/40 bg-accent/10 text-text-primary'
-                      : 'border-[var(--border)] text-text-muted'
-                  }`}
-                >
-                  {POOL_LABELS[cat]}
-                  {categories.includes(cat) && <Check size={14} className="text-accent" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <Modal title="Song pool" onClose={() => setShowFilters(false)}>
+          <FiltersPanelBody data={data} touch={false} />
+        </Modal>
       )}
 
       {editingTier && (

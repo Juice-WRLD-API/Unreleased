@@ -14,7 +14,7 @@
 // The store owns every write and mirrors its map in here via setSongPrefsCache
 // so non-React callers always resolve against the current overrides.
 
-/** One user's overrides for one song — mirrors the API row shape. */
+/** One user's overrides for one song - mirrors the API row shape. */
 export interface SongPreference {
   /** Numeric API song id (the row's `song` field). */
   song: number
@@ -24,18 +24,24 @@ export interface SongPreference {
    *  API's storage. Resolved to a loadable URL by resolvePrefCoverUrl. */
   cover_url: string | null
   /** Preferred version *label* (e.g. "v1", "OG", "TV Mix") within this song's
-   *  version group — matched against the /versions/ table's `version` field
+   *  version group - matched against the /versions/ table's `version` field
    *  rather than holding a song id, so it survives songs being relinked or
    *  groups being merged. A default set on any member governs the whole group;
    *  see queueSlice's groupDefaultVersion. */
   default_version: string | null
+  /** Version *labels* (same matching rules as `default_version`) this user
+   *  never wants picked automatically within the group - e.g. a random pick
+   *  for a compact-view shuffle-play. Doesn't affect explicitly choosing the
+   *  version from the "Change version" menu. Excluded on any member governs
+   *  the whole group; see queueSlice's groupExcludedVersions. */
+  excluded_versions: string[]
   /** How many times this user has played the song. */
   playcount: number
 }
 
 export type SongPrefMap = Record<number, SongPreference>
 
-/** A change to a preference row — only the fields being set. */
+/** A change to a preference row - only the fields being set. */
 export type SongPrefPatch = Partial<Omit<SongPreference, 'song'>>
 
 let _prefs: SongPrefMap = {}
@@ -63,16 +69,27 @@ export function hasAnyDefaultVersion(): boolean {
   return false
 }
 
+/** True if any song has excluded versions set. Same purpose as
+ *  hasAnyDefaultVersion - skip the version-group lookup entirely when nobody
+ *  has excluded anything. */
+export function hasAnyExcludedVersion(): boolean {
+  for (const songId in _prefs) {
+    if (_prefs[songId].excluded_versions?.length) return true
+  }
+  return false
+}
+
 /** A row with no overrides yet, so callers can patch a song that has no
  *  preferences without repeating the defaults. */
 export function emptySongPref(songId: number): SongPreference {
-  return { song: songId, name: null, cover_url: null, default_version: null, playcount: 0 }
+  return { song: songId, name: null, cover_url: null, default_version: null, excluded_versions: [], playcount: 0 }
 }
 
-/** True once a row carries no overrides and no play history — the store drops
+/** True once a row carries no overrides and no play history - the store drops
  *  these instead of keeping empty rows around forever. */
 export function isEmptySongPref(p: SongPreference): boolean {
-  return p.name == null && p.cover_url == null && p.default_version == null && p.playcount === 0
+  return p.name == null && p.cover_url == null && p.default_version == null
+    && (p.excluded_versions?.length ?? 0) === 0 && p.playcount === 0
 }
 
 /** Normalizes a user-entered name/version to either a non-empty trimmed
@@ -83,18 +100,66 @@ export function normalizePrefText(value: string | null | undefined): string | nu
   return trimmed ? trimmed : null
 }
 
+/** A preference row as it travels to/from the profile blob. Every override
+ *  field is optional: the blob stores what it's given, and a row that carries
+ *  no override for a field simply omits it rather than spending bytes on an
+ *  explicit null. Rows predating this already arrive missing
+ *  `excluded_versions`, so readers have always had to tolerate absent keys -
+ *  normalizeSongPref is the single place that does. */
+export type WireSongPreference =
+  & { song: number }
+  & Partial<Omit<SongPreference, 'song'>>
+
+/** Fills a wire row out to a complete SongPreference. Everything downstream
+ *  (songToTrack, the version swap, the store's merge) reads full rows, so
+ *  absent keys are resolved here once rather than guarded at each use. */
+export function normalizeSongPref(row: WireSongPreference): SongPreference {
+  return {
+    song: row.song,
+    name: row.name ?? null,
+    cover_url: row.cover_url ?? null,
+    default_version: row.default_version ?? null,
+    excluded_versions: row.excluded_versions ?? [],
+    playcount: row.playcount ?? 0,
+  }
+}
+
+/** Drops fields a row has no value for before it goes up. The blob is
+ *  replaced wholesale on every PATCH, so a user with a few hundred
+ *  playcount-only rows re-sends three explicit nulls per row on every
+ *  debounced push; on a real 291-row profile that's ~33% of the
+ *  user_preferences array. normalizeSongPref is its exact inverse. */
+export function serializeSongPref(p: SongPreference): WireSongPreference {
+  const out: WireSongPreference = { song: p.song }
+  if (p.name != null) out.name = p.name
+  if (p.cover_url != null) out.cover_url = p.cover_url
+  if (p.default_version != null) out.default_version = p.default_version
+  if (p.excluded_versions?.length) out.excluded_versions = p.excluded_versions
+  if (p.playcount) out.playcount = p.playcount
+  return out
+}
+
+/** Whether pushing `local` would send exactly what `server` already holds:
+ *  the same rows (after the push's own cap) with the same wire values. Lets a
+ *  login merge that changed nothing skip re-uploading the whole array. */
+export function songPrefsMatchServer(local: SongPreference[], server: SongPreference[]): boolean {
+  const wire = (prefs: SongPreference[]): string =>
+    JSON.stringify(prefs.map(serializeSongPref).sort((a, b) => a.song - b.song))
+  return wire(capSongPrefs(local)) === wire(server)
+}
+
 /** Server-side cap on `user_preferences` rows (the profile-blob validator's
  *  limit). Local storage keeps everything; only the pushed copy is capped. */
 export const SERVER_PREFS_LIMIT = 500
 
 /** Fits the prefs array under the server's row cap. Rows with real overrides
- *  (name/cover/default version) survive first — a playcount-only row is the
+ *  (name/cover/default version) survive first - a playcount-only row is the
  *  cheapest thing to lose since every song played past the threshold creates
- *  one — then higher playcounts win among the rest. */
+ *  one - then higher playcounts win among the rest. */
 export function capSongPrefs(prefs: SongPreference[], max = SERVER_PREFS_LIMIT): SongPreference[] {
   if (prefs.length <= max) return prefs
   const hasOverride = (p: SongPreference): boolean =>
-    p.name != null || p.cover_url != null || p.default_version != null
+    p.name != null || p.cover_url != null || p.default_version != null || (p.excluded_versions?.length ?? 0) > 0
   return [...prefs]
     .sort((a, b) => (Number(hasOverride(b)) - Number(hasOverride(a))) || (b.playcount - a.playcount))
     .slice(0, max)

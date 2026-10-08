@@ -1,4 +1,4 @@
-import { JWAPI_BASE } from './juicewrldApi'
+import { RADIO_API_BASE } from './apiServers'
 
 export interface RadioTrack {
   title: string
@@ -40,7 +40,7 @@ export interface RadioLiveState {
 }
 
 export async function fetchRadioLive(): Promise<RadioLiveState> {
-  const res = await fetch(`${JWAPI_BASE}/radio/live/`)
+  const res = await fetch(`${RADIO_API_BASE}/radio/live/`)
   if (!res.ok) throw new Error(`Radio live ${res.status}`)
   return res.json()
 }

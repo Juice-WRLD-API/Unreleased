@@ -1,5 +1,7 @@
 import { useStore } from '../store/useStore'
 import { createCompProposalUpload } from './userApi'
+import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from './compChunkedUpload'
+import { errorMessage } from './format'
 
 // Comp file proposals carry the actual file body — routinely a few hundred
 // megabytes — and used to be awaited inside the Contributor page's submit
@@ -81,34 +83,48 @@ async function run(): Promise<void> {
     }
   } finally {
     running = false
+    window.dispatchEvent(new CustomEvent(COMP_UPLOADS_CHANGED))
   }
 }
 
+function startUpload(job: QueuedJob): { promise: Promise<unknown>; abort: () => void } {
+  const onProgress = (sent: number, total: number): void => {
+    const now = Date.now()
+    const prev = samples.get(job.id) ?? { bytes: 0, time: now }
+    let speedBps: number | undefined
+    const dt = (now - prev.time) / 1000
+    if (dt >= 0.4) {
+      speedBps = Math.max(0, (sent - prev.bytes) / dt)
+      samples.set(job.id, { bytes: sent, time: now })
+    }
+    useStore.getState().updateDownload(job.id, {
+      percent: total ? Math.round((sent / total) * 100) : 0,
+      received: sent, total, bytesReceived: sent,
+      ...(speedBps !== undefined ? { speedBps } : {}),
+    })
+  }
+  const file = job.form.get('file')
+  if ((job.bytes ?? 0) >= COMP_CHUNK_THRESHOLD && file instanceof File) {
+    return createCompProposalChunked(file, {
+      change_type: String(job.form.get('change_type') || 'upload'),
+      file_path: String(job.form.get('file_path') || ''),
+      destination_path: String(job.form.get('destination_path') || ''),
+      contributor_notes: String(job.form.get('contributor_notes') || ''),
+      channel: String(job.form.get('channel') || ''),
+    }, { onProgress })
+  }
+  return createCompProposalUpload(job.form, { onProgress })
+}
+
 async function runOne(job: QueuedJob): Promise<void> {
-  const { promise, abort } = createCompProposalUpload(job.form, {
-    onProgress: (sent, total) => {
-      const now = Date.now()
-      const prev = samples.get(job.id) ?? { bytes: 0, time: now }
-      let speedBps: number | undefined
-      const dt = (now - prev.time) / 1000
-      if (dt >= 0.4) {
-        speedBps = Math.max(0, (sent - prev.bytes) / dt)
-        samples.set(job.id, { bytes: sent, time: now })
-      }
-      useStore.getState().updateDownload(job.id, {
-        percent: total ? Math.round((sent / total) * 100) : 0,
-        received: sent, total, bytesReceived: sent,
-        ...(speedBps !== undefined ? { speedBps } : {}),
-      })
-    },
-  })
+  const { promise, abort } = startUpload(job)
   aborts.set(job.id, abort)
   try {
     await promise
     useStore.getState().updateDownload(job.id, { state: 'done', percent: 100, speedBps: undefined })
     window.dispatchEvent(new CustomEvent(COMP_UPLOADS_CHANGED))
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Upload failed'
+    const msg = errorMessage(e, 'Upload failed')
     useStore.getState().updateDownload(job.id, msg === 'cancelled'
       ? { state: 'cancelled', speedBps: undefined }
       : { state: 'error', error: msg, speedBps: undefined })

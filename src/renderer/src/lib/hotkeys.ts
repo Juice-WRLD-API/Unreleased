@@ -1,11 +1,11 @@
 /**
- * hotkeys.ts — the keyboard-shortcut registry and the pure helpers that turn a
+ * hotkeys.ts - the keyboard-shortcut registry and the pure helpers that turn a
  * KeyboardEvent into a canonical combo string (and back into a display label).
  *
  * The registry here is the single source of truth for *what* actions exist and
  * their default bindings. User overrides live in the store (`hotkeyBindings`,
  * an actionId → combo map) and are merged in via `effectiveBinding`. The actual
- * dispatch table — what each action *does* — lives in Player.tsx, keyed by the
+ * dispatch table - what each action *does* - lives in Player.tsx, keyed by the
  * same ids, because those handlers need the audio element and the live player
  * closures. Keeping definitions (here) and behavior (there) split lets the
  * Settings UI import the list without pulling the whole player in.
@@ -28,7 +28,7 @@ export interface HotkeyAction {
   /** Only meaningful in the desktop (Electron) build — hidden on web. */
   electronOnly?: boolean
   /** Still active with its default binding for everyone, but only listed (and
-   *  therefore rebindable) in Settings when Developer mode is on — keeps the
+   *  therefore rebindable) in Settings when Developer mode is on - keeps the
    *  shortcut list from bloating with power-user-only entries. */
   devModeOnly?: boolean
 }
@@ -92,6 +92,7 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'rescan-library',       label: 'Rescan library',              category: 'App', defaultBinding: '', electronOnly: true },
   { id: 'discord-status',       label: 'Toggle Discord status',       category: 'App', defaultBinding: '', electronOnly: true },
   { id: 'toggle-devtools',      label: 'Toggle DevTools',              category: 'App', defaultBinding: 'F12', electronOnly: true, devModeOnly: true },
+  { id: 'open-terminal',    label: 'Open terminal', category: 'Navigation', defaultBinding: 'Ctrl+`' },
 ] as const
 
 export const HOTKEY_CATEGORIES: readonly HotkeyCategory[] = ['Playback', 'Volume', 'Navigation', 'App']
@@ -122,7 +123,7 @@ export function resolveAction(combo: string, overrides: Record<string, string>):
 
 // ─── Action dispatch bridge ─────────────────────────────────────────────────
 // Player.tsx owns what each action *does* (those handlers need the audio
-// element and the live player closures). UI outside the player — the app menu —
+// element and the live player closures). UI outside the player - the app menu -
 // triggers actions by id through this bridge instead of duplicating that logic,
 // so a menu entry and its keyboard shortcut always run the exact same code.
 
@@ -168,7 +169,7 @@ function normalizeKey(e: KeyboardEvent): string | null {
   if (/^Numpad[0-9]$/.test(code)) return 'Num' + code.slice(6) // Numpad1 → Num1
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.key)) return e.key     // F1..F24
   if (CODE_KEY[code]) return CODE_KEY[code]
-  // Media keys carry no stable `code` across platforms — fall back to `key`.
+  // Media keys carry no stable `code` across platforms - fall back to `key`.
   if (e.key && e.key.startsWith('Media')) return e.key
   return null
 }
@@ -213,7 +214,7 @@ export function comboTokens(combo: string): string[] {
 
 // ─── Global (OS-wide) shortcuts ──────────────────────────────────────────────
 // A combo can only be registered as an OS-global shortcut (Electron's
-// globalShortcut) when it carries a modifier or is a media key — a bare letter
+// globalShortcut) when it carries a modifier or is a media key - a bare letter
 // registered globally would swallow that key in every application, so we refuse
 // to. These helpers translate our combo strings into Electron accelerators.
 
@@ -243,7 +244,7 @@ export function isGloballyRegistrable(combo: string): boolean {
   return parts.slice(0, -1).some((p) => MODIFIER_TOKENS.has(p))
 }
 
-/** The global-registration default for `id` — deliberately nothing: the Global
+/** The global-registration default for `id` - deliberately nothing: the Global
  *  column is opt-in, per action.
  *
  *  Mirroring the in-app defaults here would hand the OS every eligible one the
@@ -258,7 +259,7 @@ export function defaultGlobalBinding(_id: string): string {
 
 /** The OS-global combo currently bound to `id`: the user override if one
  *  exists (an explicit '' means the user cleared it), else
- *  defaultGlobalBinding(id). Fully independent of effectiveBinding — the
+ *  defaultGlobalBinding(id). Fully independent of effectiveBinding - the
  *  in-app and global shortcuts for an action can differ, or either can be
  *  unset while the other stays bound. */
 export function effectiveGlobalBinding(id: string, overrides: Record<string, string>): string {

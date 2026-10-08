@@ -1,25 +1,28 @@
 // Song metadata resolution for the Wrapped page (components/StatsView).
 //
-// A song-preference row is just {song id, playcount} — no title, no length, no
-// era — so the page has to resolve every played id to a song before it can
-// rank anything. Doing that one id at a time meant hundreds of requests on
-// open, and worse, they didn't stick: apiCache holds ~300 entries for the
-// entire app, so a few hundred played songs evict each other (and everything
-// else) and the next visit refetches the lot.
+// A song-preference row is just {song id, playcount} - no title, no length, no
+// era - so the page has to resolve every played id to a song before it can
+// rank anything. Doing that one id at a time for every played song used to
+// mean hundreds of requests on open, and worse, they didn't stick: apiCache
+// holds ~300 entries for the entire app, so a few hundred played songs evict
+// each other (and everything else) and the next visit refetches the lot. A
+// small number of unknown ids still goes straight through individual
+// requests (getSongsByIds, juicewrldApi.ts).
 //
-// So this mirrors lib/heardle's pool cache instead: page the catalogue in bulk,
-// slim each row down to the fields the page actually uses, and keep that in
-// localStorage for a day. ~25 requests once, then none. Deliberately NOT routed
-// through apiFetch for the same reason heardle isn't — a page of full song
-// objects is ~0.5MB, and caching those raw would blow the offline cache out.
+// For a genuinely large unknown set this instead mirrors lib/heardle's pool
+// cache: page the catalogue in bulk, slim each row down to the fields the
+// page actually uses, and keep that in localStorage for a day. ~25 requests
+// once, then none. Deliberately NOT routed through apiFetch for the same
+// reason heardle isn't - a page of full song objects is ~0.5MB, and caching
+// those raw would blow the offline cache out.
 
-import { apiRequest } from './apiClient'
-import { JWAPI_BASE, apiFetch, songToTrack } from './juicewrldApi'
+import { apiRequest, untilAborted } from './apiClient'
+import { routeUrl, getSongsByIds, songToTrack, loadAllSongs } from './juicewrldApi'
 import type { JWApiSong, JWApiPaginatedResponse } from './juicewrldApi'
 import type { Track } from '../types'
 
 /** A song trimmed to what the stats page reads. Full rows are ~3.3KB each
- *  (lyrics, session tracking, notes) — ~16MB of localStorage for the whole
+ *  (lyrics, session tracking, notes) - ~16MB of localStorage for the whole
  *  catalogue. Slimmed it's ~290 bytes a row, ~1.4MB for all ~2.5k songs. */
 export interface StatsSong {
   id: number
@@ -31,7 +34,7 @@ export interface StatsSong {
   category: JWApiSong['category']
   image_url: string | null
   album?: string | null
-  /** Era trimmed to what's displayed/grouped on — the API's own row also
+  /** Era trimmed to what's displayed/grouped on - the API's own row also
    *  carries a description and time frame the page never shows. */
   era: { id: number; name: string } | null
 }
@@ -53,13 +56,13 @@ export function slimSong(song: JWApiSong): StatsSong {
 
 /** Builds the playable Track for a slim row. Goes through songToTrack rather
  *  than assembling a Track here so the per-song name/cover overrides (and the
- *  stream URL) resolve exactly the way they do everywhere else — the fields it
+ *  stream URL) resolve exactly the way they do everywhere else - the fields it
  *  reads are all present above; the rest are metadata this page never shows. */
 export function statsSongToTrack(s: StatsSong): Track {
   return songToTrack({
     ...s,
     // songToTrack's display title comes from `name` alone (see its own
-    // comment) — this only exists to satisfy JWApiSong's shape.
+    // comment) - this only exists to satisfy JWApiSong's shape.
     track_titles: [],
     era: s.era,
     album: s.album ?? null,
@@ -78,14 +81,18 @@ const PAGE_SIZE = 100
 // The catalogue is ~2.5k songs; this is headroom, not a target. It exists so a
 // malformed `next` can't spin the loop forever.
 const MAX_PAGES = 40
+// Pages requested at once. High enough to collapse the ~28-page crawl into a
+// few round trips, low enough not to open a connection per page against an
+// API the rest of the app is also using.
+const PAGE_CONCURRENCY = 6
 
-// Below this many unknown ids, fetching them individually is cheaper than
-// paging the whole catalogue — a user who's played a handful of songs
-// shouldn't pull 2.5k rows to learn about six of them.
+// Below this many unknown ids, fetching them individually (getSongsByIds -
+// there's no real batch-by-id endpoint any more, see its comment in
+// juicewrldApi.ts) is cheaper than paging the whole catalogue - a user who's
+// played a handful of songs shouldn't pull 2.5k rows to learn about six of
+// them. Above it, ~25 requests for the whole catalogue beats firing that many
+// individual song requests at once.
 const PER_ID_THRESHOLD = 40
-
-// Concurrent /songs/{id}/ requests on the per-id path.
-const FETCH_CONCURRENCY = 6
 
 interface CachedCatalog { ts: number; songs: StatsSong[] }
 
@@ -107,30 +114,61 @@ function writeCache(songs: StatsSong[]): void {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), songs } as CachedCatalog))
   } catch {
-    // Quota — the page still works from the in-memory copy this session.
+    // Quota - the page still works from the in-memory copy this session.
   }
 }
 
-async function fetchCatalog(onPage?: (page: number, total: number) => void): Promise<StatsSong[]> {
-  const songs: StatsSong[] = []
-  let totalPages = 0
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const data = await apiRequest<JWApiPaginatedResponse>(
-      `${JWAPI_BASE}/songs/?page=${page}&page_size=${PAGE_SIZE}`,
-    )
-    // `count` is the total row count, so the page total is only known after
-    // the first response — before that the caller shows an indeterminate bar.
-    if (page === 1) totalPages = Math.max(1, Math.ceil((data.count ?? 0) / PAGE_SIZE))
-    for (const song of data.results ?? []) songs.push(slimSong(song))
-    onPage?.(page, totalPages)
-    if (!data.next) break
-  }
-  return songs
+async function fetchPage(page: number, signal?: AbortSignal): Promise<JWApiPaginatedResponse> {
+  return apiRequest<JWApiPaginatedResponse>(
+    `${routeUrl('/songs/')}?page=${page}&page_size=${PAGE_SIZE}`,
+    { signal },
+  )
 }
 
-/** The whole catalogue keyed by song id — memoised for the session, cached on
+/** Pages the catalogue. Page 1 carries `count`, so every remaining page is
+ *  known up front and they go out in parallel (capped at PAGE_CONCURRENCY)
+ *  rather than awaiting one at a time - the serial version spent ~20s of
+ *  wall clock on ~28 round trips that don't depend on each other. */
+async function fetchCatalog(onPage?: (page: number, total: number) => void, signal?: AbortSignal): Promise<StatsSong[]> {
+  const first = await fetchPage(1, signal)
+  const count = first.count ?? 0
+  // `count` is the total row count, so the page total is only known after
+  // the first response - before that the caller shows an indeterminate bar.
+  const totalPages = Math.min(MAX_PAGES, Math.max(1, Math.ceil(count / PAGE_SIZE)))
+
+  // Indexed by page so out-of-order completions still concatenate in
+  // catalogue order - the stats page ranks by playcount, but a stable order
+  // keeps the cached blob diffable between runs.
+  const pages: StatsSong[][] = [(first.results ?? []).map(slimSong)]
+  let done = 1
+  onPage?.(done, totalPages)
+
+  const rest: number[] = []
+  for (let page = 2; page <= totalPages; page++) rest.push(page)
+
+  let next = 0
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++
+      if (i >= rest.length) return
+      const page = rest[i]
+      if (signal?.aborted) return
+      const data = await fetchPage(page, signal)
+      pages[page - 1] = (data.results ?? []).map(slimSong)
+      done++
+      onPage?.(done, totalPages)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(PAGE_CONCURRENCY, rest.length) }, worker),
+  )
+
+  return pages.flat()
+}
+
+/** The whole catalogue keyed by song id - memoised for the session, cached on
  *  disk for a day. A stale cache is still returned on a network failure. */
-export async function loadCatalog(onPage?: (page: number, total: number) => void): Promise<Map<number, StatsSong>> {
+export async function loadCatalog(onPage?: (page: number, total: number) => void, signal?: AbortSignal): Promise<Map<number, StatsSong>> {
   if (memoryCatalog) return memoryCatalog
 
   const cached = readCache()
@@ -141,8 +179,21 @@ export async function loadCatalog(onPage?: (page: number, total: number) => void
 
   let songs: StatsSong[]
   try {
-    songs = await fetchCatalog(onPage)
+    // Several other views (home, tracker sort mode, field suggestions) pull
+    // the whole catalogue through loadAllSongs. When one of them already has
+    // it in flight or cached, slimming that costs nothing and skips the page
+    // crawl entirely - only fall back to paging when nobody has it, since
+    // *starting* an all=true fetch here would pull the lyrics this page
+    // throws away.
+    // A warm fetch that turns out to have failed falls back to paging rather
+    // than failing this page with it - it belongs to whoever started it.
+    const warm = loadAllSongs.peek()
+    songs = warm
+      ? await untilAborted(warm, signal).then((all) => all.map(slimSong), (err) => { if (signal?.aborted) throw err; return fetchCatalog(onPage, signal) })
+      : await fetchCatalog(onPage, signal)
   } catch (err) {
+    // A cancel is not a failure to paper over with the day-old copy.
+    if (signal?.aborted) throw err
     // A day-old catalogue beats an empty page; song metadata barely moves.
     if (cached) {
       memoryCatalog = new Map(cached.songs.map((s) => [s.id, s]))
@@ -153,32 +204,6 @@ export async function loadCatalog(onPage?: (page: number, total: number) => void
   memoryCatalog = new Map(songs.map((s) => [s.id, s]))
   writeCache(songs)
   return memoryCatalog
-}
-
-/** Runs `fn` over `items` with at most `limit` in flight. Failures resolve to
- *  null rather than rejecting the batch. */
-async function mapPool<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-  onSettled?: () => void,
-): Promise<(R | null)[]> {
-  const out: (R | null)[] = new Array(items.length).fill(null)
-  let next = 0
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const i = next++
-      if (i >= items.length) return
-      try {
-        out[i] = await fn(items[i])
-      } catch {
-        out[i] = null
-      }
-      onSettled?.()
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return out
 }
 
 /** What the view is currently waiting on, so it can label the progress line. */
@@ -203,6 +228,7 @@ export async function resolveStatsSongs(
   ids: number[],
   onProgress: (p: ResolveProgress) => void,
   isCancelled: () => boolean,
+  signal?: AbortSignal,
 ): Promise<Map<number, StatsSong>> {
   const out = new Map<number, StatsSong>()
   if (ids.length === 0) return out
@@ -229,7 +255,7 @@ export async function resolveStatsSongs(
     onProgress({ phase: 'catalog', done: 0, total: 0 })
     const catalog = await loadCatalog((page, total) => {
       if (!isCancelled()) onProgress({ phase: 'catalog', done: page, total })
-    })
+    }, signal)
     if (isCancelled()) return out
     for (const id of ids) {
       const song = catalog.get(id)
@@ -238,18 +264,13 @@ export async function resolveStatsSongs(
     return out
   }
 
-  // Few enough to ask for directly. These do go through apiFetch: single songs
-  // are small, and its cache is the same one the tracker and song-info modal
-  // populate, so the entries get reused rather than sitting idle.
-  let done = 0
+  // Few enough (≤ PER_ID_THRESHOLD) to ask for directly - one batched
+  // /songs/?ids=... request (chunked only if that ever changes to exceed the
+  // endpoint's own per-request cap) instead of one /songs/{id}/ call per id.
   onProgress({ phase: 'songs', done: 0, total: missing.length })
-  const results = await mapPool(
-    missing,
-    FETCH_CONCURRENCY,
-    (id) => apiFetch<JWApiSong>(`/songs/${id}/`),
-    () => { if (!isCancelled()) onProgress({ phase: 'songs', done: ++done, total: missing.length }) },
-  )
+  const results = await getSongsByIds(missing, signal)
   if (isCancelled()) return out
-  for (const song of results) if (song) out.set(song.id, slimSong(song))
+  for (const song of results) out.set(song.id, slimSong(song))
+  onProgress({ phase: 'songs', done: missing.length, total: missing.length })
   return out
 }

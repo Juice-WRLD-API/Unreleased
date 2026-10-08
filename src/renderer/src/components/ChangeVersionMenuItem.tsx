@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Layers, ChevronRight, Loader2, Star } from 'lucide-react'
+import { Layers, ChevronRight, Loader2, Star, Ban } from 'lucide-react'
 import { getVersionGroup } from '../lib/versionsApi'
-import { apiFetch, JWApiSong } from '../lib/juicewrldApi'
+import { getSongsByIds, JWApiSong } from '../lib/juicewrldApi'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { placeFlyout } from '../lib/menuFlyout'
@@ -16,25 +16,25 @@ interface Props {
   itemRef: React.RefObject<HTMLButtonElement>
   /** The menu element this flyout positions itself beside. */
   menuRef: React.RefObject<HTMLElement>
-  /** The menu's own position — reposition the flyout when the menu moves. */
+  /** The menu's own position - reposition the flyout when the menu moves. */
   menuPos: { top: number; left: number }
 }
 
 interface VersionOption { song: JWApiSong; label: string | null; version: string | null }
 
 /** "Change version" row + submenu for the song context menu (which every view
- *  in the app funnels through — Tracker, Liked Songs, Playlists, Player, WRLD).
+ *  in the app funnels through - Tracker, Liked Songs, Playlists, Player, WRLD).
  *  Renders as a flyout beside the menu, like "Add to playlist" and "File
  *  actions". The parent owns the open state so only one submenu shows at a
  *  time; everything else (the sibling fetch, its own placement) stays here.
  *  Siblings are fetched lazily on first open rather than eagerly whenever
- *  the parent menu opens — doing that for every song regardless of whether
+ *  the parent menu opens - doing that for every song regardless of whether
  *  the user ever clicks this item is exactly the kind of needless-fetch
  *  pattern that made compact view laggy before.
  *
  *  Clicking a sibling's name plays it now (a one-off). The star pins it as the
  *  group's *default* version (lib/songPrefs) so every future play of any
- *  version of this song resolves to it — the persistent counterpart to the
+ *  version of this song resolves to it - the persistent counterpart to the
  *  one-off switch, set right where the user is already comparing versions. */
 export default function ChangeVersionMenuItem({
   songId, onChangeVersion, open, onToggle, itemRef, menuRef, menuPos,
@@ -43,14 +43,15 @@ export default function ChangeVersionMenuItem({
   const [versions, setVersions] = useState<VersionOption[] | null>(null)
   const flyoutRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
-  const { songPrefs, setSongDefaultVersion } = useStore(
+  const { songPrefs, setSongDefaultVersion, setSongExcludedVersions } = useStore(
     useShallow((s) => ({
       songPrefs: s.songPrefs,
       setSongDefaultVersion: s.setSongDefaultVersion,
+      setSongExcludedVersions: s.setSongExcludedVersions,
     }))
   )
 
-  // Own row wins if set, else the first sibling that has one — mirrors
+  // Own row wins if set, else the first sibling that has one - mirrors
   // queueSlice's groupDefaultVersion so the star here matches what playback
   // actually resolves to, even when the default was set from a *different*
   // version's own menu rather than this song's.
@@ -64,7 +65,19 @@ export default function ChangeVersionMenuItem({
     return null
   }, [songPrefs, songId, versions])
 
-  // Siblings load on first open, not when the parent menu mounts — see the
+  // Union of every member's excluded labels - exclusion, like the default
+  // version, is really a property of the whole group (queueSlice's
+  // groupExcludedVersions mirrors this for the actual shuffle-play filter).
+  const excludedVersions = useMemo(() => {
+    const set = new Set<string>()
+    for (const label of songPrefs[songId]?.excluded_versions ?? []) set.add(label.toLowerCase())
+    for (const v of versions ?? []) {
+      for (const label of songPrefs[v.song.id]?.excluded_versions ?? []) set.add(label.toLowerCase())
+    }
+    return set
+  }, [songPrefs, songId, versions])
+
+  // Siblings load on first open, not when the parent menu mounts - see the
   // needless-fetch note above.
   useEffect(() => {
     if (!open || versions != null || loading) return
@@ -73,21 +86,25 @@ export default function ChangeVersionMenuItem({
     ;(async () => {
       try {
         const metas = await getVersionGroup(songId)
-        const fetched = await Promise.all(metas.map(m =>
-          apiFetch<JWApiSong>(`/songs/${m.songId}/`)
-            .then(song => ({
+        const songs = await getSongsByIds(metas.map(m => m.songId))
+        const byId = new Map(songs.map(s => [s.id, s]))
+        // Songs with no `path` (recording sessions, some unsurfaced entries)
+        // have nothing to actually play - hidden here since both switching to
+        // one and starring it as the group default would break playback.
+        const fetched = metas
+          .map((m): VersionOption | null => {
+            const song = byId.get(m.songId)
+            if (!song?.path) return null
+            return {
               song,
               version: m.version,
               label: m.version
-                ? (m.versionTitle ? `${m.version} — ${m.versionTitle}` : m.version)
+                ? (m.versionTitle ? `${m.version} - ${m.versionTitle}` : m.version)
                 : m.versionTitle,
-            }))
-            .catch(() => null)
-        ))
-        // Songs with no `path` (recording sessions, some unsurfaced entries)
-        // have nothing to actually play — hidden here since both switching to
-        // one and starring it as the group default would break playback.
-        if (!cancelled) setVersions(fetched.filter((v): v is VersionOption => !!v && !!v.song.path))
+            }
+          })
+          .filter((v): v is VersionOption => !!v)
+        if (!cancelled) setVersions(fetched)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -122,6 +139,7 @@ export default function ChangeVersionMenuItem({
         <div
           ref={flyoutRef}
           onClick={(e) => e.stopPropagation()}
+          onMouseOver={(e) => e.stopPropagation()}
           style={{ position: 'fixed', zIndex: 10000, top: pos.top, left: pos.left }}
           className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
         >
@@ -135,6 +153,7 @@ export default function ChangeVersionMenuItem({
           ) : (
             versions.map(({ song, label, version }) => {
               const isDefault = !!version && defaultVersion?.toLowerCase() === version.toLowerCase()
+              const isExcluded = !!version && excludedVersions.has(version.toLowerCase())
               return (
                 <div
                   key={song.id}
@@ -145,7 +164,7 @@ export default function ChangeVersionMenuItem({
                     className="flex-1 min-w-0 text-left pl-3.5 py-2 text-sm text-text-secondary hover:text-text-primary truncate"
                   >
                     {song.name}
-                    {label && <span className="text-text-muted text-xs"> — {label}</span>}
+                    {label && <span className="text-text-muted text-xs"> - {label}</span>}
                   </button>
                   {version && (
                     <button
@@ -164,10 +183,40 @@ export default function ChangeVersionMenuItem({
                           }
                         }
                       }}
-                      title={isDefault ? 'Default version — click to unset' : `Always play "${version}" for this song`}
+                      title={isDefault ? 'Default version - click to unset' : `Always play "${version}" for this song`}
                       className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors ${isDefault ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
                     >
                       <Star size={13} fill={isDefault ? 'currentColor' : 'none'} />
+                    </button>
+                  )}
+                  {version && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const label = version.toLowerCase()
+                        if (!isExcluded) {
+                          const own = songPrefs[songId]?.excluded_versions ?? []
+                          setSongExcludedVersions(songId, [...own, version])
+                          return
+                        }
+                        // Un-excluding has to clear wherever the label
+                        // actually lives (own row or an inherited sibling's),
+                        // same reasoning as the star button above.
+                        const ownExcluded = songPrefs[songId]?.excluded_versions ?? []
+                        if (ownExcluded.some(v => v.toLowerCase() === label)) {
+                          setSongExcludedVersions(songId, ownExcluded.filter(v => v.toLowerCase() !== label))
+                        }
+                        for (const v of versions ?? []) {
+                          const sibExcluded = songPrefs[v.song.id]?.excluded_versions ?? []
+                          if (sibExcluded.some(x => x.toLowerCase() === label)) {
+                            setSongExcludedVersions(v.song.id, sibExcluded.filter(x => x.toLowerCase() !== label))
+                          }
+                        }
+                      }}
+                      title={isExcluded ? 'Excluded - click to allow again' : `Never auto-pick "${version}" for this song`}
+                      className={`shrink-0 w-7 h-7 flex items-center justify-center rounded-md transition-colors ${isExcluded ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
+                    >
+                      <Ban size={13} />
                     </button>
                   )}
                 </div>

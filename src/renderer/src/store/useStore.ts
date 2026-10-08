@@ -1,42 +1,58 @@
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, FollowedPlaylist, OfflineTrackMeta, OfflinePlaylistEntry, ConvertTarget } from '../types'
+import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, OfflineTrackMeta, OfflinePlaylistEntry, ConvertTarget } from '../types'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
-import type { AccountUser, PlaylistSummary } from '../lib/userApi'
+import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
+import { clearDonorPlaybackCache } from '../lib/donorPlayback'
+import { clearDonorImageCache } from '../lib/donorImageCache'
+import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
-import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels } from '../lib/juicewrldApi'
+import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
-  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache,
+  emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
-import type { SongPreference, SongPrefMap, SongPrefPatch } from '../lib/songPrefs'
+import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
+
+// AdminPage's own tab set (see its local `Tab` type) — duplicated here rather
+// than imported so the store doesn't depend on a component file; keep in sync.
+export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes'
 import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
 import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
+import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
+  listeningPlaysMatchServer,
   mergeListeningPlays,
   normalizeListeningPlayEvent,
+  sortListeningPlays,
 } from '../lib/listeningPlays'
 import type { ListeningPlayEvent } from '../lib/listeningPlays'
+import { loadRecentTracks, backfillRecentTracks, RECENT_TRACKS_LIMIT } from '../lib/recentTracks'
 import * as reportsApi from '../lib/reportsApi'
 import { newReportId, isDeliverable } from '../lib/reports'
 import type {
   PendingReport, ReportTarget, FeedbackCategory, SongIssueType,
 } from '../lib/reports'
 import * as foldersApi from '../lib/foldersApi'
-import { newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
+import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
+import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
+import type { GifResult } from '../lib/gifApi'
+import { listDonorFiles } from '../lib/donorFilesApi'
+import type { DonorFile } from '../lib/donorFilesApi'
 import { getFont } from '../lib/fonts'
 import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
 import type { CommunityEdit } from '../lib/audioEffects'
 import { HOTKEY_ACTIONS, effectiveBinding, effectiveGlobalBinding, defaultGlobalBinding } from '../lib/hotkeys'
 import { DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
+import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
 import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
@@ -67,6 +83,8 @@ export interface DownloadItem {
   // 'upload' is the one that goes the other way � a comp file proposal's body
   // on its way to the API (see lib/compUploads).
   type: 'file' | 'zip' | 'update' | 'playlist' | 'upload'
+  /** Secondary status line, e.g. "12 / 40 files" for a ZIP (lib/clientZip). */
+  detail?: string
   state: 'downloading' | 'done' | 'error' | 'cancelled'
   percent: number
   received?: number
@@ -81,9 +99,62 @@ export interface DownloadItem {
   speedBps?: number
 }
 
+// --- Staged file change (in-session) -------------------------------------------
+//
+// A contributor dragging rows around in ApiFilesView doesn't propose anything
+// on drop: the intended move/folder-create is parked here, the Downloads panel
+// lists what's queued, and one "Propose" there submits the lot (see
+// lib/compStagedChanges). Dragging is cheap to do by accident, and a reorganize
+// is usually several drags that only make sense together, so proposing each
+// one the instant it lands would spam reviewers with half a move.
+export interface StagedFileChange {
+  id: string
+  /** The subset of comp proposal change types drag-and-drop can produce. */
+  changeType: 'move' | 'move_folder' | 'create_folder'
+  /** Source path - the file/folder being moved, or the folder to create. */
+  path: string
+  /** Full destination path; absent for create_folder. */
+  destination?: string
+  /** Channel slug the change belongs to, since the Files tab can switch
+   *  channels with changes still queued and each proposal carries its own. */
+  channel: string
+  /** Set when a propose attempt failed, so the row can show why and stay
+   *  queued for a retry. Cleared on the next attempt. */
+  error?: string
+}
+
+// ─── Staged song edit proposal (in-session) ──────────────────
+//
+// Same idea as StagedFileChange, applied to the Tracker's song editor, bulk
+// editor and "propose new song" modal: editing a song's metadata, proposing
+// its deletion, or proposing a brand new song doesn't submit anything on its
+// own - it parks the proposal here, the Uploads panel lists what's queued,
+// and one "Propose" there sends the lot (see lib/compStagedSongChanges).
+// Editing an *already-submitted* pending proposal (editingPropId set in
+// EditorPage) is a different action - that proposal already exists
+// server-side, so it's still updated immediately.
+export interface StagedSongChange {
+  id: string
+  /** Null for a 'create' change - a new song has no id yet. */
+  songId: number | null
+  changeType: 'update' | 'delete' | 'create'
+  /** Song title, for the queue row - not sent as part of proposed_data. */
+  title: string
+  proposedData: Record<string, unknown>
+  editorNotes: string
+  /** Channel slug the proposal belongs to. Absent lets the server pick a
+   *  default (the AddSongModal can be opened without one). */
+  channel?: string
+  /** Set when a propose attempt failed, so the row can show why and stay
+   *  queued for a retry. Cleared on the next attempt. */
+  error?: string
+}
+
 // Where the desktop nav menu sits � classic left sidebar, mirrored right, or a
 // horizontal bar above/below the content. Mobile always uses the bottom tab bar.
 export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
+// 'classic' = the docked menu; 'pill' = a floating, rounded, icon-only bar.
+export type NavStyle = 'classic' | 'pill'
 
 // Where the File/Edit/View� app-menu button lives (desktop only): the floating
 // title-strip pill, tucked inside the side menu, or off entirely.
@@ -92,7 +163,7 @@ export type AppMenuPosition = 'title-bar' | 'sidebar' | 'hidden'
 // The Settings dialog's tabs � the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'appearance' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
 
 // The detached ("pop-out") BrowserWindows the desktop build can open instead of
 // rendering a view inline (see FloatApp). Each can be turned off individually:
@@ -161,6 +232,10 @@ interface AppState {
   // like the editor send its back button/redirects to wherever the user
   // actually came from instead of a hardcoded destination.
   previousView: ViewType | null
+  // Which AdminPage tab to land on next time activeView becomes 'admin' — set
+  // by the Editor/Contributor profile's Admin tile stat boxes so a click deep
+  // links straight to that queue instead of always landing on the default tab.
+  activeAdminTab: AdminTab | null
   showNowPlaying: boolean
   showSettings: boolean
   // Which Settings tab to show on next open (deep-link from the app menu, e.g.
@@ -205,7 +280,14 @@ interface AppState {
   // getSkin() resolves them everywhere. Synced across windows (windowSync).
   customSkins: Skin[]
   sidebarPosition: SidebarPosition
+  // Desktop only: visual style of the nav menu. Local-only preference.
+  navStyle: NavStyle
   appMenuPosition: AppMenuPosition
+  // Desktop only: the nav menu slides out of view until the pointer touches its
+  // screen edge (like an auto-hiding taskbar). Local-only preference.
+  autoHideNav: boolean
+  // Width (px) of the invisible edge strip that reveals the auto-hidden nav.
+  autoHideNavZone: number
   // User-defined order of the primary side-menu nav items, by view id. Only
   // ever a permutation of the known ids � orderedNavItems() sanitizes it on
   // read, so a stale/partial saved order can't drop or duplicate a tab.
@@ -215,6 +297,8 @@ interface AppState {
   // own default for anything absent, so lets the user hide built-ins and add
   // the off-by-default extras.
   navVisibility: Record<string, boolean>
+  // Per-section show/hide for the Home dashboard, same model as navVisibility.
+  homeSectionVisibility: Record<string, boolean>
   // Order + visibility for the foot-of-menu controls (Profile, Log out,
   // Diagnostics, Download, Settings) � same model as navOrder/navVisibility.
   navControlOrder: string[]
@@ -337,6 +421,10 @@ interface AppState {
   // source of truth; this exists so StatsView can answer "last 7/30 days" and
   // show a recent-plays timeline, which absolute counters can't.
   listeningPlays: ListeningPlayEvent[]
+  /** Bumped whenever _backfillRecentTracks rewrites the localStorage ring, so
+   *  an already-mounted Home re-reads it (the backfill lands after sign-in,
+   *  usually well after Home has mounted). */
+  recentTracksRev: number
 
   // In-app reports (feedback + song issue reports). `pendingReports` is a
   // persisted outbox: a report is queued locally on submit and delivered when
@@ -363,6 +451,13 @@ interface AppState {
   // API tracker extras
   apiTrackerCategory: string
   apiTrackerEra: string
+  // One-shot deep link consumed by ApiTrackerView on mount to pick which tab
+  // (Songs/Lyrics/Overview/Producers) opens - see StatisticsView's tab bar,
+  // the only current setter.
+  apiTrackerTab: string
+  // One-shot deep link: when true, ApiTrackerView focuses its search input on
+  // mount (and clears the flag) - set by the mobile Home search shortcut.
+  focusApiTrackerSearch: boolean
   apiFilesPath: string
   apiFilesLastPath: string
 
@@ -451,6 +546,13 @@ interface AppState {
   // Local-only (localStorage), so this list is per-device.
   followedPlaylists: FollowedPlaylist[]
 
+  // Donor cloud-file playlists - see DonorPlaylist. Local-only (localStorage),
+  // unlike web-dev's, which syncs through user_settings.donor_playlists - app
+  // has no cross-device settings sync yet. donorFiles is the resolved file
+  // list those playlists point into (null until loaded).
+  donorPlaylists: DonorPlaylist[]
+  donorFiles: DonorFile[] | null
+
   // Offline playlist sync (Electron only) � API-backed playlists downloaded
   // for offline playback, kept in sync with the API's song metadata.
   offlineTracks: Record<string, OfflineTrackMeta>
@@ -461,6 +563,40 @@ interface AppState {
   downloads: DownloadItem[]
   showDownloadManager: boolean
   updateStatus: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null
+
+  stagedFileChanges: StagedFileChange[]
+  // The bottom nav's overflow sheet - its trigger button lives on Home now,
+  // not in the nav bar itself, so the open/close state has to live somewhere
+  // both can reach.
+  showMoreNav: boolean
+  // Lets a view's sub-state paint a hero image full-bleed behind the app bar
+  // and up under the status bar, instead of sitting on the shell's flat
+  // reserved inset strip. The view that raises it MUST clear it on the way
+  // out, or the shell stays bled after navigating elsewhere.
+  heroBleedTop: boolean
+  // Playlist detail header's full-bleed blurred-cover backdrop (Apple Music
+  // style). Off falls back to a plain flat surface header. Tracked
+  // separately per skin darkness (not one flag) - the backdrop was designed
+  // dark-first and defaults off on a light skin, on for a dark one, and a
+  // choice made while on, say, a dark skin shouldn't silently carry over and
+  // turn it on the next time a light skin is active. setPlaylistHeroEnabled
+  // writes whichever of these matches the *current* skin; components read
+  // the matching one via isDarkSkin rather than a combined getter, since they
+  // already need isDarkSkin themselves to pair the hero's text colors.
+  playlistHeroEnabledDark: boolean
+  playlistHeroEnabledLight: boolean
+  // Whether ErrorBoundary auto-submits a crash report the moment it catches
+  // an error, through the same feedback pipeline (submitFeedback) the manual
+  // "Report this error" button uses. On by default; Settings can turn it off
+  // for anyone who'd rather report manually (or not at all).
+  autoReportErrors: boolean
+  // Playlists for signed-out users - see GuestPlaylist. Persisted to
+  // localStorage, so unlike localPlaylists these aren't tied to scanned
+  // library tracks and work identically on every platform.
+  guestPlaylists: GuestPlaylist[]
+  // Song edit/delete proposals staged by the Tracker's editors, proposed as a
+  // batch from the Uploads panel (see lib/compStagedSongChanges).
+  stagedSongChanges: StagedSongChange[]
 }
 
 interface AppActions {
@@ -489,6 +625,7 @@ interface AppActions {
   playCommunityEdit: (edit: CommunityEdit) => void
 
   setActiveView: (view: ViewType) => void
+  setActiveAdminTab: (tab: AdminTab | null) => void
   setShowNowPlaying: (show: boolean) => void
   setRadioFmActive: (active: boolean) => void
   setRadioFmIsLive: (live: boolean | null) => void
@@ -511,6 +648,26 @@ interface AppActions {
    *  bottom nav tab, the player's profile hotkey). Opens the pop-out window
    *  when that's enabled, otherwise navigates in-app. */
   openProfile: () => void
+  /** Opens the signed-in user's own public profile (/u/<id>). */
+  openOwnPublicProfile: () => void
+  /** Opens any user's public profile by id. */
+  openPublicProfile: (userId: number) => void
+  // Account ids of users whose chat messages are hidden from this account.
+  mutedUserIds: number[]
+  muteUser: (userId: number) => void
+  unmuteUser: (userId: number) => void
+  toggleMuteUser: (userId: number) => void
+  // Mirror of chatStore's mutedServers/mutedConversations (that store owns
+  // them; this is just a copy chatStore keeps in sync via _syncChatMutes so
+  // other surfaces can read it without importing chatStore back).
+  chatMutedServers: number[]
+  chatMutedConversations: number[]
+  /** Called from chatStore whenever its local mutedServers/mutedConversations
+   *  change, so this store's mirror of them stays current. */
+  _syncChatMutes: (mutedServers: number[], mutedConversations: number[]) => void
+  // GIFs favorited from the chat GIF picker (see lib/gifApi).
+  favoriteGifs: GifResult[]
+  toggleFavoriteGif: (gif: GifResult) => void
   setShowDiagnostics: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -531,8 +688,12 @@ interface AppActions {
   deleteCustomSkin: (id: string) => void
   setSidebarPosition: (position: SidebarPosition) => void
   setAppMenuPosition: (position: AppMenuPosition) => void
+  setNavStyle: (style: NavStyle) => void
+  setAutoHideNav: (on: boolean) => void
+  setAutoHideNavZone: (px: number) => void
   setNavOrder: (order: ViewType[]) => void
   setNavItemVisible: (view: ViewType, visible: boolean) => void
+  setHomeSectionVisible: (id: string, visible: boolean) => void
   setNavControlOrder: (order: string[]) => void
   setNavControlVisible: (id: string, visible: boolean) => void
 
@@ -587,6 +748,11 @@ interface AppActions {
   /** Preferred version *label* within this song's version group (e.g. "v1") �
    *  playing any member of the group then plays this one. Null clears it. */
   setSongDefaultVersion: (songId: number, version: string | null) => void
+  /** Replaces a song's own excluded-versions list outright — callers (the
+   *  Change-version menu) work out which row(s) to patch themselves, the same
+   *  way they already do for default_version, since an excluded label can
+   *  live on a different member's row than the one being toggled from. */
+  setSongExcludedVersions: (songId: number, versions: string[]) => void
   /** Drops every override for a song, playcount included. */
   clearSongPref: (songId: number) => void
   /** Credits one play. Called by the Player once a track passes the listened
@@ -595,11 +761,17 @@ interface AppActions {
   /** Merges the profile's `user_preferences` blob (from getMe) with local
    *  state � profile wins per song except playcount, which takes the max �
    *  then pushes the merged array back up. Runs on login. */
-  syncSongPrefs: (serverPrefs?: SongPreference[]) => Promise<void>
+  syncSongPrefs: (serverPrefs?: WireSongPreference[]) => Promise<void>
   /** Same shape as syncSongPrefs, but a union rather than a per-key merge �
    *  play events are immutable, so the two sides just get deduped. */
   syncListeningPlays: (serverPlays?: ListeningPlayEvent[]) => Promise<void>
-  /** Internal � the single write path for songPrefs (state + localStorage +
+  /** Resolves whatever of the newest `listeningPlays` ids aren't already in
+   *  this device's local recent-tracks ring (Home's "Recently played") and
+   *  merges them in - the ring is per-device local storage, so a play
+   *  credited elsewhere never lands here on its own. Runs after
+   *  syncListeningPlays so it sees the merged log, not just this device's. */
+  _backfillRecentTracks: () => Promise<void>
+  /** Internal - the single write path for songPrefs (state + localStorage +
    *  lib/songPrefs' cache). */
   _setSongPrefs: (next: SongPrefMap) => void
   /** Internal � the single write path for listeningPlays (state + localStorage). */
@@ -623,7 +795,7 @@ interface AppActions {
    *  delivery attempt settles: `true` if it actually reached the server this
    *  round, `false` if it's still sitting in the outbox (offline, rejected,
    *  or the API is disabled) � the caller can surface which happened. */
-  submitFeedback: (category: FeedbackCategory, message: string, contact?: string) => Promise<boolean>
+  submitFeedback: (category: FeedbackCategory, message: string, contact?: string, automated?: boolean) => Promise<boolean>
   /** Queues a song issue report (wrong/missing info or lyrics) and tries to
    *  deliver it. `issues` is the set of checked problem types. Same delivered
    *  vs. still-queued resolution as `submitFeedback`. */
@@ -656,10 +828,12 @@ interface AppActions {
   /** Internal � marks the given profile-blob field(s) dirty and (re)schedules
    *  the single shared debounced PATCH that pushes all dirty fields together
    *  in one request, whole-array, rather than one PATCH per field. */
-  _scheduleProfilePush: (fields: ('songPrefs' | 'listeningPlays' | 'folders')[]) => void
+  _scheduleProfilePush: (fields: ('songPrefs' | 'listeningPlays' | 'folders' | 'userSettings')[]) => void
 
   setApiTrackerCategory: (cat: string) => void
   setApiTrackerEra: (era: string) => void
+  setApiTrackerTab: (tab: string) => void
+  setFocusApiTrackerSearch: (focus: boolean) => void
   setApiFilesPath: (path: string) => void
   setApiFilesLastPath: (path: string) => void
 
@@ -667,6 +841,10 @@ interface AppActions {
   loadAccount: () => Promise<void>
   loginWithDiscord: () => Promise<void>
   completeDiscordLogin: (code: string, state: string) => Promise<void>
+  signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
+  loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
+  /** Finishes a login another signed-in device approved (the token comes from the approval poll). */
+  completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
@@ -741,6 +919,20 @@ interface AppActions {
   unfollowPlaylist: (id: number) => void
   updateFollowedPlaylistMeta: (id: number, meta: { name: string; trackCount: number; coverUrl: string | null }) => void
 
+  loadDonorFiles: () => Promise<void>
+  setDonorFiles: (files: DonorFile[]) => void
+  createDonorPlaylist: (name: string, fileIds?: string[]) => string
+  deleteDonorPlaylist: (id: string) => void
+  renameDonorPlaylist: (id: string, name: string) => void
+  addToDonorPlaylist: (playlistId: string, fileId: string) => void
+  removeFromDonorPlaylist: (playlistId: string, fileId: string) => void
+  reorderDonorPlaylist: (playlistId: string, fileIds: string[]) => void
+  // A re-tagged file re-uploads under a new file_id; a deleted one just goes
+  // away. Either way, any donor playlist pointing at the old id needs fixing
+  // up so it doesn't silently drop a track next time it's opened.
+  replaceDonorFileId: (oldId: string, newId: string | null) => void
+  _setDonorPlaylists: (next: DonorPlaylist[]) => void
+
   loadOfflineLibrary: () => Promise<void>
   downloadPlaylistOffline: (key: string, name: string, songIds: number[], opts?: { silent?: boolean }) => Promise<void>
   removePlaylistOffline: (key: string) => Promise<void>
@@ -755,6 +947,32 @@ interface AppActions {
   clearCompletedDownloads: () => void
   setShowDownloadManager: (show: boolean) => void
   setUpdateStatus: (status: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null) => void
+
+  /** Queues drag-and-drop file changes; ids are assigned here. Returns nothing
+   *  - the Downloads panel is where they're reviewed and proposed. */
+  stageFileChanges: (changes: Omit<StagedFileChange, 'id'>[]) => void
+  updateStagedFileChange: (id: string, updates: Partial<StagedFileChange>) => void
+  unstageFileChange: (id: string) => void
+  clearStagedFileChanges: () => void
+  setShowMoreNav: (show: boolean) => void
+  setHeroBleedTop: (heroBleedTop: boolean) => void
+  // Writes to playlistHeroEnabledDark or ...Light, whichever matches the
+  // skin active right now.
+  setPlaylistHeroEnabled: (enabled: boolean) => void
+  syncUserSettings: (serverSettings?: UserSettings) => Promise<void>
+  setAutoReportErrors: (enabled: boolean) => void
+  // Guest playlists (see GuestPlaylist) - createGuestPlaylist returns the new
+  // playlist's id so the caller can navigate straight to it.
+  createGuestPlaylist: (name: string) => string
+  deleteGuestPlaylist: (id: string) => void
+  renameGuestPlaylist: (id: string, name: string) => void
+  addToGuestPlaylist: (playlistId: string, track: Track) => void
+  removeFromGuestPlaylist: (playlistId: string, trackId: string) => void
+  reorderGuestPlaylist: (playlistId: string, tracks: Track[]) => void
+  stageSongChanges: (changes: Omit<StagedSongChange, 'id'>[]) => void
+  updateStagedSongChange: (id: string, updates: Partial<StagedSongChange>) => void
+  unstageSongChange: (id: string) => void
+  clearStagedSongChanges: () => void
 }
 
 export type AppStore = QueueSlice & AppState & AppActions
@@ -800,6 +1018,13 @@ const _offlineKeyEpochs = new Map<string, number>()
 // Covers arrive in bursts � one per visible row � and applying each through
 // its own set() meant a full libraryTracks copy and list re-render per cover.
 let _pendingArt: Map<string, string | null> | null = null
+
+// Ids currently holding a cover data URI in libraryArt, oldest first. The map
+// otherwise only ever grows (every cover scrolled past stays resident), so
+// past the cap the oldest covers not in use by the queue are dropped — they
+// re-read from the main process's disk cache if they scroll back into view.
+const _artResident = new Set<string>()
+const ART_RESIDENT_MAX = 1200
 
 // --- Song preferences helpers -------------------------------------------------
 
@@ -897,16 +1122,108 @@ function waitForReportSettled(id: string, timeoutMs = 8000): Promise<boolean> {
 
 // --- Profile-blob push debounce -----------------------------------------------
 
-// Preferences, listening plays, and folders each live as one JSON field on
-// /account/me/, PATCHed whole. A single shared timer/dirty-set collapses a
-// burst of edits across ANY of the three fields (typing a rename, a run of
-// playcount bumps, a song skip that touches both prefs and listening plays)
-// into one combined PATCH instead of one request per field. Failures are
-// swallowed: state is local-first, and the next push � or the next login's
-// merge � re-sends everything anyway.
+// Preferences, listening plays, and folders each live as one JSON
+// field on /account/me/, PATCHed whole. A single shared timer/dirty-set
+// collapses a burst of edits across ANY of the three fields (typing a
+// rename, a run of playcount bumps, a song skip that touches both prefs and
+// listening plays) into one combined PATCH instead of one request per field.
+// Failures are swallowed: state is local-first, and the next push - or the
+// next login's merge - re-sends everything anyway.
+// Last URL each path-param view was showing when it was navigated away from -
+// see setActiveView.
+const PATH_PARAM_VIEWS: ViewType[] = ['track', 'shared-playlist', 'public-profile']
+const lastPathParamUrl: Partial<Record<ViewType, string>> = {}
+
 const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
-let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false }
+let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
+
+function buildUserSettings(s: AppStore): UserSettings {
+  return {
+    muted_user_ids: s.mutedUserIds,
+    theme: s.theme,
+    custom_skins: s.customSkins,
+    donor_playlists: s.donorPlaylists,
+    accent_color: s.accentColor,
+    app_text_scale: s.appTextScale,
+    app_font: s.appFont,
+    lyrics_font: s.lyricsFont,
+    lyrics_scale: s.lyricsScale,
+    lyrics_align: s.lyricsAlign,
+    lyrics_blur: s.lyricsBlur,
+    lyrics_blur_amount: s.lyricsBlurAmount,
+    lyrics_color_active: s.lyricsColorActive,
+    lyrics_color_inactive: s.lyricsColorInactive,
+    lyrics_override: s.lyricsOverride,
+    full_era_names: s.fullEraNames,
+    gradients_enabled: s.gradientsEnabled,
+    surface_gradients_enabled: s.surfaceGradientsEnabled,
+    wrld_theme_background: s.wrldThemeBackground,
+    playlist_hero_enabled_dark: s.playlistHeroEnabledDark,
+    playlist_hero_enabled_light: s.playlistHeroEnabledLight,
+    sidebar_position: s.sidebarPosition,
+    nav_style: s.navStyle,
+    auto_hide_nav: s.autoHideNav,
+    auto_hide_nav_zone: s.autoHideNavZone,
+    nav_order: s.navOrder,
+    nav_visibility: s.navVisibility,
+    nav_control_order: s.navControlOrder,
+    nav_control_visibility: s.navControlVisibility,
+    home_section_visibility: s.homeSectionVisibility,
+    playback_speed: s.playbackSpeed,
+    crossfade_enabled: s.crossfadeEnabled,
+    crossfade_duration: s.crossfadeDuration,
+    pause_fade_enabled: s.pauseFadeEnabled,
+    prefer_og_version: s.preferOgVersion,
+    rotate_suggested_covers: s.rotateSuggestedCovers,
+    media_overlay_enabled: s.mediaOverlayEnabled,
+    lastfm_enabled: s.lastfmEnabled,
+    auto_report_errors: s.autoReportErrors,
+    eq_enabled: s.eqEnabled,
+    eq_gains: s.eqGains,
+    eq_preset: s.eqPreset,
+    eq_balance: s.eqBalance,
+    eq_mono: s.eqMono,
+    eq_boost: s.eqBoost,
+    skip_silence: s.skipSilence,
+    reverb_enabled: s.reverbEnabled,
+    reverb_mix: s.reverbMix,
+    reverb_decay: s.reverbDecay,
+    pitch_shift: s.pitchShift,
+    hotkey_bindings: s.hotkeyBindings,
+    hotkey_seek_seconds: s.hotkeySeekSeconds,
+    global_hotkeys_enabled: s.globalHotkeysEnabled,
+    muted_servers: s.chatMutedServers,
+    muted_conversations: s.chatMutedConversations,
+    favorite_gifs: s.favoriteGifs,
+  }
+}
+
+// loadAccount's sync* merges used to end by pushing the merged copy back
+// unconditionally - but on most logins the merge changes nothing, so every
+// app start re-uploaded the whole profile blob (~90 KB for an active
+// listener) just to write the server's own data back to it. Each merge now
+// checks whether its result matches what the server sent and, if so, calls
+// this instead of scheduling a push. It also cancels a push the merge's own
+// setters queued while adopting server values - safe, because the merge
+// already folded in every local change, so "matches the server" means no
+// local edit is waiting on that push.
+function dropProfilePush(field: keyof typeof _profilePushDirty): void {
+  _profilePushDirty[field] = false
+  if (_profilePushTimer && !Object.values(_profilePushDirty).some(Boolean)) {
+    clearTimeout(_profilePushTimer)
+    _profilePushTimer = null
+  }
+}
+
+// Key-order-insensitive JSON, so a nested settings object the merge rebuilt
+// (`{ ...local, ...server }`) doesn't read as changed just for key order.
+function stableJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v)
+}
 
 // Chains `fn` behind any in-flight offline work for `key` so writers for the
 // same playlist never interleave.
@@ -964,6 +1281,8 @@ function commitM3uImport(
   return { ok: true, playlistId: playlist.id, name: playlist.name, matched: trackIds.length, total: entries.length, unmatched }
 }
 
+setActiveChannelCache(ls.get<string>('activeChannel') || '')
+
 export const useStore = create<AppStore>((set, get, store) => ({
   // -- Queue slice (all queue + playback logic) -------------------------------
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -983,7 +1302,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
   },
   setVolume: (volume) => { set({ volume }); ls.set('volume', volume) },
-  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed) },
+  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
   setLyricsOffset: (offset) => { set({ lyricsOffset: offset }); ls.set('lyricsOffset', offset) },
 
   // -- Equalizer / audio effects ---------------------------------------------
@@ -1000,12 +1319,13 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // 1 = 100% (unity, off) .. EQ_BOOST_MAX = 200%.
   eqBoost: ls.get<number>('eqBoost') ?? 1,
   skipSilence: ls.get<boolean>('skipSilence') ?? false,
-  setEqEnabled: (eqEnabled) => { set({ eqEnabled }); ls.set('eqEnabled', eqEnabled) },
+  setEqEnabled: (eqEnabled) => { set({ eqEnabled }); ls.set('eqEnabled', eqEnabled); get()._scheduleProfilePush(['userSettings']) },
   setEqBand: (index, gain) => {
     const eqGains = [...get().eqGains]
     eqGains[index] = gain
     set({ eqGains, eqPreset: 'custom' })
     ls.set('eqGains', eqGains); ls.set('eqPreset', 'custom')
+    get()._scheduleProfilePush(['userSettings'])
   },
   setEqPreset: (id) => {
     const preset = EQ_PRESETS.find((p) => p.id === id)
@@ -1013,21 +1333,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const eqGains = [...preset.gains]
     set({ eqGains, eqPreset: id })
     ls.set('eqGains', eqGains); ls.set('eqPreset', id)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance) },
-  setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono) },
-  setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost) },
-  setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence) },
-  // 'slowedReverb' is the feature's short-lived bundled-toggle predecessor �
+  setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance); get()._scheduleProfilePush(['userSettings']) },
+  setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono); get()._scheduleProfilePush(['userSettings']) },
+  setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost); get()._scheduleProfilePush(['userSettings']) },
+  setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence); get()._scheduleProfilePush(['userSettings']) },
+  // 'slowedReverb' is the feature's short-lived bundled-toggle predecessor -
   // carry an existing on-state over so it doesn't silently switch off.
   reverbEnabled: ls.get<boolean>('reverbEnabled') ?? ls.get<boolean>('slowedReverb') ?? false,
   reverbMix: ls.get<number>('reverbMix') ?? 0.4,
   reverbDecay: ls.get<number>('reverbDecay') ?? 3,
   pitchShift: ls.get<boolean>('pitchShift') ?? ls.get<boolean>('slowedReverb') ?? false,
-  setReverbEnabled: (reverbEnabled) => { set({ reverbEnabled }); ls.set('reverbEnabled', reverbEnabled) },
-  setReverbMix: (reverbMix) => { set({ reverbMix }); ls.set('reverbMix', reverbMix) },
-  setReverbDecay: (reverbDecay) => { set({ reverbDecay }); ls.set('reverbDecay', reverbDecay) },
-  setPitchShift: (pitchShift) => { set({ pitchShift }); ls.set('pitchShift', pitchShift) },
+  setReverbEnabled: (reverbEnabled) => { set({ reverbEnabled }); ls.set('reverbEnabled', reverbEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setReverbMix: (reverbMix) => { set({ reverbMix }); ls.set('reverbMix', reverbMix); get()._scheduleProfilePush(['userSettings']) },
+  setReverbDecay: (reverbDecay) => { set({ reverbDecay }); ls.set('reverbDecay', reverbDecay); get()._scheduleProfilePush(['userSettings']) },
+  setPitchShift: (pitchShift) => { set({ pitchShift }); ls.set('pitchShift', pitchShift); get()._scheduleProfilePush(['userSettings']) },
   abLoopStart: null,
   abLoopEnd: null,
   setAbLoopPoint: () => {
@@ -1065,7 +1386,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       id: `community-edit-${edit.id}`,
       path: edit.path,
       title: edit.name,
-      artist: edit.author ? `Community edit � ${edit.author}` : 'Community edit',
+      artist: edit.author ? `Community edit · ${edit.author}` : 'Community edit',
       album: '',
       albumArtist: '',
       year: null,
@@ -1079,9 +1400,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get().playTrack(track, [track])
   },
 
-  // -- UI --------------------------------------------------------------------
-  activeView: 'api-tracker',
+  // ── UI ────────────────────────────────────────────────────────────────────
+  activeView: 'home',
   previousView: null,
+  activeAdminTab: null,
   showNowPlaying: false,
   showSettings: false,
   settingsTab: null,
@@ -1107,8 +1429,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
   theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
   appMenuPosition: ls.get<AppMenuPosition>('appMenuPosition') ?? 'sidebar',
-  navOrder: ls.get<ViewType[]>('navOrder') ?? DEFAULT_NAV_ORDER,
+  navStyle: ls.get<NavStyle>('navStyle') ?? 'classic',
+  autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
+  autoHideNavZone: ls.get<number>('autoHideNavZone') ?? 24,
+  navOrder: (() => {
+    // Only users who actually reordered their menu have this key at all -
+    // everyone else falls through to DEFAULT_NAV_ORDER and picks up new
+    // destinations in their intended position for free. For the ones who did,
+    // orderedNavItems appends anything missing at the *end*, which would bury
+    // Home in the "More" sheet, so front-load it instead. The `includes` guard
+    // makes this idempotent, and a later drag persists whatever they choose.
+    const saved = ls.get<ViewType[]>('navOrder')
+    if (!saved) return DEFAULT_NAV_ORDER
+    return saved.includes('home') ? saved : ['home' as ViewType, ...saved]
+  })(),
   navVisibility: { ...DEFAULT_NAV_VISIBILITY, ...(ls.get<Record<string, boolean>>('navVisibility') ?? {}) },
+  homeSectionVisibility: { ...DEFAULT_HOME_SECTION_VISIBILITY, ...(ls.get<Record<string, boolean>>('homeSectionVisibility') ?? {}) },
   navControlOrder: (() => {
     const saved = ls.get<string[]>('navControlOrder') ?? DEFAULT_NAV_CONTROL_ORDER
     return saved.filter((id) => id !== 'return-api')
@@ -1125,22 +1461,57 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // entries or churn subscribers that key off previousView.
     if (get().activeView === view) return
     const paths: Partial<Record<ViewType, string>> = {
+      'home': '/home',
       'api-tracker': '/tracker',
       'api-files': '/files',
       'editor': '/editor',
       'contributor': '/contributor',
       'admin': '/admin',
+      'editor-profile': '/editor-profile',
+      'contributor-profile': '/contributor-profile',
+      'albums-admin': '/albums-admin',
       'liked': '/liked',
       'playlists': '/playlists',
+      'docs': '/docs',
       'wrld': '/wrld',
       'news': '/news',
       'heardle': '/heardle',
       'wordle': '/wordle',
       'tierlist': '/tierlist',
-      'stats': '/stats',
+      'stats': '/wrapped',
+      'statistics': '/statistics',
+      'download': '/download',
+      'thanks': '/thank-you',
+      'settings': '/settings',
+      'chat': '/chat',
+      'terminal': '/terminal',
     }
-    window.history.pushState({ view }, '', paths[view] ?? '/tracker')
+    // Returning to Playlists with a playlist already open (it stays selected
+    // across tab switches - see playlistsSelectedId above) should restore its
+    // ?id= too, not just land on the bare list. Same idea for Admin: land
+    // back on whichever section (Users, Security, ...) was last open there
+    // instead of always resetting to the base /admin.
+    const selectedPlaylistId = get().playlistsSelectedId
+    const activeAdminTab = get().activeAdminTab
+    // Views whose identity lives in the URL path itself (/track/<id>,
+    // /shared/<id>, /u/<id>) have no fixed entry above - remember the URL
+    // they were left at so coming back (closing Settings, collapsing WRLD)
+    // restores it instead of falling back to /tracker.
+    const current = get().activeView
+    if (PATH_PARAM_VIEWS.includes(current)) lastPathParamUrl[current] = window.location.pathname
+    const path = view === 'playlists' && selectedPlaylistId != null
+      ? `/playlists?id=${selectedPlaylistId}`
+      : view === 'admin' && activeAdminTab
+        ? ADMIN_TAB_PATHS[activeAdminTab] ?? '/admin'
+        : paths[view] ?? lastPathParamUrl[view] ?? '/tracker'
+    window.history.pushState({ view }, '', path)
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
+  },
+  setActiveAdminTab: (tab) => {
+    set({ activeAdminTab: tab })
+    if (get().activeView !== 'admin') return
+    const path = (tab && ADMIN_TAB_PATHS[tab]) || '/admin'
+    window.history.replaceState({ view: 'admin', adminTab: tab }, '', path)
   },
   setShowNowPlaying: (showNowPlaying) => set({ showNowPlaying }),
   setRadioFmActive: (radioFmActive) => set({ radioFmActive }),
@@ -1200,7 +1571,28 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Which profile view depends on the account's roles, not on the caller �
     // staffProfileView is the same helper the sidebar/bottom-nav tabs label
     // themselves from, so the two can't drift apart.
-    const view = userApi.staffProfileView(get().account)
+    const s = get()
+    const account = s.account
+    const view = userApi.staffProfileView(account)
+    // The profile page's staff tiles are scoped to whichever channel is
+    // active - activeChannel is a single global setting shared with the
+    // Files tab, so it can easily be left on a channel where this account
+    // only holds the contributor role while their actual editor/manager
+    // standing is on a different one. Landing there then looks exactly like
+    // the contributor page instead of the staff dashboard the pill/tab
+    // promised. Steer to a channel where they actually have staff standing
+    // first, if the currently active one doesn't and one exists.
+    if (view === 'editor-profile' && account && !account.is_administrator) {
+      const { channels, activeChannel } = s
+      const isPrimary = (slug: string | null | undefined): boolean =>
+        channels.length === 0 ? true : !!channels.find((c) => c.slug === slug)?.is_primary
+      const hasStaffOn = (slug: string): boolean =>
+        userApi.isChannelEditor(account, slug, isPrimary(slug)) || userApi.isChannelManager(account, slug, isPrimary(slug))
+      if (!hasStaffOn(activeChannel)) {
+        const staffChannel = channels.find((c) => hasStaffOn(c.slug))
+        if (staffChannel) s.setActiveChannel(staffChannel.slug)
+      }
+    }
     if (IS_FLOAT_WINDOW) {
       // A pop-out asking for the profile with the pop-out disabled: it has no
       // router of its own, so the main window takes the navigation.
@@ -1209,6 +1601,71 @@ export const useStore = create<AppStore>((set, get, store) => ({
       return
     }
     get().setActiveView(view)
+  },
+  openOwnPublicProfile: () => {
+    const account = get().account
+    if (!account) return
+    get().openPublicProfile(account.id)
+  },
+  openPublicProfile: (userId) => {
+    // public-profile's userId lives in the URL path itself (/u/<id>), not in
+    // store state, so this can't reuse setActiveView's path table - push
+    // directly and always set state (even if already on 'public-profile',
+    // e.g. navigating there from someone else's page) so the view re-reads
+    // the new path.
+    const path = `/u/${userId}`
+    if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
+    set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
+  },
+  muteUser: (userId) => {
+    const { mutedUserIds } = get()
+    if (mutedUserIds.includes(userId)) return
+    const next = [...mutedUserIds, userId]
+    set({ mutedUserIds: next })
+    ls.set('mutedUserIds', next)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  unmuteUser: (userId) => {
+    const { mutedUserIds } = get()
+    if (!mutedUserIds.includes(userId)) return
+    const next = mutedUserIds.filter((id) => id !== userId)
+    set({ mutedUserIds: next })
+    ls.set('mutedUserIds', next)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  toggleMuteUser: (userId) => {
+    const { mutedUserIds, muteUser, unmuteUser } = get()
+    if (mutedUserIds.includes(userId)) unmuteUser(userId)
+    else muteUser(userId)
+  },
+  _syncChatMutes: (mutedServers, mutedConversations) => {
+    const s = get()
+    if (mutedServers.length === s.chatMutedServers.length && mutedServers.every((id) => s.chatMutedServers.includes(id))
+      && mutedConversations.length === s.chatMutedConversations.length && mutedConversations.every((id) => s.chatMutedConversations.includes(id))) return
+    set({ chatMutedServers: mutedServers, chatMutedConversations: mutedConversations })
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  // Merges every field of the server's `user_settings` blob into local state,
+  // then - if the result differs from what the server sent - schedules a push
+  // so the merge (and anything local-only that's never reached the server
+  // yet) makes it back up. Runs on login.
+  //
+  // muted_user_ids is unioned rather than "server wins" - muting someone
+  // should stick regardless of which device did it. Everything else adopts
+  // the server's value only when it differs from local: these are personal
+  // settings that follow the account, and the server only changes when some
+  // device just pushed a real edit, so treating that as authoritative is
+  // simpler (and less surprising) than trying to reconcile two device-local
+  // histories. A field the server has never set (undefined - a brand new
+  // field, or an account that's never synced) leaves the local value alone.
+  toggleFavoriteGif: (gif) => {
+    const { favoriteGifs } = get()
+    const next = favoriteGifs.some((g) => g.id === gif.id)
+      ? favoriteGifs.filter((g) => g.id !== gif.id)
+      : [gif, ...favoriteGifs]
+    set({ favoriteGifs: next })
+    ls.set('favoriteGifs', next)
+    get()._scheduleProfilePush(['userSettings'])
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
   setShowQueue: (showQueue) => set({ showQueue }),
@@ -1247,17 +1704,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   setPlayerCollapsed: (playerCollapsed) => { set({ playerCollapsed }); ls.set('playerCollapsed', playerCollapsed) },
   setWrldFullscreen: (wrldFullscreen) => set({ wrldFullscreen }),
-  setTheme: (theme) => { set({ theme }); ls.set('theme', theme) },
+  setTheme: (theme) => { set({ theme }); ls.set('theme', theme); get()._scheduleProfilePush(['userSettings']) },
   saveCustomSkin: (skin) => {
     const list = get().customSkins
     const idx = list.findIndex((s) => s.id === skin.id)
     const next = idx >= 0 ? list.map((s) => (s.id === skin.id ? skin : s)) : [...list, skin]
     set({ customSkins: next })
     ls.set('customSkins', next)
-    // Keep the module cache getSkin() reads in step � the theme effect reruns
+    // Keep the module cache getSkin() reads in step - the theme effect reruns
     // on this state change and repaints from the cache (live preview when the
     // edited skin is the active one).
     setCustomSkinsCache(next)
+    get()._scheduleProfilePush(['userSettings'])
   },
   deleteCustomSkin: (id) => {
     const next = get().customSkins.filter((s) => s.id !== id)
@@ -1265,23 +1723,39 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('customSkins', next)
     setCustomSkinsCache(next)
     if (get().theme === id) get().setTheme('dark')
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition) },
+  setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
   setAppMenuPosition: (appMenuPosition) => { set({ appMenuPosition }); ls.set('appMenuPosition', appMenuPosition) },
-  setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder) },
+  setNavStyle: (navStyle) => { set({ navStyle }); ls.set('navStyle', navStyle); get()._scheduleProfilePush(['userSettings']) },
+  setAutoHideNav: (autoHideNav) => { set({ autoHideNav }); ls.set('autoHideNav', autoHideNav); get()._scheduleProfilePush(['userSettings']) },
+  setAutoHideNavZone: (px) => {
+    const autoHideNavZone = Math.max(4, Math.min(120, Math.round(px)))
+    set({ autoHideNavZone }); ls.set('autoHideNavZone', autoHideNavZone)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  setNavOrder: (navOrder) => { set({ navOrder }); ls.set('navOrder', navOrder); get()._scheduleProfilePush(['userSettings']) },
+  setHomeSectionVisible: (id, visible) => {
+    const homeSectionVisibility = { ...get().homeSectionVisibility, [id]: visible }
+    set({ homeSectionVisibility })
+    ls.set('homeSectionVisibility', homeSectionVisibility)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+
+  // ── Settings ──────────────────────────────────────────────────────────────
   setNavItemVisible: (view, visible) => {
     const navVisibility = { ...get().navVisibility, [view]: visible }
     set({ navVisibility })
     ls.set('navVisibility', navVisibility)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setNavControlOrder: (navControlOrder) => { set({ navControlOrder }); ls.set('navControlOrder', navControlOrder) },
+  setNavControlOrder: (navControlOrder) => { set({ navControlOrder }); ls.set('navControlOrder', navControlOrder); get()._scheduleProfilePush(['userSettings']) },
   setNavControlVisible: (id, visible) => {
     const navControlVisibility = { ...get().navControlVisibility, [id]: visible }
     set({ navControlVisibility })
     ls.set('navControlVisibility', navControlVisibility)
+    get()._scheduleProfilePush(['userSettings'])
   },
-
-  // -- Settings --------------------------------------------------------------
   crossfadeEnabled: ls.get<boolean>('crossfadeEnabled') ?? false,
   crossfadeDuration: ls.get<number>('crossfadeDuration') ?? 5,
   pauseFadeEnabled: ls.get<boolean>('pauseFadeEnabled') ?? false,
@@ -1301,7 +1775,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   lyricsColorActive: ls.get<string>('lyricsColorActive'),
   lyricsColorInactive: ls.get<string>('lyricsColorInactive'),
   gradientsEnabled: ls.get<boolean>('gradientsEnabled') ?? true,
-  surfaceGradientsEnabled: ls.get<boolean>('surfaceGradientsEnabled') ?? true,
+  surfaceGradientsEnabled: ls.get<boolean>('surfaceGradientsEnabled') ?? false,
   wrldThemeBackground: ls.get<boolean>('wrldThemeBackground') ?? false,
   preferOgVersion: ls.get<boolean>('preferOgVersion') ?? false,
   rotateSuggestedCovers: ls.get<boolean>('rotateSuggestedCovers') ?? false,
@@ -1321,15 +1795,16 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ crossfadeEnabled: enabled, crossfadeDuration: duration })
     ls.set('crossfadeEnabled', enabled)
     ls.set('crossfadeDuration', duration)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  setPauseFade: (enabled) => { set({ pauseFadeEnabled: enabled }); ls.set('pauseFadeEnabled', enabled) },
+  setPauseFade: (enabled) => { set({ pauseFadeEnabled: enabled }); ls.set('pauseFadeEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setSleepTimer: (sleepTimerEnd) => set({ sleepTimerEnd }),
   setAudioOutput: (deviceId) => { set({ audioOutput: deviceId }); ls.set('audioOutput', deviceId) },
-  setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled) },
-
+  setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled); get()._scheduleProfilePush(['userSettings']) },
   setRotateSuggestedCovers: (enabled) => {
     set({ rotateSuggestedCovers: enabled })
     ls.set('rotateSuggestedCovers', enabled)
+    get()._scheduleProfilePush(['userSettings'])
     if (enabled) return
     // Turning it off has to forget the chosen covers, or every song stays
     // frozen on whichever suggestion it happened to land on. Re-derive the
@@ -1337,7 +1812,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // rather than at the next track change.
     resetCoverRotation()
     const { queue, currentTrack, currentTrackFull, songPrefs } = get()
-    // Only API songs � a local file has no apiImageUrl to fall back on, so
+    // Only API songs - a local file has no apiImageUrl to fall back on, so
     // running it through applyPrefToTrack would blank its album art.
     const redraw = (t: Track): Track => {
       const id = userApi.trackIdToSongId(t.id)
@@ -1356,7 +1831,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
         : {}),
     })
   },
-
   setEraCoverOverride: (era, raw) => {
     setEraCoverRaw(era, raw)
     const nextCovers = { ...get().eraCovers }
@@ -1393,30 +1867,29 @@ export const useStore = create<AppStore>((set, get, store) => ({
       .then((url) => { if (url) get()._reapplySongPref(songId) })
       .catch(() => {})
   },
-  setMediaOverlayEnabled: (enabled) => { set({ mediaOverlayEnabled: enabled }); ls.set('mediaOverlayEnabled', enabled) },
+  setMediaOverlayEnabled: (enabled) => { set({ mediaOverlayEnabled: enabled }); ls.set('mediaOverlayEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setLastfmUser: (lastfmUser) => set({ lastfmUser }),
-  setLastfmEnabled: (enabled) => { set({ lastfmEnabled: enabled }); ls.set('lastfmEnabled', enabled) },
+  setLastfmEnabled: (enabled) => { set({ lastfmEnabled: enabled }); ls.set('lastfmEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setPopoutWindow: (kind, enabled) => {
     const popoutWindows = { ...get().popoutWindows, [kind]: enabled }
     set({ popoutWindows })
     ls.set('popoutWindows', popoutWindows)
   },
-  setAccentColor: (color) => { set({ accentColor: color }); ls.set('accentColor', color) },
-  setAppTextScale: (appTextScale) => { set({ appTextScale }); ls.set('appTextScale', appTextScale) },
-  setAppFont: (appFont) => { set({ appFont }); ls.set('appFont', appFont) },
-  setLyricsFont: (lyricsFont) => { set({ lyricsFont }); ls.set('lyricsFont', lyricsFont) },
-  setLyricsScale: (lyricsScale) => { set({ lyricsScale }); ls.set('lyricsScale', lyricsScale) },
-  setLyricsAlign: (lyricsAlign) => { set({ lyricsAlign }); ls.set('lyricsAlign', lyricsAlign) },
-  setLyricsBlur: (lyricsBlur) => { set({ lyricsBlur }); ls.set('lyricsBlur', lyricsBlur) },
-  setLyricsOverride: (lyricsOverride) => { set({ lyricsOverride }); ls.set('lyricsOverride', lyricsOverride) },
-  setFullEraNames: (fullEraNames) => { set({ fullEraNames }); ls.set('fullEraNames', fullEraNames) },
-  setLyricsBlurAmount: (lyricsBlurAmount) => { set({ lyricsBlurAmount }); ls.set('lyricsBlurAmount', lyricsBlurAmount) },
-  setLyricsColorActive: (lyricsColorActive) => { set({ lyricsColorActive }); ls.set('lyricsColorActive', lyricsColorActive) },
-  setLyricsColorInactive: (lyricsColorInactive) => { set({ lyricsColorInactive }); ls.set('lyricsColorInactive', lyricsColorInactive) },
-  setGradientsEnabled: (gradientsEnabled) => { set({ gradientsEnabled }); ls.set('gradientsEnabled', gradientsEnabled) },
-  setSurfaceGradientsEnabled: (surfaceGradientsEnabled) => { set({ surfaceGradientsEnabled }); ls.set('surfaceGradientsEnabled', surfaceGradientsEnabled) },
-  setWrldThemeBackground: (wrldThemeBackground) => { set({ wrldThemeBackground }); ls.set('wrldThemeBackground', wrldThemeBackground) },
-
+  setAccentColor: (color) => { set({ accentColor: color }); ls.set('accentColor', color); get()._scheduleProfilePush(['userSettings']) },
+  setAppTextScale: (appTextScale) => { set({ appTextScale }); ls.set('appTextScale', appTextScale); get()._scheduleProfilePush(['userSettings']) },
+  setAppFont: (appFont) => { set({ appFont }); ls.set('appFont', appFont); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsFont: (lyricsFont) => { set({ lyricsFont }); ls.set('lyricsFont', lyricsFont); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsScale: (lyricsScale) => { set({ lyricsScale }); ls.set('lyricsScale', lyricsScale); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsAlign: (lyricsAlign) => { set({ lyricsAlign }); ls.set('lyricsAlign', lyricsAlign); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsBlur: (lyricsBlur) => { set({ lyricsBlur }); ls.set('lyricsBlur', lyricsBlur); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsOverride: (lyricsOverride) => { set({ lyricsOverride }); ls.set('lyricsOverride', lyricsOverride); get()._scheduleProfilePush(['userSettings']) },
+  setFullEraNames: (fullEraNames) => { set({ fullEraNames }); ls.set('fullEraNames', fullEraNames); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsBlurAmount: (lyricsBlurAmount) => { set({ lyricsBlurAmount }); ls.set('lyricsBlurAmount', lyricsBlurAmount); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsColorActive: (lyricsColorActive) => { set({ lyricsColorActive }); ls.set('lyricsColorActive', lyricsColorActive); get()._scheduleProfilePush(['userSettings']) },
+  setLyricsColorInactive: (lyricsColorInactive) => { set({ lyricsColorInactive }); ls.set('lyricsColorInactive', lyricsColorInactive); get()._scheduleProfilePush(['userSettings']) },
+  setGradientsEnabled: (gradientsEnabled) => { set({ gradientsEnabled }); ls.set('gradientsEnabled', gradientsEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setSurfaceGradientsEnabled: (surfaceGradientsEnabled) => { set({ surfaceGradientsEnabled }); ls.set('surfaceGradientsEnabled', surfaceGradientsEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setWrldThemeBackground: (wrldThemeBackground) => { set({ wrldThemeBackground }); ls.set('wrldThemeBackground', wrldThemeBackground); get()._scheduleProfilePush(['userSettings']) },
   setHotkeyBinding: (actionId, combo) => {
     const current = get().hotkeyBindings
     const next = { ...current }
@@ -1428,18 +1901,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
       }
     }
     const action = HOTKEY_ACTIONS.find((a) => a.id === actionId)
-    // Store an override only when it differs from the default � if the user
+    // Store an override only when it differs from the default - if the user
     // sets it back to the default (or clears one that had no default), drop the
     // entry entirely so the persisted map stays minimal.
     if (combo === (action?.defaultBinding ?? '')) delete next[actionId]
     else next[actionId] = combo
     set({ hotkeyBindings: next })
     ls.set('hotkeyBindings', next)
+    get()._scheduleProfilePush(['userSettings'])
   },
-  resetHotkeyBindings: () => { set({ hotkeyBindings: {} }); ls.set('hotkeyBindings', {}) },
+  resetHotkeyBindings: () => { set({ hotkeyBindings: {} }); ls.set('hotkeyBindings', {}); get()._scheduleProfilePush(['userSettings']) },
   resetGlobalHotkeyBindings: () => { set({ globalHotkeyBindings: {} }); ls.set('globalHotkeyBindings', {}) },
-  setHotkeySeekSeconds: (seconds) => { set({ hotkeySeekSeconds: seconds }); ls.set('hotkeySeekSeconds', seconds) },
-  setGlobalHotkeysEnabled: (enabled) => { set({ globalHotkeysEnabled: enabled }); ls.set('globalHotkeysEnabled', enabled) },
+  setHotkeySeekSeconds: (seconds) => { set({ hotkeySeekSeconds: seconds }); ls.set('hotkeySeekSeconds', seconds); get()._scheduleProfilePush(['userSettings']) },
+  setGlobalHotkeysEnabled: (enabled) => { set({ globalHotkeysEnabled: enabled }); ls.set('globalHotkeysEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setGlobalHotkeyBinding: (actionId, combo) => {
     const current = get().globalHotkeyBindings
     const next = { ...current }
@@ -1488,6 +1962,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // -- Song preferences ------------------------------------------------------
   songPrefs: hydrateSongPrefs(),
   listeningPlays: hydrateListeningPlays(),
+  recentTracksRev: 0,
 
   // Every write lands in three places: Zustand state (so React re-renders),
   // localStorage (so overrides survive a restart and work logged out), and
@@ -1522,22 +1997,23 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   _scheduleProfilePush: (fields) => {
-    if (!get().account || !preferencesApi.preferencesApiEnabled) return
+    if (!get().account) return
+    if (fields.some((f) => f !== 'userSettings') && !preferencesApi.preferencesApiEnabled) return
     for (const f of fields) _profilePushDirty[f] = true
     if (_profilePushTimer) clearTimeout(_profilePushTimer)
     _profilePushTimer = setTimeout(() => {
       _profilePushTimer = null
       const dirty = _profilePushDirty
-      _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false }
+      _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
       const state = get()
       profilePushApi.pushProfile({
         songPrefs: dirty.songPrefs ? Object.values(state.songPrefs) : undefined,
         listeningPlays: dirty.listeningPlays ? state.listeningPlays : undefined,
         folders: dirty.folders ? state.playlistFolders : undefined,
+        userSettings: dirty.userSettings ? buildUserSettings(state) : undefined,
       }).catch(() => {})
     }, PROFILE_PUSH_DEBOUNCE_MS)
   },
-
   _writeSongPref: (songId, patch) => {
     get()._setSongPrefs(patchPrefMap(get().songPrefs, songId, patch))
     if (patch.name !== undefined || patch.cover_url !== undefined) get()._reapplySongPref(songId)
@@ -1550,6 +2026,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setSongName: (songId, name) => get()._writeSongPref(songId, { name: normalizePrefText(name) }),
   setSongCover: (songId, coverUrl) => get()._writeSongPref(songId, { cover_url: normalizePrefText(coverUrl) }),
   setSongDefaultVersion: (songId, version) => get()._writeSongPref(songId, { default_version: normalizePrefText(version) }),
+
+  setSongExcludedVersions: (songId, versions) => get()._writeSongPref(songId, { excluded_versions: versions }),
 
   clearSongPref: (songId) => {
     const before = get().songPrefs
@@ -1569,8 +2047,17 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // one device's push can't erase plays made on another. The play *event*
     // appended alongside it is additive instead � merges union the two sides.
     get()._setSongPrefs(patchPrefMap(prefs, songId, { playcount: (prefs[songId]?.playcount ?? 0) + 1 }))
-    get()._setListeningPlays(appendListeningPlay(get().listeningPlays, songId))
-    get()._scheduleProfilePush(['songPrefs', 'listeningPlays'])
+    const plays = appendListeningPlay(get().listeningPlays, songId)
+    get()._setListeningPlays(plays)
+    get()._scheduleProfilePush(['songPrefs'])
+    // The server has an append route, so the new row goes up on its own rather
+    // than riding the whole-array PATCH. If the POST fails (offline, 5xx) the
+    // log is marked dirty and the debounced PATCH re-sends everything.
+    if (get().account && preferencesApi.preferencesApiEnabled) {
+      profilePushApi.appendPlay(plays[0]).catch(() => get()._scheduleProfilePush(['listeningPlays']))
+    } else {
+      get()._scheduleProfilePush(['listeningPlays'])
+    }
   },
 
   syncSongPrefs: async (serverPrefs) => {
@@ -1580,12 +2067,15 @@ export const useStore = create<AppStore>((set, get, store) => ({
       const local = get().songPrefs
       const merged: SongPrefMap = {}
       // The profile's copy wins for override fields (another device may have
-      // edited them since this one last pushed) � except playcount, where
+      // edited them since this one last pushed) - except playcount, where
       // max() is the only merge that never loses plays made here offline.
-      for (const row of rows) {
+      for (const wire of rows) {
+        // Wire rows omit fields they have no value for (see serializeSongPref),
+        // so they're filled out before anything downstream reads them.
+        const row = normalizeSongPref(wire)
         const mine = local[row.song]
         merged[row.song] = mine
-          ? { ...row, playcount: Math.max(row.playcount ?? 0, mine.playcount ?? 0) }
+          ? { ...row, playcount: Math.max(row.playcount, mine.playcount ?? 0) }
           : row
       }
       // Rows that exist only on this device (set before signing in, or on
@@ -1594,15 +2084,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
         if (!merged[pref.song]) merged[pref.song] = pref
       }
       get()._setSongPrefs(merged)
+      if (songPrefsMatchServer(Object.values(merged), rows.map(normalizeSongPref))) {
+        dropProfilePush('songPrefs')
+        return
+      }
       // Goes through the shared debounced scheduler rather than pushing
-      // immediately — loadAccount calls this alongside syncListeningPlays and
+      // immediately - loadAccount calls this alongside syncListeningPlays and
       // syncFolders right after, and routing all three through the same
       // timer collapses what used to be three separate login-time PATCHes
       // into one.
       get()._scheduleProfilePush(['songPrefs'])
     } catch {}
   },
-
   syncListeningPlays: async (serverPlays) => {
     if (!preferencesApi.preferencesApiEnabled) return
     try {
@@ -1611,9 +2104,25 @@ export const useStore = create<AppStore>((set, get, store) => ({
         .filter((row): row is ListeningPlayEvent => row != null)
       const merged = mergeListeningPlays(get().listeningPlays, serverRows)
       get()._setListeningPlays(merged)
-      get()._scheduleProfilePush(['listeningPlays'])
+      if (listeningPlaysMatchServer(merged, serverRows)) dropProfilePush('listeningPlays')
+      else get()._scheduleProfilePush(['listeningPlays'])
     } catch {}
   },
+
+  _backfillRecentTracks: async () => {
+    const orderedIds = sortListeningPlays(get().listeningPlays).map((e) => e.song).slice(0, RECENT_TRACKS_LIMIT)
+    if (orderedIds.length === 0) return
+    const existingIds = new Set(loadRecentTracks().map((t) => t.id))
+    const missing = orderedIds.filter((id) => !existingIds.has(`jw-${id}`))
+    if (missing.length === 0) return
+    try {
+      const songs = await getSongsByIds(missing)
+      const resolved = new Map(songs.map((s) => [s.id, songToTrack(s)]))
+      backfillRecentTracks(orderedIds, resolved)
+      set({ recentTracksRev: get().recentTracksRev + 1 })
+    } catch {}
+  },
+
 
   // -- Reports (feedback + song issue reports) --------------------------------
   pendingReports: ls.get<PendingReport[]>('pendingReports') ?? [],
@@ -1658,16 +2167,16 @@ export const useStore = create<AppStore>((set, get, store) => ({
     return !get().pendingReports.some((r) => r.id === report.id)
   },
 
-  submitFeedback: async (category, message, contact) => {
+  submitFeedback: async (category, message, contact, automated) => {
     const text = message.trim()
     if (!text) return false
     return get()._enqueueReport({
       id: newReportId(), kind: 'feedback', category, message: text,
       contact: contact?.trim() || undefined,
+      ...(automated ? { automated: true } : {}),
       appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0,
     })
   },
-
   reportSong: async (songId, songName, issues, message, contact) => {
     // A report needs at least a flagged issue or a written note to be worth
     // sending � the form enforces this too, but guard here so no empty report
@@ -1822,24 +2331,29 @@ export const useStore = create<AppStore>((set, get, store) => ({
         if (!serverIds.has(f.id) && hasLocal && !hasApi) merged.push(f)
       }
       get()._setFolders(merged)
-      get()._scheduleProfilePush(['folders'])
+      if (foldersMatchServer(merged, server)) dropProfilePush('folders')
+      else get()._scheduleProfilePush(['folders'])
     } catch {}
   },
 
   // -- API tracker extras ----------------------------------------------------
   apiTrackerCategory: '',
   apiTrackerEra: '',
+  apiTrackerTab: '',
+  focusApiTrackerSearch: false,
   apiFilesPath: '',
   apiFilesLastPath: '',
 
   setApiTrackerCategory: (cat) => set({ apiTrackerCategory: cat }),
   setApiTrackerEra: (era) => set({ apiTrackerEra: era }),
+  setApiTrackerTab: (tab) => set({ apiTrackerTab: tab }),
+  setFocusApiTrackerSearch: (focus) => set({ focusApiTrackerSearch: focus }),
   setApiFilesLastPath: (path) => set({ apiFilesLastPath: path }),
   setApiFilesPath: (path) => set({ apiFilesPath: path }),
 
-  channels: [],
+  channels: ls.get<JWApiChannel[]>('channels') ?? [],
   activeChannel: ls.get<string>('activeChannel') || '',
-  setActiveChannel: (slug) => { set({ activeChannel: slug }); ls.set('activeChannel', slug) },
+  setActiveChannel: (slug) => { set({ activeChannel: slug }); ls.set('activeChannel', slug); setActiveChannelCache(slug) },
   loadChannels: async () => {
     const list = await fetchChannels()
     if (!list.length) return
@@ -1848,20 +2362,43 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const primary = list.find((c) => c.is_primary) ?? list[0]
     const next = valid ? current : primary.slug
     set({ channels: list, activeChannel: next })
+    ls.set('channels', list)
     ls.set('activeChannel', next)
+    setActiveChannelCache(next)
   },
 
-  // -- Account ---------------------------------------------------------------
+  // ── Account ───────────────────────────────────────────────────────────────
   account: null,
   playlists: [],
   showUserAuth: false,
   pendingPlaylistId: null,
+  mutedUserIds: ls.get<number[]>('mutedUserIds') ?? [],
+  // Mirrors chatStore's own local mutedServers/mutedConversations (that store
+  // owns them; see chatStore's loadMuted/saveMuted). Empty until chatStore's
+  // account hydrate calls _syncChatMutes.
+  chatMutedServers: [],
+  chatMutedConversations: [],
+  favoriteGifs: ls.get<GifResult[]>('favoriteGifs') ?? [],
   setPendingPlaylistId: (id) => set({ pendingPlaylistId: id }),
   playlistsSelectedId: null,
   playlistsSelectedLocalId: null,
   playlistsSort: { field: 'default', dir: 'asc' },
   setPlaylistsSort: (sort) => set({ playlistsSort: sort }),
-  setPlaylistsSelectedId: (id) => set({ playlistsSelectedId: id }),
+  setPlaylistsSelectedId: (id) => {
+    set({ playlistsSelectedId: id })
+    // Keep /playlists?id=<id> in sync with whatever's open, the same way News
+    // syncs /news/<id> - so the address bar is always shareable and
+    // survives a refresh. Only touch the URL while actually on the
+    // Playlists page (this setter also fires from background hand-offs like
+    // pendingPlaylistId, whose own effect drives the tab switch + URL).
+    if (window.location.pathname !== '/playlists') return
+    const params = new URLSearchParams(window.location.search)
+    if (id != null) params.set('id', String(id))
+    else { params.delete('id'); params.delete('view') }
+    const qs = params.toString()
+    const path = qs ? `/playlists?${qs}` : '/playlists'
+    if (path !== window.location.pathname + window.location.search) window.history.pushState({}, '', path)
+  },
   setPlaylistsSelectedLocalId: (id) => set({ playlistsSelectedLocalId: id }),
   playlistsOpenFolderId: null,
   setPlaylistsOpenFolderId: (id) => set({ playlistsOpenFolderId: id }),
@@ -1913,8 +2450,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // The preference/folder blobs ride on the getMe() response � merge them
       // with local state and push the result back, no extra requests needed.
       const profile = get().account
+      await get().syncUserSettings(profile?.user_settings)
       await get().syncSongPrefs(profile?.user_preferences)
-      get().syncListeningPlays(profile?.listening_plays)
+      await get().syncListeningPlays(profile?.listening_plays)
+      get()._backfillRecentTracks()
       get().syncFolders(profile?.playlist_folders)
       // Deliver any reports queued while signed out � a logged-in flush can
       // attach the account's Discord username as the contact field.
@@ -1964,11 +2503,44 @@ export const useStore = create<AppStore>((set, get, store) => ({
     await get().loadAccount()
   },
 
+  signupWithPassword: async (username, password, displayName) => {
+    const { token, user } = await userApi.registerAccount({
+      username,
+      password,
+      display_name: displayName,
+    })
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  loginWithPassword: async (username, password, otpToken) => {
+    const { token, user } = await userApi.passwordLogin({
+      username,
+      password,
+      ...(otpToken ? { otp_token: otpToken } : {}),
+    })
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
+  completeApprovedLogin: async (token, user) => {
+    userApi.setToken(token)
+    set({ account: user })
+    await get().loadAccount()
+  },
+
   logoutAccount: async () => {
     await userApi.logout()
     const localLikes = ls.get<string[]>('likedTrackIds') ?? []
-    set({ account: null, playlists: [], likedTrackIds: localLikes })
-    // Overrides stay on this device after signing out, the same way likes do �
+    set({ account: null, playlists: [], likedTrackIds: localLikes, donorPlaylists: [], donorFiles: null })
+    // Like play history, these belong to the account, not the machine.
+    ls.set('donorPlaylists', [])
+    clearDonorPlaybackCache()
+    clearDonorImageCache()
+    clearDonorCoverCache()
+    // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
     get()._setSongPrefs(ls.get<SongPrefMap>('songPrefs') ?? {})
     // Play history does NOT stay: unlike a rename or a cover override, it's a
@@ -1977,7 +2549,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // profile. The server copy is authoritative from the next login anyway.
     get()._setListeningPlays([])
   },
-
   refreshPlaylists: async () => {
     if (!get().account) return
     if (_playlistsInFlight) return
@@ -2043,6 +2614,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       const targets: Array<[string, Record<string, string | number>]> = [
         ['/stats/', {}],
         ['/eras/', {}],
+        ['/eras/', { page: 2 }],
         ['/songs/', { page: 1, page_size: 50 }],
         ['/files/browse/', {}],
       ]
@@ -2057,7 +2629,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
   },
 
-  // -- Editor ----------------------------------------------------------------
+  // ── Editor ────────────────────────────────────────────────────────────────
   pendingCompProposal: null,
   pendingEditorSongId: null,
   pendingEditProposal: null,
@@ -2123,6 +2695,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   localPlaylists: [],
   activeLocalPlaylistId: null,
   followedPlaylists: ls.get<FollowedPlaylist[]>('followedPlaylists') ?? [],
+  donorPlaylists: ls.get<DonorPlaylist[]>('donorPlaylists') ?? [],
+  donorFiles: null,
 
   // -- Offline playlist sync ------------------------------------------------
   offlineTracks: {},
@@ -2265,7 +2839,21 @@ export const useStore = create<AppStore>((set, get, store) => ({
           // entry) track array or invalidates the album/artist/song memos that
           // key on it. Only the per-id thumbnail subscribers re-render.
           const libraryArt = { ...s.libraryArt }
-          for (const [k, v] of batch) libraryArt[k] = v
+          for (const [k, v] of batch) {
+            libraryArt[k] = v
+            _artResident.delete(k)
+            if (v) _artResident.add(k)
+          }
+          if (_artResident.size > ART_RESIDENT_MAX) {
+            const keep = new Set<string>(s.queue.map((t) => t.id))
+            if (s.currentTrack) keep.add(s.currentTrack.id)
+            for (const id of _artResident) {
+              if (_artResident.size <= ART_RESIDENT_MAX) break
+              if (batch.has(id) || keep.has(id)) continue
+              _artResident.delete(id)
+              delete libraryArt[id]
+            }
+          }
           // Fan the same covers out to the active queue / now-playing so an
           // already-queued local track picks up its art. Guarded so a large
           // queue isn't copied when none of the batched ids are even in it.
@@ -2443,13 +3031,58 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   updateFollowedPlaylistMeta: (id, meta) => {
     const existing = get().followedPlaylists
-    if (!existing.some((f) => f.id === id)) return
+    const cur = existing.find((f) => f.id === id)
+    if (!cur) return
+    // No-op when nothing changed - callers run this from an effect that also
+    // depends on followedPlaylists, so a fresh array every call would loop.
+    if (cur.name === meta.name && cur.trackCount === meta.trackCount && cur.coverUrl === meta.coverUrl) return
     const next = existing.map((f) => f.id === id ? { ...f, ...meta } : f)
     set({ followedPlaylists: next })
     ls.set('followedPlaylists', next)
   },
 
-  // -- Offline playlist sync ------------------------------------------------
+  // -- Donor cloud files/playlists (local-only - see DonorPlaylist) -----------
+  loadDonorFiles: async () => {
+    if (!get().account?.is_donor) return
+    try {
+      const { files } = await listDonorFiles()
+      get().setDonorFiles(files)
+    } catch { /* keep whatever was loaded; the UI shows its own load error */ }
+  },
+  setDonorFiles: (files) => set({ donorFiles: files }),
+  createDonorPlaylist: (name, fileIds = []) => {
+    const id = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    get()._setDonorPlaylists([...get().donorPlaylists, { id, name, fileIds, createdAt: Date.now() }])
+    return id
+  },
+  deleteDonorPlaylist: (id) => get()._setDonorPlaylists(get().donorPlaylists.filter((p) => p.id !== id)),
+  renameDonorPlaylist: (id, name) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === id ? { ...p, name } : p)),
+  addToDonorPlaylist: (playlistId, fileId) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
+      p.id === playlistId && !p.fileIds.includes(fileId) ? { ...p, fileIds: [...p.fileIds, fileId] } : p)),
+  removeFromDonorPlaylist: (playlistId, fileId) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
+      p.id === playlistId ? { ...p, fileIds: p.fileIds.filter((f) => f !== fileId) } : p)),
+  reorderDonorPlaylist: (playlistId, fileIds) =>
+    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === playlistId ? { ...p, fileIds } : p)),
+  replaceDonorFileId: (oldId, newId) => {
+    const lists = get().donorPlaylists
+    if (!lists.some((p) => p.fileIds.includes(oldId))) return
+    get()._setDonorPlaylists(lists.map((p) => {
+      if (!p.fileIds.includes(oldId)) return p
+      // Re-uploaded copy (tag edit) keeps its slot; a deleted file just leaves.
+      const ids = newId
+        ? p.fileIds.map((id) => (id === oldId ? newId : id))
+        : p.fileIds.filter((id) => id !== oldId)
+      return { ...p, fileIds: ids }
+    }))
+  },
+  _setDonorPlaylists: (next) => {
+    set({ donorPlaylists: next })
+    ls.set('donorPlaylists', next)
+    get()._scheduleProfilePush(['userSettings'])
+  },
   loadOfflineLibrary: async () => {
     const el = (window as any).electron
     if (!el) return
@@ -2755,6 +3388,189 @@ export const useStore = create<AppStore>((set, get, store) => ({
   })),
   setShowDownloadManager: (show) => set({ showDownloadManager: show }),
   setUpdateStatus: (updateStatus) => set({ updateStatus }),
+
+  stagedFileChanges: [],
+  // One queued change per path: dragging an already-queued file somewhere else
+  // is a correction, not a second move, and proposing both would ask reviewers
+  // to send the same file to two places.
+  stageFileChanges: (changes) => set((s) => ({
+    stagedFileChanges: [
+      ...s.stagedFileChanges.filter((c) => !changes.some((n) => n.path === c.path && n.channel === c.channel)),
+      ...changes.map((c, i) => ({ ...c, id: `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
+    ],
+  })),
+  updateStagedFileChange: (id, updates) => set((s) => ({
+    stagedFileChanges: s.stagedFileChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
+  })),
+  unstageFileChange: (id) => set((s) => ({
+    stagedFileChanges: s.stagedFileChanges.filter((c) => c.id !== id),
+  })),
+  clearStagedFileChanges: () => set({ stagedFileChanges: [] }),
+  showMoreNav: false,
+  heroBleedTop: false,
+  setShowMoreNav: (showMoreNav) => set({ showMoreNav }),
+  setHeroBleedTop: (heroBleedTop) => set({ heroBleedTop }),
+  playlistHeroEnabledDark: ls.get<boolean>('playlistHeroEnabledDark') ?? true,
+  playlistHeroEnabledLight: ls.get<boolean>('playlistHeroEnabledLight') ?? false,
+  setPlaylistHeroEnabled: (enabled) => {
+    if (getSkin(get().theme).dark) {
+      set({ playlistHeroEnabledDark: enabled }); ls.set('playlistHeroEnabledDark', enabled)
+    } else {
+      set({ playlistHeroEnabledLight: enabled }); ls.set('playlistHeroEnabledLight', enabled)
+    }
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  syncUserSettings: async (serverSettings) => {
+    const s = get()
+    if (!serverSettings) { get()._scheduleProfilePush(['userSettings']); return }
+
+    const mergedMuted = Array.from(new Set([...(serverSettings.muted_user_ids ?? []), ...s.mutedUserIds]))
+    if (mergedMuted.length !== s.mutedUserIds.length) { set({ mutedUserIds: mergedMuted }); ls.set('mutedUserIds', mergedMuted) }
+
+    // Favorite GIFs union like muted_user_ids - favoriting on one device
+    // shouldn't be erasable by a stale sync from another.
+    const serverFavGifs = serverSettings.favorite_gifs ?? []
+    const mergedFavGifs = [...s.favoriteGifs, ...serverFavGifs.filter((g) => !s.favoriteGifs.some((f) => f.id === g.id))]
+    if (mergedFavGifs.length !== s.favoriteGifs.length) { set({ favoriteGifs: mergedFavGifs }); ls.set('favoriteGifs', mergedFavGifs) }
+
+    if (serverSettings.theme && serverSettings.theme !== s.theme) s.setTheme(getSkin(serverSettings.theme).id)
+    if (serverSettings.custom_skins && JSON.stringify(serverSettings.custom_skins) !== JSON.stringify(s.customSkins)) {
+      set({ customSkins: serverSettings.custom_skins })
+      ls.set('customSkins', serverSettings.custom_skins)
+      setCustomSkinsCache(serverSettings.custom_skins)
+    }
+    if (Array.isArray(serverSettings.donor_playlists) && JSON.stringify(serverSettings.donor_playlists) !== JSON.stringify(s.donorPlaylists)) {
+      set({ donorPlaylists: serverSettings.donor_playlists })
+      ls.set('donorPlaylists', serverSettings.donor_playlists)
+    }
+    if (serverSettings.accent_color !== undefined && serverSettings.accent_color !== s.accentColor) s.setAccentColor(serverSettings.accent_color)
+    if (serverSettings.app_text_scale !== undefined && serverSettings.app_text_scale !== s.appTextScale) s.setAppTextScale(serverSettings.app_text_scale)
+    if (serverSettings.app_font && serverSettings.app_font !== s.appFont) s.setAppFont(getFont(serverSettings.app_font).id)
+    if (serverSettings.lyrics_font && serverSettings.lyrics_font !== s.lyricsFont) s.setLyricsFont(getFont(serverSettings.lyrics_font).id)
+    if (serverSettings.lyrics_scale !== undefined && serverSettings.lyrics_scale !== s.lyricsScale) s.setLyricsScale(serverSettings.lyrics_scale)
+    if (serverSettings.lyrics_align && serverSettings.lyrics_align !== s.lyricsAlign) s.setLyricsAlign(serverSettings.lyrics_align)
+    if (serverSettings.lyrics_blur !== undefined && serverSettings.lyrics_blur !== s.lyricsBlur) s.setLyricsBlur(serverSettings.lyrics_blur)
+    if (serverSettings.lyrics_blur_amount !== undefined && serverSettings.lyrics_blur_amount !== s.lyricsBlurAmount) s.setLyricsBlurAmount(serverSettings.lyrics_blur_amount)
+    if (serverSettings.lyrics_color_active !== undefined && serverSettings.lyrics_color_active !== s.lyricsColorActive) s.setLyricsColorActive(serverSettings.lyrics_color_active)
+    if (serverSettings.lyrics_color_inactive !== undefined && serverSettings.lyrics_color_inactive !== s.lyricsColorInactive) s.setLyricsColorInactive(serverSettings.lyrics_color_inactive)
+    if (serverSettings.lyrics_override !== undefined && serverSettings.lyrics_override !== s.lyricsOverride) s.setLyricsOverride(serverSettings.lyrics_override)
+    if (serverSettings.full_era_names !== undefined && serverSettings.full_era_names !== s.fullEraNames) s.setFullEraNames(serverSettings.full_era_names)
+    if (serverSettings.gradients_enabled !== undefined && serverSettings.gradients_enabled !== s.gradientsEnabled) s.setGradientsEnabled(serverSettings.gradients_enabled)
+    if (serverSettings.surface_gradients_enabled !== undefined && serverSettings.surface_gradients_enabled !== s.surfaceGradientsEnabled) s.setSurfaceGradientsEnabled(serverSettings.surface_gradients_enabled)
+    if (serverSettings.wrld_theme_background !== undefined && serverSettings.wrld_theme_background !== s.wrldThemeBackground) s.setWrldThemeBackground(serverSettings.wrld_theme_background)
+    if (serverSettings.playlist_hero_enabled_dark !== undefined && serverSettings.playlist_hero_enabled_dark !== s.playlistHeroEnabledDark) {
+      set({ playlistHeroEnabledDark: serverSettings.playlist_hero_enabled_dark }); ls.set('playlistHeroEnabledDark', serverSettings.playlist_hero_enabled_dark)
+    }
+    if (serverSettings.playlist_hero_enabled_light !== undefined && serverSettings.playlist_hero_enabled_light !== s.playlistHeroEnabledLight) {
+      set({ playlistHeroEnabledLight: serverSettings.playlist_hero_enabled_light }); ls.set('playlistHeroEnabledLight', serverSettings.playlist_hero_enabled_light)
+    }
+    if (serverSettings.sidebar_position && serverSettings.sidebar_position !== s.sidebarPosition) s.setSidebarPosition(serverSettings.sidebar_position as SidebarPosition)
+    if (serverSettings.nav_order && JSON.stringify(serverSettings.nav_order) !== JSON.stringify(s.navOrder)) s.setNavOrder(serverSettings.nav_order)
+    if (serverSettings.nav_visibility) { set({ navVisibility: { ...s.navVisibility, ...serverSettings.nav_visibility } }); ls.set('navVisibility', get().navVisibility) }
+    if (serverSettings.nav_control_order && JSON.stringify(serverSettings.nav_control_order) !== JSON.stringify(s.navControlOrder)) s.setNavControlOrder(serverSettings.nav_control_order)
+    if (serverSettings.nav_control_visibility) { set({ navControlVisibility: { ...s.navControlVisibility, ...serverSettings.nav_control_visibility } }); ls.set('navControlVisibility', get().navControlVisibility) }
+    if (serverSettings.home_section_visibility) { set({ homeSectionVisibility: { ...s.homeSectionVisibility, ...serverSettings.home_section_visibility } }); ls.set('homeSectionVisibility', get().homeSectionVisibility) }
+    if (serverSettings.playback_speed !== undefined && serverSettings.playback_speed !== s.playbackSpeed) s.setPlaybackSpeed(serverSettings.playback_speed)
+    if (serverSettings.crossfade_enabled !== undefined && (serverSettings.crossfade_enabled !== s.crossfadeEnabled || serverSettings.crossfade_duration !== s.crossfadeDuration)) {
+      s.setCrossfade(serverSettings.crossfade_enabled, serverSettings.crossfade_duration ?? s.crossfadeDuration)
+    }
+    if (serverSettings.pause_fade_enabled !== undefined && serverSettings.pause_fade_enabled !== s.pauseFadeEnabled) s.setPauseFade(serverSettings.pause_fade_enabled)
+    if (serverSettings.prefer_og_version !== undefined && serverSettings.prefer_og_version !== s.preferOgVersion) s.setPreferOgVersion(serverSettings.prefer_og_version)
+    if (serverSettings.rotate_suggested_covers !== undefined && serverSettings.rotate_suggested_covers !== s.rotateSuggestedCovers) s.setRotateSuggestedCovers(serverSettings.rotate_suggested_covers)
+    if (serverSettings.media_overlay_enabled !== undefined && serverSettings.media_overlay_enabled !== s.mediaOverlayEnabled) s.setMediaOverlayEnabled(serverSettings.media_overlay_enabled)
+    if (serverSettings.lastfm_enabled !== undefined && serverSettings.lastfm_enabled !== s.lastfmEnabled) s.setLastfmEnabled(serverSettings.lastfm_enabled)
+    if (serverSettings.auto_report_errors !== undefined && serverSettings.auto_report_errors !== s.autoReportErrors) s.setAutoReportErrors(serverSettings.auto_report_errors)
+    if (serverSettings.eq_enabled !== undefined && serverSettings.eq_enabled !== s.eqEnabled) s.setEqEnabled(serverSettings.eq_enabled)
+    if (serverSettings.eq_gains && serverSettings.eq_gains.length === EQ_BANDS.length && JSON.stringify(serverSettings.eq_gains) !== JSON.stringify(s.eqGains)) {
+      set({ eqGains: serverSettings.eq_gains, eqPreset: serverSettings.eq_preset ?? 'custom' })
+      ls.set('eqGains', serverSettings.eq_gains); ls.set('eqPreset', serverSettings.eq_preset ?? 'custom')
+    }
+    if (serverSettings.eq_balance != null && serverSettings.eq_balance !== s.eqBalance) s.setEqBalance(serverSettings.eq_balance)
+    if (serverSettings.eq_mono !== undefined && serverSettings.eq_mono !== s.eqMono) s.setEqMono(serverSettings.eq_mono)
+    if (serverSettings.eq_boost != null && serverSettings.eq_boost !== s.eqBoost) s.setEqBoost(serverSettings.eq_boost)
+    if (serverSettings.skip_silence !== undefined && serverSettings.skip_silence !== s.skipSilence) s.setSkipSilence(serverSettings.skip_silence)
+    if (serverSettings.reverb_enabled !== undefined && serverSettings.reverb_enabled !== s.reverbEnabled) s.setReverbEnabled(serverSettings.reverb_enabled)
+    if (serverSettings.reverb_mix !== undefined && serverSettings.reverb_mix !== s.reverbMix) s.setReverbMix(serverSettings.reverb_mix)
+    if (serverSettings.reverb_decay !== undefined && serverSettings.reverb_decay !== s.reverbDecay) s.setReverbDecay(serverSettings.reverb_decay)
+    if (serverSettings.pitch_shift !== undefined && serverSettings.pitch_shift !== s.pitchShift) s.setPitchShift(serverSettings.pitch_shift)
+    if (serverSettings.hotkey_bindings && JSON.stringify(serverSettings.hotkey_bindings) !== JSON.stringify(s.hotkeyBindings)) {
+      set({ hotkeyBindings: serverSettings.hotkey_bindings }); ls.set('hotkeyBindings', serverSettings.hotkey_bindings)
+    }
+    if (serverSettings.hotkey_seek_seconds !== undefined && serverSettings.hotkey_seek_seconds !== s.hotkeySeekSeconds) s.setHotkeySeekSeconds(serverSettings.hotkey_seek_seconds)
+    if (serverSettings.global_hotkeys_enabled !== undefined && serverSettings.global_hotkeys_enabled !== s.globalHotkeysEnabled) s.setGlobalHotkeysEnabled(serverSettings.global_hotkeys_enabled)
+
+    // muted_servers/muted_conversations aren't merged here - chatStore owns
+    // that local per-account data and already imports this store, so it
+    // reads serverSettings itself (via account.user_settings) and calls
+    // _syncChatMutes once it's merged, on the same account-hydrate pass that
+    // loads its local copy. See chatStore's account effect.
+
+    if (!get().account) return
+    const built = buildUserSettings(get())
+    const inSync = (Object.keys(built) as (keyof UserSettings)[])
+      .every((k) => stableJson(built[k]) === stableJson(serverSettings[k]))
+    if (inSync) dropProfilePush('userSettings')
+    else get()._scheduleProfilePush(['userSettings'])
+  },
+
+  // ── Song preferences ──────────────────────────────────────────────────────,
+  autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
+  setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
+  guestPlaylists: ls.get<GuestPlaylist[]>('guestPlaylists') ?? [],
+  createGuestPlaylist: (name) => {
+    const id = `gp-${Date.now()}`
+    const playlist: GuestPlaylist = { id, name, tracks: [], createdAt: Date.now() }
+    const next = [...get().guestPlaylists, playlist]
+    set({ guestPlaylists: next })
+    ls.set('guestPlaylists', next)
+    return id
+  },
+  deleteGuestPlaylist: (id) => {
+    const next = get().guestPlaylists.filter((p) => p.id !== id)
+    set({ guestPlaylists: next })
+    ls.set('guestPlaylists', next)
+  },
+  renameGuestPlaylist: (id, name) => {
+    const next = get().guestPlaylists.map((p) => p.id === id ? { ...p, name } : p)
+    set({ guestPlaylists: next })
+    ls.set('guestPlaylists', next)
+  },
+  addToGuestPlaylist: (playlistId, track) => {
+    const next = get().guestPlaylists.map((p) =>
+      p.id === playlistId ? { ...p, tracks: [...p.tracks, track] } : p)
+    set({ guestPlaylists: next })
+    ls.set('guestPlaylists', next)
+  },
+  removeFromGuestPlaylist: (playlistId, trackId) => {
+    const next = get().guestPlaylists.map((p) =>
+      p.id === playlistId ? { ...p, tracks: p.tracks.filter((t) => t.id !== trackId) } : p)
+    set({ guestPlaylists: next })
+    ls.set('guestPlaylists', next)
+  },
+  reorderGuestPlaylist: (playlistId, tracks) => {
+    const next = get().guestPlaylists.map((p) => p.id === playlistId ? { ...p, tracks } : p)
+    set({ guestPlaylists: next })
+    ls.set('guestPlaylists', next)
+  },
+  stagedSongChanges: [],
+  // One queued change per song/channel/type: editing a song again before it's
+  // proposed replaces the queued patch rather than piling up duplicates. A
+  // 'create' has no song id to key off of - each new-song draft is its own
+  // proposal, so those never collapse into each other.,
+  stageSongChanges: (changes) => set((s) => ({
+    stagedSongChanges: [
+      ...s.stagedSongChanges.filter((c) => !changes.some((n) =>
+        n.songId != null && n.songId === c.songId && n.channel === c.channel && n.changeType === c.changeType)),
+      ...changes.map((c, i) => ({ ...c, id: `staged-song-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
+    ],
+  })),
+  updateStagedSongChange: (id, updates) => set((s) => ({
+    stagedSongChanges: s.stagedSongChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
+  })),
+  unstageSongChange: (id) => set((s) => ({
+    stagedSongChanges: s.stagedSongChanges.filter((c) => c.id !== id),
+  })),
+  clearStagedSongChanges: () => set({ stagedSongChanges: [] })
 }))
 
 // Dev-only console handle for driving store state while debugging (e.g.

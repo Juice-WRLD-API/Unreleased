@@ -1,5 +1,5 @@
 ﻿/**
- * queueSlice.ts — all queue and playback logic in one place.
+ * queueSlice.ts - all queue and playback logic in one place.
  *
  * Responsibilities:
  *  - Queue state (tracks, index, shuffle, repeat)
@@ -17,7 +17,7 @@ import { apiFetch, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiPaginatedResponse, JWApiSong } from '../lib/juicewrldApi'
 import { getOwnVersionMeta, getVersionGroup } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
-import { peekSongPref, hasAnyDefaultVersion } from '../lib/songPrefs'
+import { peekSongPref, hasAnyDefaultVersion, hasAnyExcludedVersion } from '../lib/songPrefs'
 import { ls } from '../lib/persist'
 import { resolveQueueContext } from './queueContext'
 
@@ -65,12 +65,12 @@ export interface QueueSlice {
   queueFilter: QueueFilter | null
   /** True while a background page fetch is in flight. */
   queueLoadingMore: boolean
-  /** Where the current queue came from — used to activate radio on shuffle. */
+  /** Where the current queue came from - used to activate radio on shuffle. */
   queueSource: 'tracker' | 'playlist' | null
 
   /**
    * Radio mode: enabled when the user clicks a track from the Tracker with
-   * shuffle on. Uses /radio/random/ to fetch each next song — no pre-built
+   * shuffle on. Uses /radio/random/ to fetch each next song - no pre-built
    * queue. History of played tracks is kept in `queue` (capped at 30).
    */
   radioMode: boolean
@@ -85,7 +85,7 @@ export interface QueueSlice {
   /**
    * Start playing `track` with a known context list.
    * `filter` enables lazy loading beyond the initial context.
-   * Does NOT activate radio mode — use `startRadio` for that.
+   * Does NOT activate radio mode - use `startRadio` for that.
    */
   /**
    * Start playback. Omitting `context` means standalone playback; callers
@@ -104,7 +104,7 @@ export interface QueueSlice {
    * Start radio mode. The queue is seeded with `track` only;
    * subsequent songs come from /radio/random/ one at a time.
    *
-   * `keepPlayState` — when true, leaves isPlaying as it already was instead
+   * `keepPlayState` - when true, leaves isPlaying as it already was instead
    * of forcing it on. Use this for "activate radio as a side effect of some
    * other toggle" call sites (turning shuffle on); leave it unset for an
    * explicit "play this track" action, where forcing playback on is correct.
@@ -145,16 +145,16 @@ export interface QueueSlice {
   // Internal
   _loadMore: () => void
   _prefetchRadioTrack: () => void
-  /** Asynchronously swaps `track` for the version the user actually wants —
+  /** Asynchronously swaps `track` for the version the user actually wants -
    *  its group's preferred version, or its linked OG sibling when "prefer OG
-   *  version" is on — once it becomes the current track. No-op when neither
+   *  version" is on - once it becomes the current track. No-op when neither
    *  applies. */
   _maybeSwapToPreferredVersion: (track: Track) => void
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Fisher-Yates shuffle — returns a new array, does not mutate. */
+/** Fisher-Yates shuffle - returns a new array, does not mutate. */
 export function fisherYates<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i = a.length - 1; i > 0; i--) {
@@ -179,19 +179,19 @@ function insertRandom<T>(base: T[], items: T[]): T[] {
 const RADIO_HISTORY_LIMIT = 30
 
 // Bumped whenever a new radio session starts. Prefetch callbacks and 3s error
-// retries capture the value at their start and bail if it has moved on —
+// retries capture the value at their start and bail if it has moved on -
 // otherwise stopping radio and quickly restarting it left the old session's
 // retry loop alive alongside the new one, both racing to set radioNext.
 let _radioSession = 0
 
 /** Matches version labels like "OG", "OG File", "OG Quality" (not "Original Key",
- *  which is an unrelated field) — the community convention for the raw/leaked
+ *  which is an unrelated field) - the community convention for the raw/leaked
  *  file as opposed to a snippet, CDQ rip, TV mix, etc. */
 const isOgVersion = (meta: SongVersionMeta | null | undefined): boolean =>
   !!meta && /\bog\b/i.test(`${meta.version ?? ''} ${meta.versionTitle ?? ''}`)
 
 /** Matches a member against a user's preferred version label ("v1", "TV Mix").
- *  Compares the per-song `version` field only — `versionTitle` is shared by
+ *  Compares the per-song `version` field only - `versionTitle` is shared by
  *  every member of a group and so can't distinguish between them. */
 const matchesVersionLabel = (meta: SongVersionMeta | null | undefined, label: string): boolean =>
   !!meta?.version && meta.version.trim().toLowerCase() === label.trim().toLowerCase()
@@ -199,7 +199,7 @@ const matchesVersionLabel = (meta: SongVersionMeta | null | undefined, label: st
 /** The version label this user wants to hear from `songId`'s group.
  *
  *  Preferences are stored per song, but a default version is really a property
- *  of the GROUP — so a default set on any member governs all of them, and
+ *  of the GROUP - so a default set on any member governs all of them, and
  *  playing a sibling (or a compact-view group row, which can start from
  *  whichever member it likes) honours it. The song's own row wins when several
  *  members disagree. */
@@ -213,6 +213,25 @@ function groupDefaultVersion(songId: number, group: SongVersionMeta[]): string |
   return null
 }
 
+/** Version labels this user never wants auto-picked from `songId`'s group
+ *  (e.g. compact view's shuffle-play) - a union across every member's own
+ *  excluded list, since exclusion (like the default version) is really a
+ *  property of the group rather than any one row. */
+export function groupExcludedVersions(songId: number, group: SongVersionMeta[]): Set<string> {
+  const excluded = new Set<string>()
+  for (const label of peekSongPref(songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
+  for (const member of group) {
+    for (const label of peekSongPref(member.songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
+  }
+  return excluded
+}
+
+/** True if `meta`'s version label is in `excluded` - used to filter a
+ *  group's members before an automatic pick. Members with no version label
+ *  (recording sessions, etc.) are never excludable this way. */
+export const isExcludedVersion = (meta: SongVersionMeta | null | undefined, excluded: Set<string>): boolean =>
+  !!meta?.version && excluded.has(meta.version.trim().toLowerCase())
+
 const apiSongId = (track: Track): number | null => {
   if (!track.id.startsWith('jw-')) return null
   const songId = Number(track.id.slice(3))
@@ -220,7 +239,7 @@ const apiSongId = (track: Track): number | null => {
 }
 
 /** Given an API-sourced track, works out which song should actually play and
- *  returns a Track for it — or null when the current one is already right (or
+ *  returns a Track for it - or null when the current one is already right (or
  *  there's nothing to swap to).
  *
  *  A per-song default version is explicit intent about this exact group, so it
@@ -232,17 +251,31 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
   if (songId == null) return null
 
   const [own, group] = await Promise.all([getOwnVersionMeta(songId), getVersionGroup(songId)])
+  const excluded = groupExcludedVersions(songId, group)
 
   const wanted = groupDefaultVersion(songId, group)
-  if (wanted) {
+  if (wanted && !excluded.has(wanted.trim().toLowerCase())) {
     if (matchesVersionLabel(own, wanted)) return null
     const target = group.find(m => matchesVersionLabel(m, wanted))
     if (!target) return null
     return songToTrack(await apiFetch<JWApiSong>(`/songs/${target.songId}/`))
   }
 
+  // The picked version itself is off-limits (e.g. radio landed on a
+  // compacted rip the user excluded) - move to a sibling that isn't, same as
+  // compact view's shuffle-play would. A preferred OG sibling wins when that
+  // toggle is on and it isn't itself excluded; otherwise take the first
+  // playable, non-excluded member. Nothing to do if every sibling is
+  // excluded too - better to keep playing something than nothing.
+  if (isExcludedVersion(own, excluded)) {
+    const preferredOg = preferOg ? group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded)) : undefined
+    const fallback = preferredOg ?? group.find(m => m.songId !== songId && !isExcludedVersion(m, excluded))
+    if (!fallback) return null
+    return songToTrack(await apiFetch<JWApiSong>(`/songs/${fallback.songId}/`))
+  }
+
   if (!preferOg || isOgVersion(own)) return null
-  const ogSibling = group.find(isOgVersion)
+  const ogSibling = group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded))
   if (!ogSibling) return null
   return songToTrack(await apiFetch<JWApiSong>(`/songs/${ogSibling.songId}/`))
 }
@@ -258,7 +291,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   isPlaying: false,
   progress: 0,
   currentTime: 0,
-  // Playback *modes* persist across restarts (the queue itself doesn't — it's
+  // Playback *modes* persist across restarts (the queue itself doesn't - it's
   // rebuilt from whatever the user plays next). radioMode deliberately stays
   // off on load even when shuffle was on: radio is started by toggling shuffle
   // from a tracker context, so it's a property of the live session, and
@@ -357,7 +390,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       // Same reasoning as isPlaying above: when reusing the already-current
       // track (keepPlayState), the real <audio> element's position was never
       // actually touched (nothing here changes currentTrack.id, so the
-      // load/seek effect never re-fires) — resetting these to 0 would just
+      // load/seek effect never re-fires) - resetting these to 0 would just
       // make the displayed time lie about where playback really is, most
       // visibly while paused (no 'timeupdate' event ever arrives to correct
       // it back).
@@ -375,7 +408,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     // ── Radio mode ──────────────────────────────────────────────────────────
     if (radioMode) {
       if (!radioNext) {
-        // Pre-fetch not ready yet — mark as waiting; _prefetchRadioTrack will
+        // Pre-fetch not ready yet - mark as waiting; _prefetchRadioTrack will
         // auto-play when the fetch completes.
         set({ isPlaying: false, _radioWaiting: true })
         return null
@@ -487,7 +520,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     }
 
     if (radioMode) {
-      // Already in radio mode — no change needed for toggling ON again
+      // Already in radio mode - no change needed for toggling ON again
       return
     }
 
@@ -509,7 +542,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   // ── reshuffleQueue ─────────────────────────────────────────────────────────
   // Re-rolls a fresh random order for what's still upcoming, regardless of
-  // whether shuffle was already on — unlike toggleShuffle, which only
+  // whether shuffle was already on - unlike toggleShuffle, which only
   // randomizes on the OFF→ON transition and otherwise just flips shuffle off.
   reshuffleQueue: () => {
     const { currentTrack, queue, queueIndex, queueFilter, radioMode, queueSource } = get()
@@ -517,10 +550,10 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     ls.set('shuffle', true)
 
     if (radioMode) {
-      // Already mid radio session — only re-roll the next-up prediction.
+      // Already mid radio session - only re-roll the next-up prediction.
       // Reusing startRadio here (like the branch below does) would restart
       // the currently playing track from 0, force-resume it if paused, and
-      // wipe this session's history — none of that belongs to "give me a
+      // wipe this session's history - none of that belongs to "give me a
       // different next song." Bumping _radioSession invalidates any prefetch
       // already in flight so a stale response can't clobber this one.
       set({ shuffle: true, radioNext: null })
@@ -530,7 +563,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     }
 
     if (queueSource === 'tracker' && currentTrack) {
-      // Not in radio mode yet — same as toggleShuffle's tracker branch,
+      // Not in radio mode yet - same as toggleShuffle's tracker branch,
       // starting a fresh radio session from the current track.
       set({ shuffle: true })
       const rf = queueFilter
@@ -722,10 +755,10 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   // ── Preferred-version swap ─────────────────────────────────────────────────
   _maybeSwapToPreferredVersion: (track) => {
     const preferOg = get().preferOgVersion
-    // Nothing could possibly swap — no per-song default anywhere and the
-    // global toggle off — so skip the version lookup rather than pay a
+    // Nothing could possibly swap - no per-song default, no exclusions, and
+    // the global toggle off - so skip the version lookup rather than pay a
     // /versions/ round trip on every track change for the common case.
-    if (!preferOg && !hasAnyDefaultVersion()) return
+    if (!preferOg && !hasAnyDefaultVersion() && !hasAnyExcludedVersion()) return
     resolveVersionSwap(track, preferOg)
       .then((swapped) => {
         if (!swapped) return

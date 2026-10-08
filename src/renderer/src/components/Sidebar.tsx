@@ -1,20 +1,27 @@
-﻿import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Settings, LogIn, LogOut, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, ArrowLeft, Info, Check, EyeOff } from 'lucide-react'
+import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, Upload, Info, Check, EyeOff } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
-import { showStaffProfile, staffProfileView, getToken } from '../lib/userApi'
-import { orderedNavItems, isNavItemVisible, orderedNavControls, isNavControlVisible, navTabFor, tabEntryView, type NavControlId } from '../lib/navItems'
+import { showStaffProfile, getToken } from '../lib/userApi'
 import AppMenu from './AppMenu'
-import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { orderedNavItems, isNavItemVisible, orderedNavControls, isNavControlVisible, navTabFor, tabEntryView, type NavControlId } from '../lib/navItems'
+import { preloadView } from '../lib/lazyViews'
+import { hasChatAccess } from '../lib/chatAccess'
+import type { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
+import { accountDisplayName, initial } from '../lib/format'
 import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
+
+// Right-click only - fetched on first open rather than with the app shell.
+const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
 
 const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openSettings, setShowDiagnostics, developerMode, account, logoutAccount, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, appMenuPosition, offlinePlaylists } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'logoutAccount', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'appMenuPosition', 'offlinePlaylists')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, downloads, showDownloadManager, setShowDownloadManager, appMenuPosition, offlinePlaylists } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'downloads', 'showDownloadManager', 'setShowDownloadManager', 'appMenuPosition', 'offlinePlaylists')
   const isElectron = navigator.userAgent.includes('Electron')
 
   const [collapsed, setCollapsed] = useState<boolean>(
@@ -62,10 +69,10 @@ export default function Sidebar(): JSX.Element {
   const [navOverIdx, setNavOverIdx] = useState<number | null>(null)
   // Move a visible row to sit adjacent to a target row. Reordering happens on
   // the FULL saved order (including any hidden items) so their relative spots
-  // are preserved — same approach as Settings' moveNavItem.
+  // are preserved - same approach as Settings' moveNavItem.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true, true).map((i) => i.view)
     const dragView = items[fromRow].view
     const targetView = items[toRow].view
     const from = full.indexOf(dragView)
@@ -76,14 +83,16 @@ export default function Sidebar(): JSX.Element {
     setNavOrder(next)
   }
 
-  // Right-click on a nav tab pops a single "Hide" action — a faster path to
+  // Right-click on a nav tab pops a single "Hide" action - a faster path to
   // the same navVisibility toggle Settings → Appearance → Menu items exposes.
-  const [navMenu, setNavMenu] = useState<{ view: ViewType; label: string; x: number; y: number } | null>(null)
-  const openNavMenu = (view: ViewType, label: string) => (e: React.MouseEvent): void => {
+  const [navMenu, setNavMenu] = useState<{ label: string; hide: () => void; x: number; y: number } | null>(null)
+  const openHideMenu = (label: string, hide: () => void) => (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    setNavMenu({ view, label, x: e.clientX, y: e.clientY })
+    setNavMenu({ label, hide, x: e.clientX, y: e.clientY })
   }
+  const openNavMenu = (view: ViewType, label: string) => openHideMenu(label, () => setNavItemVisible(view, false))
+  const openControlMenu = (id: NavControlId, label: string) => openHideMenu(label, () => setNavControlVisible(id, false))
   const navContextMenu = navMenu && createPortal(
     <>
       <div className="fixed inset-0 z-[60]" onClick={() => setNavMenu(null)} onContextMenu={(e) => { e.preventDefault(); setNavMenu(null) }} />
@@ -95,7 +104,7 @@ export default function Sidebar(): JSX.Element {
         }}
       >
         <button
-          onClick={() => { setNavItemVisible(navMenu.view, false); setNavMenu(null) }}
+          onClick={() => { navMenu.hide(); setNavMenu(null) }}
           className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
         >
           <EyeOff size={14} className="text-text-muted" />
@@ -119,95 +128,93 @@ export default function Sidebar(): JSX.Element {
   // Order + which tabs appear both come from Settings → Appearance → Menu
   // items. orderedNavItems sanitizes the saved order; isNavItemVisible drops
   // web-only tabs on web and anything the user has toggled off.
-  const items = orderedNavItems(navOrder).filter((i) => isNavItemVisible(i, navVisibility, isElectron))
-  // Which tab reads as current — not always activeView, since some views are
+  const items = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account)).filter((i) => isNavItemVisible(i, navVisibility, isElectron))
+  // Which tab reads as current - not always activeView, since some views are
   // sub-views of a tab (the games inside Games). See navTabFor.
   const activeTab = navTabFor(activeView)
+
+  // Start the view's chunk on hover/focus rather than on click. Pointing at a
+  // menu item precedes clicking it by ~100ms, which is usually the whole
+  // download - so by the time Suspense would need a fallback, there's nothing
+  // left to wait for. Focus covers keyboard navigation. Idempotent and
+  // bandwidth-aware; see preloadView.
+  const warmOnIntent = (view: ViewType): { onPointerEnter: () => void; onFocus: () => void } => ({
+    onPointerEnter: () => preloadView(view),
+    onFocus: () => preloadView(view),
+  })
 
   const navClick = (view: ViewType): void => {
     if (activeView === view && view === 'playlists') {
       window.dispatchEvent(new CustomEvent('playlists:back'))
+    } else if (view === 'editor-profile') {
+      // The Staff tab - which profile page that is depends on the account's roles.
+      openProfile()
     } else {
-      // Not always `view` itself — a tab holding several views reopens on the
+      // Not always `view` itself - a tab holding several views reopens on the
       // one last used. See tabEntryView.
       setActiveView(tabEntryView(view))
     }
   }
 
-  // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) —
+  // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) -
   // ordered and filtered to what's both available and toggled on in Settings.
   // Log in and the collapse toggle are rendered separately (never hideable).
-  const controlCtx = { account: !!account, isElectron, developerMode }
+  const controlCtx = { account: !!account, isElectron, developerMode, hasUploads: downloads.length > 0 }
   const controls = orderedNavControls(navControlOrder).filter((c) => isNavControlVisible(c, navControlVisibility, controlCtx))
 
   const rowCls = 'flex items-center w-full py-2 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3'
   const iconWrap = 'w-6 h-6 flex items-center justify-center shrink-0'
   const labelCls = `truncate transition-opacity duration-200 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
 
-  const returnToApiVertical = !isElectron ? (
-    <a
-      key="return-api"
-      href="https://juicewrldapi.com"
-      target="_blank"
-      rel="noopener noreferrer"
-      title={collapsed ? 'Return to API' : undefined}
-      className={rowCls}
-    >
-      <span className={iconWrap}><ArrowLeft size={18} /></span>
-      <span aria-hidden={collapsed} className={labelCls}>Return to API</span>
-    </a>
-  ) : null
-
-  const returnToApiHorizontal = !isElectron ? (
-    <a
-      key="return-api"
-      href="https://juicewrldapi.com"
-      target="_blank"
-      rel="noopener noreferrer"
-      title="Return to API"
-      className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded text-sm font-medium whitespace-nowrap text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-    >
-      <span className="w-6 h-6 shrink-0 flex items-center justify-center"><ArrowLeft size={18} /></span>
-      <span>Return to API</span>
-    </a>
-  ) : null
-
   // Full-width control row for the vertical (left/right) side menu.
-  const profileView = staffProfileView(account)
+  const activeUploadCount = downloads.filter((u) => u.state === 'downloading').length
 
   const renderControl = (id: NavControlId): JSX.Element | null => {
     switch (id) {
       case 'profile':
         if (!account || !showStaffProfile(account)) return null
         return (
-          <button key="profile" onClick={openProfile} onContextMenu={copyAuthToken} title={collapsed ? (account.display_name || account.discord_username) : undefined} className={rowCls}>
+          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={collapsed ? accountDisplayName(account) : undefined} className={rowCls}>
             <span className={`${iconWrap} relative`}>
-              {account.discord_avatar
-                ? <img src={account.discord_avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
-                : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+              {account.avatar
+                ? <img src={account.avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
+                : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{initial(accountDisplayName(account))}</div>}
               {tokenCopied && <span className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Check size={12} className="text-emerald-400" /></span>}
             </span>
-            <span aria-hidden={collapsed} className={labelCls}>{tokenCopied ? 'Token copied!' : (account.display_name || account.discord_username)}</span>
+            <span aria-hidden={collapsed} className={labelCls}>{tokenCopied ? 'Token copied!' : accountDisplayName(account)}</span>
           </button>
         )
-      case 'logout':
-        if (!account) return null
+      case 'uploads':
         return (
-          <button key="logout" onClick={() => logoutAccount()} title={collapsed ? 'Log out' : undefined} className={rowCls}>
-            <span className={iconWrap}><LogOut size={18} /></span>
-            <span aria-hidden={collapsed} className={labelCls}>Log out</span>
+          <button key="uploads" onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
+            <span className={`${iconWrap} relative`}>
+              <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
+              {activeUploadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none">
+                  {activeUploadCount}
+                </span>
+              )}
+            </span>
+            <span aria-hidden={collapsed} className={labelCls}>Transfers</span>
           </button>
         )
       case 'diagnostics':
         return (
-          <button key="diagnostics" onClick={() => setShowDiagnostics(true)} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
+          <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
             <span className={iconWrap}><Info size={18} /></span>
             <span aria-hidden={collapsed} className={labelCls}>Diagnostics</span>
           </button>
         )
+      case 'download':
+        return (
+          <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} onContextMenu={openControlMenu('download', 'Download app')} title={collapsed ? 'Download desktop app' : undefined} className={rowCls}>
+            <span className={iconWrap}><Download size={18} /></span>
+            <span aria-hidden={collapsed} className={labelCls}>Download app</span>
+          </button>
+        )
       case 'settings':
         return (
-          <button key="settings" onClick={() => openSettings()} title={collapsed ? 'Settings' : undefined} className={rowCls}>
+          <button key="settings" onClick={() => openSettings()} {...warmOnIntent('settings')} title={collapsed ? 'Settings' : undefined} className={rowCls}>
             <span className={iconWrap}><Settings size={18} /></span>
             <span aria-hidden={collapsed} className={labelCls}>Settings</span>
           </button>
@@ -222,21 +229,77 @@ export default function Sidebar(): JSX.Element {
       case 'profile':
         if (!account || !showStaffProfile(account)) return null
         return (
-          <button key="profile" onClick={openProfile} onContextMenu={copyAuthToken} title={tokenCopied ? 'Token copied!' : (account.display_name || account.discord_username)} className={`${barIconBtn} hover:bg-transparent hover:opacity-80 relative`}>
-            {account.discord_avatar
-              ? <img src={account.discord_avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
-              : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={tokenCopied ? 'Token copied!' : accountDisplayName(account)} className={`${barIconBtn} hover:bg-transparent hover:opacity-80 relative`}>
+            {account.avatar
+              ? <img src={account.avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
+              : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{initial(accountDisplayName(account))}</div>}
             {tokenCopied && <span className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Check size={12} className="text-emerald-400" /></span>}
           </button>
         )
-      case 'logout':
-        if (!account) return null
-        return <button key="logout" onClick={() => logoutAccount()} title="Log out" className={barIconBtn}><LogOut size={16} /></button>
+      case 'uploads':
+        return (
+          <button key="uploads" onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title="Transfers" className={`${barIconBtn} relative`}>
+            <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
+            {activeUploadCount > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
+                {activeUploadCount}
+              </span>
+            )}
+          </button>
+        )
       case 'diagnostics':
-        return <button key="diagnostics" onClick={() => setShowDiagnostics(true)} title="Diagnostics" className={barIconBtn}><Info size={18} /></button>
+        return <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title="Diagnostics" className={barIconBtn}><Info size={18} /></button>
+      case 'download':
+        return <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} onContextMenu={openControlMenu('download', 'Download app')} title="Download desktop app" className={barIconBtn}><Download size={18} /></button>
       case 'settings':
-        return <button key="settings" onClick={() => openSettings()} title="Settings" className={barIconBtn}><Settings size={18} /></button>
+        return <button key="settings" onClick={() => openSettings()} {...warmOnIntent('settings')} title="Settings" className={barIconBtn}><Settings size={18} /></button>
     }
+  }
+
+  // ── Floating pill (Settings → Appearance → Navigation style). Icon-only, rounded,
+  // laid out along the chosen edge; AutoHideNav floats it over the page.
+  if (navStyle === 'pill') {
+    const horizontal = sidebarPosition === 'top' || sidebarPosition === 'bottom'
+    return (
+      <aside
+        className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+      >
+        {items.map(({ icon, label, view }, idx) => (
+          <button
+            key={view}
+            draggable
+            onDragStart={(e) => { setNavDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setNavOverIdx(idx) }}
+            onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
+            onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
+            onClick={() => navClick(view)}
+            {...warmOnIntent(view)}
+            onContextMenu={openNavMenu(view, label)}
+            title={label}
+            aria-label={label}
+            className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-full transition-colors cursor-grab active:cursor-grabbing ${
+              navDragIdx === idx ? 'opacity-40' : ''
+            } ${
+              navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-inset ring-accent' : ''
+            } ${
+              activeTab === view
+                ? 'bg-accent/20 text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+            }`}
+          >
+            {icon}
+          </button>
+        ))}
+        <div className={`shrink-0 bg-[var(--border)] ${horizontal ? 'w-px h-6 mx-1' : 'h-px w-6 my-1'}`} />
+        {!account && (
+          <button onClick={() => setShowUserAuth(true)} title="Log in" aria-label="Log in" className={`${barIconBtn} !w-10 !h-10 !rounded-full`}>
+            <LogIn size={18} />
+          </button>
+        )}
+        {controls.map((c) => renderControlIcon(c.id))}
+        {navContextMenu}
+      </aside>
+    )
   }
 
   // ── Horizontal bar (Settings → Appearance → Navigation position: top/bottom).
@@ -261,7 +324,6 @@ export default function Sidebar(): JSX.Element {
             <div className="shrink-0 mr-0.5"><AppMenu variant="sidebar-icon" /></div>
           )}
           <nav className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
-            {returnToApiHorizontal}
             {items.map(({ icon, label, view }, idx) => (
               <button
                 key={view}
@@ -271,6 +333,7 @@ export default function Sidebar(): JSX.Element {
                 onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
                 onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
                 onClick={() => navClick(view)}
+                {...warmOnIntent(view)}
                 onContextMenu={openNavMenu(view, label)}
                 className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded text-sm font-medium whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
                   navDragIdx === idx ? 'opacity-40' : ''
@@ -325,6 +388,7 @@ export default function Sidebar(): JSX.Element {
         />
       )}
       {/* Logo — collapses to zero height (redundant with the WRLD tab icon) */}
+      {/* Logo - collapses to zero height when the sidebar is collapsed */}
       <div
         className="flex flex-col items-center gap-1 shrink-0 px-5 overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out"
         style={{ maxHeight: collapsed ? '0px' : '200px', opacity: collapsed ? 0 : 1 }}
@@ -350,7 +414,6 @@ export default function Sidebar(): JSX.Element {
 
       {/* Nav items */}
       <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto px-3">
-        {returnToApiVertical}
         {items.map(({ icon, label, view }, idx) => (
           <div
             key={view}
@@ -373,6 +436,7 @@ export default function Sidebar(): JSX.Element {
             >
               <button
                 onClick={() => navClick(view)}
+                {...warmOnIntent(view)}
                 title={collapsed ? label : undefined}
                 className="flex items-center flex-1 min-w-0 py-2 pl-2 gap-3"
               >
@@ -417,7 +481,7 @@ export default function Sidebar(): JSX.Element {
         ))}
       </nav>
 
-      {/* Bottom section — Log in stays pinned (never hideable); the rest are
+      {/* Bottom section - Log in stays pinned (never hideable); the rest are
           user-ordered/hideable controls (Settings → Appearance → Menu controls). */}
       <div className="pb-4 space-y-1 px-2">
         {!account && (
@@ -438,7 +502,7 @@ export default function Sidebar(): JSX.Element {
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className="flex items-center w-full py-2 rounded text-sm font-medium text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3"
         >
-          {/* Chevron points where the edge will move — mirrored when the
+          {/* Chevron points where the edge will move - mirrored when the
               sidebar sits on the right. */}
           <span className="w-6 h-6 flex items-center justify-center shrink-0">
             {collapsed !== (sidebarPosition === 'right') ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}

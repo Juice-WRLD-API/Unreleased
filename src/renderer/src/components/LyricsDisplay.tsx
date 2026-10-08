@@ -2,17 +2,17 @@ import React, { useEffect, useRef, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Download } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, ADLIB_OPACITY } from '../lib/lyrics'
+import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { useStore } from '../store/useStore'
 import { seekAudio, getAudioCurrentTime } from './Player'
 
 interface LyricsDisplayProps {
   /** Playback-clock source for synced-line highlighting. Defaults to the live
-   *  audio element — pop-out windows (no local audio) pass an interpolated
+   *  audio element - pop-out windows (no local audio) pass an interpolated
    *  clock built from the synced currentTime instead. */
   getTime?: () => number
   /** Called when a synced line is clicked. Defaults to seeking the local
-   *  audio element — pop-outs send a seek command to the main window. */
+   *  audio element - pop-outs send a seek command to the main window. */
   onSeek?: (time: number) => void
   /** Tighter type sizes/padding for small surfaces like the mini player. */
   compact?: boolean
@@ -54,7 +54,7 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
 
   // Driven by requestAnimationFrame against the LIVE audio.currentTime rather
   // than the Zustand-stored value (which only updates on the native
-  // 'timeupdate' event, ~4x/sec) — that throttling is what made the active
+  // 'timeupdate' event, ~4x/sec) - that throttling is what made the active
   // line snap every ~250ms instead of transitioning smoothly.
   const [currentLineIdx, setCurrentLineIdx] = useState(-1)
   const lineIdxRef = useRef(-1)
@@ -95,7 +95,7 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
 
   const isEditor = account?.is_editor || account?.is_administrator
 
-  // Right-click → "Download synced lyrics" — only offered for LRC-format
+  // Right-click → "Download synced lyrics" - only offered for LRC-format
   // lyrics (the .lrc file needs the timestamps; plain unsynced text has
   // nothing worth exporting in that format).
   const handleContextMenu = (e: React.MouseEvent): void => {
@@ -144,7 +144,7 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
         ref={containerRef}
         onContextMenu={handleContextMenu}
         className={`h-full overflow-y-auto ${compact ? 'py-10 px-5 space-y-3' : 'py-16 px-8 space-y-4'}`}
-        style={{ scrollbarWidth: 'none' } as React.CSSProperties}
+        style={{ scrollbarWidth: 'none', WebkitTapHighlightColor: 'transparent' } as React.CSSProperties}
       >
         <style>{`::-webkit-scrollbar { display: none; }`}</style>
         {syncedLines.map((line, i) => {
@@ -155,15 +155,26 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
             return <div key={i} className="h-4" />
           }
 
+          // Every line except the one playing - played and upcoming alike.
+          const isBlurred = !isActive && lyricsBlur
           const lineStyle: React.CSSProperties = {
             opacity: isActive ? 1 : isPast ? 0.35 : 0.2,
             color: isActive ? activeColor : inactiveColor,
-            // Every line except the one playing — played and upcoming alike.
-            filter: (!isActive && lyricsBlur) ? `blur(${lyricsBlurAmount.toFixed(2)}px)` : 'blur(0px)',
+            filter: isBlurred ? `blur(${lyricsBlurAmount.toFixed(2)}px)` : 'none',
             transition: 'opacity 0.35s ease, color 0.35s ease, filter 0.35s ease',
             fontSize: `${(compact ? 1.125 : 1.5) * lyricsScale}rem`,
             textAlign: lyricsAlign,
             fontFamily: 'var(--font-lyrics)',
+            // iOS Safari's tap-highlight overlay on this clickable line can get
+            // stuck showing (a known WebKit quirk when a touch is interrupted by
+            // the container's own scrolling) and, since the highlight repaints
+            // independently of React, it only clears once something else forces
+            // this element to repaint - which is exactly what happens when a
+            // line's own opacity/color/filter changes as it goes active → past.
+            // Lines that never go active never repaint, so a stuck highlight on
+            // one of them lingers indefinitely. Disabling the highlight outright
+            // is the standard fix.
+            WebkitTapHighlightColor: 'transparent',
           }
 
           return (
@@ -175,7 +186,13 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
               style={lineStyle}
             >
               {splitAdLibs(line.text).map((seg, si) => (
-                <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>{seg.text}</span>
+                <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>
+                  {splitColorWords(seg.text).map((cseg, ci) => (
+                    cseg.color
+                      ? <span key={ci} style={{ color: cseg.color }}>{cseg.text}</span>
+                      : cseg.text
+                  ))}
+                </span>
               ))}
             </div>
           )

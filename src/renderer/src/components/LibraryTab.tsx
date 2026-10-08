@@ -105,7 +105,7 @@ function useTrackArt(track: LibraryTrack): string | null | undefined {
     inflightArt.add(track.id)
     el.readAlbumArt(track.filePath)
       .then((a: string | null) => applyLibraryArt(track.id, a ?? null))
-      .catch(() => {})
+      .catch(() => applyLibraryArt(track.id, null)) // end the shimmer rather than spin forever
       .finally(() => inflightArt.delete(track.id))
   }, [track.id, art])
   return art

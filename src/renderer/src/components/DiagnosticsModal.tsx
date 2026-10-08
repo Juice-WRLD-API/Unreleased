@@ -1,10 +1,10 @@
-﻿import { useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Info, FolderOpen, Terminal } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { cacheStats } from '../lib/apiCache'
 import type { Track } from '../types'
-import { formatBytes } from '../lib/format'
+import { formatBytes, accountDisplayName } from '../lib/format'
 import { APP_VERSION } from '../lib/appVersion'
 
 function localStorageBytes(): number {
@@ -17,7 +17,7 @@ function localStorageBytes(): number {
   return bytes
 }
 
-// The filename actually being played — local tracks carry a filesystem
+// The filename actually being played - local tracks carry a filesystem
 // `path`, API/stream tracks only have a `streamUrl` (the "file" is whatever
 // the URL's last path segment resolves to).
 function filenameOf(track: Track | null): string {
@@ -74,7 +74,7 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
       <div className="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-[420px] max-h-[70vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
           <span className="text-text-muted text-[10px] font-semibold uppercase tracking-widest">{label}</span>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+          <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -116,10 +116,10 @@ export default function DiagnosticsModal(): JSX.Element {
       panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[480px] h-[600px] max-h-[85vh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
         <div
-          className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 cursor-grab active:cursor-grabbing"
+          className={`flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
           onMouseDown={onHandleMouseDown}
         >
           <div className="flex items-center gap-2">
@@ -127,7 +127,7 @@ export default function DiagnosticsModal(): JSX.Element {
             <h2 className="text-text-primary font-black text-lg tracking-tight">Diagnostics</h2>
           </div>
           <div className="flex items-center gap-1">
-            <LockToggle locked={locked} onClick={toggleLock} />
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
             <button onClick={() => setShowDiagnostics(false)} className="text-text-muted hover:text-text-primary transition-colors">
               <X size={20} />
             </button>
@@ -182,7 +182,7 @@ export default function DiagnosticsModal(): JSX.Element {
 
           <Section title="Account">
             <R label="Logged in" value={account ? 'yes' : 'no'} />
-            {account && <R label="User" value={account.display_name || account.discord_username} />}
+            {account && <R label="User" value={accountDisplayName(account)} />}
             {account && <R label="Role" value={account.is_administrator ? 'administrator' : account.is_manager ? 'manager' : account.is_editor ? 'editor' : account.is_contributor ? 'contributor' : 'standard'} />}
             <R label="Playlists" value={String(playlists.length)} />
             <R label="Liked songs" value={String(likedTrackIds.length)} />
@@ -239,7 +239,7 @@ export default function DiagnosticsModal(): JSX.Element {
       )}
     </ModalOverlay>
 
-    {/* Outside ModalOverlay's panel — that panel is overflow-hidden (for its
+    {/* Outside ModalOverlay's panel - that panel is overflow-hidden (for its
         rounded corners), which would clip this full-screen popup since a
         fixed-position element is still clipped by an ancestor's overflow
         despite being positioned relative to the viewport. */}
