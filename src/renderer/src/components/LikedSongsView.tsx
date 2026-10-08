@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Heart, Play, Loader2, MoreHorizontal } from 'lucide-react'
+import { Heart, Play, Loader2, MoreHorizontal, ChevronLeft } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -12,7 +12,7 @@ import { formatDuration } from '../lib/format'
 import { clickable } from '../lib/a11y'
 
 export default function LikedSongsView(): JSX.Element {
-  const { account, playTrack, playCollection, playNext, toggleLike, setShowUserAuth, setActiveView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
+  const { account, playTrack, playCollection, playNext, toggleLike, setShowUserAuth, setActiveView, previousView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'previousView','setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
   const canEdit = useCanEdit()
   const [apiTracks, setApiTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
@@ -89,6 +89,14 @@ export default function LikedSongsView(): JSX.Element {
     <>
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
       <div className="px-5 pt-5 pb-8">
+        <button
+          onClick={() => setActiveView(previousView && previousView !== 'liked' ? previousView : 'wrld')}
+          title="Back"
+          aria-label="Back"
+          className="p-1 -ml-1 mb-3 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+        >
+          <ChevronLeft size={18} />
+        </button>
         <div className="flex items-center gap-4 mb-5">
           <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center shrink-0">
             <Heart size={32} className="text-accent" fill="currentColor" />

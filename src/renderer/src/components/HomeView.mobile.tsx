@@ -190,7 +190,8 @@ export default function HomeViewMobile(): JSX.Element {
         </Section>
       )}
 
-      {showSection('albums') && albumRow.length > 0 && (
+      {/* TEMP: albums hidden on the home page */}
+      {false && showSection('albums') && albumRow.length > 0 && (
         <Section
           title="Albums"
           icon={<Album size={15} />}
