@@ -20,6 +20,15 @@ const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
 // Wordle play audio, so those are left to remount.
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
+// Footprint of the floating nav pill (40px icons + 6px padding each side + the
+// 12px inset AutoHideNav wraps it in), reserved on the edge the pill sits on.
+const PILL_RESERVE_STYLE: Record<string, React.CSSProperties> = {
+  top: { paddingTop: 'calc(var(--top-inset) + 4.75rem)' },
+  bottom: { paddingBottom: '4.75rem' },
+  left: { paddingLeft: '4.75rem' },
+  right: { paddingRight: '4.75rem' },
+}
+
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'
   // Desktop and installed apps land on Home; a mobile browser tab still gets
@@ -261,6 +270,8 @@ export default function App(): JSX.Element {
   // loadAccount returns early. No-op until the reporting endpoints exist.
   useEffect(() => { useStore.getState()._flushReports() }, [])
 
+  const pillReserve = !isMobile && navStyle === 'pill' && !autoHideNav
+
   return (
     <UserCardHost>
     <div className="app-shell flex flex-col bg-surface overflow-hidden">
@@ -297,8 +308,16 @@ export default function App(): JSX.Element {
           // more - see BottomNav), so on mobile this only ever depends on
           // heroBleedTop. sidebarPosition still gates it on desktop, where
           // Sidebar itself can sit at the top and already reserves the space.
-          style={(isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
-            ? { paddingTop: 'var(--top-inset)' } : undefined}
+          //
+          // A pill that stays visible floats over the page instead of taking
+          // layout space like the docked bar, so reserve its footprint (icons +
+          // padding + the wrapper's inset) on the edge it sits on or it covers
+          // whatever is at that edge - e.g. the Games tab's game switcher.
+          style={{
+            ...((isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
+              ? { paddingTop: 'var(--top-inset)' } : {}),
+            ...(pillReserve ? PILL_RESERVE_STYLE[sidebarPosition] : {}),
+          }}
         >
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
