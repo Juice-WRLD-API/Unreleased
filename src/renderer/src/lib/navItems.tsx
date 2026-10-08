@@ -40,6 +40,8 @@ export const NAV_ITEMS: NavItemDef[] = [
   { view: 'home', label: 'Home', icon: <House size={18} />, alwaysVisible: true },
   { view: 'api-tracker', label: 'Tracker', icon: <SearchCode size={18} /> },
   { view: 'api-files', label: 'Files', icon: <HardDrive size={18} /> },
+  // Local-files library - desktop app only (the web build has no local folders).
+  { view: 'library', label: 'Library', icon: <Library size={18} />, electronOnly: true },
   // `view` stays 'heardle' - it's the persisted id (and the /heardle route);
   // only the label is Games, so the tab can hold more than one game later.
   // Excluded from the mobile bar/More entirely (see useMobileNavTabs'
