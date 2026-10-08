@@ -208,7 +208,9 @@ export default function PublicProfileView(): JSX.Element {
   )
   const canEdit = useCanEdit()
   const startDm = useChatStore((s) => s.startDm)
-  const userId = Number(window.location.pathname.split('/u/')[1]?.split('/')[0] ?? '')
+  const pathId = window.location.pathname.split('/u/')[1]?.split('/')[0]
+  const storeId = useStore((s) => s.publicProfileId)
+  const userId = pathId ? Number(pathId) : (storeId ?? NaN)
 
   const [profile, setProfile] = useState<PublicProfile | null>(null)
   const [loading, setLoading] = useState(true)

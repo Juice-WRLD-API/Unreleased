@@ -652,6 +652,9 @@ interface AppActions {
   openOwnPublicProfile: () => void
   /** Opens any user's public profile by id. */
   openPublicProfile: (userId: number) => void
+  // Id of the profile being shown. The /u/<id> path can't carry it under
+  // file:// (packaged app), so the view falls back to this.
+  publicProfileId: number | null
   // Account ids of users whose chat messages are hidden from this account.
   mutedUserIds: number[]
   muteUser: (userId: number) => void
@@ -1614,8 +1617,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // e.g. navigating there from someone else's page) so the view re-reads
     // the new path.
     const path = `/u/${userId}`
-    if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
-    set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
+    try {
+      if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
+    } catch { /* file:// can't change path - publicProfileId carries the id */ }
+    set((s) => ({ publicProfileId: userId, activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
   muteUser: (userId) => {
     const { mutedUserIds } = get()
@@ -2372,6 +2377,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   playlists: [],
   showUserAuth: false,
   pendingPlaylistId: null,
+  publicProfileId: null,
   mutedUserIds: ls.get<number[]>('mutedUserIds') ?? [],
   // Mirrors chatStore's own local mutedServers/mutedConversations (that store
   // owns them; see chatStore's loadMuted/saveMuted). Empty until chatStore's
