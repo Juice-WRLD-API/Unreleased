@@ -256,6 +256,7 @@ function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
 
 export default function WordleView(): JSX.Element {
   const setActiveView = useStore((s) => s.setActiveView)
+  const previousView = useStore((s) => s.previousView)
   const {
     mode, setMode, settings, setSettings, poolLoading, poolError,
     answer, guesses, status,
@@ -284,7 +285,7 @@ export default function WordleView(): JSX.Element {
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(previousView && previousView !== 'wordle' ? previousView : 'wrld')}
           title="Back"
           className="p-2.5 rounded-xl text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
         >

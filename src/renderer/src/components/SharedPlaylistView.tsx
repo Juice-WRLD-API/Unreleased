@@ -100,7 +100,8 @@ function parseTracks(data: unknown): Track[] {
 }
 
 export default function SharedPlaylistView(): JSX.Element {
-  const { playTrack, playCollection, setActiveView } = useStorePick('playTrack', 'playCollection', 'setActiveView')
+  const { playTrack, playCollection, setActiveView, previousView } = useStorePick('playTrack', 'playCollection', 'setActiveView', 'previousView')
+  const backView = previousView && previousView !== 'shared-playlist' ? previousView : 'wrld'
   const shareId = window.location.pathname.split('/shared/')[1]?.split('/')[0] ?? ''
 
   const [tracks, setTracks] = useState<Track[]>([])
@@ -132,7 +133,7 @@ export default function SharedPlaylistView(): JSX.Element {
         <Music2 size={40} className="opacity-20" />
         <p className="text-sm">Shared playlist not found or expired.</p>
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(backView)}
           className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
@@ -145,7 +146,7 @@ export default function SharedPlaylistView(): JSX.Element {
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
       {/* Header */}
       <button
-        onClick={() => setActiveView('wrld')}
+        onClick={() => setActiveView(backView)}
         className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
       >
         <ChevronLeft size={15} /> Back to app

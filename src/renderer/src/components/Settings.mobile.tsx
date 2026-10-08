@@ -677,8 +677,10 @@ export default function Settings(): JSX.Element {
   // rendering a blank pane.
   useEffect(() => {
     if (!settingsTab) return
-    const known = SECTION_IDS.includes(settingsTab as Tab)
-    if (known) { setTab(settingsTab as Tab); setInSection(true) }
+    // Feedback used to be its own section; it now lives under About.
+    const target = (settingsTab as string) === 'feedback' ? 'about' : settingsTab
+    const known = SECTION_IDS.includes(target as Tab)
+    if (known) { setTab(target as Tab); setInSection(true) }
     setSettingsTab(null)
   }, [settingsTab, setSettingsTab])
 

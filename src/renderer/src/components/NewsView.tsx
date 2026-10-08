@@ -354,7 +354,7 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewsView(): JSX.Element {
-  const { setActiveView, account } = useStorePick('setActiveView', 'account')
+  const { setActiveView, previousView, account } = useStorePick('setActiveView', 'previousView', 'account')
   // News write access is its own role (is_news), separate from is_editor -
   // admins can post regardless. Only admins manage channels.
   const canPost = !!(account?.is_news || account?.is_administrator)
@@ -537,7 +537,7 @@ export default function NewsView(): JSX.Element {
       <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
         <div className="flex items-center gap-3 mb-4">
           <button
-            onClick={() => setActiveView('wrld')}
+            onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')}
             title="Back"
             aria-label="Back"
             className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"

@@ -3188,8 +3188,8 @@ function FeedsMediaTab() {
         <p className="text-sm text-text-secondary leading-relaxed">
           The player is a client-rendered SPA, so Discord, Twitter, Slack and iMessage crawlers, which don't run
           JS, would only ever see the generic site card. A small standalone Node service prerenders per-item
-          Open Graph tags (plus a Discord component embed) for these links. nginx sends only known bot
-          user-agents to it; regular visitors get the normal SPA. It only makes read-only, anonymous{' '}
+          Open Graph tags (plus a Discord component embed) for these links. Only known bot
+          user-agents are sent to it; regular visitors get the normal SPA. It only makes read-only, anonymous{' '}
           <Code>GET</Code> calls to this API, so no extra endpoints or auth are involved.
         </p>
         <Table
@@ -3226,16 +3226,14 @@ function FeedsMediaTab() {
           last 15 minutes can be rendered. At most 6 renders queue, and anything beyond that is refused. New
           renders are budgeted per hour, 120 overall and 20 per client IP, and cache hits and joining a render
           already in progress cost nothing. Audio downloads are capped at 60 MB. The cover image is fetched only
-          from HTTPS URLs on the API or site hosts, with no port or credentials, and redirects are refused. nginx
-          must pass <Code>X-Real-IP</Code> for the per-client limit, and the service only trusts that header from
-          loopback.
+          from HTTPS URLs on the API or site hosts, with no port or credentials, and redirects are refused.
         </p>
         <p className="text-xs text-text-muted font-semibold mt-2">Service environment variables:</p>
         <Table
           headers={['Var', 'Default', 'Purpose']}
           rows={[
-            [<Code>SOCIAL_PREVIEW_PORT</Code>, <Code>8788</Code>, "Listen port; must match nginx's proxy_pass"],
-            [<Code>SOCIAL_PREVIEW_HOST</Code>, <Code>127.0.0.1</Code>, 'Bind interface; keep it loopback so only nginx reaches it'],
+            [<Code>SOCIAL_PREVIEW_PORT</Code>, <Code>8788</Code>, 'Listen port'],
+            [<Code>SOCIAL_PREVIEW_HOST</Code>, <Code>127.0.0.1</Code>, 'Bind interface; keep it loopback'],
             [<Code>JWAPI_BASE</Code>, <Code>https://juicewrldapi.com/juicewrld</Code>, 'API base the service reads from'],
             [<Code>SITE_ORIGIN</Code>, <Code>https://player.juicewrldapi.com</Code>, 'Default origin for canonical and og:url links'],
             [<Code>SITE_HOSTS</Code>, <Code>player + beta hosts</Code>, 'Comma-separated hosts links may point back to; the request Host picks the origin, anything else falls back to SITE_ORIGIN'],
@@ -3244,12 +3242,6 @@ function FeedsMediaTab() {
             [<Code>SOCIAL_PREVIEW_VIDEO_RENDERS_PER_HOUR</Code>, <Code>120</Code>, 'Overall cap on new video renders per hour'],
           ]}
         />
-        <p className="text-sm text-text-secondary leading-relaxed mt-2">
-          nginx routes every bot-facing path through one location that hands bots to a named{' '}
-          <Code>@social_preview</Code> location. Define that named location in the same <Code>server</Code> block:{' '}
-          <Code>nginx -t</Code> won't catch a missing one, but every bot request then 500s. Test with a spoofed
-          bot user-agent, e.g. <Code>curl -A "Discordbot/2.0" https://player.juicewrldapi.com/track/1</Code>.
-        </p>
       </Section>
     </div>
   )
@@ -5127,329 +5119,6 @@ Node -> Browser:  { "t": "done", "size": 8432100 }`}</Pre>
   )
 }
 
-function NginxTab() {
-  const { Code, Section } = usePrimitives()
-  return (
-    <div className="space-y-6">
-      <Section title={"nginx: Social Preview Routing"}>
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">The player at <Code>{"player.juicewrldapi.com"}</Code> is a client-rendered SPA. Link-unfurling bots (Discordbot, Twitterbot, Slackbot, iMessage, ...) don&apos;t run JS, so without help they only ever see the generic site card from <Code>{"index.html"}</Code>.</p>
-          <p className="text-sm text-text-secondary leading-relaxed"><Code>{"server/social-preview.mjs"}</Code> is a small Node service that prerenders per-item Open Graph tags plus a Discord component embed. nginx sends <strong className="text-text-primary">only known bot user-agents</strong> on previewable paths to it. Real browsers hitting the same URLs keep getting the normal SPA build.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">The service only makes read-only, anonymous <Code>{"GET"}</Code> calls to the API. The one exception is <Code>{"/unfurl"}</Code> (below), which fetches pages from arbitrary sites.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">It also serves the chat client&apos;s link previews: <Code>{"GET /unfurl?url=<link>"}</Code> returns a linked page&apos;s title, description and image as JSON. See Chat link previews.</p>
-        </div>
-      </Section>
-
-      <Section title={"Routes"} defaultOpen={false}>
-        <div className="space-y-3">
-          <Table
-            headers={["Link", "Card", "API source", "Bot-gated"]}
-            rows={[
-              [<><Code>{"/track/{id}"}</Code></>, "Song: cover art, era, credits, AKAs, lyric hook, playable video", <><Code>{"/songs/{id}/"}</Code></>, "yes"],
-              [<><Code>{"/track/{id}/video.mp4"}</Code></>, "Playable embed video (cover + audio)", "Song audio and cover art", <><strong className="text-text-primary">no</strong></>],
-              [<><Code>{"/shared/{share_id}"}</Code></>, "Anonymous shared playlist", <><Code>{"/playlists/shared/{id}/"}</Code></>, "yes"],
-              [<><Code>{"/playlists?id={id}&view=shared"}</Code></>, "Public library playlist", <><Code>{"/library/playlists/public/{id}/"}</Code></>, "yes"],
-              [<><Code>{"/news/{id}"}</Code></>, "News post: body as Discord markdown, images in a gallery", <><Code>{"/news/{id}/"}</Code></>, "yes"],
-              [<><Code>{"/u/{id}"}</Code></>, "Profile: badges, bio, listening stats, public playlists", <><Code>{"/accounts/profile/{id}/"}</Code>, <Code>{".../np/"}</Code></>, "yes"],
-              [<><Code>{"/u/{id}/avatar.{jpg|png|webp|gif}"}</Code></>, "Decoded base64 avatar as a real image", <><Code>{"/accounts/profile/{id}/"}</Code></>, <><strong className="text-text-primary">no</strong></>],
-              [<><Code>{"/wrld"}</Code></>, "999 FM: live status, now playing, up next, listeners", <><Code>{"/radio/live/"}</Code></>, "yes"],
-              [<><Code>{"/statistics"}</Code></>, "Top songs, top eras, total plays", <><Code>{"/stats/"}</Code>, <Code>{"/plays/stats/"}</Code></>, "yes"],
-              [<><Code>{"/"}</Code>, <Code>{"/home"}</Code>, <Code>{"/playlists"}</Code></>, "Site card: catalog stats, latest news post", <><Code>{"/stats/"}</Code>, <Code>{"/eras/"}</Code>, <Code>{"/news/"}</Code></>, "yes"],
-              [<><Code>{"/unfurl?url={link}"}</Code></>, "JSON preview of any public page, for chat link cards", "The linked site itself", <><strong className="text-text-primary">no</strong></>],
-            ]}
-          />
-          <p className="text-sm text-text-secondary leading-relaxed">The avatar and video routes aren&apos;t bot-gated because Discord&apos;s media proxy fetches them, and the SPA has no such paths. <Code>{"/unfurl"}</Code> isn&apos;t bot-gated because real browsers call it.</p>
-        </div>
-      </Section>
-
-      <Section title={"Chat link previews (/unfurl)"} defaultOpen={false}>
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">The chat client shows a card (site name, title, description, thumbnail) under the first link in a channel message. A browser can&apos;t read another site&apos;s <Code>{"og:"}</Code> tags (CORS), and fetching from the viewer&apos;s machine would tell that site who is looking, so the SPA asks this endpoint instead. It&apos;s same-origin, so no CORS config is needed.</p>
-          <Pre>{`GET /unfurl?url=https%3A%2F%2Fexample.com%2Fpost
-200 { "url", "title", "description"?, "image"?, "siteName" }
-404 {}   nothing to show (bad or blocked URL, not HTML, no title, fetch failed)
-429 {}   caller over budget; the client retries on the next render`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">Successful responses carry <Code>{"Cache-Control: public, max-age=3600"}</Code>, and 404s <Code>{"max-age=600"}</Code>.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Because the URL is chosen by any chat member, the fetch is fenced in against SSRF:</p>
-          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
-            <li><Code>{"http"}</Code>/<Code>{"https"}</Code> only, default ports only (80/443), no credentials in the URL.</li>
-            <li>Every address a hostname resolves to must be public. The check runs in the request&apos;s <Code>{"lookup"}</Code>, so it applies to the address actually connected to, which defeats DNS rebinding. One private answer among several rejects the lot. Loopback, RFC 1918, link-local (including cloud metadata <Code>{"169.254.169.254"}</Code>), CGNAT, multicast, IPv6 ULA/link-local, NAT64 and 6to4 ranges are all blocked, and IPv4-mapped IPv6 is treated as the IPv4 it wraps.</li>
-            <li>Redirects are followed by hand, up to 4, and each hop is re-checked.</li>
-            <li>Only <Code>{"text/html"}</Code> and <Code>{"application/xhtml+xml"}</Code> are read. The read stops at <Code>{"</head>"}</Code> or 1.5 MB (YouTube buries its tags about 710 KB in), with a 6 s timeout.</li>
-            <li>Only the parsed fields come back, never the fetched body. Image URLs must be <Code>{"https"}</Code>.</li>
-            <li>Links to the site&apos;s own hosts (<Code>{"SITE_HOSTS"}</Code>) are refused. Those pages only carry generic tags.</li>
-          </ul>
-          <p className="text-sm text-text-secondary leading-relaxed">Budgets, per process:</p>
-          <Table
-            headers={["Limit", "Value"]}
-            rows={[
-              ["Uncached fetches per client IP", "30 per minute"],
-              ["Concurrent fetches", "8"],
-              ["Cache", "1000 entries in memory, 1 h for hits, 10 min for misses"],
-            ]}
-          />
-          <p className="text-sm text-text-secondary leading-relaxed">The per-client budget keys on <Code>{"X-Real-IP"}</Code>, which is only trusted from loopback. <strong className="text-text-primary">The nginx <Code>{"/unfurl"}</Code> block must set it</strong>, otherwise every user shares one budget under <Code>{"127.0.0.1"}</Code>. The endpoint doesn&apos;t check who is calling.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Privacy: DMs never request a preview. The client only asks for plaintext channel messages, since the service would otherwise see the URL of an end-to-end encrypted message. Thumbnails load straight from the linked site (with <Code>{"Referrer-Policy: no-referrer"}</Code>), so that site&apos;s image host can see the viewer&apos;s IP. Proxying images through the service would close that gap.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Set <Code>{"SOCIAL_PREVIEW_UNFURL=0"}</Code> to turn the endpoint off. It then answers 404 to everything and the chat shows no cards.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">For local dev, <Code>{"npm run social-preview"}</Code> alongside <Code>{"npm run dev"}</Code> works: <Code>{"vite.config.ts"}</Code> proxies <Code>{"/unfurl"}</Code> to port 8788.</p>
-        </div>
-      </Section>
-
-      <Section title={"Config"} defaultOpen={false}>
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">This isn&apos;t a drop-in file. Merge the two blocks into your existing config.</p>
-          <p className="text-sm font-medium text-text-primary mt-2">1. <Code>{"http {}"}</Code> block (once)</p>
-          <Pre>{`map $http_user_agent $is_social_bot {
-    default 0;
-    "~*discordbot|twitterbot|facebookexternalhit|slackbot|telegrambot|whatsapp|linkedinbot|skypeuripreview|redditbot|vkshare|applebot|iframely|embedly|pinterest|discord" 1;
-}`}</Pre>
-          <p className="text-sm font-medium text-text-primary mt-2">2. <Code>{"server {}"}</Code> block for <Code>{"player.juicewrldapi.com"}</Code></p>
-          <p className="text-sm text-text-secondary leading-relaxed">Place these <strong className="text-text-primary">above</strong> the SPA fallback (<Code>{"location / { try_files $uri /index.html; }"}</Code>). Regex locations match in file order, so the avatar and video blocks must come before the catch-all preview block.</p>
-          <Pre>{`# Profile avatars - not bot-gated.
-location ~ ^/u/\\d+/avatar\\.(jpg|png|webp|gif)$ {
-    proxy_pass http://127.0.0.1:8788;
-    proxy_set_header Host $host;
-}
-
-# Playable track videos - not bot-gated. First request for a song can wait
-# on the transcode. X-Real-IP feeds the per-client render budget.
-location ~ ^/track/\\d+/video\\.mp4$ {
-    proxy_pass http://127.0.0.1:8788;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_read_timeout 180s;
-}
-
-# Chat link previews - not bot-gated, browsers call it. X-Real-IP feeds the
-# per-client fetch budget. proxy_pass without a URI keeps the query string.
-location = /unfurl {
-    proxy_pass http://127.0.0.1:8788;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_read_timeout 15s;
-}
-
-# Every previewable page. Bots go to the service, everyone else gets the SPA.
-location ~ ^/((track|shared|news|u)/|(home|playlists|statistics|wrld)/?$|$) {
-    error_page 418 = @social_preview;
-    recursive_error_pages on;
-    if ($is_social_bot) {
-        return 418;
-    }
-    try_files $uri /index.html;
-}
-
-location @social_preview {
-    proxy_pass http://127.0.0.1:8788;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">The <Code>{"error_page 418"}</Code> + named location pattern is the standard way to proxy conditionally without wrapping <Code>{"proxy_pass"}</Code> in <Code>{"if"}</Code>. The <Code>{"@social_preview"}</Code> block must exist in the <strong className="text-text-primary">same</strong> <Code>{"server {}"}</Code>. Without it <Code>{"nginx -t"}</Code> still passes, but every bot request 500s with &quot;could not find named location&quot;.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">nginx locations never see the query string, so <Code>{"/playlists?id=...&view=shared"}</Code> matches the <Code>{"playlists"}</Code> entry and the service reads the query itself.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Apply:</p>
-          <Pre>{`sudo nginx -t && sudo systemctl reload nginx`}</Pre>
-        </div>
-      </Section>
-
-      <Section title={"Adding a new previewable page"} defaultOpen={false}>
-        <div className="space-y-3">
-          <ol className="space-y-1.5 text-sm text-text-secondary list-decimal pl-5">
-            <li>Add a <Code>{"render*()"}</Code> function and a route in <Code>{"handle()"}</Code> in <Code>{"server/social-preview.mjs"}</Code>.</li>
-            <li>Add the path to the preview <Code>{"location"}</Code> regex above (exact pages go in the <Code>{"(home|playlists|statistics|wrld)"}</Code> group, prefixes in <Code>{"(track|shared|news|u)"}</Code>).</li>
-            <li>Reload nginx.</li>
-          </ol>
-        </div>
-      </Section>
-
-      <Section title={"Live beta config (beta.juicewrldapi.com)"} defaultOpen={false}>
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">The deployed config doesn&apos;t use the single catch-all regex from the section above. It routes bots two ways:</p>
-          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
-            <li><strong className="text-text-primary">Prefix routes</strong> (<Code>{"/track/"}</Code>, <Code>{"/shared/"}</Code>, <Code>{"/news/"}</Code>, <Code>{"/u/"}</Code>): a server-level <Code>{"if ($social_preview)"}</Code> rewrites to the internal <Code>{"/__social_preview/"}</Code> location. <Code>{"$social_preview"}</Code> is a <Code>{"map"}</Code> in the <Code>{"http {}"}</Code> block (not shown here) that combines the bot UA check with the path.</li>
-            <li><strong className="text-text-primary">Exact pages</strong> (<Code>{"/"}</Code>, <Code>{"/home"}</Code>, <Code>{"/playlists"}</Code>, <Code>{"/statistics"}</Code>, <Code>{"/wrld"}</Code>): one <Code>{"location"}</Code> each, using the <Code>{"418"}</Code> to <Code>{"@social_preview"}</Code> pattern.</li>
-          </ul>
-          <p className="text-sm text-text-secondary leading-relaxed">A new exact page needs its own <Code>{"location = /path"}</Code> block. A new prefix route goes in the <Code>{"$social_preview"}</Code> map.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Changes for the 999 FM embed:</p>
-          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
-            <li>Added <Code>{"location = /wrld"}</Code>.</li>
-            <li>Escaped the <Code>{"."}</Code> in the avatar regex (<Code>{"avatar\\."}</Code>). It used to match any character there.</li>
-          </ul>
-          <Pre>{`server {
-        listen 80;
-        server_name beta.juicewrldapi.com;
-
-        root E:/v1.1.0/Experimental/Unreleased/dist;
-        index index.html;
-
-        location ~ ^/juicewrld/ws/ {
-            proxy_pass http://jwa_rt;
-
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-
-            proxy_connect_timeout 3600s;
-            proxy_send_timeout 3600s;
-            proxy_read_timeout 3600s;
-        }
-
-        location ~ ^/u/\\d+/avatar\\.(jpg|png|webp|gif)$ {
-            proxy_pass http://127.0.0.1:8788;
-            proxy_set_header Host $host;
-        }
-
-        location ~ ^/track/\\d+/video\\.mp4$ {
-            proxy_pass http://127.0.0.1:8788;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_read_timeout 180s;
-        }
-
-        # Chat link previews (GET /unfurl?url=...). Not bot-gated. X-Real-IP
-        # feeds the per-client fetch budget.
-        location = /unfurl {
-            proxy_pass http://127.0.0.1:8788;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_read_timeout 15s;
-        }
-
-        location = /playlists {
-            error_page 418 = @social_preview;
-            recursive_error_pages on;
-            if ($is_social_bot) { return 418; }
-            try_files $uri /index.html;
-        }
-
-        location ~ ^/(home)?$ {
-            error_page 418 = @social_preview;
-            recursive_error_pages on;
-            if ($is_social_bot) { return 418; }
-            try_files $uri /index.html;
-        }
-
-        location = /statistics {
-            error_page 418 = @social_preview;
-            recursive_error_pages on;
-            if ($is_social_bot) { return 418; }
-            try_files $uri /index.html;
-        }
-
-        # 999 FM radio card
-        location = /wrld {
-            error_page 418 = @social_preview;
-            recursive_error_pages on;
-            if ($is_social_bot) { return 418; }
-            try_files $uri /index.html;
-        }
-
-        location @social_preview {
-            proxy_pass http://127.0.0.1:8788;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
-
-        if ($social_preview) {
-            rewrite ^ /__social_preview$uri last;
-        }
-
-        location ^~ /__social_preview/ {
-            internal;
-            rewrite ^/__social_preview(/.*)$ $1 break;
-            proxy_pass http://127.0.0.1:8788;
-            proxy_set_header Host $host;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_connect_timeout 3s;
-            proxy_read_timeout 10s;
-            add_header Vary User-Agent always;
-        }
-
-
-        location /juicewrld/heardle/ {
-            proxy_pass http://jwa_api;
-
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
-
-            proxy_connect_timeout 120s;
-            proxy_send_timeout 120s;
-            proxy_read_timeout 120s;
-        }
-
-        location / {
-            try_files $uri $uri/ /index.html;
-        }
-
-        location /assets/ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-
-        location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|webmanifest)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">Things to know about this config:</p>
-          <ul className="space-y-1.5 text-sm text-text-secondary list-disc pl-5">
-            <li><strong className="text-text-primary">The <Code>{"/__social_preview/"}</Code> path doesn&apos;t pass <Code>{"X-Real-IP"}</Code></strong>, so bot hits on <Code>{"/track/:id"}</Code> reach the service without the client IP. The page render doesn&apos;t need it. The video render budget does, and it&apos;s charged on the <Code>{"video.mp4"}</Code> request, which does pass it.</li>
-            <li><strong className="text-text-primary"><Code>{"proxy_read_timeout 10s"}</Code></strong> on <Code>{"/__social_preview/"}</Code> is fine for pages. Each API fetch inside the service times out at 5s.</li>
-            <li><strong className="text-text-primary">Exact matches only.</strong> <Code>{"/wrld/"}</Code> and <Code>{"/statistics/"}</Code> with a trailing slash fall through to the SPA and get the generic card. The service accepts both forms, so widen a location (for example <Code>{"location ~ ^/wrld/?$"}</Code>) if that matters.</li>
-          </ul>
-        </div>
-      </Section>
-
-      <Section title={"Service"} defaultOpen={false}>
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">Runs as systemd (<Code>{"server/social-preview.service.example"}</Code>), listening on loopback only.</p>
-          <div className="border-l-2 border-[var(--border)] pl-3 text-xs text-text-muted leading-relaxed">The live beta box runs the service on Windows (see the config below), so the systemd unit is only the Linux reference. There, ffmpeg comes from <Code>{"PATH"}</Code> (<Code>{"ffmpeg.exe"}</Code>).</div>
-          <Table
-            headers={["Env", "Default", "Notes"]}
-            rows={[
-              [<><Code>{"SOCIAL_PREVIEW_PORT"}</Code></>, <><Code>{"8788"}</Code></>, <>Must match the <Code>{"proxy_pass"}</Code> port</>],
-              [<><Code>{"SOCIAL_PREVIEW_HOST"}</Code></>, <><Code>{"127.0.0.1"}</Code></>, <>Only nginx should reach it. <Code>{"X-Real-IP"}</Code> is only trusted from loopback</>],
-              [<><Code>{"JWAPI_BASE"}</Code></>, <><Code>{"https://juicewrldapi.com/juicewrld"}</Code></>, ""],
-              [<><Code>{"SITE_ORIGIN"}</Code></>, <><Code>{"https://player.juicewrldapi.com"}</Code></>, "Fallback origin for links in embeds"],
-              [<><Code>{"SITE_HOSTS"}</Code></>, <>origin host + <Code>{"beta.juicewrldapi.com"}</Code></>, <>Hosts whose <Code>{"Host"}</Code> header picks the embed&apos;s link origin</>],
-              [<><Code>{"SOCIAL_PREVIEW_CACHE"}</Code></>, <><Code>{"$TMPDIR/social-preview-video"}</Code></>, "Track video cache dir"],
-              [<><Code>{"SOCIAL_PREVIEW_VIDEO"}</Code></>, "on", <><Code>{"0"}</Code> disables playable track embeds</>],
-              [<><Code>{"SOCIAL_PREVIEW_VIDEO_RENDERS_PER_HOUR"}</Code></>, <><Code>{"120"}</Code></>, "Global new-render budget"],
-              [<><Code>{"SOCIAL_PREVIEW_UNFURL"}</Code></>, "on", <><Code>{"0"}</Code> disables the <Code>{"/unfurl"}</Code> chat link-preview endpoint</>],
-            ]}
-          />
-          <p className="text-sm text-text-secondary leading-relaxed">Playable track videos need ffmpeg at <Code>{"/usr/bin/ffmpeg"}</Code> (<Code>{"apt install ffmpeg"}</Code>). Without it, track embeds fall back to a thumbnail.</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Responses carry <Code>{"Vary: User-Agent"}</Code> because nginx serves a different body (the SPA shell) for the same URL to non-bots.</p>
-        </div>
-      </Section>
-
-      <Section title={"Testing"} defaultOpen={false}>
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary leading-relaxed">Fake a bot user-agent:</p>
-          <Pre>{`curl -s -A Discordbot https://player.juicewrldapi.com/wrld | grep -E 'og:|component-embed'`}</Pre>
-          <p className="text-sm text-text-secondary leading-relaxed">A normal UA should return the SPA&apos;s <Code>{"index.html"}</Code>:</p>
-          <Pre>{`curl -s https://player.juicewrldapi.com/wrld | grep -c 'component-embed'`}</Pre>
-        </div>
-      </Section>
-
-    </div>
-  )
-}
-
 function TierListsTab() {
   const { Code, Section } = usePrimitives()
   return (
@@ -5792,7 +5461,6 @@ export const TABS = [
   { id: 'feeds',     label: 'Feeds & Media' },
   { id: 'patterns',  label: 'Code Patterns' },
   { id: 'cdn',       label: 'Distributed CDN' },
-  { id: 'nginx',     label: 'nginx: Social Preview' },
   { id: 'tierlists', label: 'Tier Lists' },
   { id: 'sockets',   label: 'Realtime Sockets' },
 ] as const
@@ -5816,7 +5484,6 @@ const TAB_CONTENT: Record<TabId, () => JSX.Element> = {
   feeds:     FeedsMediaTab,
   patterns:  FetchPatternTab,
   cdn:       CdnTab,
-  nginx:     NginxTab,
   tierlists: TierListsTab,
   sockets:   SocketsTab,
 }

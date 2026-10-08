@@ -203,7 +203,7 @@ function Modal({ title, onClose, children, wide }: {
 }
 
 export default function TierlistView(): JSX.Element {
-  const { setActiveView } = useStorePick('setActiveView')
+  const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
 
   const data = useTierlistData()
   const {
@@ -270,7 +270,7 @@ export default function TierlistView(): JSX.Element {
 
       <div className="absolute top-4 left-4 z-20">
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(previousView && previousView !== 'tierlist' ? previousView : 'wrld')}
           title="Back"
           className="p-2.5 rounded-xl text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
         >

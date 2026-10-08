@@ -384,8 +384,8 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
 // ─── View ─────────────────────────────────────────────────────────────────────
 
 export default function HeardleView(): JSX.Element {
-  const { setActiveView, playTrack, setIsPlaying, isPlaying, volume, setVolume, account } = useStorePick(
-    'setActiveView', 'playTrack', 'setIsPlaying', 'isPlaying', 'volume', 'setVolume', 'account')
+  const { setActiveView, playTrack, setIsPlaying, isPlaying, volume, setVolume, account, previousView } = useStorePick(
+    'setActiveView', 'playTrack', 'setIsPlaying', 'isPlaying', 'volume', 'setVolume', 'account', 'previousView')
 
   const [mode, setMode] = useState<Mode>(() => loadGameMode())
   const [settings, setSettings] = useState<HeardleSettings>(() => loadSettings())
@@ -732,7 +732,7 @@ export default function HeardleView(): JSX.Element {
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(previousView && previousView !== 'heardle' ? previousView : 'wrld')}
           title="Back"
           className="p-2.5 rounded-xl text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
         >

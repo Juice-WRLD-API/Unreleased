@@ -200,10 +200,10 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 
 export default function PublicProfileView(): JSX.Element {
   const {
-    playTrack, playCollection, playNext, addToQueue, setActiveView, account, playlistFolders, setPendingPlaylistId,
+    playTrack, playCollection, playNext, addToQueue, setActiveView, previousView, account, playlistFolders, setPendingPlaylistId,
     mutedUserIds, toggleMuteUser, playlists: ownPlaylists,
   } = useStorePick(
-    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'account', 'playlistFolders', 'setPendingPlaylistId',
+    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'setActiveView', 'previousView', 'account', 'playlistFolders', 'setPendingPlaylistId',
     'mutedUserIds', 'toggleMuteUser', 'playlists',
   )
   const canEdit = useCanEdit()
@@ -455,7 +455,7 @@ export default function PublicProfileView(): JSX.Element {
         <User size={40} className="opacity-20" />
         <p className="text-sm">Profile not found.</p>
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
           className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
@@ -539,7 +539,7 @@ export default function PublicProfileView(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
       <button
-        onClick={() => setActiveView('wrld')}
+        onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
         className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
       >
         <ChevronLeft size={15} /> Back to app
