@@ -31,7 +31,6 @@ import { useBackToClose } from '../hooks/useBackToClose'
 import { Sheet } from './mobile/Sheet'
 import { useDragReorder } from './mobile/useDragReorder'
 import type { ViewType } from '../types'
-import ReportForm from './ReportForm'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import EraCoversSection from './EraCoversSection'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
@@ -112,9 +111,9 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
   )
 }
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'feedback' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'about'
 
-const SECTION_IDS: Tab[] = ['account', 'appearance', 'preferences', 'playback', 'feedback', 'about']
+const SECTION_IDS: Tab[] = ['account', 'appearance', 'preferences', 'playback', 'about']
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. Only lists rows that actually
@@ -156,8 +155,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'playback', label: 'Last.fm scrobbling' },
   { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Feedback / About
-  { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
-  { tab: 'feedback', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
+  { tab: 'about', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
@@ -654,8 +653,7 @@ export default function Settings(): JSX.Element {
     { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, lyrics' },
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal, color: '#0d9488', sub: 'Navigation, home screen, eras' },
     { id: 'playback', label: 'Playback', icon: Volume2, color: '#2563eb', sub: 'Output, crossfade, lyrics' },
-    { id: 'feedback', label: 'Feedback', icon: MessageCircle, color: '#db2777', sub: 'Report a problem or idea' },
-    { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, legal' },
+    { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, feedback, legal' },
   ]
 
   const openSection = (id: Tab): void => {
@@ -1713,27 +1711,6 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
-            {/* ── Feedback ── */}
-            {!settingsQueryTrimmed && tab === 'feedback' && (
-              <div>
-                <p className="text-text-muted text-xs mb-4 leading-relaxed">
-                  Found a bug or have an idea? Let us know. To report a problem with a
-                  specific song's info or lyrics, open that song and choose “Report”.
-                </p>
-                <SettingsCard>
-                  <Row
-                    icon={Bug}
-                    iconColor="#ef4444"
-                    label="Auto-report app errors"
-                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
-                  >
-                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
-                  </Row>
-                </SettingsCard>
-                <ReportForm mode={{ kind: 'feedback' }} />
-              </div>
-            )}
-
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
@@ -1764,6 +1741,18 @@ export default function Settings(): JSX.Element {
                   <LinkRow icon={Globe} iconColor="#0891b2" label="API" href="https://juicewrldapi.com" />
                   <ActionRow icon={BookOpen} iconColor="#6366f1" label="API Docs" onClick={() => openMainView('docs')} />
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
+                </SettingsCard>
+
+                <SettingsCard title="Feedback">
+                  <ActionRow icon={MessageCircle} iconColor="#db2777" label="Send feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
+                  <Row
+                    icon={Bug}
+                    iconColor="#ef4444"
+                    label="Auto-report app errors"
+                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                  >
+                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
                 </SettingsCard>
 
                 <SettingsCard title="API servers">

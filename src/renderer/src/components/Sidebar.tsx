@@ -19,7 +19,7 @@ const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'uploads', 'showUploadManager', 'setShowUploadManager')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'uploads', 'showUploadManager', 'setShowUploadManager')
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(LS_COLLAPSED) === 'true'
@@ -82,12 +82,14 @@ export default function Sidebar(): JSX.Element {
 
   // Right-click on a nav tab pops a single "Hide" action - a faster path to
   // the same navVisibility toggle Settings → Appearance → Menu items exposes.
-  const [navMenu, setNavMenu] = useState<{ view: ViewType; label: string; x: number; y: number } | null>(null)
-  const openNavMenu = (view: ViewType, label: string) => (e: React.MouseEvent): void => {
+  const [navMenu, setNavMenu] = useState<{ label: string; hide: () => void; x: number; y: number } | null>(null)
+  const openHideMenu = (label: string, hide: () => void) => (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    setNavMenu({ view, label, x: e.clientX, y: e.clientY })
+    setNavMenu({ label, hide, x: e.clientX, y: e.clientY })
   }
+  const openNavMenu = (view: ViewType, label: string) => openHideMenu(label, () => setNavItemVisible(view, false))
+  const openControlMenu = (id: NavControlId, label: string) => openHideMenu(label, () => setNavControlVisible(id, false))
   const navContextMenu = navMenu && createPortal(
     <>
       <div className="fixed inset-0 z-[60]" onClick={() => setNavMenu(null)} onContextMenu={(e) => { e.preventDefault(); setNavMenu(null) }} />
@@ -99,7 +101,7 @@ export default function Sidebar(): JSX.Element {
         }}
       >
         <button
-          onClick={() => { setNavItemVisible(navMenu.view, false); setNavMenu(null) }}
+          onClick={() => { navMenu.hide(); setNavMenu(null) }}
           className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
         >
           <EyeOff size={14} className="text-text-muted" />
@@ -181,7 +183,7 @@ export default function Sidebar(): JSX.Element {
         )
       case 'uploads':
         return (
-          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
+          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
             <span className={`${iconWrap} relative`}>
               <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
               {activeUploadCount > 0 && (
@@ -195,14 +197,14 @@ export default function Sidebar(): JSX.Element {
         )
       case 'diagnostics':
         return (
-          <button key="diagnostics" onClick={() => setShowDiagnostics(true)} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
+          <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
             <span className={iconWrap}><Info size={18} /></span>
             <span aria-hidden={collapsed} className={labelCls}>Diagnostics</span>
           </button>
         )
       case 'download':
         return (
-          <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} title={collapsed ? 'Download desktop app' : undefined} className={rowCls}>
+          <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} onContextMenu={openControlMenu('download', 'Download app')} title={collapsed ? 'Download desktop app' : undefined} className={rowCls}>
             <span className={iconWrap}><Download size={18} /></span>
             <span aria-hidden={collapsed} className={labelCls}>Download app</span>
           </button>
@@ -233,7 +235,7 @@ export default function Sidebar(): JSX.Element {
         )
       case 'uploads':
         return (
-          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} title="Transfers" className={`${barIconBtn} relative`}>
+          <button key="uploads" onClick={() => setShowUploadManager(!showUploadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title="Transfers" className={`${barIconBtn} relative`}>
             <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
             {activeUploadCount > 0 && (
               <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
@@ -243,9 +245,9 @@ export default function Sidebar(): JSX.Element {
           </button>
         )
       case 'diagnostics':
-        return <button key="diagnostics" onClick={() => setShowDiagnostics(true)} title="Diagnostics" className={barIconBtn}><Info size={18} /></button>
+        return <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title="Diagnostics" className={barIconBtn}><Info size={18} /></button>
       case 'download':
-        return <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} title="Download desktop app" className={barIconBtn}><Download size={18} /></button>
+        return <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} onContextMenu={openControlMenu('download', 'Download app')} title="Download desktop app" className={barIconBtn}><Download size={18} /></button>
       case 'settings':
         return <button key="settings" onClick={() => openSettings()} {...warmOnIntent('settings')} title="Settings" className={barIconBtn}><Settings size={18} /></button>
     }
@@ -259,15 +261,24 @@ export default function Sidebar(): JSX.Element {
       <aside
         className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
-        {items.map(({ icon, label, view }) => (
+        {items.map(({ icon, label, view }, idx) => (
           <button
             key={view}
+            draggable
+            onDragStart={(e) => { setNavDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setNavOverIdx(idx) }}
+            onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
+            onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
             onClick={() => navClick(view)}
             {...warmOnIntent(view)}
             onContextMenu={openNavMenu(view, label)}
             title={label}
             aria-label={label}
-            className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-full transition-colors ${
+            className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-full transition-colors cursor-grab active:cursor-grabbing ${
+              navDragIdx === idx ? 'opacity-40' : ''
+            } ${
+              navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-inset ring-accent' : ''
+            } ${
               activeTab === view
                 ? 'bg-accent/20 text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'

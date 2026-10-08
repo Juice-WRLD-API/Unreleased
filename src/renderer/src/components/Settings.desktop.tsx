@@ -29,7 +29,6 @@ import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import type { ViewType } from '../types'
-import ReportForm from './ReportForm'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import { useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
@@ -69,7 +68,7 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'feedback' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `devOnly` mirrors the same gate
@@ -122,8 +121,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
   // Feedback / About
-  { tab: 'feedback', label: 'Feedback', sub: 'Report a bug or share an idea' },
-  { tab: 'feedback', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
+  { tab: 'about', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
@@ -566,7 +565,6 @@ export default function Settings(): JSX.Element {
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-    { id: 'feedback', label: 'Feedback', icon: MessageCircle },
     { id: 'about', label: 'About', icon: Info },
   ]
 
@@ -592,7 +590,8 @@ export default function Settings(): JSX.Element {
   // the user last was rather than snapping back here.
   useEffect(() => {
     if (!settingsTab) return
-    setTab(settingsTab as Tab)
+    // Feedback used to be its own tab; it now lives under About.
+    setTab(((settingsTab as string) === 'feedback' ? 'about' : settingsTab) as Tab)
     setSettingsTab(null)
   }, [settingsTab, setSettingsTab])
 
@@ -1843,30 +1842,6 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
-            {/* ── Feedback ── */}
-            {!settingsQueryTrimmed && tab === 'feedback' && (
-              <div>
-                <h3 className="text-text-primary text-lg font-bold mb-1">Feedback</h3>
-                <p className="text-text-muted text-xs mb-4 leading-relaxed max-w-md">
-                  Found a bug or have an idea? Let us know. To report a problem with a
-                  specific song's info or lyrics, open that song and choose “Report”.
-                </p>
-                <div className="max-w-md mb-2">
-                  <Row
-                    icon={Bug}
-                    iconColor="#ef4444"
-                    label="Auto-report app errors"
-                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
-                  >
-                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
-                  </Row>
-                </div>
-                <div className="max-w-md">
-                  <ReportForm mode={{ kind: 'feedback' }} />
-                </div>
-              </div>
-            )}
-
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
@@ -1919,6 +1894,24 @@ export default function Settings(): JSX.Element {
                     <Globe size={13} />
                     API
                   </a>
+                </div>
+
+                <div className="mb-4 rounded-xl border border-[var(--border)] p-3 max-w-md">
+                  <button
+                    onClick={() => useStore.getState().openReport({ kind: 'feedback' })}
+                    className="flex items-center gap-2 w-full px-3 py-2 rounded-lg bg-accent/10 hover:bg-accent/15 border border-accent/25 text-accent text-sm font-medium transition-colors mb-2"
+                  >
+                    <MessageCircle size={15} />
+                    Send feedback
+                  </button>
+                  <Row
+                    icon={Bug}
+                    iconColor="#ef4444"
+                    label="Auto-report app errors"
+                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                  >
+                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
                 </div>
 
                 <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
