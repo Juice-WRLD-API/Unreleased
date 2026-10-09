@@ -10,6 +10,7 @@ import { hasChatAccess } from '../lib/chatAccess'
 import type { PlaylistContextMenuState } from './PlaylistContextMenu'
 import { lazyOverlay } from '../lib/lazyView'
 import ContextMenu from './ContextMenu'
+import NavPillGrip from './NavPillGrip'
 import { accountDisplayName, initial } from '../lib/format'
 
 // Right-click only - fetched on first open rather than with the app shell.
@@ -250,6 +251,7 @@ export default function Sidebar(): JSX.Element {
       <aside
         className={`app-sidebar pointer-events-auto hidden md:flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
+        <NavPillGrip horizontal={horizontal} />
         {items.map(({ icon, label, view }, idx) => (
           <button
             key={view}
