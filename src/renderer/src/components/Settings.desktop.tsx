@@ -68,7 +68,7 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'developer' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `devOnly` mirrors the same gate
@@ -120,6 +120,9 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Shortcuts
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
+  // Developer
+  { tab: 'developer', label: 'API servers', sub: 'Main API and route rules', devOnly: true },
+
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
@@ -565,8 +568,12 @@ export default function Settings(): JSX.Element {
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+    ...(developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench }] : []),
     { id: 'about', label: 'About', icon: Info },
   ]
+  useEffect(() => {
+    if (tab === 'developer' && !developerMode) setTab('preferences')
+  }, [tab, developerMode])
 
   // ── Settings search - a flat filter over SETTINGS_SEARCH_INDEX rather than
   // per-tab content, since matches can live on a tab you're not currently
@@ -1311,6 +1318,14 @@ export default function Settings(): JSX.Element {
                   <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
                 </Row>
                 <Row
+                  icon={Wrench}
+                  iconColor="#6b7280"
+                  label="Developer options"
+                  sub="Shows a Developer tab with API server settings"
+                >
+                  <Toggle on={developerMode} onClick={() => setDeveloperMode(!developerMode)} />
+                </Row>
+                <Row
                   icon={FlaskConical}
                   iconColor="#f59e0b"
                   label="Sandbox"
@@ -1380,9 +1395,9 @@ export default function Settings(): JSX.Element {
                   label="Auto-hide navigation"
                   sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
                 >
-                  <Toggle on={autoHideNav} onClick={() => setAutoHideNav(!autoHideNav)} />
+                  <Toggle on={autoHideNav || navStyle === 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
                 </Row>
-                {autoHideNav && (
+                {(autoHideNav || navStyle === 'pill') && (
                   <Row
                     icon={Minimize2}
                     iconColor="#0d9488"
@@ -1850,6 +1865,24 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
+            {/* ── Developer ── */}
+            {!settingsQueryTrimmed && tab === 'developer' && developerMode && (
+              <div>
+                <h3 className="text-text-primary text-lg font-bold mb-4">Developer</h3>
+                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
+                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
+                    <Server size={13} />
+                    API servers
+                  </div>
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] mt-2.5">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
@@ -1902,18 +1935,6 @@ export default function Settings(): JSX.Element {
                     <Globe size={13} />
                     API
                   </a>
-                </div>
-
-                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
-                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
-                    <Server size={13} />
-                    API servers
-                  </div>
-                  <ApiServerRow />
-                  <RouteRulesEditor />
-                  <p className="text-text-muted text-[11px] mt-2.5">
-                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
-                  </p>
                 </div>
 
                 {(!account || (!account.is_editor && !account.is_administrator)) && (

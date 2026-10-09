@@ -5,7 +5,7 @@ import {
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
+  ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Wrench, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
@@ -111,15 +111,15 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
   )
 }
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'developer' | 'about'
 
-const SECTION_IDS: Tab[] = ['account', 'appearance', 'preferences', 'playback', 'about']
+const SECTION_IDS: Tab[] = ['account', 'appearance', 'preferences', 'playback', 'developer', 'about']
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. Only lists rows that actually
 // exist on the mobile layout - no Shortcuts/Library/App/Developer tabs here
 // (keyboard shortcuts and Electron-only settings don't apply on mobile).
-const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
+const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: boolean }[] = [
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
@@ -154,6 +154,9 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string }[] = [
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
   { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
+  // Developer
+  { tab: 'developer', label: 'API servers', sub: 'Main API and route rules', devOnly: true },
+
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
@@ -637,6 +640,7 @@ export default function Settings(): JSX.Element {
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
+        (!r.devOnly || developerMode) &&
         r.label.toLowerCase().includes(settingsQueryTrimmed) || r.sub?.toLowerCase().includes(settingsQueryTrimmed)
       )
     : []
@@ -653,6 +657,7 @@ export default function Settings(): JSX.Element {
     { id: 'appearance', label: 'Appearance', icon: Palette, color: '#7c3aed', sub: 'Skin, accent, fonts, lyrics' },
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal, color: '#0d9488', sub: 'Navigation, home screen, eras' },
     { id: 'playback', label: 'Playback', icon: Volume2, color: '#2563eb', sub: 'Output, crossfade, lyrics' },
+    ...(developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench, color: '#6b7280', sub: 'API servers' }] : []),
     { id: 'about', label: 'About', icon: Info, color: '#6b7280', sub: 'Version, links, legal' },
   ]
 
@@ -679,10 +684,10 @@ export default function Settings(): JSX.Element {
     if (!settingsTab) return
     // Feedback used to be its own section; it now lives under About.
     const target = (settingsTab as string) === 'feedback' ? 'about' : settingsTab
-    const known = SECTION_IDS.includes(target as Tab)
+    const known = SECTION_IDS.includes(target as Tab) && (target !== 'developer' || developerMode)
     if (known) { setTab(target as Tab); setInSection(true) }
     setSettingsTab(null)
-  }, [settingsTab, setSettingsTab])
+  }, [settingsTab, setSettingsTab, developerMode])
 
   const toggleSleepTimer = (): void => {
     if (sleepTimerEnd) setSleepTimer(null)
@@ -1397,6 +1402,14 @@ export default function Settings(): JSX.Element {
                   >
                     <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
                   </Row>
+                  <Row
+                    icon={Wrench}
+                    iconColor="#6b7280"
+                    label="Developer options"
+                    sub="Shows a Developer section with API server settings"
+                  >
+                    <Toggle on={developerMode} onClick={() => setDeveloperMode(!developerMode)} />
+                  </Row>
                 </SettingsCard>
 
                 <SettingsCard title="Navigation">
@@ -1721,6 +1734,19 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
+            {/* ── Developer ── */}
+            {!settingsQueryTrimmed && tab === 'developer' && developerMode && (
+              <div>
+                <SettingsCard title="API servers">
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] pb-1 leading-snug">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
+                  </p>
+                </SettingsCard>
+              </div>
+            )}
+
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
@@ -1752,14 +1778,6 @@ export default function Settings(): JSX.Element {
                   <ActionRow icon={BookOpen} iconColor="#6366f1" label="API Docs" onClick={() => openMainView('docs')} />
                   <ActionRow icon={MessageCircle} iconColor="#db2777" label="Send Feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
-                </SettingsCard>
-
-                <SettingsCard title="API servers">
-                  <ApiServerRow />
-                  <RouteRulesEditor />
-                  <p className="text-text-muted text-[11px] pb-1 leading-snug">
-                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
-                  </p>
                 </SettingsCard>
 
                 {/* Only shown to accounts that aren't already one - these are

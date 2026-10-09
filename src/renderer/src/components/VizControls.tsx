@@ -40,11 +40,13 @@ export function webglAvailable(): boolean {
   return webglProbe
 }
 
-export function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
+export function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => void; locked?: boolean }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'}`}
+      disabled={locked}
+      title={locked ? 'Locked on while the Pill navigation style is selected' : undefined}
+      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
           block centering trick) instead of a manual top offset - a fixed
