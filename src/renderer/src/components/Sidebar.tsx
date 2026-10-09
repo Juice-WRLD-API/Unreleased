@@ -13,6 +13,7 @@ import { lazyOverlay } from '../lib/lazyView'
 import { accountDisplayName, initial } from '../lib/format'
 import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 import ContextMenu from './ContextMenu'
+import NavPillGrip from './NavPillGrip'
 
 // Right-click only - fetched on first open rather than with the app shell.
 const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
@@ -253,6 +254,7 @@ export default function Sidebar(): JSX.Element {
       <aside
         className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
+        <NavPillGrip horizontal={horizontal} />
         {isElectron && appMenuPosition === 'sidebar' && (
           <>
             <div className="w-10 h-10 shrink-0 flex items-center justify-center"><AppMenu variant="sidebar-icon" /></div>
