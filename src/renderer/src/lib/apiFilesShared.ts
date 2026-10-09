@@ -83,8 +83,14 @@ export function triggerDownload(url: string, filename: string): void {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
+  // blob:/same-origin URLs honour `download`, so no new tab is needed. A
+  // _blank click fired after an await (no user activation) is what mobile
+  // Chrome reports as "Pop-ups blocked". Cross-origin URLs ignore `download`,
+  // so they still open in a new tab rather than navigating the player away.
+  if (!url.startsWith('blob:') && new URL(url, location.href).origin !== location.origin) {
+    a.target = '_blank'
+    a.rel = 'noopener noreferrer'
+  }
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
