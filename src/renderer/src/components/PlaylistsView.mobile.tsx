@@ -422,7 +422,7 @@ export default function PlaylistsView(): JSX.Element {
   const { detail, setDetail, loadingDetail, coverData, setCoverData, coverLoading, coverImgError, setCoverImgError, loadDetail } =
     usePlaylistDetailData(selectedId, isSharedView)
   const { shareCopied, togglingPublic, handleTogglePublic, handleShare } = usePlaylistSharing(selectedId, detail, setDetail)
-  const { zipState, handleZipDownload } = usePlaylistZipDownload()
+  const { zipState, zipProgress, handleZipDownload } = usePlaylistZipDownload()
 
   // Song info modal
   const [infoSong, setInfoSong] = useState<JWApiSong | null>(null)
@@ -2077,6 +2077,21 @@ export default function PlaylistsView(): JSX.Element {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      {zipState !== 'idle' && (
+        <div
+          role="status"
+          className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-surface-overlay border border-[var(--border)] shadow-2xl text-[13px] text-text-primary"
+          style={{ bottom: 'calc(var(--bottom-inset, 0px) + 5rem)' }}
+        >
+          {zipState === 'loading' ? <Loader2 size={15} className="animate-spin" />
+            : zipState === 'done' ? <Check size={15} /> : <X size={15} />}
+          <span>
+            {zipState === 'loading'
+              ? (zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Preparing download…')
+              : zipState === 'done' ? 'Download started' : 'Download failed'}
+          </span>
+        </div>
+      )}
       {showLiked ? (
         <>
           <div className="shrink-0 flex items-center gap-1 px-2">

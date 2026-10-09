@@ -11,9 +11,11 @@ import type { Track } from '../types'
 
 export function usePlaylistZipDownload(): {
   zipState: 'idle' | 'loading' | 'done' | 'error'
+  zipProgress: { done: number; total: number } | null
   handleZipDownload: (trackList: Track[] | (() => Promise<Track[]>), name: string) => Promise<void>
 } {
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [zipProgress, setZipProgress] = useState<{ done: number; total: number } | null>(null)
 
   const handleZipDownload = useCallback(async (trackList: Track[] | (() => Promise<Track[]>), name: string) => {
     if (zipState === 'loading') return
@@ -27,12 +29,13 @@ export function usePlaylistZipDownload(): {
         name: t.path.split('/').pop() || t.title,
         url: t.streamUrl ?? buildStreamUrl(t.path),
       }))
-      const { saved, cancelled } = items.length ? await saveItems(target, items) : { saved: 0, cancelled: false }
-      if (cancelled) { setZipState('idle'); return }
+      const { saved, cancelled } = items.length ? await saveItems(target, items, setZipProgress) : { saved: 0, cancelled: false }
+      if (cancelled) { setZipState('idle'); setZipProgress(null); return }
       setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
+    setZipProgress(null)
     setTimeout(() => setZipState('idle'), 3000)
   }, [zipState])
 
-  return { zipState, handleZipDownload }
+  return { zipState, zipProgress, handleZipDownload }
 }

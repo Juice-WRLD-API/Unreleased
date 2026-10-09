@@ -712,6 +712,7 @@ export default function ApiTrackerView(): JSX.Element {
   const [selected, setSelected] = useState<Map<number, JWApiSong>>(new Map())
   const [bulkZipStatus, setBulkZipStatus] = useState<'idle' | 'zipping' | 'done' | 'partial' | 'none' | 'error'>('idle')
   const [bulkZipSkipped, setBulkZipSkipped] = useState(0)
+  const [bulkZipProgress, setBulkZipProgress] = useState<{ done: number; total: number } | null>(null)
   const [bulkLinkStatus, setBulkLinkStatus] = useState<'idle' | 'linking' | 'done' | 'error'>('idle')
   // Shown after a link completes if the resulting group still has no
   // version_title - untitled groups are functionally useless in compact view.
@@ -1356,12 +1357,14 @@ export default function ApiTrackerView(): JSX.Element {
         name: path.split('/').pop() || path,
         url: buildStreamUrl(path),
         cdnPath: path,
-      })))
+      })), setBulkZipProgress)
+      setBulkZipProgress(null)
       if (cancelled) { setBulkZipStatus('idle'); return }
       skipped += failed
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
     } catch {
+      setBulkZipProgress(null)
       setBulkZipStatus('error')
     }
     setTimeout(() => setBulkZipStatus('idle'), skipped > 0 ? 5000 : 3000)
@@ -1869,6 +1872,12 @@ export default function ApiTrackerView(): JSX.Element {
               className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
             >Select all</button>
           </div>
+          {bulkZipStatus === 'zipping' && (
+            <div role="status" className="px-4 py-2 flex items-center gap-2 bg-accent/10 text-accent text-xs font-medium">
+              <Loader2 size={14} className="shrink-0 animate-spin" />
+              {bulkZipProgress ? `Zipping ${bulkZipProgress.done}/${bulkZipProgress.total}…` : 'Preparing download…'}
+            </div>
+          )}
           {(bulkZipStatus === 'partial' || bulkZipStatus === 'none') && (
             <div className="px-4 py-2 flex items-start gap-2 bg-amber-500/10 text-amber-500 text-xs font-medium">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
@@ -2086,7 +2095,7 @@ export default function ApiTrackerView(): JSX.Element {
               />
               <SheetItem
                 icon={bulkZipStatus === 'zipping' ? Loader2 : PackageOpen}
-                label={bulkZipStatus === 'zipping' ? 'Downloading…' : 'Download'}
+                label={bulkZipStatus === 'zipping' ? (bulkZipProgress ? `Zipping ${bulkZipProgress.done}/${bulkZipProgress.total}…` : 'Downloading…') : 'Download'}
                 disabled={bulkZipStatus === 'zipping'}
                 onClick={() => { bulkDownloadZip(); closeSheet() }}
               />

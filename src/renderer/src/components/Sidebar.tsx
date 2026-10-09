@@ -259,7 +259,7 @@ export default function Sidebar(): JSX.Element {
     const horizontal = sidebarPosition === 'top' || sidebarPosition === 'bottom'
     return (
       <aside
-        className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+        className={`app-sidebar pointer-events-auto hidden md:flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
         {items.map(({ icon, label, view }, idx) => (
           <button
