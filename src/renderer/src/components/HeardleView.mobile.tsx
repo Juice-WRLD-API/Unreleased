@@ -633,7 +633,8 @@ export default function HeardleView(): JSX.Element {
     stopPlayback()
     try {
       const song = await apiFetch<JWApiSong>(`/songs/${answer.id}/`)
-      playTrack(songToTrack(song))
+      const track = songToTrack(song)
+      playTrack(track, [track])
     } catch {
       setAudioError(true)
     }

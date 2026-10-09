@@ -108,7 +108,7 @@ export interface QueueSlice {
   /** Advance to the next track. Returns the track, or null if playback stops. */
   nextTrack: () => Track | null
 
-  /** Go back one track (or restart if >3 s in). */
+  /** Move one position back in the queue. Restart semantics belong to Player. */
   prevTrack: () => Track | null
 
   /**
@@ -452,19 +452,8 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   // ── prevTrack ──────────────────────────────────────────────────────────────
   prevTrack: () => {
-    const { queue, queueIndex, currentTime, radioMode } = get()
+    const { queue, queueIndex } = get()
     if (queue.length === 0) return null
-
-    // In radio mode, only allow restarting the current track
-    if (radioMode) {
-      set({ currentTime: 0, progress: 0 })
-      return get().currentTrack
-    }
-
-    if (currentTime > 3) {
-      set({ currentTime: 0, progress: 0 })
-      return get().currentTrack
-    }
 
     const prevIdx = Math.max(0, queueIndex - 1)
     const track = queue[prevIdx]

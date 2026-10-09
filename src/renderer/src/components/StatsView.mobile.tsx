@@ -245,13 +245,13 @@ export default function StatsView(): JSX.Element {
                       className="flex items-center gap-3 px-3 py-2.5 active:bg-surface-raised transition-colors"
                     >
                       {track ? (
-                        <button onClick={() => playTrack(track)} className="shrink-0" aria-label={`Play ${title}`}>
+                        <button onClick={() => playTrack(track, [track])} className="shrink-0" aria-label={`Play ${title}`}>
                           <AlbumArtThumbnail track={track} size={40} className="rounded-md" />
                         </button>
                       ) : (
                         <div className="w-10 h-10 rounded-md bg-surface-raised shrink-0" />
                       )}
-                      <div className="min-w-0 flex-1" {...clickable(() => track && playTrack(track))}>
+                      <div className="min-w-0 flex-1" {...clickable(() => track && playTrack(track, [track]))}>
                         <p className="text-text-primary text-sm font-medium truncate" title={title}>{title}</p>
                         <p className="text-text-muted text-xs truncate">
                           {track?.artist ?? ''}{song?.era?.name ? ` · ${song.era.name}` : ''}

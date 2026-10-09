@@ -11,7 +11,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
-import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
+import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand } from './Player'
 import { apiFetch, getSongsByIds } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
@@ -70,7 +70,6 @@ export default function WrldView(): JSX.Element {
     playTrack,
     isPlaying, setIsPlaying,
     shuffle, repeat, toggleShuffle, toggleRepeat,
-    nextTrack, prevTrack,
     showQueue, setShowQueue,
     toggleEqPanel, eqFxActive,
   } = useStore(useShallow(s => ({
@@ -95,8 +94,6 @@ export default function WrldView(): JSX.Element {
     repeat: s.repeat,
     toggleShuffle: s.toggleShuffle,
     toggleRepeat: s.toggleRepeat,
-    nextTrack: s.nextTrack,
-    prevTrack: s.prevTrack,
     showQueue: s.showQueue,
     setShowQueue: s.setShowQueue,
     toggleEqPanel: s.toggleEqPanel,
@@ -437,7 +434,7 @@ export default function WrldView(): JSX.Element {
                 style={{ color: shuffle ? txtPri : txtTer, opacity: shuffle ? 1 : 0.7 }}
               ><Shuffle size={17} /></button>
               <button
-                onClick={() => prevTrack()}
+                onClick={() => runPlayerCommand('previous')}
                 disabled={noTrack}
                 aria-label="Previous"
                 className="w-12 h-12 flex items-center justify-center rounded-full active:bg-white/10"
@@ -455,7 +452,7 @@ export default function WrldView(): JSX.Element {
                   : <Play size={24} fill="currentColor" className="ml-1" />}
               </button>
               <button
-                onClick={() => nextTrack()}
+                onClick={() => runPlayerCommand('next')}
                 disabled={noTrack}
                 aria-label="Next"
                 className="w-12 h-12 flex items-center justify-center rounded-full active:bg-white/10"
@@ -1517,11 +1514,9 @@ function LyricsScreen({
   artError: boolean
   isDarkSkin: boolean
 } & Omit<LyricsPanelProps, 'padded'>): JSX.Element {
-  const { isPlaying, setIsPlaying, nextTrack, prevTrack } = useStore(useShallow(s => ({
+  const { isPlaying, setIsPlaying } = useStore(useShallow(s => ({
     isPlaying: s.isPlaying,
     setIsPlaying: s.setIsPlaying,
-    nextTrack: s.nextTrack,
-    prevTrack: s.prevTrack,
   })))
   useBackToClose(onClose)
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
@@ -1602,7 +1597,7 @@ function LyricsScreen({
           className="relative shrink-0 px-6 pt-1 flex items-center justify-center gap-8"
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
         >
-          <button onClick={() => prevTrack()} aria-label="Previous" className="w-12 h-12 flex items-center justify-center" style={{ color: txtPri }}>
+          <button onClick={() => runPlayerCommand('previous')} aria-label="Previous" className="w-12 h-12 flex items-center justify-center" style={{ color: txtPri }}>
             <SkipBack size={24} fill="currentColor" />
           </button>
           <button
@@ -1613,7 +1608,7 @@ function LyricsScreen({
           >
             {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-0.5" />}
           </button>
-          <button onClick={() => nextTrack()} aria-label="Next" className="w-12 h-12 flex items-center justify-center" style={{ color: txtPri }}>
+          <button onClick={() => runPlayerCommand('next')} aria-label="Next" className="w-12 h-12 flex items-center justify-center" style={{ color: txtPri }}>
             <SkipFwd size={24} fill="currentColor" />
           </button>
         </div>
