@@ -45,7 +45,7 @@ export function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => vo
     <button
       onClick={onClick}
       disabled={locked}
-      title={locked ? 'Locked on while the Pill navigation style is selected' : undefined}
+      title={locked ? 'Locked off while the Pill navigation style is selected' : undefined}
       className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/

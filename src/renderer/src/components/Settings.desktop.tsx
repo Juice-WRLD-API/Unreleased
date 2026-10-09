@@ -1396,9 +1396,9 @@ export default function Settings(): JSX.Element {
                   label="Auto-hide navigation"
                   sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
                 >
-                  <Toggle on={autoHideNav || navStyle === 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
+                  <Toggle on={autoHideNav && navStyle !== 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
                 </Row>
-                {(autoHideNav || navStyle === 'pill') && (
+                {autoHideNav && navStyle !== 'pill' && (
                   <Row
                     icon={Minimize2}
                     iconColor="#0d9488"
