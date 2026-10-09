@@ -15,6 +15,7 @@ the commit, and the `app` branch's version as of the same time.
 
 | Date (UTC+3) | Relay commit | Landed on | Branch version | app version | Summary |
 |---|---|---|---|---|---|
+| 2026-10-09 22:37:22 | [`facbdb3`](https://github.com/Juice-WRLD-API/Unreleased/commit/facbdb3d20ed2b502010ec3d72ead922cff89b90) | app | 2.2.8 | 2.2.8 | Relay web `0582614`: CDN node binary upload (platform + version + file, progress bar) in the admin CDN nodes tab. Desktop tab only; web's mobile tab has no counterpart on app |
 | 2026-10-09 16:24:20 | [`62960c6`](https://github.com/Juice-WRLD-API/Unreleased/commit/62960c6346911976cab13f66598533e76a510584) | web | 2.1.0 | 2.2.7 | Relay app `61a77b0`: Pill nav style now locks auto-hide off (was locked on) |
 | 2026-10-09 04:45:24 | [`1e09345`](https://github.com/Juice-WRLD-API/Unreleased/commit/1e093455) | web | 2.1.0 | 2.2.7 | Mirror of app `c68cde1`: fix news Copy link, add Copy link button to the article page |
 | 2026-10-09 04:44:44 | [`0071402`](https://github.com/Juice-WRLD-API/Unreleased/commit/00714027) | web | 2.1.0 | 2.2.7 | Mirror of app `6685e9b`: stacked avatars for group chats in the chat rail |
