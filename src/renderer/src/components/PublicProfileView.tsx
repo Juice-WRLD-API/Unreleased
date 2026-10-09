@@ -1,5 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
   BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3,
@@ -23,10 +22,10 @@ import {
   prefsFromEvents, joinPlayedSongs, buildListeningStats, formatListeningTime, type ListeningStats,
 } from '../lib/listeningStats'
 import { resolveStatsSongs, statsSongToTrack } from '../lib/statsCatalog'
-import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { clickable } from '../lib/a11y'
 import { initial } from '../lib/format'
 import { relativeTime } from './adminShared'
+import ContextMenu from './ContextMenu'
 
 type ProposalRow = { key: string; kind: 'edit' | 'comp'; title: string; status: string; created_at: string }
 
@@ -121,24 +120,6 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 }): JSX.Element {
   const { playCollection, addToQueue } = useStorePick('playCollection', 'addToQueue')
   const [copied, setCopied] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  const MENU_W = 200
-  const [pos, setPos] = useState(() => ({
-    left: Math.max(8, Math.min(state.x, window.innerWidth - MENU_W - 8)),
-    top: Math.max(8, Math.min(state.y, window.innerHeight - 180 - 8)),
-  }))
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const top = Math.max(8, Math.min(state.y, window.innerHeight - rect.height - 8))
-    const left = Math.max(8, Math.min(state.x, window.innerWidth - rect.width - 8))
-    setPos((prev) => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [state.x, state.y])
-
-  useEscapeToClose(onClose)
 
   const loadTracks = async (): Promise<Track[]> => {
     const d = await getPublicPlaylist(state.playlist.id)
@@ -153,48 +134,21 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
     } catch {}
   }
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
-      <div
-        ref={ref}
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[200px]"
-        style={{ left: pos.left, top: pos.top }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={async () => { const t = await loadTracks(); if (t.length) playCollection(t); onClose() }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <Play size={14} className="text-text-muted" /> Play all
-        </button>
-        <button
-          onClick={async () => { const t = await loadTracks(); t.forEach((tr) => addToQueue(tr)); onClose() }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <ListEnd size={14} className="text-text-muted" /> Add all to queue
-        </button>
-        <button
-          onClick={copyLink}
-          title="Copy link"
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <LinkIcon size={14} className="text-text-muted" /> {copied ? 'Link copied!' : 'Copy link'}
-        </button>
-        {onOpenInLibrary && (
-          <>
-            <div className="my-1 border-t border-[var(--border)]" />
-            <button
-              onClick={onOpenInLibrary}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-            >
-              <ListMusic size={14} className="text-text-muted" /> Open in your library
-            </button>
-          </>
-        )}
-      </div>
-    </>,
-    document.body,
+  return (
+    <ContextMenu
+      x={state.x}
+      y={state.y}
+      onClose={onClose}
+      zIndex={61}
+      className="w-[200px]"
+      items={[
+        { icon: Play, label: 'Play all', onSelect: async () => { const t = await loadTracks(); if (t.length) playCollection(t) } },
+        { icon: ListEnd, label: 'Add all to queue', onSelect: async () => { const t = await loadTracks(); t.forEach((tr) => addToQueue(tr)) } },
+        { icon: LinkIcon, label: copied ? 'Link copied!' : 'Copy link', keepOpen: true, onSelect: copyLink },
+        onOpenInLibrary && 'divider',
+        onOpenInLibrary && { icon: ListMusic, label: 'Open in your library', onSelect: onOpenInLibrary },
+      ]}
+    />
   )
 }
 

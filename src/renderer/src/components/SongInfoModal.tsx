@@ -252,7 +252,7 @@ export default function SongInfoModal({ song, onClose, onEdit, floating = false,
             ModalOverlay) so the modal can be moved around the page. The
             buttons opt back out below or they'd be undraggable/unclickable. */}
         <div
-          className={`relative shrink-0 overflow-hidden ${floating || !canLock ? '' : 'cursor-grab active:cursor-grabbing'}`}
+          className={`relative shrink-0 overflow-hidden `}
           style={floating ? ({ WebkitAppRegion: 'drag' } as CSSProperties) : undefined}
           onMouseDown={onHandleMouseDown}
           {...dragHandlers}

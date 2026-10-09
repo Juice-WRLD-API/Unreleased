@@ -225,7 +225,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
       >
         {/* Header */}
         <div
-          className={`shrink-0 px-4 pt-4 pb-3 border-b border-[var(--border)] ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          className={`shrink-0 px-4 pt-4 pb-3 border-b border-[var(--border)]`}
           onMouseDown={onHandleMouseDown}
         >
           <div className="flex items-center justify-between mb-3">

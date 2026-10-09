@@ -90,7 +90,7 @@ export default function SkinEditorModal({
       <div className="w-full h-full flex flex-col overflow-hidden">
         {/* Header */}
         <div
-          className={`flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-raised)] ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          className={`flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-raised)]`}
           onMouseDown={onHandleMouseDown}
         >
           <input

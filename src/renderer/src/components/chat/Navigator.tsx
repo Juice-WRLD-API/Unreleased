@@ -1,4 +1,4 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BellOff, BellRing, ChevronDown, Compass, FolderPlus, Lock, MessagesSquare, Pencil, Pin, PinOff, Plus, Settings, ShieldCheck, SquarePen, Trash2, UserPlus, WifiOff } from 'lucide-react'
 import * as api from '../../lib/chatApi'
@@ -14,61 +14,32 @@ import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp
 import { UserCardBody } from './UserCard'
 import { MenuItem } from './SidePanels'
 import { ConfirmDialog } from './MessageItem'
-import { useEscapeToClose } from '../../hooks/useEscapeToClose'
+import ContextMenu from '../ContextMenu'
 
 interface RoomMenuItem {
   label: string
-  icon: React.ReactNode
+  icon: React.ElementType
   onClick: () => void
   danger?: boolean
 }
 
 // Cursor-positioned menu for pin/mute/delete actions, used from a right-click
-// on a server rail icon or a DM row. Mirrors PlaylistContextMenu's portal +
-// fixed-position + clamp-on-mount approach at a much smaller scale.
+// on a server rail icon, a DM row, or a channel/category.
 function RoomMenu({ x, y, items, onClose }: {
   x: number
   y: number
   items: RoomMenuItem[]
   onClose: () => void
 }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ left: x, top: y })
-
-  useEscapeToClose(onClose)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    setPos({
-      left: Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)),
-      top: Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)),
-    })
-  }, [x, y])
-
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
-      <div
-        ref={ref}
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[190px] overflow-hidden"
-        style={{ left: pos.left, top: pos.top }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {items.map((item, i) => (
-          <button
-            key={i}
-            onClick={() => { item.onClick(); onClose() }}
-            className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors hover:bg-surface-overlay ${item.danger ? 'text-red-400' : 'text-text-primary'}`}
-          >
-            <span className={item.danger ? 'text-red-400' : 'text-text-muted'}>{item.icon}</span>
-            <span className="flex-1 text-left">{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </>,
-    document.body,
+  return (
+    <ContextMenu
+      x={x}
+      y={y}
+      onClose={onClose}
+      zIndex={61}
+      className="w-[190px]"
+      items={items.map((i) => ({ label: i.label, icon: i.icon, danger: i.danger, onSelect: i.onClick }))}
+    />
   )
 }
 
@@ -380,19 +351,19 @@ export function ServerRail(): JSX.Element {
         const items: RoomMenuItem[] = [
           {
             label: pinned ? `Unpin ${label}` : `Pin ${label}`,
-            icon: pinned ? <PinOff size={14} /> : <Pin size={14} />,
+            icon: pinned ? PinOff : Pin,
             onClick: () => (isServer ? togglePinServer(ctxMenu.id) : togglePinConversation(ctxMenu.id)),
           },
           {
             label: muted ? `Unmute ${label}` : `Mute ${label}`,
-            icon: muted ? <BellRing size={14} /> : <BellOff size={14} />,
+            icon: muted ? BellRing : BellOff,
             onClick: () => (isServer ? toggleMuteServer(ctxMenu.id) : toggleMuteConversation(ctxMenu.id)),
           },
         ]
         if (!isServer) {
           items.push({
             label: 'Delete chat',
-            icon: <Trash2 size={14} />,
+            icon: Trash2,
             danger: true,
             onClick: () => setConfirmDeleteConvId(ctxMenu.id),
           })
@@ -704,8 +675,8 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
           y={chanMenu.y}
           onClose={() => setChanMenu(null)}
           items={[
-            { label: 'Edit channel', icon: <Settings size={14} />, onClick: () => openModal({ kind: 'channel', serverId, channel: chanMenu.channel }) },
-            { label: 'Delete channel', icon: <Trash2 size={14} />, danger: true, onClick: () => setConfirmDeleteChannel(chanMenu.channel) },
+            { label: 'Edit channel', icon: Settings, onClick: () => openModal({ kind: 'channel', serverId, channel: chanMenu.channel }) },
+            { label: 'Delete channel', icon: Trash2, danger: true, onClick: () => setConfirmDeleteChannel(chanMenu.channel) },
           ]}
         />
       )}
@@ -715,9 +686,9 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
           y={catMenu.y}
           onClose={() => setCatMenu(null)}
           items={[
-            { label: 'Create channel', icon: <Plus size={14} />, onClick: () => openModal({ kind: 'channel', serverId, defaultCategory: catMenu.category }) },
-            { label: 'Rename category', icon: <Pencil size={14} />, onClick: () => openModal({ kind: 'rename-category', serverId, category: catMenu.category }) },
-            { label: 'Delete category', icon: <Trash2 size={14} />, danger: true, onClick: () => setConfirmDeleteCategory({ category: catMenu.category, count: groups.find(([cat]) => cat === catMenu.category)?.[1].length ?? 0 }) },
+            { label: 'Create channel', icon: Plus, onClick: () => openModal({ kind: 'channel', serverId, defaultCategory: catMenu.category }) },
+            { label: 'Rename category', icon: Pencil, onClick: () => openModal({ kind: 'rename-category', serverId, category: catMenu.category }) },
+            { label: 'Delete category', icon: Trash2, danger: true, onClick: () => setConfirmDeleteCategory({ category: catMenu.category, count: groups.find(([cat]) => cat === catMenu.category)?.[1].length ?? 0 }) },
           ]}
         />
       )}
@@ -999,17 +970,17 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
         const items: RoomMenuItem[] = [
           {
             label: pinned ? 'Unpin chat' : 'Pin chat',
-            icon: pinned ? <PinOff size={14} /> : <Pin size={14} />,
+            icon: pinned ? PinOff : Pin,
             onClick: () => togglePinConversation(ctxMenu.convId),
           },
           {
             label: muted ? 'Unmute chat' : 'Mute chat',
-            icon: muted ? <BellRing size={14} /> : <BellOff size={14} />,
+            icon: muted ? BellRing : BellOff,
             onClick: () => toggleMuteConversation(ctxMenu.convId),
           },
           {
             label: 'Delete chat',
-            icon: <Trash2 size={14} />,
+            icon: Trash2,
             danger: true,
             onClick: () => setConfirmDeleteConvId(ctxMenu.convId),
           },

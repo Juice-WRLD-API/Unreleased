@@ -179,7 +179,7 @@ export default function ConvertFormatModal({ floating = false }: { floating?: bo
       {({ onHandleMouseDown, locked, toggleLock }) => (
       <div className="bg-surface w-full h-full flex flex-col overflow-y-auto">
         <div
-          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 shrink-0 ${floating ? '' : 'cursor-grab active:cursor-grabbing'}`}
+          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 shrink-0`}
           style={floating ? ({ WebkitAppRegion: 'drag' } as CSSProperties) : undefined}
           onMouseDown={onHandleMouseDown}
         >

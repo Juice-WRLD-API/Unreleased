@@ -124,7 +124,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
         <div
-          className={`shrink-0 flex items-center justify-between px-5 py-4 border-b border-[var(--border)] bg-surface ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          className={`shrink-0 flex items-center justify-between px-5 py-4 border-b border-[var(--border)] bg-surface`}
           onMouseDown={onHandleMouseDown}
         >
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">

@@ -1,12 +1,12 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, ChevronLeft, ChevronDown, Menu, Check, RefreshCw, AlertTriangle } from 'lucide-react'
+import React, { useEffect, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown, Menu, Check, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { effectiveBinding, comboTokens, runHotkeyAction } from '../lib/hotkeys'
 import { trackIdToSongId } from '../lib/userApi'
-import { placeFlyout } from '../lib/menuFlyout'
 import { orderedNavItems } from '../lib/navItems'
 import type { ViewType } from '../types'
 import { APP_VERSION } from '../lib/appVersion'
+import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
 
 // View tabs that have a dedicated navigation hotkey — the rest navigate via
 // setActiveView. Keyed by the nav item's `view` id.
@@ -37,8 +37,7 @@ const VIEW_HOTKEYS: Partial<Record<ViewType, string>> = {
 type Entry =
   | { kind: 'sep' }
   | {
-      /** A nested flyout — its own list of entries, opened to the side. Only
-       *  one level deep (nested entries are items/seps, not further submenus). */
+      /** A nested flyout — its own list of entries, opened to the side. */
       kind: 'submenu'
       label: string
       entries: Entry[]
@@ -57,14 +56,11 @@ type Entry =
       /** Right-aligned status adornment (e.g. the update-check spinner). Shown
        *  in place of a combo. */
       trailing?: ReactNode
+      /** Leave the menu open after the click, so the row can show progress or a toggle. */
+      keepOpen?: boolean
     }
 
 interface MenuDef { id: string; label: string; entries: Entry[] }
-
-// Hover-intent delay before a hovered top-level menu swaps in its submenu, so
-// gliding the mouse across the list (Controls → Tools) doesn't flip through
-// every submenu on the way. Clicking a top-level item still opens it instantly.
-const SUBMENU_HOVER_DELAY_MS = 250
 
 function openExternal(url: string): void {
   const a = document.createElement('a')
@@ -126,16 +122,8 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
   )
 
   const [open, setOpen] = useState(false)
-  const [activeMenu, setActiveMenu] = useState<string | null>(null)
-  // The open nested submenu (a `kind: 'submenu'` row inside the level-1 flyout),
-  // keyed by its label, plus its own flyout position.
-  const [activeSub, setActiveSub] = useState<string | null>(null)
-  const [subSubPos, setSubSubPos] = useState({ top: 0, left: 0 })
-  const [subPos, setSubPos] = useState({ top: 0, left: 0 })
-  const [panelPos, setPanelPos] = useState({ top: 28, left: 4 })
-  // Whether the panel opened above the trigger instead of below (bottom bar) —
-  // drives the grow-from-bottom origin so the pop animation feels right.
-  const [flipUp, setFlipUp] = useState(false)
+  // The trigger's rect when the menu opened - the dropdown anchors to it.
+  const [anchorRect, setAnchorRect] = useState<{ left: number; top: number; bottom: number } | null>(null)
   // In-menu updater status so "Check for updates" gives feedback in place
   // rather than silently closing the menu (mirrors Settings' own state machine).
   const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'>('idle')
@@ -144,50 +132,8 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
   // Discord Rich Presence on/off lives in main-process app settings, not the
   // store — mirror it here so the Tools entry can show a checkmark.
   const [discordOn, setDiscordOn] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const subRef = useRef<HTMLDivElement>(null)
-  const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  // Pending hover-intent switch (see SUBMENU_HOVER_DELAY_MS): the timer, plus
-  // which menu id it's waiting to open, so repeated mousemoves over the same
-  // row don't keep resetting it.
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingMenuRef = useRef<string | null>(null)
-  const clearHover = (): void => {
-    if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null }
-    pendingMenuRef.current = null
-  }
-  // Same hover-intent machinery, one level deeper — for opening nested submenus.
-  const subSubRef = useRef<HTMLDivElement>(null)
-  const subRowRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const subHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingSubRef = useRef<string | null>(null)
-  const clearSubHover = (): void => {
-    if (subHoverTimerRef.current) { clearTimeout(subHoverTimerRef.current); subHoverTimerRef.current = null }
-    pendingSubRef.current = null
-  }
   const el = (window as any).electron
-  const PANEL_W = 176 // w-44
-
-  // Close on outside click / Escape, and reset the open submenu with it.
-  useEffect(() => {
-    if (!open) { clearHover(); return }
-    const onDown = (e: MouseEvent): void => {
-      if (!rootRef.current?.contains(e.target as Node)) { setOpen(false); setActiveMenu(null); clearHover() }
-    }
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { setOpen(false); setActiveMenu(null); clearHover() }
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-      clearHover()
-      clearSubHover()
-    }
-  }, [open])
 
   // Follow updater progress so the "Check for updates" row reflects it live
   // (available → downloading% → ready). Auto-updates fired elsewhere land here
@@ -262,10 +208,11 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
   // API/stream tracks have no local path to read.
   const canConvert = !!currentTrack?.path && currentTrack.id.startsWith('local-')
 
-  const close = (): void => { setOpen(false); setActiveMenu(null) }
-  // Wraps an entry's action so every click also dismisses the menu.
-  const run = (fn: () => void) => (): void => { fn(); close() }
-  const hk = (id: string) => (): void => { runHotkeyAction(id); close() }
+  const close = (): void => setOpen(false)
+  // ContextMenu closes itself on every click (except `keepOpen` entries), so
+  // actions here are the bare behavior.
+  const run = (fn: () => void) => fn
+  const hk = (id: string) => (): void => runHotkeyAction(id)
 
   const pickLibraryFolder = async (): Promise<void> => {
     const picked = await el?.pickFolder()
@@ -396,7 +343,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         { kind: 'item', label: 'Mini player', hotkey: 'mini-player', onClick: hk('mini-player') },
         { kind: 'item', label: 'Close pop-out windows', hotkey: 'close-float-windows', onClick: hk('close-float-windows') },
         { kind: 'sep' },
-        { kind: 'item', label: 'Discord status', hotkey: 'discord-status', checked: discordOn, onClick: () => { void toggleDiscord() } },
+        { kind: 'item', label: 'Discord status', hotkey: 'discord-status', checked: discordOn, keepOpen: true, onClick: () => { void toggleDiscord() } },
         { kind: 'item', label: 'Last.fm scrobbling', onClick: run(() => setLastfmEnabled(!lastfmEnabled)), checked: lastfmEnabled },
         { kind: 'item', label: 'Global shortcuts', onClick: run(() => setGlobalHotkeysEnabled(!globalHotkeysEnabled)), checked: globalHotkeysEnabled },
         { kind: 'sep' },
@@ -418,8 +365,8 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         { kind: 'item', label: 'Keyboard shortcuts', onClick: run(() => openSettings('shortcuts')) },
         { kind: 'item', label: 'Send feedback…', onClick: run(() => openReport({ kind: 'feedback' })) },
         { kind: 'sep' },
-        // No `run` wrapper — keeps the menu open so the row can report progress.
-        { kind: 'item', label: updateLabel, trailing: updateTrailing, onClick: () => { void checkForUpdates() } },
+        // keepOpen — the row reports progress in place.
+        { kind: 'item', label: updateLabel, trailing: updateTrailing, keepOpen: true, onClick: () => { void checkForUpdates() } },
         { kind: 'item', label: 'Reinstall latest release', onClick: run(() => el?.forceUpdate?.()) },
         { kind: 'sep' },
         { kind: 'item', label: 'GitHub', onClick: run(() => openExternal('https://github.com/Juice-WRLD-API/Unreleased')) },
@@ -431,90 +378,21 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     },
   ]
 
-  // Anchor the dropdown to the trigger button wherever it sits: below it by
-  // default, but flipped above when it wouldn't fit (the menu button in a
-  // bottom nav bar), and left-aligned but clamped off the right edge (the
-  // sidebar on the right). Uses the panel's measured height, so it only lands
-  // right once the panel exists — hence keying off `open` and its content.
-  useLayoutEffect(() => {
-    if (!open) return
-    const r = triggerRef.current?.getBoundingClientRect()
-    if (!r) return
-    const panelH = panelRef.current?.offsetHeight ?? 0
-    const left = Math.max(4, Math.min(r.left, window.innerWidth - PANEL_W - 8))
-    const below = r.bottom + 2
-    const up = below + panelH > window.innerHeight - 8 && r.top - panelH - 2 >= 4
-    const top = up ? r.top - panelH - 2 : Math.min(below, window.innerHeight - panelH - 8)
-    setFlipUp(up)
-    setPanelPos((prev) => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [open, variant, sidebarPosition])
-
-  // Place the open submenu beside the panel, level with its row — the same
-  // flyout placement the song context menu's submenus use.
-  useLayoutEffect(() => {
-    if (!activeMenu) return
-    const row = rowRefs.current[activeMenu]
-    if (!row || !panelRef.current || !subRef.current) return
-    const { top, left } = placeFlyout(row, panelRef.current, subRef.current)
-    setSubPos((prev) => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [activeMenu])
-
-  // Switching (or closing) the level-1 menu drops any open nested submenu.
-  useEffect(() => { setActiveSub(null); clearSubHover() }, [activeMenu])
-
-  // Place the nested flyout beside the level-1 submenu, level with its row.
-  useLayoutEffect(() => {
-    if (!activeSub) return
-    const row = subRowRefs.current[activeSub]
-    if (!row || !subRef.current || !subSubRef.current) return
-    const { top, left } = placeFlyout(row, subRef.current, subSubRef.current)
-    setSubSubPos((prev) => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [activeSub])
+  const toItems = (entries: Entry[]): ContextMenuEntry[] => entries.map((e): ContextMenuEntry => {
+    if (e.kind === 'sep') return 'divider'
+    if (e.kind === 'submenu') return { label: e.label, disabled: e.disabled, children: toItems(e.entries) }
+    return {
+      label: e.label,
+      disabled: e.disabled,
+      checked: e.checked,
+      trailing: e.trailing,
+      keepOpen: e.keepOpen,
+      kbd: comboTokens(e.combo ?? (e.hotkey ? effectiveBinding(e.hotkey, hotkeyBindings) : '')),
+      onSelect: e.onClick,
+    }
+  })
 
   if (!el) return null
-
-  // Which side the flyouts open on — mirrors placeFlyout's flip test (a flyout
-  // sits to the right unless it would overrun the viewport, then it flips left).
-  // Derived here so the row chevrons point toward where the flyout actually
-  // opens, e.g. leftward when the whole menu is docked on the right edge.
-  const SUB_W = 240 // w-60
-  const submenuOpensLeft = panelPos.left + PANEL_W + 4 + SUB_W > window.innerWidth - 8
-  const nestedOpensLeft = subPos.left + SUB_W + 4 + SUB_W > window.innerWidth - 8
-
-  const activeEntries = menus.find((m) => m.id === activeMenu)?.entries ?? []
-  const activeSubEntries =
-    (activeEntries.find((e) => e.kind === 'submenu' && e.label === activeSub) as
-      | Extract<Entry, { kind: 'submenu' }>
-      | undefined)?.entries ?? []
-
-  // Shared row renderer for leaf items — used by both the level-1 flyout and
-  // nested submenus. `onHover` lets the level-1 list close an open nested
-  // submenu when the pointer moves onto a plain item; nested rows pass none.
-  const renderItem = (entry: Extract<Entry, { kind: 'item' }>, onHover?: () => void): ReactNode => (
-    <button
-      key={entry.label}
-      onMouseEnter={onHover}
-      onClick={(e) => { e.stopPropagation(); if (!entry.disabled) entry.onClick() }}
-      disabled={entry.disabled}
-      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors text-text-secondary hover:text-text-primary hover:bg-surface-raised disabled:opacity-40 disabled:pointer-events-none"
-    >
-      <span className="w-3.5 shrink-0 flex items-center justify-center">
-        {entry.checked && <Check size={12} className="text-accent" />}
-      </span>
-      <span className="flex-1 truncate">{entry.label}</span>
-      <span className="ml-auto flex items-center gap-1 shrink-0">
-        {entry.trailing}
-        {comboTokens(entry.combo ?? (entry.hotkey ? effectiveBinding(entry.hotkey, hotkeyBindings) : '')).map((t, ti) => (
-          <kbd
-            key={ti}
-            className="px-1.5 py-0.5 rounded bg-[var(--surface-highest)] text-text-muted text-[10px] font-semibold leading-none border border-[var(--border)] tabular-nums"
-          >
-            {t}
-          </kbd>
-        ))}
-      </span>
-    </button>
-  )
 
   // 'bar' and 'titlebar' share the compact-pill look.
   const isPill = variant === 'bar' || variant === 'titlebar'
@@ -527,7 +405,6 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
 
   return (
     <div
-      ref={rootRef}
       className={variant === 'bar' ? 'fixed top-0 left-0 z-[10000] flex items-center h-7'
         : variant === 'titlebar' ? 'flex items-center h-full'
         : variant === 'sidebar' ? 'w-full' : 'shrink-0'}
@@ -535,7 +412,11 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     >
       <button
         ref={triggerRef}
-        onClick={() => { setOpen((o) => !o); setActiveMenu(null) }}
+        onClick={() => {
+          const r = triggerRef.current?.getBoundingClientRect()
+          if (r) setAnchorRect({ left: r.left, top: r.top, bottom: r.bottom })
+          setOpen((o) => !o)
+        }}
         title="Menu"
         className={btnClass}
       >
@@ -555,110 +436,21 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         )}
       </button>
 
-      {open && (
-        <>
-        {/* Panel and submenu are SIBLINGS (not nested): the panel's pop
-            animation applies a transform, which would otherwise make it the
-            containing block for the fixed-positioned submenu and throw its
-            coords off — badly when the panel is flipped up in a bottom bar. */}
-        <div
-          ref={panelRef}
-          // Hover behavior: opening the FIRST submenu is instant; SWITCHING
-          // from an already-open one waits out the hover-intent delay so
-          // gliding across the list doesn't strobe through submenus. Clicking a
-          // row always opens instantly (handled per row).
-          onMouseOver={(e) => {
-            const hovered = menus.find((m) => rowRefs.current[m.id]?.contains(e.target as Node))
-            if (!hovered || hovered.id === activeMenu) { clearHover(); return }
-            if (activeMenu === null) { clearHover(); setActiveMenu(hovered.id); return }
-            if (pendingMenuRef.current === hovered.id) return // already counting down for this one
-            clearHover()
-            pendingMenuRef.current = hovered.id
-            hoverTimerRef.current = setTimeout(() => { setActiveMenu(hovered.id); pendingMenuRef.current = null }, SUBMENU_HOVER_DELAY_MS)
-          }}
-          style={{ position: 'fixed', zIndex: 10000, top: panelPos.top, left: panelPos.left, transformOrigin: flipUp ? 'bottom left' : 'top left', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          className="w-44 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 animate-menu-pop"
-        >
-          {menus.map((m) => (
-            <button
-              key={m.id}
-              ref={(node) => { rowRefs.current[m.id] = node }}
-              onClick={(e) => { e.stopPropagation(); clearHover(); setActiveMenu((cur) => (cur === m.id ? null : m.id)) }}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors ${
-                activeMenu === m.id
-                  ? 'bg-surface-raised text-text-primary'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
-              }`}
-            >
-              {submenuOpensLeft && <ChevronLeft size={13} className="text-text-muted shrink-0" />}
-              <span className="flex-1 truncate">{m.label}</span>
-              {!submenuOpensLeft && <ChevronRight size={13} className="text-text-muted shrink-0" />}
-            </button>
-          ))}
-        </div>
-
-        {activeMenu && (
-            <div
-              key={activeMenu}
-              ref={subRef}
-              onClick={(e) => e.stopPropagation()}
-              style={{ position: 'fixed', zIndex: 10001, top: subPos.top, left: subPos.left, maxHeight: window.innerHeight - 16, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              className="w-60 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-y-auto overflow-x-hidden animate-menu-pop"
-            >
-              {activeEntries.map((entry, i) => {
-                if (entry.kind === 'sep') return <div key={`sep-${i}`} className="my-1 border-t border-[var(--border)]" />
-                if (entry.kind === 'submenu') {
-                  const isOpenSub = activeSub === entry.label
-                  return (
-                    <button
-                      key={entry.label}
-                      ref={(node) => { subRowRefs.current[entry.label] = node }}
-                      onMouseEnter={() => {
-                        if (activeSub === entry.label) { clearSubHover(); return }
-                        clearSubHover()
-                        // First open is instant; switching between siblings waits
-                        // out the hover-intent delay (matches the top level).
-                        if (activeSub === null) { setActiveSub(entry.label); return }
-                        pendingSubRef.current = entry.label
-                        subHoverTimerRef.current = setTimeout(() => { setActiveSub(entry.label); pendingSubRef.current = null }, SUBMENU_HOVER_DELAY_MS)
-                      }}
-                      onClick={(e) => { e.stopPropagation(); clearSubHover(); setActiveSub((cur) => (cur === entry.label ? null : entry.label)) }}
-                      disabled={entry.disabled}
-                      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors disabled:opacity-40 disabled:pointer-events-none ${
-                        isOpenSub ? 'bg-surface-raised text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
-                      }`}
-                    >
-                      {nestedOpensLeft && <ChevronLeft size={13} className="text-text-muted shrink-0" />}
-                      {!nestedOpensLeft && <span className="w-3.5 shrink-0" />}
-                      <span className="flex-1 truncate">{entry.label}</span>
-                      {!nestedOpensLeft && <ChevronRight size={13} className="text-text-muted shrink-0" />}
-                    </button>
-                  )
-                }
-                // Plain item — hovering it dismisses any open nested submenu.
-                return renderItem(entry, () => { clearSubHover(); if (activeSub !== null) setActiveSub(null) })
-              })}
-            </div>
-          )}
-
-        {activeMenu && activeSub && activeSubEntries.length > 0 && (
-            <div
-              key={`${activeMenu}:${activeSub}`}
-              ref={subSubRef}
-              onClick={(e) => e.stopPropagation()}
-              style={{ position: 'fixed', zIndex: 10002, top: subSubPos.top, left: subSubPos.left, maxHeight: window.innerHeight - 16, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-              className="w-60 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-y-auto overflow-x-hidden animate-menu-pop"
-            >
-              {activeSubEntries.map((entry, i) =>
-                entry.kind === 'sep'
-                  ? <div key={`sep-${i}`} className="my-1 border-t border-[var(--border)]" />
-                  : entry.kind === 'item'
-                    ? renderItem(entry)
-                    : null,
-              )}
-            </div>
-          )}
-        </>
+      {open && anchorRect && (
+        <ContextMenu
+          x={anchorRect.left}
+          y={anchorRect.bottom + 2}
+          anchor={anchorRect}
+          ignoreRef={triggerRef}
+          onClose={close}
+          zIndex={10000}
+          popAnimation
+          checkColumn
+          compact
+          className="!min-w-0 !max-w-none w-44"
+          flyoutClassName="w-60"
+          items={menus.map((m): ContextMenuEntry => ({ label: m.label, children: toItems(m.entries) }))}
+        />
       )}
     </div>
   )

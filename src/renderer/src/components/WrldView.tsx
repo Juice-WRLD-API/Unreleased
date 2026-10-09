@@ -1,9 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Check, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2 } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2 } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
-import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import CoverEditor from './CoverEditor'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -23,6 +22,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
+import ContextMenu from './ContextMenu'
 import { getSkin } from '../lib/skins'
 import WrldVisualizer from './WrldVisualizer'
 import LyricsControls from './LyricsControls'
@@ -133,7 +133,7 @@ export default function WrldView(): JSX.Element {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
   const [showOutputPicker, setShowOutputPicker] = useState(false)
   const outputBtnRef = useRef<HTMLButtonElement>(null)
-  const [pickerPos, setPickerPos] = useState({ bottom: 0, right: 0 })
+  const [outputRect, setOutputRect] = useState<{ left: number; top: number; bottom: number } | null>(null)
 
   useEffect(() => {
     // Absent in some iOS Safari contexts - see Player.tsx's equivalent effect.
@@ -152,7 +152,7 @@ export default function WrldView(): JSX.Element {
   const openOutputPicker = (): void => {
     if (!outputBtnRef.current) return
     const r = outputBtnRef.current.getBoundingClientRect()
-    setPickerPos({ bottom: window.innerHeight - r.top + 8, right: window.innerWidth - r.right })
+    setOutputRect({ left: r.left, top: r.top, bottom: r.bottom })
     setShowOutputPicker((v) => !v)
   }
 
@@ -1230,40 +1230,26 @@ export default function WrldView(): JSX.Element {
 
             {/* Output device popover - portaled so it isn't clipped by the
                 (overflow-hidden) column it's anchored to. */}
-            {showOutputPicker && createPortal(
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowOutputPicker(false)} />
-                <div
-                  onMouseDown={(e) => e.stopPropagation()}
-                  className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl py-1.5 min-w-[220px]"
-                  style={{ bottom: pickerPos.bottom, right: pickerPos.right }}
-                >
-                  <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted">Audio Output</p>
-                  <button
-                    onClick={() => { setAudioOutput(''); setShowOutputPicker(false) }}
-                    className="flex items-center gap-3 w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-                  >
-                    <span className="w-4 h-4 flex items-center justify-center shrink-0">
-                      {audioOutput === '' && <Check size={12} className="text-accent" />}
-                    </span>
-                    System default
-                  </button>
-                  {outputDevices.map((d) => (
-                    <button
-                      key={d.deviceId}
-                      onClick={() => { setAudioOutput(d.deviceId); setShowOutputPicker(false) }}
-                      className="flex items-center gap-3 w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-                    >
-                      <span className="w-4 h-4 flex items-center justify-center shrink-0">
-                        {audioOutput === d.deviceId && <Check size={12} className="text-accent" />}
-                      </span>
-                      <span className="truncate">{d.label || `Output ${d.deviceId.slice(0, 8)}`}</span>
-                    </button>
-                  ))}
-                </div>
-              </>,
-              document.body
-            )}
+            {showOutputPicker && outputRect && (
+          <ContextMenu
+            x={outputRect.left}
+            y={outputRect.bottom + 2}
+            anchor={outputRect}
+            ignoreRef={outputBtnRef}
+            title="Audio Output"
+            onClose={() => setShowOutputPicker(false)}
+            className="min-w-[220px]"
+            checkColumn="auto"
+            items={[
+              { label: 'System default', checked: audioOutput === '', onSelect: () => setAudioOutput('') },
+              ...outputDevices.map((d) => ({
+                label: d.label || `Output ${d.deviceId.slice(0, 8)}`,
+                checked: audioOutput === d.deviceId,
+                onSelect: () => setAudioOutput(d.deviceId),
+              })),
+            ]}
+          />
+        )}
 
             {/* Divider - FM only */}
             {radioFmActive && <div className="w-px bg-white/10 shrink-0 my-10" />}
@@ -1429,7 +1415,7 @@ export default function WrldView(): JSX.Element {
           {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
             <div className="bg-surface w-full h-full overflow-y-auto">
               <div
-                className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface`}
                 onMouseDown={onHandleMouseDown}
               >
                 <h2 className="text-text-primary text-sm font-semibold">Change cover</h2>
@@ -2163,33 +2149,22 @@ const LyricsPanel = memo(function LyricsPanel({
   // lyrics (the .lrc file needs the timestamps; plain unsynced text has
   // nothing worth exporting in that format).
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
-  // Shared stack, so Escape dismisses just this menu when one of the WRLD
-  // panels happens to be open behind it.
-  useEscapeToClose(useCallback(() => setMenuPos(null), []), menuPos !== null)
   const handleContextMenu = (e: React.MouseEvent): void => {
     if (!isSynced || !rawLyrics) return
     e.preventDefault()
     setMenuPos({ x: e.clientX, y: e.clientY })
   }
-  const downloadMenu = menuPos && rawLyrics && createPortal(
-    <>
-      <div className="fixed inset-0 z-40" onClick={() => setMenuPos(null)} onContextMenu={(e) => { e.preventDefault(); setMenuPos(null) }} />
-      <div
-        className="fixed z-50 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[200px]"
-        style={{ top: menuPos.y, left: menuPos.x }}
-      >
-        <button
-          onClick={() => {
-            downloadSyncedLyrics(currentTrack?.title ?? 'lyrics', currentTrack?.artist ?? '', rawLyrics)
-            setMenuPos(null)
-          }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-left text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <Download size={14} className="text-text-muted" /> Download synced lyrics
-        </button>
-      </div>
-    </>,
-    document.body
+  const downloadMenu = menuPos && rawLyrics && (
+    <ContextMenu
+      x={menuPos.x}
+      y={menuPos.y}
+      onClose={() => setMenuPos(null)}
+      items={[{
+        icon: Download,
+        label: 'Download synced lyrics',
+        onSelect: () => downloadSyncedLyrics(currentTrack?.title ?? 'lyrics', currentTrack?.artist ?? '', rawLyrics),
+      }]}
+    />
   )
 
   if (!rawLyrics) {

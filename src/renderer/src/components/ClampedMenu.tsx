@@ -25,20 +25,36 @@ export interface ClampedMenuProps extends Omit<React.HTMLAttributes<HTMLDivEleme
   // (this component's own clamp is itself async, via ResizeObserver), so the
   // callback is the only way a caller can react to the settled value.
   onPositioned?: (pos: { left: number; top: number }) => void
+  // Opened from a button rather than a pointer: `x` is the left edge to align
+  // to and the menu drops below `anchor.bottom`, flipping above `anchor.top`
+  // when it would run off the bottom (a menu button in a bottom nav bar).
+  anchor?: { top: number; bottom: number }
+  // Numeric so dependants (flyouts) can stack relative to it; the z-50 class
+  // is the fallback.
+  zIndex?: number
 }
 
 export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
-  ({ x, y, className = '', children, onClick, onPositioned, ...rest }, forwardedRef) => {
+  ({ x, y, className = '', children, onClick, onPositioned, anchor, zIndex, ...rest }, forwardedRef) => {
     const ownRef = useRef<HTMLDivElement>(null)
     const [pos, setPos] = useState({ left: x, top: y })
+    const [up, setUp] = useState(false)
 
     useLayoutEffect(() => {
       const el = ownRef.current
       if (!el) return
       const clamp = (): void => {
-        const rect = el.getBoundingClientRect()
+        // Layout size, not getBoundingClientRect: a menu mid scale-in animation
+        // would measure small and clamp a few px too far out.
+        const rect = { width: el.offsetWidth, height: el.offsetHeight }
         const left = Math.round(Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)))
-        const top = Math.round(Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)))
+        let top = Math.round(Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)))
+        let flipped = false
+        if (anchor) {
+          flipped = anchor.bottom + 2 + rect.height > window.innerHeight - 8 && anchor.top - rect.height - 2 >= 4
+          if (flipped) top = Math.round(anchor.top - rect.height - 2)
+        }
+        setUp(flipped)
         setPos(prev => (prev.left === left && prev.top === top ? prev : { left, top }))
         onPositioned?.({ left, top })
       }
@@ -47,7 +63,7 @@ export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
       ro.observe(el)
       return () => ro.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [x, y])
+    }, [x, y, anchor?.top, anchor?.bottom])
 
     return (
       <div
@@ -57,7 +73,16 @@ export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
           else if (forwardedRef) (forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = el
         }}
         className={`fixed z-50 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-y-auto overflow-x-hidden ${className}`}
-        style={{ left: pos.left, top: pos.top, maxHeight: window.innerHeight - 16 }}
+        style={{
+          left: pos.left,
+          top: pos.top,
+          maxHeight: window.innerHeight - 16,
+          zIndex,
+          // Menus can open over the frameless title strip, which the OS would
+          // otherwise treat as a window-drag handle and swallow the clicks.
+          WebkitAppRegion: 'no-drag',
+          transformOrigin: up ? 'bottom left' : 'top left',
+        } as React.CSSProperties}
         onClick={onClick ?? (e => e.stopPropagation())}
         {...rest}
       >

@@ -1,7 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useState } from 'react'
 import {
-  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Loader2, Check, Download, ChevronRight, Share2,
+  Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Check, Download, Share2,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -10,11 +9,10 @@ import type { PlaylistSummary } from '../lib/userApi'
 import { JWAPI_BASE, buildStreamUrl } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
 import { openZipTarget, saveItems } from '../lib/clientZip'
-import { placeFlyout } from '../lib/menuFlyout'
 import { Track } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
-import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import ContextMenu from './ContextMenu'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
@@ -23,31 +21,6 @@ const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal')
 // (the sidebar's playlist list, the Playlists grid, etc.) without needing
 // PlaylistsView mounted, since it talks to userApi/the store directly. Mirrors
 // the action set in PlaylistsView's open-playlist "⋯" menu.
-
-function MenuItem({ icon: Icon, label, onClick, destructive = false, disabled = false, trailing, innerRef }: {
-  icon: React.ElementType
-  label: string
-  onClick: () => void
-  destructive?: boolean
-  disabled?: boolean
-  trailing?: React.ReactNode
-  innerRef?: React.Ref<HTMLButtonElement>
-}): JSX.Element {
-  return (
-    <button
-      ref={innerRef}
-      onClick={(e) => { e.stopPropagation(); onClick() }}
-      disabled={disabled}
-      className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm transition-colors hover:bg-surface-overlay disabled:opacity-40 disabled:cursor-not-allowed ${
-        destructive ? 'text-red-400 hover:text-red-300' : 'text-text-primary'
-      }`}
-    >
-      <Icon size={14} className={destructive ? 'text-red-400' : 'text-text-muted'} />
-      <span className="flex-1 text-left">{label}</span>
-      {trailing}
-    </button>
-  )
-}
 
 export interface PlaylistContextMenuState {
   playlist: PlaylistSummary
@@ -70,14 +43,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
   )
 
   const [playlist, setPlaylist] = useState(state.playlist)
-  const [showPlaylists, setShowPlaylists] = useState(false)
-  const addAllItemRef = useRef<HTMLButtonElement>(null)
-  const addAllSubmenuRef = useRef<HTMLDivElement>(null)
-  const [addAllSubPos, setAddAllSubPos] = useState({ top: 0, left: 0 })
-  const [showExport, setShowExport] = useState(false)
-  const exportItemRef = useRef<HTMLButtonElement>(null)
-  const exportSubmenuRef = useRef<HTMLDivElement>(null)
-  const [exportSubPos, setExportSubPos] = useState({ top: 0, left: 0 })
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState(state.playlist.name)
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -92,19 +57,17 @@ export default function PlaylistContextMenu({ state, onClose }: {
     return <SharePlaylistModal playlist={playlist} onClose={onClose} />
   }
 
-  const open = (): void => { setPendingPlaylistId(playlist.id); setActiveView('playlists'); onClose() }
+  const open = (): void => { setPendingPlaylistId(playlist.id); setActiveView('playlists') }
 
   const playAll = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
     const tracks = d.items.map(i => userApi.liteSongToTrack(i.song))
     if (tracks.length) playCollection(tracks)
-    onClose()
   }
 
   const queueAll = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
     d.items.forEach(i => addToQueue(userApi.liteSongToTrack(i.song)))
-    onClose()
   }
 
   // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
@@ -151,7 +114,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   const exportJson = async (): Promise<void> => {
-    onClose()
     const d = await userApi.getPlaylist(playlist.id)
     const data = {
       name: d.name,
@@ -170,7 +132,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   const exportM3u = async (): Promise<void> => {
-    onClose()
     const d = await userApi.getPlaylist(playlist.id)
     const tracks = d.items.map(i => userApi.liteSongToTrack(i.song))
     const lines = ['#EXTM3U']
@@ -220,7 +181,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   const addAllTo = async (targetId: number): Promise<void> => {
-    onClose()
     const src = await userApi.getPlaylist(playlist.id)
     await Promise.all(src.items.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
     await refreshPlaylists()
@@ -235,175 +195,79 @@ export default function PlaylistContextMenu({ state, onClose }: {
   }
 
   const del = async (): Promise<void> => {
-    onClose()
     await userApi.deletePlaylist(playlist.id)
     await refreshPlaylists()
   }
 
-  // Keep the menu on-screen near the cursor. The 220x340 figures are just the
-  // first-paint estimate - the layout effect below re-clamps against the
-  // actual rendered size, since content here grows a bit (the rename field)
-  // after the initial guess.
-  const MENU_W = 220
-  const [pos, setPos] = useState(() => ({
-    left: Math.max(8, Math.min(state.x, window.innerWidth - MENU_W - 8)),
-    top: Math.max(8, Math.min(state.y, window.innerHeight - 340 - 8)),
-  }))
+  const syncing = offlineSyncState?.state === 'syncing'
 
-  // Close on Escape.
-  const ref = useRef<HTMLDivElement>(null)
-  useEscapeToClose(onClose)
+  const renameBody = (
+    <div className="px-3 py-2 flex gap-2">
+      <input
+        autoFocus
+        value={renameVal}
+        onChange={e => setRenameVal(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') commitRename()
+          else if (e.key === 'Escape') { e.stopPropagation(); setRenaming(false) }
+        }}
+        className="flex-1 min-w-0 bg-surface-overlay rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none border border-[var(--border)]"
+      />
+      <button onClick={commitRename} className="px-2.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium">Save</button>
+    </div>
+  )
 
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const top = Math.max(8, Math.min(state.y, window.innerHeight - rect.height - 8))
-    const left = Math.max(8, Math.min(state.x, window.innerWidth - rect.width - 8))
-    setPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [state.x, state.y, renaming])
-
-  // "Add all to playlist" and "Export playlist" open flyouts beside the menu
-  // (matching SongContextMenu's "Add to playlist") instead of growing this
-  // menu inline - an inline list has no width cap of its own, so a long
-  // playlist name would keep stretching this box out to the edge of the
-  // screen. Hovering the row opens it, same as a native submenu.
-  useLayoutEffect(() => {
-    if (!showPlaylists) return
-    const item = addAllItemRef.current, menu = ref.current, sub = addAllSubmenuRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setAddAllSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [showPlaylists, pos, otherPlaylists.length])
-
-  useLayoutEffect(() => {
-    if (!showExport) return
-    const item = exportItemRef.current, menu = ref.current, sub = exportSubmenuRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setExportSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [showExport, pos])
-
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
-      <div
-        ref={ref}
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 w-[210px] overflow-x-hidden"
-        style={{ left: pos.left, top: pos.top }}
-        onClick={e => e.stopPropagation()}
-      >
-        {renaming ? (
-          <div className="px-3 py-2 flex gap-2">
-            <input
-              autoFocus
-              value={renameVal}
-              onChange={e => setRenameVal(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') commitRename(); else if (e.key === 'Escape') setRenaming(false) }}
-              className="flex-1 bg-surface-overlay rounded-lg px-2.5 py-1.5 text-sm text-text-primary focus:outline-none border border-[var(--border)]"
-            />
-            <button onClick={commitRename} className="px-2.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium">Save</button>
-          </div>
-        ) : (
-          <>
-            {/* Rendered outside the hover-tracked div below (but still inside
-                this portal) so moving the mouse into a flyout doesn't count as
-                "left the trigger row" and close it. */}
-            {showExport && (
-              <div
-                ref={exportSubmenuRef}
-                onClick={e => e.stopPropagation()}
-                style={{ position: 'fixed', zIndex: 62, top: exportSubPos.top, left: exportSubPos.left }}
-                className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-              >
-                <button onClick={exportJson}
-                  className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
-                  As JSON
-                </button>
-                <button onClick={exportM3u}
-                  className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors">
-                  As M3U
-                </button>
-              </div>
-            )}
-            {showPlaylists && (
-              <div
-                ref={addAllSubmenuRef}
-                onClick={e => e.stopPropagation()}
-                style={{ position: 'fixed', zIndex: 62, top: addAllSubPos.top, left: addAllSubPos.left }}
-                className="w-[210px] bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-              >
-                <div className="max-h-44 overflow-y-auto">
-                  {otherPlaylists.map(p => (
-                    <button key={p.id} onClick={() => addAllTo(p.id)} title={p.name}
-                      className="w-full text-left px-3.5 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors truncate">
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {/* Hovering a submenu row opens its flyout; hovering any other
-                row closes it again, the way a native submenu behaves.
-                Driving both from one handler also makes them mutually
-                exclusive. */}
-            <div
-              onMouseOver={(e) => {
-                const t = e.target as Node
-                setShowPlaylists(addAllItemRef.current?.contains(t) ?? false)
-                setShowExport(exportItemRef.current?.contains(t) ?? false)
-              }}
-            >
-            <MenuItem icon={Play} label="Open" onClick={open} />
-            <MenuItem icon={Shuffle} label="Play all" onClick={playAll} />
-            <MenuItem icon={ListEnd} label="Add all to queue" onClick={queueAll} />
-            <MenuItem
-              icon={zipState === 'loading' ? Loader2 : Archive}
-              label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all'}
-              disabled={zipState === 'loading'}
-              onClick={downloadZip}
-            />
-            {!!(window as any).electron && (
-              <MenuItem
-                icon={offlineSyncState?.state === 'syncing' ? Loader2 : Download}
-                label={
-                  offlineSyncState?.state === 'syncing' ? `Downloading… ${offlineSyncState.current}/${offlineSyncState.total}`
-                    : isOffline ? 'Remove offline download' : 'Download for offline'
-                }
-                disabled={offlineSyncState?.state === 'syncing'}
-                onClick={toggleOffline}
-              />
-            )}
-            <MenuItem
-              innerRef={exportItemRef}
-              icon={Download}
-              label="Export playlist"
-              trailing={<ChevronRight size={13} className="text-text-muted" />}
-              onClick={() => setShowExport(v => !v)}
-            />
-            <div className="border-t border-[var(--border)] my-1" />
-            {canShareToChat && <MenuItem icon={Share2} label="Share to chat" onClick={() => void shareToChat()} />}
-            <MenuItem icon={shareCopied ? Check : Link} label={shareCopied ? 'Link copied!' : 'Copy share link'} onClick={copyShare} />
-            <MenuItem icon={playlist.is_public ? Globe : Lock} label={playlist.is_public ? 'Make private' : 'Make public'} disabled={busy} onClick={togglePublic} />
-            {canShareToChat && <MenuItem icon={Share2} label="Share to chat" onClick={() => void shareToChat()} />}
-            <div className="border-t border-[var(--border)] my-1" />
-            <MenuItem icon={Pencil} label="Rename" onClick={() => { setRenameVal(playlist.name); setRenaming(true) }} />
-            {otherPlaylists.length > 0 && (
-              <MenuItem
-                innerRef={addAllItemRef}
-                icon={FolderInput}
-                label="Add all to playlist"
-                onClick={() => setShowPlaylists(v => !v)}
-                trailing={<ChevronRight size={13} className="text-text-muted" />}
-              />
-            )}
-            <div className="border-t border-[var(--border)] my-1" />
-            <MenuItem icon={Trash2} label="Delete playlist" destructive onClick={del} />
-            </div>
-          </>
-        )}
-      </div>
-    </>,
-    document.body
+  return (
+    <ContextMenu
+      x={state.x}
+      y={state.y}
+      onClose={onClose}
+      zIndex={61}
+      className="w-[210px]"
+      body={renaming ? renameBody : undefined}
+      items={[
+        { icon: Play, label: 'Open', onSelect: open },
+        { icon: Shuffle, label: 'Play all', onSelect: playAll },
+        { icon: ListEnd, label: 'Add all to queue', onSelect: queueAll },
+        {
+          icon: Archive,
+          label: zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all',
+          loading: zipState === 'loading',
+          disabled: zipState === 'loading',
+          keepOpen: true,
+          onSelect: downloadZip,
+        },
+        !!(window as any).electron && {
+          icon: Download,
+          label: syncing ? `Downloading… ${offlineSyncState.current}/${offlineSyncState.total}`
+            : isOffline ? 'Remove offline download' : 'Download for offline',
+          loading: syncing,
+          disabled: syncing,
+          keepOpen: true,
+          onSelect: toggleOffline,
+        },
+        {
+          icon: Download,
+          label: 'Export playlist',
+          children: [
+            { label: 'As JSON', onSelect: exportJson },
+            { label: 'As M3U', onSelect: exportM3u },
+          ],
+        },
+        'divider',
+        canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => void shareToChat() },
+        { icon: shareCopied ? Check : Link, label: shareCopied ? 'Link copied!' : 'Copy share link', keepOpen: true, onSelect: copyShare },
+        { icon: playlist.is_public ? Globe : Lock, label: playlist.is_public ? 'Make private' : 'Make public', disabled: busy, keepOpen: true, onSelect: togglePublic },
+        'divider',
+        { icon: Pencil, label: 'Rename', keepOpen: true, onSelect: () => { setRenameVal(playlist.name); setRenaming(true) } },
+        otherPlaylists.length > 0 && {
+          icon: FolderInput,
+          label: 'Add all to playlist',
+          children: otherPlaylists.map(p => ({ label: p.name, onSelect: () => addAllTo(p.id) })),
+        },
+        'divider',
+        { icon: Trash2, label: 'Delete playlist', danger: true, onSelect: del },
+      ]}
+    />
   )
 }

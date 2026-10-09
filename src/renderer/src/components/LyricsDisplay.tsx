@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { Download } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { useStore } from '../store/useStore'
 import { seekAudio, getAudioCurrentTime } from './Player'
+import ContextMenu from './ContextMenu'
 
 interface LyricsDisplayProps {
   /** Playback-clock source for synced-line highlighting. Defaults to the live
@@ -86,13 +86,6 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
   }, [currentLineIdx])
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
-  useEffect(() => {
-    if (!menuPos) return
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setMenuPos(null) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menuPos])
-
   const isEditor = account?.is_editor || account?.is_administrator
 
   // Right-click → "Download synced lyrics" - only offered for LRC-format
@@ -103,25 +96,17 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
     e.preventDefault()
     setMenuPos({ x: e.clientX, y: e.clientY })
   }
-  const downloadMenu = menuPos && rawLyrics && createPortal(
-    <>
-      <div className="fixed inset-0 z-40" onClick={() => setMenuPos(null)} onContextMenu={(e) => { e.preventDefault(); setMenuPos(null) }} />
-      <div
-        className="fixed z-50 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[200px]"
-        style={{ top: menuPos.y, left: menuPos.x }}
-      >
-        <button
-          onClick={() => {
-            downloadSyncedLyrics(currentTrackFull?.title ?? 'lyrics', currentTrackFull?.artist ?? '', rawLyrics)
-            setMenuPos(null)
-          }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-left text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <Download size={14} className="text-text-muted" /> Download synced lyrics
-        </button>
-      </div>
-    </>,
-    document.body
+  const downloadMenu = menuPos && rawLyrics && (
+    <ContextMenu
+      x={menuPos.x}
+      y={menuPos.y}
+      onClose={() => setMenuPos(null)}
+      items={[{
+        icon: Download,
+        label: 'Download synced lyrics',
+        onSelect: () => downloadSyncedLyrics(currentTrackFull?.title ?? 'lyrics', currentTrackFull?.artist ?? '', rawLyrics),
+      }]}
+    />
   )
 
   if (!rawLyrics) {

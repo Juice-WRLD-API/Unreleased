@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
@@ -23,7 +23,6 @@ import { useTrackChannel } from '../hooks/useTrackChannel'
 import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } from '../lib/droppedFiles'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
-import { placeFlyout } from '../lib/menuFlyout'
 import {
   apiFetch,
   searchFiles,
@@ -45,7 +44,7 @@ import { basename } from '../lib/compStagedChanges'
 import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import { CdnDownloadToast } from './CdnDownloadToast'
 import { useMultiSelect } from '../hooks/useMultiSelect'
-import { ClampedMenu } from './ClampedMenu'
+import ContextMenu from './ContextMenu'
 import { Track } from '../types'
 import { ProgressiveCover } from './ProgressiveCover'
 import MediaLightbox, { LightboxItem } from './MediaLightbox'
@@ -54,6 +53,11 @@ import TextFileViewer, { TextFileSource } from './TextFileViewer'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
 import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
+
+// lucide's `fill` is a prop, not a class, so the filled heart needs to be a
+// component of its own to fit a menu item's `icon` slot.
+const HeartFilled = (p: React.ComponentProps<typeof Heart>): JSX.Element => <Heart {...p} fill="currentColor" />
+
 type MediaFilter = 'all' | 'audio' | 'image' | 'video' | 'text'
 
 interface LocalEntry { name: string; path: string; type: 'file' | 'directory'; size: number | null }
@@ -177,12 +181,7 @@ export default function ApiFilesBrowser(): JSX.Element {
   const { lightboxItems, setLightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
-  // "Add to playlist" flyout, opened from the context menu.
-  const [playlistsOpen, setPlaylistsOpen] = useState(false)
   const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
-  const playlistItemRef = useRef<HTMLButtonElement>(null)
-  const playlistFlyoutRef = useRef<HTMLDivElement>(null)
-  const [playlistFlyoutPos, setPlaylistFlyoutPos] = useState({ top: 0, left: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
   // Whether a right-clicked audio file actually has a matching song in the
   // Tracker — resolved lazily per path on menu-open (not for every row up
@@ -190,27 +189,11 @@ export default function ApiFilesBrowser(): JSX.Element {
   // of opening the info modal on nothing. undefined = not looked up yet,
   // null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
-  // Position clamping is handled by the shared <ClampedMenu> at render time —
-  // this ref is kept only so the playlist flyout below can measure it.
-  const ctxMenuRef = useRef<HTMLDivElement>(null)
-  const [ctxMenuPos, setCtxMenuPos] = useState({ left: 0, top: 0 })
-
-  // Closing/reopening the menu resets the playlist flyout so it never
-  // re-opens against a different entry than the one it was populated for.
+  // Closing/reopening the menu clears the "added" ticks so they never carry
+  // over to a different entry.
   useEffect(() => {
-    setPlaylistsOpen(false)
     resetPlaylistDone()
   }, [ctxMenu])
-
-  // Flyout sits beside the menu, flipping left when it'd run off the edge —
-  // same placement helper the song context menu's submenus use.
-  useLayoutEffect(() => {
-    if (!playlistsOpen) return
-    const item = playlistItemRef.current, menu = ctxMenuRef.current, sub = playlistFlyoutRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setPlaylistFlyoutPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [playlistsOpen, ctxMenuPos, playlists.length])
 
   // Search — recursive across the whole file tree via /files/browse/'s
   // `search` param (same endpoint findSessionZips uses), not scoped to the
@@ -239,32 +222,10 @@ export default function ApiFilesBrowser(): JSX.Element {
   // (new / view / sort / refresh), the way Explorer and Finder behave.
   const [bgCtxMenu, setBgCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [bgSubmenu, setBgSubmenu] = useState<'view' | 'sort' | null>(null)
-  // Position clamping for both menus is handled by the shared <ClampedMenu>
-  // at render time. bgCtxMenuRef/bgCtxMenuPos are kept only because the
-  // submenu below needs to measure the outer menu's *settled* clamped box —
-  // see ClampedMenu's onPositioned doc comment.
-  const bgCtxMenuRef = useRef<HTMLDivElement>(null)
-  const [bgCtxMenuPos, setBgCtxMenuPos] = useState({ left: 0, top: 0 })
-  const bgViewItemRef = useRef<HTMLButtonElement>(null)
-  const bgSortItemRef = useRef<HTMLButtonElement>(null)
-  const bgSubmenuRef = useRef<HTMLDivElement>(null)
-  const [bgSubmenuPos, setBgSubmenuPos] = useState({ top: 0, left: 0 })
   const [nameEditor, setNameEditor] = useState<NameEditor | null>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const [nameBusy, setNameBusy] = useState(false)
-
-  // Reopening the menu elsewhere must not carry a stale submenu with it.
-  useEffect(() => { setBgSubmenu(null) }, [bgCtxMenu])
-
-  useLayoutEffect(() => {
-    if (!bgSubmenu) return
-    const item = bgSubmenu === 'view' ? bgViewItemRef.current : bgSortItemRef.current
-    const menu = bgCtxMenuRef.current, sub = bgSubmenuRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setBgSubmenuPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [bgSubmenu, bgCtxMenuPos])
 
   const browseLocal = async (dirPath: string): Promise<void> => {
     const el = (window as any).electron
@@ -418,20 +379,6 @@ export default function ApiFilesBrowser(): JSX.Element {
       setSortDir('asc')
     }
   }
-
-  // ESC closes an open context menu, like a native one. Registered separately
-  // from the select-mode handler so it works whether or not that's active.
-  useEffect(() => {
-    if (!bgCtxMenu && !localCtxMenu && !ctxMenu) return
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      setBgCtxMenu(null)
-      setLocalCtxMenu(null)
-      setCtxMenu(null)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [bgCtxMenu, localCtxMenu, ctxMenu])
 
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
     const match = await findSongByFilename(entry.name)
@@ -1683,408 +1630,205 @@ export default function ApiFilesBrowser(): JSX.Element {
         />
       )}
 
-      {!localMode && ctxMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setCtxMenu(null)} />
-          <ClampedMenu
-            ref={ctxMenuRef}
+      {!localMode && ctxMenu && (() => {
+        const entry = ctxMenu.entry
+        const matched = trackerMatches.get(entry.path) != null
+        const liked = likedTrackIds.includes(apiFileTrackId(entry.path, trackChannel))
+        const isDir = entry.type === 'directory'
+        const isAudio = getMediaType(entry.name) === 'audio'
+        return (
+          <ContextMenu
             x={ctxMenu.x}
             y={ctxMenu.y}
+            onClose={() => setCtxMenu(null)}
             className="min-w-[180px]"
-            onPositioned={setCtxMenuPos}
-          >
-            {/* Playlist flyout — a child of the menu so the click-away overlay
-                still counts clicks in it as "inside", but positioned beside it. */}
-            {playlistsOpen && (
-              <div
-                ref={playlistFlyoutRef}
-                onClick={e => e.stopPropagation()}
-                style={{ position: 'fixed', zIndex: 60, top: playlistFlyoutPos.top, left: playlistFlyoutPos.left }}
-                className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-              >
-                {!account ? (
-                  <div className="px-3 py-2">
-                    <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-                    <button
-                      onClick={() => { setShowUserAuth(true); setCtxMenu(null) }}
-                      className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
-                    >Log in</button>
-                  </div>
-                ) : playlists.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-                ) : (
-                  <div className="max-h-44 overflow-y-auto">
-                    {playlists.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          const songId = trackerMatches.get(ctxMenu.entry.path)
-                          if (songId != null) addToPlaylist(p.id, songId)
-                        }}
-                        disabled={playlistBusyId === p.id}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                      >
-                        <ListMusic size={13} className="shrink-0 text-text-muted" />
-                        <span className="flex-1 truncate text-xs">{p.name}</span>
-                        {playlistBusyId === p.id
-                          ? <Loader2 size={12} className="animate-spin shrink-0" />
-                          : playlistDoneId === p.id
-                            ? <Check size={12} className="text-accent shrink-0" />
-                            : null}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {getMediaType(ctxMenu.entry.name) === 'audio' && (
-              <>
-                <button onClick={() => { handlePlay(ctxMenu.entry); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Play size={14} className="text-text-muted" /> Play
-                </button>
-                <button onClick={() => { addToQueue(fileToTrack(ctxMenu.entry, activeChannel)); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <ListPlus size={14} className="text-text-muted" /> Add to queue
-                </button>
-                {trackerMatches.get(ctxMenu.entry.path) != null && (
+            items={[
+              isAudio && { icon: Play, label: 'Play', onSelect: () => handlePlay(entry) },
+              isAudio && { icon: ListPlus, label: 'Add to queue', onSelect: () => addToQueue(fileToTrack(entry, activeChannel)) },
+              isAudio && matched && {
+                icon: Plus,
+                label: 'Add to playlist',
+                childrenEmpty: account ? 'No playlists yet.' : 'Log in to save to playlists.',
+                children: account ? playlists.map((p) => ({
+                  label: p.name,
+                  icon: ListMusic,
+                  checked: playlistDoneId === p.id,
+                  loading: playlistBusyId === p.id,
+                  disabled: playlistBusyId === p.id,
+                  keepOpen: true,
+                  onSelect: () => {
+                    const songId = trackerMatches.get(entry.path)
+                    if (songId != null) addToPlaylist(p.id, songId)
+                  },
+                })) : [],
+                childrenFooter: !account ? (
                   <button
-                    ref={playlistItemRef}
-                    onClick={() => setPlaylistsOpen(o => !o)}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                    <Plus size={14} className="text-text-muted" /> Add to playlist
-                    <ChevronRight size={13} className="ml-auto text-text-muted" />
-                  </button>
-                )}
-                <button disabled={!channelsReady} onClick={() => { toggleApiFileLike(ctxMenu.entry.path); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Heart size={14} fill={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'currentColor' : 'none'}
-                    className={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'text-accent' : 'text-text-muted'} />
-                  {likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'Unlike' : 'Like'}
-                </button>
-                {trackerMatches.get(ctxMenu.entry.path) != null && (
-                  <button onClick={() => { openSongInfo(ctxMenu.entry); setCtxMenu(null) }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                    <Info size={14} className="text-text-muted" /> Find in Tracker
-                  </button>
-                )}
-                {canEdit && (
-                  <button onClick={async () => {
-                    const title = ctxMenu.entry.name.replace(/\.[^.]+$/, '')
-                    setCtxMenu(null)
-                    try {
-                      const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
-                      const id = data.results[0]?.id
-                      if (id) useStore.getState().openSongEditor(id)
-                    } catch {}
-                  }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                    <Pencil size={14} className="text-text-muted" /> Edit
-                  </button>
-                )}
-                <div className="border-t border-[var(--border)] my-1" />
-              </>
-            )}
-            {getMediaType(ctxMenu.entry.name) === 'text' && (
-              <button onClick={() => { openApiText(ctxMenu.entry); setCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <FileText size={14} className="text-text-muted" /> View
-              </button>
-            )}
-            <button onClick={() => enterSelectMode(ctxMenu.entry)}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <CheckSquare2 size={14} className="text-text-muted" /> Select
-            </button>
-            <button onClick={() => { copyLink(ctxMenu.entry); setCtxMenu(null) }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <Link size={14} className="text-text-muted" /> Copy link
-            </button>
-            <button onClick={() => { copyPath(ctxMenu.entry); setCtxMenu(null) }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <Clipboard size={14} className="text-text-muted" /> Copy path
-            </button>
-            {/* Contributor actions — proposals target a file, so directories
-                are excluded. Both land on the contributor page prefilled. */}
-            {canPropose && ctxMenu.entry.type !== 'directory' && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button onClick={() => {
-                  setPendingCompProposal({ paths: [ctxMenu.entry.path], changeType: 'replace' })
-                  setCtxMenu(null)
+                    onClick={() => { setShowUserAuth(true); setCtxMenu(null) }}
+                    className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
+                  >Log in</button>
+                ) : undefined,
+              },
+              isAudio && {
+                icon: liked ? HeartFilled : Heart,
+                label: liked ? 'Unlike' : 'Like',
+                active: liked,
+                disabled: !channelsReady,
+                onSelect: () => toggleApiFileLike(entry.path),
+              },
+              isAudio && matched && { icon: Info, label: 'Find in Tracker', onSelect: () => { void openSongInfo(entry) } },
+              isAudio && canEdit && {
+                icon: Pencil,
+                label: 'Edit',
+                onSelect: async () => {
+                  const title = entry.name.replace(/\.[^.]+$/, '')
+                  try {
+                    const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
+                    const id = data.results[0]?.id
+                    if (id) useStore.getState().openSongEditor(id)
+                  } catch {}
+                },
+              },
+              isAudio && 'divider',
+              getMediaType(entry.name) === 'text' && { icon: FileText, label: 'View', onSelect: () => openApiText(entry) },
+              { icon: CheckSquare2, label: 'Select', onSelect: () => enterSelectMode(entry) },
+              { icon: Link, label: 'Copy link', onSelect: () => copyLink(entry) },
+              { icon: Clipboard, label: 'Copy path', onSelect: () => copyPath(entry) },
+              // Contributor actions — proposals target a file, so directories
+              // are excluded. Both land on the contributor page prefilled.
+              canPropose && !isDir && 'divider',
+              canPropose && !isDir && {
+                icon: Replace,
+                label: 'Propose replacement',
+                onSelect: () => {
+                  setPendingCompProposal({ paths: [entry.path], changeType: 'replace' })
                   setActiveView('contributor')
-                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Replace size={14} className="text-text-muted" /> Propose replacement
-                </button>
-                <button onClick={() => {
-                  setPendingCompProposal({ paths: [ctxMenu.entry.path], changeType: 'delete' })
-                  setCtxMenu(null)
+                },
+              },
+              canPropose && !isDir && {
+                icon: Trash2,
+                label: 'Propose deletion',
+                onSelect: () => {
+                  setPendingCompProposal({ paths: [entry.path], changeType: 'delete' })
                   setActiveView('contributor')
-                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Trash2 size={14} className="text-text-muted" /> Propose deletion
-                </button>
-                <div className="border-t border-[var(--border)] my-1" />
-              </>
-            )}
-            {canPropose && ctxMenu.entry.type === 'directory' && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'files'); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Upload size={14} className="text-text-muted" /> Upload files here
-                </button>
-                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'folder'); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <FolderInput size={14} className="text-text-muted" /> Upload folder here
-                </button>
-                <div className="border-t border-[var(--border)] my-1" />
-              </>
-            )}
-            {ctxMenu.entry.type === 'directory' ? (
-              <button onClick={() => { downloadFolder(ctxMenu.entry); setCtxMenu(null) }}
-                disabled={zipStatus === 'starting' || zipStatus === 'zipping'}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50">
-                <PackageOpen size={14} className="text-text-muted" /> Download folder (ZIP)
-              </button>
-            ) : (
-              <button onClick={() => { handleDownload(ctxMenu.entry); setCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <Download size={14} className="text-text-muted" /> Download
-              </button>
-            )}
-          </ClampedMenu>
-        </>
-      )}
+                },
+              },
+              canPropose && isDir && 'divider',
+              canPropose && isDir && { icon: Upload, label: 'Upload files here', onSelect: () => openUploadPicker(entry.path, 'files') },
+              canPropose && isDir && { icon: FolderInput, label: 'Upload folder here', onSelect: () => openUploadPicker(entry.path, 'folder') },
+              'divider',
+              isDir
+                ? { icon: PackageOpen, label: 'Download folder (ZIP)', disabled: zipStatus === 'starting' || zipStatus === 'zipping', onSelect: () => downloadFolder(entry) }
+                : { icon: Download, label: 'Download', onSelect: () => handleDownload(entry) },
+            ]}
+          />
+        )
+      })()}
 
       {/* Local-mode context menu — open / play, rename, delete. Deletion and
           renaming are handled in the main process (confirm + OS trash there),
           so nothing here touches the filesystem directly. */}
-      {localMode && localCtxMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setLocalCtxMenu(null)} />
-          <ClampedMenu x={localCtxMenu.x} y={localCtxMenu.y} className="min-w-[190px]">
-            {localCtxMenu.entry.type === 'directory' ? (
-              <button onClick={() => { browseLocal(localCtxMenu.entry.path); setLocalCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <FolderOpen size={14} className="text-text-muted" /> Open
-              </button>
-            ) : getMediaType(localCtxMenu.entry.name) === 'audio' ? (
-              <button onClick={() => { handleLocalPlay(localCtxMenu.entry); setLocalCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <Play size={14} className="text-text-muted" /> Play
-              </button>
-            ) : getMediaType(localCtxMenu.entry.name) === 'text' ? (
-              <button onClick={() => { openLocalText(localCtxMenu.entry); setLocalCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <FileText size={14} className="text-text-muted" /> View
-              </button>
-            ) : null}
-            <button onClick={() => { openLocalFile(localCtxMenu.entry.path); setLocalCtxMenu(null) }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <ExternalLink size={14} className="text-text-muted" /> Open with system app
-            </button>
-            <button onClick={() => startRename(localCtxMenu.entry)}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <Pencil size={14} className="text-text-muted" /> Rename
-            </button>
-            <div className="border-t border-[var(--border)] my-1" />
-            <button onClick={() => startCreate('directory')}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <FolderPlus size={14} className="text-text-muted" /> New folder
-            </button>
-            <button onClick={() => startCreate('file')}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <FilePlus size={14} className="text-text-muted" /> New file
-            </button>
-            <div className="border-t border-[var(--border)] my-1" />
-            <button onClick={() => deleteLocalEntry(localCtxMenu.entry)}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-red-400 hover:bg-surface-overlay transition-colors">
-              <Trash2 size={14} /> Delete
-            </button>
-          </ClampedMenu>
-        </>
-      )}
+      {localMode && localCtxMenu && (() => {
+        const entry = localCtxMenu.entry
+        const media = getMediaType(entry.name)
+        return (
+          <ContextMenu
+            x={localCtxMenu.x}
+            y={localCtxMenu.y}
+            onClose={() => setLocalCtxMenu(null)}
+            className="min-w-[190px]"
+            items={[
+              entry.type === 'directory'
+                ? { icon: FolderOpen, label: 'Open', onSelect: () => browseLocal(entry.path) }
+                : media === 'audio'
+                  ? { icon: Play, label: 'Play', onSelect: () => handleLocalPlay(entry) }
+                  : media === 'text'
+                    ? { icon: FileText, label: 'View', onSelect: () => openLocalText(entry) }
+                    : null,
+              { icon: ExternalLink, label: 'Open with system app', onSelect: () => openLocalFile(entry.path) },
+              { icon: Pencil, label: 'Rename', onSelect: () => startRename(entry) },
+              'divider',
+              { icon: FolderPlus, label: 'New folder', onSelect: () => startCreate('directory') },
+              { icon: FilePlus, label: 'New file', onSelect: () => startCreate('file') },
+              'divider',
+              { icon: Trash2, label: 'Delete', danger: true, onSelect: () => deleteLocalEntry(entry) },
+            ]}
+          />
+        )
+      })()}
 
       {/* Background (empty-space) menu for the current folder — the Explorer /
           Finder equivalent: View, Sort by, Refresh, plus local-only New /
           Open in file manager, or API-only Copy link. */}
       {bgCtxMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setBgCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setBgCtxMenu(null) }} />
-          <ClampedMenu
-            ref={bgCtxMenuRef}
-            x={bgCtxMenu.x}
-            y={bgCtxMenu.y}
-            className="min-w-[190px]"
-            onPositioned={setBgCtxMenuPos}
-            // Hovering a submenu row opens it, hovering anything else closes
-            // it — the way a native submenu behaves.
-            onMouseOver={(e) => {
-              const t = e.target as Node
-              if (bgViewItemRef.current?.contains(t)) setBgSubmenu('view')
-              else if (bgSortItemRef.current?.contains(t)) setBgSubmenu('sort')
-              else setBgSubmenu(null)
-            }}
-          >
-            {/* Submenu flyout — a child of the menu so the click-away overlay
-                still counts clicks inside it as "inside". */}
-            {bgSubmenu && (
-              <div
-                ref={bgSubmenuRef}
-                onClick={e => e.stopPropagation()}
-                style={{ position: 'fixed', zIndex: 60, top: bgSubmenuPos.top, left: bgSubmenuPos.left }}
-                className="w-44 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-              >
-                {bgSubmenu === 'view' ? (
-                  ([['list', 'List', LayoutList], ['grid', 'Grid', LayoutGrid]] as const).map(([key, label, Icon]) => (
-                    <button
-                      key={key}
-                      onClick={() => { setViewMode(key); setBgCtxMenu(null) }}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                    >
-                      <Icon size={14} className="text-text-muted" />
-                      <span className="flex-1 text-left">{label}</span>
-                      {viewMode === key && <Check size={13} className="text-accent" />}
-                    </button>
-                  ))
-                ) : (
-                  <>
-                    {(['name', 'type', 'size'] as SortBy[]).map((by) => (
-                      <button
-                        key={by}
-                        onClick={() => { toggleSort(by); setBgCtxMenu(null) }}
-                        className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors capitalize"
-                      >
-                        <span className="flex-1 text-left">{by}</span>
-                        {sortBy === by && (sortDir === 'asc'
-                          ? <ArrowUp size={13} className="text-accent" />
-                          : <ArrowDown size={13} className="text-accent" />)}
-                      </button>
-                    ))}
-                    <div className="border-t border-[var(--border)] my-1" />
-                    <button
-                      onClick={() => { setSortDir(sortDir === 'asc' ? 'desc' : 'asc'); setBgCtxMenu(null) }}
-                      className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                    >
-                      <ArrowUpDown size={14} className="text-text-muted" />
-                      {sortDir === 'asc' ? 'Descending' : 'Ascending'}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-
-            <button
-              ref={bgViewItemRef}
-              onClick={() => setBgSubmenu(s => (s === 'view' ? null : 'view'))}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-            >
-              {viewMode === 'grid' ? <LayoutGrid size={14} className="text-text-muted" /> : <LayoutList size={14} className="text-text-muted" />}
-              <span className="flex-1 text-left">View</span>
-              <ChevronRight size={13} className="text-text-muted" />
-            </button>
-            <button
-              ref={bgSortItemRef}
-              onClick={() => setBgSubmenu(s => (s === 'sort' ? null : 'sort'))}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-            >
-              <ArrowUpDown size={14} className="text-text-muted" />
-              <span className="flex-1 text-left">Sort by</span>
-              <ChevronRight size={13} className="text-text-muted" />
-            </button>
-            <button
-              onClick={() => {
+        <ContextMenu
+          x={bgCtxMenu.x}
+          y={bgCtxMenu.y}
+          onClose={() => setBgCtxMenu(null)}
+          className="min-w-[190px]"
+          flyoutClassName="w-44"
+          items={[
+            {
+              icon: viewMode === 'grid' ? LayoutGrid : LayoutList,
+              label: 'View',
+              children: ([['list', 'List', LayoutList], ['grid', 'Grid', LayoutGrid]] as const).map(([key, label, icon]) => ({
+                icon,
+                label,
+                checked: viewMode === key,
+                onSelect: () => setViewMode(key),
+              })),
+            },
+            {
+              icon: ArrowUpDown,
+              label: 'Sort by',
+              children: [
+                ...(['name', 'type', 'size'] as SortBy[]).map((by) => ({
+                  label: by.charAt(0).toUpperCase() + by.slice(1),
+                  trailing: sortBy === by
+                    ? (sortDir === 'asc' ? <ArrowUp size={13} className="text-accent" /> : <ArrowDown size={13} className="text-accent" />)
+                    : undefined,
+                  onSelect: () => toggleSort(by),
+                })),
+                'divider' as const,
+                { icon: ArrowUpDown, label: sortDir === 'asc' ? 'Descending' : 'Ascending', onSelect: () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc') },
+              ],
+            },
+            {
+              icon: RefreshCw,
+              label: 'Refresh',
+              onSelect: () => {
                 if (localMode) browseLocal(localPath)
                 else navigate(currentPath, false)
-                setBgCtxMenu(null)
-              }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-            >
-              <RefreshCw size={14} className="text-text-muted" /> Refresh
-            </button>
-            {localMode && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button
-                  onClick={() => startCreate('directory')}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                  <FolderPlus size={14} className="text-text-muted" /> New folder
-                </button>
-                <button
-                  onClick={() => startCreate('file')}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                  <FilePlus size={14} className="text-text-muted" /> New file
-                </button>
-                <button
-                  onClick={() => { uploadLocalFiles(); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                  <Upload size={14} className="text-text-muted" /> Upload file
-                </button>
-              </>
-            )}
-            {!localMode && canPropose && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button
-                  onClick={() => { setNewFolderPrompt(''); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                  <FolderPlus size={14} className="text-text-muted" /> New folder
-                </button>
-                <button onClick={() => { openUploadPicker(currentPath, 'files'); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Upload size={14} className="text-text-muted" /> Upload files
-                </button>
-                <button onClick={() => { openUploadPicker(currentPath, 'folder'); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <FolderInput size={14} className="text-text-muted" /> Upload folder
-                </button>
-                {/* The Contributor page is still where an upload gets notes or a
-                    rename before it's proposed. */}
-                <button
-                  onClick={() => {
-                    setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
-                    setBgCtxMenu(null)
-                    setActiveView('contributor')
-                  }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                  <FileText size={14} className="text-text-muted" /> Upload with notes…
-                </button>
-              </>
-            )}
-            <div className="border-t border-[var(--border)] my-1" />
-            <button
-              onClick={() => {
-                if (localMode) copyTextToClipboard(localPath, 'path')
-                else copyTextToClipboard(currentPath, 'path')
-                setBgCtxMenu(null)
-              }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-            >
-              <Clipboard size={14} className="text-text-muted" /> Copy folder path
-            </button>
-            {localMode ? (
-              <button
-                onClick={() => { openLocalFile(localPath); setBgCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-              >
-                <ExternalLink size={14} className="text-text-muted" /> Open in file manager
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  copyTextToClipboard(window.location.origin + pathToUrl(currentPath), 'link')
-                  setBgCtxMenu(null)
-                }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-              >
-                <Link size={14} className="text-text-muted" /> Copy folder link
-              </button>
-            )}
-          </ClampedMenu>
-        </>
+              },
+            },
+            localMode && 'divider',
+            localMode && { icon: FolderPlus, label: 'New folder', onSelect: () => startCreate('directory') },
+            localMode && { icon: FilePlus, label: 'New file', onSelect: () => startCreate('file') },
+            localMode && { icon: Upload, label: 'Upload file', onSelect: () => uploadLocalFiles() },
+            !localMode && canPropose && 'divider',
+            !localMode && canPropose && { icon: FolderPlus, label: 'New folder', onSelect: () => setNewFolderPrompt('') },
+            !localMode && canPropose && { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
+            !localMode && canPropose && { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
+            // The Contributor page is still where an upload gets notes or a
+            // rename before it's proposed.
+            !localMode && canPropose && {
+              icon: FileText,
+              label: 'Upload with notes…',
+              onSelect: () => {
+                setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                setActiveView('contributor')
+              },
+            },
+            'divider',
+            {
+              icon: Clipboard,
+              label: 'Copy folder path',
+              onSelect: () => copyTextToClipboard(localMode ? localPath : currentPath, 'path'),
+            },
+            localMode
+              ? { icon: ExternalLink, label: 'Open in file manager', onSelect: () => openLocalFile(localPath) }
+              : { icon: Link, label: 'Copy folder link', onSelect: () => copyTextToClipboard(window.location.origin + pathToUrl(currentPath), 'link') },
+          ]}
+        />
       )}
 
     </>

@@ -2,10 +2,9 @@ import { useOpenUserCard } from './chat/UserCard'
 import { useRef, useState } from 'react'
 import {
   Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
-  Pencil, Check, PictureInPicture2, User, MessagesSquare,
+  Pencil, Check, PictureInPicture2,
 } from 'lucide-react'
 import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
-import { hasChatAccess } from '../store/chatStore'
 import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
 import { accountDisplayName, initial } from '../lib/format'
 import ReportsTab from './ReportsTab'
@@ -127,7 +126,6 @@ export default function EditorProfileView(): JSX.Element {
   const isElectron = navigator.userAgent.includes('Electron')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const el = (window as any).electron
-  const openOwnPublicProfile = useStore((st) => st.openOwnPublicProfile)
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
@@ -167,22 +165,6 @@ export default function EditorProfileView(): JSX.Element {
                 >{ch.name}</button>
               ))}
             </div>
-          )}
-          <button
-            onClick={openOwnPublicProfile}
-            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-            title="View your public profile"
-          >
-            <User size={13} />
-          </button>
-          {hasChatAccess(account) && (
-            <button
-              onClick={() => go('chat')}
-              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-              title="Staff chat"
-            >
-              <MessagesSquare size={13} />
-            </button>
           )}
           {/* Shown only when the pop-out is turned off - with it on, this page
               *is* the pop-out and the button would reopen the window it's

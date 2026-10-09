@@ -15,12 +15,10 @@ import {
   Heart,
   ChevronUp,
   ChevronDown,
-  Check,
   MoreHorizontal,
   PictureInPicture2,
   Radio,
   Info,
-  Loader2,
   SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -35,6 +33,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
 import { FullTrack } from '../types'
 import SongContextMenu from './SongContextMenu'
+import ContextMenu from './ContextMenu'
 import EqualizerPanel from './EqualizerPanel'
 import {
   attachAudioElement, applyAudioEffects, resumeEffectsContext,
@@ -1849,7 +1848,7 @@ export default function Player(): JSX.Element {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
   const [showOutputPicker, setShowOutputPicker] = useState(false)
   const outputBtnRef = useRef<HTMLButtonElement>(null)
-  const [pickerPos, setPickerPos] = useState({ bottom: 0, right: 0 })
+  const [outputRect, setOutputRect] = useState<{ left: number; top: number; bottom: number } | null>(null)
 
   useEffect(() => {
     const enumerate = async (): Promise<void> => {
@@ -1868,7 +1867,7 @@ export default function Player(): JSX.Element {
   const openOutputPicker = (): void => {
     if (!outputBtnRef.current) return
     const r = outputBtnRef.current.getBoundingClientRect()
-    setPickerPos({ bottom: window.innerHeight - r.top + 8, right: window.innerWidth - r.right })
+    setOutputRect({ left: r.left, top: r.top, bottom: r.bottom })
     setShowOutputPicker((v) => !v)
   }
 
@@ -2146,25 +2145,22 @@ export default function Player(): JSX.Element {
                     <MoreHorizontal size={13} />
                   </button>
 
-                  {showContextMenu && radioFmActive && radioFmNowPlaying && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowContextMenu(false)} />
-                      <div className="absolute bottom-7 left-0 z-50 w-48 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-hidden">
-                        <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
-                          <p className="text-text-primary text-xs font-semibold truncate" title={radioFmNowPlaying.title}>{radioFmNowPlaying.title}</p>
-                          <p className="text-text-muted text-[10px] truncate">{radioFmNowPlaying.artist}</p>
-                        </div>
-                        {radioFmNowPlaying.song_id != null && (
-                          <button
-                            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                            onClick={openSongInfo}
-                          >
-                            <Info size={14} /> Song info
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
+                  {showContextMenu && radioFmActive && radioFmNowPlaying && (() => {
+                    const r = contextMenuBtnRef.current?.getBoundingClientRect()
+                    return (
+                      <ContextMenu
+                        x={r?.left ?? 0}
+                        y={(r?.bottom ?? 0) + 2}
+                        anchor={r ? { top: r.top, bottom: r.bottom } : undefined}
+                        ignoreRef={contextMenuBtnRef}
+                        title={radioFmNowPlaying.title}
+                        subtitle={radioFmNowPlaying.artist}
+                        onClose={() => setShowContextMenu(false)}
+                        className="w-48"
+                        items={[radioFmNowPlaying.song_id != null && { icon: Info, label: 'Song info', onSelect: openSongInfo }]}
+                      />
+                    )
+                  })()}
 
                   {showContextMenu && !radioFmActive && currentTrack && (
                     <SongContextMenu
@@ -2344,39 +2340,25 @@ export default function Player(): JSX.Element {
         )}
 
         {/* Output device popover */}
-        {showOutputPicker && createPortal(
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowOutputPicker(false)} />
-            <div
-              onMouseDown={(e) => e.stopPropagation()}
-              className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl py-1.5 min-w-[220px]"
-              style={{ bottom: pickerPos.bottom, right: pickerPos.right }}
-            >
-              <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted">Audio Output</p>
-              <button
-                onClick={() => { setAudioOutput(''); setShowOutputPicker(false) }}
-                className="flex items-center gap-3 w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-              >
-                <span className="w-4 h-4 flex items-center justify-center shrink-0">
-                  {audioOutput === '' && <Check size={12} className="text-accent" />}
-                </span>
-                System default
-              </button>
-              {outputDevices.map((d) => (
-                <button
-                  key={d.deviceId}
-                  onClick={() => { setAudioOutput(d.deviceId); setShowOutputPicker(false) }}
-                  className="flex items-center gap-3 w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                     <span className="w-4 h-4 flex items-center justify-center shrink-0">
-                    {audioOutput === d.deviceId && <Check size={12} className="text-accent" />}
-                  </span>
-                  <span className="truncate">{d.label || `Output ${d.deviceId.slice(0, 8)}`}</span>
-                </button>
-              ))}
-            </div>
-          </>,
-          document.body
+        {showOutputPicker && outputRect && (
+          <ContextMenu
+            x={outputRect.left}
+            y={outputRect.bottom + 2}
+            anchor={outputRect}
+            ignoreRef={outputBtnRef}
+            title="Audio Output"
+            onClose={() => setShowOutputPicker(false)}
+            className="min-w-[220px]"
+            checkColumn="auto"
+            items={[
+              { label: 'System default', checked: audioOutput === '', onSelect: () => setAudioOutput('') },
+              ...outputDevices.map((d) => ({
+                label: d.label || `Output ${d.deviceId.slice(0, 8)}`,
+                checked: audioOutput === d.deviceId,
+                onSelect: () => setAudioOutput(d.deviceId),
+              })),
+            ]}
+          />
         )}
       </div>
       </>

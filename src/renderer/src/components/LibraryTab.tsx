@@ -15,6 +15,7 @@ import * as userApi from '../lib/userApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { formatDuration, formatTotalDuration } from '../lib/format'
+import { AnchoredContextMenu } from './ContextMenu'
 
 /* ══════════════════════════════════════════════════════════════════════════════
    Library — local-file browser styled like the rest of the app (solid surfaces,
@@ -730,6 +731,7 @@ export default function LibraryTab(): JSX.Element {
   // target (a scanned file has no song id to give a synced playlist). The
   // per-track context menu has always offered this; the bulk bar hadn't.
   const [showBulkPlaylists, setShowBulkPlaylists] = useState(false)
+  const bulkPlBtnRef = useRef<HTMLButtonElement>(null)
   const [bulkNewName, setBulkNewName] = useState('')
 
   const closeBulkPlaylists = (): void => { setShowBulkPlaylists(false); setBulkNewName('') }
@@ -965,6 +967,7 @@ export default function LibraryTab(): JSX.Element {
             </button>
             <div className="relative">
               <button
+                ref={bulkPlBtnRef}
                 onClick={() => setShowBulkPlaylists(v => !v)}
                 disabled={selected.size === 0}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
@@ -972,27 +975,16 @@ export default function LibraryTab(): JSX.Element {
                 <Plus size={13} /> Add to playlist
               </button>
               {showBulkPlaylists && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={closeBulkPlaylists} />
-                  <div className="absolute right-0 bottom-full mb-1 z-50 w-56 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
-                    <div className="px-3 py-2 border-b border-[var(--border)] text-[11px] uppercase tracking-wider text-text-muted font-semibold">
-                      Add to playlist
-                    </div>
-                    <div className="max-h-56 overflow-y-auto py-1">
-                      {localPlaylists.length === 0 ? (
-                        <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-                      ) : localPlaylists.map(p => (
-                        <button
-                          key={p.id}
-                          onClick={() => bulkAddToLocalPlaylist(p.id)}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                        >
-                          <HardDrive size={14} className="shrink-0 text-text-muted" />
-                          <span className="flex-1 truncate">{p.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="border-t border-[var(--border)] p-2 flex items-center gap-1.5">
+                <AnchoredContextMenu
+                  anchorRef={bulkPlBtnRef}
+                  title="Add to playlist"
+                  onClose={closeBulkPlaylists}
+                  className="w-56"
+                  items={localPlaylists.length === 0
+                    ? [{ label: 'No playlists yet.', disabled: true }]
+                    : localPlaylists.map(p => ({ icon: HardDrive, label: p.name, onSelect: () => bulkAddToLocalPlaylist(p.id) }))}
+                  footer={(
+                    <div className="flex items-center gap-1.5 p-1">
                       <input
                         value={bulkNewName}
                         onChange={e => setBulkNewName(e.target.value)}
@@ -1009,8 +1001,8 @@ export default function LibraryTab(): JSX.Element {
                         <Plus size={13} />
                       </button>
                     </div>
-                  </div>
-                </>
+                  )}
+                />
               )}
             </div>
             <button

@@ -8,7 +8,7 @@ import { formatBytes } from '../format'
 import { getToken } from '../userApi'
 import { termAccess } from './access'
 import { completeSongs } from './player'
-import { fail, pickByName, type TermCommand } from './types'
+import { confirmAction, fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -185,6 +185,16 @@ token show prints it in full · token copy puts it on the clipboard`)
     run: () => { window.location.reload() },
   },
   {
+    name: 'restart', aliases: ['relaunch'], group: 'App', usage: 'restart',
+    description: 'Quit and reopen the desktop app (reload only refreshes the page)',
+    run: async (_a, ctx) => {
+      const el = (window as unknown as { electron?: { relaunchApp?: () => Promise<unknown> } }).electron
+      const relaunch = el?.relaunchApp ?? fail('restart is only available in the desktop app (try: reload)')
+      ctx.print('restarting…', 'ok')
+      await relaunch()
+    },
+  },
+  {
     name: 'version', group: 'App', usage: 'version', description: 'The app version this build is running, and the commit it was built from',
     run: async (_a, ctx) => {
       ctx.print(`unreleased ${APP_VERSION}`)
@@ -197,6 +207,46 @@ token show prints it in full · token copy puts it on the clipboard`)
         // Offline or rate limited: the hash alone is still baked into the build.
         ctx.print(`commit ${COMMIT_HASH.slice(0, 7)}`, 'dim')
       }
+    },
+  },
+  {
+    name: 'update', aliases: ['upgrade'], group: 'App', usage: 'update [check | install | force [-y]]',
+    description: 'Update the desktop app: check (default) looks for a new release and downloads it, install restarts into a downloaded update, force reinstalls the latest release',
+    complete: (before, partial) => (before.length === 0 ? ['check', 'install', 'force'].filter((w) => w.startsWith(partial.toLowerCase())) : []),
+    run: async (args, ctx) => {
+      const [sub = 'check', ...flags] = args.trim().split(/\s+/).filter(Boolean)
+      const mode = sub.toLowerCase()
+      if (!['check', 'install', 'force'].includes(mode)) fail('usage: update [check | install | force [-y]]')
+      type Status = { type: string; version?: string; percent?: number; message?: string }
+      const maybeEl = (window as unknown as { electron?: {
+        checkForUpdates?: () => Promise<unknown>; forceUpdate?: () => Promise<unknown>; installUpdate?: () => Promise<unknown>
+        onUpdateStatus?: (cb: (d: Status) => void) => () => void
+      } }).electron
+      const el = maybeEl?.checkForUpdates ? maybeEl : fail('updates are only available in the desktop app')
+      if (mode === 'install') {
+        if (!el.installUpdate) fail('install is not available in this build')
+        ctx.print('restarting to install the downloaded update (if there is none, run: update)', 'ok')
+        await (el.installUpdate ?? fail('install is not available in this build'))()
+        return
+      }
+      if (mode === 'force' && !confirmAction(ctx, 'Download the latest release and reinstall the app?', flags.includes('-y'))) return
+      // The updater reports through events; wait for one that ends the run.
+      let lastPercent = -10
+      await new Promise<void>((resolve) => {
+        const off = el.onUpdateStatus?.((d) => {
+          if (d.type === 'checking') ctx.print('checking for updates…', 'dim')
+          else if (d.type === 'available') ctx.print(`update available${d.version ? `: v${d.version}` : ''}`, 'ok')
+          else if (d.type === 'downloading') {
+            const pct = d.percent ?? 0
+            if (pct - lastPercent >= 10 || pct === 100) { lastPercent = pct; ctx.print(`downloading… ${pct}%`, 'dim') }
+          } else if (d.type === 'not-available') { ctx.print(`up to date (v${APP_VERSION})`, 'ok'); off?.(); resolve() }
+          else if (d.type === 'downloaded') { ctx.print(`v${d.version ?? ''} downloaded - run: update install`.replace('vv', 'v'), 'ok'); off?.(); resolve() }
+          else if (d.type === 'error') { ctx.print(`update failed: ${d.message ?? 'unknown error'}${mode === 'check' ? ' (try: update force)' : ''}`, 'error'); off?.(); resolve() }
+        })
+        const start = mode === 'force' ? el.forceUpdate : el.checkForUpdates
+        // No event stream means nothing else will resolve this, so settle on the call itself.
+        start?.().then(() => { if (!el.onUpdateStatus) resolve() }, (e: Error) => { ctx.print(`update failed: ${e.message}`, 'error'); off?.(); resolve() })
+      })
     },
   },
   {
