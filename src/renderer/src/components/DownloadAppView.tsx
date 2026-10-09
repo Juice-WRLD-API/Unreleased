@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Download, Github, Monitor, Apple, Terminal, Smartphone, Share, Plus,
   HardDriveDownload, Library, Globe, Radio, FileAudio, RefreshCw, ArrowDown, Check,
-  Home, History,
+  Home, History, Server,
 } from 'lucide-react'
 import logo from '../assets/logo.png'
+import { CDN_BINARY_PLATFORMS, fetchCdnBinaries, type CdnNodeBinary } from '../lib/cdnAdminApi'
+import { baseFor } from '../lib/apiServers'
 import { IS_ANDROID, IS_IOS, IS_MOBILE } from '../lib/platform'
 import { hasPwaInstallPrompt, onPwaInstallPromptChange, showPwaInstallPrompt } from './InstallPrompt'
 
@@ -120,6 +122,12 @@ function fmtDate(iso: string): string {
   } catch { return '' }
 }
 
+/** The API may return a root-relative download path; resolve it against the
+ *  API base that serves /cdn. */
+function cdnBinaryUrl(url: string): string {
+  return url.startsWith('/') ? `${baseFor(url)}${url}` : url
+}
+
 // ── Small building blocks ────────────────────────────────────────────────────
 
 function FeatureCard({ icon, title, desc }: { icon: JSX.Element; title: string; desc: string }): JSX.Element {
@@ -199,6 +207,7 @@ export default function DownloadAppView(): JSX.Element {
   const [failed, setFailed] = useState(false)
   const [legacyRelease, setLegacyRelease] = useState<ReleaseInfo | null | undefined>(cachedLegacyRelease)
   const [canInstallPwa, setCanInstallPwa] = useState(hasPwaInstallPrompt())
+  const [cdnBinaries, setCdnBinaries] = useState<CdnNodeBinary[]>([])
 
   const os = useMemo(detectOS, [])
 
@@ -217,6 +226,23 @@ export default function DownloadAppView(): JSX.Element {
     fetchLegacyRelease().then((r) => { if (alive) setLegacyRelease(r) })
     return () => { alive = false }
   }, [legacyRelease])
+
+  useEffect(() => {
+    let alive = true
+    fetchCdnBinaries()
+      .then((all) => {
+        if (!alive) return
+        // Newest upload per platform.
+        const latest = new Map<string, CdnNodeBinary>()
+        for (const b of all) {
+          const cur = latest.get(b.platform)
+          if (!cur || b.created_at > cur.created_at) latest.set(b.platform, b)
+        }
+        setCdnBinaries(CDN_BINARY_PLATFORMS.flatMap((p) => latest.get(p) ?? []))
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   useEffect(() => onPwaInstallPromptChange(() => setCanInstallPwa(hasPwaInstallPrompt())), [])
 
@@ -555,6 +581,38 @@ export default function DownloadAppView(): JSX.Element {
                 </a>
               )
             })()}
+          </div>
+        )}
+
+        {/* ── CDN node ── */}
+        {cdnBinaries.length > 0 && (
+          <div className="mt-10 rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-5 md:p-6">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-11 h-11 rounded-2xl bg-accent/15 text-accent flex items-center justify-center shrink-0">
+                <Server size={20} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-text-primary text-sm font-semibold mb-0.5">Run a CDN node</p>
+                <p className="text-text-secondary text-[13px] leading-relaxed">
+                  Help serve songs to listeners from your own machine. Download the node for your platform, then register it under Settings &rarr; My CDN nodes.
+                </p>
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {cdnBinaries.map((b) => (
+                <a
+                  key={b.platform}
+                  href={cdnBinaryUrl(b.download_url)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold border border-[var(--border)] text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
+                >
+                  <Download size={13} className="shrink-0" />
+                  <span className="flex-1 min-w-0 text-left leading-tight">
+                    <span className="block truncate">{b.platform}</span>
+                    <span className="block text-[11px] font-normal text-text-muted">v{b.version} · {fmtMB(b.size)}</span>
+                  </span>
+                </a>
+              ))}
+            </div>
           </div>
         )}
 
