@@ -3,6 +3,7 @@ import type { CdnAdminNode } from '../lib/cdnAdminApi'
 import { Empty, QueueSearch } from './adminShared'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
+import CdnBinaryUpload from './CdnBinaryUpload'
 import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
 
 // Mobile layout for the CDN nodes admin tab - list, then a full-screen detail
@@ -101,6 +102,8 @@ export default function CdnNodesTab(): JSX.Element {
 
       <div className="flex-1 overflow-y-auto">
         {stats && <div className="p-3"><CdnStatsStrip stats={stats} columns="grid-cols-2" /></div>}
+
+        <div className="px-3 pb-2"><CdnBinaryUpload compact /></div>
 
         <div className="px-3 pb-2 space-y-2">
           <div className="flex gap-1 overflow-x-auto scrollbar-none">

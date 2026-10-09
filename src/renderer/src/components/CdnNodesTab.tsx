@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Loader2, AlertCircle, RefreshCw, Server } from 'lucide-react'
 import { Empty, QueueSearch } from './adminShared'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
+import CdnBinaryUpload from './CdnBinaryUpload'
 import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
 
 // Admin-only roster of distributed-CDN nodes (the volunteer machines running
@@ -58,6 +59,7 @@ export default function CdnNodesTab(): JSX.Element {
             </div>
             <QueueSearch value={search} onChange={setSearch} placeholder="Search name, owner, region, IP…" matches={visible.length} total={nodes.length} />
           </div>
+          <div className="shrink-0 p-3 border-b border-[var(--border)]"><CdnBinaryUpload /></div>
           <div className="flex-1 overflow-y-auto">
             {visible.length === 0 && <Empty label={nodes.length === 0 ? 'No nodes registered' : 'No nodes'} />}
             {visible.map((n) => (
