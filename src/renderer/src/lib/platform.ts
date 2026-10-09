@@ -43,6 +43,11 @@ export function shareOrigin(): string {
   return window.location.origin
 }
 
+/** Public, shareable URL for a news post's /news/<id> page. */
+export function newsShareUrl(id: number | string): string {
+  return `${shareOrigin()}/news/${id}`
+}
+
 /** Public, shareable URL for a single song's /track/<id> page. */
 export function trackShareUrl(songId: number): string {
   return `${shareOrigin()}/track/${songId}`

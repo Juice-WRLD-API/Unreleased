@@ -1,5 +1,7 @@
-import { BookOpen, Link2, Pencil, Share2, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { BookOpen, Check, Link2, Pencil, Share2, Trash2 } from 'lucide-react'
 import type { NewsItem } from '../lib/newsApi'
+import { newsShareUrl } from '../lib/platform'
 import ContextMenu from './ContextMenu'
 
 export interface NewsMenuState { item: NewsItem; x: number; y: number }
@@ -15,8 +17,15 @@ export default function NewsContextMenu({ state, onClose, onOpen, onShare, onEdi
   onDelete?: () => void
 }): JSX.Element {
   const { item } = state
-  const copyLink = (): void => {
-    void navigator.clipboard.writeText(`${window.location.origin}/news/${item.id}`).catch(() => undefined)
+  const [linkCopied, setLinkCopied] = useState(false)
+  // keepOpen so the clipboard write finishes before the menu unmounts, and the
+  // user sees the "Link copied" confirmation (same as the song menu).
+  const copyLink = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(newsShareUrl(item.id))
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2500)
+    } catch {}
   }
 
   return (
@@ -27,7 +36,7 @@ export default function NewsContextMenu({ state, onClose, onOpen, onShare, onEdi
       onClose={onClose}
       items={[
         { icon: BookOpen, label: 'Open', onSelect: onOpen },
-        { icon: Link2, label: 'Copy link', onSelect: copyLink },
+        { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: copyLink },
         onShare && { icon: Share2, label: 'Share to chat', onSelect: onShare },
         (onEdit || onDelete) && 'divider',
         onEdit && { icon: Pencil, label: 'Edit', onSelect: onEdit },
