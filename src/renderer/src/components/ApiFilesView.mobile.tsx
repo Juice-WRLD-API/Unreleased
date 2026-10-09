@@ -815,12 +815,22 @@ export default function ApiFilesView(): JSX.Element {
       )}
       {!selectMode && zipStatus !== 'idle' && (
         <div
-          className="fixed left-1/2 -translate-x-1/2 z-[75] flex items-center gap-2 px-4 py-2.5 rounded-full bg-surface-highest text-text-primary text-[13px] shadow-2xl animate-slide-up"
+          className="fixed left-1/2 -translate-x-1/2 z-[75] flex flex-col gap-1.5 px-4 py-2.5 rounded-2xl bg-surface-highest text-text-primary text-[13px] shadow-2xl animate-slide-up min-w-[220px]"
           style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 92px)' }}
         >
-          {zipBusy ? <><Loader2 size={14} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Downloading folder…'}</>
-            : zipStatus === 'done' ? <><Check size={14} className="text-accent" /> Download started</>
-            : <><X size={14} className="text-red-400" /> Download failed</>}
+          <div className="flex items-center justify-center gap-2 whitespace-nowrap">
+            {zipBusy ? <><Loader2 size={14} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Preparing folder…' : zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}${zipProgress.totalBytes ? ` · ${Math.min(99, Math.round(((zipProgress.bytes ?? 0) / zipProgress.totalBytes) * 100))}%` : zipProgress.bytes ? ` · ${formatBytes(zipProgress.bytes)}` : ''}` : 'Downloading folder…'}</>
+              : zipStatus === 'done' ? <><Check size={14} className="text-accent" /> Download started</>
+              : <><X size={14} className="text-red-400" /> Download failed</>}
+          </div>
+          {zipBusy && zipProgress && (
+            <div className="h-1 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full bg-accent transition-[width] duration-200"
+                style={{ width: `${zipProgress.totalBytes ? Math.min(100, ((zipProgress.bytes ?? 0) / zipProgress.totalBytes) * 100) : (zipProgress.done / Math.max(1, zipProgress.total)) * 100}%` }}
+              />
+            </div>
+          )}
         </div>
       )}
 

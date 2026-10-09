@@ -32,7 +32,9 @@ export interface ZipItem {
   size?: number | null
 }
 
-export interface ZipProgress { done: number; total: number }
+/** `bytes`/`totalBytes` are set by saveItems so views can show a real
+ *  progress bar - a folder of a few big files sits on one file count for ages. */
+export interface ZipProgress { done: number; total: number; bytes?: number; totalBytes?: number }
 export interface ZipResult { saved: number; failed: number; cancelled?: boolean }
 
 export type ZipTarget =
@@ -227,6 +229,7 @@ export async function saveItems(
   let bytes = 0
   let sample = { bytes: 0, time: Date.now() }
   let lastPush = 0
+  let lastView = 0
   const push = (force = false): void => {
     const now = Date.now()
     if (!force && now - lastPush < 250) return
@@ -258,8 +261,16 @@ export async function saveItems(
   try {
     const result = await writeZip(target, items, {
       signal: ctrl.signal,
-      onProgress: (p) => { done = p.done; onProgress?.(p); push() },
-      onBytes: (b) => { bytes = b; push() },
+      onProgress: (p) => { done = p.done; onProgress?.({ ...p, bytes, totalBytes: knownTotal }); push() },
+      onBytes: (b) => {
+        bytes = b
+        const now = Date.now()
+        if (now - lastView >= 250) {
+          lastView = now
+          onProgress?.({ done, total: fileCount, bytes, totalBytes: knownTotal })
+        }
+        push()
+      },
     })
     updateUpload(id, {
       state: result.saved > 0 ? 'done' : 'error',
