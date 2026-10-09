@@ -262,7 +262,7 @@ export default function StatsView(): JSX.Element {
                       onContextMenu={(e) => { if (track) { e.preventDefault(); setCtxMenu({ track, songId: event.song, x: e.clientX, y: e.clientY }) } }}
                     >
                       {track ? (
-                        <button onClick={() => playTrack(track)} className="relative shrink-0">
+                        <button onClick={() => playTrack(track, [track])} className="relative shrink-0">
                           <AlbumArtThumbnail track={track} size={40} className="rounded-md" />
                           <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 rounded-md transition-opacity">
                             <Play size={16} className="text-white" fill="currentColor" />
@@ -271,7 +271,7 @@ export default function StatsView(): JSX.Element {
                       ) : (
                         <div className="w-10 h-10 rounded-md bg-surface-raised shrink-0" />
                       )}
-                      <div className="min-w-0 flex-1 cursor-pointer" {...clickable(() => track && playTrack(track))}>
+                      <div className="min-w-0 flex-1 cursor-pointer" {...clickable(() => track && playTrack(track, [track]))}>
                         <p className="text-text-primary text-sm font-medium truncate" title={title}>{title}</p>
                         <p className="text-text-muted text-xs truncate">
                           {track?.artist ?? ''}{song?.era?.name ? ` · ${song.era.name}` : ''}

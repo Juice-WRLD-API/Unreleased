@@ -1117,7 +1117,7 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
                   <QueueRow
                     key={`hist-${track.id}-${i}`}
                     track={track}
-                    onPlay={() => radioMode ? jumpToTrack(track) : playTrack(track)}
+                    onPlay={() => jumpToTrack(track, history.length - 1 - i)}
                   />
                 ))}
                 {!query && filtered.length > MAX_HISTORY_SHOWN && (

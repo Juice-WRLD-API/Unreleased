@@ -19,6 +19,7 @@ import { getOwnVersionMeta, getVersionGroup } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { peekSongPref, hasAnyDefaultVersion, hasAnyExcludedVersion } from '../lib/songPrefs'
 import { ls } from '../lib/persist'
+import { resolveQueueContext } from './queueContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,10 @@ export interface QueueSlice {
    * Start playing `track` with a known context list.
    * `filter` enables lazy loading beyond the initial context.
    * Does NOT activate radio mode - use `startRadio` for that.
+   */
+  /**
+   * Start playback. Omitting `context` means standalone playback; callers
+   * representing a collection must pass its tracks explicitly.
    */
   playTrack: (track: Track, context?: Track[], filter?: QueueFilter | null, source?: 'tracker' | 'playlist' | null) => void
 
@@ -300,9 +305,11 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   // ── playTrack ──────────────────────────────────────────────────────────────
   playTrack: (track, context?, filter = null, source = null) => {
-    const tracks: Track[] = context ?? (get().queue as Track[])
-    let idx = tracks.findIndex((t: Track) => t.id === track.id)
-    if (idx < 0) idx = 0
+    // Without an explicit context this is a standalone play request, not a
+    // request to graft the song onto whatever queue happened to be active.
+    // Always keep currentTrack aligned with queue[queueIndex], including when
+    // a malformed/partial context does not contain the requested track.
+    const { tracks, index: idx } = resolveQueueContext(track, context)
 
     const { shuffle } = get()
     let finalQueue = tracks
@@ -474,6 +481,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       : queue.findIndex((t: Track) => t.id === track.id)
     if (idx < 0) return
     set({ queueIndex: idx, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+    get()._loadMore()
     get()._maybeSwapToPreferredVersion(track)
   },
 

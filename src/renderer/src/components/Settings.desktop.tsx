@@ -129,6 +129,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
+  { tab: 'about', label: 'Credits' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -2038,6 +2039,13 @@ export default function Settings(): JSX.Element {
                       )}
                     </div>
                   ))}
+                </div>
+
+                <h3 className="text-text-primary text-lg font-bold mt-5 mb-3">Credits</h3>
+                <div className="rounded-xl border border-[var(--border)] px-3 py-2.5">
+                  <p className="text-text-secondary text-xs leading-relaxed">
+                    X, saint, Q_scal, xig, bleed
+                  </p>
                 </div>
               </div>
             )}

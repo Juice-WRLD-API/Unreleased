@@ -11,6 +11,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { lazyView } from '../lib/lazyView'
 import SongContextMenu from './SongContextMenu'
+import { AnchoredContextMenu } from './ContextMenu'
 import FilePickerModal from './FilePickerModal'
 import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
 import {
@@ -1764,6 +1765,7 @@ export default function ApiTrackerView(): JSX.Element {
   const [bulkZipStatus, setBulkZipStatus] = useState<'idle' | 'zipping' | 'done' | 'partial' | 'none' | 'error'>('idle')
   const [bulkZipSkipped, setBulkZipSkipped] = useState(0)
   const [showBulkPlaylists, setShowBulkPlaylists] = useState(false)
+  const bulkPlBtnRef = useRef<HTMLButtonElement>(null)
   const [bulkLinkStatus, setBulkLinkStatus] = useState<'idle' | 'linking' | 'done' | 'error'>('idle')
   // Shown after a link completes if the resulting group still has no
   // version_title - untitled groups are functionally useless in compact
@@ -3483,6 +3485,7 @@ export default function ApiTrackerView(): JSX.Element {
           </button>
           <div className="relative">
             <button
+              ref={bulkPlBtnRef}
               onClick={() => setShowBulkPlaylists(v => !v)}
               disabled={selected.size === 0 || !canBulkAddToPlaylist}
               title={!canBulkAddToPlaylist && selected.size > 0 ? "Can't add to playlist while a session/unsurfaced song is selected" : undefined}
@@ -3491,45 +3494,31 @@ export default function ApiTrackerView(): JSX.Element {
               <Plus size={13} /> Add to playlist
             </button>
             {showBulkPlaylists && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowBulkPlaylists(false)} />
-                <div className="absolute right-0 bottom-full mb-1 z-50 w-56 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
-                  <div className="px-3 py-2 border-b border-[var(--border)] text-[0.6875rem] uppercase tracking-wider text-text-muted font-semibold">
-                    Add to playlist
+              <AnchoredContextMenu
+                anchorRef={bulkPlBtnRef}
+                title="Add to playlist"
+                onClose={() => setShowBulkPlaylists(false)}
+                className="w-56"
+                items={!account ? [] : playlists.length === 0
+                  ? [{ label: 'No playlists yet.', disabled: true }]
+                  : playlists.map(p => ({
+                    icon: ListMusic,
+                    label: p.name,
+                    checked: bulkContained.has(p.id),
+                    onSelect: () => bulkAddToPlaylist(p.id),
+                  }))}
+                footer={!account ? (
+                  <div className="p-1">
+                    <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
+                    <button
+                      onClick={() => { setShowUserAuth(true); setShowBulkPlaylists(false) }}
+                      className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
+                    >
+                      Log in
+                    </button>
                   </div>
-                  {!account ? (
-                    <div className="p-3">
-                      <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-                      <button
-                        onClick={() => { setShowUserAuth(true); setShowBulkPlaylists(false) }}
-                        className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
-                      >
-                        Log in
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="max-h-56 overflow-y-auto py-1">
-                      {playlists.length === 0 && (
-                        <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-                      )}
-                      {playlists.map(p => {
-                        const allIn = bulkContained.has(p.id)
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => { bulkAddToPlaylist(p.id); setShowBulkPlaylists(false) }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                          >
-                            <ListMusic size={14} className={`shrink-0 ${allIn ? 'text-accent' : 'text-text-muted'}`} />
-                            <span className="flex-1 truncate">{p.name}</span>
-                            {allIn && <Check size={12} className="text-accent shrink-0" />}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              </>
+                ) : undefined}
+              />
             )}
           </div>
           {canEdit && (

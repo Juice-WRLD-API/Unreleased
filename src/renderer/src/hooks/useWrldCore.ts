@@ -154,11 +154,12 @@ export function useWrldNowPlaying(
  * Byte-identical in both views - fetching songVersions itself is NOT shared,
  * since desktop gates playability via resolveSessionEditSource(song).path
  * while mobile only checks song.path, a genuine behavioral difference. */
-export function usePlayVersion(playTrack: (t: Track) => void): (songId: number) => Promise<void> {
+export function usePlayVersion(playTrack: (t: Track, context?: Track[]) => void): (songId: number) => Promise<void> {
   return async (songId: number): Promise<void> => {
     try {
       const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
-      playTrack(songToTrack(song))
+      const track = songToTrack(song)
+      playTrack(track, [track])
     } catch {}
   }
 }

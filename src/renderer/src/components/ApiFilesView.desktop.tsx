@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
@@ -12,7 +12,6 @@ import type { StagedFileChange } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { useTrackChannel } from '../hooks/useTrackChannel'
-import { placeFlyout } from '../lib/menuFlyout'
 import {
   apiFetch,
   buildStreamUrl,
@@ -42,11 +41,15 @@ import { queueCompUploads } from '../lib/compUploads'
 import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
 import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
 import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } from '../lib/droppedFiles'
-import { ClampedMenu } from './ClampedMenu'
+import ContextMenu from './ContextMenu'
 import { Track } from '../types'
 import { ProgressiveCover } from './ProgressiveCover'
 import MediaLightbox from './MediaLightbox'
 import TextFileViewer, { TextFileSource } from './TextFileViewer'
+
+// lucide's `fill` is a prop, not a class, so the filled heart needs to be a
+// component of its own to fit a menu item's `icon` slot.
+const HeartFilled = (p: React.ComponentProps<typeof Heart>): JSX.Element => <Heart {...p} fill="currentColor" />
 
 type MediaFilter = 'all' | 'audio' | 'image' | 'video' | 'text'
 
@@ -154,19 +157,10 @@ export default function ApiFilesView(): JSX.Element {
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
   const [boostToast, setBoostToast] = useState(false)
-  // "Add to playlist" flyout, opened from the context menu.
-  const [playlistsOpen, setPlaylistsOpen] = useState(false)
-  const playlistItemRef = useRef<HTMLButtonElement>(null)
-  const playlistFlyoutRef = useRef<HTMLDivElement>(null)
-  const [playlistFlyoutPos, setPlaylistFlyoutPos] = useState({ top: 0, left: 0 })
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
   // Right-click on empty listing space, rather than a specific entry.
   const [bgCtxMenu, setBgCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const [newFolderPrompt, setNewFolderPrompt] = useState<string | null>(null)
-  // Position clamping is handled by the shared <ClampedMenu> at render time -
-  // this ref is kept only so the playlist flyout below can measure it.
-  const ctxMenuRef = useRef<HTMLDivElement>(null)
-  const [ctxMenuPos, setCtxMenuPos] = useState({ left: 0, top: 0 })
 
   // Data layer (browse/history/search/channel-switch) - shared with the
   // mobile build, see useApiFilesBrowse.
@@ -188,22 +182,11 @@ export default function ApiFilesView(): JSX.Element {
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
 
-  // Closing/reopening the menu resets the playlist flyout so it never
-  // re-opens against a different entry than the one it was populated for.
+  // Closing/reopening the menu clears the "added" tick so it never shows
+  // against a different entry than the one it was populated for.
   useEffect(() => {
-    setPlaylistsOpen(false)
     resetPlaylistDone()
   }, [ctxMenu]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Flyout sits beside the menu, flipping left when it'd run off the edge -
-  // same placement helper the song context menu's submenus use.
-  useLayoutEffect(() => {
-    if (!playlistsOpen) return
-    const item = playlistItemRef.current, menu = ctxMenuRef.current, sub = playlistFlyoutRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setPlaylistFlyoutPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [playlistsOpen, ctxMenuPos, playlists.length])
 
   // Multi-select state - see the useMultiSelect() call further down (needs
   // filteredEntries, which isn't defined yet here) for
@@ -237,28 +220,6 @@ export default function ApiFilesView(): JSX.Element {
       setSortDir('asc')
     }
   }
-
-  // ESC closes an open context menu, like a native one. Registered separately
-  // from the select-mode handler so it works whether or not that's active.
-  useEffect(() => {
-    if (!ctxMenu) return
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      setCtxMenu(null)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [ctxMenu])
-
-  useEffect(() => {
-    if (!bgCtxMenu) return
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      setBgCtxMenu(null)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [bgCtxMenu])
 
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
     const match = await findSongByFilename(entry.name)
@@ -1230,214 +1191,128 @@ export default function ApiFilesView(): JSX.Element {
         />
       )}
 
-      {ctxMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setCtxMenu(null)} />
-          <ClampedMenu
-            ref={ctxMenuRef}
+      {ctxMenu && (() => {
+        const entry = ctxMenu.entry
+        const matched = trackerMatches.get(entry.path) != null
+        const liked = likedTrackIds.includes(apiFileTrackId(entry.path, trackChannel))
+        const isDir = entry.type === 'directory'
+        const isAudio = getMediaType(entry.name) === 'audio'
+        return (
+          <ContextMenu
             x={ctxMenu.x}
             y={ctxMenu.y}
+            onClose={() => setCtxMenu(null)}
             className="min-w-[180px]"
-            onPositioned={setCtxMenuPos}
-          >
-            {/* Playlist flyout - a child of the menu so the click-away overlay
-                still counts clicks in it as "inside", but positioned beside it. */}
-            {playlistsOpen && (
-              <div
-                ref={playlistFlyoutRef}
-                onClick={e => e.stopPropagation()}
-                style={{ position: 'fixed', zIndex: 60, top: playlistFlyoutPos.top, left: playlistFlyoutPos.left }}
-                className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-              >
-                {!account ? (
-                  <div className="px-3 py-2">
-                    <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-                    <button
-                      onClick={() => { setShowUserAuth(true); setCtxMenu(null) }}
-                      className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
-                    >Log in</button>
-                  </div>
-                ) : playlists.length === 0 ? (
-                  <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-                ) : (
-                  <div className="max-h-44 overflow-y-auto">
-                    {playlists.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          const songId = trackerMatches.get(ctxMenu.entry.path)
-                          if (songId != null) addToPlaylist(p.id, songId)
-                        }}
-                        disabled={playlistBusyId === p.id}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                      >
-                        <ListMusic size={13} className="shrink-0 text-text-muted" />
-                        <span className="flex-1 truncate text-xs">{p.name}</span>
-                        {playlistBusyId === p.id
-                          ? <Loader2 size={12} className="animate-spin shrink-0" />
-                          : playlistDoneId === p.id
-                            ? <Check size={12} className="text-accent shrink-0" />
-                            : null}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {getMediaType(ctxMenu.entry.name) === 'audio' && (
-              <>
-                <button onClick={() => { handlePlay(ctxMenu.entry); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Play size={14} className="text-text-muted" /> Play
-                </button>
-                <button onClick={async () => { const e = ctxMenu.entry; setCtxMenu(null); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <ListPlus size={14} className="text-text-muted" /> Add to queue
-                </button>
-                {trackerMatches.get(ctxMenu.entry.path) != null && (
+            items={[
+              isAudio && { icon: Play, label: 'Play', onSelect: () => handlePlay(entry) },
+              isAudio && {
+                icon: ListPlus,
+                label: 'Add to queue',
+                onSelect: async () => { addToQueue(fileToTrack(entry, (await resolveTrackChannel()) ?? activeChannel)) },
+              },
+              isAudio && matched && {
+                icon: Plus,
+                label: 'Add to playlist',
+                childrenEmpty: account ? 'No playlists yet.' : 'Log in to save to playlists.',
+                children: account ? playlists.map((p) => ({
+                  label: p.name,
+                  icon: ListMusic,
+                  checked: playlistDoneId === p.id,
+                  loading: playlistBusyId === p.id,
+                  disabled: playlistBusyId === p.id,
+                  keepOpen: true,
+                  onSelect: () => {
+                    const songId = trackerMatches.get(entry.path)
+                    if (songId != null) addToPlaylist(p.id, songId)
+                  },
+                })) : [],
+                childrenFooter: !account ? (
                   <button
-                    ref={playlistItemRef}
-                    onClick={() => setPlaylistsOpen(o => !o)}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                    <Plus size={14} className="text-text-muted" /> Add to playlist
-                    <ChevronRight size={13} className="ml-auto text-text-muted" />
-                  </button>
-                )}
-                <button onClick={() => { toggleApiFileLike(ctxMenu.entry.path); setCtxMenu(null) }}
-                  disabled={!channelsReady}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40">
-                  <Heart size={14} fill={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'currentColor' : 'none'}
-                    className={likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'text-accent' : 'text-text-muted'} />
-                  {likedTrackIds.includes(apiFileTrackId(ctxMenu.entry.path, trackChannel)) ? 'Unlike' : 'Like'}
-                </button>
-                {trackerMatches.get(ctxMenu.entry.path) != null && (
-                  <button onClick={() => { openSongInfo(ctxMenu.entry); setCtxMenu(null) }}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                    <Info size={14} className="text-text-muted" /> Find in Tracker
-                  </button>
-                )}
-                {canEdit && (
-                  <button onClick={async () => {
-                    const title = ctxMenu.entry.name.replace(/\.[^.]+$/, '')
-                    setCtxMenu(null)
-                    try {
-                      const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
-                      const id = data.results[0]?.id
-                      if (id) useStore.getState().openSongEditor(id)
-                    } catch {}
-                  }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                    <Pencil size={14} className="text-text-muted" /> Edit
-                  </button>
-                )}
-                <div className="border-t border-[var(--border)] my-1" />
-              </>
-            )}
-            {getMediaType(ctxMenu.entry.name) === 'text' && (
-              <button onClick={() => { openApiText(ctxMenu.entry); setCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <FileText size={14} className="text-text-muted" /> View
-              </button>
-            )}
-            <button onClick={() => enterSelectMode(ctxMenu.entry)}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <CheckSquare2 size={14} className="text-text-muted" /> Select
-            </button>
-            <button onClick={() => { copyLink(ctxMenu.entry); setCtxMenu(null) }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <Link size={14} className="text-text-muted" /> Copy link
-            </button>
-            <button onClick={() => { copyPath(ctxMenu.entry); setCtxMenu(null) }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <Clipboard size={14} className="text-text-muted" /> Copy path
-            </button>
-            {/* Contributor actions - proposals target a file, so directories
-                are excluded. Both land on the contributor page prefilled. */}
-            {canPropose && ctxMenu.entry.type !== 'directory' && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button onClick={() => {
-                  setPendingCompProposal({ paths: [ctxMenu.entry.path], changeType: 'replace' })
-                  setCtxMenu(null)
+                    onClick={() => { setShowUserAuth(true); setCtxMenu(null) }}
+                    className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
+                  >Log in</button>
+                ) : undefined,
+              },
+              isAudio && {
+                icon: liked ? HeartFilled : Heart,
+                label: liked ? 'Unlike' : 'Like',
+                active: liked,
+                disabled: !channelsReady,
+                onSelect: () => toggleApiFileLike(entry.path),
+              },
+              isAudio && matched && { icon: Info, label: 'Find in Tracker', onSelect: () => openSongInfo(entry) },
+              isAudio && canEdit && {
+                icon: Pencil,
+                label: 'Edit',
+                onSelect: async () => {
+                  const title = entry.name.replace(/\.[^.]+$/, '')
+                  try {
+                    const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
+                    const id = data.results[0]?.id
+                    if (id) useStore.getState().openSongEditor(id)
+                  } catch {}
+                },
+              },
+              isAudio && 'divider',
+              getMediaType(entry.name) === 'text' && { icon: FileText, label: 'View', onSelect: () => openApiText(entry) },
+              { icon: CheckSquare2, label: 'Select', onSelect: () => enterSelectMode(entry) },
+              { icon: Link, label: 'Copy link', onSelect: () => copyLink(entry) },
+              { icon: Clipboard, label: 'Copy path', onSelect: () => copyPath(entry) },
+              // Contributor actions - proposals target a file, so directories
+              // are excluded. Both land on the contributor page prefilled.
+              canPropose && !isDir && 'divider',
+              canPropose && !isDir && {
+                icon: Replace,
+                label: 'Propose replacement',
+                onSelect: () => {
+                  setPendingCompProposal({ paths: [entry.path], changeType: 'replace' })
                   setActiveView('contributor')
-                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Replace size={14} className="text-text-muted" /> Propose replacement
-                </button>
-                <button onClick={() => {
-                  setPendingCompProposal({ paths: [ctxMenu.entry.path], changeType: 'delete' })
-                  setCtxMenu(null)
+                },
+              },
+              canPropose && !isDir && {
+                icon: Trash2,
+                label: 'Propose deletion',
+                onSelect: () => {
+                  setPendingCompProposal({ paths: [entry.path], changeType: 'delete' })
                   setActiveView('contributor')
-                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Trash2 size={14} className="text-text-muted" /> Propose deletion
-                </button>
-                <div className="border-t border-[var(--border)] my-1" />
-              </>
-            )}
-            {canPropose && ctxMenu.entry.type === 'directory' && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'files'); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Upload size={14} className="text-text-muted" /> Upload files here
-                </button>
-                <button onClick={() => { openUploadPicker(ctxMenu.entry.path, 'folder'); setCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <FolderInput size={14} className="text-text-muted" /> Upload folder here
-                </button>
-                <div className="border-t border-[var(--border)] my-1" />
-              </>
-            )}
-            {ctxMenu.entry.type === 'directory' ? (
-              <button onClick={() => { downloadFolder(ctxMenu.entry); setCtxMenu(null) }}
-                disabled={zipStatus === 'starting' || zipStatus === 'zipping'}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50">
-                <PackageOpen size={14} className="text-text-muted" /> Download folder
-              </button>
-            ) : (
-              <button onClick={() => { handleDownload(ctxMenu.entry); setCtxMenu(null) }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                <Download size={14} className="text-text-muted" /> Download
-              </button>
-            )}
-          </ClampedMenu>
-        </>
-      )}
+                },
+              },
+              canPropose && isDir && 'divider',
+              canPropose && isDir && { icon: Upload, label: 'Upload files here', onSelect: () => openUploadPicker(entry.path, 'files') },
+              canPropose && isDir && { icon: FolderInput, label: 'Upload folder here', onSelect: () => openUploadPicker(entry.path, 'folder') },
+              'divider',
+              isDir
+                ? { icon: PackageOpen, label: 'Download folder', disabled: zipStatus === 'starting' || zipStatus === 'zipping', onSelect: () => downloadFolder(entry) }
+                : { icon: Download, label: 'Download', onSelect: () => handleDownload(entry) },
+            ]}
+          />
+        )
+      })()}
 
       {bgCtxMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setBgCtxMenu(null)} />
-          <ClampedMenu x={bgCtxMenu.x} y={bgCtxMenu.y} className="min-w-[180px]">
-            <button onClick={() => { navigate(currentPath, false); setBgCtxMenu(null) }}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-              <RefreshCw size={14} className="text-text-muted" /> Refresh
-            </button>
-            {canPropose && (
-              <>
-                <div className="border-t border-[var(--border)] my-1" />
-                <button onClick={() => { openUploadPicker(currentPath, 'files'); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <Upload size={14} className="text-text-muted" /> Upload files
-                </button>
-                <button onClick={() => { openUploadPicker(currentPath, 'folder'); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <FolderInput size={14} className="text-text-muted" /> Upload folder
-                </button>
-                {/* The Contributor page is still where an upload gets notes or a
-                    rename before it's proposed. */}
-                <button onClick={() => {
-                  setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
-                  setBgCtxMenu(null)
-                  setActiveView('contributor')
-                }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <FileText size={14} className="text-text-muted" /> Upload with notes…
-                </button>
-                <button onClick={() => { setNewFolderPrompt(''); setBgCtxMenu(null) }}
-                  className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors">
-                  <FolderPlus size={14} className="text-text-muted" /> New folder
-                </button>
-              </>
-            )}
-          </ClampedMenu>
-        </>
+        <ContextMenu
+          x={bgCtxMenu.x}
+          y={bgCtxMenu.y}
+          onClose={() => setBgCtxMenu(null)}
+          className="min-w-[180px]"
+          items={[
+            { icon: RefreshCw, label: 'Refresh', onSelect: () => navigate(currentPath, false) },
+            canPropose && 'divider',
+            canPropose && { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
+            canPropose && { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
+            // The Contributor page is still where an upload gets notes or a
+            // rename before it's proposed.
+            canPropose && {
+              icon: FileText,
+              label: 'Upload with notes…',
+              onSelect: () => {
+                setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                setActiveView('contributor')
+              },
+            },
+            canPropose && { icon: FolderPlus, label: 'New folder', onSelect: () => setNewFolderPrompt('') },
+          ]}
+        />
       )}
 
       {newFolderPrompt !== null && (

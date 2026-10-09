@@ -1,5 +1,4 @@
 ﻿import React, { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
 import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, Upload, Info, Check, EyeOff } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
@@ -10,6 +9,7 @@ import { preloadView } from '../lib/lazyViews'
 import { hasChatAccess } from '../lib/chatAccess'
 import type { PlaylistContextMenuState } from './PlaylistContextMenu'
 import { lazyOverlay } from '../lib/lazyView'
+import ContextMenu from './ContextMenu'
 import { accountDisplayName, initial } from '../lib/format'
 
 // Right-click only - fetched on first open rather than with the app shell.
@@ -90,26 +90,15 @@ export default function Sidebar(): JSX.Element {
   }
   const openNavMenu = (view: ViewType, label: string) => openHideMenu(label, () => setNavItemVisible(view, false))
   const openControlMenu = (id: NavControlId, label: string) => openHideMenu(label, () => setNavControlVisible(id, false))
-  const navContextMenu = navMenu && createPortal(
-    <>
-      <div className="fixed inset-0 z-[60]" onClick={() => setNavMenu(null)} onContextMenu={(e) => { e.preventDefault(); setNavMenu(null) }} />
-      <div
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[170px]"
-        style={{
-          left: Math.max(8, Math.min(navMenu.x, window.innerWidth - 178)),
-          top: Math.max(8, Math.min(navMenu.y, window.innerHeight - 48)),
-        }}
-      >
-        <button
-          onClick={() => { navMenu.hide(); setNavMenu(null) }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <EyeOff size={14} className="text-text-muted" />
-          <span className="flex-1 text-left">Hide "{navMenu.label}"</span>
-        </button>
-      </div>
-    </>,
-    document.body
+  const navContextMenu = navMenu && (
+    <ContextMenu
+      x={navMenu.x}
+      y={navMenu.y}
+      onClose={() => setNavMenu(null)}
+      zIndex={61}
+      className="min-w-[170px]"
+      items={[{ icon: EyeOff, label: `Hide "${navMenu.label}"`, onSelect: navMenu.hide }]}
+    />
   )
 
   const [tokenCopied, setTokenCopied] = useState(false)

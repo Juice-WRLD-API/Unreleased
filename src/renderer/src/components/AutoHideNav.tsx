@@ -44,12 +44,31 @@ export default function AutoHideNav({ position, autoHide = true, pill = false, c
     if (timer.current) { clearTimeout(timer.current); timer.current = null }
   }
   const show = (): void => { clear(); setHovered(true) }
+  // Rearranging nav items is an HTML5 drag, which fires pointerleave (and no
+  // more pointer events) the moment it starts - stay open until it ends.
+  const dragging = useRef(false)
   const hideSoon = (): void => {
     clear()
+    if (dragging.current) return
     timer.current = setTimeout(() => setHovered(false), HIDE_DELAY_MS)
   }
   const wrapRef = useRef<HTMLDivElement>(null)
   useEffect(() => clear, [])
+  useEffect(() => {
+    if (!autoHide) return
+    const start = (e: DragEvent): void => {
+      if (e.target instanceof Node && wrapRef.current?.contains(e.target)) { dragging.current = true; show() }
+    }
+    const end = (): void => { if (dragging.current) { dragging.current = false; hideSoon() } }
+    document.addEventListener('dragstart', start)
+    document.addEventListener('dragend', end)
+    document.addEventListener('drop', end)
+    return () => {
+      document.removeEventListener('dragstart', start)
+      document.removeEventListener('dragend', end)
+      document.removeEventListener('drop', end)
+    }
+  }, [autoHide])
   // Pointer jumping to another monitor can skip the element's own leave event,
   // so also close when it leaves the page or the window loses focus.
   useEffect(() => {

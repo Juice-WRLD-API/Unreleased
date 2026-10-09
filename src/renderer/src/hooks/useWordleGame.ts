@@ -323,7 +323,8 @@ export function useWordleGame(): {
     if (!answer) return
     try {
       const song = await apiFetch<JWApiSong>(`/songs/${answer.song.id}/`)
-      playTrack(songToTrack(song))
+      const track = songToTrack(song)
+      playTrack(track, [track])
     } catch {
       setPlayError(true)
     }
