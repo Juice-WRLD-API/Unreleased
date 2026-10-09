@@ -298,7 +298,7 @@ function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => void; loc
     <button
       onClick={onClick}
       disabled={locked}
-      title={locked ? 'Locked on while the Pill navigation style is selected' : undefined}
+      title={locked ? 'Locked off while the Pill navigation style is selected' : undefined}
       className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
@@ -1809,9 +1809,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                   label="Auto-hide navigation"
                   sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
                 >
-                  <Toggle on={autoHideNav || navStyle === 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
+                  <Toggle on={autoHideNav && navStyle !== 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
                 </Row>
-                {(autoHideNav || navStyle === 'pill') && (
+                {autoHideNav && navStyle !== 'pill' && (
                   <Row
                     icon={Minimize2}
                     iconColor="#0d9488"

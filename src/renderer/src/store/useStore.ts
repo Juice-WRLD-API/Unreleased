@@ -1732,14 +1732,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
   setAppMenuPosition: (appMenuPosition) => { set({ appMenuPosition }); ls.set('appMenuPosition', appMenuPosition) },
-  // The floating pill always auto-hides, and that setting is locked on while it's chosen.
+  // The floating pill never auto-hides, and that setting is locked off while it's chosen.
   setNavStyle: (navStyle) => {
-    set(navStyle === 'pill' ? { navStyle, autoHideNav: true } : { navStyle })
+    set(navStyle === 'pill' ? { navStyle, autoHideNav: false } : { navStyle })
     ls.set('navStyle', navStyle)
-    if (navStyle === 'pill') ls.set('autoHideNav', true)
+    if (navStyle === 'pill') ls.set('autoHideNav', false)
     get()._scheduleProfilePush(['userSettings'])
   },
-  setAutoHideNav: (autoHideNav) => { if (!autoHideNav && get().navStyle === 'pill') return; set({ autoHideNav }); ls.set('autoHideNav', autoHideNav); get()._scheduleProfilePush(['userSettings']) },
+  setAutoHideNav: (autoHideNav) => { if (autoHideNav && get().navStyle === 'pill') return; set({ autoHideNav }); ls.set('autoHideNav', autoHideNav); get()._scheduleProfilePush(['userSettings']) },
   setAutoHideNavZone: (px) => {
     const autoHideNavZone = Math.max(4, Math.min(120, Math.round(px)))
     set({ autoHideNavZone }); ls.set('autoHideNavZone', autoHideNavZone)
