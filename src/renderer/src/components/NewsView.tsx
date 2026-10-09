@@ -4,8 +4,11 @@ import {
   ChevronLeft, Newspaper, RefreshCw, AlertCircle, Plus, Settings2,
   Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow,
   Share2,
+  Link2,
+  Check,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
+import { newsShareUrl } from '../lib/platform'
 import { IS_ELECTRON, ELECTRON_TITLEBAR_CLEARANCE_Y } from '../lib/platform'
 import {
   fetchNews, peekNews, fetchChannels, fetchNewsItem, deleteNewsItem, isImageAttachment, isAudioAttachment,
@@ -312,6 +315,14 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
   canShareToChat: boolean
   onShare: (item: NewsItem) => void
 }) {
+  const [linkCopied, setLinkCopied] = useState(false)
+  const copyLink = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(newsShareUrl(item.id))
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2500)
+    } catch {}
+  }
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center gap-2 mb-4">
@@ -322,6 +333,7 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
           <ChevronLeft size={16} /> Back to news
         </button>
         <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => void copyLink()} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{linkCopied ? <Check size={13} /> : <Link2 size={13} />} {linkCopied ? 'Link copied' : 'Copy link'}</button>
           {canShareToChat && (
             <button onClick={() => onShare(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Share2 size={13} /> Share to chat</button>
           )}
