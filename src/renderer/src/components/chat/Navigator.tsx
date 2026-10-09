@@ -103,7 +103,15 @@ function RecentDmButton({ conv, active, onClick, onContextMenu }: {
   const title = conversationTitle(conv, meId)
   return (
     <RailButton label={title} active={active} unread={count > 0} mentions={mention} onClick={onClick} onContextMenu={onContextMenu}>
-      {others[0] ? (
+      {conv.is_group || others.length > 1 ? (
+        <span className={`relative block w-11 h-11 bg-surface-raised transition-[border-radius] duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}>
+          {others.slice(0, 2).map((p, i) => (
+            <span key={p.id} className={`absolute ${i === 0 ? 'top-0.5 left-0.5' : 'bottom-0.5 right-0.5'}`}>
+              <ChatAvatar user={p.user} size={28} className={i === 1 ? 'ring-2 ring-[var(--chat-rail)]' : ''} />
+            </span>
+          ))}
+        </span>
+      ) : others[0] ? (
         <ChatAvatar user={others[0].user} size={44} presence className={`transition-[border-radius] duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`} />
       ) : (
         <span className={`w-11 h-11 flex items-center justify-center bg-surface-raised text-text-secondary transition-[border-radius,background-color,color] duration-200 ${active ? 'rounded-[14px]' : 'rounded-[22px] group-hover:rounded-[14px]'}`}>
