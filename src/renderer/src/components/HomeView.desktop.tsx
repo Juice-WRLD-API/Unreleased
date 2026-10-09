@@ -367,7 +367,7 @@ export default function HomeViewDesktop(): JSX.Element {
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="h-full min-h-[600px] w-full max-w-[1800px] mx-auto px-6 py-5 flex flex-col gap-4">
+      <div className="h-full min-h-[600px] w-full px-6 py-5 flex flex-col gap-4">
         {/* ── Hero: one line, with "Your listening" folded in as numbers ── */}
         <div className="shrink-0 flex items-center gap-3.5 flex-wrap">
           <button
