@@ -1,10 +1,12 @@
+import { useMemo } from 'react'
 import { Loader2, AlertCircle, RefreshCw, Server, ChevronLeft } from 'lucide-react'
 import type { CdnAdminNode } from '../lib/cdnAdminApi'
 import { Empty, QueueSearch } from './adminShared'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
 import CdnBinaryUpload from './CdnBinaryUpload'
-import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
+import CdnWorldMap from './CdnWorldMap'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
 
 // Mobile layout for the CDN nodes admin tab - list, then a full-screen detail
 // on tap (same pattern as EraTab.mobile). Behavior lives in useCdnNodesAdmin.
@@ -58,6 +60,18 @@ export default function CdnNodesTab(): JSX.Element {
     approve, revoke, setActive, resetTrust, restore, remove,
   } = useCdnNodesAdmin()
 
+  const dimmedIds = useMemo(() => {
+    if (visible.length === nodes.length) return undefined
+    const shown = new Set(visible.map((n) => n.node_id))
+    return new Set(nodes.filter((n) => !shown.has(n.node_id)).map((n) => n.node_id))
+  }, [nodes, visible])
+
+  // A faded marker is outside the roster filter - widen it so the pick isn't dropped.
+  const selectFromMap = (id: string): void => {
+    if (dimmedIds?.has(id)) { setFilter('all'); setSearch('') }
+    setSelectedId(id)
+  }
+
   if (loading && nodes.length === 0) return <div className="flex justify-center py-10"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
 
   if (selected) {
@@ -103,6 +117,11 @@ export default function CdnNodesTab(): JSX.Element {
       <div className="flex-1 overflow-y-auto">
         {stats && <div className="p-3"><CdnStatsStrip stats={stats} columns="grid-cols-2" /></div>}
 
+        <div className="px-3 pb-3 space-y-2">
+          <CdnWorldMap nodes={nodes} dimmedIds={dimmedIds} selectedId={null} onSelect={selectFromMap} />
+          <CdnCountryChips nodes={nodes} limit={6} />
+        </div>
+
         <div className="px-3 pb-2"><CdnBinaryUpload compact /></div>
 
         <div className="px-3 pb-2 space-y-2">
@@ -130,7 +149,7 @@ export default function CdnNodesTab(): JSX.Element {
               <CdnBucketChip node={n} />
             </div>
             <p className="text-[11px] text-text-muted mt-0.5 truncate pl-5">
-              {[n.owner_username || 'unclaimed', n.region, formatMbps(n.upload_speed_mbps) + ' up'].filter(Boolean).join(' · ')}
+              {[n.owner_username || 'unclaimed', n.city || n.country_code ? `${countryFlag(n.country_code ?? '')} ${nodeLocation(n)}`.trim() : n.region, formatMbps(n.upload_speed_mbps) + ' up'].filter(Boolean).join(' · ')}
             </p>
           </button>
         ))}

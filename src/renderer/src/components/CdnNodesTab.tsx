@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Loader2, AlertCircle, RefreshCw, Server } from 'lucide-react'
 import { Empty, QueueSearch } from './adminShared'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
 import CdnBinaryUpload from './CdnBinaryUpload'
-import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions } from './cdnNodesShared'
+import CdnWorldMap from './CdnWorldMap'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
 
 // Admin-only roster of distributed-CDN nodes (the volunteer machines running
 // jwa-cdn-node). Nodes register anonymously and serve nothing until approved
@@ -16,6 +17,19 @@ export default function CdnNodesTab(): JSX.Element {
     busyId, actionError,
     approve, revoke, setActive, resetTrust, restore, remove,
   } = useCdnNodesAdmin()
+
+  // The map always shows the whole network; the roster filter/search only fades the rest.
+  const dimmedIds = useMemo(() => {
+    if (visible.length === nodes.length) return undefined
+    const shown = new Set(visible.map((n) => n.node_id))
+    return new Set(nodes.filter((n) => !shown.has(n.node_id)).map((n) => n.node_id))
+  }, [nodes, visible])
+
+  // A faded marker is outside the roster filter - widen it so the pick isn't dropped.
+  const selectFromMap = (id: string): void => {
+    if (dimmedIds?.has(id)) { setFilter('all'); setSearch('') }
+    setSelectedId(id)
+  }
 
   // Keep a valid selection as the filter/search narrows the roster.
   useEffect(() => {
@@ -73,14 +87,18 @@ export default function CdnNodesTab(): JSX.Element {
                   <CdnBucketChip node={n} />
                 </div>
                 <p className="text-[10px] text-text-muted truncate pl-5">
-                  {[n.owner_username || 'unclaimed', n.region, formatMbps(n.upload_speed_mbps) + ' up'].filter(Boolean).join(' · ')}
+                  {[n.owner_username || 'unclaimed', n.city || n.country_code ? `${countryFlag(n.country_code ?? '')} ${nodeLocation(n)}`.trim() : n.region, formatMbps(n.upload_speed_mbps) + ' up'].filter(Boolean).join(' · ')}
                 </p>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          <div className="space-y-2.5">
+            <CdnWorldMap nodes={nodes} dimmedIds={dimmedIds} selectedId={selectedId} onSelect={selectFromMap} wheelZoom />
+            <CdnCountryChips nodes={nodes} />
+          </div>
           {!selected ? <Empty label="Select a node" /> : (
             <div className="max-w-2xl space-y-5">
               <div>

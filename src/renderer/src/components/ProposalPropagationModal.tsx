@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { X, Loader2, Globe, CheckCircle, Wifi, WifiOff } from 'lucide-react'
 import { ModalOverlay } from './Modal'
+import { countryFlag } from './cdnNodesShared'
 import { fetchProposalPropagation } from '../lib/cdnAdminApi'
 import type { ProposalPropagation, PropagationNode, PropagationState } from '../lib/cdnAdminApi'
 
@@ -10,13 +11,6 @@ const STATE_COLORS: Record<PropagationState, string> = {
   propagated: '#22c55e',
   propagating: '#3b82f6',
   offline: '#6b7280',
-}
-
-function countryFlag(code: string): string {
-  if (!code || code.length !== 2) return ''
-  const cp1 = 0x1f1e6 + code.charCodeAt(0) - 65
-  const cp2 = 0x1f1e6 + code.charCodeAt(1) - 65
-  return String.fromCodePoint(cp1, cp2)
 }
 
 function projectX(lon: number, width: number): number {
