@@ -407,6 +407,14 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
     // ── Radio mode ──────────────────────────────────────────────────────────
     if (radioMode) {
+      // After stepping back through history, replay forward through it before
+      // consuming the pre-fetched radio track.
+      if (queueIndex < queue.length - 1) {
+        const track = queue[queueIndex + 1]
+        set({ queueIndex: queueIndex + 1, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+        get()._maybeSwapToPreferredVersion(track)
+        return track
+      }
       if (!radioNext) {
         // Pre-fetch not ready yet - mark as waiting; _prefetchRadioTrack will
         // auto-play when the fetch completes.

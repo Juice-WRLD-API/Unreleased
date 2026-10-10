@@ -227,8 +227,9 @@ export default function QueuePanel(): JSX.Element {
                   <RefreshCw size={11} />
                 </button>
               </p>
-              {radioNext ? (
-                <QueueRow track={radioNext} isActive={false} isPlaying={false} />
+              {(upcoming[0] ?? radioNext) ? (
+                // After stepping back, the actual next song is the one in history.
+                <QueueRow track={(upcoming[0] ?? radioNext)!} isActive={false} isPlaying={false} />
               ) : (
                 <div className="flex items-center gap-2 px-1 py-2 text-text-muted text-xs opacity-50">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
