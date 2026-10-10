@@ -41,10 +41,12 @@ export async function startCdnFileDownload(
   path: string,
   filename: string,
   streamUrl: string,
-  onProgress?: (p: CdnDownloadProgress) => void
+  onProgress?: (p: CdnDownloadProgress) => void,
+  /** Song id, so the "embed lyrics on download" setting can apply. */
+  songId?: number | null
 ): Promise<boolean> {
   // CDN off: downloadFileSmart goes straight to the browser download.
-  if (!cdnService.enabled) return downloadFileSmart(path, filename, streamUrl)
+  if (!cdnService.enabled) return downloadFileSmart(path, filename, streamUrl, undefined, songId)
 
   const id = nextId++
   setDownloads([...downloads, { id, name: filename, progress: null }])
@@ -53,7 +55,7 @@ export async function startCdnFileDownload(
     onProgress?.(progress)
   }
   try {
-    return await downloadFileSmart(path, filename, streamUrl, track)
+    return await downloadFileSmart(path, filename, streamUrl, track, songId)
   } finally {
     setDownloads(downloads.filter((d) => d.id !== id))
   }

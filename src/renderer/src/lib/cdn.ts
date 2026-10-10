@@ -15,6 +15,7 @@ import { getToken } from './userApi'
 import { downloadViaNode, CdnNodeError, NO_ICE_CANDIDATES, type CdnDownloadProgress, type CdnNodeDownloadResult } from './cdnWebrtc'
 import { downloadViaTunnel } from './cdnTunnel'
 import { blake2bHexFromBlob } from './cdnBlake2b'
+import { embedForDownload, embedSafe } from './lyricsEmbed'
 
 const CDN_BASE = `${JWAPI_BASE}/cdn`
 const ENABLED_KEY = 'cdnEnabled'
@@ -233,17 +234,31 @@ export async function downloadFileSmart(
   path: string,
   filename: string,
   streamUrl: string,
-  onProgress?: (p: CdnDownloadProgress) => void
+  onProgress?: (p: CdnDownloadProgress) => void,
+  /** The song this file is, for the "embed lyrics on download" setting. */
+  songId?: number | null
 ): Promise<boolean> {
+  const embedPromise = embedForDownload(songId, path)
   const result = await cdnService.tryDownload(path, onProgress)
-  if (!result) {
+  const embed = await embedPromise
+  let blob = result?.blob ?? null
+  // The origin fallback is normally a plain browser download; embedding needs
+  // the bytes, so fetch them here (and fall back to the browser on failure).
+  if (!blob && embed) {
+    try {
+      const res = await fetch(streamUrl)
+      if (res.ok) blob = await res.blob()
+    } catch { /* plain download below */ }
+  }
+  if (!blob) {
     triggerDownload(streamUrl, filename)
     return false
   }
+  if (embed) blob = await embedSafe(blob, embed)
 
-  const objectUrl = URL.createObjectURL(result.blob)
+  const objectUrl = URL.createObjectURL(blob)
   triggerDownload(objectUrl, filename)
   // Give the download a moment to actually start before freeing the blob.
   setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
-  return result.isDonor
+  return result?.isDonor ?? false
 }

@@ -127,6 +127,7 @@ const SETTINGS: Setting[] = [
   bool('chat-presence', 'Request and show who is online', () => useChatStore.getState().presenceEnabled, (v) => useChatStore.getState().setPresenceEnabled(v)),
   bool('chat-read-receipts', 'Send read receipts', () => useChatStore.getState().readEnabled, (v) => useChatStore.getState().setReadEnabled(v)),
   bool('cdn', 'Distributed CDN downloads (off always uses the origin server)', () => cdnService.enabled, (v) => cdnService.setEnabled(v)),
+  bool('embed-lyrics', 'Embed lyrics and your cover in downloaded MP3s', () => st().embedLyricsOnDownload, (v) => st().setEmbedLyricsOnDownload(v)),
   bool('developer-mode', 'Developer tab in Settings', () => st().developerMode, (v) => st().setDeveloperMode(v)),
 ]
 

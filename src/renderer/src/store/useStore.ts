@@ -590,6 +590,9 @@ interface AppState {
   // "Report this error" button uses. On by default; Settings can turn it off
   // for anyone who'd rather report manually (or not at all).
   autoReportErrors: boolean
+  // When on, downloading an MP3 song writes its lyrics and the user's own cover into the
+  // file's ID3 tag (see lib/lyricsEmbed). Per-device: not synced.
+  embedLyricsOnDownload: boolean
   // Playlists for signed-out users - see GuestPlaylist. Persisted to
   // localStorage, so unlike localPlaylists these aren't tied to scanned
   // library tracks and work identically on every platform.
@@ -964,6 +967,7 @@ interface AppActions {
   setPlaylistHeroEnabled: (enabled: boolean) => void
   syncUserSettings: (serverSettings?: UserSettings) => Promise<void>
   setAutoReportErrors: (enabled: boolean) => void
+  setEmbedLyricsOnDownload: (enabled: boolean) => void
   // Guest playlists (see GuestPlaylist) - createGuestPlaylist returns the new
   // playlist's id so the caller can navigate straight to it.
   createGuestPlaylist: (name: string) => string
@@ -3528,6 +3532,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // ── Song preferences ──────────────────────────────────────────────────────,
   autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
   setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
+  embedLyricsOnDownload: ls.get<boolean>('embedLyricsOnDownload') ?? false,
+  setEmbedLyricsOnDownload: (embedLyricsOnDownload) => { set({ embedLyricsOnDownload }); ls.set('embedLyricsOnDownload', embedLyricsOnDownload) },
   guestPlaylists: ls.get<GuestPlaylist[]>('guestPlaylists') ?? [],
   createGuestPlaylist: (name) => {
     const id = `gp-${Date.now()}`

@@ -45,8 +45,38 @@ export function readMp3Tags(blob: Blob): Promise<Mp3Tags> {
   })
 }
 
-export async function writeMp3Tags(source: Blob, tags: Mp3Tags): Promise<Blob> {
+export interface EmbeddableLyrics {
+  /** Plain text, one lyric line per line. Written as USLT. */
+  text: string
+  /** Timed lines (seconds), written as SYLT alongside the plain text. */
+  synced: { time: number; text: string }[]
+}
+
+/** Adds lyrics and/or a cover to an MP3 while keeping the tags it already
+ *  carries (as far as this module reads them - see the header note). A given
+ *  `cover` replaces the file's own one. */
+export async function embedInMp3(source: Blob, extras: { lyrics?: EmbeddableLyrics; cover?: Mp3Cover }): Promise<Blob> {
+  const tags = await readMp3Tags(source)
+  if (extras.cover) tags.cover = extras.cover
   const writer = new ID3Writer(await source.arrayBuffer())
+  applyTags(writer, tags)
+  const { lyrics } = extras
+  if (lyrics) {
+    writer.setFrame('USLT', { description: '', lyrics: lyrics.text })
+    if (lyrics.synced.length > 0) {
+      writer.setFrame('SYLT', {
+        type: 1, // lyrics
+        text: lyrics.synced.map((l) => [l.text, Math.round(l.time * 1000)] as const),
+        timestampFormat: 2, // milliseconds
+        description: '',
+      })
+    }
+  }
+  writer.addTag()
+  return writer.getBlob()
+}
+
+function applyTags(writer: ID3Writer, tags: Mp3Tags): void {
   if (tags.title.trim()) writer.setFrame('TIT2', tags.title.trim())
   if (tags.artist.trim()) writer.setFrame('TPE1', [tags.artist.trim()])
   if (tags.album.trim()) writer.setFrame('TALB', tags.album.trim())
@@ -60,6 +90,11 @@ export async function writeMp3Tags(source: Blob, tags: Mp3Tags): Promise<Blob> {
       useUnicodeEncoding: false,
     })
   }
+}
+
+export async function writeMp3Tags(source: Blob, tags: Mp3Tags): Promise<Blob> {
+  const writer = new ID3Writer(await source.arrayBuffer())
+  applyTags(writer, tags)
   writer.addTag()
   return writer.getBlob()
 }

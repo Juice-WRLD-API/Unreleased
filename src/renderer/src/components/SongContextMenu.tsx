@@ -85,7 +85,7 @@ interface Props {
   onClearSessionLink?: () => void
 }
 
-function downloadTrack(track: Track): void {
+function downloadTrack(track: Track, songId: number | null): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
@@ -104,7 +104,7 @@ function downloadTrack(track: Track): void {
   // resolveSessionEditSource) - rebuilding from track.path alone would drop
   // that for a session-edit-linked recording_session song on a non-primary
   // channel.
-  void downloadFileSmart(track.path, `${track.title}.mp3`, track.streamUrl ?? buildStreamUrl(track.path))
+  void downloadFileSmart(track.path, `${track.title}.mp3`, track.streamUrl ?? buildStreamUrl(track.path), undefined, songId)
 }
 
 function downloadZipEntry(entry: JWApiFileEntry): void {
@@ -391,7 +391,7 @@ export default function SongContextMenu({
         showSessionLink && { icon: FileAudio2, label: 'Link session file…', onSelect: onLinkSessionFile },
         showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
         canDownload && 'divider',
-        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track) },
+        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
         canDownload && !!el && hasValidSong && {
           icon: addedToLib ? Check : HardDrive,
           label: addedToLib ? 'Added to library' : addingToLib ? 'Adding...' : 'Add to library',
