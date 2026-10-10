@@ -8,6 +8,7 @@ import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
 import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { downloadWithEmbed } from '../lib/lyricsEmbed'
 import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
 import ChangeVersionPanel from './ChangeVersionPanel'
@@ -81,7 +82,7 @@ interface Props {
   onClearSessionLink?: () => void
 }
 
-function downloadTrack(track: Track): void {
+function downloadTrack(track: Track, songId: number | null): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
@@ -92,6 +93,12 @@ function downloadTrack(track: Track): void {
       link.click()
       link.remove()
     })
+    return
+  }
+  // Lyrics embedding needs the file bytes, so it takes the fetch path; with the
+  // setting off (or nothing to embed) this stays a plain anchor download.
+  if (songId != null && useStore.getState().embedLyricsOnDownload) {
+    void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
     return
   }
   const a = document.createElement('a')
@@ -364,7 +371,7 @@ export default function SongContextMenu({
         showSessionLink && { icon: FileAudio2, label: 'Link session file…', onSelect: onLinkSessionFile },
         showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
         canDownload && 'divider',
-        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track) },
+        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
         removeAction && 'divider',
         removeAction && { icon: Trash2, label: removeAction.label, danger: true, onSelect: removeAction.onClick },
       ]}

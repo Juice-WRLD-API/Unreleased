@@ -1319,7 +1319,7 @@ const SongCard = memo(function SongCard({
               e.stopPropagation()
               // Always the primary channel here (no channel arg), so the
               // P2P CDN is safe to try before falling back to the stream URL.
-              startCdnFileDownload(song.path, `${title}.mp3`, buildStreamUrl(song.path))
+              startCdnFileDownload(song.path, `${title}.mp3`, buildStreamUrl(song.path), undefined, song.id)
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"

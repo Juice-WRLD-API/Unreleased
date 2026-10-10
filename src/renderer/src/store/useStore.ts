@@ -427,6 +427,9 @@ interface AppState {
   // "Report this error" button uses. On by default; Settings can turn it off
   // for anyone who'd rather report manually (or not at all).
   autoReportErrors: boolean
+  // When on, downloading an MP3 song writes its lyrics and the user's own cover into the
+  // file's ID3 tag (see lib/lyricsEmbed). Per-device: not synced.
+  embedLyricsOnDownload: boolean
 
   // Playlist folders - a local-first grouping over both synced and local
   // playlists (keyed by "api:<id>"/"local:<id>"). Persisted to localStorage and
@@ -745,6 +748,7 @@ interface AppActions {
   openReport: (target: ReportTarget) => void
   closeReport: () => void
   setAutoReportErrors: (enabled: boolean) => void
+  setEmbedLyricsOnDownload: (enabled: boolean) => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. `automated` flags a
    *  crash report ErrorBoundary sent on its own rather than one the user
@@ -2072,6 +2076,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   reportModal: null,
   autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
   setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
+  embedLyricsOnDownload: ls.get<boolean>('embedLyricsOnDownload') ?? false,
+  setEmbedLyricsOnDownload: (embedLyricsOnDownload) => { set({ embedLyricsOnDownload }); ls.set('embedLyricsOnDownload', embedLyricsOnDownload) },
 
   openReport: (target) => set({ reportModal: target }),
   closeReport: () => set({ reportModal: null }),
