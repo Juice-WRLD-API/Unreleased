@@ -1,4 +1,4 @@
-import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSquare, Check } from 'lucide-react'
+import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSquare, Check, X } from 'lucide-react'
 import type { SongEditProposal } from '../lib/userApi'
 import { STATUS_STYLES, formatDate, changeTypeLabel } from '../lib/proposalSearch'
 import { ProposalDiff } from './adminShared'
@@ -22,15 +22,20 @@ export interface ProposalListItemProps {
    *  EditorProfileView's expandedProposalId). */
   expanded: boolean
   onToggleExpand: () => void
+  /** Staff only - adds approve/deny to a pending row (an admin reviewing
+   *  their own proposal without detouring through the Admin queue). */
+  onReview?: (p: SongEditProposal, action: 'approve' | 'reject') => void
+  reviewingId?: number | null
 }
 
 export default function ProposalListItem({
   proposal: p, onEdit, onResubmit, onDelete, resubmittingId, deletingId, variant = 'desktop',
-  expanded, onToggleExpand,
+  expanded, onToggleExpand, onReview, reviewingId = null,
 }: ProposalListItemProps): JSX.Element {
   const isMobile = variant === 'mobile'
   const s = STATUS_STYLES[p.status]
-  const busy = resubmittingId === p.id || deletingId === p.id
+  const reviewing = reviewingId === p.id
+  const busy = resubmittingId === p.id || deletingId === p.id || reviewing
   const iconSize = isMobile ? 13 : 12
 
   // A decided proposal (approved/rejected/reversed) has no edit UI of its
@@ -73,6 +78,26 @@ export default function ProposalListItem({
               onClick={(e) => e.stopPropagation()}
               className={`flex items-center gap-0.5 shrink-0 ${isMobile ? '' : 'md:opacity-0 md:group-hover:opacity-100 transition-opacity'}`}
             >
+              {onReview && (
+                <>
+                  <button
+                    onClick={() => onReview(p, 'approve')}
+                    disabled={busy}
+                    title="Approve proposal"
+                    className={`${actionBtnCls} ${isMobile ? 'active:text-emerald-400 active:bg-emerald-500/10' : 'hover:text-emerald-400 hover:bg-emerald-500/10'}`}
+                  >
+                    {reviewing ? <Loader2 size={iconSize} className="animate-spin" /> : <Check size={iconSize} />}
+                  </button>
+                  <button
+                    onClick={() => onReview(p, 'reject')}
+                    disabled={busy}
+                    title="Deny proposal"
+                    className={`${actionBtnCls} ${isMobile ? 'active:text-red-400 active:bg-red-500/10' : 'hover:text-red-400 hover:bg-red-500/10'}`}
+                  >
+                    <X size={iconSize} />
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => onEdit(p)}
                 title="Edit proposal"

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { getMyProposals, withdrawProposal, resubmitProposal } from '../lib/userApi'
+import { getMyProposals, withdrawProposal, resubmitProposal, adminReviewProposal } from '../lib/userApi'
 import type { SongEditProposal } from '../lib/userApi'
 import { proposalSearchText, type ProposalFilterTab } from '../lib/proposalSearch'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
@@ -17,6 +17,7 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
   const [search, setSearch] = useState('')
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [resubmittingId, setResubmittingId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<number | null>(null)
 
   useStrictModeSafeEffect((isCancelled) => {
     setRefreshing(true)
@@ -48,6 +49,18 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
     finally { setResubmittingId(null) }
   }
 
+  // Staff reviewing their own proposal straight from this list - same
+  // endpoint as AdminPage's queue; the returned row replaces the local one so
+  // the status badge flips without a refetch.
+  const handleReview = async (p: SongEditProposal, action: 'approve' | 'reject'): Promise<void> => {
+    setReviewingId(p.id)
+    try {
+      const updated = await adminReviewProposal(p.id, { action, channel: activeChannel })
+      setProposals(prev => prev.map(x => x.id === p.id ? updated : x))
+    } catch (e) { console.error('review failed:', e) }
+    finally { setReviewingId(null) }
+  }
+
   const filteredProposals = useMemo(() => {
     const byStatus = filter === 'all' ? proposals : proposals.filter(p => p.status === filter)
     const q = search.trim().toLowerCase()
@@ -66,9 +79,11 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
     search, setSearch,
     deletingId,
     resubmittingId,
+    reviewingId,
     filteredProposals,
     handleDelete,
     handleResubmit,
+    handleReview,
     tabCount,
   }
 }

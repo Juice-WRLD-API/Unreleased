@@ -92,6 +92,11 @@ export function useEditorProfileView(): {
   filteredProposals: ReturnType<typeof useMyProposals>['filteredProposals']
   handleDelete: ReturnType<typeof useMyProposals>['handleDelete']
   handleResubmit: ReturnType<typeof useMyProposals>['handleResubmit']
+  handleReview: ReturnType<typeof useMyProposals>['handleReview']
+  reviewingId: number | null
+  /** Staff (admin, or manager of this channel) past the 2FA lock - gets
+   *  approve/deny on their own pending proposals here. */
+  canReviewProposals: boolean
   tabCount: ReturnType<typeof useMyProposals>['tabCount']
   leaderboard: ReturnType<typeof useLeaderboard>['leaderboard']
   loadingLeaderboard: boolean
@@ -217,7 +222,7 @@ export function useEditorProfileView(): {
   const {
     proposals, loading: loadingProposals, refreshing,
     filter, setFilter, search, setSearch, deletingId, resubmittingId,
-    filteredProposals, handleDelete, handleResubmit, tabCount,
+    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, tabCount,
   } = useMyProposals(activeChannel, refreshKey)
 
   const { leaderboard, loading: loadingLeaderboard, myEntry } = useLeaderboard(refreshKey, account?.discord_username)
@@ -309,6 +314,7 @@ export function useEditorProfileView(): {
   // Security box itself, so a compromised (password-only) admin account
   // can't be used to browse or act on admin-only data from this dashboard.
   const otpLocked = isAdmin && adminPreview?.otpEnabled === false
+  const canReviewProposals = canReviewStaff && !otpLocked
 
   const handleEdit = (p: SongEditProposal): void => {
     // p.song is null for 'create' proposals (new song, no backing record yet) -
@@ -326,7 +332,7 @@ export function useEditorProfileView(): {
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
     isContributor, isAdmin, isManager, canReviewReports, canReviewStaff,
     proposals, loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
-    filteredProposals, handleDelete, handleResubmit, tabCount,
+    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
     compTabCount, filteredCompProposals,
