@@ -1,5 +1,6 @@
 // Presentational pieces shared by the CDN nodes admin tab and the donor's own
 // "My CDN nodes" panel - the parts that read the same in both places.
+import { useMemo } from 'react'
 import { AlertCircle, ArrowDown, Check, Loader2, Minus, Rss } from 'lucide-react'
 import type { CdnAdminNode, CdnAdminStats } from '../lib/cdnAdminApi'
 import { wasAutoDisabled, VIOLATION_LIMIT, DEFAULT_TRUST_SCORE } from '../lib/cdnAdminApi'
@@ -169,6 +170,52 @@ export function nodeLocation(n: Pick<CdnOwnedNode, 'city' | 'country_code' | 'la
   const place = [n.city, n.country_code].filter(Boolean).join(', ')
   if (place) return place
   return n.latitude != null && n.longitude != null ? `${n.latitude.toFixed(2)}, ${n.longitude.toFixed(2)}` : '—'
+}
+
+export function countryFlag(code: string): string {
+  if (!/^[a-z]{2}$/i.test(code)) return ''
+  const [a, b] = code.toUpperCase()
+  return String.fromCodePoint(0x1f1e6 + a.charCodeAt(0) - 65, 0x1f1e6 + b.charCodeAt(0) - 65)
+}
+
+let regionNames: Intl.DisplayNames | null | undefined
+function countryName(code: string): string {
+  if (regionNames === undefined) {
+    try { regionNames = new Intl.DisplayNames(undefined, { type: 'region' }) } catch { regionNames = null }
+  }
+  try { return regionNames?.of(code.toUpperCase()) ?? code } catch { return code }
+}
+
+/** Where the network is: nodes per country, biggest first, with how many of
+ *  them are up. Nodes that never reported a country are left out. */
+export function CdnCountryChips({ nodes, limit = 10 }: { nodes: CdnOwnedNode[]; limit?: number }): JSX.Element | null {
+  const rows = useMemo(() => {
+    const m = new Map<string, { total: number; online: number }>()
+    for (const n of nodes) {
+      const code = (n.country_code ?? '').trim().toUpperCase()
+      if (!code) continue
+      const r = m.get(code) ?? { total: 0, online: 0 }
+      r.total++
+      if (cdnNodeBucket(n) === 'online') r.online++
+      m.set(code, r)
+    }
+    return [...m.entries()].sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0]))
+  }, [nodes])
+  if (rows.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mr-1">{rows.length} {rows.length === 1 ? 'country' : 'countries'}</span>
+      {rows.slice(0, limit).map(([code, r]) => (
+        <span key={code} title={`${countryName(code)}: ${r.total} node${r.total === 1 ? '' : 's'}, ${r.online} online`}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface-overlay border border-[var(--border)] text-[11px] text-text-secondary">
+          <span>{countryFlag(code) || '🌐'}</span>
+          <span className="font-medium text-text-primary">{code}</span>
+          <span className="tabular-nums text-text-muted">{r.total}</span>
+        </span>
+      ))}
+      {rows.length > limit && <span className="text-[11px] text-text-muted">+{rows.length - limit} more</span>}
+    </div>
+  )
 }
 
 export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: string }): JSX.Element {
