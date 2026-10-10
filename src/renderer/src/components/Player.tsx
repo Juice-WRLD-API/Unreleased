@@ -1296,8 +1296,13 @@ export default function Player(): JSX.Element {
         // could end up referring to two different tracks.
         const isRadio = useStore.getState().radioMode
         const nextIdx = isRadio ? -1 : computeNextIdx()
+        // Radio's nextTrack() replays forward through history first when the
+        // user has stepped back, so crossfade into that same track.
+        const radioStore = useStore.getState()
         const nextTrackData = isRadio
-          ? useStore.getState().radioNext
+          ? (radioStore.queueIndex < radioStore.queue.length - 1
+              ? radioStore.queue[radioStore.queueIndex + 1]
+              : radioStore.radioNext)
           : (nextIdx >= 0 && nextIdx < queue.length) ? queue[nextIdx] : null
         const na = getNext()
 
@@ -1465,13 +1470,10 @@ export default function Player(): JSX.Element {
 
   const handlePrev = (): void => {
     const audio = getActive()
-    // In radio mode the user can't go back - always restart current song
-    if (radioMode) {
-      restartCurrentTrack()
-      return
-    }
-    // When on repeat-one, skip back = restart the same song (mirrors handleNext)
-    if (repeat === 'one') {
+    // When on repeat-one, skip back = restart the same song (mirrors handleNext).
+    // Radio keeps its played songs in `queue` as history, so it falls through
+    // to the normal "restart if >3s in, otherwise previous song" logic below.
+    if (repeat === 'one' && !radioMode) {
       restartCurrentTrack()
       return
     }
