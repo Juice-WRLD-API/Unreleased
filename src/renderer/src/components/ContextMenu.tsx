@@ -476,12 +476,20 @@ function Flyout({ rowEl, parentRef, innerRef, z, menuId, className, onEnter, chi
   onEnter: () => void
   children: ReactNode
 }): JSX.Element {
-  const [pos, setPos] = useState({ top: 0, left: 0 })
+  // The position is written straight onto the element, not held in state. It is
+  // recomputed from a layout effect after every render and from a
+  // ResizeObserver, and as state those two writers fought: an observer update
+  // still pending at the default lane gets replayed under each sync-lane
+  // update from the effect, so the `prev` guard returned a fresh object every
+  // pass, every commit re-ran the effect, and React threw "maximum update
+  // depth" - which unmounted the whole app, leaving only the theme background.
+  // Setting the same style value twice is a no-op, so this settles on its own.
   const place = (): void => {
     const sub = innerRef.current, parent = parentRef.current
     if (!rowEl || !sub || !parent) return
     const { top, left } = placeFlyout(rowEl, parent, sub)
-    setPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
+    sub.style.top = `${top}px`
+    sub.style.left = `${left}px`
   }
   const placeRef = useRef(place)
   placeRef.current = place
@@ -504,7 +512,7 @@ function Flyout({ rowEl, parentRef, innerRef, z, menuId, className, onEnter, chi
       data-ctx-menu={menuId}
       onClick={e => e.stopPropagation()}
       onMouseEnter={onEnter}
-      style={{ position: 'fixed', zIndex: z, top: pos.top, left: pos.left, maxHeight: 'calc(100vh - 16px)', ...NO_DRAG }}
+      style={{ position: 'fixed', zIndex: z, top: 0, left: 0, maxHeight: 'calc(100vh - 16px)', ...NO_DRAG }}
       className={`overflow-y-auto overflow-x-hidden bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 ${className}`}
     >
       {children}
