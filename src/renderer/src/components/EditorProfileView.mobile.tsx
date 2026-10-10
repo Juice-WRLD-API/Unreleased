@@ -106,7 +106,7 @@ export default function EditorProfileView(): JSX.Element {
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
     isContributor, isAdmin, isManager, canReviewReports, canReviewStaff,
     loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
-    filteredProposals, handleDelete, handleResubmit, tabCount, proposals,
+    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter,
     compTabCount, filteredCompProposals,
@@ -378,6 +378,8 @@ export default function EditorProfileView(): JSX.Element {
                           onResubmit={handleResubmit}
                           onDelete={handleDelete}
                           resubmittingId={resubmittingId}
+                          onReview={canReviewProposals ? handleReview : undefined}
+                          reviewingId={reviewingId}
                           deletingId={deletingId}
                           variant="mobile"
                           expanded={expandedProposalId === p.id}

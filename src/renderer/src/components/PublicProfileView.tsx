@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3, Check, X,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
@@ -9,8 +9,10 @@ import { subscribeNotifications } from '../lib/notificationSocket'
 import {
   getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
   adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
+  adminReviewProposal, adminReviewCompProposal,
 } from '../lib/userApi'
-import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser } from '../lib/userApi'
+import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser, AccountUser } from '../lib/userApi'
+import { compApproveBlockedReason } from '../lib/compProposalShared'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
 import { Track } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -27,7 +29,8 @@ import { initial } from '../lib/format'
 import { relativeTime } from './adminShared'
 import ContextMenu from './ContextMenu'
 
-type ProposalRow = { key: string; kind: 'edit' | 'comp'; title: string; status: string; created_at: string }
+// approveBlocked: comp-only gate (delete_folder) - see compApproveBlockedReason.
+type ProposalRow = { key: string; id: number; kind: 'edit' | 'comp'; title: string; status: string; created_at: string; approveBlocked: string | null }
 
 const PROPOSAL_STATUS_STYLE: Record<string, string> = {
   pending: 'text-amber-400 bg-amber-500/15',
@@ -40,9 +43,12 @@ const PROPOSAL_HISTORY_LIMIT = 8
 
 // Manage panel's per-user proposal history. The admin list endpoints have no
 // per-user filter, so both queues are fetched and narrowed by id here.
-function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
+// Pending rows get approve/deny inline so an admin can clear this user's
+// queue without leaving their profile for the Admin console.
+function AdminProposalHistory({ userId, account }: { userId: number; account: AccountUser | null }): JSX.Element {
   const [rows, setRows] = useState<ProposalRow[] | null>(null)
   const [error, setError] = useState(false)
+  const [reviewingKey, setReviewingKey] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -51,17 +57,29 @@ function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
         if (!alive) return
         const merged: ProposalRow[] = [
           ...edits.filter((p) => p.editor_id === userId).map((p): ProposalRow => ({
-            key: `e${p.id}`, kind: 'edit', title: p.title || `${p.change_type} song`, status: p.status, created_at: p.created_at,
+            key: `e${p.id}`, id: p.id, kind: 'edit', title: p.title || `${p.change_type} song`, status: p.status, created_at: p.created_at, approveBlocked: null,
           })),
           ...comps.filter((p) => p.contributor_id === userId).map((p): ProposalRow => ({
-            key: `c${p.id}`, kind: 'comp', title: p.file_path, status: p.status, created_at: p.created_at,
+            key: `c${p.id}`, id: p.id, kind: 'comp', title: p.file_path, status: p.status, created_at: p.created_at,
+            approveBlocked: compApproveBlockedReason(p, account),
           })),
         ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
         setRows(merged)
       })
       .catch(() => { if (alive) setError(true) })
     return () => { alive = false }
-  }, [userId])
+  }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const review = async (r: ProposalRow, action: 'approve' | 'reject'): Promise<void> => {
+    setReviewingKey(r.key)
+    try {
+      const updated = r.kind === 'edit'
+        ? await adminReviewProposal(r.id, { action })
+        : await adminReviewCompProposal(r.id, { action })
+      setRows((prev) => prev?.map((x) => x.key === r.key ? { ...x, status: updated.status } : x) ?? prev)
+    } catch (e) { console.error('review failed:', e) }
+    finally { setReviewingKey(null) }
+  }
 
   const count = (st: string): number => rows?.filter((r) => r.status === st).length ?? 0
 
@@ -86,6 +104,32 @@ function AdminProposalHistory({ userId }: { userId: number }): JSX.Element {
                 <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${PROPOSAL_STATUS_STYLE[r.status] ?? 'text-text-muted bg-surface-raised'}`}>{r.status}</span>
                 <span className="min-w-0 flex-1 truncate text-text-secondary">{r.kind === 'comp' && <span className="text-text-muted">Comp · </span>}{r.title}</span>
                 <span className="shrink-0 text-text-muted">{relativeTime(r.created_at)}</span>
+                {r.status === 'pending' && (
+                  <span className="shrink-0 flex items-center gap-0.5">
+                    {reviewingKey === r.key ? (
+                      <Loader2 size={12} className="animate-spin text-text-muted mx-1" />
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => void review(r, 'approve')}
+                          disabled={!!reviewingKey || !!r.approveBlocked}
+                          title={r.approveBlocked ?? 'Approve proposal'}
+                          className="p-1 rounded text-text-muted hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button
+                          onClick={() => void review(r, 'reject')}
+                          disabled={!!reviewingKey}
+                          title="Deny proposal"
+                          className="p-1 rounded text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          <X size={12} />
+                        </button>
+                      </>
+                    )}
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -625,7 +669,7 @@ export default function PublicProfileView(): JSX.Element {
                 {adminUser.is_active ? 'Disable account' : 'Enable account'}
               </button>
             </div>
-            <AdminProposalHistory userId={adminUser.user_id} />
+            <AdminProposalHistory userId={adminUser.user_id} account={account} />
             </>
           )}
         </div>
