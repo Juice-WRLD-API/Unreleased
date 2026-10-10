@@ -123,9 +123,18 @@ function fmtDate(iso: string): string {
 }
 
 /** The API may return a root-relative download path; resolve it against the
- *  API base that serves /cdn. */
+ *  API base that serves /cdn. The server's path usually already includes the
+ *  base's own path prefix (`/juicewrld/cdn/binary/...`), so only the base's
+ *  origin is prepended in that case - otherwise the prefix doubles up. */
 function cdnBinaryUrl(url: string): string {
-  return url.startsWith('/') ? `${baseFor(url)}${url}` : url
+  if (!url.startsWith('/')) return url
+  const base = baseFor('/cdn')
+  try {
+    const { origin, pathname } = new URL(base)
+    const basePath = pathname.replace(/\/+$/, '')
+    if (basePath && (url === basePath || url.startsWith(`${basePath}/`))) return `${origin}${url}`
+  } catch { /* fall through to plain concatenation */ }
+  return `${base}${url}`
 }
 
 // ── Small building blocks ────────────────────────────────────────────────────
