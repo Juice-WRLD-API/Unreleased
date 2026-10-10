@@ -96,9 +96,13 @@ export function reportSongId(r: SongReportRow): number | null {
 export async function listSongReports(status?: SongReportStatus): Promise<SongReportRow[]> {
   const url = new URL(SONG_REPORTS_URL)
   if (status) url.searchParams.set('status', status)
+  // cacheKey opts into apiRequest's in-flight dedupe: the profile page asks for
+  // the pending queue twice in the same commit (the Reports tile and the Admin
+  // tile's count), which used to be two identical round-trips.
   const data = await apiRequest<SongReportRow[] | { results?: SongReportRow[] }>(url.toString(), {
     method: 'GET',
     headers: authHeaders(getToken()),
+    cacheKey: url.toString(),
   })
   // Tolerate either a bare array or DRF-style pagination.
   return Array.isArray(data) ? data : (data?.results ?? [])

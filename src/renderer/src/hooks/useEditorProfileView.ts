@@ -220,7 +220,7 @@ export function useEditorProfileView(): {
     filteredProposals, handleDelete, handleResubmit, tabCount,
   } = useMyProposals(activeChannel, refreshKey)
 
-  const { leaderboard, loading: loadingLeaderboard, myEntry } = useLeaderboard(refreshKey, activeChannel, account?.discord_username)
+  const { leaderboard, loading: loadingLeaderboard, myEntry } = useLeaderboard(refreshKey, account?.discord_username)
 
   // Grid mode has no "active tab" gating a tile's own fetch - every visible
   // tile is live at once - so this is gated on the role condition alone
