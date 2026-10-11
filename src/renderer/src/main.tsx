@@ -5,8 +5,10 @@ import FloatApp from './FloatApp'
 import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { initWindowSync } from './lib/windowSync'
+import { installTranslateDomGuard } from './lib/translateDomGuard'
 
 installGlobalErrorLogging()
+installTranslateDomGuard()
 
 // Pop-out windows boot this same bundle with ?float=<view> (see main.js
 // createFloatWindow) and mount a single view instead of the full app. Every
