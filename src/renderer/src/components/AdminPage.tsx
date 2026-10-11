@@ -16,6 +16,7 @@ import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
 import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, ProposalDiff } from './adminShared'
 import ReportsTab from './ReportsTab'
+import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
@@ -77,6 +78,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     users, setUsers,
     reportStatus, setReportStatus,
     reports, setReports,
+    feedbackFilter, setFeedbackFilter,
+    feedback,
     refresh,
     nav,
   } = useAdminQueue({
@@ -233,6 +236,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('reports') && (
           <div className={tab === 'reports' ? 'h-full' : 'hidden'}>
             <ReportsTab reports={reports} status={reportStatus} setStatus={setReportStatus} onChanged={() => refresh()} />
+          </div>
+        )}
+        {visited.has('feedback') && (
+          <div className={tab === 'feedback' ? 'h-full' : 'hidden'}>
+            <FeedbackTab feedback={feedback} filter={feedbackFilter} setFilter={setFeedbackFilter} />
           </div>
         )}
         {visited.has('users') && (
