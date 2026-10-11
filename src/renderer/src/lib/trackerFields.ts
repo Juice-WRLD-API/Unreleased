@@ -111,10 +111,12 @@ export function insertField(keys: TrackerFieldKey[], index: number, next: Tracke
   return [...keys.slice(0, at), next, ...keys.slice(at)]
 }
 
-export function moveField(keys: TrackerFieldKey[], index: number, delta: -1 | 1): TrackerFieldKey[] {
-  const to = index + delta
-  if (to < 0 || to >= keys.length) return keys
+/** Moves the field at `from` into slot `to` (drag-and-drop semantics: the
+ *  dragged field lands where the drop target was, neighbours shift over). */
+export function reorderField(keys: TrackerFieldKey[], from: number, to: number): TrackerFieldKey[] {
+  if (from === to || from < 0 || to < 0 || from >= keys.length || to >= keys.length) return keys
   const out = [...keys]
-  ;[out[index], out[to]] = [out[to], out[index]]
+  const [k] = out.splice(from, 1)
+  out.splice(to, 0, k)
   return out
 }
