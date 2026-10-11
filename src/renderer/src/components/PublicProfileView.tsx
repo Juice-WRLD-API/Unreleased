@@ -7,7 +7,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
 import { subscribeNotifications } from '../lib/notificationSocket'
 import {
-  getPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
+  getPublicProfile, peekPublicProfile, liteSongToTrack, getPublicPlaylist, trackIdToSongId, getNowPlaying,
   adminGetUser, adminUpdateUser, adminListProposals, adminListCompProposals,
   adminReviewProposal, adminReviewCompProposal,
 } from '../lib/userApi'
@@ -208,8 +208,10 @@ export default function PublicProfileView(): JSX.Element {
   const startDm = useChatStore((s) => s.startDm)
   const userId = Number(window.location.pathname.split('/u/')[1]?.split('/')[0] ?? '')
 
-  const [profile, setProfile] = useState<PublicProfile | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Stale-while-revalidate: paint the last-seen copy immediately, then the
+  // mount effect refetches and swaps in the fresh one.
+  const [profile, setProfile] = useState<PublicProfile | null>(() => (userId > 0 ? peekPublicProfile(userId) ?? null : null))
+  const [loading, setLoading] = useState(() => profile === null)
   const [notFound, setNotFound] = useState(false)
   const [messaging, setMessaging] = useState(false)
 

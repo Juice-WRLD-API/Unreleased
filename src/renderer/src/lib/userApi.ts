@@ -8,7 +8,7 @@ import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
-import { cacheSet } from './apiCache'
+import { cacheGet, cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
 import type { TierlistSummary } from './tierlistApi'
@@ -538,6 +538,12 @@ export async function updateNowPlaying(
 export async function getPublicProfile(userId: number): Promise<PublicProfile> {
   const url = `${ACCOUNT_BASE}/profile/${userId}/`
   return request(url, { method: 'GET' }, false, url)
+}
+
+// Last-seen copy of a profile, for painting instantly while getPublicProfile
+// revalidates. Same key getPublicProfile writes under.
+export function peekPublicProfile(userId: number): PublicProfile | undefined {
+  return cacheGet<PublicProfile>(`${ACCOUNT_BASE}/profile/${userId}/`)
 }
 
 export async function getNowPlaying(userId: number): Promise<NowPlayingResponse> {
