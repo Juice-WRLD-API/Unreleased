@@ -1,6 +1,6 @@
 {
   "name": "unreleased",
-  "version": "2.3.5",
+  "version": "2.3.6",
   "description": "A music player for Juice WRLD",
   "desktopName": "com.juicewrldapi.player.desktop",
   "main": "electron/main.js",
@@ -61,12 +61,12 @@
     "zustand": "^5.0.14"
   },
   "overrides": {
-    "js-yaml": "4.3.1",
+    "js-yaml": "4.3.2",
     "@discordjs/rest": {
-      "undici": "6.28.0"
+      "undici": "6.29.0"
     },
     "@electron/get": {
-      "undici": "7.29.0"
+      "undici": "7.30.0"
     }
   },
   "build": {
