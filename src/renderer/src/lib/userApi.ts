@@ -1166,6 +1166,56 @@ export async function confirmOtpSetup(otpToken: string): Promise<{ otp_enabled: 
   })
 }
 
+// Named API keys for scripts and integrations (docs/api-docs/20-api-keys.md).
+// A key acts as its owner, limited by scope: read = safe methods only, write =
+// mutations outside admin routes, admin = admin routes too (role still
+// applies). Managing keys is session-token only - a key can't mint more keys.
+export type ApiKeyScope = 'read' | 'write' | 'admin'
+export const API_KEY_SCOPES: ApiKeyScope[] = ['read', 'write', 'admin']
+export const API_KEY_LIMIT = 25
+
+export interface UserApiKey {
+  id: string
+  name: string
+  key_prefix: string
+  scopes: ApiKeyScope[]
+  is_active: boolean
+  last_used_at: string | null
+  created_at: string | null
+}
+
+/** Create response: the only time the full secret (`key`) is ever returned. */
+export interface UserApiKeyCreated extends UserApiKey {
+  key: string
+  message: string
+}
+
+export async function listApiKeys(): Promise<UserApiKey[]> {
+  const res = await request<{ keys: UserApiKey[] }>(`${ACCOUNT_BASE}/account/api-keys/`, { method: 'GET' })
+  return res.keys ?? []
+}
+
+export async function createApiKey(name: string, scopes: ApiKeyScope[]): Promise<UserApiKeyCreated> {
+  return request(`${ACCOUNT_BASE}/account/api-keys/`, {
+    method: 'POST',
+    body: JSON.stringify({ name, scopes }),
+  })
+}
+
+export async function updateApiKey(
+  id: string,
+  patch: { name?: string; scopes?: ApiKeyScope[]; is_active?: boolean },
+): Promise<UserApiKey> {
+  return request(`${ACCOUNT_BASE}/account/api-keys/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
+}
+
+export async function deleteApiKey(id: string): Promise<void> {
+  await request(`${ACCOUNT_BASE}/account/api-keys/${id}/`, { method: 'DELETE' })
+}
+
 // Same path as request(), minus the JSON Content-Type - the browser has to set
 // its own multipart boundary. Everything else (error parsing, offline cache
 // fallback) comes from apiClient like every other call in this module.
