@@ -3600,9 +3600,13 @@ function quitAndInstallSilently() {
   ].join('\n')
   try {
     fs.writeFileSync(watcherPath, script, 'utf-8')
+    // Only pass -InstallerPath when known: Windows PowerShell's -File binder
+    // rejects an empty-string argument as "missing", which kills the script
+    // before it does anything (the param already defaults to '').
     const child = spawn('powershell.exe', [
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
-      '-File', watcherPath, '-AppPid', String(process.pid), '-AppExePath', exePath, '-InstallerPath', installerPath,
+      '-File', watcherPath, '-AppPid', String(process.pid), '-AppExePath', exePath,
+      ...(installerPath ? ['-InstallerPath', installerPath] : []),
     ], { detached: true, stdio: 'ignore' })
     child.unref()
   } catch (e) {
