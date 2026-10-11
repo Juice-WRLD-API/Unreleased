@@ -48,6 +48,11 @@ import type { GifResult } from '../lib/gifApi'
 import { listDonorFiles } from '../lib/donorFilesApi'
 import type { DonorFile } from '../lib/donorFilesApi'
 import { getFont } from '../lib/fonts'
+import {
+  sanitizeFieldKeys, DEFAULT_DETAIL_FIELDS, DEFAULT_MOBILE_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS,
+  MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS,
+} from '../lib/trackerFields'
+import type { TrackerFieldKey } from '../lib/trackerFields'
 import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
 import type { CommunityEdit } from '../lib/audioEffects'
 import { HOTKEY_ACTIONS, effectiveBinding, effectiveGlobalBinding, defaultGlobalBinding } from '../lib/hotkeys'
@@ -335,6 +340,12 @@ interface AppState {
   // Show eras by their full name ("WRLD On Drugs") instead of the API's
   // abbreviation ("WOD") wherever the Tracker displays one.
   fullEraNames: boolean
+  // User-chosen Tracker field layouts (see lib/trackerFields.ts): the
+  // Detailed view's metadata grid on desktop and phone, and the List view's
+  // columns. Device-local - kept out of the profile push.
+  trackerDetailFields: TrackerFieldKey[]
+  trackerMobileDetailFields: TrackerFieldKey[]
+  trackerListColumns: TrackerFieldKey[]
   // Strength of that blur, as a multiplier on each surface's own base radius
   // (the WRLD tab blurs less than the now-playing/mini panels, and a
   // multiplier keeps that relationship intact at every setting). 1 = the
@@ -716,6 +727,9 @@ interface AppActions {
   setLyricsBlur: (enabled: boolean) => void
   setLyricsOverride: (enabled: boolean) => void
   setFullEraNames: (enabled: boolean) => void
+  setTrackerDetailFields: (keys: TrackerFieldKey[]) => void
+  setTrackerMobileDetailFields: (keys: TrackerFieldKey[]) => void
+  setTrackerListColumns: (keys: TrackerFieldKey[]) => void
   setLyricsBlurAmount: (amount: number) => void
   setLyricsColorActive: (color: string | null) => void
   setLyricsColorInactive: (color: string | null) => void
@@ -1786,6 +1800,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   lyricsBlur: ls.get<boolean>('lyricsBlur') ?? true,
   lyricsOverride: ls.get<boolean>('lyricsOverride') ?? false,
   fullEraNames: ls.get<boolean>('fullEraNames') ?? false,
+  trackerDetailFields: sanitizeFieldKeys(ls.get('trackerDetailFields'), DEFAULT_DETAIL_FIELDS, MAX_DETAIL_FIELDS),
+  trackerMobileDetailFields: sanitizeFieldKeys(ls.get('trackerMobileDetailFields'), DEFAULT_MOBILE_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS),
+  trackerListColumns: sanitizeFieldKeys(ls.get('trackerListColumns'), DEFAULT_LIST_COLUMNS, MAX_LIST_COLUMNS),
   lyricsBlurAmount: ls.get<number>('lyricsBlurAmount') ?? 1,
   lyricsColorActive: ls.get<string>('lyricsColorActive'),
   lyricsColorInactive: ls.get<string>('lyricsColorInactive'),
@@ -1899,6 +1916,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setLyricsBlur: (lyricsBlur) => { set({ lyricsBlur }); ls.set('lyricsBlur', lyricsBlur); get()._scheduleProfilePush(['userSettings']) },
   setLyricsOverride: (lyricsOverride) => { set({ lyricsOverride }); ls.set('lyricsOverride', lyricsOverride); get()._scheduleProfilePush(['userSettings']) },
   setFullEraNames: (fullEraNames) => { set({ fullEraNames }); ls.set('fullEraNames', fullEraNames); get()._scheduleProfilePush(['userSettings']) },
+  setTrackerDetailFields: (keys) => {
+    const trackerDetailFields = sanitizeFieldKeys(keys, DEFAULT_DETAIL_FIELDS, MAX_DETAIL_FIELDS)
+    set({ trackerDetailFields }); ls.set('trackerDetailFields', trackerDetailFields)
+  },
+  setTrackerMobileDetailFields: (keys) => {
+    const trackerMobileDetailFields = sanitizeFieldKeys(keys, DEFAULT_MOBILE_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS)
+    set({ trackerMobileDetailFields }); ls.set('trackerMobileDetailFields', trackerMobileDetailFields)
+  },
+  setTrackerListColumns: (keys) => {
+    const trackerListColumns = sanitizeFieldKeys(keys, DEFAULT_LIST_COLUMNS, MAX_LIST_COLUMNS)
+    set({ trackerListColumns }); ls.set('trackerListColumns', trackerListColumns)
+  },
   setLyricsBlurAmount: (lyricsBlurAmount) => { set({ lyricsBlurAmount }); ls.set('lyricsBlurAmount', lyricsBlurAmount); get()._scheduleProfilePush(['userSettings']) },
   setLyricsColorActive: (lyricsColorActive) => { set({ lyricsColorActive }); ls.set('lyricsColorActive', lyricsColorActive); get()._scheduleProfilePush(['userSettings']) },
   setLyricsColorInactive: (lyricsColorInactive) => { set({ lyricsColorInactive }); ls.set('lyricsColorInactive', lyricsColorInactive); get()._scheduleProfilePush(['userSettings']) },

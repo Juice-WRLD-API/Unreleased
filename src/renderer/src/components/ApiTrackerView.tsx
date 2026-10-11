@@ -47,6 +47,12 @@ import {
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
 import { useLyricSearch } from '../lib/useLyricSearch'
+import TrackerFieldMenu from './TrackerFieldMenu'
+import type { TrackerFieldMenuState } from './TrackerFieldMenu'
+import {
+  TRACKER_FIELD_MAP, DEFAULT_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS, MAX_DETAIL_FIELDS, MAX_LIST_COLUMNS,
+} from '../lib/trackerFields'
+import type { TrackerFieldKey } from '../lib/trackerFields'
 import { AnchoredContextMenu } from './ContextMenu'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel'))
@@ -84,18 +90,22 @@ type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'leng
 // every render, which makes React unmount/remount the buttons on every
 // state update (e.g. every page loaded while sorting), causing a visible
 // flicker instead of a smooth active/inactive toggle.
-const SortBtn = ({ field, label, className, orderField, orderDir, onClick }: {
+const SortBtn = ({ field, label, className, orderField, orderDir, onClick, onContextMenu, title }: {
   field: OrderField
   label: string
   className?: string
   orderField: OrderField | null
   orderDir: 'asc' | 'desc'
   onClick: (field: OrderField) => void
+  onContextMenu?: (e: React.MouseEvent) => void
+  title?: string
 }): JSX.Element => {
   const active = orderField === field
   return (
     <button
       onClick={() => onClick(field)}
+      onContextMenu={onContextMenu}
+      title={title}
       className={`flex items-center gap-0.5 text-xs font-medium uppercase tracking-wider transition-colors ${active ? 'text-accent' : 'text-text-muted hover:text-text-secondary'} ${className ?? ''}`}
     >
       {label}
@@ -523,6 +533,71 @@ function SongActions({
   )
 }
 
+// ─── List columns ─────────────────────────────────────────────────────────────
+// The List view's columns after Title are user-chosen (see lib/trackerFields).
+// Each column has a fixed width so header cells and row cells line up; the
+// four original columns keep their original widths/alignment and interactive
+// cells (Era / Category filter on click), everything else is plain text.
+const LIST_COLUMN_WIDTH: Partial<Record<TrackerFieldKey, string>> = {
+  artist: 'w-32', era: 'w-36', category: 'w-24', length: 'w-12',
+}
+const listColumnWidth = (key: TrackerFieldKey): string => LIST_COLUMN_WIDTH[key] ?? 'w-36'
+const LIST_COLUMN_SORT: Partial<Record<TrackerFieldKey, OrderField>> = {
+  artist: 'credited_artists', era: 'era__name', category: 'category', length: 'length',
+}
+// Compact-view member rows only line up under the compact header's Category
+// column, so they ignore the user's column choice.
+const COMPACT_MEMBER_COLUMNS: TrackerFieldKey[] = ['category', 'length']
+
+function ListCell({ field, song, selectMode, fullEraNames, onEraClick, onCategoryClick }: {
+  field: TrackerFieldKey
+  song: JWApiSong
+  selectMode: boolean
+  fullEraNames: boolean
+  onEraClick: (era: string) => void
+  onCategoryClick: (cat: Category) => void
+}): JSX.Element {
+  const w = listColumnWidth(field)
+  if (field === 'era' && song.era?.name && !selectMode) {
+    const label = eraLabel(song.era.name, fullEraNames)
+    return (
+      <button
+        onClick={() => onEraClick(song.era!.name)}
+        className={`hidden md:block text-text-muted text-xs truncate ${w} shrink-0 text-left hover:text-accent transition-colors`}
+        title={`Filter by era: ${label}`}
+      >
+        {label}
+      </button>
+    )
+  }
+  if (field === 'category') {
+    const cls = `hidden md:block text-xs px-1.5 py-0.5 rounded border shrink-0 ${w} text-center ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`
+    const label = CATEGORY_LABELS[song.category] ?? song.category
+    return selectMode
+      ? <span className={cls}>{label}</span>
+      : (
+        <button onClick={() => onCategoryClick(song.category as Category)} className={`${cls} transition-colors hover:opacity-80`} title="Filter by category">
+          {label}
+        </button>
+      )
+  }
+  if (field === 'length') {
+    return <span className={`hidden md:block text-text-muted text-xs ${w} shrink-0 tabular-nums`}>{formatDuration(parseDuration(song.length), '--:--')}</span>
+  }
+  const v = TRACKER_FIELD_MAP.get(field)!.get(song, fullEraNames)
+  return (
+    <span className={`hidden md:block text-xs truncate ${w} shrink-0 ${v ? 'text-text-muted' : 'text-text-muted/50'}`} title={v || undefined}>
+      {v || '—'}
+    </span>
+  )
+}
+
+/** Anchors a field menu just under the clicked element. */
+function fieldMenuAnchor(e: React.MouseEvent, index: number): TrackerFieldMenuState {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  return { x: r.left, y: r.bottom + 4, index }
+}
+
 // ─── Song row (list mode) ─────────────────────────────────────────────────────
 const SongRow = memo(function SongRow({
   song, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
@@ -540,10 +615,10 @@ const SongRow = memo(function SongRow({
   /** Shown next to the title when this row is a member of a compact-view
    *  group (e.g. "v1", "TV Mix") - this song's own label within the group. */
   versionLabel?: string | null
-  /** Compact-view member row: hides the Artist/Era columns (the compact
-   *  header has no columns for them) so the Category badge lines up under
-   *  the same header cell whether the row above it is a collapsed group
-   *  or an expanded version. */
+  /** Compact-view member row: shows only Category/Time (the compact header
+   *  has no columns for the rest) so the Category badge lines up under the
+   *  same header cell whether the row above it is a collapsed group or an
+   *  expanded version. */
   compact?: boolean
 }): JSX.Element {
   // This song's personal override, if any. Selecting just this song's row keeps
@@ -551,6 +626,7 @@ const SongRow = memo(function SongRow({
   // the custom cover from the same source on the render this triggers.
   const pref = useStore((s) => s.songPrefs[song.id])
   const fullEraNames = useStore((s) => s.fullEraNames)
+  const listColumns = useStore((s) => s.trackerListColumns)
   const track = songToTrack(song)
   const title = pref?.name || song.name
   const altTitles = song.track_titles ?? []
@@ -602,42 +678,19 @@ const SongRow = memo(function SongRow({
         )}
       </div>
 
-      {/* Desktop-only columns - omitted in compact view, which has no
-          Artist/Era header cells for them to line up under. */}
-      {!compact && (
-        <>
-          <span className="hidden md:block text-text-muted text-xs truncate w-32 shrink-0">{song.credited_artists || 'Juice WRLD'}</span>
-          {song.era?.name ? (
-            selectMode ? (
-              <span className="hidden md:block text-text-muted text-xs truncate w-36 shrink-0">{eraLabel(song.era.name, fullEraNames)}</span>
-            ) : (
-              <button
-                onClick={() => onEraClick(song.era!.name)}
-                className="hidden md:block text-text-muted text-xs truncate w-36 shrink-0 text-left hover:text-accent transition-colors"
-                title={`Filter by era: ${eraLabel(song.era.name, fullEraNames)}`}
-              >
-                {eraLabel(song.era.name, fullEraNames)}
-              </button>
-            )
-          ) : (
-            <span className="hidden md:block text-text-muted text-xs truncate w-36 shrink-0">—</span>
-          )}
-        </>
-      )}
-      {selectMode ? (
-        <span className={`hidden md:block text-xs px-1.5 py-0.5 rounded border shrink-0 w-24 text-center ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}>
-          {CATEGORY_LABELS[song.category] ?? song.category}
-        </span>
-      ) : (
-        <button
-          onClick={() => onCategoryClick(song.category as Category)}
-          className={`hidden md:block text-xs px-1.5 py-0.5 rounded border shrink-0 w-24 text-center transition-colors hover:opacity-80 ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}
-          title="Filter by category"
-        >
-          {CATEGORY_LABELS[song.category] ?? song.category}
-        </button>
-      )}
-      <span className="hidden md:block text-text-muted text-xs w-12 shrink-0 tabular-nums">{formatDuration(parseDuration(song.length), '--:--')}</span>
+      {/* Desktop-only columns - the user's chosen set (compact member rows
+          use a fixed pair that lines up under the compact header). */}
+      {(compact ? COMPACT_MEMBER_COLUMNS : listColumns).map((key) => (
+        <ListCell
+          key={key}
+          field={key}
+          song={song}
+          selectMode={selectMode}
+          fullEraNames={fullEraNames}
+          onEraClick={onEraClick}
+          onCategoryClick={onCategoryClick}
+        />
+      ))}
 
       {/* Desktop action buttons */}
       {!selectMode && (
@@ -682,17 +735,34 @@ const SongRow = memo(function SongRow({
 // One labeled metadata cell in the detailed-row field grid. Values are
 // single-line truncated (full text on hover via title) so every row keeps
 // the fixed height the virtual window depends on.
-function DetailField({ label, value, className }: {
+function DetailField({ label, value, className, onLabelClick }: {
   label: string
   value: string | null | undefined
   className?: string
+  /** Makes the label a button that opens the field picker for this slot. */
+  onLabelClick?: (e: React.MouseEvent) => void
 }): JSX.Element {
   const v = value?.trim() || ''
+  // rem-valued rather than `text-[9px]` so the label tracks app text size
+  // like the value below it does - see useScaledRowH.
+  const labelCls = 'text-[0.5625rem] uppercase tracking-wider text-text-muted/70 leading-tight truncate'
   return (
     <div className={`min-w-0 ${className ?? ''}`}>
-      {/* rem-valued rather than `text-[9px]` so the label tracks app text size
-          like the value below it does - see useScaledRowH. */}
-      <p className="text-[0.5625rem] uppercase tracking-wider text-text-muted/70 leading-tight truncate">{label}</p>
+      {onLabelClick ? (
+        <button
+          className={`${labelCls} block max-w-full text-left hover:text-accent transition-colors`}
+          onClick={(e) => { e.stopPropagation(); onLabelClick(e) }}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          title={`Change or hide ${label}`}
+        >
+          {label}
+        </button>
+      ) : (
+        <p className={labelCls}>{label}</p>
+      )}
       <p className={`text-xs truncate ${v ? 'text-text-secondary' : 'text-text-muted/50'}`} title={v || undefined}>
         {v || '—'}
       </p>
@@ -709,7 +779,7 @@ function DetailField({ label, value, className }: {
 // the rarer fields.
 const DetailedSongRow = memo(function DetailedSongRow({
   song, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
-  selectMode, selected, onToggleSelect,
+  selectMode, selected, onToggleSelect, onFieldMenu,
 }: {
   song: JWApiSong
   onPlay: (song: JWApiSong) => void
@@ -720,13 +790,14 @@ const DetailedSongRow = memo(function DetailedSongRow({
   selectMode: boolean
   selected: boolean
   onToggleSelect: (song: JWApiSong) => void
+  onFieldMenu?: (index: number, e: React.MouseEvent) => void
 }): JSX.Element {
   const pref = useStore((s) => s.songPrefs[song.id])
   const fullEraNames = useStore((s) => s.fullEraNames)
+  const detailFields = useStore((s) => s.trackerDetailFields)
   const track = songToTrack(song)
   const title = pref?.name || song.name
   const canPlay = !!song.path
-  const altTitles = song.track_titles ?? []
   const longPress = useLongPress()
 
   return (
@@ -818,23 +889,25 @@ const DetailedSongRow = memo(function DetailedSongRow({
           {` · ${CATEGORY_LABELS[song.category] ?? song.category}`}
         </p>
 
-        {/* Metadata field grid - fixed cell set so every row is the same height */}
-        <div className="mt-1.5 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
-          <DetailField label="Producers" value={song.producers} />
-          <DetailField label="Engineers" value={song.engineers} />
-          <DetailField label="Recording Locations" value={song.recording_locations} className="hidden md:block" />
-          <DetailField label="Record Dates" value={song.record_dates} />
-          <DetailField label="Leak Type" value={song.leak_type} />
-          <DetailField label="Date Leaked" value={song.date_leaked} className="hidden md:block" />
-          <DetailField label="Bitrate" value={song.bitrate} />
-          <DetailField label="Release Date" value={song.release_date} className="hidden md:block" />
-          <DetailField label="File Names" value={song.file_names} className="hidden md:block" />
-          {/* Title fields grouped together - `original_key` is the source-JSON
-              key (a name), not a musical key. */}
-          <DetailField label="Original Name" value={song.original_key} />
-          <DetailField label="Session Titles" value={song.session_titles} className="hidden md:block" />
-          <DetailField label="Alt Titles" value={altTitles.join(' · ')} className="hidden md:block" />
-        </div>
+        {/* Metadata field grid - the user's chosen fields (lib/trackerFields).
+            Every row renders the same cell set (empty ones show "—") so all
+            rows share one height; click a label to swap/hide that field. */}
+        {detailFields.length > 0 && (
+          <div className="mt-1.5 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
+            {detailFields.map((key, i) => {
+              const f = TRACKER_FIELD_MAP.get(key)!
+              return (
+                <DetailField
+                  key={key}
+                  label={f.label}
+                  value={f.get(song, fullEraNames)}
+                  className={i >= DETAIL_FIELDS_BELOW_MD ? 'hidden md:block' : undefined}
+                  onLabelClick={onFieldMenu && !selectMode ? (e) => onFieldMenu(i, e) : undefined}
+                />
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1021,20 +1094,34 @@ function VirtualSongList({
   )
 }
 
-// Detailed rows are taller than list rows (title line + a 3-row metadata
-// grid - 4 columns at md:, 2 on mobile), but still fixed-height -
-// DetailedSongRow clips overflow, so the stride below just has to match its
-// natural height with a little headroom.
-const DETAIL_ROW_H_DESKTOP = 136
-const DETAIL_ROW_H_MOBILE = 152
+// Detailed rows are taller than list rows (title line + the metadata grid -
+// 4 columns at md:, 2 below), but still fixed-height - DetailedSongRow clips
+// overflow, so the stride below just has to match its natural height with a
+// little headroom. The grid's row count follows the user's field count, so
+// height = chrome + grid rows, floored at the cover art's height. (The
+// defaults - 12 fields, 3 rows - come out at the original 136/152.)
+const DETAIL_ROW_BASE_DESKTOP = 43
+const DETAIL_ROW_BASE_MOBILE = 59
+const DETAIL_GRID_ROW_H = 31
+const DETAIL_ROW_MIN_DESKTOP = 74
+const DETAIL_ROW_MIN_MOBILE = 66
+/** Below md: only the first few fields fit the 2-column grid. */
+const DETAIL_FIELDS_BELOW_MD = 6
+function detailRowHeights(fieldCount: number): [desktop: number, mobile: number] {
+  return [
+    Math.max(DETAIL_ROW_MIN_DESKTOP, DETAIL_ROW_BASE_DESKTOP + Math.ceil(fieldCount / 4) * DETAIL_GRID_ROW_H),
+    Math.max(DETAIL_ROW_MIN_MOBILE, DETAIL_ROW_BASE_MOBILE + Math.ceil(Math.min(fieldCount, DETAIL_FIELDS_BELOW_MD) / 2) * DETAIL_GRID_ROW_H),
+  ]
+}
 const DETAIL_ROW_GAP = 6 // bordered card-style rows want more breathing room than the flat list's 2px
 
 function VirtualSongDetailList({
   scrollRef, songs, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
-  selectMode, selected, onToggleSelect,
-}: VirtualSongsProps): JSX.Element {
+  selectMode, selected, onToggleSelect, onFieldMenu,
+}: VirtualSongsProps & { onFieldMenu: (index: number, e: React.MouseEvent) => void }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
-  const rowH = useScaledRowH(DETAIL_ROW_H_DESKTOP, DETAIL_ROW_H_MOBILE)
+  const fieldCount = useStore((s) => s.trackerDetailFields.length)
+  const rowH = useScaledRowH(...detailRowHeights(fieldCount))
   const stride = rowH + DETAIL_ROW_GAP
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, songs.length, stride)
   return (
@@ -1051,6 +1138,7 @@ function VirtualSongDetailList({
             selectMode={selectMode}
             selected={selected.has(song.id)}
             onToggleSelect={onToggleSelect}
+            onFieldMenu={onFieldMenu}
           />
         </div>
       ))}
@@ -1772,6 +1860,18 @@ export default function ApiTrackerView(): JSX.Element {
   useEffect(() => { if (apiTrackerTab) setApiTrackerTab('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [contextMenu, setContextMenu] = useState<{ song: JWApiSong; x: number; y: number } | null>(null)
+  // Field picker for the Detailed grid / List columns (TrackerFieldMenu).
+  const [fieldMenu, setFieldMenu] = useState<(TrackerFieldMenuState & { target: 'detail' | 'list' }) | null>(null)
+  const closeFieldMenu = useCallback(() => setFieldMenu(null), [])
+  const openDetailFieldMenu = useCallback((index: number, e: React.MouseEvent) => {
+    setFieldMenu({ target: 'detail', ...fieldMenuAnchor(e, index) })
+  }, [])
+  const { detailFields, listColumns, setTrackerDetailFields, setTrackerListColumns } = useStore(useShallow((s) => ({
+    detailFields: s.trackerDetailFields,
+    listColumns: s.trackerListColumns,
+    setTrackerDetailFields: s.setTrackerDetailFields,
+    setTrackerListColumns: s.setTrackerListColumns,
+  })))
   const [bulkContextMenu, setBulkContextMenu] = useState<BulkContextMenuState | null>(null)
 
   // Multi-select - see the useMultiSelect() call further down (needs
@@ -2885,6 +2985,16 @@ export default function ApiTrackerView(): JSX.Element {
                 </button>
               )}
             </div>
+
+            {viewMode === 'detail' && !compactView && (
+              <button
+                onClick={(e) => setFieldMenu({ target: 'detail', ...fieldMenuAnchor(e, -1) })}
+                className={`p-2.5 md:p-2 rounded-lg transition-colors shrink-0 ${fieldMenu?.target === 'detail' ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+                title="Customize fields - or click any field label to swap/hide it"
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            )}
           </div>
 
           {/* Second row - mobile-only category select (desktop uses the filter popover above) */}
@@ -3367,11 +3477,42 @@ export default function ApiTrackerView(): JSX.Element {
                 ) : (
                   <>
                     <SortBtn field="name" label="Title" className="flex-1" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="credited_artists" label="Artist" className="w-32 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="era__name" label="Era" className="w-36 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="category" label="Category" className="w-24 shrink-0 justify-center" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="length" label="Time" className="w-12 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <div className="w-14 shrink-0" />
+                    {/* User-chosen columns: sortable ones sort on click, the
+                        rest open the column picker; right-click any of them
+                        to swap/hide/move it. */}
+                    {listColumns.map((key, i) => {
+                      const label = TRACKER_FIELD_MAP.get(key)!.label
+                      const w = listColumnWidth(key)
+                      const align = key === 'category' ? 'justify-center' : ''
+                      const onMenu = (e: React.MouseEvent): void => { e.preventDefault(); setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, i) }) }
+                      const sortField = LIST_COLUMN_SORT[key]
+                      return sortField ? (
+                        <SortBtn
+                          key={key} field={sortField} label={label} className={`${w} shrink-0 ${align}`}
+                          orderField={orderField} orderDir={orderDir} onClick={handleSort}
+                          onContextMenu={onMenu} title="Click to sort · right-click to change column"
+                        />
+                      ) : (
+                        <button
+                          key={key}
+                          onClick={onMenu}
+                          onContextMenu={onMenu}
+                          className={`${w} shrink-0 ${align} flex items-center min-w-0 text-xs font-medium uppercase tracking-wider text-text-muted hover:text-text-secondary transition-colors`}
+                          title="Change column"
+                        >
+                          <span className="truncate">{label}</span>
+                        </button>
+                      )
+                    })}
+                    <div className="w-14 shrink-0 flex justify-end">
+                      <button
+                        onClick={(e) => setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, -1) })}
+                        className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors"
+                        title="Customize columns"
+                      >
+                        <SlidersHorizontal size={12} />
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -3464,6 +3605,7 @@ export default function ApiTrackerView(): JSX.Element {
                 selectMode={selectMode}
                 selected={selected}
                 onToggleSelect={toggleSelect}
+                onFieldMenu={openDetailFieldMenu}
               />
             )}
             {/* Sentinel always in DOM so IntersectionObserver is set up from mount */}
@@ -3622,6 +3764,19 @@ export default function ApiTrackerView(): JSX.Element {
           </button>
           </div>
         </div>
+      )}
+
+      {fieldMenu && (
+        <TrackerFieldMenu
+          key={`${fieldMenu.target}:${fieldMenu.index}:${fieldMenu.x}:${fieldMenu.y}`}
+          state={fieldMenu}
+          keys={fieldMenu.target === 'detail' ? detailFields : listColumns}
+          defaults={fieldMenu.target === 'detail' ? DEFAULT_DETAIL_FIELDS : DEFAULT_LIST_COLUMNS}
+          max={fieldMenu.target === 'detail' ? MAX_DETAIL_FIELDS : MAX_LIST_COLUMNS}
+          noun={fieldMenu.target === 'detail' ? 'field' : 'column'}
+          onChange={fieldMenu.target === 'detail' ? setTrackerDetailFields : setTrackerListColumns}
+          onClose={closeFieldMenu}
+        />
       )}
 
       {contextMenu && (
