@@ -53,6 +53,8 @@ import {
   TRACKER_FIELD_MAP, DEFAULT_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS, MAX_DETAIL_FIELDS, MAX_LIST_COLUMNS,
 } from '../lib/trackerFields'
 import type { TrackerFieldKey } from '../lib/trackerFields'
+import { reorderField } from '../lib/trackerFields'
+import { useFieldDrag } from '../hooks/useFieldDrag'
 import { AnchoredContextMenu } from './ContextMenu'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel'))
@@ -592,6 +594,59 @@ function ListCell({ field, song, selectMode, fullEraNames, onEraClick, onCategor
   )
 }
 
+// Drag-reorder for the in-place drop targets (column headers, field labels).
+// Read the layout fresh from the store so memoized rows needn't re-render
+// just to carry the current order in a callback.
+function reorderDetailFields(from: number, to: number): void {
+  const s = useStore.getState()
+  s.setTrackerDetailFields(reorderField(s.trackerDetailFields, from, to))
+}
+function reorderListColumns(from: number, to: number): void {
+  const s = useStore.getState()
+  s.setTrackerListColumns(reorderField(s.trackerListColumns, from, to))
+}
+
+// One user-chosen List column header: drag it onto another header to reorder
+// (like the nav tabs), click to sort (or, for unsortable columns, open the
+// column picker), right-click to swap/hide it.
+function ListColumnHeader({ field, index, orderField, orderDir, onSort, onMenu }: {
+  field: TrackerFieldKey
+  index: number
+  orderField: OrderField | null
+  orderDir: 'asc' | 'desc'
+  onSort: (field: OrderField) => void
+  onMenu: (index: number, e: React.MouseEvent) => void
+}): JSX.Element {
+  const drag = useFieldDrag('list', index, reorderListColumns)
+  const label = TRACKER_FIELD_MAP.get(field)!.label
+  const align = field === 'category' ? 'justify-center' : ''
+  const sortField = LIST_COLUMN_SORT[field]
+  const menu = (e: React.MouseEvent): void => { e.preventDefault(); onMenu(index, e) }
+  return (
+    <div
+      {...drag.props}
+      className={`${listColumnWidth(field)} shrink-0 flex min-w-0 rounded cursor-grab active:cursor-grabbing ${drag.over ? 'ring-1 ring-accent' : ''}`}
+    >
+      {sortField ? (
+        <SortBtn
+          field={sortField} label={label} className={`w-full min-w-0 ${align}`}
+          orderField={orderField} orderDir={orderDir} onClick={onSort}
+          onContextMenu={menu} title="Click to sort · drag to reorder · right-click to change column"
+        />
+      ) : (
+        <button
+          onClick={menu}
+          onContextMenu={menu}
+          className={`w-full min-w-0 flex items-center ${align} text-xs font-medium uppercase tracking-wider text-text-muted hover:text-text-secondary transition-colors`}
+          title="Click to change column · drag to reorder"
+        >
+          <span className="truncate">{label}</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** Anchors a field menu just under the clicked element. */
 function fieldMenuAnchor(e: React.MouseEvent, index: number): TrackerFieldMenuState {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -735,13 +790,17 @@ const SongRow = memo(function SongRow({
 // One labeled metadata cell in the detailed-row field grid. Values are
 // single-line truncated (full text on hover via title) so every row keeps
 // the fixed height the virtual window depends on.
-function DetailField({ label, value, className, onLabelClick }: {
+function DetailField({ label, value, className, index, onLabelClick }: {
   label: string
   value: string | null | undefined
   className?: string
-  /** Makes the label a button that opens the field picker for this slot. */
+  /** Slot index - the label's drag-to-reorder position. */
+  index: number
+  /** Makes the label a button that opens the field picker for this slot
+   *  (and a drag handle for reordering it). */
   onLabelClick?: (e: React.MouseEvent) => void
 }): JSX.Element {
+  const drag = useFieldDrag('detail', index, reorderDetailFields)
   const v = value?.trim() || ''
   // rem-valued rather than `text-[9px]` so the label tracks app text size
   // like the value below it does - see useScaledRowH.
@@ -750,13 +809,14 @@ function DetailField({ label, value, className, onLabelClick }: {
     <div className={`min-w-0 ${className ?? ''}`}>
       {onLabelClick ? (
         <button
-          className={`${labelCls} block max-w-full text-left hover:text-accent transition-colors`}
+          {...drag.props}
+          className={`${labelCls} block max-w-full text-left rounded-sm hover:text-accent transition-colors cursor-grab active:cursor-grabbing ${drag.over ? 'ring-1 ring-accent text-accent' : ''}`}
           onClick={(e) => { e.stopPropagation(); onLabelClick(e) }}
           onDoubleClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
-          title={`Change or hide ${label}`}
+          title={`Click to change or hide ${label} · drag to reorder`}
         >
           {label}
         </button>
@@ -891,7 +951,8 @@ const DetailedSongRow = memo(function DetailedSongRow({
 
         {/* Metadata field grid - the user's chosen fields (lib/trackerFields).
             Every row renders the same cell set (empty ones show "—") so all
-            rows share one height; click a label to swap/hide that field. */}
+            rows share one height; click a label to swap/hide that field,
+            drag it onto another label to reorder. */}
         {detailFields.length > 0 && (
           <div className="mt-1.5 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
             {detailFields.map((key, i) => {
@@ -899,6 +960,7 @@ const DetailedSongRow = memo(function DetailedSongRow({
               return (
                 <DetailField
                   key={key}
+                  index={i}
                   label={f.label}
                   value={f.get(song, fullEraNames)}
                   className={i >= DETAIL_FIELDS_BELOW_MD ? 'hidden md:block' : undefined}
@@ -1865,6 +1927,9 @@ export default function ApiTrackerView(): JSX.Element {
   const closeFieldMenu = useCallback(() => setFieldMenu(null), [])
   const openDetailFieldMenu = useCallback((index: number, e: React.MouseEvent) => {
     setFieldMenu({ target: 'detail', ...fieldMenuAnchor(e, index) })
+  }, [])
+  const openListFieldMenu = useCallback((index: number, e: React.MouseEvent) => {
+    setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, index) })
   }, [])
   const { detailFields, listColumns, setTrackerDetailFields, setTrackerListColumns } = useStore(useShallow((s) => ({
     detailFields: s.trackerDetailFields,
@@ -3477,33 +3542,18 @@ export default function ApiTrackerView(): JSX.Element {
                 ) : (
                   <>
                     <SortBtn field="name" label="Title" className="flex-1" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    {/* User-chosen columns: sortable ones sort on click, the
-                        rest open the column picker; right-click any of them
-                        to swap/hide/move it. */}
-                    {listColumns.map((key, i) => {
-                      const label = TRACKER_FIELD_MAP.get(key)!.label
-                      const w = listColumnWidth(key)
-                      const align = key === 'category' ? 'justify-center' : ''
-                      const onMenu = (e: React.MouseEvent): void => { e.preventDefault(); setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, i) }) }
-                      const sortField = LIST_COLUMN_SORT[key]
-                      return sortField ? (
-                        <SortBtn
-                          key={key} field={sortField} label={label} className={`${w} shrink-0 ${align}`}
-                          orderField={orderField} orderDir={orderDir} onClick={handleSort}
-                          onContextMenu={onMenu} title="Click to sort · right-click to change column"
-                        />
-                      ) : (
-                        <button
-                          key={key}
-                          onClick={onMenu}
-                          onContextMenu={onMenu}
-                          className={`${w} shrink-0 ${align} flex items-center min-w-0 text-xs font-medium uppercase tracking-wider text-text-muted hover:text-text-secondary transition-colors`}
-                          title="Change column"
-                        >
-                          <span className="truncate">{label}</span>
-                        </button>
-                      )
-                    })}
+                    {/* User-chosen columns - see ListColumnHeader. */}
+                    {listColumns.map((key, i) => (
+                      <ListColumnHeader
+                        key={key}
+                        field={key}
+                        index={i}
+                        orderField={orderField}
+                        orderDir={orderDir}
+                        onSort={handleSort}
+                        onMenu={openListFieldMenu}
+                      />
+                    ))}
                     <div className="w-14 shrink-0 flex justify-end">
                       <button
                         onClick={(e) => setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, -1) })}
@@ -3774,6 +3824,7 @@ export default function ApiTrackerView(): JSX.Element {
           defaults={fieldMenu.target === 'detail' ? DEFAULT_DETAIL_FIELDS : DEFAULT_LIST_COLUMNS}
           max={fieldMenu.target === 'detail' ? MAX_DETAIL_FIELDS : MAX_LIST_COLUMNS}
           noun={fieldMenu.target === 'detail' ? 'field' : 'column'}
+          dragScope={fieldMenu.target}
           onChange={fieldMenu.target === 'detail' ? setTrackerDetailFields : setTrackerListColumns}
           onClose={closeFieldMenu}
         />
