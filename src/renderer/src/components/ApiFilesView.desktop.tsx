@@ -443,6 +443,8 @@ export default function ApiFilesView(): JSX.Element {
       form.append('file_path', path)
       form.append('change_type', 'upload')
       form.append('contributor_notes', '')
+      // No form to tick it on here - flag it afterwards from the proposals list.
+      form.append('is_new_leak', 'false')
       form.append('file', file)
       if (activeChannel) form.append('channel', activeChannel)
       return { label: relPath, form, bytes: file.size }

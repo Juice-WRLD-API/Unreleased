@@ -187,6 +187,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
               <div className="flex items-center gap-1.5 mb-1">
                 <StatusChip status={item.status} />
                 <span className="text-[9px] text-text-muted bg-surface-raised px-1.5 py-0.5 rounded">{userApi.compChangeTypeLabel(item.change_type)}</span>
+                {item.is_new_leak && <span className="text-[9px] text-accent bg-accent/10 px-1.5 py-0.5 rounded">new leak</span>}
               </div>
               <p className="text-[11px] font-mono text-text-primary truncate">{item.file_path}</p>
               {DESTINATION_TYPES.has(item.change_type) && item.destination_path && (
@@ -209,6 +210,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                   <div className="flex items-center gap-2 flex-wrap mb-1.5">
                     <StatusChip status={p.status} />
                     <span className="text-[10px] text-text-muted bg-surface-raised px-2 py-0.5 rounded">{userApi.compChangeTypeLabel(p.change_type)}</span>
+                    {p.is_new_leak && <span className="text-[10px] text-accent bg-accent/10 px-2 py-0.5 rounded font-semibold">New leak</span>}
                   </div>
                   <div className="flex items-start gap-1.5">
                     <h2 className="text-text-primary font-bold text-base font-mono break-all">{p.file_path}</h2>

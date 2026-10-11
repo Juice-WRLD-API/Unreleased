@@ -1756,6 +1756,7 @@ FormData:
   file_path         "Compilation/Unreleased/Song.mp3"     // target path; a folder path for the folder change types
   destination_path  "Compilation/Unreleased/New Name.mp3" // "move", "rename_folder", "move_folder" only
   contributor_notes "optional"
+  is_new_leak       "true" | "false"                      // optional, "upload"/"replace" only; defaults to false
   file              <binary>                              // only for "upload"/"replace"
   channel           "optional, channel slug, defaults to the primary channel"`}</Pre>
         <p className="text-xs text-text-muted mt-2">
@@ -1806,6 +1807,7 @@ Content-Type: application/json
   "file_path": "Compilation/Unreleased/Song.wav",
   "destination_path": "optional, \\"replace\\" only",
   "contributor_notes": "optional",
+  "is_new_leak": false,                 // optional, defaults to false
   "channel": "optional, same as init"
 }
 
@@ -1863,6 +1865,7 @@ Content-Type: application/json
     ]
   },
   "contributor_notes": "Fixing typo in folder name",
+  "is_new_leak": false,
   "status": "pending",
   "reviewer_username": null,
   "review_notes": "",
@@ -1890,6 +1893,7 @@ Content-Type: application/json
   "staging_filename": "staged-a1b2c3.mp3",
   "original_snapshot": { /* file metadata before this change */ },
   "contributor_notes": "Higher quality rip",
+  "is_new_leak": false,
   "status": "pending",
   "reviewer_username": null,
   "review_notes": "",

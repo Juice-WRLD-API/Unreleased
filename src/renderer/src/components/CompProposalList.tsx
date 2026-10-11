@@ -1,4 +1,4 @@
-import { Loader2, X } from 'lucide-react'
+import { Loader2, Sparkles, X } from 'lucide-react'
 import type { CompFileProposal } from '../lib/userApi'
 import { compChangeTypeLabel } from '../lib/userApi'
 import { StatusChip, relativeTime } from './adminShared'
@@ -61,7 +61,7 @@ export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
   )
 }
 
-export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, empty = 'No comp proposals yet.' }: {
+export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, onToggleNewLeak, togglingLeakId, empty = 'No comp proposals yet.' }: {
   proposals: CompFileProposal[]
   loading?: boolean
   /** Clicking a row - omit to render the rows as plain, unclickable cards. */
@@ -69,6 +69,11 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
   /** Omit to hide the withdraw control (profile views are read-only). */
   onWithdraw?: (id: number) => void
   withdrawingId?: number | null
+  /** Flip is_new_leak on a pending upload/replace - omit to hide the control.
+   *  Drag-drop uploads from the Files tab have no form to set it on, so this
+   *  is where those get flagged. */
+  onToggleNewLeak?: (proposal: CompFileProposal) => void
+  togglingLeakId?: number | null
   empty?: string
 }): JSX.Element {
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-text-muted" /></div>
@@ -86,6 +91,7 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <StatusChip status={p.status} />
               <span className="text-[10px] uppercase font-bold text-text-muted bg-surface-overlay px-1.5 py-0.5 rounded">{compChangeTypeLabel(p.change_type)}</span>
+              {p.is_new_leak && <span className="text-[10px] uppercase font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">new leak</span>}
             </div>
             <p className="text-sm font-mono text-text-primary truncate">{p.file_path}</p>
             {(p.change_type === 'move' || p.change_type === 'rename_folder' || p.change_type === 'move_folder') && p.destination_path && (
@@ -108,6 +114,14 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
               </button>
             ) : (
               <div className="flex-1 min-w-0 px-4 py-3">{body}</div>
+            )}
+            {onToggleNewLeak && p.status === 'pending' && (p.change_type === 'upload' || p.change_type === 'replace') && (
+              <button onClick={() => onToggleNewLeak(p)} disabled={togglingLeakId === p.id}
+                title={p.is_new_leak ? 'Unmark as new leak' : 'Mark as new leak'}
+                aria-pressed={!!p.is_new_leak}
+                className={`p-2 my-2 rounded-lg transition-colors shrink-0 ${p.is_new_leak ? 'text-accent bg-accent/10 hover:bg-accent/15' : 'text-text-muted hover:text-accent hover:bg-accent/10'}`}>
+                {togglingLeakId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              </button>
             )}
             {onWithdraw && p.status === 'pending' && (
               <button onClick={() => onWithdraw(p.id)} disabled={withdrawingId === p.id}

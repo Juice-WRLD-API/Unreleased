@@ -848,6 +848,8 @@ export interface CompFileProposal {
   staging_filename: string
   original_snapshot: Record<string, unknown>
   contributor_notes: string
+  // Optional on the way in: rows cached before the field shipped lack it.
+  is_new_leak?: boolean
   status: ProposalStatus
   reviewer_username: string | null
   review_notes: string
