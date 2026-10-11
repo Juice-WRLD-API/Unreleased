@@ -18,6 +18,7 @@ import {
   QueueSearch, ProposalDiff,
 } from './adminShared'
 import ReportsTab from './ReportsTab.mobile'
+import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab.mobile'
 import ChannelsTab from './ChannelsTab.mobile'
 import EraTab from './EraTab.mobile'
@@ -79,6 +80,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     users, setUsers,
     reportStatus, setReportStatus,
     reports, setReports,
+    feedbackFilter, setFeedbackFilter,
+    feedback,
     refresh,
     nav,
   } = useAdminQueue({
@@ -215,6 +218,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('reports') && (
           <div className={tab === 'reports' ? 'h-full' : 'hidden'}>
             <ReportsTab reports={reports} status={reportStatus} setStatus={setReportStatus} onChanged={() => refresh()} />
+          </div>
+        )}
+        {visited.has('feedback') && (
+          <div className={tab === 'feedback' ? 'h-full' : 'hidden'}>
+            <FeedbackTab feedback={feedback} filter={feedbackFilter} setFilter={setFeedbackFilter} stacked />
           </div>
         )}
         {visited.has('users') && (

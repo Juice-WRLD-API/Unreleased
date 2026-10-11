@@ -21,11 +21,11 @@ import * as userApi from '../lib/userApi'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import type { AdminUser, EditorApplication, ProposalStatus, SongEditProposal } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
-import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
+import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/reportsApi'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes'
+export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -38,6 +38,7 @@ export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   'comp-proposals': '/comp-files',
   applications: '/applications',
   reports: '/reports',
+  feedback: '/feedback',
   users: '/users',
   channels: '/channels',
   eras: '/eras',
@@ -50,10 +51,13 @@ export const ADMIN_PATH_TABS: Partial<Record<string, AdminTab>> = Object.fromEnt
   Object.entries(ADMIN_TAB_PATHS).map(([tab, path]) => [path, tab as AdminTab]),
 )
 
+/** Which /feedback/ rows the Feedback tab asks for - '' is everything. */
+export type FeedbackFilter = 'human' | 'automated' | ''
+
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'security'
+  iconKey: 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'security'
   badge?: number
 }
 
@@ -94,6 +98,10 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [reportStatus, setReportStatus] = useState<SongReportStatus | ''>('pending')
   const [reports, setReports] = useState<SongReportRow[]>([])
+  // 'human' by default: the automated rows are ErrorBoundary crash reports,
+  // which would otherwise bury what people actually wrote.
+  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackFilter>('human')
+  const [feedback, setFeedback] = useState<FeedbackRow[]>([])
 
   // Only 'proposals' and 'stats' actually query by channel. activeChannel is
   // corrected asynchronously right after mount (it starts from a possibly
@@ -120,6 +128,7 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
   // stale, and vice versa.
   const sig = tab === 'proposals' ? `${propStatus}|${channelDep}|${tabRefreshKey}`
     : tab === 'reports' ? `${reportStatus}|${tabRefreshKey}`
+    : tab === 'feedback' ? `${feedbackFilter}|${tabRefreshKey}`
     : tab === 'stats' ? `${channelDep}|${tabRefreshKey}`
     : `${tabRefreshKey}`
   const loadedSigRef = useRef<Partial<Record<AdminTab, string>>>({})
@@ -134,6 +143,8 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
         setApplications(await userApi.adminListApplications())
       } else if ((!gateNonProposalTabs || isFullAdmin) && tab === 'reports') {
         setReports(await reportsApi.listSongReports(reportStatus || undefined))
+      } else if ((!gateNonProposalTabs || isFullAdmin) && tab === 'feedback') {
+        setFeedback(await reportsApi.listFeedback(feedbackFilter === '' ? undefined : feedbackFilter === 'automated'))
       } else if ((!gateNonProposalTabs || isFullAdmin) && (tab === 'users' || tab === 'stats')) {
         setUsers(await userApi.adminListUsers())
         if (tab === 'stats') {
@@ -149,11 +160,12 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
       if (tab === 'proposals') setProposals([])
       else if (tab === 'applications') setApplications([])
       else if (tab === 'reports') setReports([])
+      else if (tab === 'feedback') setFeedback([])
       else if (tab === 'users' || tab === 'stats') setUsers([])
     }
     finally { setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- channelDep stands in for activeChannel; see comment above
-  }, [tab, canLoad, isFullAdmin, gateNonProposalTabs, propStatus, reportStatus, channelDep])
+  }, [tab, canLoad, isFullAdmin, gateNonProposalTabs, propStatus, reportStatus, feedbackFilter, channelDep])
 
   useStrictModeSafeEffect(() => {
     if (!canLoad) return
@@ -180,6 +192,7 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     ...(CONTRIBUTOR_ENABLED ? [{ id: 'comp-proposals' as const, label: 'Comp files', iconKey: 'comp-proposals' as const }] : []),
     { id: 'applications', label: 'Applications', iconKey: 'applications', badge: pendingApps || undefined },
     { id: 'reports',      label: 'Reports',      iconKey: 'reports',      badge: pendingReports || undefined },
+    { id: 'feedback',     label: 'Feedback',     iconKey: 'feedback' },
     { id: 'users',        label: 'Users',        iconKey: 'users' },
     { id: 'stats',        label: 'Stats',        iconKey: 'stats' },
     { id: 'channels',     label: 'Channels',     iconKey: 'channels' },
@@ -201,6 +214,8 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     users, setUsers,
     reportStatus, setReportStatus,
     reports, setReports,
+    feedbackFilter, setFeedbackFilter,
+    feedback,
     pendingApps, pendingProps, pendingReports,
     fullNav, nav,
   }
