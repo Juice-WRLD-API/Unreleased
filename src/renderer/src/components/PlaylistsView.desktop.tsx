@@ -2459,7 +2459,7 @@ export default function PlaylistsView(): JSX.Element {
                         <PlaylistCard
                           name={track.title}
                           subtitle={track.artist}
-                          cover={<AlbumArtThumbnail track={track} fill className="w-full h-full" shimmer={false} eager />}
+                          cover={<AlbumArtThumbnail track={track} fill res={512} className="w-full h-full" shimmer={false} eager />}
                           selected={isSelected}
                           selectMode={selectMode}
                           onClick={e => { if (e.ctrlKey || e.metaKey || selectMode) toggleTrackSelect(track) }}

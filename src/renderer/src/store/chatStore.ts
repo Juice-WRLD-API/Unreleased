@@ -13,6 +13,7 @@ import { getNowPlaying } from '../lib/userApi'
 import { chatNotificationsEnabled, fireChatNotification } from '../lib/chatNotifications'
 import { ensureNotifyPermission } from '../lib/notifications'
 import { useStore } from './useStore'
+import { trackChatUpload } from '../lib/chatUploads'
 
 export interface RoomRef { kind: RoomKind; id: number }
 
@@ -1434,7 +1435,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           let created: ChatMessage
           if (room.kind === 'channel') {
             const attachments: AttachmentInput[] = []
-            for (const f of input.files) attachments.push(await api.uploadChatFile(f, f.name))
+            for (const f of input.files) attachments.push(await trackChatUpload(f.name, f.size, (o) => api.uploadChatFile(f, f.name, o)))
             created = await api.createChannelMessage(room.id, { content: text, parent: input.parent ?? null, mentions: input.mentions, attachments })
           } else {
             const m = await e2e()
@@ -1447,7 +1448,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             if (await m.sendsV2()) {
               const manifest: import('../lib/chatE2E').AttachmentManifest[] = []
               for (const [i, f] of input.files.entries()) {
-                const up = await m.uploadEncryptedFileV2(f, res.key, room.id, res.version, clientId, i)
+                const up = await trackChatUpload(f.name, f.size, (o) => m.uploadEncryptedFileV2(f, res.key, room.id, res.version, clientId, i, o))
                 attachments.push(up.input)
                 manifest.push(up.manifest)
               }
@@ -1458,7 +1459,7 @@ export const useChatStore = create<ChatState>((set, get) => {
               })
               created = await api.createDmMessage(room.id, { ...sealed, parent: input.parent ?? null, attachments })
             } else {
-              for (const f of input.files) attachments.push(await m.uploadEncryptedFile(f, res.key, res.version))
+              for (const f of input.files) attachments.push(await trackChatUpload(f.name, f.size, (o) => m.uploadEncryptedFile(f, res.key, res.version, o)))
               const sealed = text ? await m.encryptForSend(text, res.key) : null
               created = await api.createDmMessage(room.id, {
                 ciphertext: sealed?.ciphertext, nonce: sealed?.nonce, key_version: res.version,

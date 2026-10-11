@@ -3,7 +3,7 @@ import { conversationTitle, displayName, roomKey, useChatStore } from '../../sto
 import {
   addMember, CHAT_PERMISSIONS, createChannel, createConversation, createRole, createServer, deleteChannel, deleteConversation, deleteOverride, deleteRole,
   deleteServer, discoverServers, fetchAttachmentBytes, fetchPermissionMap, getChannel, getConversation, getMessage, getPresence, getServer, joinServer, leaveServer, listBans, listConversations,
-  listMembers, listOverrides, listRoles, listServers, listThread, markChannelRead, markDmRead, setMemberRoles, updateChannel, updateConversation, updateMember,
+  applyOverride, channelWhitelist, listMembers, listOverrides, listRoles, overrideKey, planChannelWhitelist, listServers, listThread, markChannelRead, markDmRead, setMemberRoles, updateChannel, updateConversation, updateMember,
   updateRole, updateServer, upsertOverride, type ChatMessage, type ChatPermissionName,
 } from '../chatApi'
 import { splitForwardRef } from '../chatForwardRef'
@@ -178,10 +178,10 @@ const roleCommand: TermCommand = {
 
 const roomCommand: TermCommand = {
   name: 'room', group: 'People', chat: true,
-  usage: 'room show <id> · new <server> <name> [--topic t] [--category c] [--private on|off] [--pos n] · edit <id> [same flags] · rm <id> · read [id] · overrides <id> · override <id> (--role r | --member user) [--allow a,b] [--deny a,b] · unoverride <id> <overrideId>',
-  description: 'Chat rooms (channels) and their permission overrides: create, edit, delete, mark read, and set who can see or write in one',
+  usage: 'room show <id> · new <server> <name> [--topic t] [--category c] [--private on|off] [--pos n] · edit <id> [same flags] · rm <id> · read [id] · overrides <id> · override <id> (--role r | --member user) [--allow a,b] [--deny a,b] · unoverride <id> <overrideId> · whitelist <id> [role…|off]',
+  description: 'Chat rooms (channels) and their permission overrides: create, edit, delete, mark read, set who can see or write in one, or limit a room to some roles (whitelist)',
   covers: ['chatApi.getChannel', 'chatApi.createChannel', 'chatApi.updateChannel', 'chatApi.deleteChannel', 'chatApi.markChannelRead', 'chatApi.markDmRead', 'chatApi.listOverrides', 'chatApi.upsertOverride', 'chatApi.deleteOverride'],
-  complete: complete(['show', 'new', 'edit', 'rm', 'read', 'overrides', 'override', 'unoverride']),
+  complete: complete(['show', 'new', 'edit', 'rm', 'read', 'overrides', 'override', 'unoverride', 'whitelist']),
   run: async (args, ctx) => {
     const { rest, bool, value } = parseArgs(args, ['topic', 'category', 'private', 'pos', 'name', 'role', 'member', 'allow', 'deny'])
     const sub = (rest.shift() ?? '').toLowerCase()
@@ -222,15 +222,41 @@ const roomCommand: TermCommand = {
     } else if (sub === 'override') {
       const id = idArg(rest[0], 'room override <id> (--role r | --member user) …')
       const role = value.has('role') ? idArg(value.get('role'), 'room override <id> --role <roleId>') : undefined
-      const member = value.has('member') ? await userId(value.get('member')) : undefined
-      if ((role === undefined) === (member === undefined)) fail('give --role <roleId> or --member <user> (one of them)')
+      if (value.has('role') === value.has('member')) fail('give --role <roleId> or --member <user> (one of them)')
+      // Overrides key on the server membership, not the user id.
+      let member: number | undefined
+      if (value.has('member')) {
+        const uid = await userId(value.get('member'))
+        const m = (await listMembers((await getChannel(id)).server)).find((x) => x.user.id === uid)
+        member = m?.id ?? fail('that user is not a member of this room’s server')
+      }
       const o = await upsertOverride(id, { ...(role !== undefined ? { role } : { member }), allow: parsePerms(value.get('allow') ?? ''), deny: parsePerms(value.get('deny') ?? '') })
       ctx.print(`override #${o.id}: allow ${permNames(o.allow)} · deny ${permNames(o.deny)}`, 'ok')
     } else if (sub === 'unoverride') {
       const id = idArg(rest[0], 'room unoverride <id> <overrideId>')
       await deleteOverride(id, idArg(rest[1], 'room unoverride <id> <overrideId>'))
       ctx.print('override removed', 'ok')
-    } else fail('usage: room [show | new | edit | rm | read | overrides | override | unoverride]')
+    } else if (sub === 'whitelist') {
+      // Only these roles can see the room: @everyone loses View channels and
+      // each listed role gets it back. "off" opens it to everyone again.
+      const id = idArg(rest[0], 'room whitelist <id> [role…|off]')
+      const roles = await listRoles((await getChannel(id)).server)
+      let overrides = await listOverrides(id)
+      const roleName = (rid: number): string => roles.find((r) => r.id === rid)?.name ?? `#${rid}`
+      const words = rest.slice(1).join(' ').split(/[,\s]+/).filter(Boolean)
+      if (words.length) {
+        const ids = words[0].toLowerCase() === 'off' ? null : words.map((w) => {
+          const hits = roles.filter((r) => !r.is_default && (String(r.id) === w || r.name.toLowerCase() === w.toLowerCase()))
+          return hits.length === 1 ? hits[0].id : fail(`no role "${w}" (chatrole ls)`)
+        })
+        for (const t of planChannelWhitelist(overrides, roles, ids)) {
+          const saved = await applyOverride(id, overrides.find((o) => overrideKey(o) === overrideKey(t)), t)
+          overrides = [...overrides.filter((o) => overrideKey(o) !== overrideKey(t)), ...(saved ? [saved] : [])]
+        }
+      }
+      const now = channelWhitelist(overrides, roles)
+      ctx.print(now === null ? 'everyone in the server can see this room' : now.length ? `only ${now.map(roleName).join(', ')} (plus owners and admins) can see this room` : 'only owners and admins can see this room', words.length ? 'ok' : 'plain')
+    } else fail('usage: room [show | new | edit | rm | read | overrides | override | unoverride | whitelist]')
   },
 }
 

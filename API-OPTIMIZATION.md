@@ -15,6 +15,12 @@ a response for exactly these reasons.
 
 ## 1. `GET /songs/` — add `?omit_lyrics=true`
 
+> **Shipped (2026-10) as `?omit=<field>,<field>`** (comma or semicolon). It
+> is only honoured with `?all=true` — paged and search responses ignore it.
+> Whole catalogue with `omit=lyrics,synced_lyrics`: 12.9 MB → 3.5 MB. The client
+> uses it for every bulk fetch (`OMIT_BULK` in `lib/juicewrldApi.ts`); the Tracker
+> also drops display fields its current layout doesn't show (`useTrackerOmit`).
+
 **Problem.** A song row is ~6.4 KB, and two fields are most of it:
 
 | field | share of payload |
@@ -137,7 +143,7 @@ history.
 
 | # | Change | Saving | Breaking? |
 |---|---|---|---|
-| 1 | `?omit_lyrics=true` on `/songs/` | ~8.4 MB per catalogue crawl | No (opt-in) |
+| 1 | ~~`?omit_lyrics=true` on `/songs/`~~ shipped as `?omit=` | ~8.4 MB per catalogue crawl | No (opt-in) |
 | 2 | URLs instead of base64 in chat lists | ~190 KB per poll cycle, then cached | Yes, unless opt-in flag |
 | 3 | ETag on chat lists | ~195 KB per unchanged poll | No |
 | 4 | `listening_plays` append route | ~68 KB per push | No (additive) |

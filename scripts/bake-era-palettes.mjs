@@ -31,7 +31,7 @@ async function decode(bytes) {
   return raw
 }
 
-const res = await fetch(`${SITE}/juicewrld/songs/?all=true`)
+const res = await fetch(`${SITE}/juicewrld/songs/?all=true&omit=lyrics,synced_lyrics`)
 if (!res.ok) throw new Error(`song list: HTTP ${res.status}`)
 const body = await res.json()
 const songs = Array.isArray(body) ? body : body.results

@@ -103,7 +103,13 @@ self.addEventListener('fetch', (event) => {
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        const net = await fetch(req)
+        // The host sends index.html without Cache-Control, so a plain fetch
+        // can be answered from the browser's heuristic cache - an old build
+        // whose hashed chunks no longer exist. Revalidate instead. A navigate
+        // Request can't be re-issued with options, so fetch by URL; a
+        // redirected response can't answer a navigation, so redo those as-is.
+        let net = await fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+        if (net.redirected) net = await fetch(req)
         if (net.ok) {
           const cache = await caches.open(SHELL_CACHE)
           cache.put('/', net.clone())

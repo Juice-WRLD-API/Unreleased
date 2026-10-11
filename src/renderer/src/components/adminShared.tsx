@@ -149,10 +149,15 @@ export function QueueSearch({ value, onChange, placeholder, matches, total }: {
   )
 }
 
-export function AppSection({ label, value }: { label: string; value: string }): JSX.Element {
+/** `copyText` adds a copy button beside the label; pass the raw text when it
+ *  differs from the displayed `value` (e.g. feedback with its version line). */
+export function AppSection({ label, value, copyText }: { label: string; value: string; copyText?: string }): JSX.Element {
   return (
     <div>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1.5">{label}</p>
+      <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1.5">
+        {label}
+        {copyText !== undefined && <CopyButton text={copyText} label={label.toLowerCase()} />}
+      </p>
       <p className="text-text-primary text-sm leading-relaxed whitespace-pre-wrap">{value}</p>
     </div>
   )

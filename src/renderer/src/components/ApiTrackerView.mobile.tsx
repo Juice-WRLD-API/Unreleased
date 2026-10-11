@@ -14,11 +14,11 @@ import SongContextMenu from './SongContextMenu'
 import { useExpandedGroups } from './CompactGroupRow'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { TrackerFieldsSheet } from './mobile/TrackerFieldsSheet'
-import { TRACKER_FIELD_MAP, DEFAULT_MOBILE_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS } from '../lib/trackerFields'
+import { TRACKER_FIELD_MAP, DEFAULT_MOBILE_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, apiFieldsFor, useTrackerOmit } from '../lib/trackerFields'
 import { useLongPress } from './mobile/useLongPress'
 import {
-  apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, buildStreamUrl,
-  JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra,
+  apiFetch, apiPeek, OMIT_BULK, peekTrackerCatalog, fetchTrackerCatalog, songToTrack, parseDuration, CATEGORY_LABELS, buildStreamUrl,
+  JWApiSong, JWApiStats, JWApiEra,
 } from '../lib/juicewrldApi'
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
@@ -27,7 +27,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { CompactGroup } from '../lib/compactGroups'
-import { parseSearchQuery, matchesFieldFilters } from '../lib/trackerSearch'
+import { parseSearchQuery, matchesFieldFilters, filterApiFields } from '../lib/trackerSearch'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration } from '../lib/format'
@@ -37,7 +37,7 @@ import { useBackToClose } from '../hooks/useBackToClose'
 import {
   Category, ViewMode, TrackerTab, TRACKER_TABS, isTrackerTab,
   EraColor, ERA_COLOR_PALETTE, DEFAULT_ERA_COLOR, GROUP_CATEGORY_PRIORITY, groupCategory,
-  PAGE_SIZE, LS_TRACKER_SEARCH, MIN_PLAUSIBLE_RECORD_YEAR, getInitialSearch,
+  LS_TRACKER_SEARCH, MIN_PLAUSIBLE_RECORD_YEAR, getInitialSearch,
   SNIPPET_CONTEXT_CHARS, getLyricSnippet, MONTH_LABELS, buildMonthGrid,
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
@@ -314,7 +314,7 @@ const SongCard = memo(function SongCard({
       {...press}
     >
       <div className="relative w-full bg-surface-overlay shrink-0" style={{ height: coverH }}>
-        <AlbumArtThumbnail track={track} fill className="w-full h-full object-cover" shimmer={false} eager />
+        <AlbumArtThumbnail track={track} fill res={512} className="w-full h-full object-cover" shimmer={false} eager />
         {selectMode && (
           <div className="absolute top-1.5 left-1.5">
             {selected
@@ -779,9 +779,8 @@ export default function ApiTrackerView(): JSX.Element {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Compact view renders far less content than the underlying song list, so the
-  // sentinel stays permanently visible and would otherwise auto-page through the
-  // entire library in the background - pause that while active.
+  // Read by the compact-groups invalidation subscriber below, which is set up
+  // once and so can't close over compactView itself.
   const compactViewRef = useRef(false)
   useEffect(() => { compactViewRef.current = compactView }, [compactView])
 
@@ -810,37 +809,20 @@ export default function ApiTrackerView(): JSX.Element {
   }), [])
 
   // Stale-while-revalidate: seed from the offline cache synchronously so the
-  // list renders instantly on open, then the effects below refetch and replace
-  // it. The seeded first page must use the exact same params as the initial
-  // scroll-mode fetch or the cache key won't match.
-  const seedRef = useRef<JWApiPaginatedResponse | undefined>(undefined)
-  const seededRef = useRef(false)
-  if (!seededRef.current) {
-    seededRef.current = true
-    const initialSearch = parseSearchQuery(getInitialSearch()).freeText
-    seedRef.current = apiPeek<JWApiPaginatedResponse>('/songs/', {
-      searchall: initialSearch || undefined, category: undefined, era: undefined,
-      page: 1, page_size: PAGE_SIZE,
-    })
-  }
-  const cachedFirstPage = seedRef.current
+  // list renders instantly on open, then the fetch effect below replaces it.
+  // The cache is keyed by search text only (see peekTrackerCatalog).
+  const [catalog, setCatalog] = useState<JWApiSong[]>(() =>
+    peekTrackerCatalog(parseSearchQuery(getInitialSearch()).freeText) ?? [])
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   const [eras, setEras] = useState<JWApiEra[]>(() => {
     return listEras()
   })
-  const [songs, setSongs] = useState<JWApiSong[]>(() => cachedFirstPage?.results ?? [])
-  const [count, setCount] = useState(() => cachedFirstPage?.count ?? 0)
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(() => cachedFirstPage ? cachedFirstPage.next !== null : false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Bumped by the error state's "Try again" to rerun the catalogue fetch.
+  const [reloadToken, setReloadToken] = useState(0)
 
-  const sentinelRef = useRef<HTMLDivElement>(null)
   const listScrollRef = useRef<HTMLDivElement>(null)
-  // Refs for scroll logic - avoids stale closures in the observer callback.
-  const hasMoreRef = useRef(false)
-  const loadingRef = useRef(true)
-  const sentinelVisibleRef = useRef(false)
 
   const [viewMode, setViewModeState] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(LS_TRACKER_VIEW)
@@ -850,21 +832,10 @@ export default function ApiTrackerView(): JSX.Element {
 
   const [orderField, setOrderField] = useState<OrderField | null>(null)
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc')
-  // Whether any column is driving sort mode - the fetched song set depends only
-  // on this and the search/category/era filters, not on *which* field it'll be
-  // sorted by (that's applied client-side).
-  const sortModeActive = orderField !== null
-
+  // A new search/filter starts the list back at the top. The list itself
+  // re-derives (filters) or refetches (search) on its own.
   const resetSongs = useCallback((): void => {
-    setSongs([])
-    setPage(1)
-    // Clear pagination state NOW, not when the new page-1 fetch lands: emptying
-    // the list scrolls the sentinel into view and its observer fires in the gap
-    // before the fetch effect runs, which would bump the page and request one
-    // the narrower result set doesn't have (the API 404s "Invalid page").
-    setHasMore(false)
-    hasMoreRef.current = false
-    loadingRef.current = true
+    listScrollRef.current?.scrollTo({ top: 0 })
   }, [])
 
   const [search, setSearch] = useState(getInitialSearch)
@@ -878,14 +849,10 @@ export default function ApiTrackerView(): JSX.Element {
     setFocusApiTrackerSearch(false)
   }, [focusApiTrackerSearch, trackerTab, setFocusApiTrackerSearch])
   // Sets rather than single values so more than one category/era can be active
-  // at once (OR'd within each dimension, AND'd across them). The API accepts one
-  // `category`/`era` per request, so anything beyond a single selection in
-  // either falls back to fetching everything and filtering client-side.
+  // at once (OR'd within each dimension, AND'd across them), applied
+  // client-side over the loaded catalogue.
   const [categoryFilter, setCategoryFilter] = useState<Set<Category>>(new Set())
   const [eraFilter, setEraFilter] = useState<Set<string>>(new Set())
-  const multiFilterActive = categoryFilter.size > 1 || eraFilter.size > 1
-  const categoryParam: Category = categoryFilter.size === 1 ? [...categoryFilter][0] : ''
-  const eraParam = eraFilter.size === 1 ? [...eraFilter][0] : ''
   const filterCount = categoryFilter.size + eraFilter.size
 
   const toggleCategoryFilter = useCallback((cat: Category) => {
@@ -915,9 +882,15 @@ export default function ApiTrackerView(): JSX.Element {
   // param - so a query using it forces fetch-all mode (below) and gets
   // filtered here instead of trusting the server to have applied it.
   const parsedSearch = useMemo(() => parseSearchQuery(debouncedSearch), [debouncedSearch])
-  const advancedSearchActive = parsedSearch.filters.length > 0
   const matchesSearch = useCallback((song: JWApiSong): boolean =>
     matchesFieldFilters(song, parsedSearch.filters), [parsedSearch])
+  // ?omit= for the fetch-all request below: phone list and grid rows show no
+  // optional fields, so only the Detailed view's chosen fields and any field
+  // filters are kept.
+  const bulkOmit = useTrackerOmit([
+    ...(viewMode === 'detail' ? apiFieldsFor(mobileDetailFields) : []),
+    ...filterApiFields(parsedSearch.filters),
+  ])
 
   useEffect(() => {
     if (apiTrackerCategory) { setCategoryFilter(new Set([apiTrackerCategory as Category])); setApiTrackerCategory('') }
@@ -951,7 +924,7 @@ export default function ApiTrackerView(): JSX.Element {
     if ((trackerTab !== 'calendar' && trackerTab !== 'producers') || calendarFetchedRef.current) return
     calendarFetchedRef.current = true
     setCalendarLoading(true)
-    apiFetch<JWApiSong[]>('/songs/', { all: 'true' })
+    apiFetch<JWApiSong[]>('/songs/', { all: 'true', omit: OMIT_BULK })
       .then(setCalendarSongs)
       .catch((err) => setCalendarError(err.message))
       .finally(() => setCalendarLoading(false))
@@ -1100,100 +1073,44 @@ export default function ApiTrackerView(): JSX.Element {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [search, debouncedSearch, resetSongs])
 
-  // ── FETCH-ALL MODE ────────────────────────────────────────────────────────
-  // The API has no ordering param and accepts one category/era per request, so
-  // both "sort" and "2+ categories/eras selected" fall back to fetching every
-  // matching page up front. category/era are still sent server-side when
-  // exactly one value is selected, to shrink the payload.
-  // Sorting doesn't drag the flat list's catalog down while compact view is
-  // showing: compact view fetches its own groups and sorts them client-side, so
-  // a sort chosen there would otherwise kick off a full-catalog download for a
-  // list that isn't on screen. Switching back to a flat view flips this on and
-  // the fetch runs then.
-  const fetchAllMode = (sortModeActive && !compactView) || multiFilterActive || advancedSearchActive
+  // ── Song list: the whole (server-searched) catalogue in one request ──────
+  // No paging: trimmed with ?omit= (see useTrackerOmit) the whole catalogue is
+  // ~1.2 MB - less than paging through it, since paged requests ignore ?omit
+  // and carry lyrics. The API also has no ordering param and takes only one
+  // category/era per request, so category/era, field filters and sorting all
+  // apply client-side below; only the free-text search and the omit list
+  // refetch.
+  const lastSearchRef = useRef(parsedSearch.freeText)
   useEffect(() => {
-    if (!fetchAllMode) return
-    let cancelled = false
-    loadingRef.current = true
-    setLoading(true); setError(null); setSongs([]); setHasMore(false); setCount(0)
-    const t0 = performance.now()
-    runLog('tracker-sort', `start search=${JSON.stringify(debouncedSearch)} category=${categoryParam || '-'} era=${eraParam || '-'} multi=${multiFilterActive} advanced=${advancedSearchActive}`)
-    const matchesAll = (s: JWApiSong): boolean => matchesFilters(s) && matchesSearch(s)
-    // `all=true` returns the whole (filtered) catalogue as a plain array in
-    // one request - server-side page_size is capped below what we'd need to
-    // paginate reliably, so this avoids under-counting totalPages against it.
-    ;(async () => {
-      try {
-        const all = await apiFetch<JWApiSong[]>('/songs/', {
-          // field:value tokens are stripped out - parsedSearch.freeText is what's
-          // left, which the server still searches; matchesSearch narrows further
-          // by the field filters below.
-          searchall: parsedSearch.freeText || undefined,
-          category: categoryParam || undefined,
-          era: eraParam || undefined,
-          all: 'true',
-        })
-        if (cancelled) return
-        const filtered = all.filter(matchesAll)
-        setSongs(filtered)
-        setCount(filtered.length)
-        runLog('tracker-sort', `done ${all.length} songs in ${Math.round(performance.now() - t0)}ms`)
-      } catch (e) {
-        if (!cancelled) { setError((e as Error).message); runLog('tracker-sort', 'ERROR', e as Error) }
-      } finally {
-        if (!cancelled) { loadingRef.current = false; setLoading(false) }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [fetchAllMode, debouncedSearch, parsedSearch, categoryParam, eraParam, matchesFilters, matchesSearch, advancedSearchActive, multiFilterActive])
-
-  // ── SCROLL MODE: infinite scroll, accumulates pages ───────────────────────
-  useEffect(() => {
-    if (fetchAllMode) return
-    let cancelled = false
-    loadingRef.current = true
+    // A new search swaps in that search's cached copy (or nothing) rather
+    // than leaving the previous query's results up while it loads.
+    if (lastSearchRef.current !== parsedSearch.freeText) {
+      lastSearchRef.current = parsedSearch.freeText
+      setCatalog(peekTrackerCatalog(parsedSearch.freeText) ?? [])
+    }
+    const ctl = new AbortController()
     setLoading(true); setError(null)
-    apiFetch<JWApiPaginatedResponse>('/songs/', {
-      searchall: parsedSearch.freeText || undefined,
-      category: categoryParam || undefined,
-      era: eraParam || undefined,
-      page,
-      page_size: PAGE_SIZE,
-    })
-      .then((data) => {
-        if (!cancelled) {
-          setSongs((prev) => page === 1 ? data.results : [...prev, ...data.results])
-          setCount(data.count)
-          const more = data.next !== null
-          setHasMore(more)
-          hasMoreRef.current = more
-        }
+    const t0 = performance.now()
+    runLog('tracker-load', `start search=${JSON.stringify(parsedSearch.freeText)}`)
+    fetchTrackerCatalog(parsedSearch.freeText, bulkOmit, ctl.signal)
+      .then((all) => {
+        setCatalog(all)
+        runLog('tracker-load', `done ${all.length} songs in ${Math.round(performance.now() - t0)}ms`)
       })
-      .catch((err) => { if (!cancelled) setError(err.message) })
-      .finally(() => {
-        if (!cancelled) {
-          loadingRef.current = false
-          setLoading(false)
-          if (sentinelVisibleRef.current && hasMoreRef.current && !compactViewRef.current) {
-            setPage((p) => p + 1)
-          }
-        }
+      .catch((e) => {
+        if (ctl.signal.aborted) return
+        setError((e as Error).message)
+        runLog('tracker-load', 'ERROR', e as Error)
       })
-    return () => { cancelled = true }
-  }, [debouncedSearch, parsedSearch, categoryParam, eraParam, page, fetchAllMode])
+      .finally(() => { if (!ctl.signal.aborted) setLoading(false) })
+    return () => ctl.abort()
+  }, [parsedSearch.freeText, bulkOmit, reloadToken])
 
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(([entry]) => {
-      sentinelVisibleRef.current = entry.isIntersecting
-      if (entry.isIntersecting && hasMoreRef.current && !loadingRef.current && !compactViewRef.current) {
-        setPage((p) => p + 1)
-      }
-    }, { threshold: 0.1 })
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
+  const songs = useMemo(
+    () => catalog.filter((s) => matchesFilters(s) && matchesSearch(s)),
+    [catalog, matchesFilters, matchesSearch],
+  )
+  const count = songs.length
 
   // Client-side sort over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
@@ -1265,22 +1182,16 @@ export default function ApiTrackerView(): JSX.Element {
   const handlePlay = useCallback((song: JWApiSong) => {
     const track = songToTrack(song)
     // If shuffle is already on, start radio mode from this track instead of
-    // loading the visible page into the queue.
+    // loading the list into the queue.
     if (shuffle) {
-      const rf = (!fetchAllMode && hasMore)
-        ? { category: categoryParam, era: eraParam, search: debouncedSearch, total: count }
-        : null
-      startRadio(track, rf)
+      startRadio(track, null)
       return
     }
+    // The whole result set is loaded, so the queue gets all of it up front.
     const playable = sortedSongs.filter((s) => !!s.path)
     const context = playable.map(songToTrack)
-    const needsLazy = !fetchAllMode && hasMore
-    playTrack(track, context.length > 0 ? context : [track], needsLazy ? {
-      category: categoryParam, era: eraParam, search: debouncedSearch,
-      page: page + 1, hasMore: true, total: count,
-    } : null, 'tracker')
-  }, [playTrack, startRadio, shuffle, sortedSongs, categoryParam, eraParam, debouncedSearch, count, hasMore, fetchAllMode, page])
+    playTrack(track, context.length > 0 ? context : [track], null, 'tracker')
+  }, [playTrack, startRadio, shuffle, sortedSongs])
 
   const handleInfo = useCallback((song: JWApiSong) => { setSelectedSong(song) }, [])
   const handleQueue = useCallback((track: Track) => { addToQueue(track) }, [addToQueue])
@@ -1842,7 +1753,7 @@ export default function ApiTrackerView(): JSX.Element {
                 <X size={24} className="text-text-muted" />
               </div>
               <p className="text-text-secondary text-sm">{error}</p>
-              <button onClick={resetSongs} className="h-10 px-5 rounded-full bg-accent text-white text-sm font-semibold active:opacity-80">Try again</button>
+              <button onClick={() => setReloadToken((t) => t + 1)} className="h-10 px-5 rounded-full bg-accent text-white text-sm font-semibold active:opacity-80">Try again</button>
             </div>
           ) : sortedSongs.length === 0 ? (
             emptyState(<Music2 size={24} className="text-text-muted" />, 'No songs found')
@@ -1856,15 +1767,12 @@ export default function ApiTrackerView(): JSX.Element {
             <VirtualSongDetailList scrollRef={listScrollRef} songs={sortedSongs} {...rowProps} />
           )}
 
-          {/* Sentinel always in the DOM so the observer is set up from mount */}
-          <div ref={sentinelRef} className="h-4" />
           {loading && sortedSongs.length > 0 && (
             <div className="flex items-center justify-center gap-2 py-4 text-text-muted">
               <Loader2 size={16} className="animate-spin" />
-              {fetchAllMode && <span className="text-xs">{sortedSongs.length.toLocaleString()} / {count.toLocaleString()} loaded</span>}
             </div>
           )}
-          {!loading && !hasMore && sortedSongs.length > 0 && !compactView && (
+          {!loading && sortedSongs.length > 0 && !compactView && (
             <p className="text-center text-text-muted text-xs py-4">{count.toLocaleString()} songs total</p>
           )}
         </div>

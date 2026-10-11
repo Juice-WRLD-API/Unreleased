@@ -269,6 +269,7 @@ function SongsTab() {
             [<Code>lyrics</Code>, 'string', 'Full-text search within lyrics content'],
             [<Code>all</Code>, 'string', <>&quot;true&quot; returns the <span className="font-semibold text-text-primary">entire catalogue in one response</span> as a plain array. There's no pagination envelope, and <Code>page</Code>/<Code>page_size</Code> are ignored. It's ~2,500 songs, so use it for whole-dataset work (calendars, grouping, offline seeding), not for lists a user scrolls.</>],
             [<Code>file_names_array</Code>, 'string', '"true" to return file_names as array instead of string'],
+            [<Code>omit</Code>, 'string', <>Field names to drop from every row, comma- or semicolon-separated (<Code>omit=lyrics,synced_lyrics</Code>). <span className="font-semibold text-text-primary">Only honoured with <Code>all=true</Code></span>; paged and search responses ignore it. Dropping the two lyrics fields cuts the whole catalogue from ~13 MB to ~3.5 MB. Omitted fields are absent from the row, not <Code>null</Code>.</>],
             [<Code>versions</Code>, 'string', <>"true" to add <Code>version_title</Code> and a <Code>versions</Code> array to each song. Collection endpoint only; <Code>{'/songs/{id}/'}</Code> ignores it.</>],
           ]}
         />

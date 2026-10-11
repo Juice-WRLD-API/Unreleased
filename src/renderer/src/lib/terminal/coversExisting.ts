@@ -22,8 +22,11 @@ export const EXISTING_COVERS: Record<string, string[]> = {
   version: ['appVersion.fetchRunningCommit'],
   // library.ts, player.ts, fun.ts, index.ts (lookup)
   song: ['juicewrldApi.getSongById', 'juicewrldApi.getSongsByIds'],
-  find: ['juicewrldApi.searchSongs', 'juicewrldApi.resolveTitleToSong'],
-  juicesay: ['juicewrldApi.loadAllSongsAbortable'],
+  // (fetchTrackerCatalog: the Tracker's list is the same server-side search)
+  find: ['juicewrldApi.searchSongs', 'juicewrldApi.resolveTitleToSong', 'juicewrldApi.fetchTrackerCatalog'],
+  juicesay: ['juicewrldApi.loadAllSongsWithLyricsAbortable'],
+  // same catalogue + searchLyrics as the Lyrics tab's hook
+  lyricfind: ['juicewrldApi.loadAllSongsWithLyricsAbortable', 'useLyricSearch.useLyricSearch'],
   // the raw escape hatch reaches any endpoint by hand
   http: ['juicewrldApi.apiFetch'],
   // comp staging download goes through this helper

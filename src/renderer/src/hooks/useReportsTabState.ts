@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import * as reportsApi from '../lib/reportsApi'
 import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
-import { apiFetch } from '../lib/juicewrldApi'
+import { loadAllSongs } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 
 export const REPORT_FILTERS: { id: SongReportStatus | ''; label: string }[] = [
@@ -39,10 +39,10 @@ export function useReportsTabState(reports: SongReportRow[], onChanged: () => vo
   }, [reports, autoSelect])
 
   // Song names for rows that only carry an id - one bulk catalog fetch (the
-  // same ?all=true mode compact view uses) instead of a request per report.
+  // shared loadAllSongs copy) instead of a request per report.
   const [songsById, setSongsById] = useState<Map<number, JWApiSong>>(new Map())
   useEffect(() => {
-    apiFetch<JWApiSong[]>('/songs/', { all: 'true' })
+    loadAllSongs()
       .then(songs => setSongsById(new Map(songs.map(s => [s.id, s]))))
       .catch(() => {})
   }, [])

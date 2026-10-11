@@ -1,4 +1,5 @@
-import { CATEGORY_LABELS, parseDuration } from './juicewrldApi'
+import { useMemo, useRef } from 'react'
+import { CATEGORY_LABELS, parseDuration, OMIT_BULK } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { eraLabel } from './eras'
 import { formatDuration } from './format'
@@ -119,4 +120,49 @@ export function reorderField(keys: TrackerFieldKey[], from: number, to: number):
   const [k] = out.splice(from, 1)
   out.splice(to, 0, k)
   return out
+}
+
+// ─── Bulk-fetch field trimming ────────────────────────────────────────────────
+// The Tracker's whole-catalogue fetches (sort/filter mode, select-all) can drop
+// every display-only field the current view doesn't show, on top of OMIT_BULK.
+// The core fields rows, sorting, playback and session-edit linking need (id,
+// name, path, image_url, category, era, credited_artists, length, album,
+// track_titles, ...) are never in this list, so they're always fetched.
+// `notes` isn't here because the API doesn't return it on song rows at all.
+export const OPTIONAL_SONG_FIELDS = [
+  'producers', 'engineers', 'recording_locations', 'record_dates', 'leak_type',
+  'date_leaked', 'bitrate', 'release_date', 'preview_date', 'dates', 'file_names',
+  'original_key', 'session_titles', 'session_tracking', 'instrumentals',
+  'instrumental_names', 'additional_information', 'bpm', 'key',
+] as const
+
+/** The optional API field(s) behind each Tracker field ([] = always fetched). */
+const FIELD_API_KEYS: Record<TrackerFieldKey, string[]> = {
+  artist: [], era: [], category: [], length: [], alt_titles: [], album: [],
+  producers: ['producers'], engineers: ['engineers'], recording_locations: ['recording_locations'],
+  record_dates: ['record_dates'], leak_type: ['leak_type'], date_leaked: ['date_leaked'],
+  bitrate: ['bitrate'], release_date: ['release_date'], preview_date: ['preview_date'],
+  dates: ['dates'], file_names: ['file_names'], original_key: ['original_key'],
+  session_titles: ['session_titles'], session_tracking: ['session_tracking'],
+  instrumentals: ['instrumentals'], instrumental_names: ['instrumental_names'],
+  additional_information: ['additional_information'], notes: [], bpm: ['bpm'], musical_key: ['key'],
+}
+
+export function apiFieldsFor(keys: TrackerFieldKey[]): string[] {
+  return keys.flatMap((k) => FIELD_API_KEYS[k] ?? [])
+}
+
+/** The `omit` value for a Tracker bulk fetch that has to carry `needed`.
+ *  The kept set only ever grows for the life of the view: switching to a
+ *  layout that shows fewer fields keeps what's already loaded instead of
+ *  refetching, so only showing a field the last fetch dropped changes the
+ *  value (and with it, triggers a refetch). */
+export function useTrackerOmit(needed: string[]): string {
+  const keep = useRef(new Set<string>())
+  const key = [...new Set(needed)].sort().join(',')
+  return useMemo(() => {
+    for (const f of needed) keep.current.add(f)
+    return [OMIT_BULK, ...OPTIONAL_SONG_FIELDS.filter((f) => !keep.current.has(f))].join(',')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 }

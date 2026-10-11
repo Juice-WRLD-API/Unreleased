@@ -13,7 +13,7 @@ import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import type { GifResult } from '../lib/gifApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
-import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack } from '../lib/juicewrldApi'
+import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
@@ -47,7 +47,7 @@ import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/ski
 import { getFont } from '../lib/fonts'
 import {
   sanitizeFieldKeys, DEFAULT_DETAIL_FIELDS, DEFAULT_MOBILE_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS,
-  MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS,
+  MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS, OPTIONAL_SONG_FIELDS,
 } from '../lib/trackerFields'
 import type { TrackerFieldKey } from '../lib/trackerFields'
 import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
@@ -67,7 +67,7 @@ import { runWhenIdle } from '../lib/platform'
 export interface UploadItem {
   id: string
   filename: string
-  // 'upload': comp/donor file uploads (lib/compUploads, lib/donorUploads).
+  // 'upload': comp/donor/chat file uploads (lib/compUploads, lib/donorUploads, lib/chatUploads).
   // 'zip': a ZIP being built client-side for download (lib/clientZip).
   type: 'upload' | 'zip'
   /** Secondary status line, e.g. "12 / 40 files" for a ZIP. */
@@ -2533,7 +2533,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // navigates to them. These calls go through apiFetch's cacheKey, which is the
   // same offline fallback the views themselves read from on a network failure,
   // and the URLs/params match the views' own first fetches exactly so the cache
-  // keys line up (tracker: stats + eras + first unfiltered song page; files:
+  // keys line up (tracker: stats + eras + the unfiltered catalogue; files:
   // the root folder listing). Fire-and-forget and failure-tolerant - a miss
   // just means the view does its normal fetch later.
   //
@@ -2551,14 +2551,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
         ['/stats/', {}],
         ['/eras/', {}],
         ['/eras/', { page: 2 }],
-        ['/songs/', { page: 1, page_size: 50 }],
         ['/files/browse/', {}],
       ]
-      await Promise.allSettled(
-        targets
+      await Promise.allSettled([
+        ...targets
           .filter(([path, params]) => apiPeek(path, params) === undefined)
           .map(([path, params]) => apiFetch(path, params)),
-      )
+        // The Tracker's list. Fetched as lean as it goes (every display field
+        // omitted) - it only seeds the view, which refetches with what its
+        // layout needs on open.
+        ...(peekTrackerCatalog('') === undefined
+          ? [fetchTrackerCatalog('', [OMIT_BULK, ...OPTIONAL_SONG_FIELDS].join(','), new AbortController().signal)]
+          : []),
+      ])
       get().loadChannels().catch(() => {})
     } finally {
       _apiPrefetchInFlight = false

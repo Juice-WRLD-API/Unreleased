@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -81,7 +81,7 @@ import Player from './components/Player'
 import NowPlaying from './components/NowPlaying'
 import QueuePanel from './components/QueuePanel'
 import ErrorBoundary from './components/ErrorBoundary'
-import { lazyOverlay } from './lib/lazyView'
+import { lazyOverlay, lazyView } from './lib/lazyView'
 import SandboxNotch from './components/SandboxNotch'
 import MoreNavSheet from './components/MoreNavSheet'
 
@@ -104,7 +104,7 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 // shipped to every visitor in the startup bundle.
 import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
-const LoginApprovalPrompt = lazy(() => import('./components/LoginApprovalPrompt'))
+const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))

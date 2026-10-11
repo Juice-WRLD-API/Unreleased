@@ -3,7 +3,7 @@ import { useStore } from '../../store/useStore'
 import { APP_VERSION } from '../appVersion'
 import { formatListeningTime, joinPlayedSongs, buildListeningStats, prefsForPeriod, type ListeningPeriod, type RankedEntry } from '../listeningStats'
 import { resolveStatsSongs } from '../statsCatalog'
-import { loadAllSongsAbortable } from '../juicewrldApi'
+import { loadAllSongsWithLyricsAbortable } from '../juicewrldApi'
 import { termAccess, termUserName } from './access'
 import { fail, type TermCommand } from './types'
 import { getTermFullscreen, setTermFullscreen } from './fullscreenStore'
@@ -55,7 +55,7 @@ export function juicesayText(text: string): string {
 // A random line from a random song's lyrics, read from the catalogue the app
 // already loads (5 minute cache) rather than shipped in the source.
 async function randomLyricLine(signal?: AbortSignal): Promise<string> {
-  const songs = (await loadAllSongsAbortable(signal)).filter((s) => s.lyrics && s.lyrics.trim())
+  const songs = (await loadAllSongsWithLyricsAbortable(signal)).filter((s) => s.lyrics && s.lyrics.trim())
   if (songs.length === 0) fail('juicesay: no lyrics in the catalogue')
   for (let attempt = 0; attempt < 10; attempt++) {
     const song = songs[Math.floor(Math.random() * songs.length)]

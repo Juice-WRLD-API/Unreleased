@@ -7,16 +7,41 @@ import { useIsMobile, isMobileViewport } from '../hooks/useIsMobile'
 // module" the first time the user navigates to a lazy view. The chunk isn't
 // coming back - only a reload gets the new index.html with the new hashes.
 //
-// So: retry once (covers a genuinely flaky network), then reload the page once.
+// The same error also fires on a plain network blip - iOS throws "Importing a
+// module script failed" when a tab resumes from the background before the
+// radio is back. So: retry with a short backoff, waiting out an offline spell
+// first, then reload the page once. WebKit keeps a failed module in its module
+// map for the life of the document, so there only the reload can recover, and
+// reloading while still offline just boots the cached shell into the same
+// failure - hence waiting for the network before reloading too.
 // The sessionStorage stamp keeps a chunk that fails for any *other* reason
-// (offline, blocked by an extension) from putting the app in a reload loop -
-// after one attempt the error falls through to the ErrorBoundary as before.
+// (blocked by an extension, a broken deploy) from putting the app in a reload
+// loop - after one attempt the error falls through to the ErrorBoundary.
 const RELOAD_KEY = 'chunk-reload-at'
 const RELOAD_COOLDOWN_MS = 15_000
+const RETRY_DELAYS_MS = [500, 2000]
+const ONLINE_WAIT_MS = 15_000
 
 export function isChunkLoadError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
   return /dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(msg)
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/** Resolve once the browser reports a connection (or after `maxMs`, since
+ *  navigator.onLine can stick at false on some platforms). */
+function waitForOnline(maxMs: number): Promise<void> {
+  if (navigator.onLine !== false) return Promise.resolve()
+  return new Promise((resolve) => {
+    const done = (): void => {
+      window.removeEventListener('online', done)
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(done, maxMs)
+    window.addEventListener('online', done)
+  })
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -28,14 +53,25 @@ export function lazyView<T extends ComponentType<any>>(
       return await factory()
     } catch (err) {
       if (!isChunkLoadError(err)) throw err
-      try {
-        return await factory()
-      } catch {/* still gone - fall through to the reload */}
+      for (const delay of RETRY_DELAYS_MS) {
+        await sleep(delay)
+        await waitForOnline(ONLINE_WAIT_MS)
+        try {
+          return await factory()
+        } catch {/* still failing - back off, then fall through to the reload */}
+      }
 
       let last = 0
       try { last = Number(sessionStorage.getItem(RELOAD_KEY) ?? 0) } catch {/* private mode */}
       if (Date.now() - last > RELOAD_COOLDOWN_MS) {
         try { sessionStorage.setItem(RELOAD_KEY, String(Date.now())) } catch {/* ignore */}
+        // index.html ships without Cache-Control, so the browser may answer
+        // the reload from its heuristic HTTP cache - the old build, whose
+        // chunks are gone. Revalidating the entry first makes the reload
+        // boot whatever is actually deployed.
+        try {
+          await Promise.race([fetch(window.location.href, { cache: 'reload' }), sleep(5000)])
+        } catch {/* offline or blocked - reload anyway */}
         window.location.reload()
         // The page is going away; never resolve so React doesn't render the
         // Suspense fallback (or the error card) during the teardown.

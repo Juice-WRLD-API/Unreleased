@@ -2,7 +2,7 @@ import { getAudioCurrentTime, getAudioDuration, seekAudio } from '../../componen
 import { useStore } from '../../store/useStore'
 import { EQ_PRESETS } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
-import { loadAllSongsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { loadAllSongsWithLyricsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { loadCatalog, statsSongToTrack } from '../statsCatalog'
 import { bestLyricLine, searchLyrics } from '../lyricSearch'
 import { pageRows } from './more'
@@ -262,7 +262,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       const q = rest.join(' ').trim()
       if (!q) fail('usage: lyricfind [--exact] <words from the lyrics>')
       const fuzzy = !bool.has('exact')
-      const hits = searchLyrics(await loadAllSongsAbortable(ctx.signal), q, fuzzy)
+      const hits = searchLyrics(await loadAllSongsWithLyricsAbortable(ctx.signal), q, fuzzy)
       if (hits.length === 0) { ctx.print(`no lyrics match "${q}"${fuzzy ? ' (even loosely)' : ' - drop --exact to loosen it'}`, 'dim'); return }
       lastFind = hits
       const line = (s: JWApiSong): string => { const l = bestLyricLine(s.lyrics, q, fuzzy); return l ? `\n       “${l.length > 100 ? `${l.slice(0, 100)}…` : l}”` : '' }

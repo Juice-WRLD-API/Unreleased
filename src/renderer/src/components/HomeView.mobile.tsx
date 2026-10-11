@@ -127,7 +127,7 @@ export default function HomeViewMobile(): JSX.Element {
                 className="w-[116px] shrink-0 text-left active:opacity-70 transition-opacity"
               >
                 <div className="relative w-[116px] h-[116px] rounded-xl overflow-hidden bg-surface-overlay mb-1.5">
-                  <AlbumArtThumbnail track={track} fill className="w-full h-full object-cover" />
+                  <AlbumArtThumbnail track={track} fill res={384} className="w-full h-full object-cover" />
                   <span className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/65 flex items-center justify-center">
                     <Play size={13} className="text-white ml-0.5" fill="currentColor" />
                   </span>
