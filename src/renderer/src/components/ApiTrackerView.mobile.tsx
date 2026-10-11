@@ -13,6 +13,8 @@ import { lazyView } from '../lib/lazyView'
 import SongContextMenu from './SongContextMenu'
 import { useExpandedGroups } from './CompactGroupRow'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
+import { TrackerFieldsSheet } from './mobile/TrackerFieldsSheet'
+import { TRACKER_FIELD_MAP, DEFAULT_MOBILE_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS } from '../lib/trackerFields'
 import { useLongPress } from './mobile/useLongPress'
 import {
   apiFetch, apiPeek, songToTrack, parseDuration, CATEGORY_LABELS, buildStreamUrl,
@@ -64,7 +66,7 @@ const StatisticsPanel = lazyView(() => import('./StatisticsPanel.mobile'))
 // it belongs to whichever pass rewrites those.
 
 type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length'
-type SheetKind = 'filters' | 'sort' | 'view' | 'bulk' | null
+type SheetKind = 'filters' | 'sort' | 'view' | 'fields' | 'bulk' | null
 
 const CATEGORY_COLORS: Record<string, string> = {
   released:          'text-emerald-400 bg-emerald-400/10 border-emerald-400/25',
@@ -224,13 +226,15 @@ function DetailField({ label, value }: { label: string; value: string | null | u
 }
 
 // Detailed rows trade density for the metadata that otherwise only lives in
-// SongInfoModal. The field set is fixed (empty cells render "—") so every row
-// is the same height, which is what the virtual window's fixed stride needs.
+// SongInfoModal. Which fields show is the user's choice (TrackerFieldsSheet),
+// but every row renders the same set (empty cells render "—") so all rows are
+// the same height, which is what the virtual window's fixed stride needs.
 const DetailedSongRow = memo(function DetailedSongRow({
   song, onPlay, onMenu, selectMode, selected, onToggleSelect, playingId, isPlaying,
 }: RowProps): JSX.Element {
   const pref = useStore((s) => s.songPrefs[song.id])
   const fullEraNames = useStore((s) => s.fullEraNames)
+  const detailFields = useStore((s) => s.trackerMobileDetailFields)
   const track = songToTrack(song)
   const title = pref?.name || song.name
   const canPlay = !!song.path
@@ -270,14 +274,14 @@ const DetailedSongRow = memo(function DetailedSongRow({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-        <DetailField label="Producers" value={song.producers} />
-        <DetailField label="Engineers" value={song.engineers} />
-        <DetailField label="Record Dates" value={song.record_dates} />
-        <DetailField label="Leak Type" value={song.leak_type} />
-        <DetailField label="Bitrate" value={song.bitrate} />
-        <DetailField label="Original Name" value={song.original_key} />
-      </div>
+      {detailFields.length > 0 && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          {detailFields.map((key) => {
+            const f = TRACKER_FIELD_MAP.get(key)!
+            return <DetailField key={key} label={f.label} value={f.get(song, fullEraNames)} />
+          })}
+        </div>
+      )}
     </div>
   )
 })
@@ -460,7 +464,15 @@ function useScaledRowH(base: number): number {
 }
 
 const LIST_ROW_H = 64
-const DETAIL_ROW_H = 168
+// Detailed row = header chrome + one ~30px line per 2-column grid row (the
+// default 6 fields - 3 rows - land on the original 168). With no fields the
+// grid and its gap-2 drop out entirely.
+const DETAIL_ROW_BASE = 78
+const DETAIL_GRID_ROW_H = 30
+const DETAIL_ROW_EMPTY = 70
+function detailRowH(fieldCount: number): number {
+  return fieldCount === 0 ? DETAIL_ROW_EMPTY : DETAIL_ROW_BASE + Math.ceil(fieldCount / 2) * DETAIL_GRID_ROW_H
+}
 const ROW_GAP = 2
 
 interface VirtualProps {
@@ -493,7 +505,8 @@ function VirtualSongList({ scrollRef, songs, selected, ...rest }: VirtualProps):
 
 function VirtualSongDetailList({ scrollRef, songs, selected, ...rest }: VirtualProps): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
-  const rowH = useScaledRowH(DETAIL_ROW_H)
+  const fieldCount = useStore((s) => s.trackerMobileDetailFields.length)
+  const rowH = useScaledRowH(detailRowH(fieldCount))
   const stride = rowH + 8
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, songs.length, stride)
   return (
@@ -702,6 +715,8 @@ export default function ApiTrackerView(): JSX.Element {
   // hand and coming back to this view).
   useEffect(() => { if (apiTrackerTab) setApiTrackerTab('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [sheet, setSheet] = useState<SheetKind>(null)
+  const mobileDetailFields = useStore((s) => s.trackerMobileDetailFields)
+  const setTrackerMobileDetailFields = useStore((s) => s.setTrackerMobileDetailFields)
   const [bulkSheetPage, setBulkSheetPage] = useState<'main' | 'playlists'>('main')
 
   const [selectedSong, setSelectedSong] = useState<JWApiSong | null>(null)
@@ -1945,7 +1960,28 @@ export default function ApiTrackerView(): JSX.Element {
               />
             </>
           )}
+          {viewMode === 'detail' && !compactView && (
+            <>
+              <SheetDivider />
+              <SheetItem
+                icon={SlidersHorizontal}
+                label="Customize fields"
+                sub="Choose which details each row shows"
+                onClick={() => setSheet('fields')}
+              />
+            </>
+          )}
         </Sheet>
+      )}
+
+      {sheet === 'fields' && (
+        <TrackerFieldsSheet
+          keys={mobileDetailFields}
+          defaults={DEFAULT_MOBILE_DETAIL_FIELDS}
+          max={MAX_MOBILE_DETAIL_FIELDS}
+          onChange={setTrackerMobileDetailFields}
+          onClose={closeSheet}
+        />
       )}
 
       {sheet === 'sort' && (
