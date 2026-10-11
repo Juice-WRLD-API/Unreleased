@@ -74,6 +74,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import SandboxNotch from './components/SandboxNotch'
 import { UserCardHost } from './components/chat/UserCard'
 import { useIsMobile } from './hooks/useIsMobile'
+import { useChatBootstrap } from './hooks/useChatBootstrap'
 
 // Rarely-visited views load on first navigation instead of inflating the
 // startup bundle. Suspense fallback is null: these chunks are local (Electron)
@@ -157,6 +158,7 @@ export default function App(): JSX.Element {
   useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
   const isMobile = useIsMobile()
   useThemeEffects()
+  useChatBootstrap()
 
   // Seed auth token from env in local dev only — import.meta.env.DEV is false in production
   // builds, so this never runs for real users even if the token is baked into the bundle.
