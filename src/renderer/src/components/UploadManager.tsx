@@ -31,7 +31,7 @@ export default function UploadManager(): JSX.Element {
   const active = uploads.filter((d) => d.state === 'downloading').length
 
   return (
-    <div ref={panelRef} className="fixed top-2 right-3 z-[9990] w-[320px] rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+    <div ref={panelRef} style={{ top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }} className="fixed right-3 z-[9990] w-[320px] max-w-[calc(100vw-1.5rem)] rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-overlay)] border-b border-[var(--border)]">
         <Upload size={13} className="text-[var(--accent)] shrink-0" />

@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom'
+import { Upload } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { navTabFor, tabEntryView } from '../lib/navItems'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
@@ -9,12 +10,17 @@ import { preloadView } from '../lib/lazyViews'
 // from a button on Home rather than a tab of its own; see BottomNav's
 // removal of the in-bar "More" button for why.
 export default function MoreNavSheet(): JSX.Element | null {
-  const { activeView, setActiveView, showMoreNav, setShowMoreNav } =
-    useStorePick('activeView', 'setActiveView', 'showMoreNav', 'setShowMoreNav')
+  const { activeView, setActiveView, showMoreNav, setShowMoreNav, setShowUploadManager, uploads, stagedFileChanges, stagedSongChanges } =
+    useStorePick('activeView', 'setActiveView', 'showMoreNav', 'setShowMoreNav', 'setShowUploadManager', 'uploads', 'stagedFileChanges', 'stagedSongChanges')
   const { moreTabs } = useMobileNavSplit()
   useBackToClose(() => setShowMoreNav(false), showMoreNav)
 
   if (!showMoreNav) return null
+
+  // Staged changes count alongside in-flight transfers: they're the rows in
+  // the panel that still need the user to act (Propose).
+  const pendingCount = stagedFileChanges.length + stagedSongChanges.length
+    + uploads.filter((u) => u.state === 'downloading').length
 
   const navigateTo = (view: (typeof moreTabs)[number]['view']): void => {
     // Re-tapping the already-active Playlists row dispatches a back event
@@ -54,6 +60,20 @@ export default function MoreNavSheet(): JSX.Element | null {
               </button>
             )
           })}
+          {/* Not a view - opens the Transfers panel (UploadManager), which on
+              desktop hangs off the Sidebar. Staged proposals live there. */}
+          <button
+            onClick={() => { setShowMoreNav(false); setShowUploadManager(true) }}
+            className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors text-text-primary hover:bg-[var(--surface-overlay)] active:bg-[var(--surface-overlay)]"
+          >
+            <span className="[&_svg]:w-6 [&_svg]:h-6 flex items-center justify-center"><Upload /></span>
+            <span className="text-sm font-medium flex-1">Transfers</span>
+            {pendingCount > 0 && (
+              <span className="min-w-[20px] h-5 rounded-full bg-accent text-white text-[11px] font-bold flex items-center justify-center px-1.5 leading-none">
+                {pendingCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
     </>,
