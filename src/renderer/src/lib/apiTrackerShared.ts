@@ -16,7 +16,6 @@ export function isTrackerTab(v: string): v is TrackerTab {
   return (TRACKER_TABS as string[]).includes(v)
 }
 
-export const PAGE_SIZE = 50
 export const LS_TRACKER_SEARCH = 'api-tracker:search'
 
 // record_dates is free-text and occasionally yields a technically-valid but

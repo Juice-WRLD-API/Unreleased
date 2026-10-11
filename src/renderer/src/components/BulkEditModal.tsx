@@ -6,7 +6,8 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { apiFetch, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { apiFetch, getSongById, loadAllSongs, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { OPTIONAL_SONG_FIELDS } from '../lib/trackerFields'
 import type { JWApiSong, JWApiEra } from '../lib/juicewrldApi'
 import type { LibraryTrack } from '../types'
 import * as userApi from '../lib/userApi'
@@ -337,6 +338,29 @@ export default function BulkEditModal(): JSX.Element | null {
   const [versionMeta, setVersionMeta] = useState<Map<number, SongVersionMeta> | null>(null)
   const isApi = target?.kind === 'api'
 
+  // The Tracker's bulk fetches trim display fields it isn't showing (?omit=),
+  // but every field here reads its current value off the song - and "add"
+  // mode appends to it - so a trimmed row would read as blank and the edit
+  // would overwrite what's really there. Swap any such rows for complete ones
+  // (the shared catalogue copy keeps every field but lyrics) before the form
+  // opens; null while that's loading.
+  const [songs, setSongs] = useState<JWApiSong[] | null>(null)
+  useEffect(() => {
+    if (target?.kind !== 'api') { setSongs(null); return }
+    const trimmed = (s: JWApiSong): boolean => OPTIONAL_SONG_FIELDS.some(k => !(k in s))
+    if (!target.songs.some(trimmed)) { setSongs(target.songs); return }
+    let stale = false
+    setSongs(null)
+    loadAllSongs().catch(() => [] as JWApiSong[])
+      .then(all => {
+        const byId = new Map(all.map(s => [s.id, s]))
+        return Promise.all(target.songs.map(s => !trimmed(s) ? s : byId.get(s.id) ?? getSongById(s.id)))
+      })
+      .then(full => { if (!stale) setSongs(full) })
+      .catch(() => { if (!stale) close() })
+    return () => { stale = true }
+  }, [target, close])
+
   useEffect(() => {
     if (!isApi || eras.length) return
     loadEraFullNames().catch(() => undefined).finally(() => setEras(listEras()))
@@ -364,10 +388,10 @@ export default function BulkEditModal(): JSX.Element | null {
   }, [target])
 
   const apiSpec = useMemo<BulkSpec<JWApiSong> | null>(() => {
-    if (target?.kind !== 'api') return null
+    if (target?.kind !== 'api' || !songs) return null
 
     return {
-      items: target.songs,
+      items: songs,
       groups: API_GROUPS,
       fields: apiFields(eras, versionMeta, fetchVersionMeta),
       keyOf: s => String(s.id),
@@ -407,7 +431,7 @@ export default function BulkEditModal(): JSX.Element | null {
         }])
       },
     }
-  }, [target, canEdit, eras, versionMeta, fetchVersionMeta, activeChannel])
+  }, [target, songs, canEdit, eras, versionMeta, fetchVersionMeta, activeChannel])
 
   const localSpec = useMemo<BulkSpec<LibraryTrack> | null>(() => {
     if (target?.kind !== 'local') return null

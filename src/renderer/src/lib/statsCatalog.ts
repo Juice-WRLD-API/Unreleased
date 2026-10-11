@@ -179,18 +179,16 @@ export async function loadCatalog(onPage?: (page: number, total: number) => void
 
   let songs: StatsSong[]
   try {
-    // Several other views (home, tracker sort mode, field suggestions) pull
-    // the whole catalogue through loadAllSongs. When one of them already has
-    // it in flight or cached, slimming that costs nothing and skips the page
-    // crawl entirely - only fall back to paging when nobody has it, since
-    // *starting* an all=true fetch here would pull the lyrics this page
-    // throws away.
-    // A warm fetch that turns out to have failed falls back to paging rather
-    // than failing this page with it - it belongs to whoever started it.
-    const warm = loadAllSongs.peek()
-    songs = warm
-      ? await untilAborted(warm, signal).then((all) => all.map(slimSong), (err) => { if (signal?.aborted) throw err; return fetchCatalog(onPage, signal) })
-      : await fetchCatalog(onPage, signal)
+    // The shared loadAllSongs copy (home, tracker, field suggestions use it
+    // too) comes with ?omit=lyrics, so one ~3.5 MB request beats crawling
+    // ~28 pages that still carry the ~10 MB of lyrics this page throws away
+    // (?omit only applies with ?all=true). It has no page count, so the view
+    // shows an indeterminate bar. A failed bulk fetch falls back to paging
+    // rather than failing this page - a warm one belongs to whoever started it.
+    songs = await untilAborted(loadAllSongs(), signal).then(
+      (all) => all.map(slimSong),
+      (err) => { if (signal?.aborted) throw err; return fetchCatalog(onPage, signal) },
+    )
   } catch (err) {
     // A cancel is not a failure to paper over with the day-old copy.
     if (signal?.aborted) throw err

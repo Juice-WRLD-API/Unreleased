@@ -93,7 +93,7 @@ export default function TrackView(): JSX.Element {
 
         <div className="rounded-2xl border border-[var(--border)] bg-surface-raised p-5 shadow-2xl">
           <div className="aspect-square w-full rounded-xl overflow-hidden bg-surface-overlay mb-4">
-            <AlbumArtThumbnail track={track} fill className="w-full h-full" />
+            <AlbumArtThumbnail track={track} fill res={512} className="w-full h-full" />
           </div>
 
           <p className="text-text-muted text-[11px] uppercase tracking-widest font-semibold mb-1">{categoryLabel}</p>

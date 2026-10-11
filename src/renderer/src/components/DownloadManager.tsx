@@ -3,6 +3,8 @@ import { Download, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, FolderOpen,
 import { useStore, useStorePick, DownloadItem, StagedFileChange, StagedSongChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
+import { cancelDonorUpload, cancelAllDonorUploads, isDonorUploadId } from '../lib/donorUploads'
+import { cancelChatUpload, cancelAllChatUploads, isChatUploadId } from '../lib/chatUploads'
 import { cancelZipTask, isZipTaskId } from '../lib/clientZip'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 import { proposeStagedSongChanges, stagedSongChangeLabel } from '../lib/compStagedSongChanges'
@@ -131,7 +133,7 @@ export default function DownloadManager(): JSX.Element | null {
               </button>
             )}
             {activeUploads > 1 && (
-                <button onClick={cancelAllCompUploads} className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors px-1 rounded">
+                <button onClick={() => { cancelAllCompUploads(); cancelAllDonorUploads(); cancelAllChatUploads() }} className="text-[10px] text-[var(--text-muted)] hover:text-red-400 transition-colors px-1 rounded">
                   Cancel All
                   </button>
               )}
@@ -330,7 +332,7 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
             </button>
           )}
           {isActive && isUpload && (
-            <button onClick={() => cancelCompUpload(item.id)} title="Cancel upload"
+            <button onClick={() => (isChatUploadId(item.id) ? cancelChatUpload(item.id) : isDonorUploadId(item.id) ? cancelDonorUpload(item.id) : cancelCompUpload(item.id))} title="Cancel upload"
               className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 transition-colors">
               <X size={12} />
             </button>

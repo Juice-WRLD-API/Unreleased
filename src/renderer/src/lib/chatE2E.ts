@@ -671,10 +671,10 @@ export function clientIdOf(message: ChatMessage | undefined): string | null {
   return message?.format === 2 ? message.client_id ?? null : null
 }
 
-export async function uploadEncryptedFile(file: File, key: Uint8Array, version: number): Promise<api.AttachmentInput> {
+export async function uploadEncryptedFile(file: File, key: Uint8Array, version: number, opts?: api.ChatUploadOptions): Promise<api.AttachmentInput> {
   const plain = new Uint8Array(await file.arrayBuffer())
   const { bytes, nonce } = await encryptBytes(plain, key)
-  const uploaded: UploadedFile = await api.uploadChatFile(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'attachment.bin')
+  const uploaded: UploadedFile = await api.uploadChatFile(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'attachment.bin', opts)
   return {
     ...uploaded,
     name: 'attachment.bin',
@@ -689,11 +689,11 @@ export async function uploadEncryptedFile(file: File, key: Uint8Array, version: 
 // v2: the file is bound to its message and slot by the AD, and its name,
 // size and hash ride in the encrypted body instead of encrypted_name.
 export async function uploadEncryptedFileV2(
-  file: File, key: Uint8Array, conversationId: number, version: number, clientId: string, index: number,
+  file: File, key: Uint8Array, conversationId: number, version: number, clientId: string, index: number, opts?: api.ChatUploadOptions,
 ): Promise<{ input: api.AttachmentInput; manifest: AttachmentManifest }> {
   const plain = new Uint8Array(await file.arrayBuffer())
   const { ct, nonce } = await aeadEncrypt(plain, attachmentAd(conversationId, version, clientId, index), key)
-  const uploaded = await api.uploadChatFile(new Blob([ct as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'attachment.bin')
+  const uploaded = await api.uploadChatFile(new Blob([ct as Uint8Array<ArrayBuffer>], { type: 'application/octet-stream' }), 'attachment.bin', opts)
   const nonceB64 = await b64(nonce)
   return {
     input: { ...uploaded, name: 'attachment.bin', mime: 'application/octet-stream', size: file.size, nonce: nonceB64, key_version: version },

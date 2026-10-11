@@ -3,7 +3,7 @@
 // caller has to reimplement any of it.
 import { cacheGet, cacheSet } from './apiCache'
 
-async function defaultParseError(res: Response): Promise<string> {
+export async function defaultParseError(res: Response): Promise<string> {
   try {
     const body = await res.json()
     if (typeof body === 'string') return body

@@ -11,7 +11,7 @@
 //   - Playlists already has its full, unpaginated track list in hand, so it
 //     only needs version metadata for those specific songs - no need to
 //     fetch anything about the songs themselves.
-import { apiFetch, JWApiSong } from './juicewrldApi'
+import { apiFetch, OMIT_BULK, JWApiSong } from './juicewrldApi'
 import { SongVersionMeta, getAllVersionGroups, getVersionMetaForSongs, versionsEnabled } from './versionsApi'
 
 export interface CompactGroup<T> {
@@ -77,7 +77,7 @@ export function subscribeCompactGroupsInvalidation(listener: () => void): () => 
 async function buildAllCompactGroups(): Promise<CompactGroup<JWApiSong>[]> {
   const [metas, songs] = await Promise.all([
     getAllVersionGroups(),
-    apiFetch<JWApiSong[]>('/songs/', { all: 'true' }),
+    apiFetch<JWApiSong[]>('/songs/', { all: 'true', omit: OMIT_BULK }),
   ])
   const songMap = new Map(songs.map(s => [s.id, s]))
   return buildGroups(metas, id => songMap.get(id))

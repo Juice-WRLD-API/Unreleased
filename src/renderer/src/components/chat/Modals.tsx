@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, Globe, Hash, ImagePlus, Loader2, Lock, Search, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, Globe, Hash, ImagePlus, Loader2, Lock, Plus, Search, ShieldCheck, Slash, Trash2, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import { CHAT_PERMISSIONS, type ChannelOverride, type ChatChannel, type ChatMember, type ChatPermissionName, type ChatUserBrief, type PublicServerSummary, type ServerRoleDef } from '../../lib/chatApi'
 import { adminListUsers, compressImageFile } from '../../lib/userApi'
@@ -13,7 +13,6 @@ import { ChatAvatar, errorText, ServerGlyph, useChatToast } from './ui'
 import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 const EMPTY_CATEGORIES: string[] = []
-const EMPTY_ROLES: ServerRoleDef[] = []
 
 export function DialogShell({ title, subtitle, onClose, children, footer, width = 'max-w-md' }: {
   title: string
@@ -859,77 +858,327 @@ export function MemberRolesModal({ serverId, member, onClose }: { serverId: numb
   )
 }
 
-// Compact override list + add row, scoped to a single channel. Only role-based
-// overrides are exposed here (not per-member) - the full Discord-style editor
-// (member overrides, per-permission inherit/allow/deny tri-state, drag
-// hierarchy) is deliberately out of scope; the API supports member overrides
-// via api.upsertOverride({ member, ... }) for a future pass.
-function ChannelOverridesSection({ channelId, serverId }: { channelId: number; serverId: number }): JSX.Element {
-  const roles = useChatStore((s) => s.servers.find((x) => x.id === serverId)?.roles ?? EMPTY_ROLES)
+// ─── Channel permissions ─────────────────────────────────────────────────────
+
+// Only the bits that mean something per channel; server-wide ones (kick, ban,
+// manage roles/server, administrator) are left alone on each row.
+const CHANNEL_PERMS: { key: ChatPermissionName; hint: string }[] = [
+  { key: 'view_channels', hint: 'See the channel and read its messages' },
+  { key: 'send_messages', hint: 'Post new messages' },
+  { key: 'attach_files', hint: 'Upload files and images' },
+  { key: 'add_reactions', hint: 'React to messages' },
+  { key: 'mention_everyone', hint: 'Ping @everyone' },
+  { key: 'manage_threads', hint: 'Rename, close and delete threads' },
+  { key: 'manage_messages', hint: "Delete and pin other people's messages" },
+  { key: 'manage_channels', hint: 'Edit this channel and its permissions' },
+]
+
+const bitCount = (mask: number): number => CHANNEL_PERMS.reduce((n, p) => n + ((mask & CHAT_PERMISSIONS[p.key]) ? 1 : 0), 0)
+
+function TriState({ state, onChange }: { state: -1 | 0 | 1; onChange: (next: -1 | 0 | 1) => void }): JSX.Element {
+  const btn = (value: -1 | 0 | 1, title: string, icon: React.ReactNode, on: string): JSX.Element => (
+    <button
+      type="button"
+      title={title}
+      aria-pressed={state === value}
+      onClick={() => onChange(value)}
+      className={`w-8 h-7 flex items-center justify-center transition-colors ${state === value ? on : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`}
+    >
+      {icon}
+    </button>
+  )
+  return (
+    <div className="flex shrink-0 rounded-lg border border-[var(--border)] overflow-hidden divide-x divide-[var(--border)]">
+      {btn(-1, 'Deny', <X size={14} strokeWidth={3} />, 'bg-red-500 text-white')}
+      {btn(0, 'Inherit from server roles', <Slash size={12} strokeWidth={3} />, 'bg-surface-highest text-text-primary')}
+      {btn(1, 'Allow', <Check size={14} strokeWidth={3} />, 'bg-emerald-500 text-white')}
+    </div>
+  )
+}
+
+function ChannelPermissionsSection({ channelId, serverId }: { channelId: number; serverId: number }): JSX.Element {
+  const roles = useChatStore((s) => s.roles[serverId])
+  const loadRoles = useChatStore((s) => s.loadRoles)
+  const members = useChatStore((s) => s.members[serverId])
   const toast = useChatToast()
-  const [overrides, setOverrides] = useState<ChannelOverride[] | null>(null)
-  const [roleId, setRoleId] = useState<number | ''>('')
-  const [allow, setAllow] = useState(0)
-  const [deny, setDeny] = useState(0)
-  const [busy, setBusy] = useState(false)
+  const [overrides, setOverridesState] = useState<ChannelOverride[] | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [query, setQuery] = useState('')
+  const [saving, setSaving] = useState(0)
+
+  // Writes are optimistic: the UI updates at once and each row (role or
+  // member) has its own queue, so rapid clicks collapse into the latest state
+  // and responses can't land out of order.
+  const overridesRef = useRef<ChannelOverride[]>([])
+  const desired = useRef(new Map<string, api.OverrideTarget>())
+  const running = useRef(new Set<string>())
+  const setOverrides = (next: ChannelOverride[]): void => { overridesRef.current = next; setOverridesState(next) }
 
   const load = (): void => {
-    api.listOverrides(channelId).then(setOverrides).catch((err) => toast(errorText(err, 'Could not load overrides')))
+    api.listOverrides(channelId).then(setOverrides).catch((err) => toast(errorText(err, 'Could not load permissions')))
   }
-  useEffect(() => { load() }, [channelId])
+  useEffect(() => { load(); void loadRoles(serverId) }, [channelId, serverId])
 
-  const roleName = (id: number | null): string => roles.find((r) => r.id === id)?.name ?? `Role #${id}`
-
-  const add = async (): Promise<void> => {
-    if (!roleId) return
-    setBusy(true)
+  const flush = async (key: string): Promise<void> => {
+    if (running.current.has(key)) return
+    running.current.add(key)
+    setSaving((n) => n + 1)
     try {
-      await api.upsertOverride(channelId, { role: roleId, allow, deny })
-      setAllow(0)
-      setDeny(0)
-      setRoleId('')
-      load()
+      for (;;) {
+        const t = desired.current.get(key)
+        if (!t) break
+        desired.current.delete(key)
+        const existing = overridesRef.current.find((o) => o.id > 0 && api.overrideKey(o) === key)
+        const saved = await api.applyOverride(channelId, existing, t)
+        const rest = overridesRef.current.filter((o) => api.overrideKey(o) !== key)
+        // A newer edit queued meanwhile keeps its optimistic row; only settle
+        // to the server's copy once this key is idle.
+        if (desired.current.has(key)) {
+          if (saved) setOverrides(overridesRef.current.map((o) => (api.overrideKey(o) === key ? { ...o, id: saved.id } : o)))
+        } else setOverrides(saved ? [...rest, saved] : rest)
+      }
     } catch (err) {
-      toast(errorText(err, 'Could not save override'))
+      desired.current.delete(key)
+      toast(errorText(err, 'Could not save permission'))
+      load()
     } finally {
-      setBusy(false)
+      running.current.delete(key)
+      setSaving((n) => n - 1)
     }
   }
 
-  const remove = (overrideId: number): void => {
-    api.deleteOverride(channelId, overrideId).then(load).catch((err) => toast(errorText(err, 'Could not remove override')))
+  const write = (targets: api.OverrideTarget[]): void => {
+    let next = overridesRef.current
+    for (const t of targets) {
+      const key = api.overrideKey(t)
+      const cur = next.find((o) => api.overrideKey(o) === key)
+      next = !t.allow && !t.deny
+        ? next.filter((o) => api.overrideKey(o) !== key)
+        : cur
+          ? next.map((o) => (o === cur ? { ...o, allow: t.allow, deny: t.deny } : o))
+          : [...next, { id: -1, channel: channelId, role: t.role ?? null, member: t.member ?? null, allow: t.allow, deny: t.deny }]
+      desired.current.set(key, t)
+    }
+    setOverrides(next)
+    for (const t of targets) void flush(api.overrideKey(t))
   }
 
+  const sortedRoles = useMemo(() => (roles ?? []).slice().sort((a, b) => b.position - a.position), [roles])
+  const everyone = sortedRoles.find((r) => r.is_default)
+  const whitelist = overrides && roles ? api.channelWhitelist(overrides, roles) : null
+
+  const setWhitelist = (roleIds: number[] | null): void => {
+    if (!overrides || !roles) return
+    try {
+      write(api.planChannelWhitelist(overrides, roles, roleIds))
+    } catch (err) {
+      toast(errorText(err, 'Could not restrict channel'))
+    }
+  }
+
+  const labelOf = (o: { role: number | null; member: number | null }): { name: string; color?: string; member?: ChatMember } => {
+    if (o.role != null) {
+      const r = sortedRoles.find((x) => x.id === o.role)
+      return r ? { name: r.is_default ? '@everyone' : r.name, color: r.color || '#8a8f98' } : { name: `Role #${o.role}` }
+    }
+    const m = members?.find((x) => x.id === o.member)
+    return m ? { name: displayName(m.user), member: m } : { name: `Member #${o.member}` }
+  }
+
+  // Roles first (by hierarchy, @everyone last), then members. The expanded
+  // row stays visible as a draft even while it has no bits set.
+  const rows = useMemo(() => {
+    const list = (overrides ?? []).slice()
+    if (expanded && !list.some((o) => api.overrideKey(o) === expanded)) {
+      const [kind, id] = expanded.split(':')
+      list.push({ id: -1, channel: channelId, role: kind === 'role' ? Number(id) : null, member: kind === 'member' ? Number(id) : null, allow: 0, deny: 0 })
+    }
+    const rank = (o: ChannelOverride): number => {
+      if (o.role == null) return -1
+      const r = sortedRoles.find((x) => x.id === o.role)
+      return r?.is_default ? 0 : (r?.position ?? 0) + 1
+    }
+    return list.sort((a, b) => rank(b) - rank(a))
+  }, [overrides, sortedRoles, expanded, channelId])
+
+  const candidates = useMemo(() => {
+    const taken = new Set(rows.map(api.overrideKey))
+    const q = query.trim().toLowerCase()
+    const r = sortedRoles
+      .filter((x) => !taken.has(`role:${x.id}`))
+      .map((x) => ({ key: `role:${x.id}`, name: x.is_default ? '@everyone' : x.name, color: x.color || '#8a8f98', member: undefined as ChatMember | undefined }))
+    const m = (members ?? [])
+      .filter((x) => !taken.has(`member:${x.id}`))
+      .map((x) => ({ key: `member:${x.id}`, name: displayName(x.user), color: undefined, member: x }))
+    return [...r, ...m].filter((c) => !q || c.name.toLowerCase().includes(q)).slice(0, 30)
+  }, [rows, sortedRoles, members, query])
+
+  const loading = overrides === null || !roles
+
   return (
-    <div className="rounded-xl border border-[var(--border)] p-3 mb-4">
-      <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2">Permission overrides</p>
-      {overrides === null && <div className="flex justify-center py-3"><Loader2 size={15} className="animate-spin text-text-muted" /></div>}
-      {overrides?.length === 0 && <p className="text-xs text-text-muted mb-2">No overrides yet — this channel follows each role's server-wide permissions.</p>}
-      {overrides?.map((o) => (
-        <div key={o.id} className="flex items-center gap-2 py-1.5 text-xs border-b border-[var(--border)] last:border-0">
-          <span className="flex-1 text-text-primary truncate">{o.role != null ? roleName(o.role) : `Member #${o.member}`}</span>
-          {o.allow > 0 && <span className="text-emerald-400">allow {o.allow}</span>}
-          {o.deny > 0 && <span className="text-red-400">deny {o.deny}</span>}
-          <button onClick={() => remove(o.id)} className="text-text-muted hover:text-red-400"><Trash2 size={13} /></button>
-        </div>
-      ))}
-      <select value={roleId} onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : '')} className={`${inputCls} mt-2 mb-2`}>
-        <option value="">Add an override for a role…</option>
-        {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-      </select>
-      {roleId !== '' && (
-        <div className="grid grid-cols-2 gap-3 mb-2">
-          <div>
-            <p className="text-[10px] font-bold uppercase text-emerald-400 mb-1">Allow</p>
-            <PermissionCheckboxes value={allow} onChange={setAllow} columns={1} />
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <p className="flex-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">Permissions</p>
+        <span className="text-[11px] text-text-muted inline-flex items-center gap-1">
+          {saving > 0 ? <><Loader2 size={11} className="animate-spin" />Saving…</> : 'Changes save instantly'}
+        </span>
+      </div>
+
+      {loading && <div className="flex justify-center py-6 rounded-xl border border-[var(--border)]"><Loader2 size={16} className="animate-spin text-text-muted" /></div>}
+
+      {!loading && (
+        <>
+          {/* Who can see it */}
+          <div className="rounded-xl border border-[var(--border)] p-3 mb-3">
+            <p className="text-sm font-semibold text-text-primary">Who can see this channel</p>
+            <div className="grid grid-cols-2 gap-1 p-1 mt-2 rounded-lg bg-surface-raised">
+              {([['Everyone', null], ['Only certain roles', whitelist ?? []]] as const).map(([label, value]) => {
+                const on = (value === null) === (whitelist === null)
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    disabled={!everyone}
+                    onClick={() => { if (!on) setWhitelist(value === null ? null : []) }}
+                    className={`py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-40 ${on ? 'bg-surface text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}`}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            {whitelist !== null && (
+              <>
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {sortedRoles.filter((r) => !r.is_default).map((r) => {
+                    const on = whitelist.includes(r.id)
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setWhitelist(on ? whitelist.filter((id) => id !== r.id) : [...whitelist, r.id])}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${on ? 'border-accent/60 bg-accent/10 text-text-primary' : 'border-[var(--border)] text-text-muted hover:text-text-primary hover:border-text-muted'}`}
+                      >
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: r.color || '#8a8f98' }} />
+                        {r.name}
+                        {on && <Check size={12} strokeWidth={3} />}
+                      </button>
+                    )
+                  })}
+                  {sortedRoles.every((r) => r.is_default) && <p className="text-xs text-text-muted">No roles yet — create one from Server settings → Roles.</p>}
+                </div>
+                <p className="text-[11px] text-text-muted mt-2">
+                  {whitelist.length === 0 ? 'Nobody but owners and admins can see it until you pick a role.' : 'Owners, admins and roles with Administrator can always see it.'}
+                </p>
+              </>
+            )}
+            {!everyone && <p className="text-[11px] text-text-muted mt-2">This server has no @everyone role, so it can't be restricted.</p>}
           </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase text-red-400 mb-1">Deny</p>
-            <PermissionCheckboxes value={deny} onChange={setDeny} columns={1} />
+
+          {/* Fine-grained overrides */}
+          <div className="rounded-xl border border-[var(--border)] overflow-hidden">
+            <div className="px-3 pt-3 pb-2">
+              <p className="text-sm font-semibold text-text-primary">Overrides</p>
+              <p className="text-xs text-text-muted">Allow or deny specific things for a role or member in this channel only.</p>
+            </div>
+            {rows.length === 0 && <p className="px-3 pb-3 text-xs text-text-muted">None — everyone follows their server-wide role permissions.</p>}
+            {rows.map((o) => {
+              const key = api.overrideKey(o)
+              const open = expanded === key
+              const label = labelOf(o)
+              const allowN = bitCount(o.allow)
+              const denyN = bitCount(o.deny)
+              return (
+                <div key={key} className="border-t border-[var(--border)]">
+                  <div className={`flex items-center gap-2.5 px-3 py-2 ${open ? 'bg-surface-raised/50' : ''}`}>
+                    <button type="button" onClick={() => setExpanded(open ? null : key)} className="flex-1 min-w-0 flex items-center gap-2.5 text-left">
+                      {label.member ? <ChatAvatar user={label.member.user} size={22} /> : <span className="w-2.5 h-2.5 mx-[5px] rounded-full shrink-0" style={{ background: label.color ?? '#8a8f98' }} />}
+                      <span className="flex-1 min-w-0 text-sm text-text-primary truncate">{label.name}</span>
+                      {allowN > 0 && <span className="text-[11px] font-semibold text-emerald-400">{allowN} allowed</span>}
+                      {denyN > 0 && <span className="text-[11px] font-semibold text-red-400">{denyN} denied</span>}
+                      {!allowN && !denyN && <span className="text-[11px] text-text-muted">no changes</span>}
+                      <ChevronDown size={15} className={`text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Remove override"
+                      onClick={() => { if (open) setExpanded(null); write([{ ...(o.role != null ? { role: o.role } : { member: o.member as number }), allow: 0, deny: 0 }]) }}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-surface-overlay"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  {open && (
+                    <div className="px-3 pb-2 bg-surface-raised/50">
+                      {CHANNEL_PERMS.map(({ key: perm, hint }) => {
+                        const bit = CHAT_PERMISSIONS[perm]
+                        const state: -1 | 0 | 1 = o.allow & bit ? 1 : o.deny & bit ? -1 : 0
+                        return (
+                          <div key={perm} className="flex items-center gap-3 py-1.5">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-text-primary">{PERMISSION_LABELS[perm]}</p>
+                              <p className="text-[11px] text-text-muted truncate">{hint}</p>
+                            </div>
+                            <TriState
+                              state={state}
+                              onChange={(v) => write([{
+                                ...(o.role != null ? { role: o.role } : { member: o.member as number }),
+                                allow: v === 1 ? o.allow | bit : o.allow & ~bit,
+                                deny: v === -1 ? o.deny | bit : o.deny & ~bit,
+                              }])}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            <div className="border-t border-[var(--border)]">
+              {!adding ? (
+                <button type="button" onClick={() => setAdding(true)} className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-text-muted hover:text-text-primary hover:bg-surface-raised/50 transition-colors">
+                  <Plus size={14} />Add a role or member
+                </button>
+              ) : (
+                <div className="p-2">
+                  <div className="relative mb-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                    <input
+                      autoFocus
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setAdding(false); setQuery('') } }}
+                      placeholder="Search roles and members"
+                      className={`${inputCls} pl-8 py-2`}
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto chat-scroll">
+                    {candidates.length === 0 && <p className="text-xs text-text-muted text-center py-3">{members ? 'Nothing left to add' : 'Loading members…'}</p>}
+                    {candidates.map((c) => (
+                      <button
+                        key={c.key}
+                        type="button"
+                        onClick={() => {
+                          setExpanded(c.key)
+                          setAdding(false)
+                          setQuery('')
+                        }}
+                        className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-surface-raised/60"
+                      >
+                        {c.member ? <ChatAvatar user={c.member.user} size={22} /> : <span className="w-2.5 h-2.5 mx-[5px] rounded-full shrink-0" style={{ background: c.color }} />}
+                        <span className="flex-1 text-sm text-text-primary truncate">{c.name}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">{c.member ? 'Member' : 'Role'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
-      <PrimaryButton onClick={add} busy={busy} disabled={!roleId || (!allow && !deny)}>Add override</PrimaryButton>
     </div>
   )
 }
@@ -1031,7 +1280,7 @@ export function ChannelModal({ serverId, channel, defaultCategory, onClose }: { 
           })}
         </div>
       )}
-      {channel && <ChannelOverridesSection channelId={channel.id} serverId={serverId} />}
+      {channel && <ChannelPermissionsSection channelId={channel.id} serverId={serverId} />}
       {channel && (
         <button onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:underline">
           <Trash2 size={13} />Delete channel

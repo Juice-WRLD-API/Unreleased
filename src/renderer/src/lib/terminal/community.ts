@@ -3,7 +3,7 @@ import { APP_VERSION } from '../appVersion'
 import { fetchRecentBroadcasts } from '../broadcastApi'
 import { getSongsByIds } from '../juicewrldApi'
 import { FEEDBACK_CATEGORIES, newReportId, SONG_ISSUE_TYPES, type FeedbackCategory, type SongIssueType } from '../reports'
-import { listFeedback, listSongReports, reviewSongReport, submitFeedback, submitSongReport, type SongReportStatus } from '../reportsApi'
+import { dedupeAutomatedFeedback, listFeedback, listSongReports, reviewSongReport, submitFeedback, submitSongReport, type SongReportStatus } from '../reportsApi'
 import { createTierlist, deleteTierlist, getPublicTierlist, listTierlists, updateTierlist, type ServerTierlist, type TierlistData } from '../tierlistApi'
 import { useStore } from '../../store/useStore'
 import { completeSongs, songFromArg } from './player'
@@ -99,7 +99,7 @@ const tierlistCommand: TermCommand = {
 }
 
 const feedbackCommand: TermCommand = {
-  name: 'devfeedback', group: 'Content', usage: 'devfeedback send <bug|suggestion|praise|other> -- <message> [--contact how] · ls [--automated on|off]',
+  name: 'devfeedback', group: 'Content', usage: 'devfeedback send <bug|suggestion|praise|other> -- <message> [--contact how] · ls [--automated on|off] [--dedupe]',
   description: 'Send feedback to the developers (the chat /feedback is a different command), or (admins) read what has been sent',
   covers: ['reportsApi.submitFeedback', 'reportsApi.listFeedback'],
   complete: (before, partial) => (before.length === 0 ? ['send', 'ls'].filter((v) => v.startsWith(partial.toLowerCase())) : before[0] === 'send' && before.length === 1 ? FEEDBACK_CATEGORIES.filter((v) => v.startsWith(partial.toLowerCase())) : []),
@@ -111,9 +111,10 @@ const feedbackCommand: TermCommand = {
     if (sub === 'ls') {
       signedIn()
       const flag = value.get('automated')
-      const rows = await listFeedback(flag === undefined ? undefined : parseBool(flag) ?? fail('--automated takes on or off'))
+      const all = await listFeedback(flag === undefined ? undefined : parseBool(flag) ?? fail('--automated takes on or off'))
+      const { rows, extra } = bool.has('dedupe') ? dedupeAutomatedFeedback(all) : { rows: all, extra: new Map<number, number>() }
       if (asJson(ctx, bool.has('json'), rows)) return
-      ctx.print(rows.length ? rows.map((r) => `#${r.id}  ${r.created_at ? relativeTime(r.created_at) : ''}${r.automated ? '  [automated]' : ''}${r.contact ? `  (${r.contact})` : ''}\n  ${oneLine(r.message, 300)}`).join('\n') : 'no feedback', rows.length ? 'plain' : 'dim')
+      ctx.print(rows.length ? rows.map((r) => `#${r.id}  ${r.created_at ? relativeTime(r.created_at) : ''}${r.automated ? '  [automated]' : ''}${extra.get(r.id) ? `  (+${extra.get(r.id)} dupes)` : ''}${r.contact ? `  (${r.contact})` : ''}\n  ${oneLine(r.message, 300)}`).join('\n') : 'no feedback', rows.length ? 'plain' : 'dim')
     } else if (sub === 'send') {
       const category = (rest[0] ?? '').toLowerCase() as FeedbackCategory
       if (!FEEDBACK_CATEGORIES.includes(category) || !message) fail(`usage: devfeedback send <${FEEDBACK_CATEGORIES.join('|')}> -- <message>`)

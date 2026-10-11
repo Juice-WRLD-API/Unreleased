@@ -11,7 +11,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { attachToMainWindow } from '../lib/windowSync'
-import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongById, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import { versionsEnabled, getVersionGroup, SongVersionMeta } from '../lib/versionsApi'
 import { formatDuration } from '../lib/format'
 import { copyCoverImage, saveCoverImage } from '../lib/coverImage'
@@ -106,7 +106,19 @@ export default function SongInfoModal({ song, onClose, onEdit, floating = false,
   // caller needing to manage that - falls back to the `song` prop otherwise.
   const [overrideSong, setOverrideSong] = useState<JWApiSong | null>(null)
   useEffect(() => { setOverrideSong(null) }, [song?.id])
-  const displaySong = overrideSong ?? song
+  // Rows from bulk fetches come with `?omit=lyrics,...` (see OMIT_BULK), so
+  // the fields are absent rather than null - fetch the full song for those so
+  // the lyrics section still shows. Rows that carry the field are used as-is.
+  const [fullSong, setFullSong] = useState<JWApiSong | null>(null)
+  useEffect(() => {
+    setFullSong(null)
+    if (!song || song.lyrics !== undefined) return
+    let stale = false
+    getSongById(song.id).then((s) => { if (!stale) setFullSong(s) }).catch(() => {})
+    return () => { stale = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song?.id])
+  const displaySong = overrideSong ?? (fullSong && fullSong.id === song?.id ? fullSong : song)
 
   // "Other versions" - a separate database from juicewrldapi.com (see
   // lib/versionsApi.ts), since that API has no concept of grouping e.g.

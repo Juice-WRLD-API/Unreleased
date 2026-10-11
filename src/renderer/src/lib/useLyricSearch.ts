@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { loadAllSongsAbortable, type JWApiSong } from './juicewrldApi'
+import { loadAllSongsWithLyricsAbortable, type JWApiSong } from './juicewrldApi'
 import { searchLyrics } from './lyricSearch'
 
 const PAGE = 50
@@ -18,7 +18,7 @@ export function useLyricSearch(query: string, fuzzy = true): {
     if (!query.trim()) { setMatches([]); setError(null); setLoading(false); return }
     const ctl = new AbortController()
     setLoading(true); setError(null)
-    loadAllSongsAbortable(ctl.signal)
+    loadAllSongsWithLyricsAbortable(ctl.signal)
       .then((songs) => { setMatches(searchLyrics(songs, query, fuzzy)); setShown(PAGE) })
       .catch((err) => { if (!ctl.signal.aborted) setError(err instanceof Error ? err.message : String(err)) })
       .finally(() => { if (!ctl.signal.aborted) setLoading(false) })

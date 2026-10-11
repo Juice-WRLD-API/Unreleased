@@ -279,14 +279,55 @@ export async function apiFetch<T>(
   })
 }
 
-export const loadAllSongs = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[]>('/songs/', { all: 'true' }))
+// `?omit=` drops fields from every row of /songs/ (comma- or semicolon-
+// separated). Only honoured with ?all=true - paged and search responses
+// ignore it. The two lyrics fields are ~70% of the bulk catalogue (12.9 MB ->
+// 3.5 MB without them) and nothing that fetches in bulk renders them - lyrics
+// are read one song at a time from /songs/{id}/. groupbuy_info isn't read
+// anywhere. Rows fetched with this have the fields *absent* (undefined), not
+// null, which is how SongInfoModal tells a slimmed row from a song that
+// really has no lyrics - so every bulk omit list must include `lyrics`.
+export const OMIT_BULK = 'lyrics,synced_lyrics,groupbuy_info'
 
-// loadAllSongs, but cancellable. A warm or in-flight shared copy is just waited
-// on (it belongs to whoever started it, so the wait stops but the fetch runs
-// on); with none, this makes its own request and the signal really aborts it.
-export function loadAllSongsAbortable(signal?: AbortSignal): Promise<JWApiSong[]> {
-  const shared = loadAllSongs.peek()
-  return shared ? untilAborted(shared, signal) : apiFetch<JWApiSong[]>('/songs/', { all: 'true' }, signal)
+export const loadAllSongs = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[]>('/songs/', { all: 'true', omit: OMIT_BULK }))
+
+// The Tracker's song list: the whole (server-searched) catalogue in one
+// request rather than paging - trimmed with ?omit= it's ~1.2 MB, against
+// ~330 KB per 50-song page that ignores ?omit and still carries lyrics.
+// Category/era filtering happens client-side over it. The offline cache entry
+// is keyed without `omit`, so layout changes (which change `omit`) overwrite
+// one ~1.2M-char entry per search instead of piling up variants, and
+// peekTrackerCatalog can seed the list on open whatever the layout.
+const trackerCatalogKey = (search: string): string =>
+  apiUrl('/songs/', { searchall: search || undefined, all: 'true' })
+
+export function peekTrackerCatalog(search: string): JWApiSong[] | undefined {
+  return cacheGet<JWApiSong[]>(trackerCatalogKey(search))
+}
+
+// Always takes a signal: apiRequest dedupes in-flight GETs by cacheKey, which
+// would hand one `omit` variant's rows to a caller asking for another.
+export function fetchTrackerCatalog(search: string, omit: string, signal: AbortSignal): Promise<JWApiSong[]> {
+  return apiRequest<JWApiSong[]>(apiUrl('/songs/', { searchall: search || undefined, all: 'true', omit }), {
+    signal,
+    cache: 'no-cache',
+    cacheKey: trackerCatalogKey(search),
+    parseError: async (res) => `JW API error ${res.status}`,
+  })
+}
+
+// Lyric search reads plain `lyrics` across the whole catalogue, so it gets its
+// own bulk copy that keeps them - only synced_lyrics (never searched) dropped.
+const ALL_WITH_LYRICS = { all: 'true', omit: 'synced_lyrics' }
+const loadAllSongsWithLyrics = createTtlCache(5 * 60_000, () => apiFetch<JWApiSong[]>('/songs/', ALL_WITH_LYRICS))
+
+// The whole catalogue *with* plain lyrics, cancellable. A warm or in-flight
+// shared copy is just waited on (it belongs to whoever started it, so the wait
+// stops but the fetch runs on); with none, this makes its own request and the
+// signal really aborts it.
+export function loadAllSongsWithLyricsAbortable(signal?: AbortSignal): Promise<JWApiSong[]> {
+  const shared = loadAllSongsWithLyrics.peek()
+  return shared ? untilAborted(shared, signal) : apiFetch<JWApiSong[]>('/songs/', ALL_WITH_LYRICS, signal)
 }
 
 // Shared TTL + in-flight cache for single-song lookups by id. Player's lyrics
@@ -466,6 +507,31 @@ export function smallCoverUrl(url: string | null | undefined): string | undefine
   }
 }
 
+/** A cover at `px` - between smallCoverUrl's fixed 128px and fullCoverUrl's
+ *  1024px, for art drawn as a card rather than a row thumbnail (128px
+ *  stretched across a ~250px card is visibly soft). /files/cover-art/ takes
+ *  `size` directly; /files/download/ ignores it and would serve the original
+ *  whole (a 4000px PNG is ~14MB), so those go through /files/image-thumbnail/.
+ *  GIFs and anything the API can't resize pass through untouched. */
+export function sizedCoverUrl(url: string | null | undefined, px: number): string | undefined {
+  if (!url) return undefined
+  if (!degradable(url) || /\.gif(&|$)/i.test(url)) return url
+  try {
+    if (url.includes('/files/cover-art/')) {
+      const u = new URL(url)
+      u.searchParams.delete('small')
+      u.searchParams.set('size', String(px))
+      return u.toString()
+    }
+    const u = new URL(routeUrl('/files/image-thumbnail/'))
+    new URL(url).searchParams.forEach((v, k) => u.searchParams.set(k, v))
+    u.searchParams.set('size', String(px))
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
 /** Caps a full-size cover at FULL_COVER_SIZE.
  *
  *  /files/cover-art/ already carries `size` from buildCoverArtUrl, but
@@ -577,6 +643,8 @@ export function apiFilePathToTrack(path: string, name?: string, channel?: string
 // /files/browse/'s recursive `search` param (matched against the song's
 // name/original_key) and picks out the .zip results.
 export async function findSessionZips(song: JWApiSong): Promise<JWApiFileEntry[]> {
+  // A Tracker row from a trimmed bulk fetch (?omit=) may not carry original_key.
+  if (song.original_key === undefined) song = await getSongById(song.id).catch(() => song)
   const term = song.original_key || song.name
   if (!term) return []
   const entries = await searchFiles(term)

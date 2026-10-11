@@ -1,6 +1,6 @@
 import { CHAT_API_BASE } from './apiServers'
 import { JWAPI_BASE } from './juicewrldApi'
-import { apiRequest } from './apiClient'
+import { apiRequest, defaultParseError } from './apiClient'
 import { getToken } from './userApi'
 
 export const CHAT_BASE = `${CHAT_API_BASE}/chat`
@@ -500,6 +500,57 @@ export const upsertOverride = (channelId: number, body: { role?: number; member?
 export const deleteOverride = (channelId: number, overrideId: number) =>
   request<void>(`/channels/${channelId}/overrides/${overrideId}/`, json('DELETE'))
 
+// One desired override state. `member` is the ServerMember id (ChatMember.id),
+// not the user id. allow = deny = 0 means "no override" and deletes it.
+export interface OverrideTarget { role?: number; member?: number; allow: number; deny: number }
+
+export const overrideKey = (t: { role?: number | null; member?: number | null }): string =>
+  t.role != null ? `role:${t.role}` : `member:${t.member}`
+
+// Writes one target, upserting or deleting as needed. Returns the saved row
+// (null when it was removed or never existed).
+export async function applyOverride(channelId: number, existing: ChannelOverride | undefined, t: OverrideTarget): Promise<ChannelOverride | null> {
+  if (!t.allow && !t.deny) {
+    if (existing) await deleteOverride(channelId, existing.id)
+    return null
+  }
+  return upsertOverride(channelId, { ...(t.role != null ? { role: t.role } : { member: t.member }), allow: t.allow, deny: t.deny })
+}
+
+// A "whitelisted" channel: @everyone is denied View channels and only the
+// listed roles get it back. Returns null when the channel isn't restricted.
+export function channelWhitelist(overrides: ChannelOverride[], roles: ServerRoleDef[]): number[] | null {
+  const everyone = roles.find((r) => r.is_default)
+  const VIEW = CHAT_PERMISSIONS.view_channels
+  const ev = everyone && overrides.find((o) => o.role === everyone.id)
+  if (!ev || !(ev.deny & VIEW)) return null
+  return overrides.filter((o) => o.role != null && o.role !== everyone.id && (o.allow & VIEW)).map((o) => o.role as number)
+}
+
+// The override writes that turn the whitelist into `roleIds` (null = open the
+// channel back up to everyone). Other permission bits on each row are kept.
+export function planChannelWhitelist(overrides: ChannelOverride[], roles: ServerRoleDef[], roleIds: number[] | null): OverrideTarget[] {
+  const everyone = roles.find((r) => r.is_default)
+  if (!everyone) throw new Error('This server has no @everyone role to restrict')
+  const VIEW = CHAT_PERMISSIONS.view_channels
+  const byRole = new Map(overrides.filter((o) => o.role != null).map((o) => [o.role as number, o]))
+  const plan: OverrideTarget[] = []
+  const push = (role: number, allow: number, deny: number): void => {
+    const cur = byRole.get(role)
+    if ((cur?.allow ?? 0) !== allow || (cur?.deny ?? 0) !== deny) plan.push({ role, allow, deny })
+  }
+  const ev = byRole.get(everyone.id)
+  push(everyone.id, (ev?.allow ?? 0) & ~(roleIds ? VIEW : 0), roleIds ? (ev?.deny ?? 0) | VIEW : (ev?.deny ?? 0) & ~VIEW)
+  const wanted = new Set(roleIds ?? [])
+  for (const r of roles) {
+    if (r.is_default) continue
+    const cur = byRole.get(r.id)
+    if (wanted.has(r.id)) push(r.id, (cur?.allow ?? 0) | VIEW, (cur?.deny ?? 0) & ~VIEW)
+    else if (cur && (cur.allow & VIEW)) push(r.id, cur.allow & ~VIEW, cur.deny)
+  }
+  return plan
+}
+
 // Channels
 export interface ChannelInput {
   name: string
@@ -641,57 +692,93 @@ export const listBackupEntries = (after?: number) =>
 // Uploads
 // Files up to the threshold go in one request; anything larger is sent as
 // chunks, each retried on its own so a flaky connection doesn't restart it.
-export async function uploadChatFile(file: Blob, name: string): Promise<UploadedFile> {
+// Both go over XHR rather than fetch, since fetch can't report upload progress.
+export interface ChatUploadOptions {
+  /** Cumulative bytes of `file` sent so far, out of `file.size`. */
+  onProgress?: (sent: number, total: number) => void
+  signal?: AbortSignal
+}
+
+export async function uploadChatFile(file: Blob, name: string, opts: ChatUploadOptions = {}): Promise<UploadedFile> {
   if (file.size > MAX_CHAT_UPLOAD_BYTES) {
     throw new Error(`"${name}" is larger than ${MAX_CHAT_UPLOAD_BYTES / (1024 * 1024)} MB`)
   }
-  if (file.size > CHAT_CHUNK_THRESHOLD) return uploadChatFileChunked(file, name)
+  if (file.size > CHAT_CHUNK_THRESHOLD) return uploadChatFileChunked(file, name, opts)
   const form = new FormData()
   form.append('file', file, name)
-  return apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/`, {
-    method: 'POST',
-    headers: authHeaders(getToken()),
-    body: form,
+  const res = await xhrUpload<UploadedFile>(`${CHAT_BASE}/uploads/`, form, opts.signal,
+    (loaded, total) => opts.onProgress?.(Math.min(file.size, Math.round((loaded / total) * file.size)), file.size))
+  opts.onProgress?.(file.size, file.size)
+  return res
+}
+
+// Rejects the way apiRequest does - a TypeError for a network failure, an
+// Error carrying the parsed detail for an HTTP rejection - so withChunkRetry
+// can tell them apart. A cancel rejects with an AbortError, which it won't retry.
+function xhrUpload<T>(url: string, body: FormData, signal: AbortSignal | undefined, onProgress?: (loaded: number, total: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException('Upload cancelled', 'AbortError')); return }
+    const xhr = new XMLHttpRequest()
+    const onAbort = (): void => xhr.abort()
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const settle = (): void => signal?.removeEventListener('abort', onAbort)
+    xhr.open('POST', url)
+    for (const [k, v] of Object.entries(authHeaders(getToken()))) xhr.setRequestHeader(k, v)
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded, e.total) }
+    xhr.onerror = () => { settle(); reject(new TypeError('Network error during upload')) }
+    xhr.onabort = () => { settle(); reject(new DOMException('Upload cancelled', 'AbortError')) }
+    xhr.onload = () => {
+      settle()
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve((xhr.responseText ? JSON.parse(xhr.responseText) : undefined) as T) } catch (err) { reject(err) }
+        return
+      }
+      void defaultParseError(new Response(xhr.responseText, { status: xhr.status })).then((msg) => reject(new Error(msg)))
+    }
+    xhr.send(body)
   })
 }
 
 const CHUNK_RETRIES = 3
 
-async function withChunkRetry<T>(run: () => Promise<T>): Promise<T> {
+async function withChunkRetry<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await run()
     } catch (err) {
       // A thrown Error from apiRequest is an HTTP rejection (bad chunk, expired
       // upload) and won't improve on retry; only a network-level TypeError will.
-      if (!(err instanceof TypeError) || attempt >= CHUNK_RETRIES) throw err
+      if (!(err instanceof TypeError) || attempt >= CHUNK_RETRIES || signal?.aborted) throw err
       await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt))
     }
   }
 }
 
-export async function uploadChatFileChunked(file: Blob, name: string): Promise<UploadedFile> {
+export async function uploadChatFileChunked(file: Blob, name: string, opts: ChatUploadOptions = {}): Promise<UploadedFile> {
+  const { signal, onProgress } = opts
   const init = await withChunkRetry(() => apiRequest<{ upload_id: string; chunk_size: number; total_chunks: number }>(
     `${CHAT_BASE}/uploads/chunked/init/`,
     { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
-      body: JSON.stringify({ filename: name, total_size: file.size, mime: file.type }) },
-  ))
+      body: JSON.stringify({ filename: name, total_size: file.size, mime: file.type }), signal },
+  ), signal)
   const chunkSize = init.chunk_size
   for (let i = 0; i < init.total_chunks; i++) {
+    const start = i * chunkSize
+    const chunk = file.slice(start, Math.min(file.size, start + chunkSize))
     await withChunkRetry(() => {
       const form = new FormData()
       form.append('upload_id', init.upload_id)
       form.append('chunk_index', String(i))
-      form.append('chunk', file.slice(i * chunkSize, Math.min(file.size, (i + 1) * chunkSize)), `${name}.part.${i}`)
-      return apiRequest(`${CHAT_BASE}/uploads/chunked/chunk/`, {
-        method: 'POST', headers: authHeaders(getToken()), body: form,
-      })
-    })
+      form.append('chunk', chunk, `${name}.part.${i}`)
+      return xhrUpload(`${CHAT_BASE}/uploads/chunked/chunk/`, form, signal,
+        (loaded, total) => onProgress?.(start + Math.min(chunk.size, Math.round((loaded / total) * chunk.size)), file.size))
+    }, signal)
+    onProgress?.(start + chunk.size, file.size)
   }
   return withChunkRetry(() => apiRequest<UploadedFile>(`${CHAT_BASE}/uploads/chunked/complete/`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders(getToken()) },
-    body: JSON.stringify({ upload_id: init.upload_id }),
-  }))
+    body: JSON.stringify({ upload_id: init.upload_id }), signal,
+  }), signal)
 }
 
 export function chatAttachmentUrl(id: number, opts: { download?: boolean } = {}): string {

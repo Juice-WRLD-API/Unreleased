@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import React, { useEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -107,7 +107,7 @@ const DiagnosticsModal = lazyView(() => import('./components/DiagnosticsModal'))
 const TerminalPage = lazyView(() => import('./components/TerminalPage'))
 const TrackView = lazyView(() => import('./components/TrackView'))
 const ThankYouView = lazyView(() => import('./components/ThankYouView'))
-const LoginApprovalPrompt = lazy(() => import('./components/LoginApprovalPrompt'))
+const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 
 function WindowControls(): JSX.Element {
   const [maximized, setMaximized] = React.useState(false)

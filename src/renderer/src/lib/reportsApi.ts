@@ -61,6 +61,30 @@ export async function listFeedback(automated?: boolean): Promise<FeedbackRow[]> 
   return Array.isArray(data) ? data : (data?.results ?? [])
 }
 
+// Automated crash reports repeat whenever the same bug hits many people, and
+// no two are byte-identical (URL, user agent and stack paths vary), so they're
+// grouped by their first line - "Crash: <error message>" once the "[Bug] "
+// prefix is stripped. Rows keep their order (newest first), so each group is
+// represented by its most recent report; `extra` counts the hidden ones.
+// Human feedback is never collapsed.
+function feedbackDupeKey(message: string): string {
+  return message.replace(/^\[[^\]\n]{1,24}\]\s*/, '').trim().split('\n', 1)[0].trim()
+}
+
+export function dedupeAutomatedFeedback(rows: FeedbackRow[]): { rows: FeedbackRow[]; extra: Map<number, number> } {
+  const firstByKey = new Map<string, number>()
+  const extra = new Map<number, number>()
+  const kept: FeedbackRow[] = []
+  for (const r of rows) {
+    if (!r.automated) { kept.push(r); continue }
+    const key = feedbackDupeKey(r.message)
+    const first = firstByKey.get(key)
+    if (first === undefined) { firstByKey.set(key, r.id); kept.push(r) }
+    else extra.set(first, (extra.get(first) ?? 0) + 1)
+  }
+  return { rows: kept, extra }
+}
+
 // ── Editor review ─────────────────────────────────────────────────────────────
 // GET /juicewrld/reports/ (?status=pending|resolved) lists submitted song
 // reports; PATCH /juicewrld/reports/<id>/ sets status/review_notes and the
