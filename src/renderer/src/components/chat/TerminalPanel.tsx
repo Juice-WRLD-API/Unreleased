@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { X } from 'lucide-react'
+import { IS_ELECTRON, ELECTRON_TITLEBAR_CLEARANCE_X } from '../../lib/platform'
 import { findChatCommand } from '../../lib/chatHelp'
 import { hasChatAccess } from '../../lib/chatAccess'
 import { canRun, chatCommandsFor, moderationChatCommandsFor, plainChatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
@@ -1073,7 +1074,9 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       style={{ fontFamily: MONO, ...termThemeVars(theme) }}
       aria-label="Terminal"
     >
-      <header className="h-9 shrink-0 flex items-center gap-3 px-3 bg-[var(--t-bar)] border-b border-[color:var(--t-border)] text-[11px] text-[color:var(--t-dim)]">
+      <header className="h-9 shrink-0 flex items-center gap-3 px-3 bg-[var(--t-bar)] border-b border-[color:var(--t-border)] text-[11px] text-[color:var(--t-dim)]"
+        // The desktop window controls (and downloads button) float over the top-right corner.
+        style={IS_ELECTRON ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
         <span className="flex gap-1.5" aria-hidden>
           <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
           <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
