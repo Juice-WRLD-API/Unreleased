@@ -1,6 +1,6 @@
 {
   "name": "unreleased",
-  "version": "2.1.0",
+  "version": "2.3.2",
   "description": "A music player for Juice WRLD",
   "scripts": {
     "dev": "vite --port 5173 --strictPort --host",

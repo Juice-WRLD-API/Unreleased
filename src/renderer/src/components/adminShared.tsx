@@ -1,6 +1,6 @@
 // Small UI pieces shared between AdminPage's tabs and ReportsTab (the latter
 // is also embedded standalone in EditorProfileView for editor-only accounts).
-import { useState, memo } from 'react'
+import { useState, useMemo, memo } from 'react'
 import { Search, X as XIcon, Copy, Check, Minus, Plus } from 'lucide-react'
 import type { SongEditProposal } from '../lib/userApi'
 
@@ -173,6 +173,29 @@ function renderValue(v: unknown): string {
 
 const LONG_KEYS = new Set(['lyrics', 'synced_lyrics', 'description', 'notes', 'additional_information'])
 const LONG_THRESHOLD = 200
+// Upper bound on what one side of one field puts on screen, collapsed or not.
+const HARD_CAP_CHARS = 20_000
+const HARD_CAP_LINES = 400
+
+/** The visible slice of a field value as one string, plus how many lines were
+ *  left off. Walks newlines with indexOf instead of split('\n') so a multi-MB
+ *  value is never exploded into an array just to show its first few lines. */
+function clipText(s: string, expanded: boolean, collapsedLines: number): { text: string; hidden: number } {
+  const maxLines = expanded ? HARD_CAP_LINES : collapsedLines
+  let end = 0
+  let lines = 0
+  while (lines < maxLines) {
+    const nl = s.indexOf('\n', end)
+    lines++
+    if (nl === -1) { end = s.length; break }
+    end = nl + 1
+  }
+  if (end > HARD_CAP_CHARS) end = HARD_CAP_CHARS
+  if (end >= s.length) return { text: s, hidden: 0 }
+  let hidden = 1
+  for (let i = s.indexOf('\n', end); i !== -1; i = s.indexOf('\n', i + 1)) hidden++
+  return { text: s.slice(0, end).replace(/\n$/, ''), hidden }
+}
 
 export function FieldDiff({ fieldKey, before, after, stacked = false }: {
   fieldKey: string; before: unknown; after: unknown
@@ -187,14 +210,12 @@ export function FieldDiff({ fieldKey, before, after, stacked = false }: {
   const [exp, setExp] = useState(!isLong || fieldKey === 'synced_lyrics')
   const MAX = fieldKey === 'synced_lyrics' ? 60 : 8
 
-  const sliceLong = (s: string) => {
-    const lines = s.split('\n')
-    if (exp || lines.length <= MAX) return { lines, clipped: false }
-    return { lines: lines.slice(0, MAX), clipped: true, total: lines.length }
-  }
-
-  const b = sliceLong(beforeStr)
-  const a = sliceLong(afterStr)
+  // Each side is ONE <pre> text node, never one element per line: a lyrics or
+  // LRC proposal runs to thousands of lines, and two columns of per-line
+  // elements mounted in a single synchronous render can lock the machine up.
+  // The copy buttons always carry the full untruncated value.
+  const b = useMemo(() => clipText(beforeStr, exp, MAX), [beforeStr, exp, MAX])
+  const a = useMemo(() => clipText(afterStr, exp, MAX), [afterStr, exp, MAX])
   const hasBefore = before !== undefined && !unchanged
   const sideBySide = hasBefore && !unchanged
 
@@ -229,11 +250,9 @@ export function FieldDiff({ fieldKey, before, after, stacked = false }: {
               <CopyButton text={beforeStr} label={`${fieldKey} (before)`} />
             </div>
             <div className="px-3 py-2">
-              {b.lines.map((line, i) => (
-                <pre key={i} className="font-mono text-red-500 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-              ))}
-              {'clipped' in b && b.clipped && (
-                <p className="text-[9px] text-red-400 italic mt-1">+{(b as { total?: number }).total! - MAX} more lines</p>
+              <pre className="font-mono text-red-500 whitespace-pre-wrap break-words leading-relaxed">{b.text}</pre>
+              {b.hidden > 0 && (
+                <p className="text-[9px] text-red-400 italic mt-1">+{b.hidden} more lines (copy for the full value)</p>
               )}
             </div>
           </div>
@@ -246,11 +265,9 @@ export function FieldDiff({ fieldKey, before, after, stacked = false }: {
               <CopyButton text={afterStr} label={`${fieldKey} (after)`} />
             </div>
             <div className="px-3 py-2">
-              {a.lines.map((line, i) => (
-                <pre key={i} className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-              ))}
-              {'clipped' in a && a.clipped && (
-                <p className="text-[9px] text-emerald-500 italic mt-1">+{(a as { total?: number }).total! - MAX} more lines</p>
+              <pre className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{a.text}</pre>
+              {a.hidden > 0 && (
+                <p className="text-[9px] text-emerald-500 italic mt-1">+{a.hidden} more lines (copy for the full value)</p>
               )}
             </div>
           </div>
@@ -266,9 +283,10 @@ export function FieldDiff({ fieldKey, before, after, stacked = false }: {
             <CopyButton text={afterStr} label={fieldKey} />
           </div>
           <div className="px-3 py-2">
-            {a.lines.map((line, i) => (
-              <pre key={i} className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{line || ' '}</pre>
-            ))}
+            <pre className="font-mono text-emerald-600 whitespace-pre-wrap break-words leading-relaxed">{a.text}</pre>
+            {a.hidden > 0 && (
+              <p className="text-[9px] text-emerald-500 italic mt-1">+{a.hidden} more lines (copy for the full value)</p>
+            )}
           </div>
         </div>
       )}
@@ -277,7 +295,7 @@ export function FieldDiff({ fieldKey, before, after, stacked = false }: {
       {unchanged && (
         <div className="px-3 py-2">
           <pre className="font-mono text-text-muted whitespace-pre-wrap break-words leading-relaxed">
-            {exp ? afterStr : afterStr.slice(0, 120) + (afterStr.length > 120 ? '…' : '')}
+            {exp ? a.text : afterStr.slice(0, 120) + (afterStr.length > 120 ? '…' : '')}
           </pre>
         </div>
       )}
