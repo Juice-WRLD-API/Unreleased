@@ -110,9 +110,15 @@ export default function Sidebar(): JSX.Element {
     e.preventDefault()
     const t = getToken()
     if (!t) return
-    navigator.clipboard.writeText(t)
-    setTokenCopied(true)
-    setTimeout(() => setTokenCopied(false), 1500)
+    // A right-click isn't a user-activation gesture, so navigator.clipboard
+    // has to ask for clipboard-write — which main.js's deny-all permission
+    // handler refuses. Use the native clipboard bridge on Electron instead.
+    const el = (window as any).electron
+    const write: Promise<unknown> = el?.copyTextToClipboard ? el.copyTextToClipboard(t) : navigator.clipboard.writeText(t)
+    write.then(() => {
+      setTokenCopied(true)
+      setTimeout(() => setTokenCopied(false), 1500)
+    }).catch((err: unknown) => console.error('[copy token] failed:', err))
   }
 
   // Order + which tabs appear both come from Settings → Appearance → Menu
