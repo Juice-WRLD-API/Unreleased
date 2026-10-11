@@ -5,6 +5,7 @@ import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, ELECTRON_TITLEBAR_CLEARANCE_X } from './lib/platform'
 import { applySeo } from './lib/seo'
 import { lazyView } from './lib/lazyView'
+import { hasChatAccess } from './lib/chatAccess'
 import { ViewType } from './types'
 
 // Views that stay mounted (hidden) underneath the terminal so their local
@@ -253,6 +254,18 @@ export default function App(): JSX.Element {
   // making at that same moment. Overlap with those is still free — apiRequest
   // dedupes identical in-flight GETs.
   useEffect(() => runWhenIdle(() => { prefetchApiData() }), [prefetchApiData])
+
+  // Warm the Settings chunk (and Chat's, for staff) so the first open doesn't
+  // wait on loading and parsing it. Scheduled at a longer idle timeout than
+  // the data prefetch above so it queues behind it. Re-running the same
+  // import() is free - the module is already cached - so this needs no
+  // once-only guard, and a failed warm-up is swallowed: the real open still
+  // goes through lazyView's retry.
+  useEffect(() => runWhenIdle(() => { import('./components/Settings').catch(() => {}) }, 4000), [])
+  const chatAllowed = useStore((s) => hasChatAccess(s.account))
+  useEffect(() => {
+    if (chatAllowed) return runWhenIdle(() => { import('./components/ChatView').catch(() => {}) }, 4000)
+  }, [chatAllowed])
 
   // Warm the local library into the store during idle after boot, so the first
   // Library/Playlists open is instant instead of paying a cold disk read + IPC.
