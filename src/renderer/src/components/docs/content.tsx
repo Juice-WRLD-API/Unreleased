@@ -1543,6 +1543,59 @@ Authorization: Token <token>`}</Pre>
 { "otp_token": "123456" }
 // Response: { "otp_enabled": true }`}</Pre>
       </Section>
+
+      <Section title="API Keys" defaultOpen={false}>
+        <p className="text-xs text-text-muted">
+          Named keys for scripts and integrations. A key acts as its owner, limited by its scopes, and never raises the account's
+          role. Send it as <Code>X-API-Key: jwapi_…</Code> or <Code>Authorization: ApiKey jwapi_…</Code> (<Code>X-API-Key</Code> is
+          checked first). An unknown, revoked or inactive key returns <Code>401 "Invalid API key."</Code>
+        </p>
+        <Table
+          headers={['Scope', 'GET / HEAD / OPTIONS', 'POST / PATCH / PUT / DELETE', 'Admin routes']}
+          rows={[
+            ['read', 'Yes', '403', '403'],
+            ['write', 'Yes', 'Yes', '403'],
+            ['admin', 'Yes', 'Yes', "Yes, if the user's role already allows it"],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Managing keys needs a session <Code>Authorization: Token</Code> and rejects API keys, so a leaked key can't mint more. Up to 25
+          keys per user. The secret is returned once, on create; after that only <Code>key_prefix</Code> identifies the key.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', '/accounts/account/api-keys/', 'List keys (never includes the secret)'],
+            ['POST', '/accounts/account/api-keys/', 'Create: name (1-100 chars) + non-empty scopes (read / write / admin)'],
+            ['PATCH', '/accounts/account/api-keys/{id}/', 'Any of name, scopes, is_active - is_active: false revokes but keeps the row'],
+            ['DELETE', '/accounts/account/api-keys/{id}/', 'Remove the key'],
+          ]}
+        />
+        <Pre>{`// GET response
+{
+  "keys": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "Discord bot",
+      "key_prefix": "jwapi_a1b2c3d4",
+      "scopes": ["read", "write"],
+      "is_active": true,
+      "last_used_at": "2026-10-10T18:30:00+00:00",
+      "created_at": "2026-10-01T12:00:00+00:00"
+    }
+  ]
+}
+
+// POST 201 - the list-item fields plus, this one time only:
+{
+  "key": "jwapi_<full-secret-string>",
+  "message": "Store this API key now. It will not be shown again."
+}
+
+// DELETE -> { "detail": "API key deleted." }
+// Wrong id / another user's key -> 404 { "detail": "API key not found." }
+// Bad name/scopes or a 26th key -> 400 ("Maximum of 25 API keys per user.")`}</Pre>
+      </Section>
     </div>
   )
 }

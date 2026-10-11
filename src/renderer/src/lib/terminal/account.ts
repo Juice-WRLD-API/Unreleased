@@ -4,6 +4,7 @@ import {
   compressImageFile, decideLoginApproval, getDiscordAuthUrl, getFavorites, getMe, getOtpSetup, listLoginApprovals, pollLoginApproval,
   confirmOtpSetup, removeAvatar, requestLoginApproval, updateAvatar, updateBio, updateDisplayName,
   updateNowPlaying, updatePrivacySettings, updateUserSettings, discordRedirectUri, type AccountUser,
+  API_KEY_SCOPES, createApiKey, isManagerAnywhere, deleteApiKey, listApiKeys, updateApiKey, type ApiKeyScope, type UserApiKey,
 } from '../userApi'
 import { relativeTime } from '../../components/adminShared'
 import { pickLocalFile } from './pick'
@@ -63,6 +64,40 @@ function describeMe(a: AccountUser): string {
     `public      history ${a.public_play_history ? 'on' : 'off'} · playlists ${a.public_playlists ? 'on' : 'off'} · now playing ${a.public_now_playing ? 'on' : 'off'}`,
   ].join('\n')
 }
+
+// `read,write` -> validated scope list in canonical order. Like the Settings
+// picker, `admin` is only for administrators and managers - unless the key
+// already has it (`had`), so changing other scopes doesn't trip on it.
+function parseScopes(raw: string | undefined, had: ApiKeyScope[] = []): ApiKeyScope[] {
+  const a = signedIn()
+  const staff = a.is_administrator || isManagerAnywhere(a)
+  const allowed = API_KEY_SCOPES.filter((sc) => sc !== 'admin' || staff || had.includes('admin'))
+  const words = (raw ?? '').toLowerCase().split(/[\s,]+/).filter(Boolean)
+  const bad = words.filter((w) => !allowed.includes(w as ApiKeyScope))
+  if (bad.length) {
+    fail(bad.length === 1 && bad[0] === 'admin'
+      ? 'the admin scope is only for administrators and managers'
+      : `unknown scope ${bad.join(', ')} (${allowed.join(', ')})`)
+  }
+  if (words.length === 0) fail(`pick at least one scope: ${allowed.join(', ')}`)
+  return API_KEY_SCOPES.filter((sc) => words.includes(sc))
+}
+
+// A key by full id, id prefix, key prefix or exact name.
+async function findApiKey(ref: string | undefined): Promise<UserApiKey> {
+  if (!ref) return fail('which key? (id, prefix or name - see apikeys)')
+  const keys = await listApiKeys()
+  const lower = ref.toLowerCase()
+  const hits = keys.filter((k) => k.id === ref || k.key_prefix === ref || k.name.toLowerCase() === lower)
+  const pool = hits.length ? hits : keys.filter((k) => k.id.startsWith(lower) || k.key_prefix.startsWith(ref))
+  if (pool.length === 1) return pool[0]
+  return fail(pool.length ? `${ref} matches ${pool.length} keys - use more of the id` : `no API key matches ${ref}`)
+}
+
+const apiKeyLine = (k: UserApiKey): string[] => [
+  k.id.slice(0, 8), k.name, `${k.key_prefix}…`, k.scopes.join(','), k.is_active ? 'active' : 'revoked',
+  k.last_used_at ? `used ${relativeTime(k.last_used_at)}` : 'never used',
+]
 
 const PRIVACY_KEYS: Record<string, 'public_play_history' | 'public_playlists' | 'public_now_playing'> = {
   history: 'public_play_history', playlists: 'public_playlists', nowplaying: 'public_now_playing',
@@ -225,6 +260,65 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
       if ((verb !== 'approve' && verb !== 'deny') || !id) fail('usage: approvals [approve <id> | deny <id>]')
       await decideLoginApproval(id, verb as 'approve' | 'deny')
       ctx.print(`${verb === 'approve' ? 'approved' : 'denied'} ${id}`, 'ok')
+    },
+  },
+  {
+    name: 'apikeys', aliases: ['apikey'], group: 'Account',
+    usage: 'apikeys [ls] [--json] | new <name> [--scopes read,write,admin] | rename <key> <name> | scopes <key> <read,write,admin> | revoke <key> | restore <key> | rm <key> [-y]',
+    description: 'API keys for scripts and integrations. The secret is shown once, when the key is made. <key> is an id, id prefix, key prefix or name',
+    covers: ['userApi.listApiKeys', 'userApi.createApiKey', 'userApi.updateApiKey', 'userApi.deleteApiKey'],
+    complete: (before, partial) => (before.length === 0 ? ['ls', 'new', 'rename', 'scopes', 'revoke', 'restore', 'rm'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
+    run: async (args, ctx) => {
+      signedIn()
+      const { rest, bool, value } = parseArgs(args, ['scopes'])
+      const sub = (rest.shift() ?? 'ls').toLowerCase()
+      if (sub === 'ls' || sub === 'list') {
+        const keys = await listApiKeys()
+        if (asJson(ctx, bool.has('json'), keys)) return
+        if (keys.length === 0) { ctx.print('no API keys yet (apikeys new <name>)', 'dim'); return }
+        ctx.print(table(keys.map(apiKeyLine)))
+        return
+      }
+      if (sub === 'new' || sub === 'create') {
+        const name = rest.join(' ').trim()
+        if (!name) fail('usage: apikeys new <name> [--scopes read,write,admin]')
+        const k = await createApiKey(name, parseScopes(value.get('scopes') ?? 'read'))
+        ctx.print([
+          `created ${k.name} (${k.scopes.join(', ')})`,
+          `key  ${k.key}`,
+          k.message || 'Store this API key now. It will not be shown again.',
+        ].join('\n'), 'ok')
+        return
+      }
+      if (sub === 'rename') {
+        const k = await findApiKey(rest.shift())
+        const name = rest.join(' ').trim()
+        if (!name) fail('usage: apikeys rename <key> <name>')
+        await updateApiKey(k.id, { name })
+        ctx.print(`renamed ${k.name} to ${name}`, 'ok')
+        return
+      }
+      if (sub === 'scopes') {
+        const k = await findApiKey(rest.shift())
+        const scopes = parseScopes(rest.join(','), k.scopes)
+        await updateApiKey(k.id, { scopes })
+        ctx.print(`${k.name} scopes: ${scopes.join(', ')}`, 'ok')
+        return
+      }
+      if (sub === 'revoke' || sub === 'restore') {
+        const k = await findApiKey(rest.join(' '))
+        await updateApiKey(k.id, { is_active: sub === 'restore' })
+        ctx.print(`${sub === 'restore' ? 'restored' : 'revoked'} ${k.name}`, 'ok')
+        return
+      }
+      if (sub === 'rm' || sub === 'delete') {
+        const k = await findApiKey(rest.join(' '))
+        if (!confirmAction(ctx, `Delete API key ${k.name} for good?`, bool.has('y'))) return
+        await deleteApiKey(k.id)
+        ctx.print(`deleted ${k.name}`, 'ok')
+        return
+      }
+      fail('usage: apikeys [ls | new | rename | scopes | revoke | restore | rm]')
     },
   },
   {
