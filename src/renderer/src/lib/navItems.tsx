@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Download, Gamepad2, HardDrive, Heart, Home, House, Info, Library, ListMusic, LogOut, Newspaper, SearchCode, Settings, Shield, SquareTerminal, Upload, User } from 'lucide-react'
+import { AudioWaveform, BarChart3, BookOpen, Download, Gamepad2, HardDrive, Heart, Home, House, Info, Library, ListMusic, LogOut, Newspaper, SearchCode, Settings, Shield, SquareTerminal, Upload, User } from 'lucide-react'
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
@@ -50,6 +50,9 @@ export const NAV_ITEMS: NavItemDef[] = [
   // Same as Games: hidden from mobile entirely, since Home's own Playlists
   // section is the real mobile entry point now.
   { view: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
+  // Arrange studio-session takes into a new song. Desktop only - it's a
+  // timeline editor (see MOBILE_HIDDEN_VIEWS in useMobileNavTabs).
+  { view: 'session-maker', label: 'Sessions', icon: <AudioWaveform size={18} /> },
   { view: 'chat', label: 'Chat', icon: <ChatNavIcon size={18} />, staffOnly: true },
   // Off by default, addable from Settings → Menu items - same as Liked/Docs
   // below. (No mobileOverflow: that flag forces a tab into the "More" sheet

@@ -28,6 +28,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/heardle') return 'heardle'
   if (pathname === '/wordle') return 'wordle'
   if (pathname === '/tierlist') return 'tierlist'
+  if (pathname === '/session-maker') return 'session-maker'
   if (pathname === '/stats' || pathname === '/wrapped') return 'stats'
   if (pathname === '/thank-you') return 'thanks'
   if (pathname === '/statistics') return 'statistics'
@@ -94,6 +95,7 @@ const NewsView = lazyView(() => import('./components/NewsView'))
 const HeardleView = lazyView(() => import('./components/HeardleView'))
 const WordleView = lazyView(() => import('./components/WordleView'))
 const TierlistView = lazyView(() => import('./components/TierlistView'))
+const SessionMakerView = lazyView(() => import('./components/SessionMakerView'))
 const StatsView = lazyView(() => import('./components/StatsView'))
 const StatisticsView = lazyView(() => import('./components/StatisticsView'))
 const PublicProfileView = lazyView(() => import('./components/PublicProfileView'))
@@ -355,6 +357,7 @@ export default function App(): JSX.Element {
               : activeView === 'heardle' ? <HeardleView />
               : activeView === 'wordle' ? <WordleView />
               : activeView === 'tierlist' ? <TierlistView />
+              : activeView === 'session-maker' ? <SessionMakerView />
               : activeView === 'stats' ? <StatsView />
               : activeView === 'statistics' ? <StatisticsView />
               : activeView === 'public-profile' ? <PublicProfileView />

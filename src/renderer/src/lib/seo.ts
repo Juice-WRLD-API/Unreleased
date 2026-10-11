@@ -71,6 +71,12 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     description:
       'Build a tier list of Juice WRLD songs, released and unreleased. Drag tracks into S through D tiers and save your ranking.',
   },
+  'session-maker': {
+    path: '/session-maker',
+    title: 'Session Maker - arrange Juice WRLD studio sessions',
+    description:
+      'Open a Juice WRLD studio session in your browser, line the vocal takes up over the beat, and arrange your own version of the song.',
+  },
   docs: {
     path: '/docs',
     title: 'Docs',

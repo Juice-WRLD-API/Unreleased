@@ -21,6 +21,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   heardle: () => import('../components/HeardleView'),
   wordle: () => import('../components/WordleView'),
   tierlist: () => import('../components/TierlistView'),
+  'session-maker': () => import('../components/SessionMakerView'),
   stats: () => import('../components/StatsView'),
   statistics: () => import('../components/StatisticsView'),
   'public-profile': () => import('../components/PublicProfileView'),

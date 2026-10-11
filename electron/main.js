@@ -3367,7 +3367,16 @@ app.whenReady().then(() => {
   // notifications/media/geolocation/etc. granted to loaded web content, and
   // Electron's built-in default handler grants most of them — this closes
   // that gap explicitly rather than relying on the default.
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+  // The one exception is clipboard *write* for the app's own pages: every
+  // renderer copy button uses navigator.clipboard.writeText, which asks for
+  // 'clipboard-sanitized-write' and silently failed under the blanket deny.
+  // Clipboard read stays denied, as does anything from another origin.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (permission === 'clipboard-sanitized-write') {
+      const url = webContents.getURL()
+      callback(isDev ? url.startsWith('http://localhost:3018/') : url.startsWith('file://'))
+      return
+    }
     callback(false)
   })
 

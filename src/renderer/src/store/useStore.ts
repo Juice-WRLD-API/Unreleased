@@ -1499,6 +1499,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'heardle': '/heardle',
       'wordle': '/wordle',
       'tierlist': '/tierlist',
+      'session-maker': '/session-maker',
       'stats': '/wrapped',
       'statistics': '/statistics',
       'download': '/download',

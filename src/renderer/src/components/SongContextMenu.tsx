@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2, Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2, Layers,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2, Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2, Layers, AudioWaveform,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -16,6 +16,8 @@ import { versionsEnabled } from '../lib/versionsApi'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
 import { downloadFileSmart } from '../lib/cdn'
+import { requestOpenSession } from '../lib/sessionMakerOpen'
+import { isMobileViewport } from '../hooks/useIsMobile'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const ShareSongModal = lazyOverlay(() => import('./chat/ShareSongModal'))
@@ -138,6 +140,9 @@ export default function SongContextMenu({
   // to a pick-one page.
   const [zipCandidates, setZipCandidates] = useState<JWApiFileEntry[] | null>(null)
   const [zipPage, setZipPage] = useState(false)
+  // The candidate page serves both "Download session" and "Open in Session Maker".
+  const [zipMode, setZipMode] = useState<'download' | 'open'>('download')
+  const [smLoading, setSmLoading] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [doneId, setDoneId] = useState<number | null>(null)
@@ -198,8 +203,31 @@ export default function SongContextMenu({
     } catch {} finally { setBusyId(null) }
   }
 
+  const openInSessionMaker = (zipPath: string): void => {
+    requestOpenSession(zipPath)
+    useStore.getState().setActiveView('session-maker')
+    onClose()
+  }
+
+  const findForSessionMaker = async (): Promise<void> => {
+    if (smLoading || !song) return
+    setSmLoading(true)
+    try {
+      const candidates = await findSessionZips(song)
+      if (candidates.length === 1) { openInSessionMaker(candidates[0].path); return }
+      setZipCandidates(candidates)
+    } catch {
+      setZipCandidates([])
+    } finally {
+      setSmLoading(false)
+    }
+    setZipMode('open')
+    setZipPage(true)
+  }
+
   const loadSessionZips = async (): Promise<void> => {
     if (zipLoading || !song) return
+    setZipMode('download')
     setZipLoading(true)
     try {
       const candidates = await findSessionZips(song)
@@ -306,6 +334,7 @@ export default function SongContextMenu({
       )
 
   const showZip = ZIP_OPERATIONS_ENABLED && !!song && !track.path && track.genre === 'recording_session'
+  const showSessionMaker = !!song && track.genre === 'recording_session' && !isMobileViewport()
   const showSessionLink = !!song && !!canLinkSessionFile && track.genre === 'recording_session' && !!onLinkSessionFile
   const canDownload = !!track.path && !isLocalOnly
 
@@ -321,11 +350,13 @@ export default function SongContextMenu({
       zIndex={9999}
       className="w-52"
       page={zipPage ? {
-        title: 'Download session',
+        title: zipMode === 'open' ? 'Open in Session Maker' : 'Download session',
         onBack: () => setZipPage(false),
         note: zipCandidates && zipCandidates.length > 0 ? 'Multiple matches found - pick one:' : undefined,
         empty: 'No matching ZIP found for this session.',
-        items: (zipCandidates ?? []).map(c => ({ label: c.name, icon: PackageOpen, onSelect: () => downloadZipEntry(c) })),
+        items: (zipCandidates ?? []).map(c => zipMode === 'open'
+          ? { label: c.name, icon: AudioWaveform, onSelect: () => openInSessionMaker(c.path) }
+          : { label: c.name, icon: PackageOpen, onSelect: () => downloadZipEntry(c) }),
       } : null}
       items={[
         onPlay && canQueue && { icon: ListEnd, label: 'Play', onSelect: onPlay },
@@ -378,7 +409,15 @@ export default function SongContextMenu({
             />
           ),
         },
-        showZip && 'divider',
+        (showZip || showSessionMaker) && 'divider',
+        showSessionMaker && {
+          icon: AudioWaveform,
+          label: smLoading ? 'Finding session…' : 'Open in Session Maker',
+          loading: smLoading,
+          disabled: smLoading,
+          keepOpen: true,
+          onSelect: findForSessionMaker,
+        },
         showZip && {
           icon: PackageOpen,
           label: zipLoading ? 'Finding files…' : 'Download session (ZIP)',
