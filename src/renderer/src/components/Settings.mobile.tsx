@@ -165,7 +165,6 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
-  { tab: 'about', label: 'Credits' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -1851,10 +1850,6 @@ export default function Settings(): JSX.Element {
                       )}
                     </div>
                   ))}
-                </SettingsCard>
-
-                <SettingsCard title="Credits">
-                  <p className="py-3 text-xs leading-relaxed text-text-secondary">X, saint, Q_scal, xig, bleed</p>
                 </SettingsCard>
               </div>
             )}
