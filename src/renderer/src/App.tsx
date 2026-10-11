@@ -5,6 +5,7 @@ import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, isStandalonePWA } from './lib/platform'
 import { applySeo } from './lib/seo'
 import { orderedNavItems, isNavItemVisible } from './lib/navItems'
+import { hasChatAccess } from './lib/chatAccess'
 import { useIsMobile, isMobileViewport } from './hooks/useIsMobile'
 import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
@@ -240,13 +241,20 @@ export default function App(): JSX.Element {
   // Driven by the user's own menu (order + show/hide), not a fixed list: a
   // tab they've hidden isn't somewhere they navigate, so downloading it would
   // be pure waste. Capped, and skipped entirely on Data Saver / 2G - see
-  // preloadView. The active view is already loaded by definition.
+  // preloadView. The active view is already loaded by definition. Staff-only
+  // tabs (Chat) count once the account resolves as staff, same as the Sidebar.
+  const chatAllowed = useStore((s) => hasChatAccess(s.account))
   useEffect(() => runWhenIdle(() => {
-    orderedNavItems(navOrder)
+    orderedNavItems(navOrder, chatAllowed)
       .filter((i) => isNavItemVisible(i, navVisibility, false) && i.view !== activeView)
       .slice(0, 4)
       .forEach((i) => preloadView(i.view))
-  }, 4000), [navOrder, navVisibility, activeView])
+  }, 4000), [navOrder, navVisibility, activeView, chatAllowed])
+
+  // Settings is a nav control, not a nav item, so the pass above never warms
+  // it - and on mobile the only other warm-up is pointerdown, which buys a few
+  // tens of ms. It's reachable from every view, so warm it unconditionally.
+  useEffect(() => runWhenIdle(() => preloadView('settings'), 4000), [])
 
   // The terminal is hidden from the nav by default, so the pass above never
   // warms it - but admins reach it by hotkey, where a chunk download would
