@@ -3,8 +3,10 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
+import { installTranslateDomGuard } from './lib/translateDomGuard'
 
 installGlobalErrorLogging()
+installTranslateDomGuard()
 
 // iOS home-screen apps have shipped several WebKit versions that size the
 // viewport as if Safari's bottom toolbar could still appear - chrome that

@@ -134,11 +134,11 @@ export default class ErrorBoundary extends Component<Props, State> {
             </div>
             {this.state.reportStatus === 'delivered' ? (
               <p className="flex items-center gap-1.5 text-xs text-accent mt-1">
-                <Check size={13} /> Reported - thanks
+                <Check size={13} /> <span>Reported - thanks</span>
               </p>
             ) : this.state.reportStatus === 'queued' ? (
               <p className="flex items-center gap-1.5 text-xs text-amber-500 mt-1">
-                <CloudOff size={13} /> Saved - will send once back online
+                <CloudOff size={13} /> <span>Saved - will send once back online</span>
               </p>
             ) : (
               <button
@@ -150,8 +150,8 @@ export default class ErrorBoundary extends Component<Props, State> {
                 className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary underline mt-1 disabled:opacity-50"
               >
                 {this.state.reportStatus === 'sending'
-                  ? <><Loader2 size={13} className="animate-spin" /> Reporting…</>
-                  : <><Flag size={13} /> Report this error</>}
+                  ? <><Loader2 size={13} className="animate-spin" /> <span>Reporting…</span></>
+                  : <><Flag size={13} /> <span>Report this error</span></>}
               </button>
             )}
             <div className="flex items-center gap-4 mt-1">
@@ -159,7 +159,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 className="text-xs text-accent hover:text-accent-hover underline"
                 onClick={this.retry}
               >
-                {isChunkLoadError(this.state.error) ? 'Reload' : 'Try again'}
+                <span>{isChunkLoadError(this.state.error) ? 'Reload' : 'Try again'}</span>
               </button>
               {overlay && this.props.onDismiss && (
                 <button className="text-xs text-text-muted hover:text-text-primary underline" onClick={this.dismiss}>
