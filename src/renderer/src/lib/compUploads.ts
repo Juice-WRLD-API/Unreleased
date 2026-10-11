@@ -110,6 +110,7 @@ function startUpload(job: QueuedJob): { promise: Promise<unknown>; abort: () => 
       file_path: String(job.form.get('file_path') || ''),
       destination_path: String(job.form.get('destination_path') || ''),
       contributor_notes: String(job.form.get('contributor_notes') || ''),
+      is_new_leak: job.form.get('is_new_leak') === 'true',
       channel: String(job.form.get('channel') || ''),
     }, { onProgress })
   }

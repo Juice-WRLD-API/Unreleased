@@ -104,7 +104,7 @@ function progressPrinter(ctx: TermCtx, label: string): (sent: number, total: num
 
 const compCommand: TermCommand = {
   name: 'comp', group: 'Editor',
-  usage: 'comp [ls] · new <type> <path> [--to dest] [--note n] · edit <id> [--path p] [--to dest] [--note n] [--file] · withdraw <id> · staging <id> · history <path>   (--channel c)',
+  usage: 'comp [ls] · new <type> <path> [--to dest] [--note n] [--new-leak] · edit <id> [--path p] [--to dest] [--note n] [--file] [--new-leak|--not-new-leak] · withdraw <id> · staging <id> · history <path>   (--channel c)',
   description: `Your comp file proposals (changes to the Files tab): types ${COMP_TYPES.join(', ')}. upload/replace open a file picker. staging and history are for reviewers`,
   covers: [
     'userApi.getMyCompProposals', 'userApi.createCompProposal', 'userApi.createCompProposalUpload', 'userApi.updateCompProposal', 'userApi.withdrawCompProposal',
@@ -126,14 +126,14 @@ const compCommand: TermCommand = {
       const list = await getMyCompProposals(channel)
       if (asJson(ctx, bool.has('json'), list)) return
       if (list.length === 0) { ctx.print('no comp proposals yet', 'dim'); return }
-      ctx.print(`${table(list.map((p) => [`#${p.id}`, p.status, compChangeTypeLabel(p.change_type), p.file_path, relativeTime(p.created_at)]))}\n${list.length} proposal${list.length === 1 ? '' : 's'}`)
+      ctx.print(`${table(list.map((p) => [`#${p.id}`, p.status, compChangeTypeLabel(p.change_type) + (p.is_new_leak ? ' (new leak)' : ''), p.file_path, relativeTime(p.created_at)]))}\n${list.length} proposal${list.length === 1 ? '' : 's'}`)
     } else if (sub === 'new') {
       const type = (rest.shift() ?? '').toLowerCase() as CompProposalChangeType
       const path = rest.join(' ')
-      if (!COMP_TYPES.includes(type) || !path) fail(`usage: comp new <${COMP_TYPES.join('|')}> <path> [--to dest] [--note n]`)
+      if (!COMP_TYPES.includes(type) || !path) fail(`usage: comp new <${COMP_TYPES.join('|')}> <path> [--to dest] [--note n] [--new-leak]`)
       const dest = value.get('to')
       if (NEEDS_DESTINATION.has(type) && !dest) fail(`${type} needs a destination: --to <path>`)
-      const metadata = { change_type: type, file_path: path, destination_path: NEEDS_DESTINATION.has(type) ? dest : undefined, contributor_notes: value.get('note') ?? '', channel }
+      const metadata = { change_type: type, file_path: path, destination_path: NEEDS_DESTINATION.has(type) ? dest : undefined, contributor_notes: value.get('note') ?? '', is_new_leak: NEEDS_FILE.has(type) && bool.has('new-leak'), channel }
       if (NEEDS_FILE.has(type)) {
         const file = await pickLocalFile('*/*')
         ctx.print(`uploading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)…`, 'dim')
@@ -143,6 +143,7 @@ const compCommand: TermCommand = {
         if (metadata.destination_path) form.append('destination_path', metadata.destination_path)
         form.append('change_type', type)
         form.append('contributor_notes', metadata.contributor_notes)
+        form.append('is_new_leak', String(metadata.is_new_leak))
         form.append('file', file)
         if (channel) form.append('channel', channel)
         // Big files go up in chunks, small ones in one request - the same split the Files tab makes.
@@ -161,14 +162,16 @@ const compCommand: TermCommand = {
       const made = await createCompProposal(form)
       ctx.print(`comp proposal #${made.id} sent (${made.status}): ${compChangeTypeLabel(made.change_type)} ${made.file_path}`, 'ok')
     } else if (sub === 'edit') {
-      const id = idArg(rest[0], 'comp edit <id> [--path p] [--to dest] [--note n] [--file]')
+      const id = idArg(rest[0], 'comp edit <id> [--path p] [--to dest] [--note n] [--file] [--new-leak|--not-new-leak]')
       const form = new FormData()
       if (value.has('path')) form.append('file_path', value.get('path') as string)
       if (value.has('to')) form.append('destination_path', value.get('to') as string)
       if (value.has('note')) form.append('contributor_notes', value.get('note') as string)
+      if (bool.has('new-leak') && bool.has('not-new-leak')) fail('pick one of --new-leak or --not-new-leak')
+      if (bool.has('new-leak') || bool.has('not-new-leak')) form.append('is_new_leak', String(bool.has('new-leak')))
       if (bool.has('file')) form.append('file', await pickLocalFile('*/*'))
       if (channel) form.append('channel', channel)
-      if ([...form.keys()].every((k) => k === 'channel')) fail('nothing to change - give --path, --to, --note or --file')
+      if ([...form.keys()].every((k) => k === 'channel')) fail('nothing to change - give --path, --to, --note, --file, --new-leak or --not-new-leak')
       const p = await updateCompProposal(id, form)
       ctx.print(`comp proposal #${p.id} updated (${p.status}, edited ${p.edit_count}×)`, 'ok')
     } else if (sub === 'withdraw') {

@@ -11,6 +11,7 @@ export interface CompProposalChunkedMeta {
   file_path: string
   destination_path?: string
   contributor_notes?: string
+  is_new_leak?: boolean
   channel?: string
 }
 
@@ -163,6 +164,7 @@ export function createCompProposalChunked(file: File, metadata: CompProposalChun
           file_path: metadata.file_path,
           destination_path: metadata.destination_path || '',
           contributor_notes: metadata.contributor_notes || '',
+          is_new_leak: !!metadata.is_new_leak,
           ...(metadata.channel ? { channel: metadata.channel } : {}),
         }),
         signal,

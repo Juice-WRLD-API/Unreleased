@@ -132,6 +132,7 @@ export default function ContributorPage(): JSX.Element {
   const [destFileName, setDestFileName] = useState('')
   const [changeType, setChangeType] = useState<CompProposalChangeType>('upload')
   const [notes, setNotes] = useState('')
+  const [isNewLeak, setIsNewLeak] = useState(false)
   // A batch shares one folder, change type and note; the API takes one file
   // per proposal, so N files become N proposals submitted in sequence.
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
@@ -142,6 +143,7 @@ export default function ContributorPage(): JSX.Element {
   const [submitState, setSubmitState] = useState<SubmitState>('idle')
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
+  const [togglingLeakId, setTogglingLeakId] = useState<number | null>(null)
   const [picker, setPicker] = useState<PickerTarget | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // React state lags a render behind, so `submitState` alone can't stop a
@@ -249,6 +251,8 @@ export default function ContributorPage(): JSX.Element {
     if (needsDestination) form.append('destination_path', destinationPath)
     form.append('change_type', changeType)
     form.append('contributor_notes', notes)
+    // Only a proposal that brings a file body can be a new leak.
+    form.append('is_new_leak', String(carriesFile && isNewLeak))
     if (file) form.append('file', file)
     if (activeChannel) form.append('channel', activeChannel)
     return form
@@ -317,6 +321,7 @@ export default function ContributorPage(): JSX.Element {
       setSubmitState('submitted')
       setSelectedFiles([])
       setNotes('')
+      setIsNewLeak(false)
       setFileName('')
       setDestFileName('')
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -381,6 +386,22 @@ export default function ContributorPage(): JSX.Element {
       setSubmitError(errorMessage(e, 'Could not withdraw that proposal'))
     } finally {
       setWithdrawingId(null)
+    }
+  }
+
+  const toggleNewLeak = async (p: CompFileProposal): Promise<void> => {
+    setTogglingLeakId(p.id)
+    setSubmitError(null)
+    try {
+      const form = new FormData()
+      form.append('is_new_leak', String(!p.is_new_leak))
+      if (activeChannel) form.append('channel', activeChannel)
+      const updated = await userApi.updateCompProposal(p.id, form)
+      setProposals(prev => prev.map(x => (x.id === p.id ? updated : x)))
+    } catch (e) {
+      setSubmitError(errorMessage(e, 'Could not update that proposal'))
+    } finally {
+      setTogglingLeakId(null)
     }
   }
 
@@ -607,6 +628,12 @@ export default function ContributorPage(): JSX.Element {
                     approve or reject them individually.
                   </p>
                 )}
+                <label className="mt-3 flex items-center gap-2 text-xs text-text-secondary cursor-pointer select-none">
+                  <input type="checkbox" checked={isNewLeak} onChange={e => setIsNewLeak(e.target.checked)}
+                    className="accent-[var(--accent)]" />
+                  New leak
+                  {isBatch && <span className="text-text-muted">- applies to every file in this batch</span>}
+                </label>
               </div>
             )}
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Notes for reviewers (optional)"
@@ -662,6 +689,8 @@ export default function ContributorPage(): JSX.Element {
               loading={loading}
               onWithdraw={withdraw}
               withdrawingId={withdrawingId}
+              onToggleNewLeak={toggleNewLeak}
+              togglingLeakId={togglingLeakId}
               empty="No proposals yet."
             />
           </section>
