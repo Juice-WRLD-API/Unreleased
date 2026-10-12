@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useState } from 'react'
 import {
   Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Check, Download, Share2,
@@ -152,7 +153,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
         setPlaylist(p => ({ ...p, is_public: true }))
         await refreshPlaylists()
       }
-      await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${playlist.id}&view=shared`)
+      await copyText(`${shareOrigin()}/playlists?id=${playlist.id}&view=shared`)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
     } catch {}

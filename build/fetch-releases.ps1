@@ -9,16 +9,19 @@
 #
 # Backend contract (implemented server-side, not in this repo):
 #   GET  {BetaApiBase}/versions   header X-Beta-Code: <code>
-#        -> 200 JSON array [{ "tag": "v1.15.0-beta.1", ... }, ...] on a valid
-#           code; 401 on an invalid one.
-#   GET  {BetaApiBase}/download?version=<tag>   header X-Beta-Code: <code>
-#        -> the installer exe (or a redirect to one); 401 invalid, 404 unknown
-#           version. build/installer.nsh sends the header itself when
-#           downloading — this script only needs to embed the endpoint URL.
+#        -> 200 JSON array [{ "version": "1.15.0-beta.1", "notes": ...,
+#           "published_at": ..., "created_at": ... }, ...], active only, newest
+#           first, on a valid code; 403 on an invalid one.
+#   GET  {BetaApiBase}/download?version=<version>   header X-Beta-Code: <code>
+#        -> the build file as an attachment. <version> is the bare string
+#           from /versions (no "v" prefix). 403 invalid code, 404 unknown
+#           version or missing file, 400 no version. build/installer.nsh sends
+#           the header itself when downloading — this script only needs to
+#           embed the endpoint URL.
 #
 # Exit codes: 0 = success (stable list, plus beta entries if a code was given
 # and accepted); 1 = couldn't get the stable list at all (network failure);
-# 2 = the beta code that was passed was rejected (401) — the stable list is
+# 2 = the beta code that was passed was rejected (401/403) — the stable list is
 # NOT written in this case, since build/installer.nsh treats any non-zero
 # exit as "don't touch the picker" and simply shows the rejection message.
 param(
@@ -64,13 +67,18 @@ if ($Code) {
     $betaReleases = Invoke-RestMethod -Uri "$BetaApiBase/versions" `
       -Headers @{ 'X-Beta-Code' = $Code; 'User-Agent' = 'Unreleased-Installer' } -TimeoutSec 15
     foreach ($r in @($betaReleases)) {
-      if ($ExcludeTag -and $r.tag -eq $ExcludeTag) { continue }
-      $lines += "$($r.tag)|$BetaApiBase/download?version=$([Uri]::EscapeDataString($r.tag))"
+      if (-not $r.version) { continue }
+      # Picker entries are "v"-prefixed tags like the stable ones (installer.nsh
+      # keys the beta download header off the "-" in the tag); the backend
+      # wants the bare version string.
+      $tag = "v$($r.version)"
+      if ($ExcludeTag -and $tag -eq $ExcludeTag) { continue }
+      $lines += "$tag|$BetaApiBase/download?version=$([Uri]::EscapeDataString($r.version))"
     }
   } catch {
     $status = $null
     if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
-    if ($status -eq 401) { exit 2 }
+    if ($status -eq 401 -or $status -eq 403) { exit 2 }
     # Any other failure (backend down, timeout, 5xx) just means no beta
     # entries this round — the stable list is still good, so fall through
     # and exit 0 rather than treating it as a hard failure.

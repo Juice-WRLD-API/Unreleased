@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useEffect, useState } from 'react'
 import { Heart, Copy, Check, X as XIcon } from 'lucide-react'
 import { COOKIE_NOTICE_ACK_EVENT } from './CookieNotice'
@@ -27,7 +28,7 @@ function AddressRow({ label, value }: { label: string; value: string }): JSX.Ele
       <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-text-secondary">{value}</span>
       <button
         onClick={() => {
-          navigator.clipboard.writeText(value).then(() => {
+          copyText(value).then(() => {
             setCopied(true)
             setTimeout(() => setCopied(false), 1200)
           })

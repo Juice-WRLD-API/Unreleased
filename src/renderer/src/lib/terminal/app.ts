@@ -1,3 +1,4 @@
+import { copyText } from '../clipboard'
 import { useChatStore, conversationTitle } from '../../store/chatStore'
 import { useStore, type SettingsTab } from '../../store/useStore'
 import type { AdminTab } from '../../hooks/useAdminQueue'
@@ -22,7 +23,7 @@ const VIEWS: Record<string, ViewType> = {
   albums: 'albums-admin', sessions: 'session-maker', 'session-maker': 'session-maker',
 }
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'preferences', 'playback', 'shortcuts', 'library', 'app', 'developer', 'feedback', 'about']
-const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'applications', 'reports', 'feedback', 'users', 'stats', 'security', 'channels', 'eras', 'cdn-nodes']
+const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'applications', 'reports', 'feedback', 'users', 'stats', 'security', 'channels', 'eras', 'cdn-nodes', 'beta']
 const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'user', 'song']
 // The Admin page is for administrators and chat is for staff, so neither is offered otherwise.
 const offered = (target: string): boolean => {
@@ -93,7 +94,7 @@ export const APP_COMMANDS: TermCommand[] = [
       // A script (`source`) runs lines nobody typed, so it doesn't get to read secrets.
       if (mode && ctx.scripted) fail(`token ${mode}: not available from a script`)
       if (mode === 'copy') {
-        try { await navigator.clipboard.writeText(token) } catch { fail('the clipboard is not available here (try: token show)') }
+        try { await copyText(token) } catch { fail('the clipboard is not available here (try: token show)') }
         ctx.print('token copied to the clipboard', 'ok')
         return
       }

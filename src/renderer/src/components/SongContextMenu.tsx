@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
@@ -263,7 +264,7 @@ export default function SongContextMenu({
   const handleCopyLink = async (): Promise<void> => {
     if (!hasValidSong) return
     try {
-      await navigator.clipboard.writeText(trackShareUrl(songId))
+      await copyText(trackShareUrl(songId))
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2500)
     } catch {}

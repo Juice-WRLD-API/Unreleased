@@ -1,6 +1,7 @@
 // Panel bodies shared by both Tier List views: the saved-lists manager and the
 // song-pool filters. Each view supplies its own chrome around them (a centered
 // modal on desktop, a bottom Sheet on mobile); `touch` only scales hit areas.
+import { copyText } from '../lib/clipboard'
 import { useState } from 'react'
 import {
   Check, Copy, Pencil, Plus, RefreshCw, Trash2, Disc3, ListOrdered, Globe, Lock, Link, Cloud, CloudOff, Music2,
@@ -66,7 +67,7 @@ export function ListsPanelBody({ data, touch, onDone }: {
     const url = shareUrl(l)
     if (!url) return
     try {
-      await navigator.clipboard.writeText(url)
+      await copyText(url)
       setCopiedId(l.id)
       window.setTimeout(() => setCopiedId((cur) => (cur === l.id ? null : cur)), 1500)
     } catch {}

@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } from 'react'
 import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud, FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical, PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2, ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload, ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal, Bell, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, LogIn,
@@ -164,6 +165,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'developer', label: 'Clear cache', sub: 'Removes cached API responses and cover art', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'Update source', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'Online installer', sub: 'Repairs or reinstalls the app', electronOnly: true, devOnly: true },
+  { tab: 'developer', label: 'API servers', sub: 'Main API base and per-path route rules', electronOnly: true, devOnly: true },
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
@@ -929,7 +931,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
       panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[760px] h-[600px] max-h-[85vh]"
       minWidth={520} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <>
       {/* Custom-skin editor (portals to <body>, so placement here is fine) */}
       {editingSkinId && (
@@ -1021,7 +1023,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                 <Minimize2 size={18} />
               </button>
             )}
-            {!floating && <LockToggle locked={locked} onClick={toggleLock} />}
+            {!floating && canLock && <LockToggle locked={locked} onClick={toggleLock} />}
             <button onClick={closeSettings} className="text-text-muted hover:text-text-primary transition-colors">
               <X size={20} />
             </button>
@@ -1258,7 +1260,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                           onClick={() => {
                             const t = getToken()
                             if (t) {
-                              navigator.clipboard.writeText(t)
+                              copyText(t)
                               setTokenCopied(true)
                               setTimeout(() => setTokenCopied(false), 2000)
                             }
@@ -2745,6 +2747,18 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     Open
                   </button>
                 </Row>
+
+                <div className="mt-4 rounded-xl border border-[var(--border)] p-3">
+                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
+                    <Server size={13} />
+                    API servers
+                  </div>
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] mt-2.5">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -2800,18 +2814,6 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     <Globe size={13} />
                     API
                   </a>
-                </div>
-
-                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
-                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
-                    <Server size={13} />
-                    API servers
-                  </div>
-                  <ApiServerRow />
-                  <RouteRulesEditor />
-                  <p className="text-text-muted text-[11px] mt-2.5">
-                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
-                  </p>
                 </div>
 
                 {(!account || (!account.is_editor && !account.is_administrator)) && (

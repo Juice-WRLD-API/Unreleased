@@ -1,3 +1,4 @@
+import { copyPngImage } from '../lib/clipboard'
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
@@ -286,7 +287,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
   )
   const fileName = `${title} - ${artist}`.replace(/[/\\?%*:|"<>]/g, '').trim() || 'lyrics'
   const canNativeShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
-  const canCopyImage = typeof navigator !== 'undefined' && !!navigator.clipboard?.write && typeof window.ClipboardItem === 'function'
+  const canCopyImage = !!(window as any).electron?.copyImageToClipboard || typeof navigator !== 'undefined' && !!navigator.clipboard?.write && typeof window.ClipboardItem === 'function'
 
   const renderOpts = { pixelRatio: 4, cacheBust: true, backgroundColor: '#111114' }
 
@@ -335,7 +336,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     try {
       const blob = await withExportMode(() => toBlob(cardRef.current!, renderOpts))
       if (!blob) throw new Error('empty blob')
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      await copyPngImage(blob)
     } catch {
       setError('Could not copy the image.')
     } finally {

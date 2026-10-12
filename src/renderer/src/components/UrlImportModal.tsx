@@ -207,7 +207,7 @@ export default function UrlImportModal(): JSX.Element | null {
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md max-h-[92svh]"
       minWidth={380} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full flex flex-col overflow-y-auto">
         <div
           className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 shrink-0"
@@ -217,7 +217,7 @@ export default function UrlImportModal(): JSX.Element | null {
             <Link2 size={15} className="text-accent" /> Import from URL
           </h2>
           <div className="flex items-center gap-1">
-            <LockToggle locked={locked} onClick={toggleLock} />
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
             <button
               onClick={dismiss}
               disabled={busy}

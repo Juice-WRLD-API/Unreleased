@@ -1,4 +1,5 @@
 // Shared "make public + copy share link" flow for PlaylistsView desktop/mobile.
+import { copyText } from '../lib/clipboard'
 import { useCallback, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { PlaylistDetail } from '../lib/userApi'
@@ -35,7 +36,7 @@ export function usePlaylistSharing(
         const updated = await userApi.updatePlaylist(selectedId, { is_public: true })
         setDetail(updated)
       }
-      await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${selectedId}&view=shared`)
+      await copyText(`${shareOrigin()}/playlists?id=${selectedId}&view=shared`)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2500)
     } catch {}

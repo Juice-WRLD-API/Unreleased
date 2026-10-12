@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useEffect, useState } from 'react'
 import { Play, Loader2, Music2, ChevronLeft, Share2, Download, Check } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -73,7 +74,7 @@ export default function TrackView(): JSX.Element {
 
   const handleShare = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(trackShareUrl(songId))
+      await copyText(trackShareUrl(songId))
       setCopied(true)
       setTimeout(() => setCopied(false), 2500)
     } catch {}

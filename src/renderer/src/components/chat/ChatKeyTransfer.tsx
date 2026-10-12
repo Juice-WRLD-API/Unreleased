@@ -1,3 +1,4 @@
+import { copyText } from '../../lib/clipboard'
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, Download, Loader2, QrCode, Upload } from 'lucide-react'
 import { exportKeys, importKeys } from '../../lib/chatKeyTransfer'
@@ -102,7 +103,7 @@ function ExportPanel({ userId }: { userId: number }): JSX.Element {
           />
           <div className="flex items-center gap-1 flex-wrap">
             <button
-              onClick={() => { void navigator.clipboard.writeText(result.blob); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+              onClick={() => { void copyText(result.blob); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
               className={plainBtn}
             >
               {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}{copied ? 'Copied' : 'Copy'}

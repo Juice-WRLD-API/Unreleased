@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import {
@@ -318,7 +319,7 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
   const [linkCopied, setLinkCopied] = useState(false)
   const copyLink = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(newsShareUrl(item.id))
+      await copyText(newsShareUrl(item.id))
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2500)
     } catch {}

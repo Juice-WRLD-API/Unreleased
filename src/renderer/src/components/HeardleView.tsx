@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useOpenUserCard } from './chat/UserCard'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -690,7 +691,7 @@ export default function HeardleView(): JSX.Element {
 
   const share = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(shareText(dailyMode, day, guesses, status, ladder.length))
+      await copyText(shareText(dailyMode, day, guesses, status, ladder.length))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {}

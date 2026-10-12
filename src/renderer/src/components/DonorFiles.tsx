@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown, ArrowUp, Check, Copy, Download, FileAudio, FileImage, ImagePlus, Link2, Link2Off,
@@ -163,7 +164,7 @@ export default function DonorFiles(): JSX.Element {
 
   const copyLink = async (f: DonorFile): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(f.share_url)
+      await copyText(f.share_url)
       setCopied(f.file_id)
       setTimeout(() => setCopied((c) => (c === f.file_id ? null : c)), 1500)
     } catch {

@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useState } from 'react'
 import { BookOpen, Check, Link2, Pencil, Share2, Trash2 } from 'lucide-react'
 import type { NewsItem } from '../lib/newsApi'
@@ -22,7 +23,7 @@ export default function NewsContextMenu({ state, onClose, onOpen, onShare, onEdi
   // user sees the "Link copied" confirmation (same as the song menu).
   const copyLink = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(newsShareUrl(item.id))
+      await copyText(newsShareUrl(item.id))
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2500)
     } catch {}

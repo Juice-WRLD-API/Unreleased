@@ -1,3 +1,4 @@
+import { copyText, copyPngImage } from '../../lib/clipboard'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -431,7 +432,7 @@ function MessageItem({
         canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not convert image'))), 'image/png'),
       )
     }
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+    await copyPngImage(blob)
   }
 
   const react = (name: string): void => {
@@ -687,7 +688,7 @@ function MessageItem({
           pinned={message.pinned}
           onTogglePin={() => run(() => togglePin(message), 'Could not update pin')}
           canCopy={canCopy}
-          onCopy={() => { void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }}
+          onCopy={() => { void copyText(bodyText); toast('Copied to clipboard', 'ok') }}
           canCopyImage={canCopyImage}
           onCopyImage={() => run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image')}
           canForward={canForward}
@@ -713,7 +714,7 @@ function MessageItem({
           {!inThread && onOpenThread && <SheetRow icon={<MessageSquareReply size={18} />} label="Reply in thread" onClick={() => { setSheet(false); onOpenThread(message.id) }} />}
           {canEdit && <SheetRow icon={<Pencil size={18} />} label="Edit message" onClick={() => { setSheet(false); onStartEdit(message.id) }} />}
           {canPin && <SheetRow icon={message.pinned ? <PinOff size={18} /> : <Pin size={18} />} label={message.pinned ? 'Unpin' : 'Pin message'} onClick={() => { setSheet(false); run(() => togglePin(message), 'Could not update pin') }} />}
-          {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void navigator.clipboard.writeText(bodyText); toast('Copied to clipboard', 'ok') }} />}
+          {plainText && <SheetRow icon={<Copy size={18} />} label="Copy text" onClick={() => { setSheet(false); void copyText(bodyText); toast('Copied to clipboard', 'ok') }} />}
           {canCopyImage && <SheetRow icon={<ImageIcon size={18} />} label="Copy image" onClick={() => { setSheet(false); run(() => copyImage().then(() => toast('Image copied to clipboard', 'ok')), 'Could not copy image') }} />}
           {canForward && <SheetRow icon={<Forward size={18} />} label="Forward message" onClick={() => { setSheet(false); setForwarding(true) }} />}
           {canMute && (

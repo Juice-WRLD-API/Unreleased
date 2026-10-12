@@ -2458,10 +2458,22 @@ Authorization: Token <token>
           headers={['Method', 'Path', 'Auth', 'Description']}
           rows={[
             ['GET', '/beta/unlock?code=X', 'None', <>Check a code, returns <Code>{'{ "valid": true|false }'}</Code>. Throttled at <Code>20/min</Code> per client, so don&apos;t poll it or try codes in a loop (429)</>],
-            ['GET', '/beta/versions', <Code>X-Beta-Code</Code>, 'List active beta builds (401 if the code is invalid)'],
-            ['GET', '/beta/download?version=X', <Code>X-Beta-Code</Code>, 'Stream the installer for that build (401/404)'],
+            ['GET', '/beta/versions', <Code>X-Beta-Code</Code>, <>Active builds, newest first: <Code>version</Code>, <Code>notes</Code>, <Code>published_at</Code>, <Code>created_at</Code></>],
+            ['GET', '/beta/download?version=X', <Code>X-Beta-Code</Code>, <>Stream the build file. <Code>X</Code> is the exact version string, no <Code>v</Code> prefix (400 missing, 404 unknown version or missing file)</>],
           ]}
         />
+        <p className="text-xs text-text-muted mt-2">
+          A missing, inactive or expired code gets <Code>403</Code> with{' '}
+          <Code>{'{ "detail": "A valid beta code is required." }'}</Code>. Codes and versions can also be managed in
+          Django Admin (<Code>/admin/beta/betacode/</Code>, <Code>/admin/beta/betaversion/</Code>). There is no
+          update-feed endpoint.
+        </p>
+        <p className="text-sm text-text-secondary mt-3">
+          Admin API (administrator + 2FA, <Code>Authorization: Token</Code>): <Code>GET/POST /beta/admin/codes/</Code>,{' '}
+          <Code>PATCH/DELETE /beta/admin/codes/&lt;id&gt;/</Code>, <Code>GET/POST /beta/admin/versions/</Code>,{' '}
+          <Code>PATCH/DELETE /beta/admin/versions/&lt;id&gt;/</Code>. A version is created with a multipart upload of the build (<Code>file</Code>, plus <Code>version</Code>, optional <Code>notes</Code>). The server stores it in its beta
+          builds folder and sets <Code>file_path</Code> itself; a PATCH with a <Code>file</Code> replaces the binary.
+        </p>
         <Pre>{`GET /beta/versions
 X-Beta-Code: YOUR_CODE`}</Pre>
       </Section>
