@@ -52,6 +52,38 @@ int wmain (int argc, wchar_t** argv) {
 			require(before>0 && after>before*1.5,"Live output gain change did not reach the running processor");
 			require(plugin.input.getParameterCount()==0,"Delivered parameter queue was not cleared");
 			sendLine("PASS: live VST3 output-gain update on the same processor instance");
+
+			// A drag must not call the (unseen) native controller. It may perform
+			// expensive GUI work or restart the processor when setParamNormalized
+			// is called; automation belongs in inputParameterChanges instead.
+			double controllerBefore=plugin.plug.controller->getParamNormalized(gain);
+			for(int i=0;i<200;i++) plugin.parameter(gain,i/200.);
+			require(plugin.plug.controller->getParamNormalized(gain)==controllerBefore,"Knob drag reached the controller on the audio thread");
+			require(plugin.input.getParameterCount()==1,"Drag did not coalesce to one parameter queue");
+			auto* changes=plugin.input.getParameterData(0); int32 offset=0; ParamValue value=0;
+			require(changes->getPointCount()==1,"Drag accumulated redundant points in one audio block");
+			changes->getPoint(0,offset,value); require(std::abs(value-.995)<1e-9,"Drag lost the latest value");
+			// A concurrent mix change still containing the old saved state must
+			// not discard knowledge that these live edits were delivered.
+			plugin.restore(plugin.state,48000);
+			SessionPlugin editor;
+			editor.load(json("{\"id\":\"editor\",\"path\":"+jsonStr(path)+",\"cid\":"+jsonStr(cid)+"}"),48000);
+			editor.plug.controller->setParamNormalized(gain,.995);
+			editor.parameter(gain,.995);
+			float silence[2][sessionBlock] {};
+			editor.process(silence,sessionBlock,48000,120,0,false);
+			auto saved=editor.plug.getState();
+			require(saved!=plugin.plug.getState(),"Test snapshot must differ from the audio processor's current state");
+			plugin.editorState(saved,true,48000);
+			require(plugin.input.getParameterCount()==1,"Persistence snapshot reset the live parameter queue");
+			require(plugin.state==saved && !plugin.liveEdits,"Persistence snapshot was not acknowledged");
+			require(plugin.restartFlags.load()==0,"Ordinary drag requested a processor restart");
+			energy(); plugin.restore(saved,48000);
+			require(plugin.input.getParameterCount()==0,"Mix acknowledgement introduced extra parameter edits");
+			plugin.parameter(gain,.2);
+			plugin.editorState(plugin.initialState,false,48000);
+			require(plugin.input.getParameterCount()==0 && !plugin.liveEdits,"Full state restore retained stale live edits");
+			sendLine("PASS: drag coalescing, persistence without restart, and explicit state restore");
 		}
 		TerminateProcess(GetCurrentProcess(),0);
 	} catch(const std::exception& e) { sendLine(std::string("FAIL: ")+e.what()); TerminateProcess(GetCurrentProcess(),1); }

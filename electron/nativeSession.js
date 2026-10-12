@@ -117,6 +117,7 @@ function registerNativeSessions({ app, ipcMain, helper }) {
         op: event.type, pluginId: request.key.slice(at + 1),
         lanes: request.lanes || [request.key.slice(0, at)],
         param: event.param, value: event.value, state: event.state,
+        parametersOnly: event.parametersOnly === true,
       }
       void entry.host.command(command).catch(() => {})
     },

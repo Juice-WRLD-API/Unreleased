@@ -924,6 +924,8 @@ struct Editor : IComponentHandler, IPlugFrame
 	double sampleRate {48000};
 	bool processReady {false};
 	bool dirty {false};
+	bool parameterEdits {false};
+	bool stateInvalidated {false};
 	DWORD lastEdit {0};
 	std::string lastState;
 	bool resizing {false};
@@ -955,6 +957,7 @@ struct Editor : IComponentHandler, IPlugFrame
 	tresult PLUGIN_API beginEdit (ParamID) override { return kResultOk; }
 	tresult PLUGIN_API performEdit (ParamID id, ParamValue value) override
 	{
+		parameterEdits = true;
 		int32 qi = 0, pi = 0;
 		if (auto* q = pending.addParameterData (id, qi))
 			q->addPoint (0, value, pi);
@@ -969,6 +972,9 @@ struct Editor : IComponentHandler, IPlugFrame
 	}
 	tresult PLUGIN_API restartComponent (int32 flags) override
 	{
+		// Presets and structural changes still require a full state transfer.
+		if (flags & (kReloadComponent | kIoChanged | kParamValuesChanged | kLatencyChanged))
+			stateInvalidated = true;
 		if (flags & kLatencyChanged && processReady)
 		{
 			plug.stop ();
@@ -1033,10 +1039,12 @@ struct Editor : IComponentHandler, IPlugFrame
 	void sendState (bool force)
 	{
 		auto s = plug.getState ();
+		bool parametersOnly = parameterEdits && !stateInvalidated;
+		parameterEdits = stateInvalidated = false;
 		if (!force && s == lastState)
 			return;
 		lastState = s;
-		sendLine ("{\"type\":\"state\",\"state\":" + jsonStr (s) + "}");
+		sendLine ("{\"type\":\"state\",\"parametersOnly\":" + std::string (parametersOnly ? "true" : "false") + ",\"state\":" + jsonStr (s) + "}");
 	}
 
 	void onTimer (UINT_PTR id)

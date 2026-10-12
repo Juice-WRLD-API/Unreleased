@@ -13,6 +13,7 @@ struct SessionPlugin : IComponentHandler
 	ProcessContext context {};
 	std::string id, path, cid, state, initialState;
 	uint32 latency {};
+	bool liveEdits {false};
 	std::atomic<int32> restartFlags {0};
 	~SessionPlugin () { if(plug.controller) plug.controller->setComponentHandler(nullptr); plug.stop(); data.unprepare(); }
 	tresult PLUGIN_API queryInterface (const TUID iid, void** object) override {
@@ -57,6 +58,8 @@ struct SessionPlugin : IComponentHandler
 	}
 	void restore (const std::string& s, double sr) {
 		if(s==state) return;
+		liveEdits=false;
+		input.clearQueue();
 		if(plug.getState()==s) { state=s; return; }
 		plug.stop(); data.unprepare();
 		if(!plug.setState(s.empty()?initialState:s)) throw std::runtime_error("Invalid plug-in state");
@@ -64,8 +67,18 @@ struct SessionPlugin : IComponentHandler
 	}
 	void parameter (ParamID id, double value) {
 		value=unit(value);
-		if(plug.controller) plug.controller->setParamNormalized(id,value);
+		// The editor owns its controller. Calling setParamNormalized here can do
+		// GUI/state work (and request restarts) on the audio thread. Deliver the
+		// normalized edit only through the processor's block parameter queue.
+		liveEdits=true;
 		int32 q=0,p=0; if(auto* changes=input.addParameterData(id,q)) changes->addPoint(0,value,p);
+	}
+	void editorState (const std::string& s, bool parametersOnly, double sr) {
+		if(parametersOnly && liveEdits) {
+			// Already applied by process(). Remember the persistence snapshot so
+			// the renderer's subsequent mix update is also a no-op for this plug-in.
+			state=s; liveEdits=false;
+		} else restore(s,sr);
 	}
 	void process (float audio[2][sessionBlock], int n, double sr, double bpm, double time, bool playing) {
 		for(int b=0;b<data.numInputs;b++) {
@@ -182,7 +195,7 @@ struct SessionMixer {
 			bool target=cmd["lanes"].a.empty(); for(auto& id:cmd["lanes"].a) target |= id.str()==lane->id;
 			if(!target) continue;
 			if(cmd["op"].str()=="parameter") p->parameter(static_cast<ParamID>(cmd["param"].num()),cmd["value"].num());
-			else p->restore(cmd["state"].str(),sr);
+			else p->editorState(cmd["state"].str(),cmd["parametersOnly"].b,sr);
 			lane->latency=0; for(auto& plugin:lane->plugins) lane->latency+=plugin->latency/sr;
 		}
 	}
@@ -375,6 +388,9 @@ int runSession () {
 			std::vector<SessionCommand> work;
 			{ std::lock_guard<std::mutex> lock(mutex); work.swap(commands); }
 			for(auto& command:work) {
+				// A burst of control messages must not drain the device buffer while
+				// we wait to reach the end of the batch.
+				if(mixer.playing) device.fill(mixer);
 				auto& c=command.json; auto op=c["op"].str();
 				if(op=="asset") mixer.assets[c["id"].str()]=std::move(command.asset);
 				else if(op=="play") {
