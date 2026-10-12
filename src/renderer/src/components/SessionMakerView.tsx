@@ -1,8 +1,9 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Activity, ArrowDown, ArrowLeft, ArrowUp, Check, Info, ClipboardCopy, CopyPlus, Eraser, FolderInput, FolderMinus, FolderPlus, Headphones, Highlighter, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Download, FileDown, FileUp, Flag, HardDrive, HardDriveDownload, Layers, Loader2, Magnet,
-  Minus, Pause, Play, Pencil, Plus, Redo2, Repeat, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
+  Minus, Pause, Play, Pencil, Plus, Redo2, Repeat, Rewind, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
 } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../store/useStore'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { onOpenSessionRequest, takePendingSession } from '../lib/sessionMakerOpen'
@@ -10,10 +11,11 @@ import { formatBytes } from '../lib/format'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import type { JWApiFileEntry } from '../lib/juicewrldApi'
 import {
-  PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
+  PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, duplicateProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
   loadProjects, loadTake, newProject, parseProjectFile, peakOf, peekLoadProgress, placeAllTakes, projectEnd, renderProject, scaleBuffer,
   saveProject, scanSession, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
-  type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
+  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, chainActive, chainReadout, echoSeconds, reverseClip, reversedPeaks,
+  type ChainKey, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
 } from '../lib/sessionMaker'
 
 const HEADER_W = 208
@@ -87,7 +89,7 @@ export default function SessionMakerView(): JSX.Element {
   }
 
   if (opened) {
-    return <SessionEditor key={opened.project.id} initial={opened.project} session={opened.session} onClose={() => setOpened(null)} />
+    return <SessionEditor key={opened.project.id} initial={opened.project} session={opened.session} onClose={() => setOpened(null)} onOpenCopy={(project) => setOpened({ project, session: opened.session })} />
   }
 
   return <SessionBrowser opening={opening} error={error} onOpenZip={(p) => void open(p)} onOpenProject={(p) => void open(p.zipPath, p)} />
@@ -369,6 +371,13 @@ function SessionBrowser({ opening, error, onOpenZip, onOpenProject }: {
                       </div>
                     </button>
                     <button
+                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-text-muted hover:text-text-primary transition"
+                      title="Duplicate project"
+                      onClick={() => { duplicateProject(p); setProjects(loadProjects()) }}
+                    >
+                      <Copy size={14} />
+                    </button>
+                    <button
                       className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-text-muted hover:text-red-400 transition"
                       title="Delete project"
                       onClick={() => { if (confirm(`Delete "${p.name}"?`)) { deleteProject(p.id); setProjects(loadProjects()) } }}
@@ -467,7 +476,7 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 const dbOf = (g: number): number => (g <= 0 ? -60 : 20 * Math.log10(g))
 const gainOf = (db: number): number => (db <= -60 ? 0 : Math.pow(10, db / 20))
 
-function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProject; session: ScannedSession; onClose: () => void }): JSX.Element {
+function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { initial: SmProject; session: ScannedSession; onClose: () => void; onOpenCopy: (p: SmProject) => void }): JSX.Element {
   // Projects saved before references existed get the default one.
   const [project, setProject] = useState<SmProject>(() => {
     if (initial.reference !== undefined) return initial
@@ -841,6 +850,16 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
     const muted = clips.some((c) => !c.muted)
     commit({ ...p, tracks: p.tracks.map((t) => (t.clips.some((c) => set.has(c.id)) ? { ...t, clips: t.clips.map((c) => (set.has(c.id) ? { ...c, muted } : c)) } : t)) })
   }, [commit])
+  /** Flips each clip to play backwards over the same stretch (or forwards again). */
+  const reverseClips = useCallback((ids: string[]) => {
+    const p = projectRef.current
+    const set = new Set(ids)
+    const flip = (c: SmClip): SmClip => {
+      const len = loadedRef.current.get(c.takeId)?.buffer.duration ?? takesById.get(c.takeId)?.duration
+      return len ? reverseClip(c, len) : c
+    }
+    commit({ ...p, tracks: p.tracks.map((t) => (t.clips.some((c) => set.has(c.id)) ? { ...t, clips: t.clips.map((c) => (set.has(c.id) ? flip(c) : c)) } : t)) })
+  }, [commit, takesById])
 
   // ── Clip operations ──
   type Placement = { take: Take; trackIdx: number | null; at: number | null }
@@ -950,6 +969,11 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
     if (history) commit(next)
     else setLive(next)
   }, [commit, setLive])
+  const sharedFx = useMemo<SharedFx>(
+    () => ({ bpm: project.bpm, echoNote: project.echoNote ?? DEFAULT_ECHO_NOTE, reverbSize: project.reverbSize ?? DEFAULT_REVERB_SIZE }),
+    [project.bpm, project.echoNote, project.reverbSize],
+  )
+  const setSharedFx = useCallback((patch: Partial<Pick<SmProject, 'echoNote' | 'reverbSize'>>) => commit({ ...projectRef.current, ...patch }), [commit])
 
   const selectTrack = useCallback((trackId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const ids = projectRef.current.tracks.map((t) => t.id)
@@ -1663,6 +1687,7 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
           { icon: track.muted ? Volume2 : VolumeX, label: `${track.muted ? 'Unmute' : 'Mute'}${many ? ` ${what}` : ''}`, onSelect: () => updateTrack(track.id, { muted: !track.muted }) },
           { icon: Headphones, label: `${track.solo ? 'Unsolo' : 'Solo'}${many ? ` ${what}` : ''}`, active: track.solo, onSelect: () => updateTrack(track.id, { solo: !track.solo }) },
           track.gain !== 1 && { icon: RotateCcw, label: `Reset volume${many ? 's' : ''} to 0 dB`, onSelect: () => updateTrack(track.id, { gain: 1 }) },
+          (chainActive(track.chain) || FX_KEYS.some((k) => (track.fx?.[k] ?? 0) > 0)) && { icon: RotateCcw, label: `Clear effects${many ? ` on ${what}` : ''}`, onSelect: () => updateTrack(track.id, { fx: undefined, chain: undefined }) },
           'divider',
           clips.length > 0 && { icon: SquareDashedMousePointer, label: `Select clips (${clips.length})`, onSelect: () => setSelection(clips.map((c) => c.id)) },
           { icon: CopyPlus, label: `Duplicate ${what}`, onSelect: duplicate },
@@ -1786,6 +1811,7 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
         onClose={() => setTakeMenu(null)}
         items={[
           clip && { icon: clip.muted ? Volume2 : VolumeX, label: `${clip.muted ? 'Unmute' : 'Mute'}${many}`, kbd: ['M'], onSelect: () => toggleClipMute(clipSel) },
+          clip && { icon: Rewind, label: `${clip.reversed ? 'Play forwards' : 'Reverse'}${many}`, active: !!clip.reversed, onSelect: () => reverseClips(clipSel) },
           clip && { icon: Scissors, label: `Split${many} at playhead`, kbd: ['S'], onSelect: () => splitClips(clipSel, engine.position()) },
           clip && { icon: Copy, label: `Duplicate${many}`, kbd: ['Ctrl', 'D'], onSelect: () => duplicateClips(clipSel) },
           clip && { icon: Repeat, label: 'Loop this clip', onSelect: () => setLoop({ start: clip.start, end: clip.start + clip.length }) },
@@ -1979,6 +2005,18 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
               <button className={`${btn} w-full justify-start`} title="Save the project as a file (share it - it holds no audio)" onClick={() => { exportProject(); setProjMenu(false) }}>
                 <FileDown size={15} /> Save project file
               </button>
+              <button
+                className={`${btn} w-full justify-start`}
+                title="Save a copy of this project and switch to it (this one stays as it is)"
+                onClick={() => {
+                  const current = { ...projectRef.current, updatedAt: Date.now() }
+                  saveProject(current)
+                  engine.dispose()
+                  onOpenCopy(duplicateProject(current))
+                }}
+              >
+                <Copy size={15} /> Duplicate project
+              </button>
               <button className={`${btn} w-full justify-start bg-accent text-white hover:bg-accent-hover hover:text-white`} title="Render the arrangement to a WAV file" onClick={() => void exportWav()} disabled={!!exporting || end <= 0}>
                 {exporting ? <><Loader2 size={15} className="animate-spin" /> {exporting}</> : <><Download size={15} /> Export WAV</>}
               </button>
@@ -2146,7 +2184,9 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
                       selected={trackSelSet.has(track.id)}
                       groupSize={trackSelSet.has(track.id) ? trackSel.length : 1}
                       onSelect={onTrackPointerDown}
+                      shared={sharedFx}
                       onChange={updateTrack}
+                      onShared={setSharedFx}
                       onRemove={removeTrack}
                       onMenu={openTrackMenu}
                     />
@@ -2225,6 +2265,7 @@ function SessionEditor({ initial, session: scanned, onClose }: { initial: SmProj
               onComp={() => compClip(sel.clip.id)}
               count={selection.length}
               onToggleMute={() => toggleClipMute(selection)}
+              onReverse={() => reverseClips(selection)}
               onLoop={() => setLoop({ start: sel.clip.start, end: sel.clip.start + sel.clip.length })}
               onSplit={() => splitClips(selection, engine.position())}
               onDuplicate={() => duplicateClips(selection)}
@@ -2731,7 +2772,7 @@ const CompLane = memo(function CompLane({ members, loaded, takesById, pps, width
             onContextMenu={(e) => onMenu(sg.clip.takeId, e, sg.clip.id)}
           >
             {lt && Array.from({ length: Math.ceil(w / TILE_W) }, (_, i) => (
-              <WaveTile key={i} peaks={lt.peaks} clip={sg.view} pps={pps} x={i * TILE_W} width={Math.min(TILE_W, w - i * TILE_W)} color={sg.color} />
+              <WaveTile key={i} peaks={sg.clip.reversed ? reversedPeaks(lt.peaks) : lt.peaks} clip={sg.view} pps={pps} x={i * TILE_W} width={Math.min(TILE_W, w - i * TILE_W)} color={sg.color} />
             ))}
             {selectedSet.has(sg.clip.id) && <div className="absolute inset-0 ring-2 ring-inset ring-white/80 pointer-events-none" />}
           </div>
@@ -2751,10 +2792,117 @@ const CompLane = memo(function CompLane({ members, loaded, takesById, pps, width
 
 const panLabel = (pan: number): string => (pan === 0 ? 'centre' : `${Math.round(Math.abs(pan) * 100)}% ${pan < 0 ? 'left' : 'right'}`)
 
-const TrackHeader = memo(function TrackHeader({ track, nested = false, color, selected, groupSize, onSelect, onChange, onRemove, onMenu }: {
+/** Project-wide effect settings, shown in every lane's FX popover. */
+interface SharedFx { bpm: number | null; echoNote: EchoNote; reverbSize: ReverbSize }
+
+/** The FX button on a lane header and its popover: the lane's own chain, its sends, and the shared send settings. */
+function TrackFxButton({ fx, chain, shared, many, onChange, onShared }: {
+  fx: TrackFx | undefined; chain: TrackChain | undefined; shared: SharedFx; many: string
+  onChange: (patch: Partial<SmTrack>) => void
+  onShared: (patch: Partial<Pick<SmProject, 'echoNote' | 'reverbSize'>>) => void
+}): JSX.Element {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const active = FX_KEYS.some((k) => (fx?.[k] ?? 0) > 0) || chainActive(chain)
+  useEffect(() => {
+    if (!pos) return
+    const close = (e: PointerEvent): void => {
+      const t = e.target as Node
+      if (popRef.current?.contains(t) || btnRef.current?.contains(t)) return
+      setPos(null)
+    }
+    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape') setPos(null) }
+    window.addEventListener('pointerdown', close, true)
+    window.addEventListener('keydown', esc)
+    return () => { window.removeEventListener('pointerdown', close, true); window.removeEventListener('keydown', esc) }
+  }, [pos])
+  const slider = (label: string, value: number, readout: string, set: (v: number) => void, title: string): JSX.Element => (
+    <label className="flex items-center gap-2 text-xs text-text-secondary">
+      <span className="w-14 shrink-0">{label}</span>
+      <input
+        type="range" min={0} max={1} step={0.02} value={value}
+        onChange={(e) => set(Number(e.target.value))}
+        onDoubleClick={() => set(0)}
+        title={`${title}${many} - double-click to turn off`}
+        className="flex-1 min-w-0 h-1 accent-[rgb(var(--accent-rgb))]"
+      />
+      <span className="w-12 text-right tabular-nums text-text-muted">{readout}</span>
+    </label>
+  )
+  const seg = <T extends string>(options: readonly T[], value: T, set: (v: T) => void, label: (v: T) => string, disabled = false): JSX.Element => (
+    <div className={`flex flex-1 rounded-md overflow-hidden border border-[var(--border)] ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
+      {options.map((o) => (
+        <button
+          key={o}
+          className={`flex-1 h-6 text-[11px] transition-colors ${o === value ? 'bg-accent/80 text-white' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)]'}`}
+          onClick={() => set(o)}
+        >{label(o)}</button>
+      ))}
+    </div>
+  )
+  const heading = 'text-[10px] font-semibold uppercase tracking-wider text-text-muted'
+  return (
+    <>
+      <button
+        ref={btnRef}
+        className={`h-6 px-1.5 rounded-md text-[10px] font-bold transition-colors ${active ? 'bg-accent/80 text-white' : 'bg-[var(--surface-raised)] text-text-muted hover:text-text-primary'}`}
+        title={`Effects - low cut, compressor, EQ, lo-fi, reverb, echo, chorus${many}`}
+        onClick={() => {
+          if (pos) { setPos(null); return }
+          const r = btnRef.current?.getBoundingClientRect()
+          if (r) setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 268)), top: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - 430)) })
+        }}
+      >FX</button>
+      {pos && createPortal(
+        // Portal events still bubble through React to the header, which would select the lane.
+        <div
+          ref={popRef}
+          className="fixed z-50 w-[260px] p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-xl space-y-2"
+          style={{ left: pos.left, top: pos.top }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.stopPropagation()}
+        >
+          <div className={heading}>Lane</div>
+          {CHAIN_KEYS.map((k: ChainKey) => {
+            const v = chain?.[k] ?? 0
+            return <div key={k}>{slider(CHAIN_LABELS[k], v, chainReadout(k, v), (x) => onChange({ chain: { ...chain, [k]: x } }), CHAIN_TITLES[k])}</div>
+          })}
+          <div className={`${heading} pt-1`}>Sends</div>
+          {FX_KEYS.map((k: FxKey) => {
+            const v = fx?.[k] ?? 0
+            return <div key={k}>{slider(FX_LABELS[k], v, v > 0 ? `${Math.round(v * 100)}%` : 'off', (x) => onChange({ fx: { ...fx, [k]: x } }), `${FX_LABELS[k]} send`)}</div>
+          })}
+          <div className={`${heading} pt-1`}>Shared by every lane</div>
+          <div className="flex items-center gap-2 text-xs text-text-secondary" title={shared.bpm ? `Echo repeats at ${Math.round(echoSeconds(shared) * 1000)} ms - ${shared.echoNote} at ${shared.bpm.toFixed(1)} BPM` : 'Set the tempo to time the echo to the beat - it repeats every 375 ms until then'}>
+            <span className="w-14 shrink-0">Echo</span>
+            {seg(Object.keys(ECHO_NOTES) as EchoNote[], shared.echoNote, (v) => onShared({ echoNote: v }), (v) => v, !shared.bpm)}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-text-secondary" title="Reverb size">
+            <span className="w-14 shrink-0">Reverb</span>
+            {seg(Object.keys(REVERB_SIZES) as ReverbSize[], shared.reverbSize, (v) => onShared({ reverbSize: v }), (v) => v[0].toUpperCase() + v.slice(1))}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+const CHAIN_TITLES: Record<ChainKey, string> = {
+  lowCut: 'Low cut - clears rumble and mic thumps below the voice',
+  comp: 'Compressor - evens out loud and quiet words',
+  presence: 'Presence - brings the voice forward (3.5 kHz)',
+  air: 'Air - adds top-end sheen (10 kHz shelf)',
+  lofi: 'Lo-fi - telephone band-pass with grit',
+}
+
+const TrackHeader = memo(function TrackHeader({ track, nested = false, color, selected, groupSize, shared, onSelect, onChange, onShared, onRemove, onMenu }: {
   track: SmTrack; nested?: boolean; color: string; selected: boolean; groupSize: number
+  shared: SharedFx
   onSelect: (id: string, e: React.PointerEvent) => void
   onChange: (id: string, patch: Partial<SmTrack>, history?: boolean) => void
+  onShared: (patch: Partial<Pick<SmProject, 'echoNote' | 'reverbSize'>>) => void
   onRemove: (id: string) => void
   onMenu: (id: string, e: React.MouseEvent) => void
 }): JSX.Element {
@@ -2787,6 +2935,7 @@ const TrackHeader = memo(function TrackHeader({ track, nested = false, color, se
           />
           <button className={toggleCls(track.muted, 'bg-amber-500/80 text-black')} title={`Mute${many}`} onClick={() => onChange(track.id, track.muted ? { muted: false } : { muted: true, solo: false })}>M</button>
           <button className={toggleCls(track.solo, 'bg-emerald-500/80 text-black')} title={`Solo${many}`} onClick={() => onChange(track.id, track.solo ? { solo: false } : { solo: true, muted: false })}>S</button>
+          <TrackFxButton fx={track.fx} chain={track.chain} shared={shared} many={many} onChange={(patch) => onChange(track.id, patch, false)} onShared={onShared} />
           <button className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition" title={groupSize > 1 ? `Delete ${groupSize} tracks` : 'Delete track'} onClick={() => onRemove(track.id)}>
             <Trash2 size={13} />
           </button>
@@ -2835,7 +2984,7 @@ const ClipView = memo(function ClipView({ clip, take, zipPath, loaded, failed, p
       onContextMenu={(e) => onMenu(clip.takeId, e, clip.id)}
     >
       {loaded && Array.from({ length: tiles }, (_, i) => (
-        <WaveTile key={i} peaks={loaded.peaks} clip={clip} pps={pps} x={i * TILE_W} width={Math.min(TILE_W, w - i * TILE_W)} color={color} />
+        <WaveTile key={i} peaks={clip.reversed ? reversedPeaks(loaded.peaks) : loaded.peaks} clip={clip} pps={pps} x={i * TILE_W} width={Math.min(TILE_W, w - i * TILE_W)} color={color} />
       ))}
       {!loaded && (
         <div className="absolute inset-0 flex items-center justify-center text-[11px] text-text-muted">
@@ -2858,7 +3007,7 @@ const ClipView = memo(function ClipView({ clip, take, zipPath, loaded, failed, p
       {fadeInW > 0 && <svg className="absolute left-0 top-0 h-full pointer-events-none" width={fadeInW} preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M0 100 L100 0 L0 0 Z" fill="rgba(0,0,0,0.35)" /></svg>}
       {fadeOutW > 0 && <svg className="absolute right-0 top-0 h-full pointer-events-none" width={fadeOutW} preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M0 0 L100 100 L100 0 Z" fill="rgba(0,0,0,0.35)" /></svg>}
       <div className="absolute left-1.5 top-0.5 right-1.5 text-[11px] font-medium truncate pointer-events-none" style={{ color, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
-        {clip.muted ? '(muted) ' : ''}{take?.name ?? 'Missing take'}{clip.gain !== 1 ? ` · ${dbOf(clip.gain).toFixed(1)} dB` : ''}
+        {clip.muted ? '(muted) ' : ''}{take?.name ?? 'Missing take'}{clip.reversed ? ' · reversed' : ''}{clip.gain !== 1 ? ` · ${dbOf(clip.gain).toFixed(1)} dB` : ''}
       </div>
       {selected && <div className="absolute inset-0 rounded-[5px] ring-2 ring-inset ring-white/80 pointer-events-none z-10" />}
       <div className={`${handle} left-0`} onPointerDown={(e) => onPointerDown(e, clip.id, 'trimL')} />
@@ -3068,12 +3217,12 @@ function TimeReadout({ engine, bpm, gridOffset }: { engine: SessionEngine; bpm: 
   return <div ref={ref} className="min-w-[128px] px-2 text-sm font-mono tabular-nums text-text-primary whitespace-pre" />
 }
 
-function ClipInspector({ count, clip, take, originalName, renaming, setRenaming, alternates, alternateIndex, onCycle, onComp, onToggleMute, onLoop, onChange, onRename, onSplit, onDuplicate, onDelete, onLocate }: {
+function ClipInspector({ count, clip, take, originalName, renaming, setRenaming, alternates, alternateIndex, onCycle, onComp, onToggleMute, onReverse, onLoop, onChange, onRename, onSplit, onDuplicate, onDelete, onLocate }: {
   clip: SmClip; take: Take | undefined; originalName: string | undefined
   renaming: boolean; setRenaming: (on: boolean) => void
   onRename: (takeId: string, name: string) => void
   alternates: number; alternateIndex: number
-  onCycle: (dir: 1 | -1) => void; onComp: () => void; onToggleMute: () => void; onLoop: () => void
+  onCycle: (dir: 1 | -1) => void; onComp: () => void; onToggleMute: () => void; onReverse: () => void; onLoop: () => void
   count: number
   onChange: (patch: Partial<SmClip>, history: boolean) => void
   onSplit: () => void; onDuplicate: () => void; onDelete: () => void; onLocate: () => void
@@ -3123,6 +3272,9 @@ File: ${originalName}` : ''}`}>
       )}
       <button className={`${btn} h-7 ${clip.muted ? btnOn : ''}`} onClick={onToggleMute} title="Mute this clip (M)">
         <VolumeX size={14} /> {clip.muted ? 'Muted' : 'Mute'}
+      </button>
+      <button className={`${btn} h-7 ${clip.reversed ? btnOn : ''}`} onClick={onReverse} title={clip.reversed ? 'Playing backwards - click to play forwards' : 'Play this clip backwards'}>
+        <Rewind size={14} /> {clip.reversed ? 'Reversed' : 'Reverse'}
       </button>
       {num('Fade in', clip.fadeIn, 'fadeIn', clip.length - clip.fadeOut)}
       {num('Fade out', clip.fadeOut, 'fadeOut', clip.length - clip.fadeIn)}

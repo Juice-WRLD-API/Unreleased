@@ -646,7 +646,29 @@ export interface SmClip {
   /** Stretches left silent by swipe comping, in take seconds (offset-relative, so
    *  they stay with the audio when the clip is moved, trimmed or split). Sorted, apart. */
   silent?: [number, number][]
+  /** Plays backwards. `offset` and `silent` are then in the backwards take's time,
+   *  so trimming, splitting and comping treat it like any other clip. */
+  reversed?: boolean
 }
+
+export const FX_KEYS = ['reverb', 'echo', 'chorus'] as const
+export type FxKey = (typeof FX_KEYS)[number]
+export type TrackFx = Partial<Record<FxKey, number>>
+export const FX_LABELS: Record<FxKey, string> = { reverb: 'Reverb', echo: 'Echo', chorus: 'Chorus' }
+
+/** A lane's own processing, in signal order. Each is 0 (off) to 1. */
+export const CHAIN_KEYS = ['lowCut', 'comp', 'presence', 'air', 'lofi'] as const
+export type ChainKey = (typeof CHAIN_KEYS)[number]
+export type TrackChain = Partial<Record<ChainKey, number>>
+export const CHAIN_LABELS: Record<ChainKey, string> = { lowCut: 'Low cut', comp: 'Comp', presence: 'Presence', air: 'Air', lofi: 'Lo-fi' }
+
+/** Echo repeat lengths, in beats. */
+export const ECHO_NOTES = { '1/4': 1, '1/8.': 0.75, '1/8': 0.5, '1/16': 0.25 } as const
+export type EchoNote = keyof typeof ECHO_NOTES
+export const DEFAULT_ECHO_NOTE: EchoNote = '1/8.'
+export const REVERB_SIZES = { small: { seconds: 0.9, preDelay: 0.01 }, medium: { seconds: 1.7, preDelay: 0.02 }, large: { seconds: 2.8, preDelay: 0.03 } } as const
+export type ReverbSize = keyof typeof REVERB_SIZES
+export const DEFAULT_REVERB_SIZE: ReverbSize = 'large'
 
 export interface SmTrack {
   id: string
@@ -654,6 +676,10 @@ export interface SmTrack {
   gain: number
   /** -1 (left) to 1 (right); missing is centre. */
   pan?: number
+  /** Effect sends, 0 (none) to 1. Missing is dry. */
+  fx?: TrackFx
+  /** Low cut, compressor, EQ and lo-fi on the lane itself. Missing is untouched. */
+  chain?: TrackChain
   muted: boolean
   solo: boolean
   clips: SmClip[]
@@ -677,6 +703,10 @@ export interface SmProject {
   /** Where bar 1 beat 1 sits on the timeline, seconds. */
   gridOffset: number
   masterGain: number
+  /** The shared echo's repeat at the project tempo. Missing is a dotted eighth. */
+  echoNote?: EchoNote
+  /** The shared reverb's size. Missing is large. */
+  reverbSize?: ReverbSize
   tracks: SmTrack[]
   loop?: { start: number; end: number; on: boolean } | null
   /** The original bounce to A/B against: a take id and where it starts on the timeline. */
@@ -724,15 +754,25 @@ export function defaultReference(session: ScannedSession): Take | undefined {
 
 export const isBeatTrack = (t: SmTrack): boolean => t.role === 'beat' || (t.role == null && t.name === 'Beat')
 
+/** The clip and its lane. */
+function locateClip(p: SmProject, clipId: string): { clip: SmClip; track: SmTrack } | null {
+  for (const t of p.tracks) { const clip = t.clips.find((c) => c.id === clipId); if (clip) return { clip, track: t } }
+  return null
+}
+
+/** Lanes whose clips can be takes of the same part as one on `lane`: those in the
+ *  same take folder (or, for a lane in none, the others in none). Doubles, stacks
+ *  and ad-libs kept outside the folder are never comped against its takes. */
+const compsWith = (lane: SmTrack) => (t: SmTrack): boolean => !isBeatTrack(t) && (t.folder ?? null) === (lane.folder ?? null)
+
 /** Clips on the vocal lanes covering the same stretch as `clipId` (it included), in lane order. */
 export function alternatesOf(p: SmProject, clipId: string): SmClip[] {
-  let target: SmClip | undefined
-  for (const t of p.tracks) target ??= t.clips.find((c) => c.id === clipId)
-  if (!target) return []
+  const found = locateClip(p, clipId)
+  if (!found) return []
+  const target = found.clip
   const s = target.start, e = target.start + target.length
   const out: SmClip[] = []
-  for (const t of p.tracks) {
-    if (isBeatTrack(t)) continue
+  for (const t of p.tracks.filter(compsWith(found.track))) {
     for (const c of [...t.clips].sort((a, b) => a.start - b.start)) {
       // Takes of the same part: each covers at least half of the other. A long
       // take isn't an alternate of a short punch-in or ad-lib that sits inside it.
@@ -793,14 +833,13 @@ export function compTo(p: SmProject, clipId: string): SmProject {
 
 /** What a swipe on `clipId` silences: its alternates, and a longer take it sits
  *  over (swiping a punch-in uses it in place of the take under it). Not shorter
- *  clips inside it - those may be ad-libs. */
+ *  clips inside it - those may be ad-libs. Only ever clips in the same folder. */
 function swipeRivals(p: SmProject, clipId: string): Set<string> {
   const out = new Set(alternatesOf(p, clipId).map((c) => c.id))
-  let target: SmClip | undefined
-  for (const t of p.tracks) target ??= t.clips.find((c) => c.id === clipId)
-  if (!target) return out
-  for (const t of p.tracks) {
-    if (isBeatTrack(t)) continue
+  const found = locateClip(p, clipId)
+  if (!found) return out
+  const target = found.clip
+  for (const t of p.tracks.filter(compsWith(found.track))) {
     for (const c of t.clips) {
       const overlap = Math.min(target.start + target.length, c.start + c.length) - Math.max(target.start, c.start)
       if (c.length > target.length && overlap >= target.length / 2) out.add(c.id)
@@ -968,6 +1007,18 @@ export function deleteProject(id: string): void {
   ls.set(LS_PROJECTS, loadProjects().filter((x) => x.id !== id))
 }
 
+/** Saves a copy of the project under a fresh id and an unused "<name> copy" name, and returns it. */
+export function duplicateProject(p: SmProject): SmProject {
+  const taken = new Set(loadProjects().map((x) => x.name))
+  const base = `${p.name.replace(/ copy(?: \d+)?$/, '')} copy`
+  let name = base
+  for (let i = 2; taken.has(name); i++) name = `${base} ${i}`
+  const now = Date.now()
+  const copy: SmProject = { ...structuredClone(p), id: uid(), name, createdAt: now, updatedAt: now }
+  saveProject(copy)
+  return copy
+}
+
 export function parseProjectFile(text: string): SmProject {
   const p = JSON.parse(text) as SmProject
   if (!p || p.v !== 1 || typeof p.zipPath !== 'string' || !Array.isArray(p.tracks)) throw new Error('Not a Session Maker project')
@@ -1047,6 +1098,290 @@ function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, buff
   return src
 }
 
+// ─── Effects ─────────────────────────────────────────────────────────────────
+// Each lane runs through its own chain (low cut → compressor → presence → air →
+// lo-fi), then its pan, then feeds three shared send effects through its own
+// send gains. The returns join the lanes at `out`, ahead of the mix limiter -
+// so the A/B reference switch mutes them with the rest of the arrangement.
+//
+// Chromium's compressor delays what passes through it by a fixed look-ahead.
+// Every lane always has one (left transparent when its knob is off), and the
+// reference goes through as many transparent ones as the mix has stages, so
+// nothing drifts out of time.
+
+/** How long the effects ring on after the last clip ends: the reverb's longest
+ *  tail, or the echo's repeats dying away (~40 dB over 5½ repeats at its feedback). */
+const fxTail = (p: SmProject): number => Math.max(3.5, 5.5 * echoSeconds(p))
+
+export const fxActive = (p: SmProject): boolean => p.tracks.some((t) => FX_KEYS.some((k) => (t.fx?.[k] ?? 0) > 0))
+
+/** The echo's repeat in seconds: its note at the project tempo, or 375 ms with no tempo. */
+export function echoSeconds(p: Pick<SmProject, 'bpm' | 'echoNote'>): number {
+  if (!p.bpm) return 0.375
+  return Math.min(1.9, (60 / p.bpm) * ECHO_NOTES[p.echoNote ?? DEFAULT_ECHO_NOTE])
+}
+
+/** A noise burst with a decaying envelope - a convolution reverb without shipping an IR file. */
+function impulseResponse(ctx: BaseAudioContext, seconds: number): AudioBuffer {
+  const rate = ctx.sampleRate
+  const length = Math.max(1, Math.floor(rate * seconds))
+  const buf = ctx.createBuffer(2, length, rate)
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buf.getChannelData(ch)
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.5)
+  }
+  return buf
+}
+
+interface FxBuses { inputs: Record<FxKey, GainNode>; set: (p: SmProject) => void; dispose: () => void }
+
+function buildFxBuses(ctx: BaseAudioContext, out: AudioNode, p: SmProject): FxBuses {
+  const nodes: AudioNode[] = []
+  const lfos: OscillatorNode[] = []
+  const make = <T extends AudioNode>(n: T): T => { nodes.push(n); return n }
+
+  // Reverb: a short pre-delay keeps consonants clear of the wash. A size change swaps the convolver.
+  const reverbIn = make(ctx.createGain())
+  const pre = make(ctx.createDelay(0.1))
+  const reverbOut = make(ctx.createGain())
+  reverbOut.gain.value = 0.9
+  reverbIn.connect(pre)
+  reverbOut.connect(out)
+  let convolver: ConvolverNode | null = null
+  let size: ReverbSize | null = null
+  const setReverb = (s: ReverbSize): void => {
+    if (s === size) return
+    size = s
+    const next = ctx.createConvolver()
+    next.buffer = impulseResponse(ctx, REVERB_SIZES[s].seconds)
+    pre.delayTime.value = REVERB_SIZES[s].preDelay
+    pre.connect(next).connect(reverbOut)
+    if (convolver) { pre.disconnect(convolver); convolver.disconnect() }
+    convolver = next
+  }
+
+  // Echo: feedback delay, repeats rolled off so they sit behind the original.
+  const echoIn = make(ctx.createGain())
+  const delay = make(ctx.createDelay(2))
+  const feedback = make(ctx.createGain())
+  feedback.gain.value = 0.42
+  const tone = make(ctx.createBiquadFilter())
+  tone.type = 'lowpass'
+  tone.frequency.value = 4200
+  echoIn.connect(delay).connect(tone)
+  tone.connect(feedback).connect(delay)
+  tone.connect(out)
+  let echo = echoSeconds(p)
+  delay.delayTime.value = echo
+
+  // Chorus: two short delays swept by slow LFOs, panned apart.
+  const chorusIn = make(ctx.createGain())
+  for (const v of [{ base: 0.022, rate: 0.6, pan: -0.7 }, { base: 0.031, rate: 0.9, pan: 0.7 }]) {
+    const d = make(ctx.createDelay(0.1))
+    d.delayTime.value = v.base
+    const lfo = ctx.createOscillator()
+    lfo.frequency.value = v.rate
+    const depth = make(ctx.createGain())
+    depth.gain.value = 0.004
+    lfo.connect(depth).connect(d.delayTime)
+    lfo.start()
+    lfos.push(lfo)
+    const pn = make(ctx.createStereoPanner())
+    pn.pan.value = v.pan
+    chorusIn.connect(d).connect(pn).connect(out)
+  }
+
+  const set = (q: SmProject): void => {
+    setReverb(q.reverbSize ?? DEFAULT_REVERB_SIZE)
+    const e = echoSeconds(q)
+    // Glides to a new time rather than jumping, which would click.
+    if (e !== echo) { echo = e; delay.delayTime.setTargetAtTime(e, ctx.currentTime, 0.03) }
+  }
+  set(p)
+
+  return {
+    inputs: { reverb: reverbIn, echo: echoIn, chorus: chorusIn },
+    set,
+    dispose: () => {
+      for (const l of lfos) { try { l.stop() } catch {} l.disconnect() }
+      for (const n of nodes) n.disconnect()
+      convolver?.disconnect()
+    },
+  }
+}
+
+/** How hard a send drives its effect: a full-scale send is a strong, still musical amount. */
+const FX_DRIVE: Record<FxKey, number> = { reverb: 0.9, echo: 0.7, chorus: 0.7 }
+
+const dbToGain = (db: number): number => 10 ** (db / 20)
+
+/** The make-up gain a DynamicsCompressorNode adds by itself, dB (the Web Audio spec's
+ *  (1 / full-range gain)^0.6, with the knee left out). */
+const autoMakeupDb = (threshold: number, ratio: number): number => 0.6 * -threshold * (1 - 1 / ratio)
+
+/** Where a lane's compressor holds the level: a vocal at this level comes out as loud as it went in. */
+const COMP_ANCHOR_DB = -14
+
+const lowCutHz = (v: number): number => 40 * (300 / 40) ** v
+const compCurve = (v: number): { threshold: number; ratio: number } => ({ threshold: -10 - 20 * v, ratio: 1 + 5 * v })
+/** Presence (a bell at 3.5 kHz) and air (a shelf from 10 kHz) at full. */
+const EQ_MAX_DB = 8
+
+/** What a chain knob is set to, in its own units. */
+export function chainReadout(k: ChainKey, v: number): string {
+  if (v <= 0) return 'off'
+  switch (k) {
+    case 'lowCut': return `${Math.round(lowCutHz(v))} Hz`
+    case 'comp': return `${compCurve(v).ratio.toFixed(1)}:1`
+    case 'presence': case 'air': return `+${(EQ_MAX_DB * v).toFixed(1)} dB`
+    case 'lofi': return `${Math.round(v * 100)}%`
+  }
+}
+
+export const chainActive = (c: TrackChain | undefined): boolean => !!c && CHAIN_KEYS.some((k) => (c[k] ?? 0) > 0)
+
+/** A soft-clipping curve for the lo-fi drive; quieter overall the harder it's pushed, as the band-pass thins it out. */
+function driveCurve(v: number): Float32Array<ArrayBuffer> {
+  const k = 1 + 3 * v
+  const n = 1024
+  const curve = new Float32Array(n)
+  const norm = Math.tanh(k) * Math.sqrt(k)
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1
+    curve[i] = Math.tanh(k * x) / norm
+  }
+  return curve
+}
+
+interface LaneChain { input: AudioNode; output: AudioNode; set: (c: TrackChain | undefined) => void; dispose: () => void }
+
+/** A lane's own processing. Every stage idles transparently at 0, so it can be adjusted live. */
+function buildChain(ctx: BaseAudioContext): LaneChain {
+  const lowCut = ctx.createBiquadFilter()
+  lowCut.type = 'highpass'
+  const comp = ctx.createDynamicsCompressor()
+  comp.knee.value = 6
+  comp.attack.value = 0.004
+  comp.release.value = 0.18
+  const compTrim = ctx.createGain()
+  const presence = ctx.createBiquadFilter()
+  presence.type = 'peaking'
+  presence.frequency.value = 3500
+  presence.Q.value = 0.9
+  const air = ctx.createBiquadFilter()
+  air.type = 'highshelf'
+  air.frequency.value = 10000
+  const lofiHp = ctx.createBiquadFilter()
+  lofiHp.type = 'highpass'
+  const lofiLp = ctx.createBiquadFilter()
+  lofiLp.type = 'lowpass'
+  const shaper = ctx.createWaveShaper()
+  shaper.oversample = '2x'
+  const nodes = [lowCut, comp, compTrim, presence, air, lofiHp, lofiLp, shaper]
+  lowCut.connect(comp).connect(compTrim).connect(presence).connect(air).connect(lofiHp).connect(lofiLp).connect(shaper)
+  let lofi = -1
+  const set = (c: TrackChain | undefined): void => {
+    const v = (k: ChainKey): number => clamp01(c?.[k] ?? 0)
+    lowCut.frequency.value = v('lowCut') > 0 ? lowCutHz(v('lowCut')) : 10
+    if (v('comp') > 0) {
+      const { threshold, ratio } = compCurve(v('comp'))
+      comp.knee.value = 6
+      comp.threshold.value = threshold
+      comp.ratio.value = ratio
+      // Take the compressor's own make-up back off, then level it so a vocal at COMP_ANCHOR_DB comes out unchanged.
+      const out = COMP_ANCHOR_DB <= threshold ? COMP_ANCHOR_DB : threshold + (COMP_ANCHOR_DB - threshold) / ratio
+      compTrim.gain.value = dbToGain(COMP_ANCHOR_DB - out - autoMakeupDb(threshold, ratio))
+    } else {
+      // Ratio 1 with no knee is a straight line: the compressor passes audio untouched (just delayed).
+      comp.knee.value = 0
+      comp.threshold.value = 0
+      comp.ratio.value = 1
+      compTrim.gain.value = 1
+    }
+    presence.gain.value = EQ_MAX_DB * v('presence')
+    air.gain.value = EQ_MAX_DB * v('air')
+    const l = v('lofi')
+    lofiHp.frequency.value = 20 * 25 ** l
+    lofiLp.frequency.value = 20000 / 7 ** l
+    if (l !== lofi) { lofi = l; shaper.curve = l > 0 ? driveCurve(l) : null }
+  }
+  return { input: lowCut, output: shaper, set, dispose: () => { for (const n of nodes) n.disconnect() } }
+}
+
+/** A compressor that leaves the audio alone - only its look-ahead delay, to keep a path in time with one that compresses. */
+function latencyStage(ctx: BaseAudioContext): DynamicsCompressorNode {
+  const c = ctx.createDynamicsCompressor()
+  c.knee.value = 0
+  c.threshold.value = 0
+  c.ratio.value = 1
+  return c
+}
+
+const LIMIT_DB = -1.5
+const LIMIT_RATIO = 20
+
+/** Catches overs on the mix: a fast, hard compressor just under full scale, its own make-up taken back off. */
+function buildLimiter(ctx: BaseAudioContext): { input: AudioNode; output: AudioNode; dispose: () => void } {
+  const l = ctx.createDynamicsCompressor()
+  l.threshold.value = LIMIT_DB
+  l.knee.value = 0
+  l.ratio.value = LIMIT_RATIO
+  l.attack.value = 0.001
+  l.release.value = 0.12
+  const trim = ctx.createGain()
+  trim.gain.value = dbToGain(-autoMakeupDb(LIMIT_DB, LIMIT_RATIO))
+  l.connect(trim)
+  return { input: l, output: trim, dispose: () => { l.disconnect(); trim.disconnect() } }
+}
+
+/** Compressor stages the mix passes through: a lane's chain and the limiter. */
+const MIX_LATENCY_STAGES = 2
+
+// ─── Reverse ─────────────────────────────────────────────────────────────────
+
+const reversedBuffers = new WeakMap<AudioBuffer, AudioBuffer>()
+const reversedPeakArrays = new WeakMap<Float32Array, Float32Array>()
+
+/** The take played backwards, made once per buffer. */
+export function reversedBuffer(b: AudioBuffer): AudioBuffer {
+  let r = reversedBuffers.get(b)
+  if (!r) {
+    r = new AudioBuffer({ numberOfChannels: b.numberOfChannels, length: b.length, sampleRate: b.sampleRate })
+    for (let ch = 0; ch < b.numberOfChannels; ch++) {
+      const src = b.getChannelData(ch), dst = r.getChannelData(ch)
+      for (let i = 0, n = src.length; i < n; i++) dst[i] = src[n - 1 - i]
+    }
+    reversedBuffers.set(b, r)
+  }
+  return r
+}
+
+/** A take's waveform peaks, backwards - what a reversed clip draws. */
+export function reversedPeaks(p: Float32Array): Float32Array {
+  let r = reversedPeakArrays.get(p)
+  if (!r) { r = p.slice().reverse(); reversedPeakArrays.set(p, r) }
+  return r
+}
+
+/** The audio a clip plays from: its take, or the take backwards when it's reversed. */
+function clipBuffer(c: SmClip, bufferFor: BufferFor): AudioBuffer | undefined {
+  const b = bufferFor(c.takeId)
+  return b && c.reversed ? reversedBuffer(b) : b
+}
+
+/** Flips a clip between forwards and backwards over the same stretch of its take
+ *  (`takeLength` seconds long), keeping its comp silences on the same audio. */
+export function reverseClip(c: SmClip, takeLength: number): SmClip {
+  const { reversed, silent, ...rest } = c
+  const flipped = silent?.map(([a, b]): [number, number] => [takeLength - b, takeLength - a]).reverse()
+  return {
+    ...rest,
+    offset: Math.max(0, takeLength - c.offset - c.length),
+    ...(flipped?.length ? { silent: flipped } : {}),
+    ...(reversed ? {} : { reversed: true }),
+  }
+}
+
 export interface LoopRange { start: number; end: number }
 export interface Reference { buffer: AudioBuffer; offset: number }
 export type AB = 'mix' | 'ref'
@@ -1061,9 +1396,14 @@ export class SessionEngine {
   private sources = new Set<AudioBufferSourceNode>()
   private trackGains = new Map<string, GainNode>()
   private trackPans = new Map<string, StereoPannerNode>()
+  private trackSends = new Map<string, Record<FxKey, GainNode>>()
+  private chains = new Map<string, LaneChain>()
+  private fx: FxBuses | null = null
   private master: GainNode | null = null
   private mixBus: GainNode | null = null
   private refBus: GainNode | null = null
+  /** The limiter and the reference's latency stages, torn down with the rest. */
+  private busNodes: { dispose: () => void }[] = []
   private startedAt = 0
   private startedFrom = 0
   private loop: LoopRange | null = null
@@ -1095,16 +1435,34 @@ export class SessionEngine {
     if (ctx.state === 'suspended') void ctx.resume()
     this.master = ctx.createGain()
     this.master.connect(ctx.destination)
+    // Lanes and effect returns → limiter → A/B switch; the reference → latency stages → A/B switch.
     const mixBus = (this.mixBus = ctx.createGain())
     mixBus.connect(this.master)
+    const limiter = buildLimiter(ctx)
+    limiter.output.connect(mixBus)
     const refBus = (this.refBus = ctx.createGain())
     refBus.connect(this.master)
+    const refIn = ctx.createGain()
+    const stages = Array.from({ length: MIX_LATENCY_STAGES }, () => latencyStage(ctx))
+    stages.reduce<AudioNode>((n, st) => n.connect(st), refIn).connect(refBus)
+    this.busNodes = [limiter, ...[refIn, ...stages].map((n) => ({ dispose: () => n.disconnect() }))]
+    const fx = (this.fx = buildFxBuses(ctx, limiter.input, p))
     for (const t of p.tracks) {
       const tg = ctx.createGain()
+      const chain = buildChain(ctx)
       const pan = ctx.createStereoPanner()
-      tg.connect(pan).connect(mixBus)
+      tg.connect(chain.input)
+      chain.output.connect(pan).connect(limiter.input)
+      const sends = {} as Record<FxKey, GainNode>
+      for (const k of FX_KEYS) {
+        const send = (sends[k] = ctx.createGain())
+        send.gain.value = 0
+        pan.connect(send).connect(fx.inputs[k])
+      }
+      this.chains.set(t.id, chain)
       this.trackGains.set(t.id, tg)
       this.trackPans.set(t.id, pan)
+      this.trackSends.set(t.id, sends)
     }
     const ref = opts.reference ?? null
     const segment = (segFrom: number, until: number, at: number): void => {
@@ -1112,11 +1470,11 @@ export class SessionEngine {
         const tg = this.trackGains.get(t.id)
         if (!tg) continue
         for (const c of t.clips) {
-          const b = bufferFor(c.takeId)
+          const b = clipBuffer(c, bufferFor)
           if (b) this.track(scheduleClip(ctx, tg, c, b, segFrom, at, until))
         }
       }
-      if (ref) this.track(scheduleClip(ctx, refBus, referenceClip(ref), ref.buffer, segFrom, at, until))
+      if (ref) this.track(scheduleClip(ctx, refIn, referenceClip(ref), ref.buffer, segFrom, at, until))
     }
 
     const at = ctx.currentTime + 0.06
@@ -1149,15 +1507,19 @@ export class SessionEngine {
     s.onended = () => { this.sources.delete(s); s.disconnect() }
   }
 
-  /** Volume/mute/solo changes without restarting playback. */
+  /** Volume/mute/solo and effect changes without restarting playback. */
   applyMix(p: SmProject): void {
     if (this.master) this.master.gain.value = p.masterGain
+    this.fx?.set(p)
     const audible = new Set(audibleTracks(p).map((t) => t.id))
     for (const t of p.tracks) {
       const g = this.trackGains.get(t.id)
       if (g) g.gain.value = audible.has(t.id) ? t.gain : 0
+      this.chains.get(t.id)?.set(t.chain)
       const pan = this.trackPans.get(t.id)
       if (pan) pan.pan.value = t.pan ?? 0
+      const sends = this.trackSends.get(t.id)
+      if (sends) for (const k of FX_KEYS) sends[k].gain.value = clamp01(t.fx?.[k] ?? 0) * FX_DRIVE[k]
     }
     this.setAB(this.ab, true)
   }
@@ -1193,6 +1555,14 @@ export class SessionEngine {
     this.trackGains.clear()
     for (const pan of this.trackPans.values()) pan.disconnect()
     this.trackPans.clear()
+    for (const sends of this.trackSends.values()) for (const s of Object.values(sends)) s.disconnect()
+    this.trackSends.clear()
+    for (const c of this.chains.values()) c.dispose()
+    this.chains.clear()
+    for (const n of this.busNodes) n.dispose()
+    this.busNodes = []
+    this.fx?.dispose()
+    this.fx = null
     for (const n of [this.mixBus, this.refBus, this.master]) n?.disconnect()
     this.mixBus = this.refBus = this.master = null
     this.loop = null
@@ -1305,24 +1675,67 @@ export class SessionEngine {
 export async function renderProject(p: SmProject, bufferFor: BufferFor, sampleRate = 48000): Promise<AudioBuffer> {
   const end = projectEnd(p)
   if (end <= 0) throw new Error('Nothing to export - the timeline is empty')
-  const ctx = new OfflineAudioContext(2, Math.ceil((end + 0.25) * sampleRate), sampleRate)
+  // Let the reverb/echo tails ring out past the last clip.
+  const lag = MIX_LATENCY_STAGES * (await compressorLatency(sampleRate))
+  const ctx = new OfflineAudioContext(2, Math.ceil((end + (fxActive(p) ? fxTail(p) : 0.25)) * sampleRate) + lag, sampleRate)
   const master = ctx.createGain()
   master.gain.value = p.masterGain
   master.connect(ctx.destination)
+  const limiter = buildLimiter(ctx)
+  limiter.output.connect(master)
+  const fx = buildFxBuses(ctx, limiter.input, p)
   const audible = new Set(audibleTracks(p).map((t) => t.id))
   for (const t of p.tracks) {
     if (!audible.has(t.id)) continue
     const tg = ctx.createGain()
     tg.gain.value = t.gain
+    const chain = buildChain(ctx)
+    chain.set(t.chain)
     const pan = ctx.createStereoPanner()
+    for (const k of FX_KEYS) {
+      const amount = clamp01(t.fx?.[k] ?? 0)
+      if (amount <= 0) continue
+      const send = ctx.createGain()
+      send.gain.value = amount * FX_DRIVE[k]
+      pan.connect(send).connect(fx.inputs[k])
+    }
     pan.pan.value = t.pan ?? 0
-    tg.connect(pan).connect(master)
+    tg.connect(chain.input)
+    chain.output.connect(pan).connect(limiter.input)
     for (const c of t.clips) {
-      const b = bufferFor(c.takeId)
+      const b = clipBuffer(c, bufferFor)
       if (b) scheduleClip(ctx, tg, c, b, 0, 0)
     }
   }
-  return ctx.startRendering()
+  const rendered = await ctx.startRendering()
+  if (!lag) return rendered
+  // Drop the compressors' look-ahead, so the file starts at timeline 0.
+  const out = new AudioBuffer({ numberOfChannels: rendered.numberOfChannels, length: rendered.length - lag, sampleRate })
+  for (let ch = 0; ch < rendered.numberOfChannels; ch++) out.copyToChannel(rendered.getChannelData(ch).subarray(lag), ch)
+  return out
+}
+
+const compressorLatencies = new Map<number, Promise<number>>()
+
+/** How many frames a compressor holds audio back by (its look-ahead), measured once per sample rate. */
+function compressorLatency(sampleRate: number): Promise<number> {
+  let p = compressorLatencies.get(sampleRate)
+  if (!p) {
+    p = (async () => {
+      const ctx = new OfflineAudioContext(1, Math.ceil(sampleRate * 0.1), sampleRate)
+      const click = ctx.createBuffer(1, 1, sampleRate)
+      click.getChannelData(0)[0] = 0.5
+      const src = ctx.createBufferSource()
+      src.buffer = click
+      src.connect(latencyStage(ctx)).connect(ctx.destination)
+      src.start(0)
+      const data = (await ctx.startRendering()).getChannelData(0)
+      const at = data.findIndex((x) => Math.abs(x) > 1e-3)
+      return at < 0 ? 0 : at
+    })()
+    compressorLatencies.set(sampleRate, p)
+  }
+  return p
 }
 
 // ─── Reference alignment ─────────────────────────────────────────────────────
