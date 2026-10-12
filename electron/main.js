@@ -169,13 +169,15 @@ process.on('unhandledRejection', (reason) => {
 // dropped connection could leave a truncated file that later passed the
 // offline library's "already downloaded" existence check — or, on a
 // re-download of a changed track, destroy the old good copy with partial data.
-function downloadFile(url, dest, onProgress) {
+// `headers` go on the first request only: a redirect may leave the host, and
+// the one caller that passes any (the beta build download) sends a secret.
+function downloadFile(url, dest, onProgress, headers) {
   const tmp = dest + '.part'
   return new Promise((resolve, reject) => {
-    function doGet(u) {
+    function doGet(u, extra) {
       const opts = new URL(u)
-      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
-        if (res.statusCode === 302 || res.statusCode === 301) return doGet(res.headers.location)
+      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App', ...extra } }, (res) => {
+        if (res.statusCode === 302 || res.statusCode === 301) return doGet(res.headers.location, null)
         if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
         const total = parseInt(res.headers['content-length'] || '0', 10)
         let received = 0
@@ -199,7 +201,7 @@ function downloadFile(url, dest, onProgress) {
         res.on('error', fail)
       }).on('error', reject)
     }
-    doGet(url)
+    doGet(url, headers)
   })
 }
 
@@ -225,14 +227,24 @@ const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 // the user's active work.
 let isStartupUpdateCheck = false
 
-function runUpdateCheck(reason) {
+async function runUpdateCheck(reason) {
   if (isDev || updateCheckInProgress || updateDownloadedPending) return
   log(`Checking for updates (${reason})...`)
   updateCheckInProgress = true
   if (reason === 'startup') isStartupUpdateCheck = true
-  autoUpdater.checkForUpdatesAndNotify()
-    .catch(err => log('checkForUpdates error:', err.message))
-    .finally(() => { updateCheckInProgress = false })
+  try {
+    // A beta user checks the gated beta list first; only when it has nothing
+    // newer does the normal stable check run.
+    if (await checkBetaUpdate({ startup: reason === 'startup' })) {
+      isStartupUpdateCheck = false
+      return
+    }
+    await autoUpdater.checkForUpdatesAndNotify()
+  } catch (err) {
+    log('checkForUpdates error:', err.message)
+  } finally {
+    updateCheckInProgress = false
+  }
 }
 // Beta channel — gated server-side by juicewrldapi.com, not by anything
 // baked into this app (see build/fetch-releases.ps1 for the full endpoint
@@ -251,50 +263,136 @@ function readBetaCode() {
 // every stable release here.
 const UPDATE_REPO = { owner: 'Juice-WRLD-API', repo: 'Unreleased' }
 
-// Switches the updater between the normal stable (GitHub) feed and the
-// gated beta feed. electron-updater allows re-pointing the feed at runtime,
-// so join/leave (and switching update source) take effect immediately, no
-// restart needed.
+// electron-updater always follows the stable (GitHub) feed. Betas are not a
+// feed at all: with a code on disk, a check lists /beta/versions, and if the
+// newest build there is higher than this one the installer is downloaded and
+// run ourselves (checkBetaUpdate). Join/leave just changes which code, if any,
+// that check uses, so it takes effect immediately.
 let activeBetaCode = null
 function applyUpdateFeed(code) {
   activeBetaCode = code || null
-  if (code) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: `${BETA_API_BASE}/update-feed`, channel: 'latest' })
-    autoUpdater.requestHeaders = { 'X-Beta-Code': code }
-    autoUpdater.allowPrerelease = true
-  } else {
-    const { owner, repo } = UPDATE_REPO
-    autoUpdater.setFeedURL({ provider: 'github', owner, repo })
-    autoUpdater.requestHeaders = null
-    autoUpdater.allowPrerelease = false
-  }
+  const { owner, repo } = UPDATE_REPO
+  autoUpdater.setFeedURL({ provider: 'github', owner, repo })
+  autoUpdater.requestHeaders = null
+  autoUpdater.allowPrerelease = false
 }
 
-// The beta feed is served by juicewrldapi.com, whose SPA answers unknown paths
-// with index.html at HTTP 200 rather than a 404. So when the /beta endpoints go
-// away, `latest.yml` comes back as a page of HTML, js-yaml throws on it, and the
-// updater fails — with no status code anywhere to reveal that the endpoint is
-// simply gone. Because the marker lives in userData, that state survives
-// uninstall, reinstall, and the force-update path, which is how a user ends up
-// permanently stuck on "check failed" while force-install keeps working.
-//
-// Any failure that means "this feed isn't speaking the update protocol" is
-// therefore treated as "beta is unavailable", not as a fatal update error: we
-// re-point at the stable GitHub feed and finish the check there. The marker is
-// deliberately left on disk, so beta resumes by itself if the backend returns —
-// the cost is one wasted request per launch, which beats bricking the updater.
-// Certificate errors are deliberately excluded: they're the signal of a
-// possible interception attempt, not "the feed is down," so they should
-// surface as a real update error instead of silently falling back to the
-// stable feed.
-function isBetaFeedUnavailable(msg) {
-  return /Cannot parse update info|YAMLException|HTTP 4\d\d|ENOTFOUND|ECONNREFUSED/i.test(msg)
+// Semver precedence (what the beta versions use): major.minor.patch first, then
+// a version with no pre-release part outranks one with it, then the dot-
+// separated pre-release identifiers compare numerically when both are numbers.
+function compareVersions(a, b) {
+  const parse = (v) => {
+    const s = String(v).replace(/^v/i, '')
+    const dash = s.indexOf('-')
+    const core = dash < 0 ? s : s.slice(0, dash)
+    const pre = dash < 0 ? '' : s.slice(dash + 1)
+    return { nums: core.split('.').map(n => parseInt(n, 10) || 0), pre: pre ? pre.split('.') : [] }
+  }
+  const x = parse(a), y = parse(b)
+  for (let i = 0; i < 3; i++) {
+    const d = (x.nums[i] || 0) - (y.nums[i] || 0)
+    if (d) return d < 0 ? -1 : 1
+  }
+  if (!x.pre.length || !y.pre.length) return x.pre.length === y.pre.length ? 0 : x.pre.length ? -1 : 1
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i], q = y.pre[i]
+    if (p === undefined) return -1
+    if (q === undefined) return 1
+    const pn = /^\d+$/.test(p), qn = /^\d+$/.test(q)
+    if (pn && qn) { const d = Number(p) - Number(q); if (d) return d < 0 ? -1 : 1 }
+    else if (pn !== qn) return pn ? -1 : 1
+    else if (p !== q) return p < q ? -1 : 1
+  }
+  return 0
 }
-let betaFallbackDone = false
+
+function fetchBetaVersions(code) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(`${BETA_API_BASE}/versions`, {
+      headers: { 'User-Agent': 'Unreleased-App', 'X-Beta-Code': code }, timeout: 15000,
+    }, (res) => {
+      let data = ''
+      res.on('data', d => { data += d })
+      res.on('end', () => {
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+        // The site's SPA answers unknown paths with an HTML page at 200, so a
+        // missing endpoint shows up here as a parse failure, not a status.
+        try {
+          const list = JSON.parse(data)
+          if (!Array.isArray(list)) throw new Error('not a list')
+          resolve(list)
+        } catch { reject(new Error('unexpected response')) }
+      })
+    })
+    req.on('timeout', () => req.destroy(new Error('timed out')))
+    req.on('error', reject)
+  })
+}
+
+// The installer a beta check downloaded, waiting to be run (see
+// quitAndInstallSilently). Null when the pending update came from the stable feed.
+let betaInstallerPath = null
+
+// Looks for a build newer than this one in the beta list and, if there is one,
+// downloads and installs it. Returns true when it took over the update (so the
+// stable check is skipped), false when there is nothing newer, no code, or the
+// list couldn't be had — a revoked code or an unreachable backend just means
+// "no beta update" and the stable check carries on. Windows only: the beta
+// builds are NSIS installers. `force` ignores the auto-download setting.
+async function checkBetaUpdate({ startup = false, force = false } = {}) {
+  const code = activeBetaCode
+  if (!code || process.platform !== 'win32') return false
+  let list
+  try {
+    list = await fetchBetaVersions(code)
+  } catch (err) {
+    log('Beta version check failed:', err.message)
+    return false
+  }
+  const newest = list.map(v => v && v.version).filter(Boolean).sort(compareVersions).pop()
+  if (!newest || compareVersions(newest, app.getVersion()) <= 0) return false
+
+  log('Newer beta available:', newest)
+  broadcastToWindows('update-status', { type: 'available', version: newest })
+  if (!appSettings.autoDownload && !startup && !force) return true
+
+  const dest = path.join(app.getPath('temp'), `Unreleased-Setup-${newest}.exe`)
+  try {
+    broadcastToWindows('update-status', { type: 'downloading', percent: 0, version: newest })
+    await downloadFile(
+      `${BETA_API_BASE}/download?version=${encodeURIComponent(newest)}`, dest,
+      (percent) => broadcastToWindows('update-status', { type: 'downloading', percent, version: newest }),
+      { 'X-Beta-Code': code },
+    )
+  } catch (err) {
+    log('Beta download failed:', err.message)
+    broadcastToWindows('update-status', { type: 'error', message: `Beta download failed: ${err.message}` })
+    return true
+  }
+
+  betaInstallerPath = dest
+  updateDownloadedPending = true
+  log('Beta installer ready:', dest)
+  broadcastToWindows('update-status', { type: 'downloaded', version: newest })
+
+  // Same rule as a stable download: at launch nothing is in progress, so
+  // install silently; mid-session ask first.
+  if (startup) { quitAndInstallSilently(); return true }
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'Update ready',
+    message: `Unreleased ${newest} (beta) has been downloaded.`,
+    detail: 'Restart the app to apply the update.',
+    buttons: ['Restart now', 'Later'],
+    defaultId: 0,
+  })
+  if (response === 0) quitAndInstallSilently()
+  return true
+}
 
 const initialBetaCode = readBetaCode()
 applyUpdateFeed(initialBetaCode)
-if (initialBetaCode) log('Beta access marker present — gated beta update feed enabled')
+if (initialBetaCode) log('Beta access marker present — checking the gated beta list for updates')
 
 // On Windows, BrowserWindow/Tray icons are loaded by native code that can't
 // read files packed inside app.asar — it silently falls back to Electron's
@@ -979,6 +1077,10 @@ ipcMain.handle('force-update', async () => {
   const https = require('https')
   log('Force update requested')
 
+  // A beta user's newest build can be a beta the stable GitHub lookup below
+  // would never see.
+  if (await checkBetaUpdate({ force: true })) return
+
   // Linux: hand off to electron-updater. Its AppImageUpdater replaces the
   // installed AppImage in place on quitAndInstall — the manual flow below
   // would just run the freshly downloaded AppImage once from temp and leave
@@ -1053,8 +1155,9 @@ ipcMain.handle('force-update', async () => {
   }
 })
 
-ipcMain.handle('check-for-updates', () => {
+ipcMain.handle('check-for-updates', async () => {
   log('Manual update check triggered')
+  if (await checkBetaUpdate()) return
   return autoUpdater.checkForUpdatesAndNotify()
 })
 ipcMain.handle('install-update', () => {
@@ -3576,7 +3679,8 @@ function quitAndInstallSilently() {
   const exePath = process.execPath
   // electron-updater runs the installer out of its cache dir (see
   // clearUpdaterCache); installerPath is the exact file when it exposes it.
-  const installerPath = autoUpdater.installerPath || ''
+  // A beta download is ours instead, in temp (see checkBetaUpdate).
+  const installerPath = betaInstallerPath || autoUpdater.installerPath || ''
   const watcherPath = path.join(app.getPath('temp'), `unreleased-update-relaunch-${process.pid}.ps1`)
   const script = [
     `param([int]$AppPid, [string]$AppExePath, [string]$InstallerPath = '', [int]$TimeoutSeconds = 120)`,
@@ -3612,12 +3716,25 @@ function quitAndInstallSilently() {
   } catch (e) {
     log('Failed to spawn update relaunch watcher:', e.message)
   }
+  if (betaInstallerPath) {
+    // Run it the way electron-updater would: --updated marks it as an update
+    // (so the installer skips its first-run pages) and /S keeps it silent.
+    try {
+      spawn(betaInstallerPath, ['--updated', '/S'], { detached: true, stdio: 'ignore' }).unref()
+    } catch (e) {
+      log('Beta installer spawn failed, opening it instead:', e.message)
+      shell.openPath(betaInstallerPath)
+    }
+    app.quit()
+    return
+  }
   autoUpdater.quitAndInstall(true, false)
 }
 
 autoUpdater.on('update-downloaded', (info) => {
   log('Update downloaded:', info.version)
   updateDownloadedPending = true
+  betaInstallerPath = null
   broadcastToWindows('update-status', { type: 'downloaded', version: info.version })
 
   // At launch there's no in-progress work to interrupt — and this is also the
@@ -3686,19 +3803,6 @@ autoUpdater.on('error', (err) => {
   if (isCorruptCacheError(msg)) {
     clearUpdaterCache()
     updateDownloadedPending = false
-  }
-
-  // Beta feed isn't answering with a usable latest.yml → retry on stable rather
-  // than surfacing a dead end the user can't clear from inside the app.
-  if (activeBetaCode && !betaFallbackDone && isBetaFeedUnavailable(msg)) {
-    betaFallbackDone = true
-    log('Beta update feed unusable — falling back to the stable GitHub feed for this session')
-    applyUpdateFeed(null)
-    broadcastToWindows('update-status', { type: 'checking' })
-    // activeBetaCode is null now, so a failure here takes the normal path below
-    // instead of looping back into the fallback.
-    autoUpdater.checkForUpdates().catch(e => log('Stable-feed retry failed:', e.message))
-    return
   }
 
   isStartupUpdateCheck = false

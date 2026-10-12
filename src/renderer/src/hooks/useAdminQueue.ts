@@ -25,7 +25,7 @@ import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/report
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes'
+export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes' | 'beta'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -43,6 +43,7 @@ export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   channels: '/channels',
   eras: '/eras',
   'cdn-nodes': '/cdn-nodes',
+  beta: '/beta',
   security: '/security',
 }
 
@@ -57,7 +58,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'security'
+  iconKey: 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'security'
   badge?: number
 }
 
@@ -198,6 +199,7 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     { id: 'channels',     label: 'Channels',     iconKey: 'channels' },
     { id: 'eras',         label: 'Eras',         iconKey: 'eras' },
     { id: 'cdn-nodes',    label: 'CDN nodes',    iconKey: 'cdn-nodes' },
+    { id: 'beta',         label: 'Beta',         iconKey: 'beta' },
     { id: 'security',     label: 'Security',     iconKey: 'security' },
   ]
   const nav = isFullAdmin ? fullNav : fullNav.filter(n => managerNavIds.includes(n.id))

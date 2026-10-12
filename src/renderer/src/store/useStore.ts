@@ -19,7 +19,7 @@ import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } f
 
 // AdminPage's own tab set (see its local `Tab` type) — duplicated here rather
 // than imported so the store doesn't depend on a component file; keep in sync.
-export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes'
+export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes' | 'beta'
 import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
 import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
