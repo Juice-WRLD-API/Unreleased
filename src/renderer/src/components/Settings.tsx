@@ -929,7 +929,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
       panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[760px] h-[600px] max-h-[85vh]"
       minWidth={520} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <>
       {/* Custom-skin editor (portals to <body>, so placement here is fine) */}
       {editingSkinId && (
@@ -1021,7 +1021,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                 <Minimize2 size={18} />
               </button>
             )}
-            {!floating && <LockToggle locked={locked} onClick={toggleLock} />}
+            {!floating && canLock && <LockToggle locked={locked} onClick={toggleLock} />}
             <button onClick={closeSettings} className="text-text-muted hover:text-text-primary transition-colors">
               <X size={20} />
             </button>
