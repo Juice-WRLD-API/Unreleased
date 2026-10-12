@@ -7,7 +7,8 @@ name: Build Android release
 # mirror), since each publishes its own android-v* release and each needs its
 # own APK attached.
 #
-# Only reacts to android-v* tags so a stray desktop v* release published on
+# Only reacts to android-v* (stable) and android-beta-v* (beta, cut from
+# android-dev) tags so a stray desktop v* release published on
 # this same repo (shouldn't happen, but android and app share release
 # machinery conceptually) doesn't try to run a Capacitor build against a tag
 # that has no android/ directory.
@@ -23,7 +24,7 @@ on:
 
 jobs:
   android:
-    if: startsWith(github.event.release.tag_name || inputs.tag, 'android-v')
+    if: startsWith(github.event.release.tag_name || inputs.tag, 'android-v') || startsWith(github.event.release.tag_name || inputs.tag, 'android-beta-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,7 +87,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           apk="android/app/build/outputs/apk/debug/app-debug.apk"
-          asset="Unreleased-android-v${{ steps.tag.outputs.version }}.apk"
+          asset="Unreleased-${{ steps.tag.outputs.tag }}.apk"
           cp "$apk" "$asset"
           gh release upload "${{ steps.tag.outputs.tag }}" "$asset" \
             --clobber --repo "${{ github.repository }}"

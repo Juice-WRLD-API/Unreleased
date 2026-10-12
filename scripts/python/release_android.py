@@ -35,10 +35,9 @@ for the desktop app's auto-updater or gets anywhere near the web deploy.
      Without --install this step is skipped entirely — the release build now
      happens in CI (see below), so no local Android SDK is required for an
      ordinary release.
-  7. Push android to GitHub — origin (Juice-WRLD-API/Unreleased) and the
-     leanwrldd/unreleased mirror.
+  7. Push android to GitHub — origin (Juice-WRLD-API/Unreleased).
   8. Create the GitHub release (tag android-v<version>, target_commitish
-     android) on both repos, already published with no APK attached.
+     android) on origin, already published with no APK attached.
      Publishing is what fires each repo's build-android.yml
      `on: release: types: [published]` trigger — CI builds the debug APK via
      Gradle and uploads it to that same release.
@@ -57,17 +56,27 @@ from pathlib import Path
 ROOT           = Path(__file__).parent.parent.parent
 REPO_OWNER     = "Juice-WRLD-API"
 REPO_NAME      = "Unreleased"
-ANDROID_BRANCH = "android"
+# Release channels, keyed by branch. `android` cuts stable releases
+# (android-v<ver>); `android-dev` cuts betas (android-beta-v<ver>). The branch
+# you're on picks the channel; any other branch is refused by the guard.
+CHANNELS = {
+    "android":     {"tag_prefix": "android-v",      "label": "stable"},
+    "android-dev": {"tag_prefix": "android-beta-v", "label": "beta"},
+}
+
+def _current_branch():
+    r = subprocess.run("git rev-parse --abbrev-ref HEAD", shell=True, cwd=ROOT,
+                       capture_output=True, text=True)
+    return r.stdout.strip()
+
+# The branch we're on, if it's a release channel; otherwise fall back to
+# "android" so guard_only_android_branch() reports the mismatch.
+ANDROID_BRANCH = _current_branch() if _current_branch() in CHANNELS else "android"
+TAG_PREFIX     = CHANNELS[ANDROID_BRANCH]["tag_prefix"]
+CHANNEL        = CHANNELS[ANDROID_BRANCH]["label"]
 API_BASE       = "https://api.github.com"
 APK_PATH       = ROOT / "android" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
 ANDROID_PACKAGE = "com.juicewrldapi.player"
-
-# Best-effort mirror: every android release also pushes the branch and
-# publishes a matching release here, same as release.py does for desktop.
-# origin (Juice-WRLD-API/Unreleased) is the source of truth and the mirror
-# is a nice-to-have — failures here are warned, never fatal.
-MIRROR_OWNER = "leanwrldd"
-MIRROR_NAME  = "unreleased"
 
 # ── ANSI helpers ──────────────────────────────────────────────────────────────
 RST  = "\033[0m"
@@ -163,23 +172,6 @@ def is_dirty():
 def git_branch():
     return capture("git rev-parse --abbrev-ref HEAD")
 
-def push_mirror_branch(branch, token):
-    """Force-push a branch to the mirror repo, authenticating via the token
-    embedded in the URL (no persistent remote, nothing written to
-    .git/config). Always --force: the mirror isn't collaborative, it just
-    has to match origin's branch exactly.
-
-    The token never reaches the console or an exception message — it's
-    redacted from both the printed command and any captured stderr.
-    """
-    url = f"https://{token}@github.com/{MIRROR_OWNER}/{MIRROR_NAME}.git"
-    detail(f"> git push https://***@github.com/{MIRROR_OWNER}/{MIRROR_NAME}.git {branch}:{branch} --force")
-    r = subprocess.run(f'git push "{url}" {branch}:{branch} --force',
-                        shell=True, cwd=ROOT, capture_output=True, text=True)
-    if r.returncode != 0:
-        err = (r.stderr or r.stdout or "").replace(token, "***")
-        raise RuntimeError(err.strip()[:500])
-
 # ── android/app/build.gradle version fields ────────────────────────────────────
 
 GRADLE_PATH = ROOT / "android" / "app" / "build.gradle"
@@ -245,9 +237,9 @@ def guard_only_android_branch():
     app or web — an android/ tree change landing on either would be exactly
     the leak this whole two-script split exists to prevent (see release.py's
     guard_no_mobile_dirs). Checked before anything mutates state."""
-    if git_branch() != ANDROID_BRANCH:
-        die(f"Expected to be on '{ANDROID_BRANCH}', got '{git_branch()}'.\n"
-            f"     This script only operates on {ANDROID_BRANCH} — switch manually\n"
+    if git_branch() not in CHANNELS:
+        die(f"Expected to be on one of {', '.join(CHANNELS)}, got '{git_branch()}'.\n"
+            f"     This script only operates on those branches — switch manually\n"
             f"     if that's really where you want to be, then re-run.")
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -432,13 +424,6 @@ def step_push(token, state):
     state["pushed"] = True
     ok(f"Pushed to origin/{ANDROID_BRANCH}")
 
-    try:
-        info(f"Mirroring {ANDROID_BRANCH} → {MIRROR_OWNER}/{MIRROR_NAME}")
-        push_mirror_branch(ANDROID_BRANCH, token)
-        ok(f"Mirrored to {MIRROR_OWNER}/{MIRROR_NAME}")
-    except Exception as e:
-        warn(f"Mirror push failed (origin unaffected): {e}")
-
 
 def step_release(version, token, notes, state):
     section(8, TOTAL, "GitHub release")
@@ -446,41 +431,28 @@ def step_release(version, token, notes, state):
     APK. Publishing (not drafting) is what fires build-android.yml's
     `on: release: types: [published]` trigger on each repo the branch was
     just pushed to."""
-    tag = f"android-v{version}"
+    tag = f"{TAG_PREFIX}{version}"
     state["tag"] = tag
     state["token"] = token
 
     if not notes:
         notes = capture(
-            'git log $(git describe --tags --match "android-v*" --abbrev=0 2>nul)..HEAD --pretty="- %s" --no-merges 2>nul'
+            f'git log $(git describe --tags --match "{TAG_PREFIX}*" --abbrev=0 2>nul)..HEAD --pretty="- %s" --no-merges 2>nul'
             if sys.platform == "win32" else
-            'git log $(git describe --tags --match "android-v*" --abbrev=0 2>/dev/null)..HEAD --pretty="- %s" --no-merges 2>/dev/null'
-        ) or f"Android release {tag}"
+            f'git log $(git describe --tags --match "{TAG_PREFIX}*" --abbrev=0 2>/dev/null)..HEAD --pretty="- %s" --no-merges 2>/dev/null'
+        ) or f"Android {CHANNEL} release {tag}"
 
     _publish_github_release(REPO_OWNER, REPO_NAME, tag, notes, token, state,
                              id_key="release_id", new_key="release_created_new")
 
-    try:
-        info(f"Mirroring release to {MIRROR_OWNER}/{MIRROR_NAME}…")
-        mstate = {}
-        _publish_github_release(MIRROR_OWNER, MIRROR_NAME, tag, notes, token, mstate,
-                                 id_key="release_id", new_key="release_created_new")
-        state["mirror_release_id"] = mstate.get("release_id")
-        state["mirror_release_created_new"] = mstate.get("release_created_new")
-        state["mirror_tag"] = tag
-    except Exception as e:
-        warn(f"Mirror release to {MIRROR_OWNER}/{MIRROR_NAME} failed (origin release unaffected): {e}")
-
     print()
-    info("CI is now building the debug APK and will attach it to both releases")
+    info("CI is now building the debug APK and will attach it to the release")
     info("once the build finishes — nothing left to do here.")
 
 
 def _publish_github_release(owner, repo, tag, notes, token, state, id_key, new_key):
     """Create/update a published GitHub release on (owner, repo) — no assets.
-    Shared by the real release (Juice-WRLD-API/Unreleased) and the mirror
-    (leanwrldd/unreleased) so both go through identical create/update
-    logic and both end up published (so both fire their own CI build)."""
+    Publishing fires build-android.yml, which builds and attaches the APK."""
     info(f"Creating release {_c(tag, WHT, BOLD)} on {owner}/{repo} (target: {ANDROID_BRANCH})…")
     try:
         release = api("POST",
@@ -529,16 +501,6 @@ def rollback(state):
         try:
             api("DELETE", f"/repos/{REPO_OWNER}/{REPO_NAME}/git/refs/tags/{state['tag']}", state["token"])
             ok(f"Deleted tag {state['tag']}")
-        except Exception:
-            pass
-
-    # Mirror release cleanup is best-effort too — it was best-effort to
-    # create, so a failure here is just left for manual cleanup.
-    if state.get("mirror_release_id") and state.get("mirror_release_created_new") and state.get("token"):
-        try:
-            api("DELETE", f"/repos/{MIRROR_OWNER}/{MIRROR_NAME}/releases/{state['mirror_release_id']}", state["token"])
-            api("DELETE", f"/repos/{MIRROR_OWNER}/{MIRROR_NAME}/git/refs/tags/{state['mirror_tag']}", state["token"])
-            ok(f"Deleted mirror release {state.get('mirror_tag')} on {MIRROR_OWNER}/{MIRROR_NAME}")
         except Exception:
             pass
 
@@ -594,7 +556,7 @@ def main():
 
         print()
         print(_c("  " + "═" * 46, GRN, BOLD))
-        print(_c(f"  ✓  android v{version} released successfully!", GRN, BOLD))
+        print(_c(f"  ✓  android {CHANNEL} v{version} released successfully!", GRN, BOLD))
         print(_c("  " + "═" * 46, GRN, BOLD))
         print()
 
