@@ -411,6 +411,17 @@ def step_sync_remote(state):
         ok(f"Up to date with origin/{APP_BRANCH}")
 
 
+def auto_beta_version(cur):
+    """Next beta version, no prompt. Betas must carry a pre-release suffix: the
+    installer and updater tell a beta from a stable build by the "-" in the
+    version. 3.0.1-beta.2 -> 3.0.1-beta.3; anything else -> the next patch's
+    first beta (3.0.1 -> 3.0.2-beta.1)."""
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)-beta\.(\d+)", cur)
+    if m:
+        return f"{m.group(1)}-beta.{int(m.group(2)) + 1}"
+    return f"{bump(cur, 'patch')}-beta.1"
+
+
 def prompt_version():
     section(2, TOTAL, "Version")
     cur = load_version()
@@ -824,11 +835,16 @@ def main(force_beta=False):
 
         # ── Every user prompt happens first — once these are answered, the
         #    rest of the release runs unattended (build, push, sync, commit).
-        version = prompt_version()
+        if force_beta:
+            # A beta asks nothing: version and notes are picked for it.
+            version = auto_beta_version(load_version())
+            ok(f"Version: {state['original_version']}  →  {_c(version, WHT, BOLD)}")
+        else:
+            version = prompt_version()
         step_apply_version(version, state)
         # A beta never touches git: no sync, commit or push.
         commit_msg = None if force_beta else prompt_commit_message(version)
-        release_notes = prompt_release_notes()
+        release_notes = "" if force_beta else prompt_release_notes()
         is_beta = force_beta
 
         if not force_beta:
