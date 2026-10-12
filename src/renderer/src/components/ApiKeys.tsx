@@ -5,6 +5,7 @@ import {
   type ApiKeyScope, type UserApiKey, type UserApiKeyCreated,
 } from '../lib/userApi'
 import { errorMessage } from '../lib/format'
+import { copyText } from '../lib/clipboard'
 import { relativeTime } from './adminShared'
 import { useStore } from '../store/useStore'
 
@@ -68,10 +69,10 @@ function NewKeyReveal({ created, onDone }: { created: UserApiKeyCreated; onDone:
   }, [])
 
   const copy = (): void => {
-    void navigator.clipboard.writeText(created.key).then(() => {
+    copyText(created.key).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    })
+    }).catch((e: unknown) => console.error('[copy] failed:', e))
   }
 
   return (

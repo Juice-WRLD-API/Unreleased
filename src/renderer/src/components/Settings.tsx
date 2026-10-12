@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } from 'react'
 import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud, FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical, PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2, ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload, ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal, Bell, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, LogIn,
@@ -1258,7 +1259,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                           onClick={() => {
                             const t = getToken()
                             if (t) {
-                              navigator.clipboard.writeText(t)
+                              copyText(t)
                               setTokenCopied(true)
                               setTimeout(() => setTokenCopied(false), 2000)
                             }

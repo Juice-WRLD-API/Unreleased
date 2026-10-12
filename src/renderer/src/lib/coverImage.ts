@@ -14,6 +14,7 @@
 // silently dropped the cover for exactly those songs. `fetchImageBlob`
 // retries them through an image CORS proxy.
 
+import { copyPngImage } from './clipboard'
 import { JWAPI_HOST } from './juicewrldApi'
 
 const MIME_EXT: Record<string, string> = {
@@ -116,7 +117,7 @@ export function coverFileName(title: string, mime: string): string {
 /** Puts the cover on the clipboard as an image, pasteable into other apps. */
 export async function copyCoverImage(url: string): Promise<void> {
   const png = await toPngBlob(await fetchImageBlob(url))
-  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  await copyPngImage(png)
 }
 
 /** Fetches a remote cover and returns it as a data: URL, for embedding in

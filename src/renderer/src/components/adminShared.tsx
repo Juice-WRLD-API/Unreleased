@@ -3,6 +3,7 @@
 import { useState, useMemo, memo } from 'react'
 import { Search, X as XIcon, Copy, Check, Minus, Plus } from 'lucide-react'
 import type { SongEditProposal } from '../lib/userApi'
+import { copyText } from '../lib/clipboard'
 
 // A field's raw value, not the JSX rendering of it (which may drop blank
 // lines, truncate, or otherwise reformat for display) - copying is for
@@ -14,10 +15,10 @@ export function CopyButton({ text, label }: { text: string; label: string }): JS
     <button
       onClick={(e) => {
         e.stopPropagation()
-        navigator.clipboard.writeText(text).then(() => {
+        copyText(text).then(() => {
           setCopied(true)
           setTimeout(() => setCopied(false), 1200)
-        })
+        }).catch((err: unknown) => console.error('[copy] failed:', err))
       }}
       title={`Copy ${label}`}
       className="p-0.5 rounded text-inherit opacity-60 hover:opacity-100 transition-opacity"

@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
 import { usePlaylistDetailData, usePlaylistCoverEditing } from '../hooks/usePlaylistDetailData'
 import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
@@ -1488,7 +1489,7 @@ export default function PlaylistsView(): JSX.Element {
           onSelect: async () => {
             try {
               if (!apiPl.is_public) { await userApi.updatePlaylist(apiPl.id, { is_public: true }); await refreshPlaylists() }
-              await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${apiPl.id}&view=shared`)
+              await copyText(`${shareOrigin()}/playlists?id=${apiPl.id}&view=shared`)
             } catch {}
           },
         },

@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useEffect, useMemo, useState } from 'react'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
@@ -172,7 +173,7 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 
   const copyLink = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${state.playlist.id}&view=shared`)
+      await copyText(`${shareOrigin()}/playlists?id=${state.playlist.id}&view=shared`)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {}

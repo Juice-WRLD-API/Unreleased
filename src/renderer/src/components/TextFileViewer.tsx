@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { useEffect, useState, useMemo } from 'react'
 import { X, Download, Loader2, AlertCircle, Check, Clipboard, WrapText } from 'lucide-react'
 import { errorMessage } from '../lib/format'
@@ -55,7 +56,7 @@ export default function TextFileViewer({ source, onClose }: Props): JSX.Element 
 
   const copyAll = (): void => {
     if (text == null) return
-    navigator.clipboard.writeText(text).then(() => {
+    copyText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     })

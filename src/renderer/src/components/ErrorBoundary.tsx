@@ -1,3 +1,4 @@
+import { copyText } from '../lib/clipboard'
 import { Component, ReactNode } from 'react'
 import { AlertTriangle, Copy, Check, Flag, Loader2, CloudOff } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -78,7 +79,7 @@ export default class ErrorBoundary extends Component<Props, State> {
     const { error } = this.state
     if (!error) return
     const text = `${error.message}\n\n${error.stack ?? ''}`
-    navigator.clipboard.writeText(text).then(() => {
+    copyText(text).then(() => {
       this.setState({ copied: true })
       setTimeout(() => this.setState({ copied: false }), 2000)
     }).catch(() => {/* ignore */})

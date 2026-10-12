@@ -1,3 +1,4 @@
+import { copyText } from '../clipboard'
 import { useChatStore, conversationTitle } from '../../store/chatStore'
 import { useStore, type SettingsTab } from '../../store/useStore'
 import type { AdminTab } from '../../hooks/useAdminQueue'
@@ -93,7 +94,7 @@ export const APP_COMMANDS: TermCommand[] = [
       // A script (`source`) runs lines nobody typed, so it doesn't get to read secrets.
       if (mode && ctx.scripted) fail(`token ${mode}: not available from a script`)
       if (mode === 'copy') {
-        try { await navigator.clipboard.writeText(token) } catch { fail('the clipboard is not available here (try: token show)') }
+        try { await copyText(token) } catch { fail('the clipboard is not available here (try: token show)') }
         ctx.print('token copied to the clipboard', 'ok')
         return
       }

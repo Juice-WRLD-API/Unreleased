@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { AlertCircle, Check, Copy, KeyRound, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useStrictModeSafeEffect } from '../hooks/useStrictModeSafeEffect'
+import { copyText } from '../lib/clipboard'
 import * as betaAdminApi from '../lib/betaAdminApi'
 import type { BetaCode, BetaVersion } from '../lib/betaAdminApi'
 import { errorMessage } from '../lib/format'
@@ -245,7 +246,7 @@ function CodesSection({ codes, setCodes, loading }: {
   }
 
   const copy = (c: BetaCode): void => {
-    navigator.clipboard.writeText(c.code).then(() => {
+    copyText(c.code).then(() => {
       setCopied(c.id)
       setTimeout(() => setCopied(id => id === c.id ? null : id), 1500)
     }).catch(() => {})

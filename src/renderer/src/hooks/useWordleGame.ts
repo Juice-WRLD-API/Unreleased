@@ -3,6 +3,7 @@
 // Desktop additionally wires up useWordlePhysicalKeyboard for its window
 // keydown listener, which mobile has no equivalent of (typing only happens
 // through the on-screen Keyboard there).
+import { copyText } from '../lib/clipboard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, useStorePick } from '../store/useStore'
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
@@ -331,7 +332,7 @@ export function useWordleGame(): {
 
   const share = async (): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(
+      await copyText(
         shareText(day, rows.map((r) => r.states), status, tries, puzzleNumber(day)))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
