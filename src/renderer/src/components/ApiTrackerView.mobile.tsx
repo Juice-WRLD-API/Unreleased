@@ -715,6 +715,8 @@ export default function ApiTrackerView(): JSX.Element {
   // hand and coming back to this view).
   useEffect(() => { if (apiTrackerTab) setApiTrackerTab('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const [sheet, setSheet] = useState<SheetKind>(null)
+  const tabDrag = useRef<{ pointerId: number; x: number; scrollLeft: number } | null>(null)
+  const tabDragged = useRef(false)
   const mobileDetailFields = useStore((s) => s.trackerMobileDetailFields)
   const setTrackerMobileDetailFields = useStore((s) => s.setTrackerMobileDetailFields)
   const [bulkSheetPage, setBulkSheetPage] = useState<'main' | 'playlists'>('main')
@@ -1396,7 +1398,7 @@ export default function ApiTrackerView(): JSX.Element {
   const viewLabel = compactView ? 'Version groups' : viewMode === 'list' ? 'List' : viewMode === 'detail' ? 'Detailed' : 'Grid'
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       {/* Neither header paints a background: the app shell's (optionally
           accent-gradient) background runs continuously from behind the status
           bar down through the list, and an opaque bar in between reads as a
@@ -1423,7 +1425,7 @@ export default function ApiTrackerView(): JSX.Element {
           </div>
         </div>
       ) : (
-        <div className="shrink-0">
+        <div className="shrink-0 min-w-0 w-full">
           <div className="flex items-center gap-1 px-2">
             <div className="flex-1 min-w-0 pl-2.5">
               <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">Tracker</h1>
@@ -1460,7 +1462,34 @@ export default function ApiTrackerView(): JSX.Element {
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center gap-2 px-4 pt-2.5 overflow-x-auto no-scrollbar">
+          <div
+            className="flex items-center gap-2 w-full min-w-0 px-4 pt-2.5 overflow-x-auto overscroll-x-contain no-scrollbar select-none"
+            onPointerDown={(e) => {
+              tabDragged.current = false
+              if (e.pointerType !== 'mouse' || e.button !== 0) return
+              tabDrag.current = { pointerId: e.pointerId, x: e.clientX, scrollLeft: e.currentTarget.scrollLeft }
+            }}
+            onPointerMove={(e) => {
+              const drag = tabDrag.current
+              if (!drag || drag.pointerId !== e.pointerId) return
+              if (e.buttons !== 1) { tabDrag.current = null; return }
+              const delta = e.clientX - drag.x
+              if (!tabDragged.current && Math.abs(delta) < 6) return
+              tabDragged.current = true
+              e.currentTarget.setPointerCapture(e.pointerId)
+              e.currentTarget.scrollLeft = drag.scrollLeft - delta
+            }}
+            onPointerUp={() => { tabDrag.current = null }}
+            onPointerCancel={() => { tabDrag.current = null }}
+            onLostPointerCapture={() => { tabDrag.current = null }}
+            onClickCapture={(e) => {
+              // A drag ending over a tab must not also navigate to it.
+              if (tabDragged.current && e.detail !== 0) {
+                e.preventDefault()
+                e.stopPropagation()
+              }
+            }}
+          >
             {TABS.map(({ key, label, icon: Icon }) => {
               const active = trackerTab === key
               return (
