@@ -5,6 +5,7 @@ import { useOpenModal } from './modalHost'
 import { ChannelList, DmList, ServerRail } from './Navigator'
 import RoomHeader, { type SidePanel } from './RoomHeader'
 import RoomPane from './RoomPane'
+import SearchPanel from './SearchPanel'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './SidePanels'
 
 function EmptyMain(): JSX.Element {
@@ -90,6 +91,7 @@ export default function ChatViewDesktop(): JSX.Element {
         {sideOpen && (
           <div className={sideClassName}>
             {active && showThread && <ThreadPanel room={active} rootId={threadRootId!} onClose={() => openThread(null)} />}
+            {active && !showThread && panel === 'search' && <SearchPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'pins' && <PinsPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'members' && serverId !== null && (
               <MembersPanel serverId={serverId} onClose={() => setPanel(null)} onAddMembers={() => openModal({ kind: 'add-members', serverId })} />

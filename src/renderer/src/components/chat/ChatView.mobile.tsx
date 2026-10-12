@@ -6,6 +6,7 @@ import { useOpenModal } from './modalHost'
 import { ChannelList, DmList } from './Navigator'
 import RoomHeader, { type SidePanel } from './RoomHeader'
 import RoomPane from './RoomPane'
+import SearchPanel from './SearchPanel'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './SidePanels'
 import { CountBadge, ServerGlyph } from './ui'
 
@@ -143,6 +144,9 @@ export default function ChatViewMobile(): JSX.Element {
         <div className={overlay} style={overlayStyle}>
           <ThreadPanel room={active} rootId={threadRootId} onClose={() => openThread(null)} />
         </div>
+      )}
+      {active && roomOpen && threadRootId === null && panel === 'search' && (
+        <div className={overlay} style={overlayStyle}><SearchPanel room={active} onClose={() => setPanel(null)} onNavigate={() => setPanel(null)} /></div>
       )}
       {active && roomOpen && threadRootId === null && panel === 'pins' && (
         <div className={overlay} style={overlayStyle}><PinsPanel room={active} onClose={() => setPanel(null)} /></div>

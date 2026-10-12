@@ -18,6 +18,7 @@
 - Like Discord servers and features
 - Share songs, playlists, news posts and lyric cards to chat, and forward messages
 - Opt-in Now Playing sharing on profiles and chat presence, plus presence and read-receipt privacy toggles
+- Message search in DMs and servers (Ctrl+F), with filters like `from:`, `mentions:`, `has:image`/`includes:img`, `in:`, `before:`/`after:`, `is:pinned`, negation and phrases; encrypted DMs are searched on-device. `grep` in the terminal
 - Chat keys shared across your own devices, with passphrase-protected export/import
 
 ## Accounts and profiles
