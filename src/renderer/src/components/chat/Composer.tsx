@@ -1,0 +1,1356 @@
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { AtSign, Command, CornerUpLeft, FileText, Loader2, Music, Paperclip, SendHorizontal, SmilePlus, X } from 'lucide-react'
+import * as chatApi from '../../lib/chatApi'
+import { MAX_CHAT_UPLOAD_BYTES, type CardCommand, type ChatUserBrief } from '../../lib/chatApi'
+import { buildBranch, CHANGELOG_MAX, fetchChangelogStatus } from '../../lib/appVersion'
+import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
+import { BROADCAST_HISTORY_DEFAULT, BROADCAST_HISTORY_MAX, CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChangelogArgs, parseChatCommand, parseNpArgs, parsePurgeArgs, PURGE_MAX, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
+import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, type AdminUser } from '../../lib/userApi'
+import { relativeTime } from '../adminShared'
+import { splitForwardRef } from '../../lib/chatForwardRef'
+import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
+import { commandCardText } from '../../lib/commandCardText'
+import { encodeLocalNotice, encodeSongInfoShare, encodeSongShare, encodeThemeShare, type LocalNoticePayload } from '../../lib/chatShare'
+import { chatCommandHelp, findChatCommand } from '../../lib/chatHelp'
+import { registerTerminalRunner, type TerminalRunner, type TerminalSink } from '../../lib/chatTerminalBridge'
+import { fetchGifFile, gifPickerConfigured, type GifResult } from '../../lib/gifApi'
+import { getSongsByIds, resolveTitleToSong, searchSongs, type JWApiSong } from '../../lib/juicewrldApi'
+import { sortListeningPlays, type ListeningPlayEvent } from '../../lib/listeningPlays'
+import { allSkins, getSkin } from '../../lib/skins'
+import { displayName, roomKey, useChatStore, type RoomRef, type UiMessage } from '../../store/chatStore'
+import { useStore } from '../../store/useStore'
+import GifPicker from './GifPicker'
+import ReactionPicker from './ReactionPicker'
+import { emojiGlyph, EMOJI_IMG } from './emoji'
+import { EVERYONE_HANDLE, mentionIdsIn } from './people'
+
+const EMOJI_NAMES = Object.keys(EMOJI_IMG).sort()
+import { ChatAvatar, errorText, formatBytes, useChatToast } from './ui'
+
+export interface ComposerHandle {
+  addFiles: (files: File[]) => void
+  focus: () => void
+}
+
+interface PendingFile {
+  id: string
+  file: File
+  preview: string | null
+}
+
+const drafts = new Map<string, string>()
+const BLOCKED_EXT = /\.(exe|msi|bat|cmd|com|scr|ps1|vbs|jar|apk|app|dmg|sh)$/i
+
+const Composer = forwardRef<ComposerHandle, {
+  room: RoomRef
+  people: ChatUserBrief[]
+  placeholder: string
+  parent?: number | null
+  replyTo?: UiMessage | null
+  onCancelReply?: () => void
+  disabledReason?: string | null
+  encrypted?: boolean
+  onEditLast?: () => void
+  compact?: boolean
+  enterSends?: boolean
+}>(function Composer({ room, people, placeholder, parent = null, replyTo, onCancelReply, disabledReason, encrypted, onEditLast, compact, enterSends = true }, ref) {
+  const send = useChatStore((s) => s.send)
+  const sendCommandCard = useChatStore((s) => s.sendCommandCard)
+  const postLocalNotice = useChatStore((s) => s.postLocalNotice)
+  const announceModeration = useChatStore((s) => s.announceModeration)
+  const sendTyping = useChatStore((s) => s.sendTyping)
+  const meId = useChatStore((s) => s.meId)
+  // @everyone needs mention_everyone in a channel's server; a DM already
+  // notifies every participant, so it's harmless there.
+  const canMentionEveryone = useChatStore((s) => {
+    if (room.kind !== 'channel') return true
+    const server = s.servers.find((x) => x.channels.some((c) => c.id === room.id))
+    return !!server && chatApi.hasPermission(server.my_permissions, chatApi.CHAT_PERMISSIONS.mention_everyone)
+  })
+  const replyPreview = useChatStore((s) => {
+    if (!replyTo) return ''
+    const raw = replyTo.is_encrypted
+      ? (() => { const p = s.plain[replyTo.id]; return p && 'text' in p ? p.text : '' })()
+      : replyTo.content
+    const { ref, body: afterReply } = splitReplyRef(raw)
+    const body = splitForwardRef(afterReply).body
+    return body || (ref ? ref.snippet : raw)
+  })
+  const chatToast = useChatToast()
+  // Set only while the admin terminal is running a command through this
+  // composer (see chatTerminalBridge): everything a command would show in the
+  // chat - toasts, notice cards, the /search picker - goes to the terminal.
+  const sink = useRef<TerminalSink | null>(null)
+  const toast = (text: string, tone?: 'error' | 'ok'): void => (sink.current ? sink.current.toast(text, tone) : chatToast(text, tone))
+  const draftKey = `${roomKey(room)}:${parent ?? 'root'}`
+
+  const [text, setText] = useState(() => drafts.get(draftKey) ?? '')
+  const [files, setFiles] = useState<PendingFile[]>([])
+  const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null)
+  const [emojiQuery, setEmojiQuery] = useState<{ start: number; query: string; index: number } | null>(null)
+  const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
+  const [commandBusy, setCommandBusy] = useState<string | null>(null)
+  const [searchPick, setSearchPick] = useState<{ query: string; results: JWApiSong[]; index: number } | null>(null)
+  const [slashQuery, setSlashQuery] = useState<{ query: string; index: number } | null>(null)
+  const [gifAt, setGifAt] = useState<{ x: number; y: number } | null>(null)
+  const textarea = useRef<HTMLTextAreaElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const typingSentAt = useRef(0)
+  const typingStop = useRef<number | null>(null)
+
+  useEffect(() => {
+    setText(drafts.get(draftKey) ?? '')
+    setFiles([])
+    setMention(null)
+  }, [draftKey])
+
+  useEffect(() => { drafts.set(draftKey, text) }, [draftKey, text])
+
+  useEffect(() => { if (replyTo) textarea.current?.focus() }, [replyTo])
+
+  useEffect(() => {
+    const el = textarea.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, compact ? 140 : 220)}px`
+  }, [text, compact])
+
+  useEffect(() => () => {
+    if (typingStop.current !== null) window.clearTimeout(typingStop.current)
+    files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const addFiles = (incoming: File[]): void => {
+    const accepted: PendingFile[] = []
+    for (const file of incoming) {
+      if (file.size > MAX_CHAT_UPLOAD_BYTES) { toast(`"${file.name}" is over ${MAX_CHAT_UPLOAD_BYTES / (1024 * 1024)} MB`); continue }
+      if (BLOCKED_EXT.test(file.name)) { toast(`"${file.name}" can't be sent - executable files are blocked`); continue }
+      accepted.push({
+        id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2)}`,
+        file,
+        preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+      })
+    }
+    setFiles((f) => [...f, ...accepted].slice(0, 10))
+    textarea.current?.focus()
+  }
+
+  useImperativeHandle(ref, () => ({
+    addFiles,
+    focus: () => textarea.current?.focus(),
+  }))
+
+  const stopTyping = (): void => {
+    if (typingStop.current !== null) window.clearTimeout(typingStop.current)
+    typingStop.current = null
+    if (typingSentAt.current) {
+      typingSentAt.current = 0
+      sendTyping(room, false)
+    }
+  }
+
+  const noteTyping = (): void => {
+    const now = Date.now()
+    if (now - typingSentAt.current > 3000) {
+      typingSentAt.current = now
+      sendTyping(room, true)
+    }
+    if (typingStop.current !== null) window.clearTimeout(typingStop.current)
+    typingStop.current = window.setTimeout(stopTyping, 4000)
+  }
+
+  const candidates = useMemo((): (ChatUserBrief | typeof EVERYONE_HANDLE)[] => {
+    if (!mention) return []
+    const q = mention.query.toLowerCase()
+    const users = people
+      .filter((p) => p.id !== meId)
+      .filter((p) => !q || p.username.toLowerCase().includes(q) || p.display_name.toLowerCase().includes(q))
+      .slice(0, 6)
+    // room.kind === 'conversation' already notifies every participant on
+    // every message, so @everyone only makes sense (and only matters) in a
+    // shared channel with more than a couple of members.
+    if (room.kind === 'channel' && canMentionEveryone && EVERYONE_HANDLE.startsWith(q)) return [EVERYONE_HANDLE as typeof EVERYONE_HANDLE, ...users].slice(0, 6)
+    return users
+  }, [mention, people, meId, room.kind, canMentionEveryone])
+
+  const updateMention = (value: string, caret: number): void => {
+    const upto = value.slice(0, caret)
+    const match = /(^|\s)@([\w.-]{0,32})$/.exec(upto)
+    if (match) setMention({ start: caret - match[2].length - 1, query: match[2], index: 0 })
+    else setMention(null)
+  }
+
+  // Only offers to autocomplete while the caret is still inside the command
+  // word itself (no space typed yet) at the very start of the message - once
+  // args start, or if this isn't the whole message, it gets out of the way.
+  const slashCandidates = useMemo(() => {
+    if (!slashQuery) return []
+    const q = slashQuery.query.toLowerCase()
+    return CHAT_COMMANDS.filter((c) => c.name.startsWith(q) || c.aliases?.some((a) => a.startsWith(q)))
+  }, [slashQuery])
+
+  // Once the command name itself is fully typed (the slash autocomplete above
+  // hands off here as soon as a space follows it), show a Discord-style
+  // parameter hint: every param the command takes, with whichever one the
+  // user is currently filling in highlighted.
+  const activeCommand = useMemo(() => {
+    if (replyTo || files.length > 0 || !text.startsWith('/')) return null
+    const parsed = parseChatCommand(text)
+    if (!parsed) return null
+    const info = CHAT_COMMANDS.find((c) => c.name === parsed.command)
+    if (!info) return null
+    // Raw (untrimmed) text after the command word, so a trailing space the
+    // user just typed still counts toward moving on to the next param.
+    const rawArgs = /^\/\w+(?:\s([\s\S]*))?$/.exec(text)?.[1] ?? ''
+    return { info, paramIndex: currentParamIndex(info.params, rawArgs), argsEmpty: parsed.args === '' }
+  }, [text, replyTo, files])
+
+  // Discord shows the parameter you're about to fill as a placeholder chip
+  // right inside the input, not just in a popup above it - it disappears the
+  // moment you start typing. We only have a slot to show once (every command
+  // takes at most one param today), so this is just "nothing typed yet".
+  const showInlineParamChip = !!activeCommand && activeCommand.info.params.length > 0 && activeCommand.argsEmpty
+    && !(slashQuery && slashCandidates.length > 0)
+
+  const updateSlashQuery = (value: string, caret: number): void => {
+    const match = /^\/(\w*)$/.exec(value.slice(0, caret))
+    if (match && caret === value.length && !replyTo && files.length === 0) {
+      setSlashQuery({ query: match[1].toLowerCase(), index: 0 })
+    } else {
+      setSlashQuery(null)
+    }
+  }
+
+  const applySlashCommand = (info: ChatCommandInfo): void => {
+    const insert = `/${info.name} `
+    setText(insert)
+    setSlashQuery(null)
+    requestAnimationFrame(() => {
+      textarea.current?.focus()
+      textarea.current?.setSelectionRange(insert.length, insert.length)
+    })
+  }
+
+  const emojiCandidates = useMemo(() => {
+    if (!emojiQuery) return []
+    const q = emojiQuery.query.toLowerCase()
+    return EMOJI_NAMES.filter((n) => n.startsWith(q)).slice(0, 6)
+  }, [emojiQuery])
+
+  const updateEmojiQuery = (value: string, caret: number): void => {
+    const upto = value.slice(0, caret)
+    const match = /(^|\s):([a-z0-9_]{1,32})$/i.exec(upto)
+    if (match) setEmojiQuery({ start: caret - match[2].length - 1, query: match[2], index: 0 })
+    else setEmojiQuery(null)
+  }
+
+  const applyEmoji = (name: string): void => {
+    if (!emojiQuery) return
+    const el = textarea.current
+    const caret = el?.selectionStart ?? text.length
+    const insert = `:${name}: `
+    const next = text.slice(0, emojiQuery.start) + insert + text.slice(caret)
+    setText(next)
+    setEmojiQuery(null)
+    requestAnimationFrame(() => {
+      const pos = emojiQuery.start + insert.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
+  const applyMention = (user: ChatUserBrief | typeof EVERYONE_HANDLE): void => {
+    if (!mention) return
+    const el = textarea.current
+    const caret = el?.selectionStart ?? text.length
+    const insert = `@${user === EVERYONE_HANDLE ? EVERYONE_HANDLE : user.username} `
+    const next = text.slice(0, mention.start) + insert + text.slice(caret)
+    setText(next)
+    setMention(null)
+    requestAnimationFrame(() => {
+      const pos = mention.start + insert.length
+      el?.focus()
+      el?.setSelectionRange(pos, pos)
+    })
+  }
+
+  const insertAtCaret = (value: string): void => {
+    const el = textarea.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? text.length
+    setText(text.slice(0, start) + value + text.slice(end))
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(start + value.length, start + value.length)
+    })
+  }
+
+  // Local, synchronous commands - no network round-trip, so they never touch
+  // commandBusy/toast('ok') the way the async ones below do. The list/help
+  // cases post a local notice (see chatStore's postLocalNotice) instead of a
+  // toast - a nicer, dismissible list that only this device ever sees.
+  // Commands that answer with a card only the sender sees can take `-s` to
+  // post the same answer to the room instead - one place decides which, so each
+  // command just hands over its payload and the `command` the server builds
+  // the card from. In a channel the room gets a real card the server builds
+  // itself, which nobody can forge; in an encrypted DM, where the server can't
+  // see what's said, it goes out as plain text (see commandCardText), since a
+  // card carried in chat text could be written by anyone.
+  const deliverNotice = async (payload: LocalNoticePayload, wantShare: boolean, command?: CardCommand): Promise<void> => {
+    // The terminal never posts into a chat, whatever flag it was typed with.
+    const share = wantShare && !sink.current
+    if (share && command && room.kind === 'channel') {
+      await sendCommandCard(room, command)
+      return
+    }
+    const text = share ? commandCardText(payload) : null
+    if (text) await send(room, { text, files: [] })
+    else showNotice(payload)
+  }
+
+  const showNotice = (payload: LocalNoticePayload): void => {
+    if (sink.current) sink.current.notice(payload)
+    else postLocalNotice(room, encodeLocalNotice(payload))
+  }
+
+  // A command's plain answer ("Muted X", "Theme set to Y"): a card only the
+  // sender sees, or with `-s` the same card in the room. Errors and usage
+  // hints stay toasts - they're a problem with the command, not its result.
+  const report = (title: string, text: string, share: boolean): void => {
+    void deliverNotice({ kind: 'result', title, text }, share, { name: 'result', title, text }).catch((err) => toast(errorText(err, 'Message failed to send')))
+  }
+
+  const applyThemeCommand = (args: string, share: boolean): void => {
+    if (!args) { void deliverNotice({ kind: 'themeList' }, share, { name: 'theme_list' }).catch((err) => toast(errorText(err, 'Message failed to send'))); return }
+    const norm = (s: string): string => s.toLowerCase().replace(/[\s_-]+/g, '')
+    const wanted = norm(args)
+    const match = allSkins().find((s) => norm(s.id) === wanted || norm(s.name) === wanted)
+    if (!match) { toast(`Unknown theme "${args}"`); return }
+    useStore.getState().setTheme(match.id)
+    report('Theme', `Theme set to ${match.name}`, share)
+  }
+
+  // Posts a card listing every command (HelpCard reads CHAT_COMMANDS itself,
+  // so the two can't drift as commands are added). This never touches the
+  // server - postLocalNotice only ever writes into this device's own room
+  // items - so it's visible only to the person who ran /help, and they can
+  // dismiss it from the card itself.
+  //
+  // `/help <command>` (a name or alias, slash optional) answers with just that
+  // command's usage instead of the whole list.
+  const runHelpCommand = (topic: string, share: boolean): void => {
+    if (topic) {
+      const info = findChatCommand(topic)
+      if (!info) { toast(`No command called "${topic}" - /help lists them all`); return }
+      const { title, text } = chatCommandHelp(info)
+      report(title, text, share)
+      return
+    }
+    void deliverNotice({ kind: 'help' }, share, { name: 'help' }).catch((err) => toast(errorText(err, 'Message failed to send')))
+  }
+
+  const runMuteCommand = (rawArgs: string, usage: '/mute' | '/unmute'): void => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) { toast(`Usage: ${usage} @username`); return }
+    const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!target) { toast(`No one named "${uname}" here`); return }
+    if (target.id === meId) { toast("You can't mute yourself"); return }
+    const wasMuted = useStore.getState().mutedUserIds.includes(target.id)
+    if (usage === '/unmute' && !wasMuted) { report('Unmute', `${displayName(target)} isn't muted`, share); return }
+    useStore.getState().toggleMuteUser(target.id)
+    report(wasMuted ? 'Unmuted' : 'Muted', wasMuted ? `Unmuted ${displayName(target)}` : `Muted ${displayName(target)} - their channel/server messages are hidden for you`, share)
+  }
+
+  // "Now playing" card shares the exact Track the player has queued, so it
+  // only works for API-sourced tracks (id "jw-<n>") - a local file has
+  // nothing a recipient's client could stream from, and encodeSongShare's
+  // decode side would reject it anyway (streamUrl isn't a JWAPI_BASE URL).
+  //
+  // In the terminal `np` only says what's playing - it never posts to the room.
+  const shareNowPlayingCommand = async (): Promise<void> => {
+    const track = useStore.getState().currentTrack
+    if (!track) { toast('Nothing is playing right now'); return }
+    if (sink.current) { toast(`Now playing: ${track.title}${track.artist ? ` - ${track.artist}` : ''}`, 'ok'); return }
+    const match = track.id.match(/^jw-(\d+)$/)
+    if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
+    await send(room, { text: encodeSongShare(Number(match[1])), files: [] })
+  }
+
+  // Shares whatever skin is currently active (built-in or custom) - the card
+  // carries the full palette, not just an id, so a custom skin the recipient
+  // has never seen still applies correctly (see chatShare.ts).
+  const runShareThemeCommand = async (): Promise<void> => {
+    const skin = getSkin(useStore.getState().theme)
+    await send(room, { text: encodeThemeShare(skin), files: [] })
+  }
+
+  // Routes through the same outbox as the Settings feedback form (see
+  // useStore's submitFeedback/pendingReports) - it's queued locally first, so
+  // this resolves even if delivery hasn't happened yet. Confirmation is a
+  // local notice, not a room message - the feedback goes to the developers,
+  // not the room, so there's nothing for anyone else here to see.
+  const runFeedbackCommand = async (args: string): Promise<void> => {
+    if (!args) { toast('Usage: /feedback <message>'); return }
+    await useStore.getState().submitFeedback('other', args)
+    showNotice({ kind: 'feedbackSent', message: args })
+  }
+
+  const runInfoCommand = async (args: string): Promise<void> => {
+    if (!args) { toast('Usage: /info <title>'); return }
+    const song = await resolveTitleToSong(args)
+    if (!song) { toast(`No song found for "${args}"`); return }
+    await send(room, { text: encodeSongInfoShare(song.id), files: [] })
+  }
+
+  // Every server-moderation command needs the same three things: the server
+  // behind this room, the member being acted on, and a permission check. They
+  // throw a plain Error whose message is shown by runCommand's catch, so each
+  // command below reads as just the action it performs.
+  const moderationTarget = (args: string, usage: string, need: 'manage' | 'kick' | 'ban'): {
+    server: chatApi.ChatServer
+    target: ChatUserBrief
+    member?: chatApi.ChatMember
+  } => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) throw new Error(`Usage: ${usage}`)
+    if (room.kind !== 'channel') throw new Error('That only works in a server channel')
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) throw new Error("Could not find this channel's server")
+    const elevated = cs.me?.role === 'administrator' || server.my_role === 'owner' || server.my_role === 'admin'
+    const perms = server.my_permissions
+    const extra = need === 'kick' ? chatApi.CHAT_PERMISSIONS.kick_members
+      : need === 'ban' ? chatApi.CHAT_PERMISSIONS.ban_members
+      : chatApi.CHAT_PERMISSIONS.manage_server
+    const allowed = elevated
+      || chatApi.hasPermission(perms, chatApi.CHAT_PERMISSIONS.manage_server)
+      || chatApi.hasPermission(perms, extra)
+    if (!allowed) throw new Error("You don't have permission to do that here")
+    const target = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!target) throw new Error(`No one named "${uname}" here`)
+    if (target.id === meId) throw new Error("You can't do that to yourself")
+    if (target.id === server.owner) throw new Error("The owner can't be moderated")
+    if (need !== 'manage' && target.role === 'administrator') throw new Error("Platform administrators can't be moderated")
+    return { server, target, member: cs.members[server.id]?.find((m) => m.user.id === target.id) }
+  }
+
+  // Splits "@user 10" / "@user being a nuisance" into the handle and whatever
+  // follows it - the trailing part is a duration for some commands and a
+  // free-text reason for others, so it comes back raw.
+  const splitTarget = (args: string): { first: string; rest: string } => {
+    const trimmed = args.trim()
+    const space = trimmed.search(/\s/)
+    return space === -1
+      ? { first: trimmed, rest: '' }
+      : { first: trimmed.slice(0, space), rest: trimmed.slice(space + 1).trim() }
+  }
+
+  const refreshMembers = (serverId: number): Promise<unknown> => useChatStore.getState().loadMembers(serverId, true)
+
+  const runKickCommand = async (args: string): Promise<void> => {
+    const { server, target } = moderationTarget(args, '/kick @username', 'kick')
+    await chatApi.removeMember(server.id, target.id)
+    await refreshMembers(server.id)
+    announceModeration(server.id, { action: 'kick', userId: target.id, name: displayName(target) })
+    toast(`Kicked ${displayName(target)} - they can rejoin if this server is public`, 'ok')
+  }
+
+  const runTimeoutCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    const { server, target } = moderationTarget(first, '/timeout @username <minutes>', 'kick')
+    const minutes = Math.floor(Number(rest))
+    if (!rest || !Number.isFinite(minutes) || minutes < 1 || minutes > chatApi.MAX_SERVER_TIMEOUT_MINUTES) {
+      throw new Error(`Give a duration in minutes, 1-${chatApi.MAX_SERVER_TIMEOUT_MINUTES}`)
+    }
+    await chatApi.timeoutMember(server.id, target.id, minutes)
+    await refreshMembers(server.id)
+    announceModeration(server.id, { action: 'timeout', userId: target.id, name: displayName(target), minutes })
+    toast(`${displayName(target)} timed out for ${minutes} minute${minutes === 1 ? '' : 's'}`, 'ok')
+  }
+
+  const runUntimeoutCommand = async (args: string): Promise<void> => {
+    const { server, target, member } = moderationTarget(args, '/untimeout @username', 'kick')
+    if (member && !chatApi.isTimedOut(member)) { toast(`${displayName(target)} isn't timed out`); return }
+    await chatApi.clearMemberTimeout(server.id, target.id)
+    await refreshMembers(server.id)
+    announceModeration(server.id, { action: 'untimeout', userId: target.id, name: displayName(target) })
+    toast(`Timeout lifted for ${displayName(target)}`, 'ok')
+  }
+
+  const runBanCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    const { server, target } = moderationTarget(first, '/ban @username [reason]', 'ban')
+    await chatApi.banUser(server.id, target.id, rest || undefined)
+    await refreshMembers(server.id)
+    await useChatStore.getState().loadBans(server.id, true).catch(() => [])
+    announceModeration(server.id, { action: 'ban', userId: target.id, name: displayName(target), reason: rest || undefined })
+    toast(`Banned ${displayName(target)}${rest ? ` - ${rest}` : ''}`, 'ok')
+  }
+
+  // Unban resolves through the ban list rather than `people`, since a banned
+  // user is no longer a member and so no longer appears in the room roster.
+  const runUnbanCommand = async (args: string): Promise<void> => {
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) throw new Error('Usage: /unban @username')
+    if (room.kind !== 'channel') throw new Error('That only works in a server channel')
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) throw new Error("Could not find this channel's server")
+    const bans = await cs.loadBans(server.id, true)
+    const ban = bans.find((b) => b.user.username.toLowerCase() === uname.toLowerCase())
+    if (!ban) { toast(`"${uname}" isn't banned from this server`); return }
+    await chatApi.unbanUser(server.id, ban.user.id)
+    await cs.loadBans(server.id, true)
+    announceModeration(server.id, { action: 'unban', userId: ban.user.id, name: displayName(ban.user) })
+    toast(`Unbanned ${displayName(ban.user)}`, 'ok')
+  }
+
+  const runBansCommand = async (args: string): Promise<void> => {
+    const { share } = splitShareFlag(args)
+    if (room.kind !== 'channel') throw new Error('That only works in a server channel')
+    const cs = useChatStore.getState()
+    const server = cs.servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (!server) throw new Error("Could not find this channel's server")
+    const bans = await cs.loadBans(server.id, true)
+    report('Bans', bans.length === 0 ? 'No one is banned from this server' : `Banned: ${bans.map((b) => displayName(b.user)).join(', ')}`, share)
+  }
+
+  // `/purge [@user] [count]`: deletes the newest messages already loaded in
+  // this room, newest first, capped at PURGE_MAX and optionally only one
+  // user's. Deleting someone else's messages takes the same standing as the
+  // message menu's Delete (platform admin, server owner/admin, or
+  // manage_messages in a channel); your own are always fair game. Each delete
+  // is its own request, so a partial failure reports what did go through.
+  const runPurgeCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest } = splitShareFlag(rawArgs)
+    const parsed = parsePurgeArgs(rest)
+    if ('error' in parsed) throw new Error(parsed.error)
+    const target = parsed.user ? resolveRoomUser(parsed.user) : null
+
+    const cs = useChatStore.getState()
+    const server = room.kind === 'channel' ? cs.servers.find((s) => s.channels.some((c) => c.id === room.id)) : undefined
+    const canModerate = cs.me?.role === 'administrator'
+      || server?.my_role === 'owner' || server?.my_role === 'admin'
+      || (!!server && chatApi.hasPermission(server.my_permissions, chatApi.CHAT_PERMISSIONS.manage_messages))
+    if (!canModerate && target?.id !== meId) throw new Error("You don't have permission to delete other people's messages here")
+
+    const victims = (cs.rooms[roomKey(room)]?.items ?? [])
+      .filter((m) => m.id > 0 && !m.deleted_at && !(m as UiMessage).local && (target ? m.author.id === target.id : true))
+      .slice(-parsed.count)
+      .reverse()
+    const whose = target ? `${target.label}'s` : 'the latest'
+    if (victims.length === 0) { toast(target ? `No loaded messages from ${target.label} in this room` : 'No messages to delete here'); return }
+    if (!window.confirm(`Delete ${victims.length} of ${whose} message${victims.length === 1 ? '' : 's'} in this room? This can't be undone.`)) return
+
+    let removed = 0
+    for (const m of victims) {
+      try { await cs.remove(m, { purge: true }); removed++ } catch { /* counted below */ }
+    }
+    const failed = victims.length - removed
+    report('Purged', `Deleted ${removed} of ${whose} message${removed === 1 ? '' : 's'}${parsed.capped ? ` (capped at ${PURGE_MAX})` : ''}${failed ? ` - ${failed} couldn't be deleted` : ''}`, share)
+  }
+
+  // Site-wide variants. The target doesn't have to be in this room (or in any
+  // server), so these resolve against the room roster first and fall back to a
+  // numeric user id, and they're gated purely on platform-admin.
+  const siteTarget = (handle: string, adminOnlyMessage = 'Site-wide moderation is administrators only'): { id: number; label: string } => {
+    const uname = handle.replace(/^@/, '').trim()
+    if (!uname) throw new Error('Name a user')
+    if (useChatStore.getState().me?.role !== 'administrator') throw new Error(adminOnlyMessage)
+    const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (match) return { id: match.id, label: displayName(match) }
+    if (/^\d+$/.test(uname)) return { id: Number(uname), label: `user #${uname}` }
+    throw new Error(`No one named "${uname}" here - use their numeric user id instead`)
+  }
+
+  const runSiteBanCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    if (!first) throw new Error('Usage: /siteban @username [reason]')
+    const { id, label } = siteTarget(first)
+    await chatApi.applySiteModeration({ user_id: id, action: 'ban', ...(rest ? { reason: rest } : {}) })
+    announceModeration(null, { action: 'ban', userId: id, name: label, reason: rest || undefined, site: true })
+    toast(`${label} banned from all chat`, 'ok')
+  }
+
+  const runSiteMuteCommand = async (args: string): Promise<void> => {
+    const { first, rest } = splitTarget(args)
+    if (!first) throw new Error('Usage: /sitemute @username [minutes]')
+    const { id, label } = siteTarget(first)
+    const minutes = rest ? Math.floor(Number(rest)) : 0
+    if (rest && (!Number.isFinite(minutes) || minutes < 1 || minutes > chatApi.MAX_SITE_TIMEOUT_MINUTES)) {
+      throw new Error(`Duration must be 1-${chatApi.MAX_SITE_TIMEOUT_MINUTES} minutes`)
+    }
+    await chatApi.applySiteModeration({ user_id: id, action: 'mute', ...(minutes ? { duration: minutes } : {}) })
+    announceModeration(null, { action: 'mute', userId: id, name: label, minutes: minutes || undefined, site: true })
+    toast(minutes ? `${label} muted everywhere for ${minutes} minutes` : `${label} muted everywhere until revoked`, 'ok')
+  }
+
+  const runSiteUnbanCommand = async (args: string): Promise<void> => {
+    if (!args.trim()) throw new Error('Usage: /siteunban @username')
+    const { id, label } = siteTarget(args)
+    const active = await chatApi.listSiteModeration({ activeOnly: true })
+    const mine = active.filter((r) => r.user.id === id)
+    if (mine.length === 0) { toast(`${label} has no active site-wide actions`); return }
+    for (const record of mine) await chatApi.revokeSiteModeration(record.id)
+    // The revoke can span a ban and a mute at once; the card names the
+    // heaviest of them so it reads as the plain opposite of what was applied.
+    announceModeration(null, {
+      action: mine.some((r) => r.action === 'ban') ? 'unban' : mine.some((r) => r.action === 'mute') ? 'unmute' : 'untimeout',
+      userId: id,
+      name: label,
+      site: true,
+    })
+    toast(`Revoked ${mine.length} site-wide action${mine.length === 1 ? '' : 's'} for ${label}`, 'ok')
+  }
+
+  // Site roles and auto-approve flags - the same PATCH the admin console's
+  // Manage panel sends. Every one of them re-reads the account first so the
+  // reply can say what actually changed ("already an editor") and so a
+  // platform administrator, whose role these toggles can't change, is refused
+  // up front instead of being silently downgraded.
+  const SITE_ROLE_LABEL: Record<SiteRole, string> = { editor: 'an editor', contributor: 'a contributor', manager: 'a manager', news: 'a news poster' }
+  const APPROVE_LABEL: Record<AutoApproveFlag, string> = { auto_approve_proposals: 'edit', auto_approve_comp_proposals: 'comp' }
+  const ADMIN_ONLY = 'Site roles are administrators only'
+
+  const roleLabels = (u: AdminUser): string[] => [
+    ...(u.role === 'administrator' ? ['administrator'] : []),
+    ...(u.role === 'editor' ? ['editor'] : []),
+    ...(u.contributor_enabled ? ['contributor'] : []),
+    ...(u.manager_enabled ? ['manager'] : []),
+    ...(u.news_enabled ? ['news'] : []),
+  ]
+
+  const loadSiteUser = async (handle: string): Promise<{ user: AdminUser; label: string }> => {
+    const { id, label } = siteTarget(handle, ADMIN_ONLY)
+    const user = await adminGetUser(id)
+    return { user, label: label.startsWith('user #') ? user.username || label : label }
+  }
+
+  const hasSiteRole = (u: AdminUser, role: SiteRole): boolean =>
+    role === 'editor' ? u.role === 'editor'
+      : role === 'contributor' ? !!u.contributor_enabled
+      : role === 'manager' ? !!u.manager_enabled
+      : !!u.news_enabled
+
+  const siteRolePayload = (role: SiteRole, on: boolean): Parameters<typeof adminUpdateUser>[1] =>
+    role === 'editor' ? { role: on ? 'editor' : 'applicant' }
+      : role === 'contributor' ? { contributor_enabled: on }
+      : role === 'manager' ? { manager_enabled: on }
+      : { news_enabled: on }
+
+  const setSiteRole = async (handle: string, roleWord: string, on: boolean, usage: string, share: boolean): Promise<void> => {
+    const role = resolveSiteRole(roleWord)
+    if (!handle || !role) throw new Error(`Usage: ${usage}`)
+    const { user, label } = await loadSiteUser(handle)
+    if (user.role === 'administrator') throw new Error(`${label} is a platform administrator - their roles can't be changed here`)
+    const title = on ? 'Role granted' : 'Role removed'
+    if (hasSiteRole(user, role) === on) { report(title, `${label} is ${on ? 'already' : 'not'} ${SITE_ROLE_LABEL[role]}`, share); return }
+    await adminUpdateUser(user.user_id, siteRolePayload(role, on))
+    report(title, on ? `${label} is now ${SITE_ROLE_LABEL[role]}` : `${label} is no longer ${SITE_ROLE_LABEL[role]}`, share)
+  }
+
+  const runPromoteCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
+    const { first, rest } = splitTarget(args)
+    // A role word means a site-wide role; without one, /promote keeps its
+    // original meaning of making someone an admin of this server.
+    if (rest) { await setSiteRole(first, rest, true, '/promote @username <editor|contributor|manager|news>', share); return }
+    const { server, target, member } = moderationTarget(args, '/promote @username', 'manage')
+    if (member?.server_role === 'admin') { report('Promote', `${displayName(target)} is already an admin`, share); return }
+    await chatApi.updateMember(server.id, target.id, { server_role: 'admin' })
+    await refreshMembers(server.id)
+    report('Promoted', `Promoted ${displayName(target)} to admin`, share)
+  }
+
+  const runDemoteCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
+    const { first, rest } = splitTarget(args)
+    await setSiteRole(first, rest, false, '/demote @username <editor|contributor|manager|news>', share)
+  }
+
+  const runRoleCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
+    if (!args.trim()) throw new Error('Usage: /role @username')
+    const { user, label } = await loadSiteUser(args)
+    const roles = roleLabels(user)
+    const approve = (['auto_approve_proposals', 'auto_approve_comp_proposals'] as const)
+      .filter((f) => user[f]).map((f) => APPROVE_LABEL[f])
+    report('Roles', `${label}: ${roles.length ? roles.join(', ') : 'standard user'}${approve.length ? ` · auto-approve ${approve.join(' + ')}` : ''}${user.is_active ? '' : ' · account disabled'}`, share)
+  }
+
+  const setAutoApprove = async (rawArgs: string, on: boolean): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
+    const usage = `/${on ? 'allow' : 'disallow'} @username <edits|comp>`
+    const { first, rest } = splitTarget(args)
+    const flag = resolveAutoApproveFlag(rest)
+    if (!first || !flag) throw new Error(`Usage: ${usage}`)
+    const { user, label } = await loadSiteUser(first)
+    const kind = APPROVE_LABEL[flag]
+    // Same visibility rule as the Manage panel: edit auto-approve belongs to
+    // editors, comp auto-approve to contributors.
+    if (on && flag === 'auto_approve_proposals' && user.role !== 'editor') throw new Error(`${label} isn't an editor, so edit auto-approve doesn't apply`)
+    if (on && flag === 'auto_approve_comp_proposals' && !user.contributor_enabled) throw new Error(`${label} isn't a contributor, so comp auto-approve doesn't apply`)
+    if (!!user[flag] === on) { report('Auto-approve', `Auto-approve for ${kind} proposals is already ${on ? 'on' : 'off'} for ${label}`, share); return }
+    await adminUpdateUser(user.user_id, { [flag]: on })
+    report('Auto-approve', `Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, share)
+  }
+
+  // A typed `@name` (or numeric id) to someone in this room - the lookup
+  // /seen and /np @user share.
+  const resolveRoomUser = (uname: string): { id: number; label: string } => {
+    const match = people.find((p) => p.username.toLowerCase() === uname.toLowerCase())
+    if (!match && !/^\d+$/.test(uname)) throw new Error(`No one named "${uname}" here - use their numeric user id instead`)
+    return match ? { id: match.id, label: displayName(match) } : { id: Number(uname), label: `user #${uname}` }
+  }
+
+  // `/np -h [count]`: newest-first slice of the merged listening log, titles
+  // resolved through the (cached) song lookup. Shown as a local card.
+  //
+  // `@user` looks at someone else's instead: what they're playing now, or with
+  // `-h` their recent plays - both only what they've made public on their
+  // profile. Same count cap as your own log, and `-s` posts it to the room.
+  const runNowPlayingCommand = async (args: string): Promise<void> => {
+    const { share, rest } = splitShareFlag(args)
+    const np = parseNpArgs(rest)
+    if ('error' in np) throw new Error(np.error)
+    const target = np.user ? resolveRoomUser(np.user) : null
+    const other = target && target.id !== meId ? target : null
+    if (!np.history && !other) { await shareNowPlayingCommand(); return }
+
+    if (other && !np.history) {
+      const state = (await getNowPlaying(other.id)).now_playing
+      if (!state) { toast(`${other.label} isn't sharing what they're playing right now`); return }
+      const [song] = await getSongsByIds([state.song])
+      await deliverNotice({ kind: 'npNow', user: other.label, song: state.song, name: song?.name ?? `Song #${state.song}`, updated_at: state.updated_at }, share, { name: 'np', user_id: other.id })
+      return
+    }
+
+    if (!np.history) return
+    let plays: ListeningPlayEvent[]
+    if (other) {
+      const profile = await getPublicProfile(other.id)
+      if (!profile.public_play_history) { toast(`${other.label} keeps their play history private`); return }
+      plays = profile.play_history ?? []
+    } else {
+      plays = useStore.getState().listeningPlays
+    }
+    const log = sortListeningPlays(plays)
+    const recent = log.slice(0, np.count)
+    const songs = await getSongsByIds(recent.map((p) => p.song))
+    const names = new Map(songs.map((s) => [s.id, s.name]))
+    await deliverNotice({
+      kind: 'npHistory',
+      items: recent.map((p) => ({ song: p.song, name: names.get(p.song) ?? `Song #${p.song}`, played_at: p.played_at })),
+      total: log.length,
+      capped: np.capped,
+      user: other?.label,
+    }, share, { name: 'np_history', count: np.count, ...(other ? { user_id: other.id } : {}) })
+  }
+
+  // The API has no general "last seen" field, so this reports the freshest
+  // signal available and says what it came from: live presence, then the newest
+  // of the user's messages in rooms this client has loaded, their public
+  // now-playing/play history (only if they've made those public), and - for
+  // administrators - the account's last login.
+  const runSeenCommand = async (rawArgs: string): Promise<void> => {
+    const { share, rest: args } = splitShareFlag(rawArgs)
+    const uname = args.replace(/^@/, '').trim()
+    if (!uname) throw new Error('Usage: /seen @username')
+    const cs = useChatStore.getState()
+    const { id, label } = resolveRoomUser(uname)
+    if (id === meId) { report('Last seen', 'You’re online right now', share); return }
+    if (cs.presenceEnabled && cs.online[id]) { report('Last seen', `${label} is online now`, share); return }
+
+    const seen: { at: number; what: string }[] = []
+    const note = (iso: string | null | undefined, what: string): void => {
+      const at = iso ? Date.parse(iso) : NaN
+      if (Number.isFinite(at)) seen.push({ at, what })
+    }
+    for (const msg of [...Object.values(cs.rooms).flatMap((r) => r.items), ...Object.values(cs.lastMessage)]) {
+      if (msg.author.id === id && !msg.deleted_at && !(msg as UiMessage).local) note(msg.created_at, 'sent a message')
+    }
+    const [profile, np, admin] = await Promise.allSettled([
+      getPublicProfile(id),
+      getNowPlaying(id),
+      cs.me?.role === 'administrator' ? adminGetUser(id) : Promise.reject(new Error('not admin')),
+    ])
+    if (profile.status === 'fulfilled') {
+      note(sortListeningPlays(profile.value.play_history ?? [])[0]?.played_at, 'played a song')
+    }
+    if (np.status === 'fulfilled') note(np.value.now_playing?.updated_at, 'was listening')
+    if (admin.status === 'fulfilled') note(admin.value.last_login, 'logged in')
+
+    const latest = seen.sort((a, b) => b.at - a.at)[0]
+    if (!latest) { toast(`No recent activity visible for ${label} - they may keep it private`); return }
+    report('Last seen', `${label} was last seen ${relativeTime(new Date(latest.at).toISOString())} (${latest.what})`, share)
+  }
+
+  const runChangelogCommand = async (args: string): Promise<void> => {
+    const { share: wantShare, rest } = splitShareFlag(args)
+    const share = wantShare && !sink.current
+    const parsed = parseChangelogArgs(rest)
+    if ('error' in parsed) throw new Error(parsed.error)
+    if (share && room.kind === 'channel') {
+      // The server reads the commits from GitHub itself, so there's nothing to
+      // fetch here first.
+      const branch = buildBranch()
+      if (branch === 'unknown') throw new Error("This build doesn't know which branch it came from")
+      await sendCommandCard(room, { name: 'changelog', branch, count: parsed.count })
+    } else {
+      await deliverNotice({ kind: 'changelog', status: await fetchChangelogStatus(parsed.count, sink.current?.signal) }, share)
+    }
+    if (parsed.capped) toast(`Showing the latest ${CHANGELOG_MAX} commits (the maximum)`)
+  }
+
+  // `-h` lists past broadcasts as a local card (only this admin sees it);
+  // otherwise it pushes a new one to everyone online. A broadcast can't be
+  // recalled, so sending asks first, same as the profile page's modal.
+  const runBroadcastCommand = async (args: string): Promise<void> => {
+    if (useChatStore.getState().me?.role !== 'administrator') throw new Error('Broadcasts are administrators only')
+    const parsed = parseBroadcastArgs(args)
+    if (parsed.history) {
+      if (parsed.message) throw new Error(`Usage: /broadcast -h [count] [-s] (1-${BROADCAST_HISTORY_MAX})`)
+      const { count, results } = await fetchBroadcastHistory(parsed.count ?? BROADCAST_HISTORY_DEFAULT)
+      await deliverNotice({ kind: 'broadcastHistory', items: results, total: count }, parsed.share, { name: 'broadcast_history', count: parsed.count ?? BROADCAST_HISTORY_DEFAULT })
+      return
+    }
+    if (parsed.badLevel !== null) throw new Error(`Level must be one of: ${BROADCAST_LEVELS.join(', ')}`)
+    if (!parsed.message) throw new Error('Usage: /broadcast [-l level] <message>  (or /broadcast -h for history)')
+    if (parsed.message.length > BROADCAST_MAX_MESSAGE) throw new Error(`Broadcasts are limited to ${BROADCAST_MAX_MESSAGE} characters`)
+    const level = parsed.level ?? 'info'
+    if (!window.confirm(`Send this ${level} broadcast to everyone connected? It can't be recalled.\n\n${parsed.message}`)) return
+    await sendBroadcast({ message: parsed.message, level })
+    report('Broadcast', `Broadcast sent to everyone connected (${level}): ${parsed.message}`, parsed.share)
+  }
+
+  // Every command in CHAT_COMMANDS (sharing, /theme, the moderation set, and
+  // so on) is recognized only when it is the entire message
+  // (no reply-in-progress, no attachments) - anything else starting with "/"
+  // (a URL, a stray command someone typed) falls through and sends as a
+  // normal text message, same as before this feature existed.
+  const runCommand = async (cmd: ParsedChatCommand, fromTerminal = false): Promise<void> => {
+    // The terminal runs its own input, so the composer's draft stays untouched.
+    if (!fromTerminal) {
+      setText('')
+      setFiles([])
+      setMention(null)
+      setEmojiQuery(null)
+      setSearchPick(null)
+      setSlashQuery(null)
+      drafts.delete(draftKey)
+      stopTyping()
+    }
+
+    if (cmd.command === 'theme') {
+      const { share, rest } = splitShareFlag(cmd.args)
+      applyThemeCommand(rest, share)
+      return
+    }
+    if (cmd.command === 'mute') { runMuteCommand(cmd.args, '/mute'); return }
+    if (cmd.command === 'unmute') { runMuteCommand(cmd.args, '/unmute'); return }
+    if (cmd.command === 'help') {
+      const { share, rest } = splitShareFlag(cmd.args)
+      runHelpCommand(rest, share)
+      return
+    }
+
+    setCommandBusy(cmd.command)
+    try {
+      if (cmd.command === 'song') {
+        if (!cmd.args) { toast('Usage: /song <title>'); return }
+        const song = await resolveTitleToSong(cmd.args)
+        if (!song) { toast(`No song found for "${cmd.args}"`); return }
+        await send(room, { text: encodeSongShare(song.id), files: [] })
+      } else if (cmd.command === 'search') {
+        if (!cmd.args) { toast('Usage: /search <title>'); return }
+        const results = await searchSongs(cmd.args)
+        if (results.length === 0) { toast(`No songs found for "${cmd.args}"`); return }
+        if (results.length === 1) {
+          await send(room, { text: encodeSongShare(results[0].id), files: [] })
+          return
+        }
+        if (sink.current) {
+          sink.current.pickSearch(cmd.args, results.map((r) => ({ id: r.id, name: r.name, detail: r.era?.name ?? r.category })))
+          return
+        }
+        setSearchPick({ query: cmd.args, results, index: 0 })
+      } else if (cmd.command === 'info') {
+        await runInfoCommand(cmd.args)
+      } else if (cmd.command === 'np') {
+        await runNowPlayingCommand(cmd.args)
+      } else if (cmd.command === 'sharetheme') {
+        await runShareThemeCommand()
+      } else if (cmd.command === 'promote') {
+        await runPromoteCommand(cmd.args)
+      } else if (cmd.command === 'demote') {
+        await runDemoteCommand(cmd.args)
+      } else if (cmd.command === 'role') {
+        await runRoleCommand(cmd.args)
+      } else if (cmd.command === 'allow') {
+        await setAutoApprove(cmd.args, true)
+      } else if (cmd.command === 'disallow') {
+        await setAutoApprove(cmd.args, false)
+      } else if (cmd.command === 'broadcast') {
+        await runBroadcastCommand(cmd.args)
+      } else if (cmd.command === 'seen') {
+        await runSeenCommand(cmd.args)
+      } else if (cmd.command === 'changelog') {
+        await runChangelogCommand(cmd.args)
+      } else if (cmd.command === 'purge') {
+        await runPurgeCommand(cmd.args)
+      } else if (cmd.command === 'kick') {
+        await runKickCommand(cmd.args)
+      } else if (cmd.command === 'timeout') {
+        await runTimeoutCommand(cmd.args)
+      } else if (cmd.command === 'untimeout') {
+        await runUntimeoutCommand(cmd.args)
+      } else if (cmd.command === 'ban') {
+        await runBanCommand(cmd.args)
+      } else if (cmd.command === 'unban') {
+        await runUnbanCommand(cmd.args)
+      } else if (cmd.command === 'bans') {
+        await runBansCommand(cmd.args)
+      } else if (cmd.command === 'siteban') {
+        await runSiteBanCommand(cmd.args)
+      } else if (cmd.command === 'sitemute') {
+        await runSiteMuteCommand(cmd.args)
+      } else if (cmd.command === 'siteunban') {
+        await runSiteUnbanCommand(cmd.args)
+      } else if (cmd.command === 'feedback') {
+        await runFeedbackCommand(cmd.args)
+      }
+    } catch (err) {
+      toast(errorText(err, 'Command failed'))
+    } finally {
+      setCommandBusy(null)
+    }
+  }
+
+  // The terminal's way in. Re-assigned every render so the registered wrapper
+  // below always calls the latest closure (current room people, store state).
+  const terminalRun = useRef<TerminalRunner>(async () => false)
+  terminalRun.current = async (input, s) => {
+    const cmd = parseChatCommand(input)
+    if (!cmd) return false
+    // These exist only to post into the room; the terminal never does that.
+    if (cmd.command === 'song' || cmd.command === 'search' || cmd.command === 'info' || cmd.command === 'sharetheme') {
+      s.toast(`/${cmd.command} posts to the chat, and the terminal never does - use the chat composer`, 'error')
+      return true
+    }
+    sink.current = s
+    try { await runCommand(cmd, true) } finally { sink.current = null }
+    return true
+  }
+  const registerKey = roomKey(room)
+  useEffect(() => {
+    // A thread's composer shares the room but isn't the room's main one.
+    if (parent !== null) return
+    return registerTerminalRunner(registerKey, (input, s) => terminalRun.current(input, s))
+  }, [registerKey, parent])
+
+  const pickSearchResult = (song: JWApiSong): void => {
+    setSearchPick(null)
+    send(room, { text: encodeSongShare(song.id), files: [] })
+      .catch((err) => toast(errorText(err, 'Message failed to send')))
+  }
+
+  // Picked GIFs send immediately (no caption step), matching the picker's
+  // click-to-send convention elsewhere.
+  const sendGif = (gif: GifResult): void => {
+    fetchGifFile(gif)
+      .then((file) => send(room, { text: '', files: [file], parent, mentions: [] }))
+      .catch((err) => toast(errorText(err, 'Could not send GIF')))
+  }
+
+  const submit = (): void => {
+    if (disabledReason || commandBusy) return
+    let body = text.trim()
+    if (!body && files.length === 0) return
+    // Mentions come from what was typed, not the reply envelope prepended
+    // below - its snippet quotes the original message, @mentions included.
+    const mentions = mentionIdsIn(body, people, canMentionEveryone)
+    if (!replyTo && files.length === 0) {
+      const cmd = parseChatCommand(body)
+      if (cmd) { void runCommand(cmd); return }
+    }
+    // Plain "Reply" (as opposed to replying inside a thread, which never sets
+    // `replyTo`) posts a normal message in the room - it isn't threaded, so
+    // the link back to the original message rides along as a small envelope
+    // in the body, which MessageItem renders as a reply bar rather than text.
+    if (replyTo) {
+      const snippet = replyPreview.split('\n')[0].slice(0, 140)
+      body = `${encodeReplyRef({
+        id: replyTo.id,
+        authorId: replyTo.author.id,
+        name: displayName(replyTo.author),
+        snippet,
+        hasAttachment: replyTo.attachments.length > 0,
+      })}${body}`
+    }
+    const outgoing = files.map((f) => f.file)
+    files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
+    setText('')
+    setFiles([])
+    setMention(null)
+    drafts.delete(draftKey)
+    stopTyping()
+    onCancelReply?.()
+    send(room, { text: body, files: outgoing, parent, mentions })
+      .catch((err) => toast(errorText(err, 'Message failed to send')))
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (slashQuery && slashCandidates.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setSlashQuery({ ...slashQuery, index: (slashQuery.index + dir + slashCandidates.length) % slashCandidates.length })
+        return
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        applySlashCommand(slashCandidates[slashQuery.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setSlashQuery(null); return }
+    }
+    if (searchPick && searchPick.results.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setSearchPick({ ...searchPick, index: (searchPick.index + dir + searchPick.results.length) % searchPick.results.length })
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        pickSearchResult(searchPick.results[searchPick.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setSearchPick(null); return }
+    }
+    if (emojiQuery && emojiCandidates.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setEmojiQuery({ ...emojiQuery, index: (emojiQuery.index + dir + emojiCandidates.length) % emojiCandidates.length })
+        return
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        applyEmoji(emojiCandidates[emojiQuery.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setEmojiQuery(null); return }
+    }
+    if (mention && candidates.length > 0) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        setMention({ ...mention, index: (mention.index + dir + candidates.length) % candidates.length })
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        applyMention(candidates[mention.index])
+        return
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setMention(null); return }
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && enterSends) {
+      e.preventDefault()
+      submit()
+      return
+    }
+    if (e.key === 'ArrowUp' && !text && files.length === 0 && onEditLast) {
+      e.preventDefault()
+      onEditLast()
+    }
+  }
+
+  const canSend = !disabledReason && (text.trim().length > 0 || files.length > 0)
+
+  return (
+    <div className={`relative ${compact ? 'px-3 pb-3' : 'px-4 md:px-5 pb-4'}`}>
+      {slashQuery && slashCandidates.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Commands</p>
+          <div className="max-h-64 overflow-y-auto chat-scroll">
+            {slashCandidates.map((c, i) => (
+              <button
+                key={c.name}
+                onMouseDown={(e) => { e.preventDefault(); applySlashCommand(c) }}
+                onMouseEnter={() => setSlashQuery({ ...slashQuery, index: i })}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === slashQuery.index ? 'bg-surface-overlay' : ''}`}
+              >
+                <Command size={14} className="shrink-0 text-text-muted" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-text-primary truncate">
+                    {c.usage}
+                    {c.aliases && c.aliases.length > 0 && (
+                      <span className="text-text-muted"> (or /{c.aliases.join(', /')})</span>
+                    )}
+                  </span>
+                  <span className="block text-xs text-text-muted truncate">{c.description}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!(slashQuery && slashCandidates.length > 0) && activeCommand && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl px-3 py-2">
+          <div className="flex items-center gap-1.5 flex-wrap text-sm font-mono">
+            <span className="text-text-primary">/{activeCommand.info.name}</span>
+            {activeCommand.info.params.length === 0 ? (
+              <span className="text-text-muted text-xs font-sans">
+                {activeCommand.info.usage.includes('-s') ? 'takes no parameters, just an optional -s' : 'takes no parameters'}
+              </span>
+            ) : (
+              activeCommand.info.params.map((p, i) => (
+                <span
+                  key={p}
+                  className={i === activeCommand.paramIndex ? 'text-accent font-semibold' : 'text-text-muted'}
+                >
+                  {`<${p}>`}
+                </span>
+              ))
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-text-muted">{activeCommand.info.description}</p>
+        </div>
+      )}
+
+      {searchPick && searchPick.results.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Results for "{searchPick.query}"</p>
+          <div className="max-h-64 overflow-y-auto chat-scroll">
+            {searchPick.results.map((song, i) => (
+              <button
+                key={song.id}
+                onMouseDown={(e) => { e.preventDefault(); pickSearchResult(song) }}
+                onMouseEnter={() => setSearchPick({ ...searchPick, index: i })}
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === searchPick.index ? 'bg-surface-overlay' : ''}`}
+              >
+                <Music size={14} className="shrink-0 text-text-muted" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm text-text-primary truncate">{song.name}</span>
+                  <span className="block text-xs text-text-muted truncate">{song.era?.name ?? song.category}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mention && candidates.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Members</p>
+          {candidates.map((p, i) => (
+            <button
+              key={p === EVERYONE_HANDLE ? EVERYONE_HANDLE : p.id}
+              onMouseDown={(e) => { e.preventDefault(); applyMention(p) }}
+              onMouseEnter={() => setMention({ ...mention, index: i })}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === mention.index ? 'bg-surface-overlay' : ''}`}
+            >
+              {p === EVERYONE_HANDLE ? (
+                <>
+                  <span className="h-6 w-6 shrink-0 rounded-full bg-surface-raised flex items-center justify-center text-text-secondary"><AtSign size={13} /></span>
+                  <span className="text-sm text-text-primary truncate">everyone</span>
+                  <span className="text-xs text-text-muted truncate">Notify everyone in this channel</span>
+                </>
+              ) : (
+                <>
+                  <ChatAvatar user={p} size={24} presence />
+                  <span className="text-sm text-text-primary truncate">{displayName(p)}</span>
+                  <span className="text-xs text-text-muted truncate">@{p.username}</span>
+                </>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!mention && emojiQuery && emojiCandidates.length > 0 && (
+        <div className="chat-pop absolute left-4 right-4 md:left-5 md:right-5 bottom-full mb-2 z-20 rounded-xl border border-[var(--border)] bg-surface shadow-2xl overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Emoji</p>
+          {emojiCandidates.map((name, i) => (
+            <button
+              key={name}
+              onMouseDown={(e) => { e.preventDefault(); applyEmoji(name) }}
+              onMouseEnter={() => setEmojiQuery({ ...emojiQuery, index: i })}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left ${i === emojiQuery.index ? 'bg-surface-overlay' : ''}`}
+            >
+              <img src={EMOJI_IMG[name]} alt="" className="h-5 w-5 shrink-0 object-contain" />
+              <span className="text-sm text-text-primary truncate">:{name}:</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {commandBusy && (
+        <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-surface-raised/70 px-2.5 py-1.5 text-xs text-text-muted">
+          <Loader2 size={13} className="shrink-0 animate-spin" />
+          <span>Running /{commandBusy}...</span>
+        </div>
+      )}
+
+      {replyTo && (
+        <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-surface-raised/70 px-2.5 py-1.5 text-xs">
+          <CornerUpLeft size={13} className="shrink-0 text-text-muted" />
+          <span className="shrink-0 font-semibold text-text-secondary">Replying to {displayName(replyTo.author)}</span>
+          <span className="min-w-0 flex-1 truncate text-text-muted">{replyPreview || (replyTo.attachments.length ? 'Attachment' : '')}</span>
+          <button onClick={onCancelReply} title="Cancel reply" className="shrink-0 text-text-muted hover:text-text-primary">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      <div
+        className={`rounded-2xl border bg-surface-raised/70 transition-colors ${
+          disabledReason ? 'border-[var(--border)] opacity-70' : 'border-[var(--border)] focus-within:border-accent/50'
+        }`}
+      >
+        {files.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto chat-scroll p-2.5 pb-0">
+            {files.map((f) => (
+              <div key={f.id} className="chat-pop relative shrink-0 w-24 rounded-xl border border-[var(--border)] bg-surface overflow-hidden">
+                {f.preview ? (
+                  <img src={f.preview} alt="" className="w-24 h-20 object-cover" />
+                ) : (
+                  <div className="w-24 h-20 flex items-center justify-center text-text-muted"><FileText size={24} /></div>
+                )}
+                <div className="px-1.5 py-1">
+                  <p className="text-[10px] text-text-primary truncate">{f.file.name}</p>
+                  <p className="text-[9px] text-text-muted">{formatBytes(f.file.size)}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (f.preview) URL.revokeObjectURL(f.preview)
+                    setFiles((list) => list.filter((x) => x.id !== f.id))
+                  }}
+                  title="Remove"
+                  className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-red-500"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 p-1.5">
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            disabled={!!disabledReason}
+            title="Attach files"
+            className="w-9 h-9 shrink-0 rounded-xl flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
+          >
+            <Paperclip size={18} />
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles(Array.from(e.target.files ?? []))
+              e.target.value = ''
+            }}
+          />
+          <div className="relative flex-1 min-w-0">
+            <textarea
+              ref={textarea}
+              value={text}
+              rows={1}
+              disabled={!!disabledReason}
+              placeholder={disabledReason ?? placeholder}
+              onChange={(e) => {
+                setText(e.target.value)
+                updateMention(e.target.value, e.target.selectionStart)
+                updateEmojiQuery(e.target.value, e.target.selectionStart)
+                updateSlashQuery(e.target.value, e.target.selectionStart)
+                if (e.target.value) noteTyping()
+                else stopTyping()
+              }}
+              onKeyDown={onKeyDown}
+              onClick={(e) => {
+                updateMention(text, e.currentTarget.selectionStart)
+                updateEmojiQuery(text, e.currentTarget.selectionStart)
+                updateSlashQuery(text, e.currentTarget.selectionStart)
+              }}
+              onBlur={() => { window.setTimeout(() => { setMention(null); setEmojiQuery(null); setSearchPick(null); setSlashQuery(null) }, 120) }}
+              onPaste={(e) => {
+                const pasted = Array.from(e.clipboardData.files)
+                if (pasted.length) {
+                  e.preventDefault()
+                  addFiles(pasted)
+                }
+              }}
+              className="w-full resize-none bg-transparent px-1.5 py-2 text-[0.9rem] leading-relaxed text-text-primary placeholder:text-text-muted focus:outline-none disabled:cursor-not-allowed"
+            />
+            {showInlineParamChip && activeCommand && (
+              <div aria-hidden className="absolute inset-0 px-1.5 py-2 text-[0.9rem] leading-relaxed whitespace-pre-wrap break-words pointer-events-none overflow-hidden">
+                <span className="invisible">{text}</span>
+                <span className="inline-block rounded border border-accent/40 bg-accent/15 px-1 text-accent text-[0.8em] font-medium align-baseline">
+                  {activeCommand.info.params[activeCommand.paramIndex]}
+                </span>
+              </div>
+            )}
+          </div>
+          {!compact && (
+            <button
+              type="button"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setEmojiAt({ x: r.right - 296, y: r.top - 380 })
+              }}
+              disabled={!!disabledReason}
+              title="Emoji"
+              className="flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
+            >
+              <SmilePlus size={18} />
+            </button>
+          )}
+          {!compact && gifPickerConfigured() && (
+            <button
+              type="button"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setGifAt({ x: r.right - 320, y: r.top - 320 })
+              }}
+              disabled={!!disabledReason}
+              title="GIF"
+              className="flex w-9 h-9 shrink-0 rounded-xl items-center justify-center text-[10px] font-bold text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40"
+            >
+              GIF
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSend}
+            title="Send"
+            className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center transition-all ${
+              canSend ? 'bg-accent text-white hover:brightness-110 scale-100' : 'text-text-muted scale-95'
+            }`}
+          >
+            <SendHorizontal size={17} />
+          </button>
+        </div>
+      </div>
+
+      {emojiAt && (
+        <ReactionPicker x={emojiAt.x} y={emojiAt.y} onPick={(name) => insertAtCaret(emojiGlyph(name))} onClose={() => setEmojiAt(null)} />
+      )}
+      {gifAt && (
+        <GifPicker x={gifAt.x} y={gifAt.y} onPick={sendGif} onClose={() => setGifAt(null)} />
+      )}
+    </div>
+  )
+})
+
+export default Composer

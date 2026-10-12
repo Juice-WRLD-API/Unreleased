@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { ModalOverlay, LockToggle } from './Modal'
 import { X, ImagePlus, Paperclip, Trash2, Star, FileText } from 'lucide-react'
 import { compressImageFile } from '../lib/userApi'
 import Markdown from './Markdown'
@@ -7,7 +7,7 @@ import {
   createNewsItem, updateNewsItem, uploadAttachment, isImageAttachment, MAX_ATTACHMENT_BYTES,
   type NewsItem, type NewsChannel, type NewsAttachment,
 } from '../lib/newsApi'
-import { useBackToClose } from '../hooks/useBackToClose'
+import { errorMessage } from '../lib/format'
 
 // An attachment row in the composer: either one already hosted on the post
 // (kept as-is) or a freshly-picked local file (uploaded on publish).
@@ -38,7 +38,6 @@ interface Props {
 }
 
 export default function NewsComposeModal({ channels, initialChannel, editing, onClose, onSaved }: Props): JSX.Element {
-  useBackToClose(onClose)
   const [title, setTitle] = useState(editing?.title ?? '')
   const [channel, setChannel] = useState(editing?.channel ?? initialChannel ?? channels[0]?.id ?? '')
   const [category, setCategory] = useState(editing?.category ?? '')
@@ -81,7 +80,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
 
   const removeAttachment = (i: number): void => setAttachments((prev) => prev.filter((_, idx) => idx !== i))
 
-  const canSave = title.trim() && summary.trim() && channel && !saving
+  const canSave = title.trim() && channel && !saving
 
   const save = async (): Promise<void> => {
     if (!canSave) return
@@ -107,7 +106,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
         : await createNewsItem(payload)
       onSaved(saved)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
+      setError(errorMessage(err, 'Failed to save'))
       setSaving(false)
     }
   }
@@ -115,25 +114,31 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
   const label = 'block text-xs font-semibold text-text-muted mb-1'
   const field = 'w-full bg-[var(--surface-raised)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 transition-colors'
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[170] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4"
-      onClick={(e) => { if (e.currentTarget === e.target && !saving) onClose() }}
+  return (
+    <ModalOverlay
+      onClose={onClose}
+      zIndexClassName="z-[170]"
+      panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg max-h-[92svh]"
+      minWidth={420} minHeight={420}
     >
-      <div
-        className="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg max-h-[92svh] overflow-y-auto"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10">
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
+        <div
+          className={`shrink-0 flex items-center justify-between px-5 py-4 border-b border-[var(--border)] bg-surface ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          onMouseDown={onHandleMouseDown}
+        >
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">
             <FileText size={15} className="text-accent" /> {editing ? 'Edit post' : 'New post'}
           </h2>
-          <button onClick={onClose} disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={onClose} title="Close" disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
           {/* Lead image */}
           <div>
             <span className={label}>Cover image</span>
@@ -159,29 +164,29 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
             )}
           </div>
 
-          <div>
-            <label className={label}>Title</label>
+          <label className="block">
+            <span className={label}>Title</span>
             <input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What's the news?" maxLength={200} />
-          </div>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Channel</label>
+            <label className="block">
+              <span className={label}>Channel</span>
               <select className={field} value={channel} onChange={(e) => setChannel(e.target.value)}>
                 {channels.length === 0 && <option value="">No channels</option>}
                 {channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
-            </div>
-            <div>
-              <label className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></label>
+            </label>
+            <label className="block">
+              <span className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></span>
               <input className={field} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Release" maxLength={40} />
-            </div>
+            </label>
           </div>
 
-          <div>
-            <label className={label}>Summary</label>
+          <label className="block">
+            <span className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></span>
             <textarea className={`${field} resize-none`} rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="One or two lines shown in the feed" maxLength={280} />
-          </div>
+          </label>
 
           <div>
             <div className="flex items-center justify-between mb-1">
@@ -254,7 +259,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)] sticky bottom-0 bg-surface">
+        <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)] bg-surface">
           <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50">
             Cancel
           </button>
@@ -267,7 +272,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+      )}
+    </ModalOverlay>
   )
 }

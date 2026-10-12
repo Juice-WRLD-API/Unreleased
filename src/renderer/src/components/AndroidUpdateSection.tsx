@@ -19,10 +19,14 @@ type State =
 
 // Separate from State: an install runs on top of an already-resolved check,
 // and folding it in would throw away the release info mid-download.
+//
+// `installing` is not a dead end: the plugin reports the session's outcome, so
+// a blocked or cancelled install lands on 'error' with a reason instead of
+// leaving this stuck mid-install with nothing to say.
 type Install =
   | { kind: 'none' }
   | { kind: 'downloading'; percent: number }
-  | { kind: 'launched' }
+  | { kind: 'installing' }
   | { kind: 'needsPermission' }
   | { kind: 'error'; message: string }
 
@@ -50,6 +54,11 @@ export default function AndroidUpdateSection(): JSX.Element {
   // default thing you see rather than an unanswered button.
   useEffect(() => { void check() }, [check])
 
+  // Unsubscribe for the install-status listener, which outlives the
+  // downloadAndInstall promise (the outcome arrives after the commit).
+  const unsubStatus = useRef<(() => void) | null>(null)
+  useEffect(() => () => unsubStatus.current?.(), [])
+
   const startInstall = useCallback(async (url: string) => {
     // Checked up front so the user gets the "allow installs" prompt before
     // sitting through a download that couldn't have installed anyway.
@@ -59,12 +68,28 @@ export default function AndroidUpdateSection(): JSX.Element {
     }
     setInstall({ kind: 'downloading', percent: 0 })
     try {
-      await downloadAndInstall(url, (percent) => {
-        if (alive.current) setInstall({ kind: 'downloading', percent })
-      })
-      // Resolves when the system installer opens, not when it finishes — a
-      // successful install replaces this process, so there's nothing after.
-      if (alive.current) setInstall({ kind: 'launched' })
+      unsubStatus.current?.()
+      unsubStatus.current = await downloadAndInstall(
+        url,
+        (percent) => {
+          if (alive.current) setInstall({ kind: 'downloading', percent })
+        },
+        (status) => {
+          if (!alive.current) return
+          // 'success' never really lands — the update replaces this process
+          // before it can render — but treat it as still installing rather
+          // than inventing a done state we can't be sure of.
+          if (status.state === 'failed' || status.state === 'cancelled') {
+            setInstall({ kind: 'error', message: status.message ?? 'The install failed.' })
+          } else {
+            setInstall({ kind: 'installing' })
+          }
+        },
+      )
+      // Resolves when the install session is committed, not when it finishes —
+      // the system installer takes over from here and reports back through the
+      // status listener above.
+      if (alive.current) setInstall((prev) => (prev.kind === 'error' ? prev : { kind: 'installing' }))
     } catch (err) {
       if (!alive.current) return
       const msg = err instanceof Error ? err.message : String(err)
@@ -91,7 +116,7 @@ export default function AndroidUpdateSection(): JSX.Element {
         </div>
         <button
           onClick={check}
-          disabled={state.kind === 'checking' || install.kind === 'downloading'}
+          disabled={state.kind === 'checking' || install.kind === 'downloading' || install.kind === 'installing'}
           aria-label="Check for updates"
           className="shrink-0 w-9 h-9 md:w-auto md:h-auto md:p-1 flex items-center justify-center rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors disabled:opacity-50"
         >
@@ -152,10 +177,10 @@ export default function AndroidUpdateSection(): JSX.Element {
                 </div>
                 <p className="text-text-muted text-xs">Downloading… {install.percent}%</p>
               </div>
-            ) : install.kind === 'launched' ? (
-              <p className="flex items-start gap-1.5 text-emerald-500 text-xs">
-                <CheckCircle2 size={13} className="shrink-0 mt-px" />
-                Installer opened — follow the prompt to finish updating.
+            ) : install.kind === 'installing' ? (
+              <p className="flex items-start gap-1.5 text-text-muted text-xs">
+                <Loader2 size={13} className="animate-spin shrink-0 mt-px" />
+                Installing — follow the Android prompt to finish updating.
               </p>
             ) : install.kind === 'needsPermission' ? (
               <div className="space-y-2">

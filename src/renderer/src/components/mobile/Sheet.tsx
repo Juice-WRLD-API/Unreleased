@@ -1,6 +1,9 @@
 import { ElementType, ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { registerBackHandler } from '../../lib/backHandlers'
+import { useDragToDismiss } from '../../hooks/useDragToDismiss'
+import { dimThemeColorMeta, syncThemeColorMeta } from '../../lib/themeEffects'
+import { useEscapeToClose } from '../../hooks/useEscapeToClose'
 
 // ─── Bottom sheet ─────────────────────────────────────────────────────────────
 // The mobile stand-in for every pointer-anchored popup the desktop UI used:
@@ -9,7 +12,7 @@ import { registerBackHandler } from '../../lib/backHandlers'
 // bottom edge instead, inside thumb range, with a scrim that doubles as the
 // dismiss target.
 //
-// Mount it only while open (`{open && <Sheet …/>}`) — it owns its own exit
+// Mount it only while open (`{open && <Sheet …/>}`) - it owns its own exit
 // animation and calls `onClose` after it finishes, so the caller never has to
 // track a closing state.
 
@@ -31,8 +34,6 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
   // both` transform outranks the inline one the drag writes, so the sheet
   // would be undraggable for as long as the class stayed on.
   const [entered, setEntered] = useState(false)
-  const [dragY, setDragY] = useState(0)
-  const dragFrom = useRef<number | null>(null)
   const closingRef = useRef(false)
   // onClose is typically an inline arrow, so read it through a ref rather than
   // making every callback below depend on its identity.
@@ -51,21 +52,27 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
   // the same path as a tap on the scrim.
   useEffect(() => registerBackHandler(() => { requestClose(); return true }), [requestClose])
 
-  // Swipe the grabber/header down to dismiss — the gesture people already
+  // The scrim below is `fixed inset-0`, same as MediaLightbox's backdrop -
+  // Safari's toolbar tinting samples it directly rather than reading the
+  // app's theme-color intent, so left alone every sheet (context menus
+  // included) reads as a hard black status bar instead of the scrim's actual
+  // 50% dim. Match it for as long as the scrim is on screen, then hand the
+  // meta tag back to the real theme.
+  useEffect(() => {
+    dimThemeColorMeta(0.5)
+    return () => syncThemeColorMeta()
+  }, [])
+
+  useEscapeToClose(requestClose)
+
+  // Swipe the grabber/header down to dismiss - the gesture people already
   // expect from a sheet. Upward drag is rubber-banded rather than blocked so
   // the sheet still feels attached to the finger.
-  const onDragStart = (e: React.TouchEvent): void => { dragFrom.current = e.touches[0].clientY }
-  const onDragMove = (e: React.TouchEvent): void => {
-    if (dragFrom.current == null) return
-    const dy = e.touches[0].clientY - dragFrom.current
-    setDragY(dy > 0 ? dy : dy / 5)
-  }
-  const onDragEnd = (): void => {
-    if (dragFrom.current == null) return
-    dragFrom.current = null
-    if (dragY > 90) requestClose()
-    else setDragY(0)
-  }
+  const { style: dragStyle, handlers: dragHandlers } = useDragToDismiss(requestClose, {
+    threshold: 90,
+    rubberBand: true,
+    transition: 'transform 220ms cubic-bezier(0.16,1,0.3,1)',
+  })
 
   return createPortal(
     <>
@@ -78,19 +85,10 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
         className={`fixed z-[81] left-0 right-0 bottom-0 flex flex-col max-h-[82svh] bg-surface rounded-t-[22px] border-t border-[var(--border)] shadow-2xl ${
           closing ? 'animate-sheet-out' : entered ? '' : 'animate-sheet-in'
         }`}
-        style={{
-          transform: dragY ? `translateY(${dragY}px)` : undefined,
-          transition: dragFrom.current == null ? 'transform 220ms cubic-bezier(0.16,1,0.3,1)' : 'none',
-        }}
+        style={dragStyle}
         onAnimationEnd={(e) => { if (e.target === e.currentTarget) setEntered(true) }}
       >
-        <div
-          className="shrink-0 pt-3 pb-1 touch-none"
-          onTouchStart={onDragStart}
-          onTouchMove={onDragMove}
-          onTouchEnd={onDragEnd}
-          onTouchCancel={onDragEnd}
-        >
+        <div className="shrink-0 pt-3 pb-1 touch-none" {...dragHandlers}>
           <div className="mx-auto w-9 h-1 rounded-full bg-[var(--text-muted)] opacity-40" />
           {title && <h3 className="px-5 pt-3 text-text-primary font-semibold text-[15px]">{title}</h3>}
           {header}
@@ -115,7 +113,7 @@ interface SheetItemProps {
   trailing?: ReactNode
   onClick?: () => void
   disabled?: boolean
-  /** Accent-tinted — the currently-applied option in a picker. */
+  /** Accent-tinted - the currently-applied option in a picker. */
   active?: boolean
   danger?: boolean
 }

@@ -4,11 +4,11 @@
 // have it apply to every unreleased song in the era at once.
 //
 // Like coverRotation.ts, this module holds only data and synchronous
-// accessors and deliberately imports nothing but the storage helper —
+// accessors and deliberately imports nothing but the storage helper -
 // juicewrldApi's songToTrack reads it on every song → Track conversion, so
 // importing the API layer here would make it a cycle.
 //
-// The "unreleased only" and "personal cover wins" rules aren't enforced here —
+// The "unreleased only" and "personal cover wins" rules aren't enforced here -
 // they're gated at the call sites (songToTrack, liteSongToTrack,
 // applyPrefToTrack), same as coverRotation's rotated suggestions.
 import { ls } from './persist'
@@ -19,7 +19,7 @@ import { ls } from './persist'
 let _covers: Record<string, string> = ls.get<Record<string, string>>('eraCovers') ?? {}
 
 /** The override raw pointer for an era, if the user has set one. Synchronous
- *  for the same reason peekSongPref is — read during song → Track conversion. */
+ *  for the same reason peekSongPref is - read during song → Track conversion. */
 export function peekEraCover(era: string | null | undefined): string | undefined {
   return era ? _covers[era] : undefined
 }

@@ -13,7 +13,7 @@
 // would silently point at a different cover later. Resolving position by
 // looking the URL up in the current list degrades gracefully instead.
 //
-// Nothing here ever writes songPrefs.cover_url — a rotated cover is a display
+// Nothing here ever writes songPrefs.cover_url - a rotated cover is a display
 // choice, not a user override. Writing one would defeat the "user hasn't set a
 // cover" condition that gates rotation, and sync junk up to the profile.
 import { ls } from './persist'
@@ -25,7 +25,7 @@ let _chosen: Record<number, string> = ls.get<Record<number, string>>('rotatedCov
 const MAX_REMEMBERED = 1000
 
 /** The suggested cover currently chosen for a song, if any. Synchronous for
- *  the same reason peekSongPref is — it's read during song → Track conversion. */
+ *  the same reason peekSongPref is - it's read during song → Track conversion. */
 export function peekRotatedCover(songId: number): string | undefined {
   return _chosen[songId]
 }
@@ -41,7 +41,7 @@ export function rememberRotatedCover(songId: number, url: string): void {
 }
 
 /** Forgets every rotated cover, so songs fall back to their own art. Called
- *  when the setting is switched off — otherwise covers would freeze on
+ *  when the setting is switched off - otherwise covers would freeze on
  *  whichever suggestion happened to be showing when it was disabled. */
 export function clearRotatedCovers(): void {
   _chosen = {}

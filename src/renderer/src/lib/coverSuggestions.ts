@@ -5,8 +5,8 @@
 // readable from juicewrldApi's songToTrack without a cycle; everything here
 // runs at play time, well away from that path, so it can import freely.
 import {
-  apiFetch, buildStreamUrl, parseBrowseEntries, cleanTitleForSearch,
-  JWApiSong, JWApiBrowseResponse,
+  apiFetch, buildStreamUrl, searchFiles, cleanTitleForSearch,
+  JWApiSong,
 } from './juicewrldApi'
 import { getMediaType } from './fileTypes'
 import { peekRotatedCover, rememberRotatedCover, clearRotatedCovers } from './coverRotation'
@@ -19,7 +19,7 @@ const _candidates = new Map<number, string[]>()
 const _pending = new Map<number, Promise<string[]>>()
 
 /** Every image the file storage has filed under this song's title or any of
- *  its alt titles — the same suggestions SongPrefsSection's "Found in API
+ *  its alt titles - the same suggestions SongPrefsSection's "Found in API
  *  files" grid offers, so what rotates is what the Personalize panel shows. */
 async function fetchCandidates(songId: number): Promise<string[]> {
   let titles: string[]
@@ -38,9 +38,7 @@ async function fetchCandidates(songId: number): Promise<string[]> {
   if (queries.length === 0) return []
 
   const lists = await Promise.all(queries.map((q) =>
-    apiFetch<JWApiBrowseResponse>('/files/browse/', { search: q })
-      .then(parseBrowseEntries)
-      .catch(() => [])
+    searchFiles(q).catch(() => [])
   ))
 
   const seenPaths = new Set<string>()
@@ -68,7 +66,7 @@ function getCandidates(songId: number): Promise<string[]> {
   return run
 }
 
-/** Steps a song onto its next suggested cover and returns it — undefined when
+/** Steps a song onto its next suggested cover and returns it - undefined when
  *  the storage has none, which leaves the song on its own art.
  *
  *  Position is derived by looking the current URL up in the candidate list
@@ -87,7 +85,7 @@ export async function advanceRotatedCover(songId: number): Promise<string | unde
   return next
 }
 
-/** Drops both the remembered choices and the cached searches — used when the
+/** Drops both the remembered choices and the cached searches - used when the
  *  setting is turned off. */
 export function resetCoverRotation(): void {
   clearRotatedCovers()

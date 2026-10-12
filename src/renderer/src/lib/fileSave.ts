@@ -10,6 +10,8 @@
 
 import { isAndroidApp } from './androidUpdate'
 import { useStore } from '../store/useStore'
+import { IS_IOS, IS_NATIVE_APP } from './platform'
+import { Directory, Filesystem } from '@capacitor/filesystem'
 
 interface DownloadsPlugin {
   save(opts: { filename: string; base64: string; mimeType: string; folderUri?: string }): Promise<{ filename: string }>
@@ -64,6 +66,17 @@ function blobToBase64(blob: Blob): Promise<string> {
 /** Saves `blob` as `filename`. Resolves once the save has actually happened —
  *  callers that show a "Saved" state should wait for this, not fire-and-forget. */
 export async function saveFile(filename: string, blob: Blob): Promise<void> {
+  if (IS_NATIVE_APP && IS_IOS) {
+    // Documents is visible under On My iPhone > Unreleased in Files.
+    // A download anchor does not save blobs in WKWebView.
+    const safeName = filename.replace(/[\\/\x00-\x1f]/g, '_').replace(/^\.+$/, '_') || 'download'
+    await Filesystem.writeFile({
+      path: safeName,
+      data: await blobToBase64(blob),
+      directory: Directory.Documents,
+    })
+    return
+  }
   if (isAndroidApp()) {
     const plugin = androidPlugin()
     if (!plugin) throw new Error('Downloads plugin unavailable')
@@ -77,8 +90,32 @@ export async function saveFile(filename: string, blob: Blob): Promise<void> {
     const a = document.createElement('a')
     a.href = url
     a.download = filename
+    document.body.appendChild(a)
     a.click()
+    a.remove()
   } finally {
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
+}
+
+export function reportSaveError(error: unknown): void {
+  console.error('Download failed', error)
+  window.alert(`Could not save the file: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+export async function saveUrl(filename: string, url: string): Promise<void> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Download failed (${response.status})`)
+  await saveFile(filename, await response.blob())
+}
+
+/** Covers declarative download links in shared web views, including chat. */
+export function installNativeDownloads(): void {
+  if (!isAndroidApp() && !(IS_NATIVE_APP && IS_IOS)) return
+  document.addEventListener('click', (event) => {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[download]') : null
+    if (!anchor || event.defaultPrevented) return
+    event.preventDefault()
+    void saveUrl(anchor.download || 'download', anchor.href).catch(reportSaveError)
+  })
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Play,
@@ -10,45 +10,57 @@ import {
   Repeat1,
   Volume2,
   VolumeX,
+  Maximize2,
   ListOrdered,
   Heart,
   ChevronUp,
   ChevronDown,
-  Check,
   MoreHorizontal,
-  PictureInPicture2,
   Radio,
   Info,
-  Loader2,
   SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import ContextMenu from './ContextMenu'
 import { eventToCombo, resolveAction, registerHotkeyDispatch } from '../lib/hotkeys'
-import { readArt } from '../lib/localLibrary'
 import { formatDuration } from '../lib/format'
-import { apiFetch, smallCoverUrl, JWApiSong } from '../lib/juicewrldApi'
-import { trackIdToSongId } from '../lib/userApi'
+import { takeEqAnchor } from '../lib/eqAnchor'
+import { getSongById, smallCoverUrl } from '../lib/juicewrldApi'
+import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
+import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
-import { isAndroidApp } from '../lib/androidUpdate'
-import { CAN_SET_VOLUME } from '../lib/platform'
-import { startMediaSession, updateMediaMetadata, updateMediaPlaybackState, onMediaControlEvent, readLocalArtworkBase64 } from '../lib/mediaControl'
+import { IS_IOS, CAN_SET_VOLUME } from '../lib/platform'
 import { FullTrack } from '../types'
-import SongInfoModal from './SongInfoModal'
-import SongContextMenu from './SongContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
 import EqualizerPanel from './EqualizerPanel'
 import { Sheet } from './mobile/Sheet'
+import { useIsMobile } from '../hooks/useIsMobile'
 import {
-  attachAudioElement, applyAudioEffects, resumeEffectsContext, setEffectsChainWanted,
-  setEffectsOutputDevice, getCurrentPeak,
+  attachAudioElement, applyAudioEffects, resumeEffectsContext,
+  setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted, EFFECTS_SUPPORTED,
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
+import { clickable } from '../lib/a11y'
+import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
+import { showPlaybackNotice } from '../lib/playbackNotice'
+import PlaybackNotice from './PlaybackNotice'
+import { ensureDonorCover } from '../lib/donorCoverArt'
+import { readArt } from '../lib/localLibrary'
 
-// Downloaded-for-offline audio always wins over streaming — same track id,
-// just playing from local disk instead of the API.
+// Only opened from the "more" button / right-click, so it loads on first use
+// instead of riding in the startup bundle with the player itself.
+const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
+
+// Donor cloud files can't be streamed by URL (the route needs the auth header),
+// so their `donor://` marker resolves to a fetched blob URL - or '' while that
+// fetch is still pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   const offline = useStore.getState().offlineTracks[track.id]
-  if (offline) return toFileUrl(offline.localPath)
+  if (offline?.localPath) return toFileUrl(offline.localPath)
+  if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
   return track.streamUrl ?? toFileUrl(track.path)
 }
 
@@ -68,7 +80,7 @@ const MAX_RECOVERY_ATTEMPTS = 4
 // a weak connection legitimately stalls for a while and re-fetching costs data.
 const STALL_TIMEOUT_MS = 20000
 // Grace period after a reload before healthy playback is allowed to reset the
-// attempt counter — otherwise a stream that plays half a second and dies each
+// attempt counter - otherwise a stream that plays half a second and dies each
 // time would retry forever.
 const RECOVERY_SETTLE_MS = 10000
 // Ceiling on consecutively skipped unplayable tracks, so an API outage that
@@ -78,10 +90,15 @@ const MAX_CONSECUTIVE_SKIPS = 3
 let _seek: ((t: number) => void) | null = null
 let _getAudioDuration: (() => number) | null = null
 let _getAudioCurrentTime: (() => number) | null = null
+let _transport: { next: () => void; previous: () => void } | null = null
 export function seekAudio(t: number): void { _seek?.(t) }
+// Views with their own transport buttons (WRLD) route through here so they share
+// the Player's restart, crossfade and repeat-one handling instead of calling the
+// queue directly.
+export function runPlayerCommand(cmd: 'next' | 'previous'): void { _transport?.[cmd]() }
 export function getAudioDuration(): number { return _getAudioDuration?.() ?? 0 }
 // Live audio.currentTime, not the Zustand-stored value (which only updates on
-// the native 'timeupdate' event, ~4x/sec) — used to drive smooth per-frame
+// the native 'timeupdate' event, ~4x/sec) - used to drive smooth per-frame
 // synced-lyrics highlighting instead of choppy ~250ms jumps.
 export function getAudioCurrentTime(): number { return _getAudioCurrentTime?.() ?? 0 }
 
@@ -94,6 +111,67 @@ export function getAudioCurrentTime(): number { return _getAudioCurrentTime?.() 
 const LYRICS_CACHE_TTL_MS = 2 * 60 * 1000
 const lyricsCache = new Map<number, { lyrics: string | null; syncedLyrics: string | null; ts: number }>()
 export function invalidateLyricsCache(songId: number): void { lyricsCache.delete(songId) }
+// Module-level, not a ref: dedupes the /songs/{id}/ fetch below across a
+// synchronous double-invoke of its effect (React StrictMode's dev-only
+// mount→cleanup→mount), where both invocations' closures still see the same
+// pre-update `currentTrackFull` state.
+let lyricsFetchInFlight: number | null = null
+
+// Playback position (progress / currentTime) changes ~4x/sec. Reading it in the
+// Player body re-rendered the entire (huge) component on every tick, so the
+// parts that actually display it subscribe on their own.
+function ProgressFill({ seekDrag, className }: { seekDrag: number | null; className: string }): JSX.Element {
+  const progress = useStore((s) => s.progress)
+  return <div className={className} style={{ width: `${(seekDrag !== null ? seekDrag : progress) * 100}%` }} />
+}
+
+function ElapsedTime(): JSX.Element {
+  const currentTime = useStore((s) => s.currentTime)
+  return <>{formatDuration(currentTime)}</>
+}
+
+interface SeekRangeProps {
+  seekDrag: number | null
+  radioFmActive: boolean
+  fmProgress: number
+  disabled: boolean
+  onMouseDown?: () => void
+  onTouchStart?: () => void
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onMouseUp?: () => void
+  onTouchEnd?: () => void
+  onKeyUp?: () => void
+}
+function SeekRange({ seekDrag, radioFmActive, fmProgress, ...rest }: SeekRangeProps): JSX.Element {
+  const progress = useStore((s) => s.progress)
+  const v = radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)
+  return (
+    <input
+      type="range" min={0} max={1} step={0.001} value={v} className="w-full"
+      style={{ '--val': `${v * 100}%`, ...(radioFmActive ? { pointerEvents: 'none' as const } : {}) } as React.CSSProperties}
+      {...rest}
+    />
+  )
+}
+
+// Media Session position state - for the lock screen / OS seek bar.
+function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; playbackSpeed: number }): null {
+  const currentTime = useStore((s) => s.currentTime)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return
+    if (!active) return
+    const duration = getAudioDuration()
+    if (!duration || isNaN(duration)) return
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: playbackSpeed,
+        position:     Math.min(currentTime, duration),
+      })
+    } catch {/* ignore */}
+  }, [currentTime, playbackSpeed, active])
+  return null
+}
 
 export default function Player(): JSX.Element {
   const {
@@ -101,8 +179,6 @@ export default function Player(): JSX.Element {
     currentTrackFull,
     isPlaying,
     volume,
-    progress,
-    currentTime,
     shuffle,
     repeat,
     setIsPlaying,
@@ -114,6 +190,8 @@ export default function Player(): JSX.Element {
     toggleRepeat,
     nextTrack,
     prevTrack,
+    setShowNowPlaying,
+    showNowPlaying,
     showQueue,
     setShowQueue,
     playerCollapsed,
@@ -132,24 +210,28 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, updateLibraryTrack, setPendingEditorSongId, sidebarPosition } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'progress', 'currentTime', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack', 'setPendingEditorSongId', 'sidebarPosition')
+    playNext, account, setPendingEditorSongId } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'setPendingEditorSongId')
   const canEditSong = useCanEdit()
 
   const [showContextMenu, setShowContextMenu] = useState(false)
   // Cursor position for a right-click-spawned menu. null → menu was opened via
   // the 3-dot button, so it anchors to the button rect instead.
   const [ctxMenuPos, setCtxMenuPos] = useState<{ x: number; y: number } | null>(null)
-  const [showSongInfo, setShowSongInfo] = useState(false)
-  const [songInfoData, setSongInfoData] = useState<JWApiSong | null>(null)
   const contextMenuBtnRef = useRef<HTMLButtonElement>(null)
   const currentSongId = currentTrack ? trackIdToSongId(currentTrack.id) : null
   const { radioMode, radioNext } = useStorePick('radioMode', 'radioNext')
   const { radioFmActive, radioFmNowPlaying, radioFmMatchedSong } = useStorePick('radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong')
-  const { libraryTracks } = useStorePick('libraryTracks')
-  const { mediaOverlayEnabled } = useStorePick('mediaOverlayEnabled')
   const { eqEnabled, eqGains, eqBalance, eqMono, eqBoost, skipSilence } = useStorePick('eqEnabled', 'eqGains', 'eqBalance', 'eqMono', 'eqBoost', 'skipSilence')
   const { reverbEnabled, reverbMix, reverbDecay, pitchShift } = useStorePick('reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift')
   const { abLoopStart, abLoopEnd, setAbLoopPoint, clearAbLoop } = useStorePick('abLoopStart', 'abLoopEnd', 'setAbLoopPoint', 'clearAbLoop')
+
+  // Tooltips for the two transport toggles. They state the mode the control is
+  // currently in rather than the one clicking would switch to, matching how the
+  // icons themselves read (accent-tinted = on), and they double as the
+  // accessible name since these buttons are icon-only. The mobile and desktop
+  // transports both render them, so they live here rather than inline twice.
+  const shuffleTitle = shuffle ? 'Shuffle: on' : 'Shuffle: off'
+  const repeatTitle = repeat === 'one' ? 'Repeat: this song' : repeat === 'all' ? 'Repeat: queue' : 'Repeat: off'
 
   // Applies the playback rate to an element, letting the pitch follow the
   // rate while the pitch-shift option is on.
@@ -162,73 +244,78 @@ export default function Player(): JSX.Element {
   // Re-assert the rate once a slot has actually loaded a resource. Setting
   // playbackRate/preservesPitch right after assigning .src (or on a slot the
   // crossfade preloaded) can be dropped when the element loads the new
-  // media — which is what made a slowed/pitched track silently revert to 1x
+  // media - which is what made a slowed/pitched track silently revert to 1x
   // partway through a playlist until some setting was toggled.
-  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => applyRate(e.currentTarget)
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
+    const audio = e.currentTarget
+    applyRate(audio)
+    // Both slots share this handler - only the active slot finishing its
+    // load means the current track is ready (a preload landing on the
+    // inactive slot doesn't unblock preloading the track after it).
+    if (audio === getActive()) setCurrentTrackReady(true)
+  }
 
 
-  // FM elapsed time — ticks locally between WS updates
+  // FM elapsed time - ticks locally between WS updates
   const [fmElapsedMs, setFmElapsedMs] = useState(0)
   const fmBaseRef = useRef<{ elapsed: number; at: number }>({ elapsed: 0, at: 0 })
+  const fmTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fmElapsed = radioFmNowPlaying?.elapsed_ms
+  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
+  // replaced on every metadata broadcast, which tore the interval down and
+  // rebuilt it faster than its own 500ms tick, so the bar sat still.
   useEffect(() => {
-    if (!radioFmActive || !radioFmNowPlaying?.elapsed_ms) { setFmElapsedMs(0); return }
-    fmBaseRef.current = { elapsed: radioFmNowPlaying.elapsed_ms, at: Date.now() }
-    setFmElapsedMs(radioFmNowPlaying.elapsed_ms)
-    const t = setInterval(() => {
-      const { elapsed, at } = fmBaseRef.current
-      setFmElapsedMs(elapsed + (Date.now() - at))
-    }, 500)
-    return () => clearInterval(t)
-    // Keyed on elapsed_ms, not the whole radioFmNowPlaying object — that
-    // object is replaced on every metadata broadcast, and broadcasts can
-    // arrive faster than this interval ticks, so depending on the object
-    // tore the interval down and rebuilt it before it ever fired, freezing
-    // the progress bar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [radioFmActive, radioFmNowPlaying?.elapsed_ms])
+    if (!radioFmActive || !fmElapsed) {
+      if (fmTickRef.current) { clearInterval(fmTickRef.current); fmTickRef.current = null }
+      setFmElapsedMs(0)
+      return
+    }
+    fmBaseRef.current = { elapsed: fmElapsed, at: Date.now() }
+    setFmElapsedMs(fmElapsed)
+    if (!fmTickRef.current) {
+      fmTickRef.current = setInterval(() => {
+        const { elapsed, at } = fmBaseRef.current
+        setFmElapsedMs(elapsed + (Date.now() - at))
+      }, 500)
+    }
+  }, [radioFmActive, fmElapsed])
+  useEffect(() => () => { if (fmTickRef.current) clearInterval(fmTickRef.current) }, [])
   const fmDurationMs = radioFmNowPlaying?.duration_ms ?? 0
   const fmProgress = fmDurationMs > 0 ? Math.min(fmElapsedMs / fmDurationMs, 1) : 0
+  // Global infoSongId (not local state) so the info panel survives switching
+  // to another tab, which unmounts this view.
   const openSongInfo = (): void => {
     setShowContextMenu(false)
     if (radioFmActive) {
       const songId = radioFmNowPlaying?.song_id ?? radioFmMatchedSong?.songId
       if (songId == null) return
-      setSongInfoData(null)
-      setShowSongInfo(true)
-      apiFetch<JWApiSong>(`/songs/${songId}/`)
-        .then((song) => setSongInfoData(song))
-        .catch(() => setShowSongInfo(false))
+      useStore.getState().setInfoSongId(songId)
       return
     }
     if (!currentTrack) return
     const match = currentTrack.id.match(/^jw-(\d+)$/)
     if (!match) return
-    setSongInfoData(null)
-    setShowSongInfo(true)
-    apiFetch<JWApiSong>(`/songs/${match[1]}/`)
-      .then((song) => setSongInfoData(song))
-      .catch(() => setShowSongInfo(false))
+    useStore.getState().setInfoSongId(Number(match[1]))
   }
 
-  // Two audio slots — ping-pong between them for crossfade
+  // Two audio slots - ping-pong between them for crossfade
   const slotA = useRef<HTMLAudioElement>(null)
   const slotB = useRef<HTMLAudioElement>(null)
   const activeSlot = useRef<'A' | 'B'>('A')
 
   const [prevMute, setPrevMute] = useState(0.8)
 
-  // Seek drag buffering — only commit audio.currentTime on mouse release
+  // Seek drag buffering - only commit audio.currentTime on mouse release
   const [seekDrag, setSeekDrag] = useState<number | null>(null)
 
-  // Crossfade rides on ramping two elements' volumes against each other, so it
-  // needs a writable volume to mean anything. Where it isn't (iOS/iPadOS — see
-  // CAN_SET_VOLUME) both ramps are silently ignored and the "crossfade" is two
-  // tracks playing over each other at full volume for its whole duration, which
-  // is worse than no crossfade. Fall back to a hard cut there; the user's
-  // setting is left alone so it takes effect again on a platform that can.
+  // Whether the active slot has actually loaded the current track (metadata
+  // received) - gates preloading the next queue track so it doesn't compete
+  // with the current track's own fetch for bandwidth.
+  const [currentTrackReady, setCurrentTrackReady] = useState(false)
+
   const canCrossfade = crossfadeEnabled && CAN_SET_VOLUME
 
-  // Crossfade state (all refs — no re-renders needed)
+  // Crossfade state (all refs - no re-renders needed)
   const cfActive     = useRef(false)
   const cfTargetIdx  = useRef(-1)
   const cfIsRadio    = useRef(false)
@@ -241,11 +328,11 @@ export default function Player(): JSX.Element {
   // Timer backstop for the pause-fade's final audio.pause(). requestAnimationFrame
   // is frozen while the window is hidden/occluded, so if the user pauses and
   // immediately switches tabs/apps the RAF ramp never reaches its end and the
-  // audio would keep playing. A timer still fires in the background — use it to
+  // audio would keep playing. A timer still fires in the background - use it to
   // guarantee the element actually pauses.
   const pauseFadeTimer = useRef<number | null>(null)
   // The current ramp's finalize(). Held in a ref so a visibilitychange handler
-  // can snap the ramp to its end state the moment the window hides — RAF is
+  // can snap the ramp to its end state the moment the window hides - RAF is
   // frozen and the timer backstop above is throttled while hidden, so without
   // this a resume ramp gets stuck mid-fade and the song plays at reduced volume
   // (and a pause ramp keeps playing) until the throttled timer eventually fires.
@@ -255,10 +342,47 @@ export default function Player(): JSX.Element {
   const volumeRef = useRef(volume)
   useEffect(() => { volumeRef.current = volume }, [volume])
 
+  // A recovery reload is delayed by backoff and then again by metadata loading.
+  // Keep its resume position live so a seek/restart during either wait cannot be
+  // overwritten by the timestamp captured when recovery was first scheduled.
+  const recoveryResumeAt = useRef(0)
+  const recoveryGeneration = useRef(0)
+  // Calling load() resets currentTime to zero and queues a timeupdate before
+  // metadata is ready. Remember which recovery owns that reload so the native
+  // reset cannot overwrite the user's live resume intent.
+  const recoveryLoading = useRef<{ audio: HTMLAudioElement; generation: number } | null>(null)
+
   const getActive = (): HTMLAudioElement | null =>
     activeSlot.current === 'A' ? slotA.current : slotB.current
   const getNext = (): HTMLAudioElement | null =>
     activeSlot.current === 'A' ? slotB.current : slotA.current
+
+  // Tracks each slot's in-flight play() promise. With preload="none" the
+  // element only starts fetching once play() is called, so pausing right
+  // after selecting a track (before that fetch/decode settles) races the
+  // pending play() request - calling pause() while it's still outstanding
+  // can lose to it and leave the track audibly playing once the data
+  // arrives. Deferring the pause until play() has settled closes that gap.
+  const pendingPlays = useRef(new WeakMap<HTMLAudioElement, Promise<unknown>>()).current
+
+  const playSlot = (audio: HTMLAudioElement): void => {
+    const p = audio.play().catch(console.error)
+    pendingPlays.set(audio, p)
+    p.finally(() => { if (pendingPlays.get(audio) === p) pendingPlays.delete(audio) })
+  }
+
+  const pauseSlot = (audio: HTMLAudioElement): void => {
+    const pending = pendingPlays.get(audio)
+    if (pending) {
+      // Wait for this play() to settle before pausing - pausing while it's
+      // still outstanding can lose the race and leave the track audibly
+      // playing once the data arrives. Skip the pause if a newer play()
+      // has since superseded this one (a quick resume raced back in).
+      pending.finally(() => { if (!pendingPlays.has(audio) || pendingPlays.get(audio) === pending) audio.pause() })
+    } else {
+      audio.pause()
+    }
+  }
 
   const cancelPauseFade = (): void => {
     if (pauseFadeRaf.current != null) { cancelAnimationFrame(pauseFadeRaf.current); pauseFadeRaf.current = null }
@@ -284,7 +408,7 @@ export default function Player(): JSX.Element {
   // Compute what the next queue index would be (mirrors store's nextTrack logic,
   // without advancing). Shuffle included: the store pre-shuffles the upcoming
   // list and then advances sequentially, so the next track is queueIndex + 1
-  // there too — picking a random index here (as this used to) could crossfade
+  // there too - picking a random index here (as this used to) could crossfade
   // into already-played history and desync from what nextTrack() would play.
   const computeNextIdx = (): number => {
     if (queue.length === 0) return -1
@@ -294,14 +418,18 @@ export default function Player(): JSX.Element {
     return next
   }
 
-  // Preload next track into inactive slot — only when crossfade is on: the
+  // Preload next track into inactive slot - only when crossfade is on: the
   // inactive slot is never played otherwise, so preloading just streamed data
   // that got thrown away on every track change. Shuffle queues are
   // pre-shuffled, so the next track is deterministic (queueIndex + 1) there
-  // too. Radio's next track lives in radioNext, not the queue — nothing to
+  // too. Radio's next track lives in radioNext, not the queue - nothing to
   // preload from here.
+  // Gated on currentTrackReady: starting this fetch before the current track
+  // has loaded would fight it for bandwidth, which is exactly backwards -
+  // the song actually playing should never be starved for one that's just
+  // getting a head start.
   useEffect(() => {
-    if (!canCrossfade || radioMode || !isPlaying || queue.length === 0 || cfActive.current) return
+    if (!canCrossfade || radioMode || !isPlaying || queue.length === 0 || cfActive.current || !currentTrackReady) return
     let nextIdx: number
     if (repeat === 'one') nextIdx = queueIndex
     else {
@@ -313,15 +441,28 @@ export default function Player(): JSX.Element {
     }
     const nextTrackData = queue[nextIdx]
     if (!nextTrackData) return
+    if (isDonorStreamUrl(nextTrackData.streamUrl) && !cachedDonorUrl(nextTrackData.streamUrl)) {
+      // Not fetched yet: fetch, then load it into the spare slot if it's still
+      // the upcoming track.
+      void ensureDonorUrl(nextTrackData.streamUrl).then((u) => {
+        const s = useStore.getState()
+        const spare = getNext()
+        if (!spare || s.queue[nextIdx]?.id !== nextTrackData.id || s.currentTrack?.id === nextTrackData.id) return
+        spare.src = u
+        spare.load()
+        applyRate(spare)
+      }).catch(() => { /* the main load will surface a real failure */ })
+      return
+    }
     const url = resolvePlaybackUrl(nextTrackData)
     const na = getNext()
     if (!na || na.src === url) return
     na.src = url
     na.load()
-    // Preloaded slots inherit the current rate too — the loadedmetadata
+    // Preloaded slots inherit the current rate too - the loadedmetadata
     // handler re-asserts it once this load settles.
     applyRate(na)
-  }, [queueIndex, queue.length, isPlaying, repeat, canCrossfade, radioMode])
+  }, [queueIndex, queue.length, isPlaying, repeat, canCrossfade, radioMode, currentTrackReady])
 
   // Route both slots through the shared Web Audio effects chain (EQ, balance,
   // mono, silence detection). Elements keep their own volume/rate handling.
@@ -329,7 +470,7 @@ export default function Player(): JSX.Element {
   // On mobile the chain only gets built once an effect is actually switched on
   // (see setEffectsChainWanted): routing a media element through Web Audio is
   // what makes background playback fragile there, and the overwhelming
-  // majority of listeners never touch the EQ — no reason to make them pay for
+  // majority of listeners never touch the EQ - no reason to make them pay for
   // it. Desktop attaches on mount as it always has.
   const effectsInUse = eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || reverbEnabled || skipSilence
   useEffect(() => {
@@ -357,55 +498,72 @@ export default function Player(): JSX.Element {
       const audio = getActive()
       if (!audio) return
       cancelCF()
+      const target = Math.max(0, t)
+      // Record intent before touching the media element: assigning currentTime
+      // can throw while its source is in an error/reload state.
+      recoveryResumeAt.current = target
       audio.volume = volumeRef.current
-      audio.currentTime = t
-      setCurrentTime(t)
-      if (audio.duration) setProgress(t / audio.duration)
+      try { audio.currentTime = target } catch { /* recovery will apply it once seekable */ }
+      setCurrentTime(target)
+      if (audio.duration) setProgress(target / audio.duration)
     }
     _getAudioDuration = () => getActive()?.duration ?? 0
     _getAudioCurrentTime = () => getActive()?.currentTime ?? 0
     return () => { _seek = null; _getAudioDuration = null; _getAudioCurrentTime = null }
-  }, []) // stable — only depends on refs
+  }, []) // stable - only depends on refs
 
   // Load full metadata when track changes or currentTrackFull is cleared
   useEffect(() => {
     if (!currentTrack) return
-    if (currentTrackFull) return  // already populated — skip
+    if (currentTrackFull) return  // already populated - skip
     // Guard against stale async responses: if the track changes again before
     // a fetch resolves, that response must not overwrite the new track's
     // metadata (this is what caused a finished song's metadata to bleed
     // into the next one).
     const trackId = currentTrack.id
+    const offline = useStore.getState().offlineTracks[trackId]
     const isStale = (): boolean => useStore.getState().currentTrack?.id !== trackId
     // Build synthetic FullTrack immediately so cover art + artist show
     const synthetic: FullTrack = {
       ...currentTrack,
       albumArt: currentTrack.imageUrl ?? null,
-      lyrics: null,
-      syncedLyrics: null,
+      lyrics: offline?.lyrics ?? null,
+      syncedLyrics: offline?.syncedLyrics ?? null,
       producer: null,
       notes: null,
       ext: '',
     }
     setCurrentTrackFull(synthetic)
+    if (currentTrack.hasAlbumArt && !synthetic.albumArt) {
+      void readArt(currentTrack.path).then((art) => {
+        if (art && !isStale()) setCurrentTrackFull({ ...synthetic, albumArt: art })
+      })
+    }
+    // Donor files carry their art embedded in the file itself (MP3 ID3), not
+    // on the API - fetch just the tag and show it once it's read.
+    const donorFileId = donorFileIdFromTrackId(currentTrack.id)
+    if (donorFileId && !synthetic.albumArt) {
+      void ensureDonorCover(donorFileId).then((url) => {
+        if (url && !isStale()) setCurrentTrackFull({ ...synthetic, albumArt: url })
+      })
+    }
     // Fetch lyrics from API if this is a tracker song (id = "jw-{n}")
     const match = currentTrack.id.match(/^jw-(\d+)$/)
-    if (match) {
+    if (match && !offline) {
       const songId = Number(match[1])
       // Serve from session cache to avoid re-hitting /songs/ when replaying
       // or revisiting a song.
       const cached = lyricsCache.get(songId)
       if (cached && Date.now() - cached.ts < LYRICS_CACHE_TTL_MS) {
         setCurrentTrackFull({ ...synthetic, lyrics: cached.lyrics, syncedLyrics: cached.syncedLyrics })
-      } else {
-        // Show the offline-downloaded snapshot immediately (if any) so a
-        // synced/downloaded song doesn't sit blank waiting on the network —
-        // the live fetch below overwrites it with fresh data when it succeeds.
-        const offlineMeta = useStore.getState().offlineTracks[currentTrack.id]
-        if (offlineMeta) {
-          setCurrentTrackFull({ ...synthetic, albumArt: offlineMeta.imageUrl ?? synthetic.albumArt, lyrics: offlineMeta.lyrics, syncedLyrics: offlineMeta.syncedLyrics })
-        }
-        apiFetch<JWApiSong>(`/songs/${songId}/`)
+      } else if (lyricsFetchInFlight !== songId) {
+        // Flagged pending so WRLD's layout doesn't read the still-null
+        // lyrics as "this song has none" and snap to the centered,
+        // no-lyrics arrangement before the fetch below has a chance to say
+        // otherwise.
+        setCurrentTrackFull({ ...synthetic, lyricsPending: true })
+        lyricsFetchInFlight = songId
+        getSongById(songId)
           .then((song) => {
             const syncedLyrics = song.synced_lyrics || null
             const lyrics = song.lyrics || null
@@ -413,18 +571,8 @@ export default function Player(): JSX.Element {
             if (isStale()) return
             setCurrentTrackFull({ ...synthetic, lyrics, syncedLyrics })
           })
-          .catch(() => {/* no network — offline snapshot (if any) already applied above */})
+          .catch(() => { if (!isStale()) setCurrentTrackFull(synthetic) /* no network - treat as no lyrics */ })
       }
-    } else if (currentTrack.path && !currentTrack.imageUrl) {
-      // Local track. There's no lyrics/tag sidecar to read on Android — the
-      // scan already captured everything MediaMetadataRetriever exposes — so
-      // the only thing still worth fetching is the embedded cover, and only
-      // when the queue entry didn't already carry one.
-      readArt(currentTrack.path).then((a) => {
-        if (isStale() || !a) return
-        updateLibraryTrack(currentTrack.id, { albumArt: a })
-        setCurrentTrackFull(prev => prev ? { ...prev, albumArt: a } : prev)
-      }).catch(() => {})
     }
   }, [currentTrack?.id, currentTrackFull])
 
@@ -434,28 +582,75 @@ export default function Player(): JSX.Element {
     if (!audio || !currentTrack) return
 
     if (skipNextLoad.current) {
-      // Crossfade just swapped — audio already playing on active slot
+      // Crossfade just swapped - audio already playing on active slot, and it
+      // was the preload target this same track just finished loading as.
       skipNextLoad.current = false
       audio.volume = volumeRef.current
       // This slot was loaded by the crossfade preload, which never ran the
-      // rate setup below — apply it now or the faded-in track plays at 1x.
+      // rate setup below - apply it now or the faded-in track plays at 1x.
       applyRate(audio)
+      setCurrentTrackReady(true)
       return
     }
 
+    if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
+      const trackId = currentTrack.id
+      const { streamUrl, title } = currentTrack
+      setCurrentTrackReady(false)
+      cancelCF()
+      cancelPauseFade()
+      // Stop the previous track while the file downloads.
+      audio.removeAttribute('src')
+      audio.load()
+      ensureDonorUrl(currentTrack.streamUrl).then((url) => {
+        const s = useStore.getState()
+        const a = getActive()
+        if (!a || s.currentTrack?.id !== trackId) return
+        a.src = url
+        a.volume = volumeRef.current
+        applyRate(a)
+        if (s.isPlaying) playSlot(a)
+      }).catch((err) => {
+        console.error('Could not load donor file', err)
+        if (useStore.getState().currentTrack?.id !== trackId) return
+        setIsPlaying(false)
+        if (isSessionEditPlaceholder(streamUrl)) {
+          showPlaybackNotice(err instanceof SessionEditNotFoundError
+            ? `No session edit found for "${title}"`
+            : `Couldn't load the session edit for "${title}"`)
+        }
+      })
+      return
+    }
+
+    const fileUrl = resolvePlaybackUrl(currentTrack)
+    // Reassigning `.src` restarts the fetch even when the URL is unchanged -
+    // guard against a redundant re-run of this effect (e.g. React StrictMode's
+    // deliberate double-invoke in dev) firing a second network request for
+    // the same track.
+    if (audio.src === fileUrl) return
+
+    setCurrentTrackReady(false)
+    // A different track just started loading - any in-flight preload of an
+    // upcoming queue track was fetched for the old "next", not this one.
+    // Abort it now instead of leaving it to compete with this track's own
+    // load for bandwidth; the preload effect below will kick off a fresh one
+    // once this track is ready and the real next track is known.
+    const na = getNext()
+    if (na && na.src) { na.removeAttribute('src'); na.load() }
+
     cancelCF()
     cancelPauseFade()
-    const fileUrl = resolvePlaybackUrl(currentTrack)
     audio.src = fileUrl
     audio.volume = volumeRef.current
     applyRate(audio)
-    if (isPlaying) audio.play().catch(console.error)
+    if (isPlaying) playSlot(audio)
   }, [currentTrack?.id])
 
   // Rotate suggested covers (when the setting is on and the song has no cover
   // the user set). Keyed on the track id rather than the play-credit threshold
   // so the cover is picked as the song starts and then holds for the whole
-  // play — advancing mid-song would swap the art out from under the user.
+  // play - advancing mid-song would swap the art out from under the user.
   // Released songs are excluded: they already have real official artwork, so
   // "suggestions" there would just be fan-made covers overriding it.
   useEffect(() => {
@@ -469,32 +664,32 @@ export default function Player(): JSX.Element {
     if (!audio) return
     cancelPauseFade()
     // Only ramp when the window is actually visible. A play/pause fired while
-    // hidden (mini player, tray, another tab in front) can't animate — RAF is
-    // frozen — so skip the fade and apply the end state instantly instead of
+    // hidden (mini player, tray, another tab in front) can't animate - RAF is
+    // frozen - so skip the fade and apply the end state instantly instead of
     // starting a ramp that would sit stuck at the wrong volume until a
     // throttled timer catches up.
-    // CAN_SET_VOLUME: without a writable volume the ramp changes nothing
-    // audible and only delays the real pause() to the end of the fade, so the
-    // track plays on at full volume for PAUSE_FADE_MS after the user hit
-    // pause. Cut straight to the end state instead.
+    // iOS Safari also ignores HTMLMediaElement.volume entirely (it's pinned to
+    // the hardware volume buttons), so a ramp there would just no-op every
+    // frame and pause would still snap silent/loud instantly - skip it rather
+    // than run a fade that can never be heard.
     const smoothFade = useStore.getState().pauseFadeEnabled && !cfActive.current
       && document.visibilityState === 'visible' && CAN_SET_VOLUME
     // Autoplay policy can leave the effects AudioContext suspended until a
-    // gesture — kick it on every play so audio never routes into a dead graph.
+    // gesture - kick it on every play so audio never routes into a dead graph.
     if (isPlaying) resumeEffectsContext()
     if (isPlaying) {
       if (smoothFade) {
-        // Ramp back up — from 0 on a normal resume, or from wherever a
+        // Ramp back up - from 0 on a normal resume, or from wherever a
         // still-running fade-out left the volume when it got cancelled above.
         const from = audio.paused ? 0 : audio.volume
         audio.volume = from
-        audio.play().catch(console.error)
+        playSlot(audio)
         const startTime = performance.now()
-        // Land the ramp at full volume — from the RAF ramp completing, or from
+        // Land the ramp at full volume - from the RAF ramp completing, or from
         // the timer backstop below. RAF is frozen while this window is hidden/
         // occluded, so a resume triggered remotely (mini player or tray with
         // the main window minimized) would otherwise start playback with the
-        // volume stuck at the 0 set above — the song "plays" silently.
+        // volume stuck at the 0 set above - the song "plays" silently.
         const finalize = (): void => {
           cancelPauseFade()
           audio.volume = volumeRef.current
@@ -513,28 +708,29 @@ export default function Player(): JSX.Element {
         // Instant resume (fade off, or fired while hidden). Restore volume in
         // case a previous ramp was snapped/cancelled mid-fade at a low value.
         audio.volume = volumeRef.current
-        audio.play().catch(console.error)
+        playSlot(audio)
       }
     } else {
       // Pause must stop BOTH slots. Mid-crossfade the incoming slot is also
       // playing, and a boundary race (the outgoing's `ended` firing around the
-      // same tick) can clear cfActive before this effect runs — so relying on
+      // same tick) can clear cfActive before this effect runs - so relying on
       // cancelCF() alone to stop the incoming element isn't race-proof.
       // Pausing both elements unconditionally guarantees nothing keeps playing.
       if (cfActive.current) cancelCF()
       if (smoothFade && !audio.paused && !audio.ended) {
         // Fade only the active slot; the inactive one is silenced immediately
         // (it should never be audible outside a crossfade anyway).
-        getNext()?.pause()
+        const next = getNext()
+        if (next) pauseSlot(next)
         const startVol = audio.volume
         const startTime = performance.now()
-        // Finalize the pause. Runs from whichever fires first — the RAF ramp
+        // Finalize the pause. Runs from whichever fires first - the RAF ramp
         // completing, or the timer backstop below (which still fires when the
         // window is hidden and RAF is frozen). cancelPauseFade() makes it
         // idempotent by clearing the other pending handle.
         const finalize = (): void => {
           cancelPauseFade()
-          audio.pause()
+          pauseSlot(audio)
           // Restore element volume while silent so any code path that plays
           // this slot without going through the resume ramp isn't stuck at 0.
           audio.volume = volumeRef.current
@@ -552,20 +748,19 @@ export default function Player(): JSX.Element {
         // it normally loses the race to RAF and only wins when RAF is stalled.
         pauseFadeTimer.current = window.setTimeout(finalize, PAUSE_FADE_MS + 50)
       } else {
-        slotA.current?.pause()
-        slotB.current?.pause()
+        if (slotA.current) pauseSlot(slotA.current)
+        if (slotB.current) pauseSlot(slotB.current)
       }
     }
   }, [isPlaying])
 
   // ── Stream recovery ────────────────────────────────────────────────────────
-  // Mobile networks drop connections mid-song constantly — a wifi/cellular
+  // Mobile networks drop connections mid-song constantly - a wifi/cellular
   // handoff, a dead spot on a train, the radio powering down behind a lock
   // screen. When that happens the element either fires 'error' or simply stops
   // advancing, and neither state fixes itself: play() on an errored element
   // rejects, so playback stayed dead for the rest of the session while the UI
-  // cheerfully showed a playing state. That is what "some songs don't start"/
-  // "randomly stops" looks like from the user's side.
+  // cheerfully showed a playing state. That is what "it randomly stops" is.
   //
   // Reload the same URL and resume from where it died instead, on a bounded
   // backoff. Everything here is event- or wall-clock-driven rather than
@@ -574,7 +769,7 @@ export default function Player(): JSX.Element {
   const recoveryAttempts   = useRef(0)
   const recoveryTimer      = useRef<number | null>(null)
   const lastRecoveryAt     = useRef(0)
-  // Last observed playhead position and when it was observed — the pair that
+  // Last observed playhead position and when it was observed - the pair that
   // distinguishes "buffering" from "the stream is gone".
   const lastProgressTime   = useRef(0)
   const lastProgressAt     = useRef(Date.now())
@@ -592,9 +787,18 @@ export default function Player(): JSX.Element {
     unexpectedPauses.current = 0
     lastProgressTime.current = 0
     lastProgressAt.current = Date.now()
+    // A normal source change has already reset the active element to zero;
+    // after a crossfade swap it is already partway through the incoming song.
+    recoveryResumeAt.current = getActive()?.currentTime ?? 0
+    recoveryGeneration.current++
+    recoveryLoading.current = null
     clearRecoveryTimer()
   }, [currentTrack?.id])
-  useEffect(() => clearRecoveryTimer, [])
+  useEffect(() => () => {
+    recoveryGeneration.current++
+    recoveryLoading.current = null
+    clearRecoveryTimer()
+  }, [])
 
   // Reloads the active slot and picks up where it stopped. Reads everything
   // from the store/refs so a stale closure (the watchdog interval holds one)
@@ -603,7 +807,7 @@ export default function Player(): JSX.Element {
     const audio = getActive()
     const track = useStore.getState().currentTrack
     if (!audio || !track || !useStore.getState().isPlaying) return
-    // A crossfade deliberately drives one slot to silence — never reload
+    // A crossfade deliberately drives one slot to silence - never reload
     // through one. (A pending seek is filtered by the caller, not here: a
     // stream that dies mid-seek leaves `seeking` stuck true, and that case
     // still has to be recoverable.)
@@ -611,43 +815,79 @@ export default function Player(): JSX.Element {
     if (recoveryTimer.current != null) return  // a retry is already queued
 
     const url = resolvePlaybackUrl(track)
-    // Nothing to retry into while the device is offline — don't burn attempts;
+    if (!url) return  // donor file still downloading - nothing to reload yet
+    // Nothing to retry into while the device is offline - don't burn attempts;
     // the 'online' listener in the watchdog retries the moment it's back.
     // Downloaded and local files are unaffected by connectivity.
     if (url.startsWith('http') && navigator.onLine === false) return
 
     if (recoveryAttempts.current >= MAX_RECOVERY_ATTEMPTS) {
-      // Out of retries. Stop pretending — a paused player the user can tap is
+      // Out of retries. Stop pretending - a paused player the user can tap is
       // far better than a play button that lies.
+      if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
       console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason})`)
       setIsPlaying(false)
       return
     }
 
     const attempt = recoveryAttempts.current++
+    const queueIndex = useStore.getState().queueIndex
+    const trackId = track.id
     lastRecoveryAt.current = Date.now()
-    const resumeAt = audio.currentTime > 0 ? audio.currentTime : lastProgressTime.current
-    console.warn(`Playback ${reason} — reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
+    // Zero is a meaningful user intent (restart/seek-to-start), so fall back to
+    // the live intent ref rather than an older progress sample.
+    // This ref is authoritative: the element can retain an obsolete non-zero
+    // currentTime when a user seek/restart throws during an error state.
+    const resumeAt = recoveryResumeAt.current
+    // Scheduling a replacement must not invalidate an in-flight load yet: the
+    // user can pause during backoff, canceling this retry, while the prior load
+    // is still capable of restoring its position once metadata arrives.
+    const scheduledGeneration = recoveryGeneration.current
+    console.warn(`Playback ${reason} - reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
 
     recoveryTimer.current = window.setTimeout(() => {
       recoveryTimer.current = null
       const a = getActive()
       const s = useStore.getState()
-      // The user may have paused, skipped, or seeked away while we waited.
-      if (!a || !s.isPlaying || s.currentTrack?.id !== track.id) return
+      // The user may have paused or skipped away while we waited, or a newer
+      // recovery may already own this slot. Track objects are also replaced
+      // for artwork and display-preference updates, so compare stable playback
+      // identity rather than object reference.
+      if (!a || a !== audio || !s.isPlaying || s.currentTrack?.id !== trackId
+        || resolvePlaybackUrl(s.currentTrack) !== url || s.queueIndex !== queueIndex
+        || recoveryGeneration.current !== scheduledGeneration || cfActive.current) return
+      // Only an actual replacement load supersedes the previous metadata
+      // callback and its timeupdate quarantine.
+      const generation = ++recoveryGeneration.current
       const onReady = (): void => {
         a.removeEventListener('loadedmetadata', onReady)
+        if (recoveryLoading.current?.audio === a
+          && recoveryLoading.current.generation === generation) {
+          recoveryLoading.current = null
+        }
+        const latest = useStore.getState()
+        if (latest.currentTrack?.id !== trackId || resolvePlaybackUrl(latest.currentTrack) !== url
+          || latest.queueIndex !== queueIndex
+          || getActive() !== a || recoveryGeneration.current !== generation
+          || cfActive.current) return
+        // This load recovered while a follow-up retry was still backing off.
+        // Its successful metadata handoff makes that replacement unnecessary.
+        clearRecoveryTimer()
+        const latestResumeAt = recoveryResumeAt.current
         // Streamed audio reports Infinity duration until the server has sent
         // enough to know the length; seeking then silently no-ops, and the
         // stall detector picks that up as another round.
-        if (resumeAt > 0 && isFinite(a.duration) && resumeAt < a.duration) {
-          try { a.currentTime = resumeAt } catch { /* not seekable yet */ }
+        if (latestResumeAt > 0 && isFinite(a.duration) && latestResumeAt < a.duration) {
+          try { a.currentTime = latestResumeAt } catch { /* not seekable yet */ }
         }
         applyRate(a)
         a.volume = volumeRef.current
-        a.play().catch(() => {})
+        // A pause that lands during metadata loading should suppress autoplay,
+        // not discard the restored position needed by the next manual resume.
+        if (latest.isPlaying) a.play().catch(() => {})
       }
       a.addEventListener('loadedmetadata', onReady)
+      recoveryLoading.current = { audio: a, generation }
       a.src = url
       a.load()
       // Fresh stall budget so the reload itself isn't immediately judged.
@@ -655,12 +895,12 @@ export default function Player(): JSX.Element {
     }, Math.min(1000 * 2 ** attempt, 8000))
   }
 
-  // A source the browser can't play at all — a 404, a codec it doesn't
-  // support — will never come back on retry, and stopping dead in the middle
+  // A source the browser can't play at all - a 404, a codec it doesn't
+  // support - will never come back on retry, and stopping dead in the middle
   // of a queue is the same complaint from the user's side. Move past it.
   const skipUnplayableTrack = (): void => {
     if (consecutiveSkips.current >= MAX_CONSECUTIVE_SKIPS) {
-      console.error('Too many unplayable tracks in a row — stopping playback')
+      console.error('Too many unplayable tracks in a row - stopping playback')
       setIsPlaying(false)
       return
     }
@@ -674,6 +914,9 @@ export default function Player(): JSX.Element {
     if (audio !== getActive()) return
     const err = audio.error
     if (!err || err.code === MediaError.MEDIA_ERR_ABORTED) return
+    // A failed recovery load may never produce loadedmetadata, so its
+    // timeupdate quarantine must be released by the terminal error instead.
+    if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
     console.error(`Audio error (${slot}): code ${err.code}`, err.message)
     if (!useStore.getState().isPlaying) return
     // Unsupported before a single frame played = the file itself is the
@@ -689,7 +932,7 @@ export default function Player(): JSX.Element {
   // another player, or the browser dropped the media session. One nudge back
   // is worth trying (hidden tabs do get spuriously paused, which is what the
   // watchdog below was built for), but if it happens again straight away the
-  // OS means it — stop fighting and let the UI say so.
+  // OS means it - stop fighting and let the UI say so.
   const handleAudioPause = (audio: HTMLAudioElement): void => {
     if (audio !== getActive()) return
     if (!useStore.getState().isPlaying) return   // our own pause; already in sync
@@ -697,41 +940,41 @@ export default function Player(): JSX.Element {
     if (cfActive.current || pauseFadeRaf.current != null) return
     // Assigning .src fires a pause of its own (the media load algorithm pauses
     // the element before tearing down the old resource), and it resets
-    // readyState to HAVE_NOTHING. Without this, every track change — and every
-    // recovery reload — would read as the OS taking playback away, so a quick
+    // readyState to HAVE_NOTHING. Without this, every track change - and every
+    // recovery reload - would read as the OS taking playback away, so a quick
     // triple-tap on skip was enough to stop the player outright.
     if (audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
     unexpectedPauses.current++
     if (unexpectedPauses.current > 2) {
-      console.warn('Playback paused externally — yielding')
+      console.warn('Playback paused externally - yielding')
       setIsPlaying(false)
       return
     }
     audio.play().catch(() => {})
   }
 
-  // Mobile background watchdog — browsers can silently pause an audio
+  // Mobile background watchdog - browsers can silently pause an audio
   // element (or never finish a play() call) while the tab is hidden, with
   // no event firing to tell the app. Periodically nudge it back, and
   // recheck immediately when the tab regains focus.
   //
   // A locked screen can also suspend JS badly enough that the native
   // 'ended' event dispatch for a track that finished never actually reaches
-  // our handler — audio.paused and audio.ended both end up true with
+  // our handler - audio.paused and audio.ended both end up true with
   // playback just stuck there forever ("next song doesn't play"). Calling
   // .play() on an already-ended element only replays it from 0, so that
   // case needs to go through the real advance-to-next-track logic instead.
   useEffect(() => {
-    // The "last advanced" stamp goes stale while paused — a five-minute pause
+    // The "last advanced" stamp goes stale while paused - a five-minute pause
     // would otherwise read as a five-minute stall the instant playback resumes.
     lastProgressAt.current = Date.now()
 
     const check = (): void => {
       if (!isPlaying) return
-      // A reload is already queued — let it land before judging anything.
+      // A reload is already queued - let it land before judging anything.
       if (recoveryTimer.current != null) return
       // The audio graph can be suspended by the OS (screen off / Android doze)
-      // while the element still reports as playing — that silences output since
+      // while the element still reports as playing - that silences output since
       // audio routes through the graph, and the checks below wouldn't catch it.
       // Nudge it back on every tick (complements the graph's own statechange
       // auto-resume, which timer throttling in the background can starve).
@@ -741,6 +984,8 @@ export default function Player(): JSX.Element {
       if (audio.ended) { onAudioEnded(audio); return }
       if (audio.error) { recoverPlayback('error'); return }
       if (audio.paused) { audio.play().catch(() => recoverPlayback('play-rejected')); return }
+      // Background WebViews throttle timeupdate even while audio is healthy.
+      if (document.hidden) { lastProgressAt.current = Date.now(); return }
       // Playing on paper, but the clock isn't moving. Very common on mobile:
       // the connection goes away without the element ever firing 'error', so it
       // sits in a rebuffer that will never finish. Nothing else detects this.
@@ -757,7 +1002,7 @@ export default function Player(): JSX.Element {
       // resume, paused on a pause) rather than leaving it stuck partway.
       pauseFadeFinalize.current?.()
     }
-    // Connectivity came back — retry immediately with a clean slate instead of
+    // Connectivity came back - retry immediately with a clean slate instead of
     // waiting out a backoff that was scheduled against a dead network.
     const onOnline = (): void => {
       recoveryAttempts.current = 0
@@ -766,14 +1011,18 @@ export default function Player(): JSX.Element {
     }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('online', onOnline)
+    window.addEventListener('pageshow', check)
+    window.addEventListener('focus', check)
     return () => {
       clearInterval(id)
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('online', onOnline)
+      window.removeEventListener('pageshow', check)
+      window.removeEventListener('focus', check)
     }
   }, [isPlaying])
 
-  // Volume — only change if not mid-crossfade or mid-pause-fade (the resume
+  // Volume - only change if not mid-crossfade or mid-pause-fade (the resume
   // ramp reads volumeRef per-frame, so slider moves still apply through it)
   useEffect(() => {
     const audio = getActive()
@@ -781,7 +1030,7 @@ export default function Player(): JSX.Element {
     if (!cfActive.current && pauseFadeRaf.current == null) audio.volume = volume
   }, [volume])
 
-  // Playback rate — apply to both audio slots (speed and the pitch-shift
+  // Playback rate - apply to both audio slots (speed and the pitch-shift
   // option both funnel through applyRate)
   useEffect(() => {
     for (const ref of [slotA, slotB]) {
@@ -792,7 +1041,7 @@ export default function Player(): JSX.Element {
   // ── Skip silence ───────────────────────────────────────────────────────────
   // Polls the effects chain's analyser; once silence is confirmed, playback
   // leaps forward in JUMP_S-second hops until sound is found, then steps back
-  // one hop and plays the remainder normally — long gaps vanish near-instantly
+  // one hop and plays the remainder normally - long gaps vanish near-instantly
   // (a 30s gap costs ~2s of hops + at most one hop of real-time run-in) and
   // the sound's onset is never clipped by an overshooting hop.
   const silentTicks = useRef(0)
@@ -809,7 +1058,7 @@ export default function Player(): JSX.Element {
     skipCooldownUntil.current = 0
   }, [currentTrack?.id])
 
-  // A-B loop points are positions within one track — meaningless (and
+  // A-B loop points are positions within one track - meaningless (and
   // possibly out of range) once the track changes, so clear them whenever it
   // does. Deliberately not keyed on abLoopStart/End too, or this would fight
   // the very set/clear it's meant to react to.
@@ -821,15 +1070,19 @@ export default function Player(): JSX.Element {
     const reset = (): void => { silentTicks.current = 0; silenceJumpStart.current = null }
     const id = setInterval(() => {
       const audio = getActive()
-      // Only ever touch normal, active playback — never mid-crossfade (the
+      // Only ever touch normal, active playback - never mid-crossfade (the
       // fade-out deliberately approaches silence) and never while paused.
       if (!audio || audio.paused || !useStore.getState().isPlaying || cfActive.current) { reset(); return }
+      // A dead stream can continue reporting its previous readyState while a
+      // bounded recovery is waiting. Do not mistake its silent analyser output
+      // for intentional silence and overwrite the user's recovery position.
+      if (audio.error || recoveryTimer.current != null) { reset(); return }
       // Wait out an in-flight seek or rebuffer: a stalled element outputs
       // silence, which would otherwise read as more silence to hop over.
       if (audio.seeking || audio.readyState < 2) return
       if (performance.now() < skipCooldownUntil.current) return
       // The analyser reads the element-volume-scaled mix, so silence under
-      // mute is indistinguishable from real silence — bail instead of
+      // mute is indistinguishable from real silence - bail instead of
       // fast-forwarding a muted song into oblivion.
       const vol = volumeRef.current
       if (vol <= 0.01) { reset(); return }
@@ -847,19 +1100,24 @@ export default function Player(): JSX.Element {
         if (silentTicks.current >= 3) {
           if (silenceJumpStart.current == null) silenceJumpStart.current = audio.currentTime
           const cap = dur > 0 ? dur - endGuard : audio.currentTime + JUMP_S
-          audio.currentTime = Math.min(audio.currentTime + JUMP_S, cap)
+          const nextPosition = Math.min(audio.currentTime + JUMP_S, cap)
+          recoveryResumeAt.current = nextPosition
+          try { audio.currentTime = nextPosition } catch { reset(); return }
         }
       } else {
         if (silenceJumpStart.current != null) {
-          // Sound found mid-hop — the onset lies somewhere inside the hop we
+          // Sound found mid-hop - the onset lies somewhere inside the hop we
           // just crossed. Step back one hop (never before the run's start,
           // which also no-ops after a user seek reshuffled positions) so the
           // onset plays from the top.
           const back = audio.currentTime - JUMP_S
           if (back > silenceJumpStart.current) {
-            audio.currentTime = back
-            const rate = Math.max(0.25, s.playbackSpeed)
-            skipCooldownUntil.current = performance.now() + (JUMP_S / rate) * 1000 + 500
+            recoveryResumeAt.current = back
+            try {
+              audio.currentTime = back
+              const rate = Math.max(0.25, s.playbackSpeed)
+              skipCooldownUntil.current = performance.now() + (JUMP_S / rate) * 1000 + 500
+            } catch { reset(); return }
           }
         }
         reset()
@@ -868,12 +1126,14 @@ export default function Player(): JSX.Element {
     return () => { clearInterval(id); reset() }
   }, [skipSilence])
 
-  // Media Session must stay alive on Android to keep the background /
-  // lock-screen session from being torn down, so the overlay toggle is a
-  // no-op here (and hidden in Settings).
+  // mediaOverlayEnabled only makes sense on desktop (Electron) - it exists to
+  // stop Windows from popping up its System Media Transport Controls overlay
+  // on media-key presses. The web build relies on Media Session staying alive
+  // to keep the background/lock-screen session from being torn down, so it
+  // always stays active here (the toggle is a no-op and hidden in Settings).
   const mediaSessionActive = true
 
-  // Media Session API — lock screen / notification metadata
+  // Media Session API - lock screen / notification metadata
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     if (!mediaSessionActive) { navigator.mediaSession.metadata = null; return }
@@ -882,7 +1142,7 @@ export default function Player(): JSX.Element {
     const rawArt = radioFmActive
       ? radioFmMatchedSong?.imageUrl
       : (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)
-    // Only pass HTTP URLs to MediaMetadata — data URIs crash Windows media transport
+    // Only pass HTTP URLs to MediaMetadata - data URIs crash Windows media transport
     const artSrc = rawArt?.startsWith('http') ? rawArt : undefined
     navigator.mediaSession.metadata = new MediaMetadata({
       title,
@@ -903,11 +1163,11 @@ export default function Player(): JSX.Element {
     mediaSessionActive,
   ])
 
-  // Media Session playback state — mobile browsers (Android Chrome in
+  // Media Session playback state - mobile browsers (Android Chrome in
   // particular) use this to decide whether the background media session is
   // still "active" and worth keeping alive. Never setting it meant the OS
   // could treat a locked-screen session as stale and tear it down mid-track,
-  // which silently stopped playback with no 'ended' event ever firing — so
+  // which silently stopped playback with no 'ended' event ever firing - so
   // the queue never advanced to the next song.
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
@@ -915,117 +1175,25 @@ export default function Player(): JSX.Element {
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
   }, [isPlaying, mediaSessionActive])
 
-  // Media Session action handlers — play/pause/skip
+  // Media Session action handlers - play/pause/skip
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     if (!mediaSessionActive) return
     navigator.mediaSession.setActionHandler('play',  () => setIsPlaying(true))
     navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false))
-    navigator.mediaSession.setActionHandler('nexttrack',     () => nextTrack())
-    navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack())
+    navigator.mediaSession.setActionHandler('nexttrack',     () => runPlayerCommand('next'))
+    navigator.mediaSession.setActionHandler('previoustrack', () => runPlayerCommand('previous'))
     return () => {
       navigator.mediaSession.setActionHandler('play',          null)
       navigator.mediaSession.setActionHandler('pause',         null)
       navigator.mediaSession.setActionHandler('nexttrack',     null)
       navigator.mediaSession.setActionHandler('previoustrack', null)
     }
-  }, [setIsPlaying, nextTrack, prevTrack, mediaSessionActive])
+  }, [setIsPlaying, mediaSessionActive])
 
-  // Media Session position state — for lock screen seek bar
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return
-    if (!mediaSessionActive) return
-    const audio = getActive()
-    if (!audio || !audio.duration || isNaN(audio.duration)) return
-    try {
-      navigator.mediaSession.setPositionState({
-        duration:     audio.duration,
-        playbackRate: playbackSpeed,
-        position:     Math.min(currentTime, audio.duration),
-      })
-    } catch {/* ignore */}
-  }, [currentTime, playbackSpeed, mediaSessionActive])
-
-  // ── Native Android media session (see lib/mediaControl.ts) ────────────────
-  // The Web MediaSession API above doesn't reliably survive backgrounding in
-  // this WebView and shows no real system notification — this drives an
-  // actual foreground Service + MediaSession on top of it. Deliberately does
-  // NOT request its own audio focus (see PlaybackService's doc comment) —
-  // Chromium already manages focus for the <audio> element on its own, and a
-  // second competing request from this app caused an instant-pause-on-play
-  // bug (found 2026-08-21). Real external focus interruptions still surface
-  // through the <audio> element's own pause/play events, handled by
-  // handleAudioPause/the watchdog above.
-  const lastNativePositionPush = useRef(0)
-
-  useEffect(() => {
-    if (!isAndroidApp() || !currentTrack) return
-    startMediaSession()
-    const title  = radioFmActive ? (radioFmNowPlaying?.title  ?? '') : (currentTrack.title  ?? '')
-    const artist = radioFmActive ? (radioFmNowPlaying?.artist ?? '') : (currentTrack.artist ?? '')
-    const rawArt = radioFmActive
-      ? radioFmMatchedSong?.imageUrl
-      : (currentTrackFull?.albumArt ?? currentTrack.imageUrl)
-    const duration = currentTrackFull?.duration ?? currentTrack.duration ?? 0
-    // http(s) covers (API/CDN art) are downloaded natively — see
-    // MediaSessionPlugin's doc comment on updateMetadata for why (CORS).
-    // data:/blob: covers (local library embedded art) never touch the
-    // network, so they're still decoded here in JS.
-    if (rawArt && !rawArt.startsWith('http')) {
-      let cancelled = false
-      ;(async () => {
-        const artworkBase64 = await readLocalArtworkBase64(rawArt)
-        if (cancelled) return
-        updateMediaMetadata({ title, artist, album: '', artworkUrl: null, artworkBase64, duration })
-      })()
-      return () => { cancelled = true }
-    }
-    updateMediaMetadata({ title, artist, album: '', artworkUrl: rawArt ?? null, artworkBase64: null, duration })
-  }, [
-    currentTrack?.id,
-    currentTrack?.title,
-    currentTrack?.artist,
-    currentTrack?.imageUrl,
-    currentTrackFull?.albumArt,
-    currentTrackFull?.duration,
-    radioFmActive,
-    radioFmNowPlaying?.title,
-    radioFmNowPlaying?.artist,
-    radioFmMatchedSong?.imageUrl,
-  ])
-
-  // Play/pause/track-change always pushes immediately; the position-tick
-  // effect below is throttled since the native side only needs enough
-  // samples to keep its own seek-bar interpolation roughly in sync, not one
-  // on every `timeupdate`.
-  useEffect(() => {
-    if (!isAndroidApp() || !currentTrack) return
-    lastNativePositionPush.current = performance.now()
-    updateMediaPlaybackState({ playing: isPlaying, position: currentTime, speed: playbackSpeed })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, currentTrack?.id])
-
-  useEffect(() => {
-    if (!isAndroidApp() || !currentTrack) return
-    const now = performance.now()
-    if (now - lastNativePositionPush.current < 3000) return
-    lastNativePositionPush.current = now
-    updateMediaPlaybackState({ playing: isPlaying, position: currentTime, speed: playbackSpeed })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTime])
-
-  useEffect(() => {
-    if (!isAndroidApp()) return
-    const offPlay = onMediaControlEvent('play', () => setIsPlaying(true))
-    const offPause = onMediaControlEvent('pause', () => setIsPlaying(false))
-    const offNext = onMediaControlEvent('next', () => nextTrack())
-    const offPrev = onMediaControlEvent('previous', () => prevTrack())
-    const offSeek = onMediaControlEvent<{ position: number }>('seek', (d) => {
-      const audio = getActive()
-      if (audio && typeof d?.position === 'number') audio.currentTime = d.position
-    })
-    return () => { offPlay(); offPause(); offNext(); offPrev(); offSeek() }
-  }, [setIsPlaying, nextTrack, prevTrack])
+  // Media Session position state - for lock screen seek bar. Lives in its own
+  // component (rendered below) so the ~4x/sec currentTime updates re-render
+  // only it, not the whole player.
 
   // Audio output device
   useEffect(() => {
@@ -1036,7 +1204,7 @@ export default function Player(): JSX.Element {
       for (const audio of [slotA.current, slotB.current]) {
         if (!audio) continue
         try {
-          // setSinkId is a Web Audio API — available in Electron's Chromium
+          // setSinkId is a Web Audio API - available in Electron's Chromium
           await (audio as HTMLAudioElement & { setSinkId(id: string): Promise<void> }).setSinkId(audioOutput || '')
         } catch (e) {
           console.warn('setSinkId failed:', e)
@@ -1047,15 +1215,15 @@ export default function Player(): JSX.Element {
   }, [audioOutput])
 
   // Credits a play once the track has actually been listened to, rather than
-  // the moment it starts — skipping through a queue or letting a crossfade
+  // the moment it starts - skipping through a queue or letting a crossfade
   // preload the next song shouldn't count. Whichever comes first: a fixed
   // number of seconds in, or halfway through anything shorter than that.
   const creditedTrackId = useRef<string | null>(null)
   const creditPlayIfListened = (position: number, dur: number): void => {
     const track = useStore.getState().currentTrack
     if (!track || dur <= 0) return
-    // Back at the start of a track that already counted — repeat-one came
-    // around, or the user seeked back — so let it count again as a new play.
+    // Back at the start of a track that already counted - repeat-one came
+    // around, or the user seeked back - so let it count again as a new play.
     if (creditedTrackId.current === track.id && position < 1) creditedTrackId.current = null
     if (creditedTrackId.current === track.id) return
     if (position < Math.min(PLAYCOUNT_THRESHOLD_SECONDS, dur / 2)) return
@@ -1064,19 +1232,27 @@ export default function Player(): JSX.Element {
     if (songId == null) return
     creditedTrackId.current = track.id
     useStore.getState().bumpSongPlaycount(songId)
+    // Same moment, but kept separate: bumpSongPlaycount only receives the id,
+    // and Home needs the whole Track to render (and replay) a row offline.
+    rememberRecentTrack(track)
   }
 
   const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
     const audio = e.currentTarget
     if (audio !== getActive()) return  // ignore pre-loading slot's events
+    // The media load algorithm resets currentTime to zero and emits timeupdate
+    // before loadedmetadata. That is transport noise, not a user seek or real
+    // playback progress, so keep both the UI and recovery intent unchanged.
+    if (recoveryLoading.current?.audio === audio) return
 
     // Liveness signal for the stall detector. Compared for *any* change, not
     // just forward motion, so a seek backwards doesn't look like a frozen
-    // clock. Sustained healthy playback also clears the recovery counters —
+    // clock. Sustained healthy playback also clears the recovery counters -
     // after a settle window, so a stream that plays half a second and dies on
     // every reload still runs out of attempts instead of retrying forever.
     if (audio.currentTime !== lastProgressTime.current) {
       lastProgressTime.current = audio.currentTime
+      recoveryResumeAt.current = audio.currentTime
       lastProgressAt.current = Date.now()
       if (Date.now() - lastRecoveryAt.current > RECOVERY_SETTLE_MS) {
         recoveryAttempts.current = 0
@@ -1088,7 +1264,7 @@ export default function Player(): JSX.Element {
     setCurrentTime(audio.currentTime)
     // audio.duration reads as Infinity for streamed audio until the server's
     // sent enough to know the real length (no Content-Length / chunked
-    // response) — dividing by that kept progress pinned at 0 the whole song,
+    // response) - dividing by that kept progress pinned at 0 the whole song,
     // so fall back to the track's own known duration when audio.duration
     // isn't a finite number yet.
     const dur = isFinite(audio.duration) ? audio.duration : (currentTrack?.duration || 0)
@@ -1105,10 +1281,11 @@ export default function Player(): JSX.Element {
     }
 
     // A-B loop: keep playback pinned inside the marked region. Checked before
-    // (and — via the guard below — instead of) the crossfade logic, so a
+    // (and - via the guard below - instead of) the crossfade logic, so a
     // looped section can never bleed into the next track.
     const abLooping = abLoopStart != null && abLoopEnd != null
     if (abLooping && audio.currentTime >= abLoopEnd!) {
+      recoveryResumeAt.current = abLoopStart!
       audio.currentTime = abLoopStart!
       setCurrentTime(abLoopStart!)
       if (dur > 0) setProgress(abLoopStart! / dur)
@@ -1117,7 +1294,7 @@ export default function Player(): JSX.Element {
 
     // Start crossfade when approaching end. A queued timeupdate event can
     // still fire right after the user pauses (it was already in flight),
-    // so without this guard a crossfade — and the next song's playback —
+    // so without this guard a crossfade - and the next song's playback -
     // could kick off even though playback was just paused.
     if (!abLooping && canCrossfade && crossfadeDuration > 0 && !cfActive.current && useStore.getState().isPlaying && dur > 0) {
       const remaining = dur - audio.currentTime
@@ -1132,12 +1309,25 @@ export default function Player(): JSX.Element {
         // could end up referring to two different tracks.
         const isRadio = useStore.getState().radioMode
         const nextIdx = isRadio ? -1 : computeNextIdx()
+        // Radio's nextTrack() replays forward through history first when the
+        // user has stepped back, so crossfade into that same track.
+        const radioStore = useStore.getState()
         const nextTrackData = isRadio
-          ? useStore.getState().radioNext
+          ? (radioStore.queueIndex < radioStore.queue.length - 1
+              ? radioStore.queue[radioStore.queueIndex + 1]
+              : radioStore.radioNext)
           : (nextIdx >= 0 && nextIdx < queue.length) ? queue[nextIdx] : null
         const na = getNext()
 
-        if (na && nextTrackData) {
+        // A donor file that hasn't finished downloading can't be faded into;
+        // skipping the crossfade falls back to a normal advance at track end.
+        const nextReady = !isDonorStreamUrl(nextTrackData?.streamUrl) || !!cachedDonorUrl(nextTrackData.streamUrl)
+        if (na && nextTrackData && nextReady) {
+          // Entering a healthy crossfade supersedes any delayed reload of the
+          // outgoing slot. Invalidate both its timer and metadata callback.
+          recoveryGeneration.current++
+          recoveryLoading.current = null
+          clearRecoveryTimer()
           cfActive.current = true
           cfIsRadio.current = isRadio
           cfTargetIdx.current = nextIdx
@@ -1198,7 +1388,7 @@ export default function Player(): JSX.Element {
     }
 
     if (cfActive.current) {
-      // Crossfade complete — next audio is already playing at full volume
+      // Crossfade complete - next audio is already playing at full volume
       if (cfOutRaf.current != null) { cancelAnimationFrame(cfOutRaf.current); cfOutRaf.current = null }
       if (cfInRaf.current  != null) { cancelAnimationFrame(cfInRaf.current);  cfInRaf.current  = null }
       cfActive.current = false
@@ -1214,11 +1404,12 @@ export default function Player(): JSX.Element {
 
       // Swap which slot is "active"
       activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
+      recoveryResumeAt.current = na?.currentTime ?? 0
 
       // Tell the load useEffect to skip (audio already playing)
       skipNextLoad.current = true
 
-      // Preserve a pause that raced in right at the crossfade boundary —
+      // Preserve a pause that raced in right at the crossfade boundary -
       // don't let the queue-advance forcibly resume playback. Since the
       // active slot just swapped, the [isPlaying] effect won't re-fire if
       // the value doesn't change (false -> false), so pause explicitly here.
@@ -1240,7 +1431,7 @@ export default function Player(): JSX.Element {
           isPlaying: wasPlaying,
         })
         // This setState bypasses nextTrack(), which is what normally tops up a
-        // lazily-loaded queue and applies the preferred-version swap — without
+        // lazily-loaded queue and applies the preferred-version swap - without
         // these, crossfaded advances never fetch the next page and playback
         // stops dead at the end of the initially loaded songs.
         useStore.getState()._loadMore()
@@ -1253,13 +1444,14 @@ export default function Player(): JSX.Element {
     // Guard against a paused crossfade boundary race: if the user pauses mid-
     // crossfade, the [isPlaying] effect runs cancelCF() which clears cfActive
     // BEFORE the outgoing element's already-queued `ended` event is handled.
-    // That `ended` then lands here instead of the crossfade branch above — and
+    // That `ended` then lands here instead of the crossfade branch above - and
     // a paused player must never auto-advance into playback.
     if (!useStore.getState().isPlaying) return
 
     if (repeat === 'one') {
       const a = getActive()
-      if (a) { a.currentTime = 0; a.volume = volumeRef.current; a.play().catch(console.error) }
+      recoveryResumeAt.current = 0
+      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; a.play().catch(console.error) }
       return
     }
     const prevId = currentTrack?.id
@@ -1271,89 +1463,80 @@ export default function Player(): JSX.Element {
     if (next.id === prevId) {
       // Same track (single song in queue with repeat-all, or only one option)
       const a = getActive()
-      if (a) { a.currentTime = 0; a.volume = volumeRef.current; a.play().catch(console.error) }
+      recoveryResumeAt.current = 0
+      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; a.play().catch(console.error) }
     }
+  }
+
+  const restartCurrentTrack = (shouldPlay = isPlaying): void => {
+    const audio = getActive()
+    cancelCF()
+    recoveryResumeAt.current = 0
+    if (audio) {
+      try { audio.currentTime = 0 } catch { /* recovery will restart at zero */ }
+      audio.volume = volumeRef.current
+      if (shouldPlay) audio.play().catch(console.error)
+    }
+    setCurrentTime(0)
+    setProgress(0)
   }
 
   const handlePrev = (): void => {
     const audio = getActive()
-    // In radio mode the user can't go back — always restart current song
-    if (radioMode) {
-      cancelCF()
-      if (audio) { audio.currentTime = 0; audio.volume = volumeRef.current }
-      setCurrentTime(0)
-      setProgress(0)
-      return
-    }
-    // When on repeat-one, skip back = restart the same song (mirrors handleNext)
-    if (repeat === 'one') {
-      cancelCF()
-      if (audio) {
-        audio.currentTime = 0
-        audio.volume = volumeRef.current
-        if (isPlaying) audio.play().catch(console.error)
-      }
-      setCurrentTime(0)
-      setProgress(0)
+    // When on repeat-one, skip back = restart the same song (mirrors handleNext).
+    // Radio keeps its played songs in `queue` as history, so it falls through
+    // to the normal "restart if >3s in, otherwise previous song" logic below.
+    if (repeat === 'one' && !radioMode) {
+      restartCurrentTrack()
       return
     }
     if (audio && audio.currentTime > 3) {
-      cancelCF()
-      audio.currentTime = 0
-      audio.volume = volumeRef.current
-      setCurrentTime(0)
-      setProgress(0)
+      restartCurrentTrack()
+      return
+    }
+    // There is no earlier queue entry to load. Restart in place and preserve
+    // pause state instead of asking prevTrack() to select index zero again.
+    if (queueIndex <= 0) {
+      restartCurrentTrack()
       return
     }
     cancelCF()
-    prevTrack()
+    const previousId = currentTrack?.id
+    const previous = prevTrack()
+    // At the start of the queue (or beside a duplicate entry) the queue can
+    // move without changing the track id. The id-keyed load effect will not
+    // run in that case, so restart the physical audio element explicitly.
+    if (!previous || previous.id === previousId) restartCurrentTrack(useStore.getState().isPlaying)
   }
 
   const handleNext = (): void => {
     cancelCF()
-    // When on repeat-one, skip = restart the same song
-    if (repeat === 'one') {
-      const audio = getActive()
-      if (audio) {
-        audio.currentTime = 0
-        audio.volume = volumeRef.current
-        if (isPlaying) audio.play().catch(console.error)
-      }
-      setCurrentTime(0)
-      setProgress(0)
+    // Radio owns its own generated-next-track flow, even if repeat-one was
+    // persisted from a normal queue session.
+    if (repeat === 'one' && !radioMode) {
+      restartCurrentTrack()
       return
     }
-    nextTrack()
+    const previousId = currentTrack?.id
+    const next = nextTrack()
+    // A single-item repeat-all queue (or a duplicate id) also bypasses the
+    // id-keyed load effect and therefore needs an explicit physical restart.
+    if (next?.id === previousId) restartCurrentTrack(useStore.getState().isPlaying)
   }
 
-  // Remote media commands — the tray menu and the mini-player pop-out both
-  // route through the same handlers as the on-screen controls (handleNext/
-  // handlePrev carry the repeat-one and radio-mode special cases). Handlers
-  // are recreated every render, so a ref keeps the subscriptions themselves
-  // stable while always dispatching to fresh closures.
-  const remoteCommandsRef = useRef<Record<string, (arg?: unknown) => void>>({})
-  remoteCommandsRef.current = {
-    'play-pause':  () => { if (currentTrack && !radioFmActive) setIsPlaying(!isPlaying) },
-    'next':        () => { if (currentTrack && !radioFmActive) handleNext() },
-    'previous':    () => { if (currentTrack && !radioFmActive) handlePrev() },
-    'toggle-like': () => { if (currentTrack && !radioFmActive) toggleLike(currentTrack.id) },
-    'toggle-shuffle': () => { if (!radioFmActive) toggleShuffle() },
-    'toggle-repeat':  () => { if (!radioFmActive) toggleRepeat() },
-    'seek': (arg) => { if (typeof arg === 'number' && currentTrack && !radioFmActive) seekAudio(arg) },
-    'jump': (arg) => {
-      if (typeof arg !== 'number' || radioFmActive) return
-      const { queue: q } = useStore.getState()
-      if (q[arg]) useStore.getState().jumpToTrack(q[arg], arg)
-    },
-    'remove-queue': (arg) => { if (typeof arg === 'number') useStore.getState().removeFromQueue(arg) },
-    'clear-queue': () => useStore.getState().clearQueue(),
-  }
+  // Latest transport handlers for runPlayerCommand (see the export above).
+  const transportRef = useRef({ next: handleNext, previous: handlePrev })
+  transportRef.current = { next: handleNext, previous: handlePrev }
+  useEffect(() => {
+    _transport = { next: () => transportRef.current.next(), previous: () => transportRef.current.previous() }
+    return () => { _transport = null }
+  }, [])
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   // What each hotkey action *does*. Keyed by the ids in lib/hotkeys.ts (which
   // owns the id → key-combo mapping). Recreated every render so the closures
-  // see fresh state, like remoteCommandsRef above; a stable listener reads the
-  // ref. Store reads/writes go through getState() so they never need the pick.
+  // see fresh state; a stable listener reads the ref. Store reads/writes go
+  // through getState() so they never need the pick.
   const clampSpeed = (v: number): number => Math.min(2, Math.max(0.5, Math.round(v * 100) / 100))
   const seekToPercent = (pct: number): void => {
     if (!currentTrack || radioFmActive) return
@@ -1386,19 +1569,15 @@ export default function Player(): JSX.Element {
     'loop':        () => { if (!radioFmActive) toggleRepeat() },
     'clear-queue': () => useStore.getState().clearQueue(),
     'like':        () => { if (currentTrack && !radioFmActive) toggleLike(currentTrack.id) },
+    'toggle-lyrics': () => { const s = useStore.getState(); s.setLyricsOverride(!s.lyricsOverride) },
     'song-info':   () => { if (currentTrack || radioFmActive) openSongInfo() },
     'edit-song': () => {
       if (radioFmActive) return
-      if (currentSongId != null) { useStore.getState().openSongEditor(currentSongId); return }
-      // Local file — open the local-metadata editor instead of the API editor.
-      if (currentTrack?.id.startsWith('local-')) {
-        const lt = libraryTracks.find((t) => t.id === currentTrack.id)
-        if (lt) useStore.getState().openLocalEditor(lt)
-      }
+      if (currentSongId != null) useStore.getState().openSongEditor(currentSongId)
     },
     'speed-up':    () => setPlaybackSpeed(clampSpeed(playbackSpeed + 0.25)),
     'speed-down':  () => setPlaybackSpeed(clampSpeed(playbackSpeed - 0.25)),
-    'equalizer':   () => useStore.getState().toggleEqPanel(),
+    'equalizer':   () => { if (EFFECTS_SUPPORTED) useStore.getState().toggleEqPanel() },
     'ab-loop':     () => { if (currentTrack && !radioFmActive) setAbLoopPoint() },
     'crossfade':   () => { const s = useStore.getState(); s.setCrossfade(!s.crossfadeEnabled, s.crossfadeDuration) },
     'smooth-playback': () => { const s = useStore.getState(); s.setPauseFade(!s.pauseFadeEnabled) },
@@ -1416,29 +1595,29 @@ export default function Player(): JSX.Element {
     'seek-90': () => seekToPercent(0.9),
     'view-tracker':   () => setActiveView('api-tracker'),
     'view-playlists': () => setActiveView('playlists'),
-    'view-library':   () => setActiveView('library'),
     'view-wrld':      () => setActiveView('wrld'),
     'view-admin':     () => {
       // Admin tools live in the editor profile page's Admin tab now.
-      if (account?.is_administrator || account?.is_editor || account?.is_manager) setActiveView('editor-profile')
+      if (showStaffProfile(account) && (account?.is_administrator || account?.is_editor || account?.is_manager)) useStore.getState().openProfile()
     },
     'open-settings':    () => useStore.getState().setShowSettings(true),
     'open-diagnostics': () => useStore.getState().setShowDiagnostics(true),
     'toggle-queue':     () => { const s = useStore.getState(); s.setShowQueue(!s.showQueue) },
+    'open-terminal':    () => { const s = useStore.getState(); s.setActiveView(s.activeView === 'terminal' ? (s.previousView ?? 'home') : 'terminal') },
     'focus-search':     () => {
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()
       input?.select()
     },
   }
-  // Same table, exposed to UI that triggers actions by id (the app menu) — a
+  // Same table, exposed to UI that triggers actions by id (the app menu) - a
   // stable subscription dispatching into the ref's fresh closures.
   useEffect(() => registerHotkeyDispatch((id) => hotkeyActionsRef.current[id]?.()), [])
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       const combo = eventToCombo(e)
       if (!combo) return
-      // Never hijack typing (search boxes, the metadata editor, etc.) — media
+      // Never hijack typing (search boxes, the metadata editor, etc.) - media
       // keys are one exception (meaningless while typing), and so are bare
       // function keys (F1-F24): conventionally global in every browser/OS,
       // never part of typed text, so a focused input shouldn't swallow them.
@@ -1446,7 +1625,9 @@ export default function Player(): JSX.Element {
       const tag = target?.tagName
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || !!target?.isContentEditable
       const isFKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(combo.split('+').pop() ?? '')
-      if (typing && !combo.startsWith('Media') && !isFKey) return
+      // The terminal's own input has focus while it is open, so its hotkey has
+      // to get through typing too or it could never close the terminal.
+      if (typing && !combo.startsWith('Media') && !isFKey && resolveAction(combo, useStore.getState().hotkeyBindings) !== 'open-terminal') return
       // Leave Space/Enter alone when a button/link/select is focused so they
       // still activate it (native keyboard behavior) instead of toggling play.
       const clickable = tag === 'BUTTON' || tag === 'A' || tag === 'SELECT' || target?.getAttribute('role') === 'button'
@@ -1464,7 +1645,7 @@ export default function Player(): JSX.Element {
 
   // Seek: buffer visually while dragging, only commit on mouse release
   const handleSeekMouseDown = (): void => {
-    setSeekDrag(progress)
+    setSeekDrag(useStore.getState().progress)
   }
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -1473,7 +1654,7 @@ export default function Player(): JSX.Element {
     // Update display time without touching audio
     const audio = getActive()
     // `audio.duration` can be Infinity (streamed audio with no known length
-    // yet) — that's still truthy, so a bare `if (audio?.duration)` let it
+    // yet) - that's still truthy, so a bare `if (audio?.duration)` let it
     // through and multiplied it into the seek target below.
     const dur = audio && isFinite(audio.duration) ? audio.duration : (currentTrack?.duration || 0)
     if (dur > 0) setCurrentTime(val * dur)
@@ -1482,7 +1663,7 @@ export default function Player(): JSX.Element {
   // Commits on mouse-up, touch-end, AND key-up: keyboard seeking (arrow keys
   // on the focused slider) fires change events with no mouse/touch pair, so
   // without the key-up commit `seekDrag` was set by handleSeekChange and never
-  // cleared — the bar froze at the phantom position while audio played on.
+  // cleared - the bar froze at the phantom position while audio played on.
   const handleSeekCommit = (): void => {
     if (seekDrag === null) return
     const audio = getActive()
@@ -1490,7 +1671,8 @@ export default function Player(): JSX.Element {
     if (audio && dur > 0) {
       cancelCF()
       const time = seekDrag * dur
-      audio.currentTime = time
+      recoveryResumeAt.current = time
+      try { audio.currentTime = time } catch { /* recovery will apply it once seekable */ }
       audio.volume = volumeRef.current
       applyRate(audio)
       setCurrentTime(time)
@@ -1514,18 +1696,37 @@ export default function Player(): JSX.Element {
   const activeDuration = getActive()?.duration
   const duration = (activeDuration && isFinite(activeDuration) ? activeDuration : 0) || currentTrack?.duration || 0
 
-  // Equalizer sheet (also hosts balance/mono/skip-silence + playback speed).
+  // Equalizer popover (also hosts balance/mono/skip-silence + playback speed).
   // Visibility lives in the store so the 'equalizer' hotkey and the WRLD tab's
-  // button can open it too — this always-mounted component owns the sheet.
+  // button can open it too - this always-mounted component owns the portal.
   const { showEqPanel, setShowEqPanel, toggleEqPanel } = useStorePick('showEqPanel', 'setShowEqPanel', 'toggleEqPanel')
+  const isMobile = useIsMobile()
+  const eqBtnRef = useRef<HTMLButtonElement>(null)
+  const [eqPos, setEqPos] = useState<{ bottom?: number; top?: number; right: number }>({ bottom: 0, right: 0 })
+  // Anchor to the button that opened it (bar or WRLD tab); openers without an
+  // anchor (hotkey, collapsed bar) get a fixed bottom-right spot.
+  useEffect(() => {
+    if (!showEqPanel) return
+    const taken = takeEqAnchor()
+    const btn = taken?.isConnected ? taken : eqBtnRef.current
+    if (btn?.isConnected) {
+      const r = btn.getBoundingClientRect()
+      // Panel is 340px wide, centred on the button, clamped inside the window.
+      const right = Math.min(Math.max(8, window.innerWidth - r.right - 170), Math.max(8, window.innerWidth - 348))
+      if (r.top > window.innerHeight / 2) setEqPos({ bottom: window.innerHeight - r.top + 8, right })
+      else setEqPos({ top: r.bottom + 8, right })
+    } else {
+      setEqPos({ bottom: 104, right: 16 })
+    }
+  }, [showEqPanel])
   // Accent the button when anything in the panel deviates from neutral.
   const eqActive = eqEnabled || playbackSpeed !== 1 || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled
 
 
-  // (Play/pause on Space is handled by the unified hotkey system above — the
+  // (Play/pause on Space is handled by the unified hotkey system above - the
   // 'play-pause' action defaults to Space and is rebindable in Settings.)
 
-  // Cover art error state — reset when track changes
+  // Cover art error state - reset when track changes
   const [coverArtError, setCoverArtError] = useState(false)
   useEffect(() => { setCoverArtError(false) }, [currentTrack?.id])
 
@@ -1533,9 +1734,14 @@ export default function Player(): JSX.Element {
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
   const [showOutputPicker, setShowOutputPicker] = useState(false)
   const outputBtnRef = useRef<HTMLButtonElement>(null)
-  const [pickerPos, setPickerPos] = useState({ bottom: 0, right: 0 })
+  const [outputRect, setOutputRect] = useState<{ left: number; top: number; bottom: number } | null>(null)
 
   useEffect(() => {
+    // Absent in some iOS Safari contexts - accessing it directly (rather
+    // than optional-chaining) threw synchronously on mount there, crashing
+    // the whole player on every load ("undefined is not an object
+    // (evaluating 'navigator.mediaDevices.addEventListener')").
+    if (!navigator.mediaDevices) return
     const enumerate = async (): Promise<void> => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices()
@@ -1552,13 +1758,15 @@ export default function Player(): JSX.Element {
   const openOutputPicker = (): void => {
     if (!outputBtnRef.current) return
     const r = outputBtnRef.current.getBoundingClientRect()
-    setPickerPos({ bottom: window.innerHeight - r.top + 8, right: window.innerWidth - r.right })
+    setOutputRect({ left: r.left, top: r.top, bottom: r.bottom })
     setShowOutputPicker((v) => !v)
   }
 
   return (
     <>
-      {/* crossOrigin: required for the Web Audio effects chain — without CORS
+      <MediaSessionPosition active={mediaSessionActive} playbackSpeed={playbackSpeed} />
+      <PlaybackNotice />
+      {/* crossOrigin: required for the Web Audio effects chain - without CORS
           clearance createMediaElementSource outputs pure silence. The API and
           the local-media:// protocol both send Access-Control-Allow-Origin. */}
       <audio
@@ -1582,47 +1790,42 @@ export default function Player(): JSX.Element {
         onError={(e) => handleAudioError(e.currentTarget, 'slotB')}
       />
 
-      {/* Equalizer sheet — outside the WRLD-page conditional below so the
-          hotkey and the WRLD tab's own button can open it on any view. */}
-      {showEqPanel && (
+      {/* Equalizer - outside the WRLD-page conditional below so the hotkey and
+          the WRLD tab's own button can open it on any view. Mobile has no
+          anchor button to position a popover against (the bar this ref lives
+          on is desktop-only, `hidden md:flex`), so it opens as a full bottom
+          sheet there instead of the desktop anchored popover. */}
+      {showEqPanel && EFFECTS_SUPPORTED && (isMobile ? (
         <Sheet onClose={() => setShowEqPanel(false)} title="Equalizer">
-          <EqualizerPanel />
+          <Suspense fallback={null}><EqualizerPanel /></Suspense>
         </Sheet>
-      )}
+      ) : createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowEqPanel(false)} />
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto slim-scroll"
+            // Cap below the title bar so a full panel scrolls internally
+            // instead of growing under the window controls.
+            style={{ bottom: eqPos.bottom, top: eqPos.top, right: eqPos.right, maxHeight: `calc(100vh - ${(eqPos.bottom ?? eqPos.top ?? 0) + 48}px)` }}
+          >
+            <Suspense fallback={null}><EqualizerPanel /></Suspense>
+          </div>
+        </>,
+        document.body
+      ))}
 
-      {/* Song info — mounted outside the bottom-bar block below, which is
-          unmounted on the WRLD page. It's what redirects to the song-info
-          pop-out window, so gating it on the bottom bar meant the `I` hotkey
-          set the state on the WRLD tab but nothing opened until navigating
-          away remounted this and finally fired the redirect. */}
-      {showSongInfo && (
-        <SongInfoModal
-          song={songInfoData}
-          onClose={() => { setShowSongInfo(false); setSongInfoData(null) }}
-          onEdit={canEditSong ? (songId) => {
-            setShowSongInfo(false); setSongInfoData(null)
-            setPendingEditorSongId(songId)
-            setActiveView('editor')
-          } : undefined}
-        />
-      )}
-
-      {/* Bottom bar hidden on the WRLD page — it has its own full playback controls.
+      {/* Bottom bar hidden on the WRLD page - it has its own full playback controls.
           Audio elements above stay mounted regardless so playback is unaffected. */}
       {activeView !== 'wrld' && (
       <>
       {/* ── Mobile player ── */}
-      {/* Safe-area padding belongs to whichever bar is actually last in the
-          stack. Normally that's the BottomNav sitting directly below this one,
-          which already reserves the home-indicator space for both — adding it
-          here too injected a dead gap. When the nav is parked at the top
-          (Settings → Appearance → Menu position) this bar IS the bottom edge,
-          so it takes the inset over. */}
-      <div
-        className="app-player md:hidden bg-surface border-t border-[var(--border)] shrink-0"
-        style={sidebarPosition === 'top' ? { paddingBottom: 'env(safe-area-inset-bottom, 0px)' } : undefined}
-        onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}
-      >
+      {/* No safe-area-inset-bottom padding here: the BottomNav sits directly
+          below this bar and already reserves the home-indicator space for the
+          whole stack. Adding it here too (it reads ~0 in Safari, where the URL
+          bar occupies the inset, but the real ~34px once installed as a
+          standalone PWA) injected a dead gap between the player and the nav. */}
+      <div className="app-player md:hidden bg-surface border-t border-[var(--border)] shrink-0" onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}>
         {/* Thin progress bar */}
         {radioFmActive ? (
           <div className="h-[2px] bg-red-900/40 relative">
@@ -1666,28 +1869,23 @@ export default function Player(): JSX.Element {
           }}
         >
           <div className="h-[2px] bg-surface-overlay relative">
-            <div
-              className="h-full bg-accent absolute left-0 top-0 transition-none"
-              style={{ width: `${(seekDrag !== null ? seekDrag : progress) * 100}%` }}
-            />
+            <ProgressFill seekDrag={seekDrag} className="h-full bg-accent absolute left-0 top-0 transition-none" />
           </div>
         </div>
         )}
-        {/* Track row */}
-        <div className="flex items-center px-3 py-2 gap-3 h-14">
-          <button
-            className="w-10 h-10 rounded bg-surface-overlay shrink-0 overflow-hidden"
-            onClick={() => setActiveView('wrld')}
-            aria-label="Open the WRLD player"
-          >
+        {/* Track row - whole row opens WRLD, not just the cover; the
+            transport buttons stopPropagation so tapping them doesn't also
+            navigate. */}
+        <div className="flex items-center px-3 py-2 gap-3 h-14" {...clickable(() => setActiveView('wrld'))}>
+          <div className="w-10 h-10 rounded bg-surface-overlay shrink-0 overflow-hidden">
             {radioFmActive ? (
               radioFmMatchedSong?.imageUrl
                 ? <img src={radioFmMatchedSong.imageUrl} alt="" className="w-full h-full object-cover" />
                 : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
             ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
-              // Keyed per cover — this element persists across track changes,
-              // so without a key the previous song's art stays painted until
-              // the new one decodes.
+              // Keyed per cover - the bar keeps one element across track
+              // changes, so without this the previous song's art stays painted
+              // until the new one decodes.
               <img key={currentTrackFull?.albumArt ?? currentTrack?.imageUrl} src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl)} alt="" className="w-full h-full object-cover" onError={() => setCoverArtError(true)} />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-text-muted">
@@ -1696,17 +1894,12 @@ export default function Player(): JSX.Element {
                 </svg>
               </div>
             )}
-          </button>
-          {/* Cover + info both expand into WRLD, the full-screen player. There
-              used to be a separate Now Playing panel behind this strip that did
-              the same job in a smaller way; WRLD is the one immersive view now,
-              so tapping the mini player just goes there. */}
-          <button
-            className="flex-1 min-w-0 text-left"
-            onClick={() => setActiveView('wrld')}
-            aria-label="Open the WRLD player"
-          >
-            <p className="text-sm font-medium text-text-primary truncate">
+          </div>
+          <div className="flex-1 min-w-0">
+            <p
+              className="text-sm font-medium text-text-primary truncate"
+              title={radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || undefined)}
+            >
               {radioFmActive && radioFmNowPlaying
                 ? radioFmNowPlaying.title
                 : (currentTrack?.title || 'Not playing')}
@@ -1716,37 +1909,34 @@ export default function Player(): JSX.Element {
                 ? radioFmNowPlaying.artist
                 : (currentTrack?.artist || '')}
             </p>
-          </button>
-          {/* Shuffle and repeat live in WRLD's transport row instead — five
-              controls in this strip meant ~27px targets and left the title
-              almost no room. What's left gets proper 44px touch targets. */}
-          <div className="flex items-center shrink-0 -mr-1">
-            <button
-              onClick={handlePrev}
-              disabled={radioFmActive}
-              aria-label="Previous track"
-              className="w-11 h-11 flex items-center justify-center text-text-secondary active:text-text-primary transition-colors disabled:opacity-30"
-            >
-              <SkipBack size={20} fill="currentColor" />
+          </div>
+          <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+            {!radioFmActive && (
+              <button onClick={toggleShuffle} title={shuffleTitle} className={`p-1.5 transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
+                <Shuffle size={15} />
+              </button>
+            )}
+            <button onClick={handlePrev} disabled={radioFmActive} title="Previous" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+              <SkipBack size={18} fill="currentColor" />
             </button>
             <button
               onClick={() => setIsPlaying(!isPlaying)}
               disabled={!currentTrack || radioFmActive}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-              className="w-11 h-11 rounded-full bg-white flex items-center justify-center active:scale-95 transition-transform disabled:opacity-30"
+              title={isPlaying ? 'Pause' : 'Play'}
+              className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             >
               {isPlaying
-                ? <Pause size={18} fill="#000" className="text-black" />
-                : <Play  size={18} fill="#000" className="text-black ml-0.5" />}
+                ? <Pause size={16} fill="#000" className="text-black" />
+                : <Play  size={16} fill="#000" className="text-black ml-0.5" />}
             </button>
-            <button
-              onClick={handleNext}
-              disabled={radioFmActive}
-              aria-label="Next track"
-              className="w-11 h-11 flex items-center justify-center text-text-secondary active:text-text-primary transition-colors disabled:opacity-30"
-            >
-              <SkipForward size={20} fill="currentColor" />
+            <button onClick={handleNext} disabled={radioFmActive} title="Next" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+              <SkipForward size={18} fill="currentColor" />
             </button>
+            {!radioFmActive && (
+              <button onClick={toggleRepeat} title={repeatTitle} className={`p-1.5 transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
+                {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1762,7 +1952,7 @@ export default function Player(): JSX.Element {
             </div>
           ) : (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
-              <div className="h-full bg-accent" style={{ width: `${(seekDrag !== null ? seekDrag : progress) * 100}%` }} />
+              <ProgressFill seekDrag={seekDrag} className="h-full bg-accent" />
             </div>
           )}
           <button
@@ -1780,13 +1970,13 @@ export default function Player(): JSX.Element {
               {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || 'Not playing')}
             </span>
             {(radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist) && (
-              <span className="text-text-muted"> — {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist}</span>
+              <span className="text-text-muted"> - {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist}</span>
             )}
           </span>
           <span className="text-text-muted text-xs tabular-nums shrink-0">
             {radioFmActive
               ? `${formatDuration(Math.floor(fmElapsedMs / 1000))} / ${formatDuration(Math.floor(fmDurationMs / 1000))}`
-              : `${formatDuration(currentTime)} / ${formatDuration(duration)}`}
+              : <><ElapsedTime /> / {formatDuration(duration)}</>}
           </span>
           <button
             onClick={() => setPlayerCollapsed(false)}
@@ -1853,32 +2043,22 @@ export default function Player(): JSX.Element {
                     <MoreHorizontal size={13} />
                   </button>
 
-                  {showContextMenu && radioFmActive && radioFmNowPlaying && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowContextMenu(false)} />
-                      <div className="absolute bottom-7 left-0 z-50 w-48 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-hidden">
-                        <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
-                          <p className="text-text-primary text-xs font-semibold truncate" title={radioFmNowPlaying.title}>{radioFmNowPlaying.title}</p>
-                          <p className="text-text-muted text-[10px] truncate">{radioFmNowPlaying.artist}</p>
-                        </div>
-                        {radioFmNowPlaying.song_id != null && (
-                          <button
-                            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                            onClick={() => {
-                              setShowContextMenu(false)
-                              setSongInfoData(null)
-                              setShowSongInfo(true)
-                              apiFetch<JWApiSong>(`/songs/${radioFmNowPlaying.song_id}/`)
-                                .then((song) => setSongInfoData(song))
-                                .catch(() => setShowSongInfo(false))
-                            }}
-                          >
-                            <Info size={14} /> Song info
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
+                  {showContextMenu && radioFmActive && radioFmNowPlaying && (() => {
+                    const r = contextMenuBtnRef.current?.getBoundingClientRect()
+                    return (
+                      <ContextMenu
+                        x={r?.left ?? 0}
+                        y={(r?.bottom ?? 0) + 2}
+                        anchor={r ? { top: r.top, bottom: r.bottom } : undefined}
+                        ignoreRef={contextMenuBtnRef}
+                        title={radioFmNowPlaying.title}
+                        subtitle={radioFmNowPlaying.artist}
+                        onClose={() => setShowContextMenu(false)}
+                        className="w-48"
+                        items={[radioFmNowPlaying.song_id != null && { icon: Info, label: 'Song info', onSelect: openSongInfo }]}
+                      />
+                    )
+                  })()}
 
                   {showContextMenu && !radioFmActive && currentTrack && (
                     <SongContextMenu
@@ -1894,10 +2074,6 @@ export default function Player(): JSX.Element {
                       onPlayNext={() => playNext(currentTrack)}
                       liked={likedTrackIds.includes(currentTrack.id)}
                       onToggleLike={() => toggleLike(currentTrack.id)}
-                      onEditLocalMetadata={currentSongId == null && currentTrack.id.startsWith('local-') ? () => {
-                        const lt = libraryTracks.find(t => t.id === currentTrack.id)
-                        if (lt) useStore.getState().openLocalEditor(lt)
-                      } : undefined}
                     />
                   )}
                 </div>
@@ -1919,18 +2095,19 @@ export default function Player(): JSX.Element {
         {/* Center: controls + progress */}
         <div className="flex-1 flex flex-col items-center gap-2">
           <div className="flex items-center gap-5">
-            {!radioFmActive && <button onClick={toggleShuffle}
+            {!radioFmActive && <button onClick={toggleShuffle} title={shuffleTitle}
               className={`transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
               <Shuffle size={18} />
             </button>}
 
-            <button onClick={handlePrev} disabled={radioFmActive} className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={handlePrev} disabled={radioFmActive} title="Previous" className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipBack size={20} fill="currentColor" />
             </button>
 
             <button
               onClick={() => setIsPlaying(!isPlaying)}
               disabled={!currentTrack || radioFmActive}
+              title={isPlaying ? 'Pause' : 'Play'}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             >
               {isPlaying
@@ -1938,11 +2115,11 @@ export default function Player(): JSX.Element {
                 : <Play  size={18} fill="#000" className="text-black ml-0.5" />}
             </button>
 
-            <button onClick={handleNext} disabled={radioFmActive} className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={handleNext} disabled={radioFmActive} title="Next" className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipForward size={20} fill="currentColor" />
             </button>
 
-            {!radioFmActive && <button onClick={toggleRepeat}
+            {!radioFmActive && <button onClick={toggleRepeat} title={repeatTitle}
               className={`transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
               {repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
             </button>}
@@ -1953,20 +2130,18 @@ export default function Player(): JSX.Element {
             <span className="text-text-muted text-xs w-10 text-right tabular-nums">
               {radioFmActive
                 ? formatDuration(Math.floor(fmElapsedMs / 1000))
-                : formatDuration(currentTime)}
+                : <ElapsedTime />}
             </span>
             <div className="flex-1 progress-track">
-              <input
-                type="range" min={0} max={1} step={0.001}
-                value={radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)}
+              <SeekRange
+                seekDrag={seekDrag} radioFmActive={radioFmActive} fmProgress={fmProgress}
                 onMouseDown={radioFmActive ? undefined : handleSeekMouseDown}
                 onTouchStart={radioFmActive ? undefined : handleSeekMouseDown}
                 onChange={handleSeekChange}
                 onMouseUp={radioFmActive ? undefined : handleSeekCommit}
                 onTouchEnd={radioFmActive ? undefined : handleSeekCommit}
                 onKeyUp={radioFmActive ? undefined : handleSeekCommit}
-                disabled={!currentTrack} className="w-full"
-                style={{ '--val': `${(radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)) * 100}%`, ...(radioFmActive ? { pointerEvents: 'none' as const } : {}) } as React.CSSProperties}
+                disabled={!currentTrack}
               />
             </div>
             <span className="text-text-muted text-xs w-10 tabular-nums">
@@ -1978,15 +2153,20 @@ export default function Player(): JSX.Element {
         {/* Right: equalizer + queue + NP + volume */}
         <div className="flex items-center gap-3 w-72 justify-end">
           {/* Equalizer (EQ, balance, mono, skip silence, playback speed).
-              Stays visible during FM — the effects chain applies to the live
-              stream too; only the speed row hides inside the panel. */}
-          <button
-            onClick={toggleEqPanel}
-            title="Equalizer"
-            className={`transition-colors ${eqActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-          >
-            <SlidersHorizontal size={16} />
-          </button>
+              Stays visible during FM - the effects chain applies to the live
+              stream too; only the speed row hides inside the panel. Hidden
+              entirely on iOS: EFFECTS_SUPPORTED is false there since routing
+              through Web Audio kills background playback (see audioEffects.ts). */}
+          {EFFECTS_SUPPORTED && (
+            <button
+              ref={eqBtnRef}
+              onClick={toggleEqPanel}
+              title="Equalizer"
+              className={`transition-colors ${eqActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+            >
+              <SlidersHorizontal size={16} />
+            </button>
+          )}
 
           {!radioFmActive && <button onClick={() => setShowQueue(!showQueue)}
             className={`relative transition-colors ${showQueue ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
@@ -1999,17 +2179,16 @@ export default function Player(): JSX.Element {
             )}
           </button>}
 
+          {!radioFmActive && <button onClick={() => setShowNowPlaying(!showNowPlaying)}
+            className={`transition-colors ${showNowPlaying ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+            title="Now Playing">
+            <Maximize2 size={16} />
+          </button>}
 
-          {/* Volume: mute + slider + output picker.
-              The mute button and slider are hidden where element volume is
-              read-only (iOS/iPadOS — see CAN_SET_VOLUME): both write
-              audio.volume, which WebKit ignores, so they would sit there
-              moving and muting nothing. The hardware volume buttons are the
-              only real control there. The output picker is unaffected — it
-              routes rather than attenuates. */}
+          {/* Volume: mute + slider + output picker */}
           <div className="flex items-center gap-1.5">
             {CAN_SET_VOLUME && (<>
-            <button onClick={toggleMute} className="text-text-secondary hover:text-text-primary transition-colors" title="Mute">
+            <button onClick={toggleMute} className="text-text-secondary hover:text-text-primary transition-colors" title={volume === 0 ? 'Unmute' : 'Mute'}>
               {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>
 
@@ -2023,8 +2202,8 @@ export default function Player(): JSX.Element {
                 onChange={handleVolumeChange} className="w-full block"
                 style={{ '--val': `${volume * 100}%` } as React.CSSProperties} />
             </div>
-            </>)}
 
+            </>)}
             {outputDevices.length > 1 && (
               <button
                 ref={outputBtnRef}
@@ -2049,39 +2228,25 @@ export default function Player(): JSX.Element {
         )}
 
         {/* Output device popover */}
-        {showOutputPicker && createPortal(
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowOutputPicker(false)} />
-            <div
-              onMouseDown={(e) => e.stopPropagation()}
-              className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl py-1.5 min-w-[220px]"
-              style={{ bottom: pickerPos.bottom, right: pickerPos.right }}
-            >
-              <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-text-muted">Audio Output</p>
-              <button
-                onClick={() => { setAudioOutput(''); setShowOutputPicker(false) }}
-                className="flex items-center gap-3 w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-              >
-                <span className="w-4 h-4 flex items-center justify-center shrink-0">
-                  {audioOutput === '' && <Check size={12} className="text-accent" />}
-                </span>
-                System default
-              </button>
-              {outputDevices.map((d) => (
-                <button
-                  key={d.deviceId}
-                  onClick={() => { setAudioOutput(d.deviceId); setShowOutputPicker(false) }}
-                  className="flex items-center gap-3 w-full px-4 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors"
-                >
-                     <span className="w-4 h-4 flex items-center justify-center shrink-0">
-                    {audioOutput === d.deviceId && <Check size={12} className="text-accent" />}
-                  </span>
-                  <span className="truncate">{d.label || `Output ${d.deviceId.slice(0, 8)}`}</span>
-                </button>
-              ))}
-            </div>
-          </>,
-          document.body
+        {showOutputPicker && outputRect && (
+          <ContextMenu
+            x={outputRect.left}
+            y={outputRect.bottom + 2}
+            anchor={outputRect}
+            ignoreRef={outputBtnRef}
+            title="Audio Output"
+            onClose={() => setShowOutputPicker(false)}
+            className="min-w-[220px]"
+            checkColumn="auto"
+            items={[
+              { label: 'System default', checked: audioOutput === '', onSelect: () => setAudioOutput('') },
+              ...outputDevices.map((d) => ({
+                label: d.label || `Output ${d.deviceId.slice(0, 8)}`,
+                checked: audioOutput === d.deviceId,
+                onSelect: () => setAudioOutput(d.deviceId),
+              })),
+            ]}
+          />
         )}
       </div>
       </>

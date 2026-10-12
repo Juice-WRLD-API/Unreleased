@@ -1,11 +1,11 @@
 /**
- * hotkeys.ts — the keyboard-shortcut registry and the pure helpers that turn a
+ * hotkeys.ts - the keyboard-shortcut registry and the pure helpers that turn a
  * KeyboardEvent into a canonical combo string (and back into a display label).
  *
  * The registry here is the single source of truth for *what* actions exist and
  * their default bindings. User overrides live in the store (`hotkeyBindings`,
  * an actionId → combo map) and are merged in via `effectiveBinding`. The actual
- * dispatch table — what each action *does* — lives in Player.tsx, keyed by the
+ * dispatch table - what each action *does* - lives in Player.tsx, keyed by the
  * same ids, because those handlers need the audio element and the live player
  * closures. Keeping definitions (here) and behavior (there) split lets the
  * Settings UI import the list without pulling the whole player in.
@@ -26,7 +26,7 @@ export interface HotkeyAction {
   /** Canonical combo, or '' for "no default binding". */
   defaultBinding: string
   /** Still active with its default binding for everyone, but only listed (and
-   *  therefore rebindable) in Settings when Developer mode is on — keeps the
+   *  therefore rebindable) in Settings when Developer mode is on - keeps the
    *  shortcut list from bloating with power-user-only entries. */
   devModeOnly?: boolean
 }
@@ -49,6 +49,7 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'like',             label: 'Like current song',         category: 'Playback', defaultBinding: 'L' },
   { id: 'song-info',        label: 'Show current song info',    category: 'Playback', defaultBinding: 'I' },
   { id: 'edit-song',        label: 'Edit current song',         category: 'Playback', defaultBinding: 'E' },
+  { id: 'toggle-lyrics',    label: 'Toggle lyrics visibility',  category: 'Playback', defaultBinding: 'Shift+L' },
   { id: 'equalizer',        label: 'Toggle equalizer panel',    category: 'Playback', defaultBinding: 'Shift+E' },
   { id: 'ab-loop',          label: 'Set A-B loop point',        category: 'Playback', defaultBinding: '' },
   { id: 'crossfade',        label: 'Toggle crossfade',          category: 'Playback', defaultBinding: '' },
@@ -80,7 +81,7 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'open-diagnostics', label: 'Open diagnostics',          category: 'Navigation', defaultBinding: '' },
   { id: 'toggle-queue',     label: 'Toggle queue panel',        category: 'Navigation', defaultBinding: 'Q' },
   { id: 'focus-search',     label: 'Focus search box',          category: 'Navigation', defaultBinding: 'Ctrl+F' },
-
+  { id: 'open-terminal',    label: 'Open terminal', category: 'Navigation', defaultBinding: 'Ctrl+`' },
 ] as const
 
 export const HOTKEY_CATEGORIES: readonly HotkeyCategory[] = ['Playback', 'Volume', 'Navigation']
@@ -111,7 +112,7 @@ export function resolveAction(combo: string, overrides: Record<string, string>):
 
 // ─── Action dispatch bridge ─────────────────────────────────────────────────
 // Player.tsx owns what each action *does* (those handlers need the audio
-// element and the live player closures). UI outside the player — the app menu —
+// element and the live player closures). UI outside the player - the app menu -
 // triggers actions by id through this bridge instead of duplicating that logic,
 // so a menu entry and its keyboard shortcut always run the exact same code.
 
@@ -157,7 +158,7 @@ function normalizeKey(e: KeyboardEvent): string | null {
   if (/^Numpad[0-9]$/.test(code)) return 'Num' + code.slice(6) // Numpad1 → Num1
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(e.key)) return e.key     // F1..F24
   if (CODE_KEY[code]) return CODE_KEY[code]
-  // Media keys carry no stable `code` across platforms — fall back to `key`.
+  // Media keys carry no stable `code` across platforms - fall back to `key`.
   if (e.key && e.key.startsWith('Media')) return e.key
   return null
 }
@@ -198,4 +199,88 @@ const DISPLAY: Record<string, string> = {
 export function comboTokens(combo: string): string[] {
   if (!combo) return []
   return combo.split('+').map((p) => DISPLAY[p] ?? p)
+}
+
+// ─── Global (OS-wide) shortcuts ──────────────────────────────────────────────
+// A combo can only be registered as an OS-global shortcut (Electron's
+// globalShortcut) when it carries a modifier or is a media key - a bare letter
+// registered globally would swallow that key in every application, so we refuse
+// to. These helpers translate our combo strings into Electron accelerators.
+
+const MODIFIER_TOKENS = new Set(['Ctrl', 'Alt', 'Shift', 'Meta'])
+
+// Combo main-key token → Electron accelerator key. Only keys that differ from
+// their combo token need an entry; anything else (A-Z, 0-9, punctuation, F-keys)
+// passes through unchanged.
+const ACCEL_KEY: Record<string, string> = {
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+  Enter: 'Return',
+  MediaPlayPause: 'MediaPlayPause',
+  MediaTrackNext: 'MediaNextTrack',
+  MediaTrackPrevious: 'MediaPreviousTrack',
+  MediaStop: 'MediaStop',
+}
+
+const MEDIA_TOKENS = new Set(Object.keys(ACCEL_KEY).filter((k) => k.startsWith('Media')))
+
+/** True when `combo` is eligible for OS-global registration (has a modifier, or
+ *  is a media key). Bare single keys are in-app only. */
+export function isGloballyRegistrable(combo: string): boolean {
+  if (!combo) return false
+  const parts = combo.split('+')
+  const key = parts[parts.length - 1]
+  if (MEDIA_TOKENS.has(key)) return true
+  return parts.slice(0, -1).some((p) => MODIFIER_TOKENS.has(p))
+}
+
+/** The global-registration default for `id` - deliberately nothing: the Global
+ *  column is opt-in, per action.
+ *
+ *  Mirroring the in-app defaults here would hand the OS every eligible one the
+ *  moment global shortcuts are switched on, and an OS-global accelerator is
+ *  taken from *every* application: Shift+ArrowLeft/Right would stop selecting
+ *  text system-wide, Ctrl+F would stop opening Find, and Ctrl+M / Ctrl+, /
+ *  Alt+1-5 would be swallowed everywhere. Only the user can say a shortcut is
+ *  worth taking machine-wide, so they pick each one explicitly. */
+export function defaultGlobalBinding(_id: string): string {
+  return ''
+}
+
+/** The OS-global combo currently bound to `id`: the user override if one
+ *  exists (an explicit '' means the user cleared it), else
+ *  defaultGlobalBinding(id). Fully independent of effectiveBinding - the
+ *  in-app and global shortcuts for an action can differ, or either can be
+ *  unset while the other stays bound. */
+export function effectiveGlobalBinding(id: string, overrides: Record<string, string>): string {
+  if (Object.prototype.hasOwnProperty.call(overrides, id)) return overrides[id]
+  return defaultGlobalBinding(id)
+}
+
+/** Reverse lookup for the global-binding namespace: which action (if any) is
+ *  globally bound to `combo`. Mirrors resolveAction for the in-app namespace. */
+export function resolveGlobalAction(combo: string, overrides: Record<string, string>): string | null {
+  if (!combo) return null
+  for (const a of HOTKEY_ACTIONS) {
+    if (effectiveGlobalBinding(a.id, overrides) === combo) return a.id
+  }
+  return null
+}
+
+/** Convert a combo to an Electron accelerator string, or null if it can't be a
+ *  global shortcut. "Ctrl" maps to CommandOrControl so it's Cmd on macOS. */
+export function comboToAccelerator(combo: string): string | null {
+  if (!isGloballyRegistrable(combo)) return null
+  const parts = combo.split('+')
+  const key = parts[parts.length - 1]
+  const out: string[] = []
+  for (const p of parts.slice(0, -1)) {
+    if (p === 'Ctrl') out.push('CommandOrControl')
+    else if (p === 'Alt') out.push('Alt')
+    else if (p === 'Shift') out.push('Shift')
+    else if (p === 'Meta') out.push('Super')
+    else return null
+  }
+  if (/^Num[0-9]$/.test(key)) out.push('num' + key.slice(3))
+  else out.push(ACCEL_KEY[key] ?? key)
+  return out.join('+')
 }

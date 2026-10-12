@@ -1,13 +1,14 @@
 // Field-qualified search syntax for the Tracker's search box, e.g.
-// `artists:"Juice WRLD" love` — matches songs whose credited_artists field
+// `artists:"Juice WRLD" love` - matches songs whose credited_artists field
 // contains "Juice WRLD" AND whose free text (title/artist/producer/etc.)
 // contains "love". Field tokens are stripped out of the query before it's
 // sent to the API's `searchall` param (which has no concept of per-field
 // search); the remaining free text still goes through the normal
-// server-side search, while field filters are applied client-side — see
+// server-side search, while field filters are applied client-side - see
 // ApiTrackerView's fetchAllMode, which this pushes field-filtered queries
 // into (same as sort/multi-category search already does).
 import { JWApiSong } from './juicewrldApi'
+import { stripApostrophes } from './compactGroups'
 
 export interface FieldFilter { field: string; label: string; value: string }
 
@@ -17,28 +18,30 @@ interface FieldDef {
   /** Canonical key shown in the info popover and used as the token's field name. */
   label: string
   get: (s: JWApiSong) => string
+  /** Optional /songs/ fields `get` reads, so a bulk fetch with ?omit= keeps them. */
+  api?: string[]
 }
 
 const FIELD_DEFS: FieldDef[] = [
   { keys: ['title', 'name', 'song'],                       label: 'title',      get: (s) => [s.name, ...(s.track_titles ?? [])].join(' ') },
   { keys: ['artist', 'artists'],                            label: 'artists',    get: (s) => s.credited_artists },
-  { keys: ['producer', 'producers'],                        label: 'producers',  get: (s) => s.producers },
-  { keys: ['engineer', 'engineers'],                        label: 'engineers',  get: (s) => s.engineers ?? '' },
+  { keys: ['producer', 'producers'],                        label: 'producers',  get: (s) => s.producers, api: ['producers'] },
+  { keys: ['engineer', 'engineers'],                        label: 'engineers',  get: (s) => s.engineers ?? '', api: ['engineers'] },
   { keys: ['era'],                                          label: 'era',        get: (s) => s.era?.name ?? '' },
   { keys: ['category', 'cat'],                              label: 'category',   get: (s) => s.category },
-  { keys: ['location', 'locations', 'studio'],              label: 'location',   get: (s) => s.recording_locations ?? '' },
-  { keys: ['date', 'dates', 'recorddate', 'recorddates'],   label: 'date',       get: (s) => s.record_dates ?? '' },
-  { keys: ['leak', 'leaktype'],                             label: 'leak',       get: (s) => s.leak_type ?? '' },
-  { keys: ['dateleaked'],                                   label: 'dateleaked', get: (s) => s.date_leaked ?? '' },
-  { keys: ['bitrate'],                                      label: 'bitrate',    get: (s) => s.bitrate ?? '' },
-  { keys: ['release', 'releasedate'],                       label: 'release',    get: (s) => s.release_date ?? '' },
-  { keys: ['files', 'filenames', 'file'],                   label: 'files',      get: (s) => s.file_names ?? '' },
-  { keys: ['session', 'sessiontitle', 'sessiontitles'],     label: 'session',    get: (s) => s.session_titles ?? '' },
+  { keys: ['location', 'locations', 'studio'],              label: 'location',   get: (s) => s.recording_locations ?? '', api: ['recording_locations'] },
+  { keys: ['date', 'dates', 'recorddate', 'recorddates'],   label: 'date',       get: (s) => s.record_dates ?? '', api: ['record_dates'] },
+  { keys: ['leak', 'leaktype'],                             label: 'leak',       get: (s) => s.leak_type ?? '', api: ['leak_type'] },
+  { keys: ['dateleaked'],                                   label: 'dateleaked', get: (s) => s.date_leaked ?? '', api: ['date_leaked'] },
+  { keys: ['bitrate'],                                      label: 'bitrate',    get: (s) => s.bitrate ?? '', api: ['bitrate'] },
+  { keys: ['release', 'releasedate'],                       label: 'release',    get: (s) => s.release_date ?? '', api: ['release_date'] },
+  { keys: ['files', 'filenames', 'file'],                   label: 'files',      get: (s) => s.file_names ?? '', api: ['file_names'] },
+  { keys: ['session', 'sessiontitle', 'sessiontitles'],     label: 'session',    get: (s) => s.session_titles ?? '', api: ['session_titles'] },
   { keys: ['notes'],                                        label: 'notes',      get: (s) => s.notes ?? '' },
-  { keys: ['info', 'additional', 'additionalinfo'],         label: 'info',       get: (s) => s.additional_information ?? '' },
-  { keys: ['instrumental', 'instrumentals'],                label: 'instrumental', get: (s) => [s.instrumentals, s.instrumental_names].filter(Boolean).join(' ') },
+  { keys: ['info', 'additional', 'additionalinfo'],         label: 'info',       get: (s) => s.additional_information ?? '', api: ['additional_information'] },
+  { keys: ['instrumental', 'instrumentals'],                label: 'instrumental', get: (s) => [s.instrumentals, s.instrumental_names].filter(Boolean).join(' '), api: ['instrumentals', 'instrumental_names'] },
   { keys: ['album'],                                        label: 'album',      get: (s) => s.album ?? '' },
-  { keys: ['key', 'originalkey'],                           label: 'key',        get: (s) => s.original_key ?? '' },
+  { keys: ['key', 'originalkey'],                           label: 'key',        get: (s) => s.original_key ?? '', api: ['original_key'] },
 ]
 
 const FIELD_LOOKUP = new Map<string, FieldDef>()
@@ -61,30 +64,20 @@ export const SEARCH_FIELD_HELP: { field: string; example: string }[] = FIELD_DEF
 // "5:30" or similar doesn't get silently eaten).
 const TOKEN_RE = /([a-zA-Z_]+):(?:"([^"]*)"|'([^']*)'|(\S+))/g
 
-// `&`/`&&` between field tokens is purely cosmetic — filters are already
+// `&`/`&&` between field tokens is purely cosmetic - filters are already
 // ANDed together with no operator needed (`artists:"X" producers:"Y"` and
-// `artists:"X" & producers:"Y"` behave identically) — so once field tokens
+// `artists:"X" & producers:"Y"` behave identically) - so once field tokens
 // are stripped out, any standalone `&`/`&&` left over is dropped too rather
 // than leaking into the free-text search sent to the server. Only matches
 // when it's its own token (surrounded by whitespace/string edges) so a
 // legitimate search like "R&B" is untouched.
 const AND_OPERATOR_RE = /(?:^|\s)&{1,2}(?=\s|$)/g
 
-// Mobile keyboards (Gboard's "smart punctuation" in particular — this is an
-// Android app) rewrite a typed straight quote into a curly one regardless of
-// the input's autoCorrect/autoCapitalize attributes, which are Safari-only
-// hints. Without normalizing them back, `artists:"Juice WRLD"` would parse as
-// unquoted (the closing curly quote isn't `"`), leaving a stray quote
-// character stuck to the field value and matching nothing.
-function normalizeQuotes(s: string): string {
-  return s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
-}
-
 export interface ParsedSearch { freeText: string; filters: FieldFilter[] }
 
 export function parseSearchQuery(raw: string): ParsedSearch {
   const filters: FieldFilter[] = []
-  const freeText = normalizeQuotes(raw)
+  const freeText = raw
     .replace(TOKEN_RE, (match, rawField: string, dq?: string, sq?: string, plain?: string) => {
       const def = FIELD_LOOKUP.get(rawField.toLowerCase())
       if (!def) return match
@@ -99,10 +92,15 @@ export function parseSearchQuery(raw: string): ParsedSearch {
   return { freeText, filters }
 }
 
-// Apostrophe-insensitive substring match, mirroring compactGroups.ts's
+// Apostrophe-insensitive substring match, matching compactGroups.ts's
 // filterCompactGroups so `artists:"wouldnt"` still matches "Wouldn't".
 function normalize(s: string): string {
-  return s.replace(/['’‘]/g, '').toLowerCase()
+  return stripApostrophes(s).toLowerCase()
+}
+
+/** Optional /songs/ fields the given filters read - see useTrackerOmit. */
+export function filterApiFields(filters: FieldFilter[]): string[] {
+  return filters.flatMap(({ field }) => FIELD_LOOKUP.get(field)?.api ?? [])
 }
 
 export function matchesFieldFilters(song: JWApiSong, filters: FieldFilter[]): boolean {

@@ -50,15 +50,7 @@ export function isAndroidApp(): boolean {
   return !!cap?.isNativePlatform?.() && cap.getPlatform?.() === 'android'
 }
 
-/**
- * Origin to build shareable/absolute links against. In the Android wrap,
- * `window.location.origin` is `file://` (the webview loads dist/ off disk),
- * which produces broken links like `file:///playlists?id=1`. Use the real
- * deployed site there instead.
- */
-export function shareOrigin(): string {
-  return isAndroidApp() ? 'https://player.juicewrldapi.com' : window.location.origin
-}
+export { shareOrigin } from './platform'
 
 /**
  * Numeric semver compare. Returns >0 when `a` is newer than `b`.
@@ -145,6 +137,21 @@ export function openApkDownload(url: string): void {
 
 // ── Native in-app installer (ApkInstallerPlugin) ─────────────────────────────
 
+/**
+ * Terminal outcome of an install session, or `confirming` while the system's
+ * confirm dialog is up. `success` is best-effort: a successful self-update
+ * kills this process, so in practice the app disappears rather than reporting
+ * it. The failure states are the point — before the plugin used a
+ * PackageInstaller session there was no outcome at all, and a rejected install
+ * looked exactly like one still running.
+ */
+export type InstallState = 'confirming' | 'success' | 'cancelled' | 'failed'
+
+export interface InstallStatus {
+  state: InstallState
+  message?: string
+}
+
 interface ApkInstallerPlugin {
   canInstall(): Promise<{ value: boolean }>
   openInstallSettings(): Promise<void>
@@ -152,6 +159,10 @@ interface ApkInstallerPlugin {
   addListener(
     event: 'downloadProgress',
     fn: (p: { percent: number; bytes: number; total: number }) => void,
+  ): Promise<{ remove: () => void }>
+  addListener(
+    event: 'installStatus',
+    fn: (s: InstallStatus) => void,
   ): Promise<{ remove: () => void }>
 }
 
@@ -182,26 +193,37 @@ export async function openInstallSettings(): Promise<void> {
 }
 
 /**
- * Download the APK and launch the system installer, reporting progress.
+ * Download the APK and commit an install session, reporting progress.
  *
- * Resolves once the installer has been *launched*, not once the install
- * finishes — that happens in another process, and a successful install
- * replaces this one. Rejects with 'PERMISSION_REQUIRED' when the user hasn't
- * granted install-unknown-apps yet, which the caller should handle by sending
- * them to openInstallSettings() rather than showing it as an error.
+ * Resolves once the session has been *committed*, not once the install
+ * finishes — the system installer takes it from there in another process.
+ * `onStatus` is how that outcome comes back, and the subscription deliberately
+ * outlives this promise: the interesting statuses (blocked, out of storage,
+ * cancelled at the confirm dialog) all arrive after the commit resolves. Call
+ * the returned unsubscribe when the caller stops caring.
+ *
+ * Rejects with 'PERMISSION_REQUIRED' when the user hasn't granted
+ * install-unknown-apps yet, which the caller should handle by sending them to
+ * openInstallSettings() rather than showing it as an error.
  */
 export async function downloadAndInstall(
   url: string,
   onProgress?: (percent: number) => void,
-): Promise<void> {
+  onStatus?: (s: InstallStatus) => void,
+): Promise<() => void> {
   const p = plugin()
   if (!p) throw new Error('In-app install is not available in this build.')
-  const sub = onProgress
+  const progressSub = onProgress
     ? await p.addListener('downloadProgress', (e) => onProgress(e.percent))
     : null
+  const statusSub = onStatus ? await p.addListener('installStatus', onStatus) : null
   try {
     await p.downloadAndInstall({ url })
+  } catch (err) {
+    statusSub?.remove()
+    throw err
   } finally {
-    sub?.remove()
+    progressSub?.remove()
   }
+  return () => statusSub?.remove()
 }

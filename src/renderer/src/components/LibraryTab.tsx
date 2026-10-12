@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo, memo, ReactNode } from 'react'
 import {
   Music, Play, Shuffle, Search, MoreVertical, ArrowLeft, User, FolderOpen, Loader2,
-  Link2, Pencil, ListPlus, X, Check, ArrowUp, ArrowDown, ListMusic,
+  ListPlus, X, Check, ArrowUp, ArrowDown, ListMusic,
   RefreshCw, Settings2, Circle, ChevronRight, SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { LibraryTrack } from '../types'
-import { libraryTrackToTrack as toQueueTrack } from '../lib/fileTypes'
+import { libraryTrackToTrack as toQueueTrack, offlineTrackToLibraryTrack } from '../lib/fileTypes'
+import { reportSaveError } from '../lib/fileSave'
 import { fisherYates } from '../store/queueSlice'
 import * as userApi from '../lib/userApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
@@ -18,7 +19,7 @@ import { registerBackHandler } from '../lib/backHandlers'
 import { readArt } from '../lib/localLibrary'
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   Library — the on-device music collection, built for a phone rather than
+   Library - the on-device music collection, built for a phone rather than
    adapted to one. The desktop version put a collapsible section rail beside a
    toolbar of small buttons and a spreadsheet-style song table; none of that
    survives here.
@@ -26,7 +27,7 @@ import { readArt } from '../lib/localLibrary'
    What it is instead: one browse screen with four category chips, a permanent
    Play/Shuffle pair, an A–Z rail you can drag to jump through a few thousand
    songs, and art-led album/artist screens you drill into and back out of.
-   Everything below the data layer is new — the scan, the lazy per-track cover
+   Everything below the data layer is new - the scan, the lazy per-track cover
    reads, the album/artist grouping and the windowing are unchanged.
    ══════════════════════════════════════════════════════════════════════════════ */
 
@@ -65,7 +66,7 @@ const LS_FILTERS = 'library:filters'
 
 // ─── filters ──────────────────────────────────────────────────────────────────
 // Applied to the track pool itself rather than to the songs list, so albums and
-// artists made up entirely of excluded files disappear too — a "flac only"
+// artists made up entirely of excluded files disappear too - a "flac only"
 // filter that still listed mp3-only albums would be lying.
 
 type LengthKey = 'any' | 'short' | 'mid' | 'long' | 'epic'
@@ -115,7 +116,7 @@ function toggleIn(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
 }
 
-/** A bare "Scanning…" with no counts reads as hung on a big library — the
+/** A bare "Scanning…" with no counts reads as hung on a big library - the
  *  native walk can take minutes, and it already reports found/parsed via
  *  `scanProgress` (see localLibrary.onScanProgress). This is that number,
  *  formatted for the two spots in this tab that show scan state. */
@@ -160,13 +161,13 @@ function indexLetter(s: string): string {
 // re-parsed.
 //
 // The same track can be visible in several places at once (song list, album
-// tile, playlist mosaic) — without this set, each thumbnail fired its own parse
+// tile, playlist mosaic) - without this set, each thumbnail fired its own parse
 // before the first result landed in the store.
 const inflightArt = new Set<string>()
 
 function useTrackArt(track: LibraryTrack): string | null | undefined {
   const { applyLibraryArt } = useStorePick('applyLibraryArt')
-  const art = useStore((s) => s.libraryArt[track.id])
+  const art = useStore((s) => s.libraryArt[track.id] !== undefined ? s.libraryArt[track.id] : s.offlineTracks[track.id]?.imageUrl)
   useEffect(() => {
     // undefined = never asked; null = asked, and this file has no embedded art.
     // Only the first state should trigger a read, or a track without a cover
@@ -182,7 +183,7 @@ function useTrackArt(track: LibraryTrack): string | null | undefined {
   return art
 }
 
-/** Small square thumbnail. Exported — PlaylistsView reuses it. */
+/** Small square thumbnail. Exported - PlaylistsView reuses it. */
 export function AlbumArtThumb({ track, size = 48 }: { track: LibraryTrack; size?: number }): JSX.Element {
   const art = useTrackArt(track)
   // rem, not px, so the thumbnail scales with the app text-size setting (which
@@ -225,7 +226,7 @@ function EqBars({ paused }: { paused: boolean }): JSX.Element {
   )
 }
 
-/** Selection drawn ON the artwork — a leading checkbox would shove every row
+/** Selection drawn ON the artwork - a leading checkbox would shove every row
  *  sideways the instant select mode turns on, which happens mid-long-press. */
 function SelectOverlay({ selected, round }: { selected: boolean; round?: boolean }): JSX.Element {
   return (
@@ -239,7 +240,7 @@ function SelectOverlay({ selected, round }: { selected: boolean; round?: boolean
 
 interface SongRowProps {
   track: LibraryTrack
-  /** Track number shown instead of artwork — album screens only. */
+  /** Track number shown instead of artwork - album screens only. */
   ordinal?: number
   onPlay: (track: LibraryTrack) => void
   onMenu: (track: LibraryTrack, e: React.MouseEvent) => void
@@ -511,7 +512,7 @@ function NoMatches({ what, onClear }: { what: string; onClear: () => void }): JS
   )
 }
 
-function EmptyState({ onOpenSettings, onImportUrl }: { onOpenSettings: () => void; onImportUrl: () => void }): JSX.Element {
+function EmptyState({ onOpenSettings }: { onOpenSettings: () => void }): JSX.Element {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 text-center">
       <div className="w-20 h-20 rounded-full bg-surface-overlay flex items-center justify-center">
@@ -520,7 +521,7 @@ function EmptyState({ onOpenSettings, onImportUrl }: { onOpenSettings: () => voi
       <div>
         <h2 className="text-text-primary text-xl font-semibold mb-1">No music yet</h2>
         <p className="text-text-muted text-sm max-w-xs">
-          Pick a folder of music — or single files — and everything in it shows up here.
+          Pick a folder of music - or single files - and everything in it shows up here.
         </p>
       </div>
       <div className="flex flex-col gap-2 w-full max-w-xs">
@@ -529,12 +530,6 @@ function EmptyState({ onOpenSettings, onImportUrl }: { onOpenSettings: () => voi
           className="h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-[15px] font-semibold active:opacity-80"
         >
           <FolderOpen size={17} /> Choose a folder
-        </button>
-        <button
-          onClick={onImportUrl}
-          className="h-12 flex items-center justify-center gap-2 rounded-full bg-surface-overlay text-text-primary text-[15px] font-semibold active:bg-surface-highest"
-        >
-          <Link2 size={17} /> Download from a link
         </button>
       </div>
     </div>
@@ -545,13 +540,18 @@ function EmptyState({ onOpenSettings, onImportUrl }: { onOpenSettings: () => voi
 
 export default function LibraryTab(): JSX.Element {
   const {
-    libraryTracks, libraryScanning, libraryScanProgress, scanLibrary, libraryFolders, loadLibrary, openSettings,
-    playTrack, playCollection, playNext, addToQueue, account, openLocalEditor, likedTrackIds,
-    toggleLike, openUrlImport, openBulkTrackEditor, currentTrack, isPlaying, setIsPlaying,
+    libraryTracks: scannedTracks, libraryScanning, libraryScanProgress, scanLibrary, libraryFolders, loadLibrary, openSettings,
+    playTrack, playCollection, playNext, addToQueue, account, likedTrackIds,
+    toggleLike, currentTrack, isPlaying, setIsPlaying,
   } = useStorePick(
     'libraryTracks', 'libraryScanning', 'libraryScanProgress', 'scanLibrary', 'libraryFolders', 'loadLibrary', 'openSettings',
-    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'account', 'openLocalEditor', 'likedTrackIds',
-    'toggleLike', 'openUrlImport', 'openBulkTrackEditor', 'currentTrack', 'isPlaying', 'setIsPlaying')
+    'playTrack', 'playCollection', 'playNext', 'addToQueue', 'account', 'likedTrackIds',
+    'toggleLike', 'currentTrack', 'isPlaying', 'setIsPlaying')
+  const offlineTracks = useStore((s) => s.offlineTracks)
+  const libraryTracks = useMemo(() => [
+    ...scannedTracks,
+    ...Object.entries(offlineTracks).map(([id, track]) => offlineTrackToLibraryTrack(id, track)),
+  ], [scannedTracks, offlineTracks])
 
   const [tab, setTabState] = useState<Tab>(() => {
     const saved = localStorage.getItem(LS_TAB)
@@ -761,7 +761,7 @@ export default function LibraryTab(): JSX.Element {
     [drillArtist]
   )
 
-  // Whatever list is on screen — what "Select all" and the play buttons act on.
+  // Whatever list is on screen - what "Select all" and the play buttons act on.
   const visibleTracks = drill?.kind === 'album' ? drillAlbumTracks
     : drill?.kind === 'artist' ? drillArtistTracks
     : songs
@@ -859,8 +859,8 @@ export default function LibraryTab(): JSX.Element {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      {/* The header paints no background of its own — the app shell's runs
-          continuously behind it — and it deliberately does not collapse in
+      {/* The header paints no background of its own - the app shell's runs
+          continuously behind it - and it deliberately does not collapse in
           select mode: swapping it out mid-long-press moves the list under the
           finger. Selection controls live in the bottom bar. */}
       {drill ? (
@@ -982,7 +982,7 @@ export default function LibraryTab(): JSX.Element {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       {showEmpty ? (
-        <EmptyState onOpenSettings={() => openSettings('library')} onImportUrl={() => openUrlImport()} />
+        <EmptyState onOpenSettings={() => openSettings('library')} />
       ) : libraryScanning && libraryTracks.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3">
           <Loader2 size={30} className="animate-spin text-accent" />
@@ -996,7 +996,7 @@ export default function LibraryTab(): JSX.Element {
               {/* Windowed like every other list here: the desktop version capped
                   an artist's songs at 60 to stay mountable, which quietly hid
                   the rest. Windowing shows all of them and mounts none of the
-                  off-screen ones — and each row's cover is a lazy disk read, so
+                  off-screen ones - and each row's cover is a lazy disk read, so
                   "mounted" is not cheap. */}
               <VirtualRows
                 scrollRef={scrollRef}
@@ -1095,7 +1095,6 @@ export default function LibraryTab(): JSX.Element {
             {([
               { key: 'queue', icon: ListPlus, label: 'Queue', onClick: () => { selectedTracks.forEach(t => addToQueue(toQueueTrack(t))); exitSelectMode() } },
               { key: 'next', icon: Play, label: 'Play next', onClick: () => { [...selectedTracks].reverse().forEach(t => playNext(toQueueTrack(t))); exitSelectMode() } },
-              { key: 'tags', icon: Pencil, label: 'Edit tags', onClick: () => { openBulkTrackEditor(selectedTracks); exitSelectMode() } },
               { key: 'more', icon: MoreVertical, label: 'More', onClick: () => setSheet('bulk') },
             ] as const).map((action) => (
               <button
@@ -1138,7 +1137,7 @@ export default function LibraryTab(): JSX.Element {
         </Sheet>
       )}
 
-      {/* Filters apply as you tap them — the list behind the sheet is already
+      {/* Filters apply as you tap them - the list behind the sheet is already
           updating, so there's nothing to "apply". The footer button just
           dismisses, with the resulting count on it. */}
       {sheet === 'filter' && (
@@ -1206,6 +1205,18 @@ export default function LibraryTab(): JSX.Element {
 
       {sheet === 'more' && (
         <Sheet onClose={() => setSheet(null)} title="Library">
+          <SheetItem icon={ListMusic} label="Import M3U playlist" onClick={async () => {
+            try {
+              const result = await useStore.getState().importM3uFromDevice()
+              if (result.ok) {
+                useStore.getState().setPlaylistsSelectedId(null)
+                useStore.getState().setPendingPlaylistId(null)
+                useStore.getState().setPlaylistsSelectedLocalId(result.playlistId)
+                useStore.getState().setActiveView('playlists')
+                setSheet(null)
+              } else if (!result.canceled) reportSaveError(new Error(result.error))
+            } catch (error) { reportSaveError(error) }
+          }} />
           <SheetItem
             icon={libraryScanning ? Loader2 : RefreshCw}
             label={libraryScanning ? 'Scanning…' : 'Scan for new music'}
@@ -1213,12 +1224,6 @@ export default function LibraryTab(): JSX.Element {
               : libraryFolders.length === 0 ? 'Add a folder first' : `${libraryFolders.length} folder${libraryFolders.length === 1 ? '' : 's'}`}
             disabled={libraryScanning || libraryFolders.length === 0}
             onClick={() => { scanLibrary(); setSheet(null) }}
-          />
-          <SheetItem
-            icon={Link2}
-            label="Download from a link"
-            sub="Pull audio from a URL into the library"
-            onClick={() => { openUrlImport(); setSheet(null) }}
           />
           <SheetDivider />
           <SheetItem
@@ -1237,8 +1242,6 @@ export default function LibraryTab(): JSX.Element {
           <SheetItem icon={ListMusic} label="Play these songs" onClick={() => { playAll(selectedTracks); exitSelectMode(); setSheet(null) }} />
           <SheetItem icon={Shuffle} label="Shuffle these songs" onClick={() => { playAll(selectedTracks, true); exitSelectMode(); setSheet(null) }} />
           <SheetDivider />
-          <SheetItem icon={Pencil} label="Edit tags" sub="Across every selected file" onClick={() => { openBulkTrackEditor(selectedTracks); exitSelectMode(); setSheet(null) }} />
-          <SheetDivider />
           <SheetItem icon={X} label="Clear selection" onClick={() => { exitSelectMode(); setSheet(null) }} />
         </Sheet>
       )}
@@ -1253,7 +1256,6 @@ export default function LibraryTab(): JSX.Element {
           onPlayNext={() => playNext(toQueueTrack(ctx.track))}
           onAddToQueue={() => addToQueue(toQueueTrack(ctx.track))}
           onSelect={() => toggleSelect(ctx.track)}
-          onEditLocalMetadata={() => openLocalEditor(ctx.track)}
           liked={likedTrackIds.includes(ctx.track.id)}
           onToggleLike={() => toggleLike(ctx.track.id)}
         />

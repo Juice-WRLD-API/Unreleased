@@ -1,24 +1,35 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { IS_NATIVE_APP } from '../lib/platform'
+import { triggerDownload } from '../lib/apiFilesShared'
+import { reportSaveError } from '../lib/fileSave'
+import { useEffect, useState } from 'react'
+import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen,
-  ChevronDown, ChevronRight, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2,
-  Clipboard, ClipboardCopy, Copy, FolderInput, FileCog,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
-import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry } from '../lib/juicewrldApi'
+import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { downloadWithEmbed } from '../lib/lyricsEmbed'
+import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
-import ChangeVersionMenuItem from './ChangeVersionMenuItem'
-import { placeFlyout } from '../lib/menuFlyout'
+import ChangeVersionPanel from './ChangeVersionPanel'
+import ContextMenu from './ContextMenu'
 import { versionsEnabled } from '../lib/versionsApi'
-import { useBackToClose } from '../hooks/useBackToClose'
-import { isAndroidApp } from '../lib/androidUpdate'
-import { saveFile } from '../lib/fileSave'
+import { hasChatAccess } from '../lib/chatAccess'
+import { lazyOverlay } from '../lib/lazyView'
+
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const ShareSongModal = lazyOverlay(() => import('./chat/ShareSongModal'))
+
+// lucide's `fill` is a prop, not a class, so the filled variant needs to be a
+// component of its own to fit an item's `icon` slot.
+const HeartFilled = (p: ComponentProps<typeof Heart>): JSX.Element => <Heart {...p} fill="currentColor" />
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
-// + `songId` (the common denominator across those five places — some only
+// + `songId` (the common denominator across those five places - some only
 // have a Track, not a full JWApiSong) so it works without every caller
 // re-fetching a full song object first. Common actions (Song info's caller
 // hook aside, playlists, download, add-to-library, edit navigation, change
@@ -45,144 +56,84 @@ interface Props {
   onPlayNext?: () => void
   onAddToQueue?: () => void
   onShowInFiles?: () => void
-  /** Tracker / Library — enters multi-select mode with this song selected. */
+  /** Tracker / Library - enters multi-select mode with this song selected. */
   onSelect?: () => void
-  /** Player only — metadata edit for a local (non-API) file. */
-  onEditLocalMetadata?: () => void
 
   /** WRLD's simple like toggle. */
   liked?: boolean
   onToggleLike?: () => void
 
-  /** Destructive, always-last action — "Unlike" (Liked Songs) or "Remove
+  /** Destructive, always-last action - "Unlike" (Liked Songs) or "Remove
    *  from playlist" (Playlists). */
   removeAction?: { label: string; onClick: () => void }
 
-  /** Full song object, if the caller already has one — unlocks the
+  /** Full song object, if the caller already has one - unlocks the
    *  recording-session ZIP download (needs fields Track doesn't carry). */
   song?: JWApiSong
 
-  /** Hides "Change version" even when songId is valid — for playback
+  /** Hides "Change version" even when songId is valid - for playback
    *  contexts where switching doesn't make sense (e.g. WRLD's FM radio,
    *  which is server-driven and can't be manually redirected). */
   disableChangeVersion?: boolean
+
+  /** Session-edit file linking (Tracker only) - lets an editor/contributor
+   *  manually point a recording-session song at its session-edit audio file
+   *  when the automatic filename match got it wrong or found nothing. */
+  canLinkSessionFile?: boolean
+  hasSessionLinkOverride?: boolean
+  onLinkSessionFile?: () => void
+  onClearSessionLink?: () => void
 }
 
-function MenuItem({ icon, label, onClick, destructive, trailing, innerRef }: {
-  icon: React.ReactNode; label: string; onClick: () => void; destructive?: boolean
-  /** Right-aligned adornment — the submenu chevron. */
-  trailing?: React.ReactNode
-  innerRef?: React.Ref<HTMLButtonElement>
-}): JSX.Element {
-  return (
-    <button
-      ref={innerRef}
-      onClick={(e) => { e.stopPropagation(); onClick() }}
-      // py-3 below md: a 32px row is a mouse target, not a finger one.
-      className={`w-full flex items-center gap-2.5 px-3 py-3 md:py-2 text-sm text-left transition-colors hover:bg-surface-raised ${
-        destructive ? 'text-red-400' : 'text-text-secondary hover:text-text-primary'
-      }`}
-    >
-      {icon}
-      {label}
-      {trailing && <span className="ml-auto flex items-center">{trailing}</span>}
-    </button>
-  )
-}
-
-function Divider(): JSX.Element {
-  return <div className="my-1 border-t border-[var(--border)]" />
-}
-
-
-/** Downloads `url` as `filename`. Android routes through saveFile (so it
- *  honors a user-picked download folder — see Settings' "Downloads" section)
- *  since `<a download>` silently no-ops in that WebView; desktop/web keep the
- *  plain anchor-click, which is a zero-copy browser-native download and
- *  shouldn't be swapped for a full in-memory fetch just to share one code
- *  path. */
-async function downloadUrl(url: string, filename: string): Promise<void> {
-  if (isAndroidApp()) {
-    const blob = await (await fetch(url)).blob()
-    await saveFile(filename, blob)
+function downloadTrack(track: Track, songId: number | null): void {
+  // Donor files need the auth header, so hand them to the blob path instead.
+  if (isDonorStreamUrl(track.streamUrl)) {
+    void ensureDonorUrl(track.streamUrl).then((url) => {
+      void triggerDownload(url, `${track.title}.mp3`).catch(reportSaveError)
+    })
     return
   }
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+  // Lyrics embedding needs the file bytes, so it takes the fetch path; with the
+  // setting off (or nothing to embed) this stays a plain anchor download.
+  if (songId != null && useStore.getState().embedLyricsOnDownload) {
+    void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
+    return
+  }
+  void triggerDownload(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`).catch(reportSaveError)
 }
 
-function downloadTrack(track: Track): Promise<void> {
-  return downloadUrl(buildStreamUrl(track.path), `${track.title}.mp3`)
-}
-
-function downloadZipEntry(entry: JWApiFileEntry): Promise<void> {
-  return downloadUrl(buildStreamUrl(entry.path), entry.name)
+function downloadZipEntry(entry: JWApiFileEntry): void {
+  void triggerDownload(buildStreamUrl(entry.path), entry.name).catch(reportSaveError)
 }
 
 export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
-  onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect, onEditLocalMetadata,
+  onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect,
   liked, onToggleLike, removeAction, song, disableChangeVersion,
+  canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
-  useBackToClose(onClose)
-  const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist, guestPlaylists, addToGuestPlaylist, createGuestPlaylist, offlineTracks, removeOfflineTrack, downloadTrackOffline, autoDownloadIfOffline, addLibraryTrack } = useStore(
+  const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
     useShallow(s => ({
       playlists: s.playlists, account: s.account, refreshPlaylists: s.refreshPlaylists,
       setShowUserAuth: s.setShowUserAuth, playTrack: s.playTrack,
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
-      guestPlaylists: s.guestPlaylists, addToGuestPlaylist: s.addToGuestPlaylist, createGuestPlaylist: s.createGuestPlaylist,
-      offlineTracks: s.offlineTracks, removeOfflineTrack: s.removeOfflineTrack, downloadTrackOffline: s.downloadTrackOffline,
-      autoDownloadIfOffline: s.autoDownloadIfOffline, addLibraryTrack: s.addLibraryTrack,
     }))
   )
+  const offline = useStore(s => !!s.offlineTracks[state.track.id])
   const { track, songId } = state
-  const menuRef = useRef<HTMLDivElement>(null)
-  const [panel, setPanel] = useState<'main' | 'zip'>('main')
-  // "Add to playlist" opens a flyout beside the menu rather than replacing it.
-  const [playlistsOpen, setPlaylistsOpen] = useState(false)
-  const addItemRef = useRef<HTMLButtonElement>(null)
-  const submenuRef = useRef<HTMLDivElement>(null)
-  const [subPos, setSubPos] = useState({ top: 0, left: 0 })
-  // "File actions" works the same way — its own flyout beside the menu.
-  const [fileOpen, setFileOpen] = useState(false)
-  const fileItemRef = useRef<HTMLButtonElement>(null)
-  const fileSubmenuRef = useRef<HTMLDivElement>(null)
-  const [fileSubPos, setFileSubPos] = useState({ top: 0, left: 0 })
-  // "Change version" is a flyout too, but ChangeVersionMenuItem owns its own
-  // placement (it has to re-place itself when its list finishes loading) — the
-  // open state stays here so all three submenus remain mutually exclusive.
-  const [versionsOpen, setVersionsOpen] = useState(false)
-  const versionItemRef = useRef<HTMLButtonElement>(null)
+  // After "Download session (ZIP)" finds more than one candidate the menu swaps
+  // to a pick-one page.
+  const [zipCandidates, setZipCandidates] = useState<JWApiFileEntry[] | null>(null)
+  const [zipPage, setZipPage] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [doneId, setDoneId] = useState<number | null>(null)
   const [localDoneId, setLocalDoneId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
-  const [addingToLib, setAddingToLib] = useState(false)
-  const [addedToLib, setAddedToLib] = useState(false)
   const [contained, setContained] = useState<Set<number>>(new Set())
   const [zipLoading, setZipLoading] = useState(false)
-  const [zipCandidates, setZipCandidates] = useState<JWApiFileEntry[] | null>(null)
-  const [downloadingOffline, setDownloadingOffline] = useState(false)
-
-  useEffect(() => {
-    const handle = (e: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
-    }
-    const handleKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
+  const [linkCopied, setLinkCopied] = useState(false)
 
   useEffect(() => {
     if (!account || songId == null || playlists.length === 0) return
@@ -203,7 +154,6 @@ export default function SongContextMenu({
       setDoneId(id)
       setContained(prev => new Set([...prev, id]))
       await refreshPlaylists()
-      autoDownloadIfOffline(id, [songId])
     } catch {} finally { setBusyId(null) }
   }
 
@@ -213,16 +163,10 @@ export default function SongContextMenu({
     if (isLocalOnly) {
       createLocalPlaylist(name)
       // createLocalPlaylist sets activeLocalPlaylistId synchronously (zustand
-      // set() applies immediately), so it's readable right after the call —
+      // set() applies immediately), so it's readable right after the call -
       // that's the newly-created playlist's id, needed to add this track to it.
       const newId = useStore.getState().activeLocalPlaylistId
       if (newId) addToLocalPlaylist(newId, track.id)
-      onClose()
-      return
-    }
-    if (!account) {
-      const newId = createGuestPlaylist(name)
-      addToGuestPlaylist(newId, track)
       onClose()
       return
     }
@@ -242,403 +186,181 @@ export default function SongContextMenu({
     try {
       const candidates = await findSessionZips(song)
       if (candidates.length === 1) {
-        downloadZipEntry(candidates[0]).catch(err => console.error('[download]', err))
+        downloadZipEntry(candidates[0])
         onClose()
       } else {
         setZipCandidates(candidates)
-        setPanel('zip')
+        setZipPage(true)
       }
     } catch {
       setZipCandidates([])
-      setPanel('zip')
+      setZipPage(true)
     } finally {
       setZipLoading(false)
     }
   }
 
   // A couple of callers use a -1 sentinel for "no real song" instead of null
-  // (e.g. shared-playlist placeholder rows) — treat both as invalid.
+  // (e.g. shared-playlist placeholder rows) - treat both as invalid.
   const hasValidSong = songId != null && songId > 0
-  const isUnplayable = ['recording_session', 'unsurfaced'].includes(track.genre)
-  // A local library file with no matching API song — it already lives on
+  const isUnplayable = track.genre === 'unsurfaced' || (track.genre === 'recording_session' && !track.path)
+  // A local library file with no matching API song - it already lives on
   // disk (so "Download" is meaningless) and can't join a server playlist,
   // but it can join one of the device-local playlists instead.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
   const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly)
-  // Sessions/unsurfaced are treated as unplayable — don't offer Play / Play
+  // Sharing rides the song's own stream URL, so it only makes sense for
+  // real API songs (not local-only files, which nobody else can reach) and
+  // only for staff, who are the only ones with a chat to share into.
+  const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
+
+  const handleCopyLink = async (): Promise<void> => {
+    if (!hasValidSong) return
+    try {
+      await navigator.clipboard.writeText(trackShareUrl(songId))
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2500)
+    } catch {}
+  }
+  // Sessions/unsurfaced are treated as unplayable - don't offer Play / Play
   // next / Add to queue for them (they'd never actually play). Local files
   // (no category in genre) stay playable as long as they have a path.
   const canQueue = !!track.path && !isUnplayable
 
-  // Estimated clamp for the very first paint; corrected against the real
-  // rendered size in the layout effect below. The estimate alone isn't enough
-  // because the menu's height varies a lot (which optional items a caller
-  // enables, long titles), so near a screen edge the guess undershoots and the
-  // menu spills off-screen. Measuring the actual box fixes every case. The
-  // submenus don't factor in — they're flyouts positioned separately.
-  const menuWidth = 208
-  const menuHeight = panel !== 'main' ? 320 : 240
-  const [pos, setPos] = useState(() => ({
-    top: Math.max(8, Math.min(state.y, window.innerHeight - menuHeight - 8)),
-    left: Math.max(8, Math.min(state.x, window.innerWidth - menuWidth - 8)),
-  }))
-
-  // Below md this stops being a pointer-anchored popup and becomes a bottom
-  // sheet: a 208px panel pinned to a tap coordinate is a mouse idiom, and its
-  // side-flyout submenus have nowhere to go on a phone (see sheetStyle, which
-  // the submenus reuse so they stack over the sheet instead of beside it).
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768)
-  useEffect(() => {
-    const check = (): void => setIsMobile(window.innerWidth < 768)
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
-  const sheetStyle: React.CSSProperties = {
-    position: 'fixed',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    top: 'auto',
-    maxHeight: '75svh',
-    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+  if (shareOpen && canShareToChat) {
+    return <ShareSongModal track={track} songId={songId as number} onClose={onClose} />
   }
 
-  useLayoutEffect(() => {
-    const el = menuRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const top = Math.max(8, Math.min(state.y, window.innerHeight - rect.height - 8))
-    const left = Math.max(8, Math.min(state.x, window.innerWidth - rect.width - 8))
-    setPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [state.x, state.y, panel, zipCandidates])
+  // "Add to playlist" second level: the account's playlists, or the device-local
+  // ones for a local-only file.
+  const playlistRows = isLocalOnly
+    ? localPlaylists.map(p => ({
+        label: p.name,
+        icon: ListMusic,
+        checked: p.trackIds.includes(track.id) || localDoneId === p.id,
+        keepOpen: true,
+        onSelect: () => { addToLocalPlaylist(p.id, track.id); setLocalDoneId(p.id) },
+      }))
+    : !account
+      ? []
+      : playlists.map(p => ({
+          label: p.name,
+          icon: ListMusic,
+          checked: contained.has(p.id) || doneId === p.id,
+          loading: busyId === p.id,
+          disabled: busyId === p.id,
+          keepOpen: true,
+          onSelect: () => { void addTo(p.id) },
+        }))
 
-  // Flyout placement: to the right of the menu, flipped to the left when
-  // there isn't room, top-aligned with the item that opened it and clamped
-  // to the viewport (the list can be much taller than the item).
-  useLayoutEffect(() => {
-    if (!playlistsOpen) return
-    const item = addItemRef.current, menu = menuRef.current, sub = submenuRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [playlistsOpen, creating, pos, playlists.length, localPlaylists.length, contained])
+  const playlistFooter = !isLocalOnly && !account
+    ? (
+      <button
+        onClick={() => { setShowUserAuth(true); onClose() }}
+        className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
+      >
+        Log in
+      </button>
+    )
+    : creating
+      ? (
+        <div className="flex gap-1">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
+            placeholder="Playlist name"
+            autoFocus
+            className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded px-2 py-1 text-xs text-text-primary focus:outline-none"
+          />
+          <button onClick={createAndAdd} disabled={busyId === -1} className="p-1.5 rounded bg-accent/15 text-accent">
+            {busyId === -1 ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+          </button>
+        </div>
+      )
+      : (
+        <button
+          onClick={() => setCreating(true)}
+          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-accent hover:bg-surface-overlay rounded transition-colors"
+        >
+          <Plus size={12} /> New playlist
+        </button>
+      )
 
-  useLayoutEffect(() => {
-    if (!fileOpen) return
-    const item = fileItemRef.current, menu = menuRef.current, sub = fileSubmenuRef.current
-    if (!item || !menu || !sub) return
-    const { top, left } = placeFlyout(item, menu, sub)
-    setFileSubPos(prev => (prev.top === top && prev.left === left ? prev : { top, left }))
-  }, [fileOpen, pos])
+  const showZip = ZIP_OPERATIONS_ENABLED && !!song && !track.path && track.genre === 'recording_session'
+  const showSessionLink = !!song && !!canLinkSessionFile && track.genre === 'recording_session' && !!onLinkSessionFile
+  const canDownload = !!track.path && !isLocalOnly
 
   return (
-    <div
-      ref={menuRef}
-      // Height-capped to the viewport: a fully-loaded menu (queue actions +
-      // playlist/version/file rows + Download/Remove) is taller than a short
-      // phone screen, and the position clamp alone would leave the bottom
-      // items clipped and unreachable — scroll instead.
-      style={isMobile
-        ? { zIndex: 9999, ...sheetStyle }
-        : { position: 'fixed', zIndex: 9999, top: pos.top, left: pos.left, maxHeight: window.innerHeight - 16 }}
-      className={`bg-surface border border-[var(--border)] shadow-2xl overflow-x-hidden overflow-y-auto py-1 ${
-        isMobile ? 'w-full rounded-t-2xl border-x-0 border-b-0' : 'w-52 rounded-xl'
-      }`}
-    >
-      <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
-        <p className="text-text-primary text-xs font-semibold truncate">{track.title}</p>
-        <p className="text-text-muted text-[10px] truncate">{track.artist}</p>
-      </div>
-
-      {playlistsOpen && panel === 'main' && (
-        // Rendered inside the menu element (so the outside-click handler still
-        // counts it as "inside") but positioned as a fixed flyout beside it.
-        <div
-          ref={submenuRef}
-          onClick={(e) => e.stopPropagation()}
-          style={isMobile
-            ? { zIndex: 10000, ...sheetStyle }
-            : { position: 'fixed', zIndex: 10000, top: subPos.top, left: subPos.left }}
-          className={`bg-surface border border-[var(--border)] shadow-2xl overflow-hidden py-1 ${
-            isMobile ? 'w-full rounded-t-2xl border-x-0 border-b-0' : 'w-52 rounded-xl'
-          }`}
-        >
-          {isLocalOnly ? (
-            <div className="max-h-44 overflow-y-auto">
-              {localPlaylists.length === 0 && (
-                <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-              )}
-              {localPlaylists.map((p) => {
-                const alreadyIn = p.trackIds.includes(track.id)
-                return (
-                  <button
-                    key={p.id}
-                    onClick={(e) => { e.stopPropagation(); addToLocalPlaylist(p.id, track.id); setLocalDoneId(p.id) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                  >
-                    <ListMusic size={13} className={`shrink-0 ${alreadyIn ? 'text-accent' : 'text-text-muted'}`} />
-                    <span className="flex-1 truncate text-xs">{p.name}</span>
-                    {(localDoneId === p.id || alreadyIn) && <Check size={12} className="text-accent shrink-0" />}
-                  </button>
-                )
-              })}
-            </div>
-          ) : !account ? (
-            // Signed out: save into a device-only guest playlist instead of a
-            // synced one — see GuestPlaylist. Login is still one tap away
-            // below, for anyone who'd rather sync across devices.
-            <div className="max-h-44 overflow-y-auto">
-              {guestPlaylists.length === 0 && (
-                <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-              )}
-              {guestPlaylists.map((p) => {
-                const alreadyIn = p.tracks.some((t) => t.id === track.id)
-                return (
-                  <button
-                    key={p.id}
-                    onClick={(e) => { e.stopPropagation(); addToGuestPlaylist(p.id, track); setLocalDoneId(p.id) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                  >
-                    <ListMusic size={13} className={`shrink-0 ${alreadyIn ? 'text-accent' : 'text-text-muted'}`} />
-                    <span className="flex-1 truncate text-xs">{p.name}</span>
-                    {(localDoneId === p.id || alreadyIn) && <Check size={12} className="text-accent shrink-0" />}
-                  </button>
-                )
-              })}
-              <button
-                onClick={() => { setShowUserAuth(true); onClose() }}
-                className="w-full mt-1 px-3 py-1.5 text-left text-[11px] text-text-muted hover:text-text-primary transition-colors border-t border-[var(--border)]"
-              >
-                Log in to sync playlists across devices
-              </button>
-            </div>
-          ) : (
-            <div className="max-h-44 overflow-y-auto">
-              {playlists.length === 0 && (
-                <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-              )}
-              {playlists.map((p) => {
-                const alreadyIn = contained.has(p.id)
-                return (
-                  <button
-                    key={p.id}
-                    onClick={(e) => { e.stopPropagation(); addTo(p.id) }}
-                    disabled={busyId === p.id}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                  >
-                    <ListMusic size={13} className={`shrink-0 ${alreadyIn ? 'text-accent' : 'text-text-muted'}`} />
-                    <span className="flex-1 truncate text-xs">{p.name}</span>
-                    {busyId === p.id
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : (doneId === p.id || alreadyIn)
-                        ? <Check size={12} className="text-accent shrink-0" />
-                        : null}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          {/* Every branch above (local, guest, synced) has its own "create
-              new and add" target, so this footer is unconditional. */}
-          <div className="border-t border-[var(--border)] pt-1 px-2 pb-1">
-              {creating ? (
-                <div className="flex gap-1">
-                  <input
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && createAndAdd()}
-                    placeholder="Playlist name"
-                    autoFocus
-                    className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded px-2 py-1 text-xs text-text-primary focus:outline-none"
-                  />
-                  <button onClick={createAndAdd} disabled={busyId === -1} className="p-1.5 rounded bg-accent/15 text-accent">
-                    {busyId === -1 ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setCreating(true)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-accent hover:bg-surface-raised rounded transition-colors"
-                >
-                  <Plus size={12} /> New playlist
-                </button>
-              )}
-          </div>
-        </div>
-      )}
-
-      {fileOpen && panel === 'main' && (
-        // Same flyout treatment as the playlists submenu above: inside the menu
-        // element so the outside-click handler still counts it as "inside".
-        <div
-          ref={fileSubmenuRef}
-          onClick={(e) => e.stopPropagation()}
-          style={isMobile
-            ? { zIndex: 10000, ...sheetStyle }
-            : { position: 'fixed', zIndex: 10000, top: fileSubPos.top, left: fileSubPos.left }}
-          className={`bg-surface border border-[var(--border)] shadow-2xl overflow-hidden py-1 ${
-            isMobile ? 'w-full rounded-t-2xl border-x-0 border-b-0' : 'w-52 rounded-xl'
-          }`}
-        >
-          {/* Removing only un-lists the track. Deleting the user's actual
-              file would need a write grant on its source folder, which the
-              read-only Storage Access Framework permission we take doesn't
-              carry — so the file itself is left alone. */}
-          <MenuItem
-            icon={<Trash2 size={14} />}
-            label="Remove from library"
-            destructive
-            onClick={() => { useStore.getState().deleteLibraryTrack(track.id); onClose() }}
-          />
-        </div>
-      )}
-
-      {panel === 'zip' ? (
-        <>
-          <button
-            onClick={(e) => { e.stopPropagation(); setPanel('main') }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors"
-          >
-            <ChevronDown size={12} className="rotate-90" /> Back
-          </button>
-          {zipCandidates && zipCandidates.length > 0 ? (
-            <div className="max-h-44 overflow-y-auto">
-              <p className="px-3 pb-1 text-[10px] text-text-muted">Multiple matches found — pick one:</p>
-              {zipCandidates.map(c => (
-                <button
-                  key={c.path}
-                  onClick={(e) => { e.stopPropagation(); downloadZipEntry(c).catch(err => console.error('[download]', err)); onClose() }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                >
-                  <PackageOpen size={13} className="shrink-0 text-text-muted" />
-                  <span className="flex-1 truncate text-xs">{c.name}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="px-3 py-3 text-xs text-text-muted">No matching ZIP found for this session.</p>
-          )}
-        </>
-      ) : (
-        // Hovering a submenu row opens its flyout; hovering any other row
-        // closes it again, the way a native submenu behaves. Driving both from
-        // one handler also makes them mutually exclusive.
-        <div
-          onMouseOver={(e) => {
-            const t = e.target as Node
-            setPlaylistsOpen(addItemRef.current?.contains(t) ?? false)
-            setFileOpen(fileItemRef.current?.contains(t) ?? false)
-            setVersionsOpen(versionItemRef.current?.contains(t) ?? false)
-          }}
-        >
-          {onPlay && canQueue && <MenuItem icon={<ListEnd size={14} />} label="Play" onClick={() => { onPlay(); onClose() }} />}
-          {onPlayNext && canQueue && <MenuItem icon={<ListEnd size={14} />} label="Play next" onClick={() => { onPlayNext(); onClose() }} />}
-          {hasValidSong && (
-            <MenuItem icon={<Info size={14} />} label="Song info" onClick={() => { onInfo(); onClose() }} />
-          )}
-          {hasValidSong && (
-            <MenuItem
-              icon={<Flag size={14} />}
-              label="Report issue"
-              onClick={() => { useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }); onClose() }}
+    <ContextMenu
+      x={state.x}
+      y={state.y}
+      title={track.title}
+      subtitle={track.artist}
+      onClose={onClose}
+      // Above every view's own chrome - this menu opens from the Player bar and
+      // fullscreen WRLD as well as ordinary pages.
+      zIndex={9999}
+      className="w-52"
+      page={zipPage ? {
+        title: 'Download session',
+        onBack: () => setZipPage(false),
+        note: zipCandidates && zipCandidates.length > 0 ? 'Multiple matches found - pick one:' : undefined,
+        empty: 'No matching ZIP found for this session.',
+        items: (zipCandidates ?? []).map(c => ({ label: c.name, icon: PackageOpen, onSelect: () => downloadZipEntry(c) })),
+      } : null}
+      items={[
+        onPlay && canQueue && { icon: ListEnd, label: 'Play', onSelect: onPlay },
+        onPlayNext && canQueue && { icon: ListEnd, label: 'Play next', onSelect: onPlayNext },
+        hasValidSong && { icon: Info, label: 'Song info', onSelect: onInfo },
+        hasValidSong && {
+          icon: Flag,
+          label: 'Report issue',
+          onSelect: () => useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }),
+        },
+        onSelect && { icon: CheckSquare2, label: 'Select', onSelect },
+        onAddToQueue && canQueue && { icon: ListPlus, label: 'Add to queue', onSelect: onAddToQueue },
+        canAddToPlaylist && {
+          icon: Plus,
+          label: 'Add to playlist',
+          children: playlistRows,
+          childrenEmpty: !isLocalOnly && !account ? 'Log in to save to playlists.' : 'No playlists yet.',
+          childrenFooter: playlistFooter,
+        },
+        canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
+        hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
+        onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
+        canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },
+        onToggleLike && { icon: liked ? HeartFilled : Heart, label: liked ? 'Unlike' : 'Like', active: liked, onSelect: onToggleLike },
+        versionsEnabled && !disableChangeVersion && hasValidSong && {
+          icon: Layers,
+          label: 'Change version',
+          panel: ({ close, mobile }) => (
+            <ChangeVersionPanel
+              songId={songId as number}
+              mobile={mobile}
+              onChangeVersion={(s) => { const t = songToTrack(s); playTrack(t, [t]); close() }}
             />
-          )}
-          {onSelect && <MenuItem icon={<CheckSquare2 size={14} />} label="Select" onClick={() => { onSelect(); onClose() }} />}
-          {onAddToQueue && canQueue && (
-            <MenuItem icon={<ListPlus size={14} />} label="Add to queue" onClick={() => { onAddToQueue(); onClose() }} />
-          )}
-          {canAddToPlaylist && (
-            <MenuItem
-              innerRef={addItemRef}
-              icon={<Plus size={14} />}
-              label="Add to playlist"
-              trailing={<ChevronRight size={13} className="text-text-muted" />}
-              // Open-only, not a toggle: the row is already hovered when it's
-              // clicked, so toggling would close the flyout the hover reopens.
-              onClick={() => setPlaylistsOpen(true)}
-            />
-          )}
-          {onShowInFiles && track.path && (
-            <MenuItem icon={<Folder size={14} />} label="Show in Files" onClick={() => { onShowInFiles(); onClose() }} />
-          )}
-          {canEdit && songId != null && songId > 0 && (
-            <MenuItem icon={<Pencil size={14} />} label="Edit" onClick={() => { useStore.getState().openSongEditor(songId); onClose() }} />
-          )}
-          {onEditLocalMetadata && (
-            <MenuItem icon={<Pencil size={14} />} label="Edit metadata" onClick={() => { onEditLocalMetadata(); onClose() }} />
-          )}
-          {/* Everything that touches the user's actual file lives in its own
-              flyout, so the destructive entries aren't one stray click away. */}
-          {isLocalOnly && !!track.path && (
-            <MenuItem
-              innerRef={fileItemRef}
-              icon={<FileCog size={14} />}
-              label="File actions"
-              trailing={<ChevronRight size={13} className="text-text-muted" />}
-              onClick={() => setFileOpen(true)}
-            />
-          )}
-          {onToggleLike && (
-            <MenuItem
-              icon={<Heart size={14} fill={liked ? 'currentColor' : 'none'} className={liked ? 'text-accent' : ''} />}
-              label={liked ? 'Unlike' : 'Like'}
-              onClick={() => { onToggleLike(); onClose() }}
-            />
-          )}
-          {versionsEnabled && !disableChangeVersion && songId != null && songId > 0 && (
-            <ChangeVersionMenuItem
-              songId={songId}
-              onChangeVersion={(s) => { const t = songToTrack(s); playTrack(t, [t]); onClose() }}
-              open={versionsOpen && panel === 'main'}
-              onToggle={() => setVersionsOpen(o => !o)}
-              itemRef={versionItemRef}
-              menuRef={menuRef}
-              menuPos={pos}
-            />
-          )}
-          {song && !track.path && track.genre === 'recording_session' && (
-            <>
-              <Divider />
-              <MenuItem
-                icon={zipLoading ? <Loader2 size={14} className="animate-spin" /> : <PackageOpen size={14} />}
-                label={zipLoading ? 'Finding files…' : 'Download session (ZIP)'}
-                onClick={loadSessionZips}
-              />
-            </>
-          )}
-          {track.path && !isLocalOnly && (
-            <>
-              <Divider />
-              <MenuItem icon={<Download size={14} />} label="Download" onClick={() => { downloadTrack(track).catch(err => console.error('[download]', err)); onClose() }} />
-              {hasValidSong && !offlineTracks[track.id] && (
-                <MenuItem
-                  icon={downloadingOffline ? <Loader2 size={14} className="animate-spin" /> : <CircleArrowDown size={14} />}
-                  label={downloadingOffline ? 'Downloading…' : 'Download offline'}
-                  onClick={async () => {
-                    if (downloadingOffline || songId == null) return
-                    setDownloadingOffline(true)
-                    try { await downloadTrackOffline(songId) } finally { setDownloadingOffline(false) }
-                  }}
-                />
-              )}
-              {!!offlineTracks[track.id] && (
-                <MenuItem
-                  icon={<CircleArrowDown size={14} fill="currentColor" />}
-                  label="Remove download"
-                  destructive
-                  onClick={() => { removeOfflineTrack(track.id); onClose() }}
-                />
-              )}
-            </>
-          )}
-          {removeAction && (
-            <>
-              <Divider />
-              <MenuItem icon={<Trash2 size={14} />} label={removeAction.label} destructive onClick={() => { removeAction.onClick(); onClose() }} />
-            </>
-          )}
-        </div>
-      )}
-    </div>
+          ),
+        },
+        showZip && 'divider',
+        showZip && {
+          icon: PackageOpen,
+          label: zipLoading ? 'Finding files…' : 'Download session (ZIP)',
+          loading: zipLoading,
+          disabled: zipLoading,
+          keepOpen: true,
+          onSelect: loadSessionZips,
+        },
+        showSessionLink && 'divider',
+        showSessionLink && { icon: FileAudio2, label: 'Link session file…', onSelect: onLinkSessionFile },
+        showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
+        canDownload && 'divider',
+        IS_NATIVE_APP && songId != null && { icon: offline ? Trash2 : Download, label: offline ? 'Remove download' : 'Download offline', onSelect: () => offline ? useStore.getState().removeOfflineTrack(track.id) : useStore.getState().downloadTrackOffline(songId) },
+        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
+        removeAction && 'divider',
+        removeAction && { icon: Trash2, label: removeAction.label, danger: true, onSelect: removeAction.onClick },
+      ]}
+    />
   )
 }

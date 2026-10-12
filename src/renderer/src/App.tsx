@@ -1,86 +1,169 @@
-import { useEffect, Suspense } from 'react'
-import { lazyView as lazy } from './lib/lazyView'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
-import { useAndroidBackButton } from './hooks/useAndroidBackButton'
-import { runWhenIdle } from './lib/platform'
+import { runWhenIdle, isStandalonePWA } from './lib/platform'
+import { applySeo } from './lib/seo'
+import { orderedNavItems, isNavItemVisible } from './lib/navItems'
+import { hasChatAccess } from './lib/chatAccess'
+import { useIsMobile, isMobileViewport } from './hooks/useIsMobile'
+import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
+import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
+import { useAndroidBackButton } from './hooks/useAndroidBackButton'
+
+// Minimum gap between window-focus-triggered refetches (playlists, news) -
+// alt-tabbing back and forth shouldn't refire a request on every focus event.
+const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
+
+// Views that stay mounted (hidden) underneath the terminal so their local
+// state survives opening and closing it. Only form-like views with no
+// route-driven side effects - Admin pushes its own history entries and Heardle/
+// Wordle play audio, so those are left to remount.
+const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
 function getViewFromPath(pathname: string): ViewType {
-  if (pathname === '/' || pathname === '/tracker') return 'api-tracker'
+  if (pathname === '/library') return 'library'
+  if (pathname === '/home') return 'home'
+  // Desktop and installed apps land on Home; a mobile browser tab still gets
+  // the Tracker. `/` is the canonical, indexed URL for the catalog
+  // (lib/seo.ts) and Google crawls mobile-first, so a phone-width crawler
+  // keeps seeing the catalog there rather than a personal dashboard -
+  // applySeo also pins `/`'s metadata to the catalog entry regardless of
+  // which view renders, so the root can never go noindex.
+  if (pathname === '/') return isStandalonePWA() || !isMobileViewport() ? 'home' : 'api-tracker'
+  if (pathname === '/tracker') return 'api-tracker'
   if (pathname.startsWith('/files')) return 'api-files'
   if (pathname === '/editor') return 'editor'
   if (pathname === '/contributor') return 'contributor'
-  if (pathname === '/admin') return 'admin'
+  // '/admin' plus one path per admin section (see ADMIN_TAB_PATHS) - all of
+  // them land on the same standalone admin console, just pre-selecting a
+  // different tab; see the syncFromPath effect below for the tab half of it.
+  if (pathname === '/admin' || pathname in ADMIN_PATH_TABS) return 'admin'
+  if (pathname === '/editor-profile') return 'editor-profile'
+  if (pathname === '/contributor-profile') return 'contributor-profile'
+  if (pathname === '/albums-admin') return 'albums-admin'
   if (pathname === '/liked') return 'liked'
   if (pathname === '/playlists') return 'playlists'
   if (pathname === '/docs') return 'docs'
   if (pathname === '/wrld') return 'wrld'
-  if (pathname === '/news') return 'news'
+  if (pathname === '/news' || pathname.startsWith('/news/')) return 'news'
   if (pathname === '/heardle') return 'heardle'
   if (pathname === '/wordle') return 'wordle'
   if (pathname === '/tierlist') return 'tierlist'
-  if (pathname === '/stats') return 'stats'
+  if (pathname === '/wrapped') return 'stats'
+  if (pathname === '/statistics') return 'statistics'
+  if (pathname === '/download') return 'download'
+  if (pathname === '/thank-you') return 'thanks'
+  if (pathname === '/settings') return 'settings'
+  if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
+  if (pathname === '/terminal') return 'terminal'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
-  if (pathname === '/library') return 'library'
+  if (/^\/track\/\d+\/?$/.test(pathname)) return 'track'
+  if (pathname.startsWith('/u/')) return 'public-profile'
   if (pathname === '/auth/discord/callback') return 'api-tracker'
   return 'not-found'
 }
 
 import Sidebar from './components/Sidebar'
+import AutoHideNav from './components/AutoHideNav'
 import BottomNav from './components/BottomNav'
-import ApiTrackerView from './components/ApiTrackerView'
-import ApiFilesView from './components/ApiFilesView'
-import LikedSongsView from './components/LikedSongsView'
-import PlaylistsView from './components/PlaylistsView'
 import RadioFmPlayer from './components/RadioFmPlayer'
 import RadioVotePopup from './components/RadioVotePopup'
-import DiscordRpcSync from './components/DiscordRpcSync'
 import LastfmScrobbler from './components/LastfmScrobbler'
+import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
-import UserAuthModal from './components/UserAuthModal'
+import BroadcastNotifier from './components/BroadcastNotifier'
+import ChatNotificationBanner from './components/ChatNotificationBanner'
 import ReportModal from './components/ReportModal'
-import ConvertFormatModal from './components/ConvertFormatModal'
-import BulkEditModal from './components/BulkEditModal'
-import UrlImportModal from './components/UrlImportModal'
+import InstallPrompt from './components/InstallPrompt'
 import CookieNotice from './components/CookieNotice'
-import { GlobalSongInfoHost } from './components/SongInfoModal'
+import DonationNotice from './components/DonationNotice'
 import Player from './components/Player'
+import NativeMediaSession from './components/NativeMediaSession'
+import NowPlaying from './components/NowPlaying'
 import QueuePanel from './components/QueuePanel'
-import DownloadManager from './components/DownloadManager'
-import LibraryTab from './components/LibraryTab'
 import ErrorBoundary from './components/ErrorBoundary'
+import { lazyOverlay, lazyView } from './lib/lazyView'
+import SandboxNotch from './components/SandboxNotch'
+import MoreNavSheet from './components/MoreNavSheet'
 
-// Rarely-visited views load on first navigation instead of inflating the
-// startup bundle. Suspense fallback is null: these chunks are small, so a
-// spinner would just flash.
-const EditorPage = lazy(() => import('./components/EditorPage'))
-const AdminPage = lazy(() => import('./components/AdminPage'))
-const SharedPlaylistView = lazy(() => import('./components/SharedPlaylistView'))
-const EditorProfileView = lazy(() => import('./components/EditorProfileView'))
-const NotFoundView = lazy(() => import('./components/NotFoundView'))
-const DocsPage = lazy(() => import('./components/DocsPage'))
-const WrldView = lazy(() => import('./components/WrldView'))
-const NewsView = lazy(() => import('./components/NewsView'))
-const HeardleView = lazy(() => import('./components/HeardleView'))
-const WordleView = lazy(() => import('./components/WordleView'))
-const TierlistView = lazy(() => import('./components/TierlistView'))
-const StatsView = lazy(() => import('./components/StatsView'))
-const LocalEditorPage = lazy(() => import('./components/LocalEditorPage'))
-const ContributorPage = lazy(() => import('./components/ContributorPage'))
-const ContributorProfileView = lazy(() => import('./components/ContributorProfileView'))
-const Settings = lazy(() => import('./components/Settings'))
-const DiagnosticsModal = lazy(() => import('./components/DiagnosticsModal'))
+// Everything off the startup path loads on first navigation instead of
+// inflating the initial bundle - including Playlists and Files, which are big
+// enough (~5.8k and ~2.6k lines across their desktop/mobile halves) that
+// shipping them to every visitor of the Tracker landing page was most of the
+// eager bundle. Definitions live in lib/lazyViews so the nav chrome can warm a
+// chunk on hover/tap without importing this file; preloadView is the warmer.
+import {
+  ApiTrackerView, EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
+  DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
+  StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
+  ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
+  LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, LibraryTab, preloadView,
+} from './lib/lazyViews'
+import { useChatBootstrap } from './hooks/useChatBootstrap'
+
+// Overlays that only mount while open - fetched on first open rather than
+// shipped to every visitor in the startup bundle.
+import { UserCardHost } from './components/chat/UserCard'
+const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
+const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
+const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
+const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
+const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
 export default function App(): JSX.Element {
-  const { showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, loadLibrary, scanLibrary, libraryAutoRefresh, libraryFolders, refreshPlaylists, loadOfflineLibrary, heroBleedTop } = useStorePick(
-    'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'loadLibrary', 'scanLibrary', 'libraryAutoRefresh', 'libraryFolders', 'refreshPlaylists', 'loadOfflineLibrary', 'heroBleedTop')
-  useThemeEffects()
-  // Android hardware back → close the topmost overlay / step back a view.
-  // No-op off native.
   useAndroidBackButton()
-  // Seed auth token from env in local dev only — import.meta.env.DEV is false in production
+  const { loadLibrary, loadOfflineLibrary, scanLibrary, libraryAutoRefresh, libraryFolders } = useStorePick(
+    'loadLibrary', 'loadOfflineLibrary', 'scanLibrary', 'libraryAutoRefresh', 'libraryFolders')
+  useEffect(() => runWhenIdle(() => {
+    void loadLibrary()
+    void loadOfflineLibrary().then(() => useStore.getState().syncOfflinePlaylists())
+  }), [loadLibrary, loadOfflineLibrary])
+  useEffect(() => {
+    const sync = (): void => { void useStore.getState().syncOfflinePlaylists() }
+    const onVisible = (): void => { if (document.visibilityState === 'visible') sync() }
+    document.addEventListener('visibilitychange', onVisible)
+    const interval = setInterval(sync, 15 * 60 * 1000)
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
+  }, [])
+  useEffect(() => {
+    if (!libraryAutoRefresh || libraryFolders.length === 0) return
+    void loadLibrary().then(() => scanLibrary())
+    const onVisible = (): void => { if (document.visibilityState === 'visible') void scanLibrary() }
+    document.addEventListener('visibilitychange', onVisible)
+    const interval = setInterval(() => { void scanLibrary() }, 15 * 60 * 1000)
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
+  }, [libraryAutoRefresh, libraryFolders, loadLibrary, scanLibrary])
+  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
+  // What renders behind WRLD - WRLD is a full-screen overlay on top of
+  // wherever you were (Spotify-style "now playing" sheet), not a real nav
+  // destination, so dragging it down should reveal that page like a curtain
+  // instead of empty space. Everywhere else this is just activeView itself.
+  const bgView = activeView === 'wrld' ? (previousView ?? 'api-tracker') : activeView
+  // Opening the terminal from a view that holds unsaved local state (the song
+  // editor's draft, a half-filled submission, an open playlist...) must not
+  // unmount it - the terminal would otherwise swap it out of the ternary below,
+  // and closing the terminal remounts it empty (the editor then sees "nothing
+  // to edit" and bounces to its dashboard). Derived during render, not in an
+  // effect, so the held view is never unmounted for even one commit.
+  const heldViewRef = useRef<ViewType | null>(null)
+  if (activeView === 'terminal') {
+    if (previousView && HOLD_UNDER_TERMINAL.includes(previousView)) heldViewRef.current = previousView
+  } else if (activeView !== heldViewRef.current) {
+    heldViewRef.current = null
+  }
+  const heldView = heldViewRef.current
+  const isMobile = useIsMobile()
+  // Keep the panel mounted after its first open instead of unmounting on
+  // close - unmounting destroyed every cover <img>, so reopening the queue
+  // made them all reload/re-decode from scratch instead of just reappearing.
+  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
+  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
+  useThemeEffects()
+  useChatBootstrap()
+  // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
   // builds, so this never runs for real users even if the token is baked into the bundle.
   useEffect(() => {
     if (!import.meta.env.DEV) return
@@ -90,13 +173,43 @@ export default function App(): JSX.Element {
 
   // Sync view from URL on mount + handle back/forward
   useEffect(() => {
-    const syncFromPath = (): void => {
-      useStore.setState({ activeView: getViewFromPath(window.location.pathname) })
+    const syncFromPath = (state?: unknown): void => {
+      // The embedded admin panel inside the editor/manager profile pushes
+      // its own history entries (see EditorProfileView's openAdmin/exitAdmin)
+      // tagged `{ view: 'editor-profile' }` so its section deep links (e.g.
+      // /users) have a real, shareable URL without actually leaving that
+      // page - activeView never changed to 'admin' when those were pushed,
+      // so a back/forward through them must not reroute here either; that
+      // component's own popstate listener handles resyncing its embedded
+      // panel instead.
+      if (state && typeof state === 'object' && (state as { view?: string }).view === 'editor-profile') return
+      const view = getViewFromPath(window.location.pathname)
+      useStore.setState({ activeView: view })
+      // Playlists keeps its open playlist selected across tab switches (it
+      // doesn't unmount cleanly otherwise), so a mount-time read of ?id=
+      // alone can't catch a bare back/forward navigation while already on
+      // the tab - resync it here too, same as the view itself.
+      if (window.location.pathname === '/playlists') {
+        const id = new URLSearchParams(window.location.search).get('id')
+        useStore.setState({ playlistsSelectedId: id ? Number(id) : null })
+      }
+      // Same idea for Admin's own per-section deep links (/users, /security,
+      // ...) - land on the section the URL names, or the base queue for
+      // plain /admin and for a back/forward hop that leaves the console
+      // entirely (activeAdminTab only matters while view === 'admin').
+      if (view === 'admin') {
+        useStore.setState({ activeAdminTab: ADMIN_PATH_TABS[window.location.pathname] ?? null })
+      }
     }
     syncFromPath()
-    window.addEventListener('popstate', syncFromPath)
-    return () => window.removeEventListener('popstate', syncFromPath)
+    const onPopState = (e: PopStateEvent): void => syncFromPath(e.state)
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  // Give each route its own title/description/canonical. Web only - no-op in
+  // the desktop app, including electron:dev (see lib/seo.ts).
+  useEffect(() => { applySeo(activeView) }, [activeView])
 
   // Complete Discord OAuth redirect, then load the public account
   useEffect(() => {
@@ -118,52 +231,68 @@ export default function App(): JSX.Element {
     loadAccount()
   }, [loadAccount, completeDiscordLogin])
 
-  // Warm the Tracker/Files offline cache on startup (public data — no auth
+  // Re-fetch playlists on window focus - playlist edits made elsewhere (the
+  // web player, another device, or a playlist saved from a shared link) don't
+  // otherwise reach this window until it's restarted. refreshPlaylists() is a
+  // no-op while signed out. Throttled so alt-tabbing back and forth doesn't
+  // refire the request on every focus - only refetch if it's actually been a
+  // while since the last one.
+  useEffect(() => {
+    let lastRun = 0
+    const onFocus = (): void => {
+      const now = Date.now()
+      if (now - lastRun < FOCUS_REFRESH_MIN_INTERVAL_MS) return
+      lastRun = now
+      refreshPlaylists()
+    }
+    window.addEventListener('focus', onFocus)
+    const onVisible = (): void => { if (document.visibilityState === 'visible') onFocus() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refreshPlaylists])
+
+  // Warm the Tracker/Files offline cache on startup (public data - no auth
   // needed), so those views are ready before the user first opens them.
   // Deferred to idle: none of it is needed to paint, and running it in the
   // mount commit put four requests in front of the ones the visible view was
-  // making at that same moment. Overlap with those is still free — apiRequest
+  // making at that same moment. Overlap with those is still free - apiRequest
   // dedupes identical in-flight GETs.
   useEffect(() => runWhenIdle(() => { prefetchApiData() }), [prefetchApiData])
 
-  // Read the saved local library (metadata only — covers stream in per row)
-  // during idle after boot, so the first Library/Playlists open is instant
-  // instead of waiting on a file read plus a bridge round trip. loadLibrary
-  // is idempotent, so this never double-reads with a tab-mount call.
-  useEffect(() => runWhenIdle(() => { loadLibrary() }), [loadLibrary])
+  // Warm the chunks for the nav destinations the user can actually reach, so
+  // switching tabs doesn't wait on a download. Scheduled at a longer idle
+  // timeout than the data prefetch above so it queues behind it - a chunk for
+  // a view nobody has asked for yet must never get in front of the requests
+  // the visible view is making right now.
+  //
+  // Driven by the user's own menu (order + show/hide), not a fixed list: a
+  // tab they've hidden isn't somewhere they navigate, so downloading it would
+  // be pure waste. Capped, and skipped entirely on Data Saver / 2G - see
+  // preloadView. The active view is already loaded by definition. Staff-only
+  // tabs (Chat) count once the account resolves as staff, same as the Sidebar.
+  const chatAllowed = useStore((s) => hasChatAccess(s.account))
+  useEffect(() => runWhenIdle(() => {
+    orderedNavItems(navOrder, chatAllowed)
+      .filter((i) => isNavItemVisible(i, navVisibility, false) && i.view !== activeView)
+      .slice(0, 4)
+      .forEach((i) => preloadView(i.view))
+  }, 4000), [navOrder, navVisibility, activeView, chatAllowed])
 
-  // Offline-downloaded playlists/tracks are disk truth, not persisted store
-  // state — every mutation (download/remove) re-reads and overwrites this,
-  // but nothing populated it on a fresh launch at all, so a relaunch showed a
-  // playlist that's genuinely offline as not-offline until the next edit.
-  // getOfflineApi() is null on the plain web build, so this is a no-op there.
-  useEffect(() => runWhenIdle(() => { loadOfflineLibrary() }), [loadOfflineLibrary])
+  // Settings is a nav control, not a nav item, so the pass above never warms
+  // it - and on mobile the only other warm-up is pointerdown, which buys a few
+  // tens of ms. It's reachable from every view, so warm it unconditionally.
+  useEffect(() => runWhenIdle(() => preloadView('settings'), 4000), [])
 
-  // "Auto-refresh" (Settings → Library) — opt-in background rescan so files
-  // added or re-tagged outside the app show up without an explicit "Scan now".
-  // The scan skips anything whose size and date are unchanged, so this stays
-  // cheap. Also runs when the app comes back to the foreground, which is when
-  // a change made in a file manager is most likely to have just happened.
+  // The terminal is hidden from the nav by default, so the pass above never
+  // warms it - but admins reach it by hotkey, where a chunk download would
+  // read as lag. Warm it as soon as the account resolves as an admin.
+  const isAdmin = useStore((s) => !!s.account?.is_administrator)
   useEffect(() => {
-    if (!libraryAutoRefresh || libraryFolders.length === 0) return
-    loadLibrary().then(() => scanLibrary())
-    const onVisible = (): void => { if (document.visibilityState === 'visible') scanLibrary() }
-    document.addEventListener('visibilitychange', onVisible)
-    const interval = setInterval(() => scanLibrary(), 15 * 60 * 1000)
-    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
-  }, [libraryAutoRefresh, libraryFolders, loadLibrary, scanLibrary])
-
-  // Re-fetch playlists whenever the app comes back to the foreground. Playlist
-  // edits (e.g. saving a shared playlist from the web) happen out-of-band from
-  // whatever session this device has open, so without this the list only ever
-  // updates on next full app start. refreshPlaylists() is a no-op while signed
-  // out. Covers both the Android wrap (backgrounded, not killed) and a
-  // desktop/browser tab left open and refocused.
-  useEffect(() => {
-    const onVisible = (): void => { if (document.visibilityState === 'visible') refreshPlaylists() }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [refreshPlaylists])
+    if (isAdmin) return runWhenIdle(() => preloadView('terminal'), 4000)
+  }, [isAdmin])
 
   // Deliver any reports queued in a previous session. loadAccount also flushes
   // after login (to attach the token), but this covers a signed-out user whose
@@ -171,11 +300,8 @@ export default function App(): JSX.Element {
   useEffect(() => { useStore.getState()._flushReports() }, [])
 
   return (
-    <div className="app-shell flex flex-col h-dvh bg-surface overflow-hidden">
-      {/* Mobile nav parked above the content when Menu position = Top. It's
-          md:hidden either way, so this branch is invisible on desktop (where
-          the same setting moves the Sidebar instead). */}
-      {sidebarPosition === 'top' && <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>}
+    <UserCardHost>
+    <div className="app-shell flex flex-col bg-surface overflow-hidden">
       {/* Sidebar stays first in the DOM; reverse variants place it visually
           on the right/bottom without reordering focus/tab order. */}
       <div className={`flex flex-1 overflow-hidden ${
@@ -184,66 +310,115 @@ export default function App(): JSX.Element {
           : sidebarPosition === 'bottom' ? 'flex-col-reverse'
           : 'flex-row'
       }`}>
-        <Sidebar />
-        {/* Android runs the WebView edge-to-edge (viewport-fit=cover), so the
-            CSS viewport starts behind the status bar / notch. Every view in
-            here opens with a flat pt-5-ish header, which physically lands
-            under the cutout — so the inset is absorbed once, here, instead of
-            each view remembering to. The one case that opts out: anything
-            position:fixed (QueuePanel, Settings, sheets) escapes
-            this box entirely and owns its own inset.
-            Skipped when the nav sits on top, since BottomNav already pads
-            itself by the same amount and content flows below it. */}
+        {!isMobile && (autoHideNav || navStyle === 'pill')
+          ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav && navStyle !== 'pill'} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
+          : <Sidebar />}
         <main
           className="flex-1 overflow-hidden flex flex-col relative"
-          // WRLD, and any view that's raised heroBleedTop (Playlists' detail
-          // screen, while it has a hero cover to bleed), want a full-bleed
-          // backdrop under the status bar and pad their own header to
-          // compensate instead (see WRLD's and PlaylistsView's own comments)
-          // — giving them padding here too would just reserve blank space
-          // this box clips before their content could ever paint into it (a
-          // negative-margin trick on a child's own root can't reach past this
-          // overflow-hidden ancestor either, which is why that was tried and
-          // didn't work). Every other view keeps the shared inset.
-          style={sidebarPosition !== 'top' && !((activeView === 'wrld' || heroBleedTop) && !showSettings)
-            ? { paddingTop: 'env(safe-area-inset-top, 0px)' } : undefined}
+          // Reserve the phone status-bar inset by default; a mobile view that
+          // wants a hero image to bleed full-bleed behind its own header
+          // (Playlists' detail screens) raises heroBleedTop and paints that
+          // strip itself instead - see the store field's doc comment.
+          //
+          // Deliberately NOT conditioned on `activeView === 'wrld'`: bgView
+          // (below) stays mounted and visible the whole time WRLD is open -
+          // through the curtain-drag reveal, and permanently once WRLD closes
+          // - so it needs this padding applied consistently regardless of
+          // WRLD's state, or it visibly "nudges" into place the instant WRLD
+          // finishes closing and this padding would otherwise reappear. WRLD
+          // still gets its own full-bleed for free - its overlay below is
+          // absolutely positioned, and an absolutely positioned element's
+          // offsets resolve against the containing block's padding edge,
+          // which sits before (outside) this padding, so no compensation is
+          // needed there.
+          // Mobile's nav bar is bottom-only (no per-platform top option any
+          // more - see BottomNav), so on mobile this only ever depends on
+          // heroBleedTop. sidebarPosition still gates it on desktop, where
+          // Sidebar itself can sit at the top and already reserves the space.
+          style={(isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
+            ? { paddingTop: 'var(--top-inset)' } : undefined}
         >
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
-            <Suspense fallback={null}>
-            {/* Settings is a page, not an overlay. It used to render as a
-                fixed layer below, on top of everything including the player
-                bar — so opening it hid what was playing. Rendering it in the
-                content slot keeps the player and nav where they are, and it
-                sits ahead of the view switch because `showSettings` is its own
-                flag rather than an activeView (every setShowSettings caller in
-                the app keeps working, and activeView still remembers the view
-                underneath to return to). */}
-            {showSettings ? <Settings />
-              : activeView === 'api-tracker' ? <ApiTrackerView />
-              : activeView === 'api-files' ? <ApiFilesView />
-              : activeView === 'editor' ? <EditorPage />
-              : activeView === 'contributor' ? <ContributorPage />
-              : activeView === 'contributor-profile' ? <ContributorProfileView />
-              : activeView === 'admin' ? <AdminPage />
-              : activeView === 'liked' ? <LikedSongsView />
-              : activeView === 'playlists' ? <PlaylistsView />
-              : activeView === 'shared-playlist' ? <SharedPlaylistView />
-              : activeView === 'editor-profile' ? <EditorProfileView />
-              : activeView === 'docs' ? <DocsPage />
-              : activeView === 'wrld' ? <WrldView />
-              : activeView === 'news' ? <NewsView />
-              : activeView === 'heardle' ? <HeardleView />
-              : activeView === 'wordle' ? <WordleView />
-              : activeView === 'tierlist' ? <TierlistView />
-              : activeView === 'stats' ? <StatsView />
-              : activeView === 'library' ? <LibraryTab />
-              : activeView === 'local-editor' ? <LocalEditorPage />
-              : activeView === 'not-found' ? <NotFoundView />
+            <Suspense fallback={<ViewSkeleton />}>
+            {/* Holdable views live in their own keyed slots so toggling between
+                "shown" and "hidden under the terminal" never remounts them.
+                `contents` keeps the wrapper out of the flex layout. */}
+            {HOLD_UNDER_TERMINAL.map((v) => (bgView === v || heldView === v) && (
+              <div key={v} className={bgView === v ? 'contents' : 'hidden'}>
+                {v === 'editor' ? <EditorPage />
+                  : v === 'contributor' ? <ContributorPage />
+                  : v === 'albums-admin' ? <AlbumsAdminView />
+                  : v === 'playlists' ? <PlaylistsView />
+                  : v === 'settings' ? <Settings />
+                  : <ChatView />}
+              </div>
+            ))}
+            {HOLD_UNDER_TERMINAL.includes(bgView) ? null
+              : bgView === 'home' ? <HomeView />
+              : bgView === 'api-tracker' ? <ApiTrackerView />
+              : bgView === 'api-files' ? <ApiFilesView />
+              : bgView === 'library' ? <LibraryTab />
+              : bgView === 'contributor-profile' ? <ContributorProfileView />
+              : bgView === 'admin' ? <AdminPage />
+              : bgView === 'liked' ? <LikedSongsView />
+              : bgView === 'shared-playlist' ? <SharedPlaylistView />
+              : bgView === 'track' ? <TrackView />
+              : bgView === 'public-profile' ? <PublicProfileView />
+              : bgView === 'editor-profile' ? <EditorProfileView />
+              : bgView === 'docs' ? <DocsPage />
+              : bgView === 'news' ? <NewsView />
+              : bgView === 'heardle' ? <HeardleView />
+              : bgView === 'wordle' ? <WordleView />
+              : bgView === 'tierlist' ? <TierlistView />
+              : bgView === 'stats' ? <StatsView />
+              : bgView === 'statistics' ? <StatisticsView />
+              : bgView === 'download' ? <DownloadAppView />
+              : bgView === 'thanks' ? <ThankYouView />
+              : bgView === 'terminal' ? <TerminalPage />
+              : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
             </Suspense>
           </ErrorBoundary>
-            {showQueue && activeView !== 'wrld' && <ErrorBoundary><QueuePanel /></ErrorBoundary>}
+            {/* WRLD is a full-screen overlay on top of bgView above, not a
+                slot in that ternary - so bgView (whatever you had open before)
+                stays mounted and visible underneath while WRLD drags down,
+                curtain-style, instead of revealing empty space. */}
+            {activeView === 'wrld' && (
+              <ErrorBoundary>
+                <Suspense fallback={null}>
+                  <div className="absolute inset-0 z-30">
+                    {/* No compensation needed for main's padding here: an
+                        absolutely positioned element's offsets resolve
+                        against its containing block's padding edge, which
+                        sits BEFORE (outside) that padding - so `inset-0`
+                        already reaches the true top of `main` regardless of
+                        whatever padding-top `main` itself has. (An earlier
+                        version of this added a negative top offset to
+                        "compensate," which was wrong and clipped the top of
+                        WRLD - including its header row - behind `main`'s
+                        own overflow-hidden.) */}
+                    <WrldView />
+                  </div>
+                </Suspense>
+              </ErrorBoundary>
+            )}
+            {/* Desktop only - on mobile the WRLD tab is the only "now playing"
+                screen (the mini player expands straight into it), so this
+                would only ever be a redundant second one. Nothing on mobile
+                can actually open it (its trigger button lives in the
+                desktop-only bottom bar), but excluding it here is the real
+                guarantee rather than relying on that. */}
+            {!isMobile && showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
+            {queueEverOpened && (
+              <ErrorBoundary>
+                {/* flex so QueuePanel stretches to the full height; a plain
+                    block wrapper let it collapse to its content height. */}
+                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
+                  <QueuePanel />
+                </div>
+              </ErrorBoundary>
+            )}
           </div>
         </main>
       </div>
@@ -253,18 +428,27 @@ export default function App(): JSX.Element {
           boundary: the chrome keeps a compact inline notice, the invisible
           background workers fail silently, and the modals/overlays show a
           centered, dismissible card. */}
-      <ErrorBoundary fallback={<div className="h-20 shrink-0 border-t border-[var(--border)] flex items-center justify-center text-text-muted text-xs">Player crashed — reload the app to restore playback controls.</div>}>
+      <ErrorBoundary fallback={<div className="h-20 shrink-0 border-t border-[var(--border)] flex items-center justify-center text-text-muted text-xs">Player crashed - reload the app to restore playback controls.</div>}>
         <Player />
+        <NativeMediaSession />
       </ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioFmPlayer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioVotePopup /></ErrorBoundary>
-      <ErrorBoundary fallback={null}><DiscordRpcSync /></ErrorBoundary>
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
-      {sidebarPosition !== 'top' && <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>}
+      <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><MoreNavSheet /></ErrorBoundary>
       {showDiagnostics && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowDiagnostics(false)}>
           <Suspense fallback={null}><DiagnosticsModal /></Suspense>
+        </ErrorBoundary>
+      )}
+      {showUploadManager && (
+        <ErrorBoundary variant="overlay" onDismiss={() => setShowUploadManager(false)}>
+          <UploadManager />
         </ErrorBoundary>
       )}
       {showUserAuth && (
@@ -272,13 +456,15 @@ export default function App(): JSX.Element {
           <UserAuthModal onClose={() => setShowUserAuth(false)} />
         </ErrorBoundary>
       )}
+      <ErrorBoundary fallback={null}><Suspense fallback={null}><LoginApprovalPrompt /></Suspense></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ReportModal /></ErrorBoundary>
-      <ErrorBoundary variant="overlay"><ConvertFormatModal /></ErrorBoundary>
-      <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>
-      <ErrorBoundary variant="overlay"><UrlImportModal /></ErrorBoundary>
+      {bulkEdit && <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>}
+      <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
-      <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>
-      <ErrorBoundary fallback={null}><DownloadManager /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>
+      {infoSongId != null && <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>}
+      <ErrorBoundary fallback={null}><SandboxNotch /></ErrorBoundary>
     </div>
+    </UserCardHost>
   )
 }

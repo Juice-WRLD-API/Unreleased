@@ -1,20 +1,21 @@
-import { useEffect, useRef, useState, CSSProperties, ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useState, ReactNode } from 'react'
+import { ModalOverlay, LockToggle } from './Modal'
 import {
-  X, Music2, Pencil, Flag, PictureInPicture2, Minimize2,
+  X, Music2, Pencil, Flag,
   Clock, Hash, MicVocal, Music, Wrench, FileText, Piano, MapPin,
   Calendar, CalendarClock, CalendarDays, Droplets, Gauge, Layers,
-  GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon
+  GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon,
+  Activity, Music4
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useDragToDismiss } from '../hooks/useDragToDismiss'
 import { useCanEdit } from '../hooks/useChannelRoles'
-import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongById, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import { versionsEnabled, getVersionGroup, SongVersionMeta } from '../lib/versionsApi'
 import { formatDuration } from '../lib/format'
 import { copyCoverImage, saveCoverImage } from '../lib/coverImage'
 import SongPrefsSection from './SongPrefsSection'
 import { ProgressiveCover } from './ProgressiveCover'
-import { useBackToClose } from '../hooks/useBackToClose'
 
 const CATEGORY_COLORS: Record<string, string> = {
   released:          'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
@@ -73,40 +74,56 @@ interface Props {
 }
 
 export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Element | null {
-  useBackToClose(onClose, true)
-  const overlayRef = useRef<HTMLDivElement>(null)
-
   const songPrefs = useStore((s) => s.songPrefs)
   const openReport = useStore((s) => s.openReport)
 
-  // Cover art actions (copy to clipboard / save to disk). `coverMsg` briefly
-  // replaces the action buttons with a confirmation instead of a toast, since
-  // the modal already owns this corner of the screen.
-  const [coverBusy, setCoverBusy] = useState<'copy' | 'save' | null>(null)
-  const [coverMsg, setCoverMsg] = useState<string | null>(null)
-
   // Clicking a linked version swaps the displayed song in place, without the
-  // caller needing to manage that — falls back to the `song` prop otherwise.
+  // caller needing to manage that - falls back to the `song` prop otherwise.
   const [overrideSong, setOverrideSong] = useState<JWApiSong | null>(null)
   useEffect(() => { setOverrideSong(null) }, [song?.id])
-  const displaySong = overrideSong ?? song
+  // Rows from bulk fetches come with `?omit=lyrics,...` (see OMIT_BULK), so
+  // the fields are absent rather than null - fetch the full song for those so
+  // the lyrics section still shows. Rows that carry the field are used as-is.
+  const [fullSong, setFullSong] = useState<JWApiSong | null>(null)
+  useEffect(() => {
+    setFullSong(null)
+    if (!song || song.lyrics !== undefined) return
+    let stale = false
+    getSongById(song.id).then((s) => { if (!stale) setFullSong(s) }).catch(() => {})
+    return () => { stale = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [song?.id])
+  const displaySong = overrideSong ?? (fullSong && fullSong.id === song?.id ? fullSong : song)
 
-  // "Other versions" — a separate database from juicewrldapi.com (see
+  // "Other versions" - a separate database from juicewrldapi.com (see
   // lib/versionsApi.ts), since that API has no concept of grouping e.g.
   // "Song (v1)" / "(v2)" / "(TV Mix)" together as the same underlying song.
-  // Linking/unlinking only happens from the editor (Edit song → Versions) —
+  // Linking/unlinking only happens from the editor (Edit song → Versions) -
   // this view is read-only.
   const [versions, setVersions] = useState<{ song: JWApiSong; meta: SongVersionMeta }[]>([])
   const [loadingVersions, setLoadingVersions] = useState(false)
+
+  // Cover art actions (copy to clipboard / save to disk). `coverMsg` briefly
+  // takes over the cover tile to report the outcome, since neither action
+  // changes anything visible on its own.
+  const [coverBusy, setCoverBusy] = useState<'copy' | 'save' | null>(null)
+  const [coverMsg, setCoverMsg] = useState<string | null>(null)
 
   const refreshVersions = (id: number): void => {
     if (!versionsEnabled) return
     setLoadingVersions(true)
     getVersionGroup(id)
-      .then(metas => Promise.all(metas.map(meta =>
-        apiFetch<JWApiSong>(`/songs/${meta.songId}/`).then(song => ({ song, meta })).catch(() => null)
-      )))
-      .then(entries => setVersions(entries.filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)))
+      .then(async metas => {
+        const songs = await getSongsByIds(metas.map(m => m.songId))
+        const byId = new Map(songs.map(s => [s.id, s]))
+        return metas
+          .map((meta): { song: JWApiSong; meta: SongVersionMeta } | null => {
+            const song = byId.get(meta.songId)
+            return song ? { song, meta } : null
+          })
+          .filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)
+      })
+      .then(entries => setVersions(entries))
       .finally(() => setLoadingVersions(false))
   }
 
@@ -123,18 +140,30 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
     } catch {}
   }
 
+  // Swipe-down-to-dismiss on mobile, same curtain gesture as WRLD's full-
+  // screen player. Only armed from the hero (cover/header) area - same
+  // region the desktop drag-handle uses - so it doesn't fight the scrollable
+  // info list below. dragY/dragging get handed to ModalOverlay so it can
+  // translate the backdrop *with* the panel - otherwise the panel would slide
+  // away while an opaque backdrop stayed put, hiding the app behind it until
+  // the modal actually closed.
+  // Called before the `!displaySong` early return below (hooks must run
+  // unconditionally on every render) even though it's only used once we know
+  // we're actually rendering the modal.
+  const { dragY, dragging, handlers: dragHandlers } = useDragToDismiss(onClose)
+
   if (!displaySong) return null
 
   // The user's per-song override (custom name/cover). Subscribing to the whole
   // map keeps the hero in step when it's edited from the Personalize section
-  // below (or another window) — the map's reference only changes on a write,
+  // below (or another window) - the map's reference only changes on a write,
   // so this modal isn't re-rendering on unrelated store churn.
   const pref = songPrefs[displaySong.id]
   const apiCoverUrl = buildImageUrl(displaySong.image_url)
   const coverUrl = resolvePrefCoverUrl(pref?.cover_url) ?? apiCoverUrl
   const apiPrimaryTitle = displaySong.name
   const primaryTitle = pref?.name || apiPrimaryTitle
-  // Every OTHER known title, not just track_titles[1:] — track_titles is an
+  // Every OTHER known title, not just track_titles[1:] - track_titles is an
   // unordered alias list, so its first entry isn't reliably the primary name
   // (see EditorPage's baseline() for the same mismatch). Excluding by value
   // rather than by index keeps a real alias from vanishing off this list just
@@ -159,8 +188,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
       if (kind === 'copy') {
         await copyCoverImage(coverUrl)
         flashCoverMsg('Copied')
-      } else {
-        await saveCoverImage(coverUrl, primaryTitle)
+      } else if (await saveCoverImage(coverUrl, primaryTitle) === 'saved') {
         flashCoverMsg('Saved')
       }
     } catch {
@@ -187,22 +215,30 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
     }
   }
 
-  // Portal to <body> so the overlay is never trapped inside a caller with a
-  // CSS transform/animation/overflow (e.g. a slide-in panel or sheet) — a
-  // transformed ancestor becomes the containing block for position: fixed,
-  // which would otherwise render this "modal" clipped inside that panel.
-  return createPortal(
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 z-[160] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4"
-      onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
+  // ModalOverlay portals to <body> so the overlay is never trapped inside a
+  // caller with a CSS transform/animation/overflow (e.g. NowPlaying's
+  // slide-in panel) - a transformed ancestor becomes the containing block for
+  // position: fixed, which would otherwise render this "modal" clipped
+  // inside that panel.
+  return (
+    <ModalOverlay
+      onClose={onClose}
+      zIndexClassName="z-[160]"
+      panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg max-h-[92svh] md:max-h-[86vh]"
+      minWidth={420} minHeight={480}
+      dragY={dragY} dragging={dragging}
     >
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div
-        className="select-text bg-surface flex flex-col overflow-hidden border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg max-h-[92svh] md:max-h-[86vh]"
+        className="select-text bg-surface w-full flex-1 min-h-0 flex flex-col overflow-hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
 
-        <div className="relative shrink-0 overflow-hidden">
+        <div
+          className={`relative shrink-0 overflow-hidden ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          onMouseDown={onHandleMouseDown}
+          {...dragHandlers}
+        >
           {coverUrl && (
             <div
               className="absolute inset-0 bg-cover bg-center scale-110"
@@ -210,9 +246,16 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             />
           )}
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-surface" />
-          <div
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5"
-          >
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5">
+            {canLock && (
+              <LockToggle
+                locked={locked}
+                onClick={toggleLock}
+                className={`w-7 h-7 flex items-center justify-center rounded-full transition-colors ${
+                  locked ? 'bg-accent/80 text-white' : 'bg-black/40 text-white/70 hover:text-white'
+                }`}
+              />
+            )}
             {onEdit && (
               <button
                 onClick={() => { onEdit(displaySong.id); onClose() }}
@@ -224,6 +267,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             )}
             <button
               onClick={onClose}
+              title="Close"
               className="w-7 h-7 flex items-center justify-center rounded-full bg-black/40 text-white/70 hover:text-white transition-colors"
             >
               <X size={15} />
@@ -238,14 +282,14 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
                   <Music2 size={32} className="text-text-muted opacity-30" />
                 </div>
               )}
-              {/* Copy/save actions — always visible (no hover on touch),
-                  tucked in the bottom-right corner so they don't compete with
-                  the cover itself. */}
               {coverUrl && (coverMsg ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/75 px-1 text-center">
                   <span className="text-white text-[10px] font-semibold">{coverMsg}</span>
                 </div>
               ) : (
+                // Copy/save actions - always visible (no hover on touch),
+                // tucked in the bottom-right corner so they don't compete with
+                // the cover itself.
                 <div className="absolute bottom-1 right-1 flex items-center gap-1">
                   <button
                     onClick={() => runCoverAction('copy')}
@@ -296,7 +340,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
         </div>
 
         {/* Scrollable info */}
-        <div className="overflow-y-auto flex-1 px-5 py-4">
+        <div className="overflow-y-auto flex-1 min-h-0 px-5 py-4">
 
           <SongPrefsSection
             songId={displaySong.id}
@@ -308,7 +352,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
             altTitles={altTitles}
           />
 
-          {/* Alt names as chips right under the hero, like the reference —
+          {/* Alt names as chips right under the hero, like the reference -
               they're also what widens the cover picker's search (see
               SongPrefsSection's altTitles prop). */}
           {altTitles.length > 0 && (
@@ -367,6 +411,8 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
           )}
 
           <TextSection icon={Gauge} label="Bitrate" value={displaySong.bitrate} />
+          <TextSection icon={Activity} label="BPM" value={displaySong.bpm != null ? String(displaySong.bpm) : null} />
+          <TextSection icon={Music4} label="Key" value={displaySong.key} />
 
           {hasSession && (
             <Section icon={Layers} label="Session">
@@ -393,7 +439,7 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
                     >
                       <span className="text-text-primary text-xs truncate block">
                         {v.name}
-                        {meta.version && <span className="text-text-muted"> ({meta.version}{meta.versionTitle ? ` — ${meta.versionTitle}` : ''})</span>}
+                        {meta.version && <span className="text-text-muted"> ({meta.version}{meta.versionTitle ? ` - ${meta.versionTitle}` : ''})</span>}
                         {!meta.version && meta.versionTitle && <span className="text-text-muted"> ({meta.versionTitle})</span>}
                       </span>
                     </button>
@@ -423,20 +469,17 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
 
         </div>
       </div>
-    </div>,
-    document.body
+      )}
+    </ModalOverlay>
   )
 }
 
-// Global host for the song-info modal — renders nothing until something sets
-// `infoSongId`, then fetches that song and shows the modal.
+// Global host for the song-info modal, driven purely by `infoSongId` (e.g.
+// ChangesFeedPanel opening info for a feed item). Renders nothing until
+// something sets it, then fetches that song and shows the modal in-app.
 export function GlobalSongInfoHost(): JSX.Element | null {
   const { infoSongId, setInfoSongId } = useStorePick('infoSongId', 'setInfoSongId')
   const [song, setSong] = useState<JWApiSong | null>(null)
-  // Called unconditionally, before the early return below — infoSongId toggles
-  // between null and a value across this component's lifetime, and a hook
-  // called only on some of those renders breaks React's hook-order rule.
-  const canEdit = useCanEdit()
 
   useEffect(() => {
     if (infoSongId == null) { setSong(null); return }
@@ -444,6 +487,8 @@ export function GlobalSongInfoHost(): JSX.Element | null {
     apiFetch<JWApiSong>(`/songs/${infoSongId}/`).then((s) => { if (!stale) setSong(s) }).catch(() => {})
     return () => { stale = true }
   }, [infoSongId])
+
+  const canEdit = useCanEdit()
 
   if (infoSongId == null || !song) return null
   return (
