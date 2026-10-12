@@ -283,6 +283,30 @@
     Pop $MaintBetaStatus
     ${NSD_OnClick} $MaintBetaButton MaintBetaUnlockClick
 
+    ; Already in the beta channel (the app dropped its marker earlier) → unlock
+    ; from that code instead of making the user type it in again. The server
+    ; still validates it on the version fetch, so a revoked code just reads as
+    ; "rejected" there.
+    ${If} $BetaUnlocked != "1"
+      ${If} $installMode == "all"
+        SetShellVarContext current
+      ${EndIf}
+      ClearErrors
+      FileOpen $3 "$APPDATA\${APP_FILENAME}\beta-access" r
+      ${IfNot} ${Errors}
+        FileRead $3 $4
+        FileClose $3
+        ${StdUtils.TrimStr} $4
+        ${If} $4 != ""
+          StrCpy $BetaCodeValue "$4"
+          StrCpy $BetaUnlocked "1"
+        ${EndIf}
+      ${EndIf}
+      ${If} $installMode == "all"
+        SetShellVarContext all
+      ${EndIf}
+    ${EndIf}
+
     ${If} $BetaUnlocked == "1"
       ; page revisited after unlocking — keep it unlocked
       EnableWindow $MaintBetaField 0

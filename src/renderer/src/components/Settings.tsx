@@ -165,6 +165,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'developer', label: 'Clear cache', sub: 'Removes cached API responses and cover art', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'Update source', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'Online installer', sub: 'Repairs or reinstalls the app', electronOnly: true, devOnly: true },
+  { tab: 'developer', label: 'API servers', sub: 'Main API base and per-path route rules', electronOnly: true, devOnly: true },
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
@@ -2746,6 +2747,18 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     Open
                   </button>
                 </Row>
+
+                <div className="mt-4 rounded-xl border border-[var(--border)] p-3">
+                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
+                    <Server size={13} />
+                    API servers
+                  </div>
+                  <ApiServerRow />
+                  <RouteRulesEditor />
+                  <p className="text-text-muted text-[11px] mt-2.5">
+                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -2801,18 +2814,6 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     <Globe size={13} />
                     API
                   </a>
-                </div>
-
-                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
-                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
-                    <Server size={13} />
-                    API servers
-                  </div>
-                  <ApiServerRow />
-                  <RouteRulesEditor />
-                  <p className="text-text-muted text-[11px] mt-2.5">
-                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
-                  </p>
                 </div>
 
                 {(!account || (!account.is_editor && !account.is_administrator)) && (

@@ -1709,10 +1709,45 @@ ipcMain.handle('beta-join', async (_, code) => {
   return true
 })
 
+// Leaving the channel while running a beta build would otherwise strand the
+// user on it: the stable check only moves forward, and a beta outranks the
+// latest stable. So fetch the newest stable installer and run it over the top
+// (the same silent install a beta update uses). Windows only, like beta builds.
+async function installLatestStable() {
+  try {
+    const release = await new Promise((resolve, reject) => {
+      https.get('https://api.github.com/repos/' + UPDATE_REPO.owner + '/' + UPDATE_REPO.repo + '/releases/latest', {
+        headers: { 'User-Agent': 'Unreleased-App', 'Accept': 'application/vnd.github+json' }, timeout: 15000,
+      }, (res) => {
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`GitHub API HTTP ${res.statusCode}`)) }
+        let data = ''
+        res.on('data', d => { data += d })
+        res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+      }).on('error', reject)
+    })
+    const asset = release.assets.find(a => a.name.endsWith('.exe'))
+    if (!asset) throw new Error('No installer found in latest release')
+    const version = String(release.tag_name).replace(/^v/, '')
+    const dest = path.join(app.getPath('temp'), asset.name)
+    log('Leaving beta — installing stable', version)
+    broadcastToWindows('update-status', { type: 'downloading', percent: 0, version })
+    await downloadFile(asset.browser_download_url, dest,
+      (percent) => broadcastToWindows('update-status', { type: 'downloading', percent, version }))
+    betaInstallerPath = dest
+    updateDownloadedPending = true
+    broadcastToWindows('update-status', { type: 'downloaded', version })
+    quitAndInstallSilently()
+  } catch (err) {
+    log('Return to stable failed:', err.message)
+    broadcastToWindows('update-status', { type: 'error', message: `Couldn't switch back to stable: ${err.message}` })
+  }
+}
+
 ipcMain.handle('beta-leave', () => {
   try { fs.rmSync(betaMarkerPath, { force: true }) } catch {}
   applyUpdateFeed(null)
   log('Left beta channel')
+  if (!isDev && process.platform === 'win32' && app.getVersion().includes('-')) installLatestStable()
   return true
 })
 
