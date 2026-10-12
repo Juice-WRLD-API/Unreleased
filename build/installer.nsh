@@ -18,6 +18,8 @@
 ;    update-feed requests. Downloading a beta build (tag contains "-") sends
 ;    the code as an "X-Beta-Code" header, never in the URL.
 ;    Skipped for silent installs, auto-updates and elevated inner instances.
+;  - customInstall: after an auto-update, restarts the app when it asked for
+;    that (the relaunch-after-update marker, see electron/main.js).
 
 !include "LogicLib.nsh"
 !include "WinMessages.nsh"
@@ -407,6 +409,25 @@
   FunctionEnd
 !macroend
 
+!macro customInit
+  ; Up to 2.4.0 the app restarted itself after an update with a detached
+  ; PowerShell watcher (%TEMP%\unreleased-update-relaunch-<pid>.ps1) that
+  ; could fire mid-install and start the OLD exe, which then re-ran the
+  ; update. When one of those versions hands off to this installer, stop the
+  ; watcher before it can; customInstall below sees its leftover script and
+  ; relaunches the app properly instead. ProcessId -ne $PID: this command's
+  ; own command line matches the pattern too.
+  ${if} ${isUpdated}
+    ClearErrors
+    FindFirst $R0 $R1 "$TEMP\unreleased-update-relaunch-*.ps1"
+    ${ifNot} ${Errors}
+      nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq 'powershell.exe' -and $$_.ProcessId -ne $$PID -and $$_.CommandLine -like '*unreleased-update-relaunch-*' } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force -ErrorAction SilentlyContinue }"`
+      Pop $R2
+    ${endIf}
+    FindClose $R0
+  ${endIf}
+!macroend
+
 !macro customInstall
   ; Valid beta access code entered on the options page → drop the marker
   ; electron/main.js checks to enable pre-release (beta) auto-updates and
@@ -414,6 +435,45 @@
   ${if} $BetaUnlocked == "1"
     !insertmacro MAINT_WRITE_BETA_MARKER
   ${endif}
+
+  ; Restart the app after an update it asked to restart into. This runs after
+  ; the new files are in place, which is the only point that's safe — see
+  ; installUpdateAndRestart in electron/main.js, which writes the marker. A
+  ; leftover pre-2.4.1 watcher script (see customInit) counts as the same
+  ; request.
+  ${if} ${isUpdated}
+    StrCpy $R3 "0"
+    ${if} $installMode == "all"
+      SetShellVarContext current
+    ${endif}
+    ${if} ${FileExists} "$APPDATA\${APP_FILENAME}\relaunch-after-update"
+      Delete "$APPDATA\${APP_FILENAME}\relaunch-after-update"
+      StrCpy $R3 "1"
+    ${endif}
+    ${if} $installMode == "all"
+      SetShellVarContext all
+    ${endif}
+
+    ClearErrors
+    FindFirst $R0 $R1 "$TEMP\unreleased-update-relaunch-*.ps1"
+    ${DoUntil} ${Errors}
+      Delete "$TEMP\$R1"
+      StrCpy $R3 "1"
+      ClearErrors
+      FindNext $R0 $R1
+    ${Loop}
+    FindClose $R0
+
+    ${if} $R3 == "1"
+      SetOutPath "$INSTDIR"
+      ; An elevated (per-machine) install must not start the app as admin.
+      ${if} ${UAC_IsAdmin}
+        ${StdUtils.ExecShellAsUser} $R2 "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "open" ""
+      ${else}
+        Exec `"$INSTDIR\${APP_EXECUTABLE_FILENAME}"`
+      ${endif}
+    ${endif}
+  ${endIf}
 !macroend
 
 !macro customUnInstall
