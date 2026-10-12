@@ -22,7 +22,7 @@ const path = require('path')
 const SCAN_TIMEOUT = 20000
 const SCAN_PARALLEL = 3
 
-function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
+function register({ app, ipcMain, dialog, shell, BrowserWindow, openControls }) {
   const helper = () => {
     if (process.platform !== 'win32') return null
     const p = app.isPackaged
@@ -290,6 +290,8 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
   })
 
   const editors = new Map()
+  const controls = new Map() // key -> { params } for open generic editors
+  ipcMain.handle('vst-controls-get', (_, key) => controls.get(key)?.params ?? null)
   const nativeSessions = require('./nativeSession').registerNativeSessions({ app, ipcMain, helper })
   ipcMain.handle('vst-edit-open', (event, req) => {
     const exe = helper()
@@ -297,7 +299,8 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
     const have = editors.get(req.key)
     if (have) {
       if (!!have.generic !== !!req.generic) return { error: "Close this plug-in's other window first" }
-      have.stdin.write('focus\n')
+      if (have.generic) openControls(req.key, req.title)
+      else have.stdin.write('focus\n')
       return {}
     }
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -310,6 +313,14 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
     const child = spawn(exe, args, { windowsHide: false })
     child.generic = !!req.generic
     editors.set(req.key, child)
+    // Generic editors show their parameters in a window of the app's own; it asks for the
+    // current list when it opens and gets changes as 'vst-controls' events.
+    let controlsWin = null
+    if (child.generic) {
+      controls.set(req.key, { params: [] })
+      controlsWin = openControls(req.key, req.title)
+      controlsWin.on('closed', () => { if (editors.get(req.key) === child) child.stdin.write('close\n') })
+    }
     const send = (msg) => { if (!event.sender.isDestroyed()) event.sender.send('vst-editor', { key: req.key, ...msg }) }
     let buf = ''
     let closed = false
@@ -323,7 +334,12 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
         try { msg = JSON.parse(line) } catch { continue }
         if (msg.type === 'closed') closed = true
         nativeSessions.editor(event.sender, req, msg)
-        if (msg.type !== 'parameter') send(msg)
+        if (msg.type === 'params' || msg.type === 'param') {
+          const c = controls.get(req.key)
+          if (c && msg.type === 'params') c.params = msg.params
+          else if (c) c.params = c.params.map((p) => (p.id === msg.id ? { ...p, value: msg.value, text: msg.text } : p))
+          if (controlsWin && !controlsWin.isDestroyed()) controlsWin.webContents.send('vst-controls', { key: req.key, ...msg })
+        } else if (msg.type !== 'parameter') send(msg)
       }
     })
     child.stderr.on('data', () => {})
@@ -331,6 +347,8 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
     child.on('error', (e) => send({ type: 'error', error: e.message }))
     child.on('close', (code) => {
       editors.delete(req.key)
+      controls.delete(req.key)
+      if (controlsWin && !controlsWin.isDestroyed()) controlsWin.close()
       if (!closed) send({ type: code === 0 ? 'closed' : 'error', error: code === 0 ? undefined : 'The plug-in window crashed' })
       if (code !== 0) send({ type: 'closed' })
     })

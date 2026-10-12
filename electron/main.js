@@ -449,6 +449,8 @@ const FLOAT_SIZES = {
   // pane), so it needs real width — below ~760 the detail pane stops being
   // usable and the tab strip starts scrolling.
   profile:       { width: 1180, height: 820, minWidth: 760, minHeight: 560 },
+  // A VST3 plug-in's parameters as sliders (vstHost.js). One window per plug-in.
+  'plugin-controls': { width: 400, height: 640, minWidth: 320, minHeight: 280 },
 }
 // Window titles for the pop-outs. Every window boots the same renderer bundle,
 // whose <title> is "unreleased", so without these each pop-out would be an
@@ -463,9 +465,11 @@ const FLOAT_TITLES = {
   equalizer:      'Equalizer',
   convert:        'Convert Format',
   profile:        'Profile',
+  'plugin-controls': 'Plug-in Controls',
 }
-function floatTitle(view) {
-  return `${FLOAT_TITLES[view] || 'Unreleased'} — Unreleased`
+function floatTitle(view, params) {
+  const name = typeof params?.title === 'string' && params.title ? params.title : FLOAT_TITLES[view]
+  return `${name || 'Unreleased'} — Unreleased`
 }
 
 // Extra per-view BrowserWindow options on top of FLOAT_SIZES. The mini
@@ -620,27 +624,29 @@ function floatBounds(view) {
   }
 }
 
-function createFloatWindow(view, params) {
+// `id` lets a view have several windows (one per plug-in); returns the window.
+function createFloatWindow(view, params, id) {
+  const slot = id ? `${view}:${id}` : view
   const query = {
     float: view,
     ...sanitizeFloatParams(params),
     ...(runtimePlatform.nativeWayland && view === 'mini-player' ? { fixedHeight: 'true' } : {}),
   }
-  const existing = floatWindows.get(view)
+  const existing = floatWindows.get(slot)
   if (existing && !existing.isDestroyed()) {
     if (existing.isMinimized()) existing.restore()
     existing.show()
     if (view !== 'mini-player') existing.focus()
     existing.webContents.send('float-params', query)
     if (view === 'mini-player' && appSettings.miniPlayerHidesWindows) hideWindowsForMiniPlayer()
-    return
+    return existing
   }
   const win = new BrowserWindow({
     ...FLOAT_SIZES[view],
     ...floatBounds(view),
     ...(runtimePlatform.nativeWayland && view === 'mini-player' ? { minHeight: MINI_EXPANDED_MIN_HEIGHT } : {}),
     ...(FLOAT_OPTIONS[view] || {}),
-    title: floatTitle(view),
+    title: floatTitle(view, params),
     backgroundColor: '#0a0a0a', icon: iconPath, frame: false,
     webPreferences: {
       nodeIntegration: false, contextIsolation: true, webSecurity: true, preload: preloadPath,
@@ -651,7 +657,7 @@ function createFloatWindow(view, params) {
   // moment the page loads.
   win.on('page-title-updated', (e) => e.preventDefault())
   rememberSize(win, view)
-  floatWindows.set(view, win)
+  floatWindows.set(slot, win)
   broadcastFloatWindows()
   win.once('ready-to-show', () => {
     win.show()
@@ -667,7 +673,7 @@ function createFloatWindow(view, params) {
     if (view === 'mini-player' && appSettings.miniPlayerHidesWindows) hideWindowsForMiniPlayer()
   })
   win.on('closed', () => {
-    if (floatWindows.get(view) === win) floatWindows.delete(view)
+    if (floatWindows.get(slot) === win) floatWindows.delete(slot)
     broadcastFloatWindows()
     // Always restore on close (even if the setting was turned off meanwhile) so
     // hidden windows can never be stranded.
@@ -686,6 +692,7 @@ function createFloatWindow(view, params) {
   } else {
     win.loadFile(path.join(__dirname, '../dist/index.html'), { query })
   }
+  return win
 }
 
 function closeAllFloatWindows() {
@@ -2237,7 +2244,7 @@ ipcMain.handle('session-zip-remove', (_, dir, filename) => {
 })
 
 // Session Maker VST3 plug-ins (see vstHost.js)
-vstHost.register({ app, ipcMain, dialog, shell, BrowserWindow })
+vstHost.register({ app, ipcMain, dialog, shell, BrowserWindow, openControls: (key, title) => createFloatWindow('plugin-controls', { key, title }, key) })
 
 ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {

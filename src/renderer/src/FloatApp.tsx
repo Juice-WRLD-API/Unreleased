@@ -4,6 +4,7 @@ import { useStore, useStorePick } from './store/useStore'
 import { useThemeEffects } from './lib/themeEffects'
 import { apiFetch, JWApiSong } from './lib/juicewrldApi'
 import { showStaffProfile, staffProfileView } from './lib/userApi'
+import { vstApi, type VstParam } from './lib/vstPlugins'
 import ErrorBoundary from './components/ErrorBoundary'
 
 const Settings = lazy(() => import('./components/Settings'))
@@ -13,6 +14,7 @@ const EditorPage = lazy(() => import('./components/EditorPage'))
 const LocalEditorPage = lazy(() => import('./components/LocalEditorPage'))
 const MiniPlayer = lazy(() => import('./components/MiniPlayer'))
 const EqualizerPanel = lazy(() => import('./components/EqualizerPanel'))
+const VstControlsPanel = lazy(() => import('./components/VstControlsPanel'))
 // Not lazy: every list view already imports the info modal statically, so
 // it lives in the main chunk regardless — a dynamic import here would just
 // trigger Vite's mixed-import warning without splitting anything.
@@ -31,12 +33,12 @@ function initialParam(key: string): string | null {
 // and song-info have modal chrome of their own that doubles as the handle).
 // Mirrors App's WindowControls but through the sender-scoped *Self IPC —
 // the plain variants would minimize/close the MAIN window.
-function FloatTitleBar(): JSX.Element {
+function FloatTitleBar({ title }: { title?: string }): JSX.Element {
   const [maximized, setMaximized] = useState(false)
   const btn = 'flex items-center justify-center w-11 h-7 text-text-muted hover:text-text-primary transition-colors'
   return (
     <div className="shrink-0 flex h-7 border-b border-[var(--border)]">
-      <div className="flex-1 select-none" style={{ WebkitAppRegion: 'drag' } as CSSProperties} />
+      <div className="flex-1 min-w-0 select-none flex items-center px-3 text-xs text-text-secondary truncate" style={{ WebkitAppRegion: 'drag' } as CSSProperties}>{title}</div>
       <div className="flex" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
         <button className={btn} onClick={() => el?.minimizeSelf()} title="Minimize">
           <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor"><rect width="10" height="1"/></svg>
@@ -193,6 +195,32 @@ function FloatProfile(): JSX.Element {
   )
 }
 
+// One VST3 plug-in's parameters as sliders. The list and its changes come from the
+// plug-in host through main (vstHost.js); a slider move goes straight back to it.
+function FloatPluginControls(): JSX.Element {
+  const key = initialParam('key') ?? ''
+  const [params, setParams] = useState<VstParam[] | null>(null)
+  useEffect(() => {
+    const api = vstApi()
+    if (!api || !key) return
+    const off = api.onVstControls((e) => {
+      if (e.key !== key) return
+      if (e.type === 'params' && e.params) setParams(e.params)
+      else if (e.type === 'param') setParams((cur) => cur && cur.map((p) => (p.id === e.id ? { ...p, value: e.value ?? p.value, text: e.text ?? p.text } : p)))
+    })
+    void api.vstControlsGet(key).then((list) => { if (list?.length) setParams((cur) => cur ?? list) })
+    return off
+  }, [key])
+  const set = (id: number, value: number): void => {
+    setParams((cur) => cur && cur.map((p) => (p.id === id ? { ...p, value } : p)))
+    void vstApi()?.vstEditParam(key, id, value)
+  }
+  if (!params) {
+    return <div className="flex-1 flex items-center justify-center"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
+  }
+  return <VstControlsPanel params={params} onSet={set} />
+}
+
 // Shell for floating pop-out windows: main.js createFloatWindow opens a second
 // frameless BrowserWindow on the same bundle with ?float=<view> (+ params),
 // and main.tsx mounts this instead of <App/> — a single view filling the whole
@@ -211,7 +239,7 @@ export default function FloatApp({ view }: { view: string }): JSX.Element {
     // The equalizer pop-out matches the in-app popover's surface (bg-surface-
     // highest) so detaching it doesn't visibly change the panel's color.
     <div className={`h-dvh overflow-hidden flex flex-col ${view === 'equalizer' ? 'bg-surface-highest' : 'bg-surface'}`}>
-      {(view === 'editor' || view === 'local-editor' || view === 'equalizer' || view === 'profile') && <FloatTitleBar />}
+      {(view === 'editor' || view === 'local-editor' || view === 'equalizer' || view === 'profile' || view === 'plugin-controls') && <FloatTitleBar title={view === 'plugin-controls' ? initialParam('title') ?? undefined : undefined} />}
       {/* A pop-out's view is the whole window's content, so an uncaught render
           error left nothing but a blank window with no way back — the boundary
           keeps the error (and its stack) visible and reloadable in place. */}
@@ -224,6 +252,7 @@ export default function FloatApp({ view }: { view: string }): JSX.Element {
             : view === 'mini-player' ? <MiniPlayer />
             : view === 'convert' ? <FloatConvert />
             : view === 'profile' ? <FloatProfile />
+            : view === 'plugin-controls' ? <FloatPluginControls />
             : view === 'equalizer' ? (
               <div className="flex-1 min-h-0 overflow-y-auto flex justify-center">
                 <EqualizerPanel floating />

@@ -1006,12 +1006,22 @@ struct Editor : IComponentHandler, IPlugFrame
 			return std::string ();
 		return text16 (s);
 	}
+	/** The plug-in's own names for a stepped parameter's positions ("Off", "Low", "High"...). */
+	std::string paramOptions (const ParameterInfo& info)
+	{
+		if (info.stepCount < 2 || info.stepCount > 32)
+			return "null";
+		std::string out = "[";
+		for (int32 k = 0; k <= info.stepCount; k++)
+			out += (k ? "," : "") + jsonStr (paramText (info.id, static_cast<double> (k) / info.stepCount));
+		return out + "]";
+	}
 	std::string paramJson (int32 i, const ParameterInfo& info, double v)
 	{
 		return "{\"id\":" + std::to_string (info.id) + ",\"name\":" + jsonStr (text16 (info.title).empty () ? text16 (info.shortTitle) : text16 (info.title)) +
 		       ",\"units\":" + jsonStr (text16 (info.units)) + ",\"steps\":" + std::to_string (info.stepCount) +
 		       ",\"def\":" + std::to_string (info.defaultNormalizedValue) + ",\"value\":" + std::to_string (v) +
-		       ",\"text\":" + jsonStr (paramText (info.id, v)) +
+		       ",\"text\":" + jsonStr (paramText (info.id, v)) + ",\"options\":" + paramOptions (info) +
 		       ",\"ro\":" + (info.flags & ParameterInfo::kIsReadOnly ? "true" : "false") +
 		       ",\"bypass\":" + (info.flags & ParameterInfo::kIsBypass ? "true" : "false") + "}";
 	}
@@ -1019,6 +1029,17 @@ struct Editor : IComponentHandler, IPlugFrame
 	{
 		int32 n = plug.controller->getParameterCount ();
 		shown.assign (n > 0 ? n : 0, -1.0);
+		// Plug-ins expose a "MIDI CC n|channel" parameter per controller and channel so hosts can
+		// map MIDI to them - thousands of placeholders that aren't controls.
+		std::vector<ParamID> midiMapped;
+		if (auto map = U::cast<IMidiMapping> (plug.controller))
+			for (int16 ch = 0; ch < 16; ch++)
+				for (int16 cc = 0; cc < 130; cc++)
+				{
+					ParamID mapped;
+					if (map->getMidiControllerAssignment (0, ch, cc, mapped) == kResultTrue)
+						midiMapped.push_back (mapped);
+				}
 		std::string out = "{\"type\":\"params\",\"params\":[";
 		bool first = true;
 		for (int32 i = 0; i < n; i++)
@@ -1029,6 +1050,9 @@ struct Editor : IComponentHandler, IPlugFrame
 			double v = plug.controller->getParamNormalized (info.id);
 			shown[i] = v;
 			if (info.flags & (ParameterInfo::kIsHidden | ParameterInfo::kIsProgramChange))
+				continue;
+			if (text16 (info.title).rfind ("MIDI", 0) == 0 &&
+			    std::find (midiMapped.begin (), midiMapped.end (), info.id) != midiMapped.end ())
 				continue;
 			out += (first ? "" : ",") + paramJson (i, info, v);
 			first = false;
