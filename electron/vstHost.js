@@ -13,6 +13,7 @@
 //   vst-process        run audio through a chain of plug-ins (offline, latency trimmed)
 //   vst-edit-open      open a plug-in's own window; its state comes back as 'vst-editor' events
 //   vst-edit-close     close one
+//   vst-edit-param     generic editors (req.generic): set one parameter; 'params'/'param' events carry the list and changes
 
 const { spawn } = require('child_process')
 const fs = require('fs')
@@ -294,14 +295,20 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
     const exe = helper()
     if (!exe) return { error: 'The plug-in host is missing' }
     const have = editors.get(req.key)
-    if (have) { have.stdin.write('focus\n'); return {} }
+    if (have) {
+      if (!!have.generic !== !!req.generic) return { error: "Close this plug-in's other window first" }
+      have.stdin.write('focus\n')
+      return {}
+    }
     const win = BrowserWindow.fromWebContents(event.sender)
     const args = ['edit']
-    if (win) {
+    if (req.generic) args.push('--generic')
+    else if (win) {
       const h = win.getNativeWindowHandle()
       args.push('--owner', String(h.length >= 8 ? h.readBigUInt64LE(0) : h.readUInt32LE(0)))
     }
     const child = spawn(exe, args, { windowsHide: false })
+    child.generic = !!req.generic
     editors.set(req.key, child)
     const send = (msg) => { if (!event.sender.isDestroyed()) event.sender.send('vst-editor', { key: req.key, ...msg }) }
     let buf = ''
@@ -333,6 +340,12 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
   ipcMain.handle('vst-edit-close', (_, key) => {
     const child = editors.get(key)
     if (child) child.stdin.write('close\n')
+  })
+  // Generic controls: one parameter's new normalized value (0-1) for an open generic editor.
+  ipcMain.handle('vst-edit-param', (_, key, param, value) => {
+    const child = editors.get(key)
+    if (!child || !child.generic || !Number.isFinite(param) || !Number.isFinite(value)) return
+    child.stdin.write(JSON.stringify({ cmd: 'set', param, value }) + '\n')
   })
   app.on('before-quit', () => { for (const child of editors.values()) try { child.stdin.write('close\n') } catch {} })
 }

@@ -26,7 +26,14 @@ export interface VstScan {
   scannedAt: number | null
   scanning: boolean
 }
-export interface VstEditorEvent { key: string; type: 'open' | 'state' | 'closed' | 'error'; state?: string; error?: string }
+/** One plug-in parameter in the generic controls. `value` is normalized 0-1; `text` is the plug-in's own readout. */
+export interface VstParam { id: number; name: string; units: string; steps: number; def: number; value: number; text: string; ro: boolean; bypass: boolean }
+export interface VstEditorEvent {
+  key: string; type: 'open' | 'state' | 'closed' | 'error' | 'params' | 'param'
+  state?: string; error?: string
+  /** 'params': the full list. 'param': one change (id, value, text). */
+  params?: VstParam[]; id?: number; value?: number; text?: string
+}
 export interface PluginRef { path: string; cid: string; state: string }
 
 interface VstApi {
@@ -38,8 +45,9 @@ interface VstApi {
   vstOpenFolder: (folder: string) => Promise<boolean>
   vstShowModule: (path: string) => Promise<boolean>
   vstProcess: (req: { sampleRate: number; bpm: number; chain: PluginRef[]; channels: Float32Array[] }) => Promise<{ channels?: Float32Array<ArrayBuffer>[]; error?: string; plugin?: number }>
-  vstEditOpen: (req: { key: string; lanes?: string[]; path: string; cid: string; state: string; title: string; sampleRate: number }) => Promise<{ error?: string }>
+  vstEditOpen: (req: { key: string; generic?: boolean; lanes?: string[]; path: string; cid: string; state: string; title: string; sampleRate: number }) => Promise<{ error?: string }>
   vstEditClose: (key: string) => Promise<void>
+  vstEditParam: (key: string, param: number, value: number) => Promise<void>
   onVstEditor: (cb: (e: VstEditorEvent) => void) => () => void
   onVstPlugins: (cb: (l: VstScan) => void) => () => void
 }

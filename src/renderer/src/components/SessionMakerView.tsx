@@ -8,7 +8,8 @@ import { useStore } from '../store/useStore'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { onOpenSessionRequest, takePendingSession } from '../lib/sessionMakerOpen'
 import { formatBytes } from '../lib/format'
-import { useVstPlugins, vstApi, vstPlugins, type VstScan } from '../lib/vstPlugins'
+import { useVstPlugins, vstApi, vstPlugins, type VstParam, type VstScan } from '../lib/vstPlugins'
+import VstControlsPanel from './VstControlsPanel'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import type { JWApiFileEntry } from '../lib/juicewrldApi'
 import {
@@ -1022,6 +1023,25 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
       title: `${pl.name} - ${where}`, sampleRate: engine.nativePlayback ? 48000 : audioContext().sampleRate,
     }).then((r) => { if (r.error) alert(r.error) })
   }, [])
+  // The same plug-in as plain sliders, for any VST3 - by pluginEditorKey.
+  const [controls, setControls] = useState<ReadonlyMap<string, { title: string; params: VstParam[] }>>(() => new Map())
+  const controlTitles = useRef(new Map<string, string>())
+  const controlPlugin = useCallback((lanes: string[], pl: SmPlugin, where: string) => {
+    const key = pluginEditorKey(lanes[0], pl.id)
+    editorLinks.current.set(key, lanes)
+    controlTitles.current.set(key, `${pl.name} - ${where}`)
+    void vstApi()?.vstEditOpen({
+      key, generic: true, lanes, path: pl.path, cid: pl.cid, state: pl.state ?? '',
+      title: `${pl.name} - ${where}`, sampleRate: engine.nativePlayback ? 48000 : audioContext().sampleRate,
+    }).then((r) => { if (r.error) alert(r.error) })
+  }, [])
+  const setControl = useCallback((key: string, id: number, value: number) => {
+    setControls((m) => {
+      const c = m.get(key)
+      return c ? new Map(m).set(key, { ...c, params: c.params.map((p) => (p.id === id ? { ...p, value } : p)) }) : m
+    })
+    void vstApi()?.vstEditParam(key, id, value)
+  }, [])
   const closePlugin = useCallback((trackId: string, pluginId: string) => { void vstApi()?.vstEditClose(pluginEditorKey(trackId, pluginId)) }, [])
   useEffect(() => {
     const api = vstApi()
@@ -1029,7 +1049,19 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     const open = new Set<string>()
     const off = api.onVstEditor((e) => {
       if (e.type === 'open') { open.add(e.key); setOpenEditors(new Set(open)) }
-      else if (e.type === 'closed') { open.delete(e.key); editorLinks.current.delete(e.key); setOpenEditors(new Set(open)) }
+      else if (e.type === 'closed') {
+        open.delete(e.key); editorLinks.current.delete(e.key); controlTitles.current.delete(e.key); setOpenEditors(new Set(open))
+        setControls((m) => { if (!m.has(e.key)) return m; const n = new Map(m); n.delete(e.key); return n })
+      }
+      else if (e.type === 'params' && e.params) {
+        setControls((m) => new Map(m).set(e.key, { title: controlTitles.current.get(e.key) ?? 'Plug-in', params: e.params! }))
+      }
+      else if (e.type === 'param' && e.id != null) {
+        setControls((m) => {
+          const c = m.get(e.key)
+          return c ? new Map(m).set(e.key, { ...c, params: c.params.map((p) => (p.id === e.id ? { ...p, value: e.value ?? p.value, text: e.text ?? p.text } : p)) }) : m
+        })
+      }
       else if (e.type === 'error') alert(e.error ?? 'The plug-in window failed')
       else if (e.type === 'state' && e.state) {
         // Tweaks in the plug-in's window land on its lane's plug-in - or every linked lane's -
@@ -1050,8 +1082,8 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     return () => { off(); for (const k of open) void api.vstEditClose(k) }
   }, [setLive])
   const pluginHost = useMemo<PluginHost | null>(
-    () => (vst.available ? { scan: vst.list, scanning: vst.scanning, open: openEditors, edit: editPlugin, manage: () => openSettings('plugins') } : null),
-    [vst.available, vst.list, vst.scanning, openEditors, editPlugin, openSettings],
+    () => (vst.available ? { scan: vst.list, scanning: vst.scanning, open: openEditors, edit: editPlugin, controls: controlPlugin, manage: () => openSettings('plugins') } : null),
+    [vst.available, vst.list, vst.scanning, openEditors, editPlugin, controlPlugin, openSettings],
   )
 
   // ── The FX popover: one lane, the selected lanes, or a take folder's lanes ──
@@ -2071,6 +2103,9 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
           onClose={() => setFxPop(null)}
         />
       )}
+      {[...controls].map(([key, c]) => (
+        <VstControlsPanel key={key} title={c.title} params={c.params} onSet={(id, v) => setControl(key, id, v)} onClose={() => { const at = key.indexOf(':'); closePlugin(key.slice(0, at), key.slice(at + 1)) }} />
+      ))}
       {renderCatMenu()}
       {/* Toolbar */}
       <div className="shrink-0 flex items-center gap-1 px-3 pt-8 pb-2 border-b border-[var(--border)]">
@@ -3119,6 +3154,8 @@ interface PluginHost {
   open: ReadonlySet<string>
   /** Opens a plug-in's window; `lanes` share it, the first one's settings show. */
   edit: (lanes: string[], pl: SmPlugin, where: string) => void
+  /** Same, but as plain sliders for the plug-in's parameters rather than its own window. */
+  controls: (lanes: string[], pl: SmPlugin, where: string) => void
   /** Settings → Plug-ins: folders, hidden plug-ins, the ones that failed. */
   manage: () => void
 }
@@ -3170,6 +3207,13 @@ function PluginList({ host, lanes, where, many, heading, onEdit }: {
               onClick={() => host.edit(on, pl, on.length === lanes.length ? where : on.length > 1 ? `${on.length} lanes` : lanes.find((t) => t.id === on[0])?.name ?? where)}
             >
               {pl.name}{open && <span className="ml-1 text-accent">●</span>}
+            </button>
+            <button
+              className={`${icon} text-text-muted hover:text-text-primary`}
+              title={`Simple controls for ${pl.name} - plain sliders for every parameter`}
+              onClick={() => host.controls(on, pl, on.length === lanes.length ? where : on.length > 1 ? `${on.length} lanes` : lanes.find((t) => t.id === on[0])?.name ?? where)}
+            >
+              <SlidersHorizontal size={12} />
             </button>
             {partial && (
               <button

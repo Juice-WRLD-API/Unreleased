@@ -906,6 +906,7 @@ int runProcess ()
 // to the app whenever it changes.
 
 constexpr UINT WM_HOST_FOCUS = WM_APP + 1;
+constexpr UINT WM_HOST_SET = WM_APP + 2;
 constexpr UINT_PTR kFlushTimer = 1;
 constexpr UINT_PTR kPollTimer = 2;
 
@@ -990,6 +991,81 @@ struct Editor : IComponentHandler, IPlugFrame
 		lastEdit = GetTickCount ();
 	}
 
+	// ── Generic mode: no plug-in window, the app draws sliders for the controller's parameters ──
+	bool generic {false};
+	std::vector<double> shown; // by parameter index: the value last sent to the app
+
+	static std::string text16 (const String128 s)
+	{
+		return StringConvert::convert (reinterpret_cast<const char16_t*> (s));
+	}
+	std::string paramText (ParamID id, double v)
+	{
+		String128 s {};
+		if (plug.controller->getParamStringByValue (id, v, s) != kResultOk)
+			return std::string ();
+		return text16 (s);
+	}
+	std::string paramJson (int32 i, const ParameterInfo& info, double v)
+	{
+		return "{\"id\":" + std::to_string (info.id) + ",\"name\":" + jsonStr (text16 (info.title).empty () ? text16 (info.shortTitle) : text16 (info.title)) +
+		       ",\"units\":" + jsonStr (text16 (info.units)) + ",\"steps\":" + std::to_string (info.stepCount) +
+		       ",\"def\":" + std::to_string (info.defaultNormalizedValue) + ",\"value\":" + std::to_string (v) +
+		       ",\"text\":" + jsonStr (paramText (info.id, v)) +
+		       ",\"ro\":" + (info.flags & ParameterInfo::kIsReadOnly ? "true" : "false") +
+		       ",\"bypass\":" + (info.flags & ParameterInfo::kIsBypass ? "true" : "false") + "}";
+	}
+	void sendParams ()
+	{
+		int32 n = plug.controller->getParameterCount ();
+		shown.assign (n > 0 ? n : 0, -1.0);
+		std::string out = "{\"type\":\"params\",\"params\":[";
+		bool first = true;
+		for (int32 i = 0; i < n; i++)
+		{
+			ParameterInfo info {};
+			if (plug.controller->getParameterInfo (i, info) != kResultOk)
+				continue;
+			double v = plug.controller->getParamNormalized (info.id);
+			shown[i] = v;
+			if (info.flags & (ParameterInfo::kIsHidden | ParameterInfo::kIsProgramChange))
+				continue;
+			out += (first ? "" : ",") + paramJson (i, info, v);
+			first = false;
+		}
+		sendLine (out + "]}");
+	}
+	/** Reports values the plug-in changed itself (a preset, its own automation). */
+	void pollParams ()
+	{
+		for (int32 i = 0; i < static_cast<int32> (shown.size ()); i++)
+		{
+			ParameterInfo info {};
+			if (plug.controller->getParameterInfo (i, info) != kResultOk)
+				continue;
+			double v = plug.controller->getParamNormalized (info.id);
+			if (std::abs (v - shown[i]) < 1e-9)
+				continue;
+			shown[i] = v;
+			sendLine ("{\"type\":\"param\",\"id\":" + std::to_string (info.id) + ",\"value\":" + std::to_string (v) +
+			          ",\"text\":" + jsonStr (paramText (info.id, v)) + "}");
+		}
+	}
+	void setParam (ParamID id, double v)
+	{
+		v = v < 0 ? 0 : v > 1 ? 1 : v;
+		plug.controller->setParamNormalized (id, v);
+		performEdit (id, v);
+		for (int32 i = 0; i < static_cast<int32> (shown.size ()); i++)
+		{
+			ParameterInfo info {};
+			if (plug.controller->getParameterInfo (i, info) == kResultOk && info.id == id)
+				shown[i] = plug.controller->getParamNormalized (id);
+		}
+		sendLine ("{\"type\":\"param\",\"id\":" + std::to_string (id) + ",\"value\":" + std::to_string (plug.controller->getParamNormalized (id)) +
+		          ",\"text\":" + jsonStr (paramText (id, plug.controller->getParamNormalized (id))) + "}");
+	}
+
 	tresult PLUGIN_API resizeView (IPlugView* v, ViewRect* r) override
 	{
 		if (!r || !v || !hwnd || resizing)
@@ -1058,8 +1134,13 @@ struct Editor : IComponentHandler, IPlugFrame
 				sendState (false);
 			}
 		}
-		else if (id == kPollTimer && !dirty)
-			sendState (false); // Changes that never went through performEdit, like a preset load.
+		else if (id == kPollTimer)
+		{
+			if (generic)
+				pollParams ();
+			if (!dirty)
+				sendState (false); // Changes that never went through performEdit, like a preset load.
+		}
 	}
 
 	void close ()
@@ -1135,7 +1216,16 @@ LRESULT CALLBACK editorProc (HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 				              SWP_NOZORDER | SWP_NOACTIVATE);
 			}
 			return 0;
+		case WM_HOST_SET:
+		{
+			std::unique_ptr<double> v (reinterpret_cast<double*> (lp));
+			if (ed && ed->generic)
+				ed->setParam (static_cast<ParamID> (wp), *v);
+			return 0;
+		}
 		case WM_HOST_FOCUS:
+			if (ed && ed->generic)
+				return 0;
 			if (IsIconic (hwnd))
 				ShowWindow (hwnd, SW_RESTORE);
 			SetForegroundWindow (hwnd);
@@ -1149,7 +1239,22 @@ LRESULT CALLBACK editorProc (HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	return DefWindowProcW (hwnd, msg, wp, lp);
 }
 
-int runEdit (HWND owner)
+int editLoop (std::unique_ptr<Editor> ed);
+
+void registerEditorClass (WNDCLASSEXW& wc)
+{
+	HINSTANCE inst = GetModuleHandleW (nullptr);
+	wc = {sizeof (WNDCLASSEXW)};
+	wc.style = CS_DBLCLKS;
+	wc.lpfnWndProc = editorProc;
+	wc.hInstance = inst;
+	wc.hCursor = LoadCursor (nullptr, IDC_ARROW);
+	wc.hIcon = LoadIcon (inst, MAKEINTRESOURCE (1));
+	wc.lpszClassName = L"UnreleasedPluginWindow";
+	RegisterClassExW (&wc);
+}
+
+int runEdit (HWND owner, bool generic)
 {
 	std::string line;
 	Json head;
@@ -1180,6 +1285,25 @@ int runEdit (HWND owner)
 		ed->data.prepare (*ed->plug.component, 64, kSample32);
 	ed->lastState = ed->plug.getState ();
 
+	if (generic)
+	{
+		// No plug-in window: a hidden one carries the timers and the app's commands.
+		WNDCLASSEXW wc;
+		registerEditorClass (wc);
+		ed->generic = true;
+		ed->hwnd = CreateWindowExW (0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+		if (!ed->hwnd)
+		{
+			sendLine ("{\"type\":\"error\",\"error\":\"Couldn't start the controls\"}");
+			return 1;
+		}
+		SetTimer (ed->hwnd, kFlushTimer, 30, nullptr);
+		SetTimer (ed->hwnd, kPollTimer, 500, nullptr);
+		sendLine ("{\"type\":\"open\",\"name\":" + jsonStr (ed->plug.name) + "}");
+		ed->sendParams ();
+		return editLoop (std::move (ed));
+	}
+
 	ed->view = owned (ed->plug.controller->createView (ViewType::kEditor));
 	if (!ed->view || ed->view->isPlatformTypeSupported (kPlatformTypeHWND) != kResultTrue)
 	{
@@ -1187,15 +1311,9 @@ int runEdit (HWND owner)
 		return 1;
 	}
 
-	HINSTANCE inst = GetModuleHandleW (nullptr);
-	WNDCLASSEXW wc {sizeof (WNDCLASSEXW)};
-	wc.style = CS_DBLCLKS;
-	wc.lpfnWndProc = editorProc;
-	wc.hInstance = inst;
-	wc.hCursor = LoadCursor (nullptr, IDC_ARROW);
-	wc.hIcon = LoadIcon (inst, MAKEINTRESOURCE (1));
-	wc.lpszClassName = L"UnreleasedPluginWindow";
-	RegisterClassExW (&wc);
+	WNDCLASSEXW wc;
+	registerEditorClass (wc);
+	HINSTANCE inst = wc.hInstance;
 
 	ViewRect size {};
 	if (ed->view->getSize (&size) != kResultTrue || size.getWidth () <= 0)
@@ -1237,8 +1355,12 @@ int runEdit (HWND owner)
 	SetTimer (ed->hwnd, kFlushTimer, 30, nullptr);
 	SetTimer (ed->hwnd, kPollTimer, 1000, nullptr);
 	sendLine ("{\"type\":\"open\",\"name\":" + jsonStr (ed->plug.name) + "}");
+	return editLoop (std::move (ed));
+}
 
-	// Commands from the app; the pipe closing means the app went away.
+/** Commands from the app, then the message loop. The pipe closing means the app went away. */
+int editLoop (std::unique_ptr<Editor> ed)
+{
 	HWND target = ed->hwnd;
 	std::thread ([target] {
 		std::string cmd;
@@ -1248,6 +1370,13 @@ int runEdit (HWND owner)
 				break;
 			if (cmd == "focus")
 				PostMessageW (target, WM_HOST_FOCUS, 0, 0);
+			else if (!cmd.empty () && cmd[0] == '{')
+			{
+				Json j;
+				if (parseJson (cmd, j) && j["cmd"].str () == "set")
+					PostMessageW (target, WM_HOST_SET, static_cast<WPARAM> (j["param"].num ()),
+					              reinterpret_cast<LPARAM> (new double (j["value"].num ())));
+			}
 		}
 		PostMessageW (target, WM_CLOSE, 0, 0);
 	}).detach ();
@@ -1296,9 +1425,15 @@ int wmain (int argc, wchar_t** argv)
 	else if (!args.empty () && args[0] == "edit")
 	{
 		HWND owner = nullptr;
-		if (args.size () >= 3 && args[1] == "--owner")
-			owner = reinterpret_cast<HWND> (static_cast<uintptr_t> (_strtoui64 (args[2].c_str (), nullptr, 10)));
-		rc = runEdit (owner);
+		bool generic = false;
+		for (size_t i = 1; i < args.size (); i++)
+		{
+			if (args[i] == "--generic")
+				generic = true;
+			else if (args[i] == "--owner" && i + 1 < args.size ())
+				owner = reinterpret_cast<HWND> (static_cast<uintptr_t> (_strtoui64 (args[++i].c_str (), nullptr, 10)));
+		}
+		rc = runEdit (owner, generic);
 	}
 	else
 		sendLine ("{\"ok\":false,\"error\":\"usage: vsthost list | scan <module> | process | edit [--owner HWND]\"}");
