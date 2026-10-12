@@ -1,117 +1,183 @@
-# unreleased - web
+# Unreleased (web)
 
-A music player for Juice WRLD - stream the full catalog of released and unreleased songs, right in your browser. Powered by the [Juice WRLD API](https://juicewrldapi.com).
+The browser version of Unreleased, a music player for Juice WRLD's unreleased
+catalogue built on the [Juice WRLD API](https://juicewrldapi.com). It runs live
+at **[player.juicewrldapi.com](https://player.juicewrldapi.com)**.
 
-> This is the deployed web build - see the [`app` branch](https://github.com/leanwrldd/unreleased/tree/app) for the full project (web + desktop), Stack, Development, and Branches docs. This README only covers what's actually usable at [player.juicewrldapi.com](https://player.juicewrldapi.com).
-
-![Version](https://img.shields.io/github/package-json/v/leanwrldd/unreleased/web?label=version&color=blue)
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/jwa)
-
-**▶ Play now:** [player.juicewrldapi.com](https://player.juicewrldapi.com) - installable as a PWA for an app-like, offline-capable experience
+This is the `web` branch. It shares most of its code with the desktop app
+(`app`), but has its own mobile layouts and leaves out everything that needs
+Electron. You can install it to your home screen as a web app; the Download
+page links the desktop, Android and iOS builds.
 
 ---
 
-## Features
+## What's in it
 
-### Browse & discover
+**Listening**
+- **Home**: a dashboard whose sections you can show or hide: recently played
+  (synced across devices), playlists, albums, 999 FM, news, games and your
+  listening stats.
+- **Tracker**: search and filter the whole API song catalogue, with
+  field-qualified search such as `artists:"Juice WRLD"`. You choose which
+  fields show in the list and in the detail panel, and drag to reorder them.
+- **Files**: browse the API's file archive, with previews, a text and `.lrc`
+  viewer, and ZIP downloads built in the browser.
+- **Playlists**: folders, custom covers, share links, following someone
+  else's playlist live, and JSON/M3U export.
+- **Player**: a queue with history, search and reshuffle, radio/shuffle mode,
+  automatic recovery when a stream stalls, synced lyrics, an equalizer with
+  volume boost, era covers and personal covers. It also shows on your phone's
+  lock screen.
+- **WRLD**: a full-screen now-playing view with blurred art, scrolling
+  synced lyrics, audio-reactive visualizers and 999 FM controls.
+- **999 FM**: the API's live radio, with listener votes and song suggestions.
+- **Downloads** can carry the song's lyrics and your cover art in the MP3.
 
-- **Tracker** - search the entire catalog (titles, artists, producers), filter by category and era, sort by any column; List, Detailed, and virtualized Grid view modes; collapsible category sidebar with era counts; infinite scroll that stays smooth through thousands of tracks
-- **999 FM** - live radio in the WRLD view: real-time metadata over WebSocket, vote to skip, suggest the next song, and preview the upcoming queue - the vote prompt surfaces anywhere in the app, not just on the WRLD page
-- **Files** - navigate the API filesystem directly, stream audio, and download files; drag files or folders in from your computer to upload, and drag to reorganize (staged as a batch before proposing)
-- **Statistics** - catalog-wide breakdowns, site-wide play stats, and an era timeline
-- **Song info** - full metadata for every track: titles, artists, producers, engineers, era, recording details, dates, and lyrics
-- **Bulk edit** - multi-select songs in the Tracker and edit shared fields (era, category, credits, and more) across all of them at once, with per-field replace/add/remove/append/fill/clear
-- **Changes feed** - a live stream of recent Tracker edits and comp-file changes, in the optional News tab (enable it in Settings → Appearance → Menu items)
-- **Home** - a landing page with recent tracks, albums, playlists, news, and a 999 FM quick-tune; choose which sections show in Settings
-- **Context menus everywhere** - right-click any song, playlist, or the player bar for play, queue, playlist, download, and edit actions
+**Sharing**
+- Track pages with real URLs, plus link previews for tracks, playlists,
+  profiles and news when they're posted on Discord, X and similar sites (see
+  [Social previews](#social-previews)).
+- Lyrics and now-playing image cards.
+- Share songs, playlists and news straight into chat.
 
-### Playback
+**Extras**
+- **Games**: Heardle (daily, practice and live 1v1), Wordle, and tier lists
+  saved to your account.
+- **Wrapped** for your own listening, and **Statistics** for the whole
+  catalogue.
+- **News** with channels and notifications.
+- **Last.fm** scrobbling.
+- **Customisation**: skins and themes, a sidebar or pill nav where you choose
+  and reorder the tabs, and rebindable keyboard shortcuts.
 
-- **Gapless playback** - the next track preloads into a second audio slot while the current one plays
-- **Radio mode** - 📻 toggle in the player bar plays endless random tracks, pre-fetching the next song and respecting your active category/era filters
-- **Queue** - drag to reorder, history and upcoming split, lazy loading for filtered queues
-- **Synced lyrics** - karaoke-style highlighting with smooth scrolling, cached per session; customize size, alignment, blur, and colors, and share a lyrics image card
-- **Visualizer** - audio-reactive visuals in the WRLD fullscreen, with corona, ripples, and lightning
-- **Excluded versions** - mark versions of a song to be skipped by shuffle-play
-- **Fine control** - crossfade (1–12 s), playback speed (0.5×–2× with an optional pitch-shift toggle for nightcore/slowed), sleep timer, and audio output device picker
-- **10-band equalizer & effects** - 14 genre presets, L/R balance, mono downmix, skip silence, reverb, and a safety limiter, in a panel you can pop out into its own always-on-top window (`Shift+E`)
-- **Last.fm scrobbling** - connect your account in Settings to scrobble what you play
-- **Lock screen support** - Media Session integration shows track info and playback controls on mobile lock screens and notification shades
+**Accounts and community**
+- Sign in with Discord, or with a username and password plus optional
+  two-factor auth. Your settings sync across devices.
+- Public profiles, liked songs, and API key management.
+- Song edit proposals, a synced-lyrics timing tool, bulk editing, file
+  ("comp") uploads, reports and feedback.
+- Roles (contributor, editor, manager, admin) with review queues, and an admin
+  console covering users, eras, albums, channels, broadcasts, CDN nodes and
+  beta builds.
+- End-to-end encrypted chat with servers, DMs, GIFs, link previews, device
+  linking and message search.
+- Donor file storage and playback, plus an optional peer-to-peer CDN for
+  downloads.
+- **Terminal**: a command line in the browser that can do almost everything
+  the UI does.
+- **API docs**, both in the app and as Markdown in [`docs/api-docs`](docs/api-docs).
 
-### Playlists & library
-
-- **Playlists** - Spotify-style hero with 2×2 cover mosaic, custom cover upload, descriptions, drag-to-reorder, JSON/M3U export, and zip-download of all tracks (built in your browser)
-- **Playlist folders** - organize playlists into folders, including folders within folders
-- **Sharing** - songs, playlists, and profiles get link previews; share any playlist via public link; anyone can play it without an account, or **Follow** it to always see the owner's current tracks
-- **Guest playlists** - not signed in? Build playlists anyway - they're saved to your browser instead of your account
-- **Liked songs** - heart in the player bar, synced to your account
-
-### Games & stats
-
-- **Heardle** - name the song from its opening seconds. Daily mode shares one puzzle a day with everyone; Personal replays the same rules on demand; Unlimited is fully configurable (guess count, reveal speed, start point, era/category filters); **1v1** matches you live against another player. Live leaderboards for Today, Streaks, and 1v1. Share your result to the clipboard, Wordle-style
-- **Wordle** - guess the song title letter by letter. Type it out on the keyboard (physical or on-screen) or find it by name in the search box; either way the guess has to be a real track whose title is exactly as long as the answer's, so the board narrows the catalog as you go. The keyboard colors in as you rule letters out. Daily shares one title a day with everyone, Unlimited draws them at random (guess count, era/category filters). Streaks, distribution and a spoiler-free share grid
-- **Tier List** - rank songs into S/A/B/C/D (or tiers you build and recolor yourself) by dragging them into rows, or tap-to-select then tap-a-row on touch. Multiple lists with album and era pools, saved to your account and optionally public on your profile
-- **Wrapped** - a listening summary built from your play counts, filterable by All time / 30 days / 7 days, with a recent-plays timeline
-
-### Chat
-
-- **End-to-end encrypted chat** - servers, channels, and DMs, with per-device keys you can share across your own devices and back up with a passphrase
-- **Servers** - roles and permissions, public server discovery, moderation (timeout, ban, site-wide restrictions), pinned and drag-to-reorder servers and DMs
-- **Messages** - GIF picker, emoji shortcodes, `@everyone` mentions, forwarding, and sharing songs, playlists, news, and lyric cards
-- **Slash commands** - `/np`, `/seen`, `/changelog`, `/broadcast`, `/promote`, `/demote`, `/role`, and more, with results shown as command cards
-- **Presence** - opt-in Now Playing sharing, with presence and read-receipt privacy toggles
-
-### Terminal
-
-- **Terminal page** - a built-in terminal with a nano editor, themes, and commands for the library, player, settings, user, and admin actions, covering anything the UI can do
-- **CLI** - a standalone CLI, available on npm and apt
-
-### Personalization
-
-- **Skins** - 9 built-in looks (including a dynamic "Now Playing" skin that recolors the app to match the current cover art), or build your own in a live color editor and import/export skins as files to share
-- **Gradient surfaces** - an optional accent-tinted gradient background behind the app, sidebar, and player
-- **Fonts** - 7 selectable typefaces for the app, with a separate one for lyrics; independently adjustable text size for each
-- **Configurable layout** - auto-hide nav, sidebar position, a reorderable and hideable side menu (and account-control row), and fully rebindable keyboard shortcuts
-- **Song personalization** - set a custom name, cover art, and preferred version for any song, and track your own play count for it
-- **Report & feedback** - flag an issue with any song, or send general feedback, right from the app
-
-### Accounts & community
-
-- **Sign-in** - Discord or username/password, with optional 2FA; liked songs, playlists, and settings sync across devices
-- **Public profiles** - bio, tier lists, playlists, and privacy settings
-- **Donor storage** - donors get cloud file storage (My files), donor playlists, in-app playback, and their own CDN nodes
-- **Editor tools** - submit song edits (a full form or a streamlined Basic layout) and propose new songs for admin review, link song versions, track proposal status, climb the leaderboard, earn badges
-- **Contributor role** - apply to contribute file changes (upload, replace, move, delete, new folders) to the compilation; propose right from the Files browser or a dedicated Contributor page, track status from your Contributor Profile, and withdraw a pending proposal any time
-- **Admin & Manager tools** - review song-edit and comp-file proposals (searchable, sortable), reports, and applications; manage albums, eras, versions, and tracklists; send broadcasts and manage CDN nodes; batch-approve or deny all pending proposals from one editor. Managers share the same review powers as Admins, short of full account/security access
+**Desktop app only, not available here:** local file library, offline
+downloads, audio format conversion, URL import, Discord Rich Presence, global
+hotkeys, mini player and pop-out windows.
 
 ---
 
-## Want more?
+## Phones and desktop browsers
 
-The **desktop app** (Windows, macOS, Linux) adds a local file library, offline downloads, format conversion, importing from YouTube/SoundCloud/etc., Discord Rich Presence, a system tray, and more - all built from this same codebase. Grab it from the [releases page](https://github.com/leanwrldd/unreleased/releases/latest), or see the [`app` branch](https://github.com/leanwrldd/unreleased/tree/app) for the full feature list and source.
+Most views come in two versions: `Component.desktop.tsx` and
+`Component.mobile.tsx`. The plain `Component.tsx` uses `responsiveView()` to
+load whichever one matches the screen size, so a phone never downloads the
+desktop layout. Phones get a bottom tab bar with a More sheet, full-height
+bottom sheets you can swipe to dismiss, and touch gestures. Desktop browsers
+get the same layout as the desktop app.
 
-There are also sideloaded native builds for **Android** (`Unreleased-android-v*.apk`, [releases](https://github.com/leanwrldd/unreleased/releases?q=android-v&expanded=true)) and **iOS** (`Unreleased-ios-v*.ipa`, [releases](https://github.com/leanwrldd/unreleased/releases?q=ios-v&expanded=true), installed via [AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io) since it's unsigned) - neither is on an app store, since both ship `unreleased`-catalog content.
+The service worker (`src/renderer/public/sw.js`) always loads the page HTML
+from the network, so nobody boots an old build. The cache is only an offline
+fallback, plus a cache for the hashed `/assets/` files.
 
 ---
 
-## Changelog
+## Running locally
 
-See [CHANGELOG.md](https://github.com/leanwrldd/unreleased/blob/app/CHANGELOG.md) on the `app` branch for the full, current version history.
+You need Node.js (22 or newer is what the project uses) and npm.
+
+```bash
+npm install
+npm run dev
+```
+
+The dev server runs on port `5173` and is reachable from your local network,
+so you can test on a phone. On Windows, `run.bat` does the same thing.
+
+### Local config
+
+Put any of these in `.env.local`. Every value is optional:
+
+| Variable | Used for |
+|---|---|
+| `VITE_AUTH_TOKEN` | An API token, so local dev skips signing in |
+| `VITE_LASTFM_API_KEY` / `VITE_LASTFM_API_SECRET` | Last.fm scrobbling |
+| `VITE_GIPHY_API_KEY` / `VITE_TENOR_API_KEY` | The chat GIF picker |
+| `VITE_JWAPI_WS` | Points the realtime sockets (chat, notifications, Heardle 1v1) at a different server |
+
+The API defaults to `https://juicewrldapi.com/juicewrld`. Developers can
+change it at runtime under **Settings → Developer → API servers**.
 
 ---
 
-## Credits
+## Scripts
 
-- **[juicewrldapi.com](https://juicewrldapi.com)** - the API powering everything: song metadata, streaming, lyrics, eras, categories, accounts, and the file browser
-- **juicewrldapi** on Discord - for the help and support building the integration
-- Built by **freakylatif** - find me on Discord
-- Join the **[Discord](https://discord.gg/jwa)** server
+| Command | What it does |
+|---|---|
+| `npm run dev` | Vite dev server |
+| `npm run build` | Typecheck and build into `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npm run docs:check-drift` | Report where `docs/api-docs/*.md` and the in-app docs disagree |
+| `npm run terminal:check-coverage` | List UI API calls the terminal can't reach yet |
+| `npm run social-preview` | Start the social preview server |
+
+---
+
+## Social previews
+
+The site is a single-page app, so crawlers that don't run JavaScript
+(Discordbot, for one) would only ever see the generic site tags.
+`server/social-preview.mjs` fixes that. nginx sends known bot user agents on
+`/track/`, `/shared/` and `/news/` links to it, and it returns a small page
+with the right title, description and image for that item. Track links can
+include a playable video embed. It also serves the link-preview endpoint the
+chat uses.
+
+[`server/nginx-social-preview.conf.example`](server/nginx-social-preview.conf.example)
+and [`server/social-preview.service.example`](server/social-preview.service.example)
+show how to wire it up. The header comment in the script lists its
+environment variables.
+
+---
+
+## Project layout
+
+```
+src/renderer/
+  index.html          entry page and default meta tags
+  public/             manifest, service worker, icons, fonts, sitemap
+  src/
+    App.tsx           app shell
+    components/       views (.desktop / .mobile pairs), modals, panels
+    lib/              API clients, chat crypto, CDN, player helpers
+    lib/terminal/     terminal commands, one module per area
+    hooks/  store/    React hooks and Zustand stores
+server/               social preview server and deployment examples
+docs/api-docs/        API reference in Markdown
+scripts/              release script, docs and terminal checks, data tools
+```
+
+---
+
+## Releasing
+
+`scripts\release.bat` runs `scripts/python/release.py`. It fast-forwards onto
+the remote branch, bumps the version, commits, pushes, and can tag a GitHub
+release with notes. There's no build artifact: the live site is served
+straight from a checkout of this branch.
+
+The `web` branch doesn't sync with `app`, `android` or `ios` automatically.
+Changes are ported between them by hand, and `app`'s `md/RELAY_LOG.md`
+records each port.
 
 ---
 
 ## License
 
-MIT
+[MIT](LICENSE).
