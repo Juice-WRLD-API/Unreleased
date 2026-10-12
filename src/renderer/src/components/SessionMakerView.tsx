@@ -8,14 +8,15 @@ import { useStore } from '../store/useStore'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { onOpenSessionRequest, takePendingSession } from '../lib/sessionMakerOpen'
 import { formatBytes } from '../lib/format'
+import { useVstPlugins, vstApi, vstPlugins, type VstScan } from '../lib/vstPlugins'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import type { JWApiFileEntry } from '../lib/juicewrldApi'
 import {
   PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, duplicateProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
   loadProjects, loadTake, newProject, parseProjectFile, peakOf, peekLoadProgress, placeAllTakes, projectEnd, renderProject, scaleBuffer,
   saveProject, scanSession, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
-  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, audioContext, chainActive, chainReadout, clipAudioState, clipSpeed, laneFx, pluginEditorKey, vstApi, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
-  type ChainKey, type LaneFx, type SmPlugin, type VstScan, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
+  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, audioContext, chainActive, chainReadout, clipAudioState, clipSpeed, laneFx, pluginEditorKey, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
+  type ChainKey, type LaneFx, type SmPlugin, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
 } from '../lib/sessionMaker'
 
 const HEADER_W = 208
@@ -1004,23 +1005,9 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
   const setSharedFx = useCallback((patch: Partial<Pick<SmProject, 'echoNote' | 'reverbSize'>>) => commit({ ...projectRef.current, ...patch }), [commit])
 
   // ── VST3 plug-ins (desktop app) ──
-  const [vstOk, setVstOk] = useState(false)
-  const [vstScan, setVstScan] = useState<VstScan | null>(null)
-  const [vstScanning, setVstScanning] = useState(false)
+  const vst = useVstPlugins()
   const [openEditors, setOpenEditors] = useState<ReadonlySet<string>>(() => new Set())
-  useEffect(() => { void vstApi()?.vstAvailable().then(setVstOk, () => {}) }, [])
-  const loadPlugins = useCallback((force = false) => {
-    const api = vstApi()
-    if (!api) return
-    setVstScanning(true)
-    api.vstScan(force).then(setVstScan, (err) => alert(err instanceof Error ? err.message : String(err))).finally(() => setVstScanning(false))
-  }, [])
-  const addPluginFolder = useCallback(() => {
-    const api = vstApi()
-    if (!api) return
-    setVstScanning(true)
-    api.vstAddFolder().then((r) => { if (r) setVstScan(r) }, () => {}).finally(() => setVstScanning(false))
-  }, [])
+  const openSettings = useStore((s) => s.openSettings)
   const editPlugin = useCallback((trackId: string, trackName: string, pl: SmPlugin) => {
     void vstApi()?.vstEditOpen({
       key: pluginEditorKey(trackId, pl.id), path: pl.path, cid: pl.cid, state: pl.state ?? '',
@@ -1050,8 +1037,8 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     return () => { off(); for (const k of open) void api.vstEditClose(k) }
   }, [setLive])
   const pluginHost = useMemo<PluginHost | null>(
-    () => (vstOk ? { scan: vstScan, scanning: vstScanning, open: openEditors, load: loadPlugins, addFolder: addPluginFolder, edit: editPlugin, close: closePlugin } : null),
-    [vstOk, vstScan, vstScanning, openEditors, loadPlugins, addPluginFolder, editPlugin, closePlugin],
+    () => (vst.available ? { scan: vst.list, scanning: vst.scanning, open: openEditors, edit: editPlugin, close: closePlugin, manage: () => openSettings('plugins') } : null),
+    [vst.available, vst.list, vst.scanning, openEditors, editPlugin, closePlugin, openSettings],
   )
 
   const selectTrack = useCallback((trackId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
@@ -3011,10 +2998,10 @@ interface PluginHost {
   scanning: boolean
   /** Plug-in windows open now, by pluginEditorKey. */
   open: ReadonlySet<string>
-  load: (force?: boolean) => void
-  addFolder: () => void
   edit: (trackId: string, trackName: string, pl: SmPlugin) => void
   close: (trackId: string, pluginId: string) => void
+  /** Settings → Plug-ins: folders, hidden plug-ins, the ones that failed. */
+  manage: () => void
 }
 
 /** A lane's VST3 plug-ins, in order, and the picker for adding one. */
@@ -3024,12 +3011,14 @@ function PluginList({ host, track, many, heading, onChange }: {
 }): JSX.Element {
   const [adding, setAdding] = useState(false)
   const [query, setQuery] = useState('')
-  const { scan, scanning, load } = host
-  useEffect(() => { if (adding && !scan && !scanning) load() }, [adding, scan, scanning, load])
+  const { scan, scanning } = host
+  useEffect(() => { if (adding && !scan && !scanning) void vstPlugins.load() }, [adding, scan, scanning])
   const list = track.plugins ?? []
   const set = (next: SmPlugin[]): void => onChange({ plugins: next.length ? next : undefined })
   const q = query.trim().toLowerCase()
-  const found = (scan?.plugins ?? []).filter((info) => !q || `${info.name} ${info.vendor}`.toLowerCase().includes(q))
+  const shown = (scan?.plugins ?? []).filter((info) => !info.hidden)
+  const found = shown.filter((info) => !q || `${info.name} ${info.vendor}`.toLowerCase().includes(q))
+  const hiddenCount = (scan?.plugins.length ?? 0) - shown.length
   const icon = 'w-5 h-5 shrink-0 rounded flex items-center justify-center transition-colors'
   const small = 'h-6 px-2 rounded-md text-[11px] flex items-center gap-1 bg-[var(--surface-raised)] text-text-secondary hover:text-text-primary disabled:opacity-40'
   return (
@@ -3095,7 +3084,7 @@ function PluginList({ host, track, many, heading, onChange }: {
             {!scan ? (
               <div className="px-1 py-2 text-[11px] text-text-muted flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Looking for plug-ins…</div>
             ) : !found.length ? (
-              <div className="px-1 py-2 text-[11px] text-text-muted">{scan.plugins.length ? 'No match' : 'No VST3 effects found - install some, or add the folder they\'re in.'}</div>
+              <div className="px-1 py-2 text-[11px] text-text-muted">{shown.length ? 'No match' : hiddenCount ? 'Every plug-in is hidden - bring some back in Manage plug-ins.' : 'No VST3 effects found - install some, or add the folder they\'re in.'}</div>
             ) : found.map((info) => (
               <button
                 key={`${info.path}|${info.cid}`}
@@ -3115,16 +3104,16 @@ function PluginList({ host, track, many, heading, onChange }: {
             ))}
           </div>
           <div className="flex items-center gap-1">
-            <button className={small} disabled={scanning} onClick={() => load(true)} title="Look through the plug-in folders again">
+            <button className={small} disabled={scanning} onClick={() => void vstPlugins.rescan()} title="Look through the plug-in folders again">
               <RefreshCw size={11} className={scanning ? 'animate-spin' : ''} /> Rescan
             </button>
-            <button className={small} disabled={scanning} onClick={host.addFolder} title={`Also look in another folder${scan?.folders.length ? ` - now also: ${scan.folders.join(', ')}` : ''}`}>
-              <FolderPlus size={11} /> Add folder…
+            <button className={small} onClick={host.manage} title="Plug-in folders, hidden plug-ins and the ones that wouldn't load - in Settings">
+              <Settings2 size={11} /> Manage…
             </button>
           </div>
-          {!!scan?.failed.length && (
-            <div className="text-[10px] text-text-muted" title={scan.failed.map((f) => `${f.path}: ${f.error}`).join('\n')}>
-              {scan.failed.length} couldn't be loaded
+          {(!!hiddenCount || !!scan?.failed.length) && (
+            <div className="text-[10px] text-text-muted">
+              {[hiddenCount ? `${hiddenCount} hidden` : '', scan?.failed.length ? `${scan.failed.length} couldn't be loaded` : ''].filter(Boolean).join(' · ')}
             </div>
           )}
         </div>

@@ -611,6 +611,17 @@ def step_build():
 
     ensure_bundled_stub()
 
+    # The Session Maker's VST3 host (native/vsthost) — win.extraResources ships
+    # build/vsthost/vsthost.exe, and electron-builder only warns when it's
+    # missing, so a build without it would quietly lose plug-in support.
+    info("Building the VST3 plug-in host (scripts/build-vsthost.mjs)…")
+    vsthost = subprocess.run("node scripts/build-vsthost.mjs", shell=True, cwd=ROOT)
+    print()
+    if vsthost.returncode != 0:
+        raise RuntimeError("VST3 host build failed. See output above.")
+    ok("VST3 host built → build/vsthost/vsthost.exe")
+    print()
+
     info("Packaging installer (electron-builder)…")
     result = subprocess.run(
         r"node_modules\.bin\electron-builder.cmd --win --publish never",

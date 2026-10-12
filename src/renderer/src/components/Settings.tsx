@@ -31,6 +31,8 @@ import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import VstPluginSettings from './VstPluginSettings'
+import { useVstPlugins } from '../lib/vstPlugins'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -84,13 +86,13 @@ const POPOUT_KINDS: { key: PopoutWindowKind; label: string; sub?: string }[] = [
 ]
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'plugins' | 'app' | 'developer' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `electronOnly`/`devOnly` mirror
 // the same gates the rows themselves are rendered behind, so a search never
 // offers to jump somewhere the tab doesn't actually exist.
-const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOnly?: boolean; devOnly?: boolean }[] = [
+const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOnly?: boolean; devOnly?: boolean; pluginsOnly?: boolean }[] = [
   // Account
   { tab: 'account', label: 'Display name' },
   { tab: 'account', label: 'Profile photo' },
@@ -142,6 +144,11 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   // Library
   { tab: 'library', label: 'Library folders', sub: 'Local folders scanned into your library', electronOnly: true },
   { tab: 'library', label: 'Auto-refresh changed files', electronOnly: true },
+  // Plug-ins (desktop builds that can host VST3)
+  { tab: 'plugins', label: 'VST3 plug-ins', sub: 'Effects for the Session Maker\'s lanes', pluginsOnly: true },
+  { tab: 'plugins', label: 'Plug-in folders', sub: 'Where the app looks for VST3 plug-ins', pluginsOnly: true },
+  { tab: 'plugins', label: 'Hidden plug-ins', sub: 'Plug-ins left out of the Session Maker\'s lists', pluginsOnly: true },
+  { tab: 'plugins', label: 'Rescan plug-ins', pluginsOnly: true },
   // App
   { tab: 'app', label: 'Download folder', electronOnly: true },
   { tab: 'app', label: 'Offline songs folder', electronOnly: true },
@@ -766,6 +773,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   }, [recording, setHotkeyBinding, setGlobalHotkeyBinding])
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
+  // Plug-ins only exist where this build can host them (Windows desktop, for now).
+  const vstHost = useVstPlugins().available
+  const vstAvailable = !!vstHost
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -773,6 +783,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     { id: 'playback', label: 'Playback', icon: Volume2 },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     ...(isElectron ? [{ id: 'library' as Tab, label: 'Library', icon: FolderOpen }] : []),
+    ...(isElectron && vstAvailable ? [{ id: 'plugins' as Tab, label: 'Plug-ins', icon: AudioLines }] : []),
     ...(isElectron ? [{ id: 'app' as Tab, label: 'App', icon: Monitor }] : []),
     ...(isElectron && developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench }] : []),
     { id: 'about', label: 'About', icon: Info },
@@ -781,6 +792,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   useEffect(() => {
     if (tab === 'developer' && !developerMode) setTab('app')
   }, [tab, developerMode, account?.is_donor])
+  useEffect(() => {
+    if (tab === 'plugins' && vstHost === false) setTab('app')
+  }, [tab, vstHost])
 
   // ── Settings search — a flat filter over SETTINGS_SEARCH_INDEX rather than
   // per-tab content, since matches can live on a tab you're not currently
@@ -792,6 +806,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
         (!r.electronOnly || isElectron) &&
         (!r.devOnly || developerMode) &&
+        (!r.pluginsOnly || vstAvailable) &&
         (r.label.toLowerCase().includes(settingsQueryTrimmed) || r.sub?.toLowerCase().includes(settingsQueryTrimmed))
       )
     : []
@@ -2452,6 +2467,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                 </div>
               </div>
             )}
+
+            {/* ── Plug-ins ── */}
+            {!settingsQueryTrimmed && tab === 'plugins' && isElectron && vstAvailable && <VstPluginSettings />}
 
             {/* ── App ── */}
             {!settingsQueryTrimmed && tab === 'app' && isElectron && (

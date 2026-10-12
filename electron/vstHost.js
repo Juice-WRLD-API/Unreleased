@@ -5,6 +5,10 @@
 //   vst-available      whether plug-ins can be used here
 //   vst-scan           the installed effects, cached by module and re-checked when one changes
 //   vst-add-folder     pick another folder to look in, then scan
+//   vst-remove-folder  stop looking in one of those
+//   vst-set-hidden     hide plug-ins from the Session Maker's lists, or bring them back
+//   vst-open-folder    open a plug-in folder in Explorer; vst-show-module shows one module
+//   Every change to the list goes out to all windows as 'vst-plugins'.
 //   vst-process        run audio through a chain of plug-ins (offline, latency trimmed)
 //   vst-edit-open      open a plug-in's own window; its state comes back as 'vst-editor' events
 //   vst-edit-close     close one
@@ -16,7 +20,7 @@ const path = require('path')
 const SCAN_TIMEOUT = 20000
 const SCAN_PARALLEL = 3
 
-function register({ app, ipcMain, dialog, BrowserWindow }) {
+function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
   const helper = () => {
     if (process.platform !== 'win32') return null
     const p = app.isPackaged
@@ -24,14 +28,27 @@ function register({ app, ipcMain, dialog, BrowserWindow }) {
       : path.join(__dirname, '..', 'build', 'vsthost', 'vsthost.exe')
     return fs.existsSync(p) ? p : null
   }
+  // userData/vst-plugins.json: what each module held when last scanned (keyed by path,
+  // re-scanned when its size or date changes), extra folders to look in, and the
+  // plug-ins hidden from the lists ("path|cid").
   const cacheFile = () => path.join(app.getPath('userData'), 'vst-plugins.json')
   const readCache = () => {
     try {
       const c = JSON.parse(fs.readFileSync(cacheFile(), 'utf8'))
-      return { modules: c.modules || {}, folders: Array.isArray(c.folders) ? c.folders : [] }
-    } catch { return { modules: {}, folders: [] } }
+      return {
+        modules: c.modules || {},
+        folders: Array.isArray(c.folders) ? c.folders : [],
+        hidden: Array.isArray(c.hidden) ? c.hidden : [],
+        scannedAt: c.scannedAt || null,
+      }
+    } catch { return { modules: {}, folders: [], hidden: [], scannedAt: null } }
   }
   const writeCache = (c) => { try { fs.writeFileSync(cacheFile(), JSON.stringify(c)) } catch {} }
+  /** The folders Windows plug-in installers use - always looked in. */
+  const standardFolders = () => [
+    path.join(process.env.CommonProgramFiles || 'C:\\Program Files\\Common Files', 'VST3'),
+    ...(process.env.LOCALAPPDATA ? [path.join(process.env.LOCALAPPDATA, 'Programs', 'Common', 'VST3')] : []),
+  ]
 
   /** Runs the helper and collects stdout. Resolves with what it printed, even on a crash. */
   const run = (args, input, timeout) => new Promise((resolve) => {
@@ -69,7 +86,6 @@ function register({ app, ipcMain, dialog, BrowserWindow }) {
     return out
   }
 
-  let scanning = null
   const scan = async (force) => {
     const cache = readCache()
     const listed = firstLine((await run(['list'], null, SCAN_TIMEOUT)).out).head
@@ -95,33 +111,53 @@ function register({ app, ipcMain, dialog, BrowserWindow }) {
       await next()
     }
     await Promise.all(Array.from({ length: SCAN_PARALLEL }, next))
-    writeCache({ modules, folders: cache.folders })
-    return listing(modules)
+    // Folders and hidden plug-ins may have changed while it ran.
+    writeCache({ ...readCache(), modules, scannedAt: Date.now() })
   }
-  const listing = (modules) => {
+  /** Scans after any scan already running, so a folder added mid-scan is still looked in. */
+  let scanning = null
+  const rescan = (force) => {
+    const settled = (scanning || Promise.resolve())
+      .then(() => scan(force))
+      .catch(() => {})
+      .then(() => { if (scanning === settled) scanning = null })
+    scanning = settled
+    // After it's cleared, so the list that goes out no longer says it's scanning.
+    return settled.then(changed)
+  }
+
+  const listing = () => {
+    const cache = readCache()
+    const hidden = new Set(cache.hidden)
     const plugins = []
     const failed = []
-    for (const [p, m] of Object.entries(modules)) {
+    for (const [p, m] of Object.entries(cache.modules)) {
       if (m.error) failed.push({ path: p, error: m.error })
       for (const c of m.classes) {
         // Instruments need notes; the Session Maker only has audio to give them.
         if (/instrument/i.test(c.sub || '') && !/fx/i.test(c.sub || '')) continue
-        plugins.push({ path: p, cid: c.cid, name: c.name, vendor: c.vendor || '', version: c.version || '', sub: c.sub || '' })
+        plugins.push({ path: p, cid: c.cid, name: c.name, vendor: c.vendor || '', version: c.version || '', sub: c.sub || '', hidden: hidden.has(`${p}|${c.cid}`) })
       }
     }
     plugins.sort((a, b) => a.name.localeCompare(b.name))
-    return { plugins, failed, folders: readCache().folders }
+    failed.sort((a, b) => a.path.localeCompare(b.path))
+    return { plugins, failed, folders: cache.folders, standardFolders: standardFolders(), scannedAt: cache.scannedAt, scanning: !!scanning }
+  }
+  /** Tells every window - the Session Maker and Settings can both be showing the list. */
+  const changed = () => {
+    const l = listing()
+    for (const w of BrowserWindow.getAllWindows()) if (!w.webContents.isDestroyed()) w.webContents.send('vst-plugins', l)
+    return l
   }
 
   ipcMain.handle('vst-available', () => !!helper())
   ipcMain.handle('vst-scan', async (_, force) => {
-    if (!helper()) return { plugins: [], failed: [], folders: [] }
-    if (!force) {
-      const cache = readCache()
-      if (Object.keys(cache.modules).length && !scanning) return listing(cache.modules)
-    }
-    if (!scanning) scanning = scan(!!force).finally(() => { scanning = null })
-    return scanning
+    if (!helper()) return { plugins: [], failed: [], folders: [], standardFolders: [], scannedAt: null, scanning: false }
+    if (!force && scanning) return scanning.then(listing)
+    if (!force && readCache().scannedAt) return listing()
+    const job = rescan(!!force)
+    changed() // so every list shows it scanning
+    return job
   })
   ipcMain.handle('vst-add-folder', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -130,8 +166,44 @@ function register({ app, ipcMain, dialog, BrowserWindow }) {
     const cache = readCache()
     if (!cache.folders.includes(res.filePaths[0])) cache.folders.push(res.filePaths[0])
     writeCache(cache)
-    if (!scanning) scanning = scan(false).finally(() => { scanning = null })
-    return scanning
+    const job = rescan(false)
+    changed()
+    return job
+  })
+  const within = (p, dir) => path.normalize(p).toLowerCase().startsWith(path.normalize(dir).toLowerCase().replace(/[\\/]+$/, '') + path.sep)
+  ipcMain.handle('vst-remove-folder', (_, folder) => {
+    const cache = readCache()
+    if (!cache.folders.includes(folder)) return listing()
+    cache.folders = cache.folders.filter((f) => f !== folder)
+    // Its plug-ins go now (unless another folder still holds them) - no rescan to wait for.
+    const still = standardFolders().concat(cache.folders)
+    for (const p of Object.keys(cache.modules)) {
+      if (within(p, folder) && !still.some((f) => within(p, f))) delete cache.modules[p]
+    }
+    writeCache(cache)
+    return changed()
+  })
+  ipcMain.handle('vst-set-hidden', (_, keys, hide) => {
+    const cache = readCache()
+    const hidden = new Set(cache.hidden)
+    for (const k of Array.isArray(keys) ? keys : []) {
+      if (typeof k !== 'string') continue
+      if (hide) hidden.add(k)
+      else hidden.delete(k)
+    }
+    cache.hidden = [...hidden]
+    writeCache(cache)
+    return changed()
+  })
+  ipcMain.handle('vst-open-folder', async (_, folder) => {
+    if (!standardFolders().concat(readCache().folders).includes(folder)) return false
+    try { fs.mkdirSync(folder, { recursive: true }) } catch {}
+    return !(await shell.openPath(folder))
+  })
+  ipcMain.handle('vst-show-module', (_, p) => {
+    if (!Object.prototype.hasOwnProperty.call(readCache().modules, p)) return false
+    shell.showItemInFolder(p)
+    return true
   })
 
   ipcMain.handle('vst-process', async (_, req) => {
@@ -142,19 +214,63 @@ function register({ app, ipcMain, dialog, BrowserWindow }) {
     const input = [Buffer.from(JSON.stringify(head) + '\n'), ...chans.map((c) => Buffer.from(c.buffer, c.byteOffset, frames * 4))]
     // Generous: some plug-ins run slower than real time, and each one loads separately.
     const seconds = frames / (req.sampleRate || 48000)
-    const res = await run(['process'], input, 60000 + seconds * 4000 * req.chain.length)
-    const { head: out, rest } = firstLine(res.out)
+    const res = await runProcess(input, 60000 + seconds * 4000 * req.chain.length)
+    const out = res.head
     if (!out) return { error: res.error || `The plug-in host crashed (${res.code})` }
     if (!out.ok) return { error: out.error || 'The plug-in failed', plugin: out.plugin }
-    if (rest.length < out.channels * out.frames * 4) return { error: res.error || 'The plug-in host stopped early' }
-    // Copied out so each channel is its own aligned Float32Array.
-    const channels = []
-    for (let c = 0; c < out.channels; c++) {
-      const f = new Float32Array(out.frames)
-      rest.copy(Buffer.from(f.buffer), 0, c * out.frames * 4, (c + 1) * out.frames * 4)
-      channels.push(f)
-    }
-    return { channels }
+    if (!res.complete) return { error: res.error || 'The plug-in host stopped early' }
+    return { channels: res.channels }
+  })
+
+  /** Runs a 'process' job, writing the audio that comes back straight into one
+   *  Float32Array per channel - no gathering it all up first, so long takes don't
+   *  sit in memory twice. */
+  const runProcess = (input, timeout) => new Promise((resolve) => {
+    const exe = helper()
+    if (!exe) return resolve({ head: null, error: 'The plug-in host is missing' })
+    const child = spawn(exe, ['process'], { windowsHide: true })
+    let killed = false
+    const timer = setTimeout(() => { killed = true; child.kill() }, timeout)
+    let pending = Buffer.alloc(0)
+    let head = null
+    let channels = null
+    let chBytes = 0
+    let total = 0
+    let got = 0
+    child.stdout.on('data', (d) => {
+      if (!head) {
+        pending = Buffer.concat([pending, d])
+        const nl = pending.indexOf(10)
+        if (nl < 0) return
+        try { head = JSON.parse(pending.subarray(0, nl).toString('utf8')) } catch { head = { ok: false, error: 'The plug-in host sent something odd' } }
+        d = pending.subarray(nl + 1)
+        pending = null
+        if (head.ok && head.channels > 0 && head.frames > 0) {
+          channels = Array.from({ length: head.channels }, () => new Float32Array(head.frames))
+          chBytes = head.frames * 4
+          total = chBytes * head.channels
+        }
+      }
+      if (!channels) return
+      for (let off = 0; off < d.length && got < total;) {
+        const ch = Math.floor(got / chBytes)
+        const at = got % chBytes
+        const n = Math.min(d.length - off, chBytes - at)
+        d.copy(Buffer.from(channels[ch].buffer), at, off, off + n)
+        off += n
+        got += n
+      }
+    })
+    child.stderr.on('data', () => {})
+    child.stdin.on('error', () => {})
+    child.on('error', (e) => { clearTimeout(timer); resolve({ head: null, error: e.message }) })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      const complete = !!head && (!head.ok || got >= total)
+      resolve({ head, code, channels: channels || [], complete, error: killed ? 'Took too long' : null })
+    })
+    for (const part of input) child.stdin.write(part)
+    child.stdin.end()
   })
 
   const editors = new Map()

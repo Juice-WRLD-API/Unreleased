@@ -15,6 +15,7 @@ import { ls } from './persist'
 import { useStore } from '../store/useStore'
 import { openRemoteZip, readEntry, readEntryHeads, type LocalZip, type RemoteZip, type ZipEntry } from './remoteZip'
 import { toFileUrl } from './fileTypes'
+import { vstApi, type PluginRef } from './vstPlugins'
 
 export const SESSIONS_ROOT = 'Studio Sessions'
 
@@ -1052,9 +1053,10 @@ const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x)
 function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, audio: ClipAudio, from: number, at: number, until = Infinity): AudioBufferSourceNode | null {
   if (clip.muted || clip.length <= 0) return null
   const { buffer, rate, stretch } = audio
+  const origin = audio.origin ?? 0
   const speed = clipSpeed(clip)
   const u0 = Math.max(0, from - clip.start)
-  const uEnd = Math.min(clip.length, until - clip.start, (buffer.duration * stretch - clip.offset) / speed)
+  const uEnd = Math.min(clip.length, until - clip.start, ((origin + buffer.duration) * stretch - clip.offset) / speed)
   if (uEnd <= u0) return null
   const base = at + (clip.start - from) // context time of the clip's u=0
   const src = ctx.createBufferSource()
@@ -1108,8 +1110,9 @@ function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, audi
   } else {
     src.connect(g).connect(dest)
   }
-  // Offset and duration are in the buffer's own seconds: a stretched buffer runs `stretch` take seconds to each of its own.
-  src.start(Math.max(at, base + u0), (clip.offset + u0 * speed) / stretch, ((uEnd - u0) * speed) / stretch)
+  // Offset and duration are in the buffer's own seconds: a stretched buffer runs `stretch` take seconds to each of its own,
+  // and a plug-in run's buffer only holds the part of it from `origin` on.
+  src.start(Math.max(at, base + u0), Math.max(0, (clip.offset + u0 * speed) / stretch - origin), ((uEnd - u0) * speed) / stretch)
   return src
 }
 
@@ -1419,8 +1422,10 @@ export const clipStretch = (c: SmClip): number => Math.round((clipSpeed(c) / cli
 /** Where timeline time `t` falls in the clip's take, seconds. */
 export const takeTime = (c: SmClip, t: number): number => c.offset + (t - c.start) * clipSpeed(c)
 
-/** The buffer a clip plays, how fast it's read, and how many take seconds each of its seconds holds. */
-interface ClipAudio { buffer: AudioBuffer; rate: number; stretch: number }
+/** The buffer a clip plays, how fast it's read, and how many take seconds each of its seconds holds.
+ *  `origin` is where the buffer starts in the (stretched) take, seconds - a plug-in run only
+ *  holds the part of the take its clips use. Missing is 0. */
+interface ClipAudio { buffer: AudioBuffer; rate: number; stretch: number; origin?: number }
 
 /** What a clip plays from right now - nothing while its stretch is still being made, and
  *  dry while its lane's plug-ins are still running over it. */
@@ -1428,9 +1433,12 @@ function clipAudio(c: SmClip, bufferFor: BufferFor, fx: LaneFx | null = null): C
   const src = clipSource(c, bufferFor)
   if (!src) return undefined
   const stretch = clipStretch(c)
-  let buffer = stretch === 1 ? src : stretchEntry(src, stretch).buffer
+  const buffer = stretch === 1 ? src : stretchEntry(src, stretch).buffer
   if (!buffer) return undefined
-  if (fx) buffer = pluginRun(buffer, fx).buffer ?? buffer
+  if (fx && !c.muted) {
+    const run = pluginRun(buffer, fx, clipSpan(c, buffer))
+    if (run.buffer) return { buffer: run.buffer, rate: clipRate(c), stretch, origin: run.from / buffer.sampleRate }
+  }
   return { buffer, rate: clipRate(c), stretch }
 }
 
@@ -1443,8 +1451,8 @@ export function clipAudioState(c: SmClip, take: AudioBuffer, fx: LaneFx | null):
   const stretch = clipStretch(c)
   const buffer = stretch === 1 ? src : stretchEntry(src, stretch).buffer
   if (!buffer) return { stage: 'stretching' }
-  if (!fx) return { stage: 'ready' }
-  const run = pluginRun(buffer, fx)
+  if (!fx || c.muted) return { stage: 'ready' }
+  const run = pluginRun(buffer, fx, clipSpan(c, buffer))
   return run.error ? { stage: 'failed', error: run.error } : run.buffer ? { stage: 'ready' } : { stage: 'plugins' }
 }
 
@@ -1459,7 +1467,7 @@ async function prepareAll(p: SmProject, bufferFor: BufferFor): Promise<void> {
       if (!src) return
       const buffer = clipStretch(c) === 1 ? src : await stretchEntry(src, clipStretch(c)).promise
       if (!fx) return
-      const run = pluginRun(buffer, fx)
+      const run = pluginRun(buffer, fx, clipSpan(c, buffer))
       await run.promise.catch(() => { throw new Error(`${t.name}: ${run.error ?? 'a plug-in failed'}`) })
     })
   }))
@@ -1590,9 +1598,10 @@ async function timeStretch(b: AudioBuffer, tempo: number): Promise<AudioBuffer> 
 
 // ─── VST3 plug-ins ────────────────────────────────────────────────────────────
 // Web Audio can't run plug-ins, so in the desktop app a lane's plug-ins run in a native
-// helper, offline: each take the lane plays goes through its chain once, in the
-// background, and the lane plays the result - dry until it's back. New settings run it
-// again. Their latency is trimmed off, so nothing drifts against the other lanes.
+// helper, offline: the part of each take the lane's clips use goes through its chain
+// once, in the background, and the lane plays the result - dry until it's back. New
+// settings run it again. Their latency is trimmed off, so nothing drifts against the
+// other lanes.
 
 export interface SmPlugin {
   id: string
@@ -1604,26 +1613,6 @@ export interface SmPlugin {
   /** The plug-in's own settings, base64 - only it can read them. */
   state?: string
   bypass?: boolean
-}
-
-export interface VstPluginInfo { path: string; cid: string; name: string; vendor: string; version: string; sub: string }
-export interface VstScan { plugins: VstPluginInfo[]; failed: { path: string; error: string }[]; folders: string[] }
-export interface VstEditorEvent { key: string; type: 'open' | 'state' | 'closed' | 'error'; state?: string; error?: string }
-interface PluginRef { path: string; cid: string; state: string }
-interface VstApi {
-  vstAvailable: () => Promise<boolean>
-  vstScan: (force?: boolean) => Promise<VstScan>
-  vstAddFolder: () => Promise<VstScan | null>
-  vstProcess: (req: { sampleRate: number; bpm: number; chain: PluginRef[]; channels: Float32Array[] }) => Promise<{ channels?: Float32Array<ArrayBuffer>[]; error?: string; plugin?: number }>
-  vstEditOpen: (req: { key: string; path: string; cid: string; state: string; title: string; sampleRate: number }) => Promise<{ error?: string }>
-  vstEditClose: (key: string) => Promise<void>
-  onVstEditor: (cb: (e: VstEditorEvent) => void) => () => void
-}
-
-/** The desktop app's plug-in bridge; null on the web. */
-export function vstApi(): VstApi | null {
-  const e = typeof window !== 'undefined' ? (window as unknown as { electron?: Partial<VstApi> }).electron : undefined
-  return e?.vstProcess ? (e as VstApi) : null
 }
 
 /** Which plug-in window belongs to which lane's plug-in. */
@@ -1658,45 +1647,103 @@ function hashString(s: string): string {
   return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36)
 }
 
-interface PluginRun { promise: Promise<AudioBuffer>; buffer?: AudioBuffer; error?: string }
-const pluginRuns = new WeakMap<AudioBuffer, Map<string, PluginRun>>()
-/** Runs kept per take: the current settings and a couple to go back to. */
-const RUNS_KEPT = 3
-/** One run at a time - each is a whole take through a whole chain. */
+/** Part of one (stretched) take through one chain: its frames `from` to `to`. */
+interface PluginRun {
+  key: string
+  from: number
+  to: number
+  /** Handed to the helper - its span is fixed from then on. */
+  started: boolean
+  promise: Promise<AudioBuffer>
+  buffer?: AudioBuffer
+  error?: string
+  /** When it was last asked for, to keep the settings in use. */
+  used: number
+}
+const pluginRuns = new WeakMap<AudioBuffer, PluginRun[]>()
+/** Settings kept per take: the current ones and the one before, so undo or A/B doesn't re-run. */
+const SETTINGS_KEPT = 2
+/** Audio fed in ahead of a clip, so the plug-ins have settled by the time it starts. */
+const PRE_ROLL = 2
+/** Spans widen to whole seconds, so a small trim doesn't need a new run. */
+const SPAN_GRID = 1
+let runClock = 0
+/** One run at a time - each is a stretch of take through a whole chain. */
 let pluginQueue: Promise<unknown> = Promise.resolve()
 
-/** The take through the lane's chain, started on first ask. */
-function pluginRun(src: AudioBuffer, fx: LaneFx): PluginRun {
-  let byKey = pluginRuns.get(src)
-  if (!byKey) { byKey = new Map(); pluginRuns.set(src, byKey) }
-  const have = byKey.get(fx.key)
-  if (have) return have
-  const all = byKey
-  const entry = {} as PluginRun
-  // Settings that moved on again before this run's turn came are skipped.
-  const job = pluginQueue.then(() => (all.get(fx.key) === entry ? runPlugins(src, fx) : Promise.reject(new Error('Replaced by newer settings'))))
+/** The frames of its (stretched) take a clip reads, with pre-roll, widened to the grid. */
+function clipSpan(c: SmClip, src: AudioBuffer): [number, number] {
+  const sr = src.sampleRate, stretch = clipStretch(c)
+  const a = Math.floor((c.offset / stretch - PRE_ROLL) / SPAN_GRID) * SPAN_GRID
+  const b = Math.ceil((c.offset + c.length * clipSpeed(c)) / stretch / SPAN_GRID) * SPAN_GRID
+  const from = Math.max(0, Math.min(src.length - 1, Math.floor(a * sr)))
+  return [from, Math.max(from + 1, Math.min(src.length, Math.ceil(b * sr)))]
+}
+
+function dropRuns(runs: PluginRun[], gone: (r: PluginRun) => boolean): void {
+  for (let i = runs.length - 1; i >= 0; i--) if (gone(runs[i])) runs.splice(i, 1)
+}
+
+/** The run that covers frames `from`-`to` of the take through the lane's chain, started
+ *  when there's none. Only the stretch of take the lane's clips use is ever run - a new
+ *  run covers everything this chain has needed of the take so far, and clips asking
+ *  while one is still waiting its turn just widen it. */
+function pluginRun(src: AudioBuffer, fx: LaneFx, [from, to]: [number, number]): PluginRun {
+  let runs = pluginRuns.get(src)
+  if (!runs) { runs = []; pluginRuns.set(src, runs) }
+  const all = runs
+  const mine = all.filter((r) => r.key === fx.key)
+  const covering = mine.filter((r) => r.from <= from && r.to >= to)
+  const have = covering.find((r) => r.buffer) ?? covering.find((r) => !r.error) ?? covering[0]
+  if (have) { have.used = ++runClock; return have }
+  const waiting = mine.find((r) => !r.started)
+  if (waiting) {
+    waiting.from = Math.min(waiting.from, from)
+    waiting.to = Math.max(waiting.to, to)
+    waiting.used = ++runClock
+    return waiting
+  }
+  const entry = { key: fx.key, started: false, used: ++runClock } as PluginRun
+  entry.from = Math.min(from, ...mine.map((r) => r.from))
+  entry.to = Math.max(to, ...mine.map((r) => r.to))
+  const job = pluginQueue.then(() => {
+    // Settings that moved on again before this run's turn came are skipped.
+    if (!all.includes(entry)) throw new Error('Replaced by newer settings')
+    entry.started = true
+    return runPlugins(src, fx, entry.from, entry.to)
+  })
   pluginQueue = job.catch(() => {})
   entry.promise = job
   job.then(
-    (buf) => { entry.buffer = buf; audioChanged() },
-    (e: Error) => { if (all.get(fx.key) === entry) { entry.error = e.message; audioChanged() } },
+    (buf) => {
+      entry.buffer = buf
+      // Smaller finished runs this one covers aren't needed any more.
+      dropRuns(all, (r) => r !== entry && r.key === entry.key && (!!r.buffer || !!r.error) && r.from >= entry.from && r.to <= entry.to)
+      audioChanged()
+    },
+    (e: Error) => { if (all.includes(entry)) { entry.error = e.message; audioChanged() } },
   )
-  all.set(fx.key, entry)
-  for (const k of all.keys()) { if (all.size <= RUNS_KEPT) break; if (k !== fx.key) all.delete(k) }
+  all.push(entry)
+  // Keep the settings asked for most recently - this one and the one before.
+  const lastUse = new Map<string, number>()
+  for (const r of all) lastUse.set(r.key, Math.max(lastUse.get(r.key) ?? 0, r.used))
+  const keep = new Set([...lastUse.entries()].sort((x, y) => y[1] - x[1]).slice(0, SETTINGS_KEPT).map(([k]) => k))
+  dropRuns(all, (r) => !keep.has(r.key))
   return entry
 }
 
-async function runPlugins(src: AudioBuffer, fx: LaneFx): Promise<AudioBuffer> {
+async function runPlugins(src: AudioBuffer, fx: LaneFx, from: number, to: number): Promise<AudioBuffer> {
   const api = vstApi()
   if (!api) throw new Error('Plug-ins need the desktop app')
-  const channels = Array.from({ length: Math.min(2, src.numberOfChannels) }, (_, c) => src.getChannelData(c))
+  // Copied out: a view would send the whole channel across.
+  const channels = Array.from({ length: Math.min(2, src.numberOfChannels) }, (_, c) => src.getChannelData(c).slice(from, to))
   const res = await api.vstProcess({ sampleRate: src.sampleRate, bpm: fx.bpm, chain: fx.chain, channels })
   if (!res.channels?.length) {
     const who = res.plugin != null ? fx.names[res.plugin] : undefined
     throw new Error(`${who ? `${who}: ` : ''}${res.error ?? 'the plug-ins failed'}`)
   }
-  const out = new AudioBuffer({ numberOfChannels: res.channels.length, length: src.length, sampleRate: src.sampleRate })
-  res.channels.forEach((ch, c) => out.copyToChannel(ch.subarray(0, src.length), c))
+  const out = new AudioBuffer({ numberOfChannels: res.channels.length, length: to - from, sampleRate: src.sampleRate })
+  res.channels.forEach((ch, c) => out.copyToChannel(ch.subarray(0, to - from), c))
   return out
 }
 

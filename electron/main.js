@@ -2237,7 +2237,7 @@ ipcMain.handle('session-zip-remove', (_, dir, filename) => {
 })
 
 // Session Maker VST3 plug-ins (see vstHost.js)
-vstHost.register({ app, ipcMain, dialog, BrowserWindow })
+vstHost.register({ app, ipcMain, dialog, shell, BrowserWindow })
 
 ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {

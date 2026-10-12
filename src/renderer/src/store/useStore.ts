@@ -168,7 +168,7 @@ export type AppMenuPosition = 'title-bar' | 'sidebar' | 'hidden'
 // The Settings dialog's tabs � the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'plugins' | 'app' | 'developer' | 'feedback' | 'about'
 
 // The detached ("pop-out") BrowserWindows the desktop build can open instead of
 // rendering a view inline (see FloatApp). Each can be turned off individually:

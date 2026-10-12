@@ -235,6 +235,10 @@ contextBridge.exposeInMainWorld('electron', {
   vstAvailable:  ()        => ipcRenderer.invoke('vst-available'),
   vstScan:       (force)   => ipcRenderer.invoke('vst-scan', force),
   vstAddFolder:  ()        => ipcRenderer.invoke('vst-add-folder'),
+  vstRemoveFolder: (folder) => ipcRenderer.invoke('vst-remove-folder', folder),
+  vstSetHidden:  (keys, hide) => ipcRenderer.invoke('vst-set-hidden', keys, hide),
+  vstOpenFolder: (folder)  => ipcRenderer.invoke('vst-open-folder', folder),
+  vstShowModule: (p)       => ipcRenderer.invoke('vst-show-module', p),
   vstProcess:    (req)     => ipcRenderer.invoke('vst-process', req),
   vstEditOpen:   (req)     => ipcRenderer.invoke('vst-edit-open', req),
   vstEditClose:  (key)     => ipcRenderer.invoke('vst-edit-close', key),
@@ -242,6 +246,11 @@ contextBridge.exposeInMainWorld('electron', {
     const fn = (_, d) => cb(d)
     ipcRenderer.on('vst-editor', fn)
     return () => ipcRenderer.removeListener('vst-editor', fn)
+  },
+  onVstPlugins: (cb) => {
+    const fn = (_, d) => cb(d)
+    ipcRenderer.on('vst-plugins', fn)
+    return () => ipcRenderer.removeListener('vst-plugins', fn)
   },
 
   // WrldData (albums JSON)
