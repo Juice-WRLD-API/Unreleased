@@ -1,182 +1,184 @@
-# unreleased
+# Unreleased
 
-A music player for Juice WRLD — stream the full catalog of released and unreleased songs in your browser, install the desktop app for local files, offline playback, and Discord integration, or run it natively on Android and iOS. Powered by the [Juice WRLD API](https://juicewrldapi.com).
+A desktop music player for Juice WRLD's unreleased catalogue, built on the
+[Juice WRLD API](https://juicewrldapi.com). It streams the API's song tracker
+and file archive, plays your own local files, and also includes the API's
+community and staff tools (editing, review, chat and admin).
 
-> Just here for the web player? See [README.web.md](./README.web.md) for a feature list scoped to what's actually usable in the browser, without the desktop-only stuff below.
+The same codebase also runs in the browser at
+[player.juicewrldapi.com](https://player.juicewrldapi.com). This branch (`app`)
+is the Electron desktop build.
 
-![Version](https://img.shields.io/github/v/release/leanwrldd/unreleased?label=version&color=blue)
-![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
-![Electron](https://img.shields.io/badge/Electron-42-47848F?logo=electron&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/jwa)
+**[Download the latest release →](https://github.com/Juice-WRLD-API/Unreleased/releases/latest)**
 
-**▶ Web player:** [player.juicewrldapi.com](https://player.juicewrldapi.com) — installable as a PWA for an app-like, offline-capable experience
-**⬇ Desktop app:** [Latest release](https://github.com/leanwrldd/unreleased/releases/latest) — Windows, macOS, Linux
-**📱 Android / iOS:** sideloaded native builds — see [Mobile apps](#mobile-apps) below
+| Platform | Package |
+|---|---|
+| Windows (x64) | NSIS installer, plus a small web installer that downloads the rest |
+| macOS (Apple Silicon and Intel) | `.dmg` |
+| Linux (x64) | AppImage |
 
----
-
-## Features
-
-### Browse & discover
-
-- **Tracker** — search the entire catalog (titles, artists, producers), filter by category and era, sort by any column; List, Detailed, and virtualized Grid view modes; collapsible category sidebar with era counts; infinite scroll that stays smooth through thousands of tracks
-- **999 FM** — live radio in the WRLD view: real-time metadata over WebSocket, vote to skip, suggest the next song, and preview the upcoming queue — the vote prompt surfaces anywhere in the app, not just on the WRLD page
-- **Files** — navigate the API filesystem directly, stream audio, and download files
-- **Song info** — full metadata for every track: titles, artists, producers, engineers, era, recording details, dates, and lyrics
-- **Bulk edit** — multi-select songs in the Tracker and edit shared fields (era, category, credits, and more) across all of them at once, with per-field replace/add/remove/append/fill/clear
-- **Changes feed** — a live stream of recent Tracker edits and comp-file changes, in the optional News tab (enable it in Settings → Appearance → Menu items)
-- **Context menus everywhere** — right-click any song, playlist, or the player bar for play, queue, playlist, download, and edit actions
-
-### Playback
-
-- **Gapless playback** — the next track preloads into a second audio slot while the current one plays
-- **Radio mode** — 📻 toggle in the player bar plays endless random tracks, pre-fetching the next song and respecting your active category/era filters
-- **Queue** — drag to reorder, history and upcoming split, lazy loading for filtered queues
-- **Synced lyrics** — karaoke-style highlighting with smooth scrolling, cached per session
-- **Fine control** — crossfade (1–12 s), playback speed (0.5×–2× with an optional pitch-shift toggle for nightcore/slowed), sleep timer, and audio output device picker
-- **10-band equalizer & effects** — 14 genre presets, L/R balance, mono downmix, skip silence, reverb, and a safety limiter, in a panel you can pop out into its own always-on-top window (`Shift+E`)
-- **Last.fm scrobbling** — connect your account in Settings to scrobble what you play, on web or desktop
-- **Lock screen support** — Media Session integration shows track info and playback controls on mobile lock screens and notification shades
-
-### Playlists & library
-
-- **Playlists** — Spotify-style hero with 2×2 cover mosaic, custom cover upload, descriptions, drag-to-reorder, and zip-download of all tracks
-- **Playlist folders** — organize playlists into folders, including folders within folders
-- **Sharing** — share any playlist via public link; anyone can play it without an account
-- **Liked songs** — heart in the player bar, synced to your account
-
-### Games & stats
-
-- **Heardle** — name the song from its opening seconds. Daily mode shares one puzzle a day with everyone; Personal replays the same rules on demand; Unlimited is fully configurable (guess count, reveal speed, start point, era/category filters); **1v1** matches you live against another player. Live leaderboards for Today, Streaks, and 1v1. Share your result to the clipboard, Wordle-style
-- **Wordle** — guess the song title letter by letter. Type it out on the keyboard (physical or on-screen) or find it by name in the search box; either way the guess has to be a real track whose title is exactly as long as the answer's, so the board narrows the catalog as you go. The keyboard colors in as you rule letters out. Daily shares one title a day with everyone, Unlimited draws them at random (guess count, era/category filters). Streaks, distribution and a spoiler-free share grid
-- **Tier List** — rank songs into S/A/B/C/D (or tiers you build and recolor yourself) by dragging them into rows, or tap-to-select then tap-a-row on touch. A personal ranking with no daily puzzle or score, saved locally
-- **Wrapped** — a listening summary built from your play counts, filterable by All time / 30 days / 7 days, with a recent-plays timeline
-
-### Personalization
-
-- **Skins** — 9 built-in looks (including a dynamic "Now Playing" skin that recolors the app to match the current cover art), or build your own in a live color editor and import/export skins as files to share
-- **Gradient surfaces** — an optional accent-tinted gradient background behind the app, sidebar, and player
-- **Fonts** — 7 selectable typefaces for the app, with a separate one for lyrics; independently adjustable text size for each
-- **Configurable layout** — sidebar position, a reorderable and hideable side menu (and account-control row), and fully rebindable keyboard shortcuts (with optional global/OS-wide bindings on desktop)
-- **Song personalization** — set a custom name, cover art, and preferred version for any song, and track your own play count for it
-- **Report & feedback** — flag an issue with any song, or send general feedback, right from the app
-
-### Accounts & community
-
-- **Discord sign-in** — liked songs and playlists sync to the API across devices
-- **Editor tools** — submit song edits (a full form or a streamlined Basic layout) and propose new songs for admin review, link song versions, track proposal status, climb the leaderboard, earn badges
-- **Contributor role** — apply to contribute file changes (upload, replace, move, delete, new folders) to the compilation; propose right from the Files browser or a dedicated Contributor page, track status from your Contributor Profile, and withdraw a pending proposal any time
-- **Admin & Manager tools** — review song-edit and comp-file proposals (searchable, sortable), reports, and applications; manage albums, versions, and tracklists. Managers share the same review powers as Admins, short of full account/security access
-
-### Desktop app
-
-- **Local library** — point the app at your music folders; it reads tags and cover art, supports synced lyrics, and plays everything alongside the API catalog. Multi-select tracks to bulk-edit their tags
-- **Metadata editor** — edit tags, cover art, and plain or line-by-line synced lyrics on your local files
-- **Import from URL** — paste a link from YouTube, SoundCloud, Bandcamp, a direct audio file, or ~1800 other sites (via yt-dlp, downloaded on first use) to add it straight to your library
-- **Convert format** — transcode local files to MP3, M4A, Opus, OGG, FLAC, or WAV using ffmpeg, downloaded on first use
-- **M3U playlists & Import Titles** — import an `.m3u`/`.m3u8`, or a plain-text list of song titles matched against the catalog, into a new local playlist — drag the file onto the app window, or use the Import buttons; export any local playlist back out as M3U
-- **Add to Library** — download any API song, or an entire playlist, for offline playback
-- **Discord Rich Presence** — show what you're playing (or the 999 FM stream) on your Discord profile with a live progress bar, real cover art (even for matching local files), and a "Listen on API" link button
-- **Application menu** — File/Edit/View/Playback/Help, dockable to the title bar or the side menu
-- **Mini player & pop-out windows** — Settings, Song info, the editor, the equalizer, and a small always-on-top mini player can float as separate windows
-- **System tray** — now-playing info and media controls in the tray menu, with optional minimize-to-tray
-- **Download manager** — live progress and speed for every download
-- **Auto-updates** — updates install themselves via GitHub releases; join the beta channel with an access code for pre-release builds
-- **Maintenance installer** — re-running the installer offers update, version switch, and uninstall, plus a standalone repair tool for when the app won't launch at all
+Installed builds update themselves in the background.
 
 ---
 
-## Mobile apps
+## What's in it
 
-Native Android and iOS builds wrap the same web UI with [Capacitor](https://capacitorjs.com), on their own `android` and `ios` branches. Neither is on an app store — this app ships `unreleased`-catalog content, so both are sideloaded instead:
+**Listening**
+- **Home**: a dashboard of sections you can show or hide: recently played
+  (synced across devices), playlists, albums, 999 FM, news, games and your
+  listening stats.
+- **Tracker**: search and filter the whole API song catalogue by era, category
+  and metadata. You choose which fields show in the list and in the detail
+  panel, and drag to reorder them. Songs with several versions let you switch
+  between them or hide ones you don't want.
+- **Files**: browse the API's file archive directly, with previews, a text and
+  `.lrc` viewer, multi-select, and bulk ZIP downloads.
+- **Library** (desktop only): scan local folders, edit ID3 tags and embedded
+  art, and convert between audio formats with ffmpeg.
+- **Playlists**: folders, custom covers and descriptions, drag to reorder,
+  JSON/M3U import and export, share links, and following someone else's
+  playlist live.
+- **Player**: a queue with history, search and reshuffle, radio/shuffle mode,
+  automatic recovery when a stream stalls, synced lyrics (Shift+L), an
+  equalizer with volume boost, era covers, and personal covers per song.
+- **WRLD**: a full-screen now-playing view with blurred cover art, scrolling
+  synced lyrics, a visualizer, and 999 FM controls.
+- **999 FM**: the API's live radio, where listeners vote to skip and suggest
+  songs.
+- **Offline**: download tracks and whole playlists for offline playback. You
+  can also embed lyrics and your cover art into downloaded MP3s.
+- **URL import**: pull audio in from a link (yt-dlp, downloaded on first use).
 
-- **Android** — download the newest `Unreleased-android-v*.apk` from the [releases page](https://github.com/leanwrldd/unreleased/releases?q=android-v&expanded=true); the app also checks for updates itself once installed. Requires Android 7.0+. Adds local library access (SAF), offline downloads, save-to-Downloads, and lock-screen/notification controls on top of the web feature set
-- **iOS** — download the newest `Unreleased-ios-v*.ipa` from the [releases page](https://github.com/leanwrldd/unreleased/releases?q=ios-v&expanded=true) and install it via [AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io) (it's unsigned — there's no Apple Developer account behind it, so your free Apple ID re-signs it on install)
+**Sharing**
+- Public track pages with real URLs, shareable playlists, and lyrics or
+  now-playing image cards.
+- Share songs, playlists and news straight into chat.
 
-Both branches' READMEs cover their own install/dev instructions in full detail.
+**Extras**
+- **Games**: Heardle (daily puzzle and online versus), Wordle, and tier lists.
+- **Wrapped**: your own listening stats. **Statistics**: catalogue-wide
+  numbers.
+- **News** feed with channels and notifications.
+- **Integrations**: Discord Rich Presence and Last.fm scrobbling.
+- **Desktop niceties**: mini player, pop-out windows, tray controls, media
+  keys, and global and in-app hotkeys you can rebind separately.
+- **Customisation**: skins and themes, and a sidebar or pill nav (drag it to
+  any window edge) where you choose and reorder the tabs.
+
+**Accounts and community** (sign in with Discord)
+- Public profiles, liked songs, and synced preferences.
+- Song edit proposals with Genius lyrics paste, a synced-lyrics timing tool,
+  and bulk editing. File ("comp") uploads, reports and feedback.
+- Roles: contributor, editor, manager and admin, each with its own profile
+  page and review queue.
+- An admin console for proposals, users, eras, albums, channels, broadcasts,
+  CDN nodes and beta builds.
+- End-to-end encrypted staff chat with group rooms, GIFs, link previews,
+  device linking and message search.
+- Donor file storage and playback, plus a distributed peer-to-peer CDN where
+  you can run your own node.
+- API key management and a Diagnostics panel.
+- **Terminal**: a command line inside the app that can do almost everything
+  the UI does: playback, files, settings, review queues, chat and admin.
+- In-app API docs.
 
 ---
 
-## Download
+## Running from source
 
-| Platform | File |
-|----------|------|
-| Windows | `Unreleased-Setup-x.x.x.exe` (full) or `Unreleased-Setup.exe` (web installer) |
-| macOS | `.dmg` — Apple Silicon and Intel |
-| Linux | `.AppImage` — native Wayland and X11/XWayland |
-
-All builds are on the [releases page](https://github.com/leanwrldd/unreleased/releases). Or skip the install entirely and use the [web player](https://player.juicewrldapi.com).
-
----
-
-## Stack
-
-- **React 18** + **TypeScript 5** — UI
-- **Vite 6** — dev server and bundler
-- **Zustand** — state management
-- **Tailwind CSS** + **lucide-react** — styling and icons
-- **Electron 42** + **electron-builder** + **electron-updater** — desktop app, packaging, auto-updates
-- **music-metadata** / **node-id3** — local file tag reading and editing
-- **youtube-dl-exec (yt-dlp)** — URL import
-- **[juicewrldapi.com](https://juicewrldapi.com)** — songs, streaming, lyrics, eras, playlists, auth
-
----
-
-## Development
+You need **Node.js 22** (the version CI builds with) and npm.
 
 ```bash
-# Install dependencies
 npm install
-
-# Web dev server (http://localhost:3018)
-npm run dev
-
-# Desktop app in dev mode (Vite + Electron)
 npm run electron:dev
-
-# Linux: optionally force a display backend while troubleshooting
-npm run electron:dev:wayland
-npm run electron:dev:x11
-
-# Type-check + production build → dist/
-npm run build
-
-# Package the desktop app → release/
-npm run electron:build
 ```
 
-Linux selects Wayland or X11 automatically. Native Wayland intentionally leaves
-window placement to the compositor, and the mini player uses a stable panel
-height because Wayland does not permit reliable app-driven resizing. Use the
-X11 override above if exact programmatic placement is important. Global
-shortcuts on Wayland use the desktop portal and may show a one-time compositor
-permission prompt.
+This starts Vite on port `3018` and opens Electron against it with hot reload.
+On Windows, `scripts\run.bat` does the same thing. On Linux, use
+`electron:dev:wayland` or `electron:dev:x11` to pick a display backend.
 
-### Branches
+To work on the renderer alone in a browser:
 
-- **`app`** — desktop/Electron source of truth; all development happens here
-- **`web`** — deployed web build, served directly at [player.juicewrldapi.com](https://player.juicewrldapi.com); synced from `app` on release
-- **`android`** / **`ios`** — native mobile wraps of the same UI via Capacitor; see [Mobile apps](#mobile-apps)
+```bash
+npm run dev
+```
+
+### Local config
+
+Copy `.env.local.example` to `.env.local`. Every value is optional:
+
+| Variable | Used for |
+|---|---|
+| `VITE_AUTH_TOKEN` | An API token, so local dev skips Discord login |
+| `VITE_LASTFM_API_KEY` / `VITE_LASTFM_API_SECRET` | Last.fm scrobbling (baked in at build time) |
+| `VITE_JWAPI_WS` | Points the realtime sockets (chat, notifications, Heardle versus) at a different server |
+| `GH_TOKEN` | Publishing GitHub releases from `release.py` |
+| `BETA_ADMIN_TOKEN` | Uploading beta builds from `release.py` |
+
+The API defaults to `https://juicewrldapi.com/juicewrld`. You can change it at
+runtime under **Settings → Developer → API servers**, which also supports
+per-route rules.
 
 ---
 
-## Changelog
+## Scripts
 
-See [CHANGELOG.md](./CHANGELOG.md) for the full version history.
+| Command | What it does |
+|---|---|
+| `npm run electron:dev` | Vite and Electron in dev mode |
+| `npm run build` | Typecheck and build the renderer into `dist/` |
+| `npm run electron:build` | Build and package an installer into `release/` |
+| `npm run typecheck:electron` | Typecheck the main process |
+| `npm run test:electron` | Main-process unit tests (`node --test`) |
+| `npm run electron:smoke` | Launch the app once and exit, as a smoke test (used by CI) |
+| `npm run terminal:check-coverage` | List UI API calls the in-app terminal can't reach yet |
 
 ---
 
-## Credits
+## Project layout
 
-- **[juicewrldapi.com](https://juicewrldapi.com)** — the API powering everything: song metadata, streaming, lyrics, eras, categories, accounts, and the file browser
-- **juicewrldapi** on Discord — for the help and support building the integration
-- Built by **freakylatif** — find me on Discord
-- Join the **[Discord](https://discord.gg/jwa)** server
+```
+electron/            main process: windows, tray, updater, IPC, offline library,
+                     Discord RPC, ffmpeg/yt-dlp tooling
+src/renderer/src/
+  App.tsx            main window shell
+  FloatApp.tsx       pop-out and mini-player windows
+  components/        views, modals and panels
+  lib/               API clients, chat crypto, CDN, player helpers
+  lib/terminal/      in-app terminal commands, one module per area
+  hooks/  store/     React hooks and Zustand stores
+build/               NSIS installer script and helper scripts
+scripts/             release, beta and dev helpers (.bat wrappers + python/)
+.github/workflows/   per-platform release builds and desktop smoke tests
+```
+
+---
+
+## Releasing
+
+Run `scripts\release.bat` (a wrapper around `scripts/python/release.py`). It
+asks a few questions up front and then runs on its own:
+
+- **Stable**: bumps the version, commits, pushes `app`, and publishes a GitHub
+  release. Publishing the release triggers the `build-windows`, `build-mac`
+  and `build-linux` workflows, which build each installer and attach it to the
+  release.
+- **Beta**: builds the Windows installer locally and uploads it to the gated
+  beta channel on juicewrldapi.com, with no git or GitHub steps. Users join
+  the beta with an access code.
+
+`test-desktop.yml` builds the app and smoke-tests it on Windows and Linux.
+
+### Other branches
+
+The repo carries one branch per platform: `app` (desktop), `web`, `android`,
+`ios` and `beta`. They don't sync automatically; changes are ported between
+them by hand. `md/RELAY_LOG.md` records each port with the versions on both
+sides.
 
 ---
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](LICENSE). Bundled third-party licences are listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
