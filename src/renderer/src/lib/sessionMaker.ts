@@ -634,8 +634,9 @@ export interface SmClip {
   takeId: string
   /** Timeline position, seconds. */
   start: number
-  /** Where in the take the clip begins, seconds. */
+  /** Where in the take the clip begins, take seconds. */
   offset: number
+  /** How long it lasts on the timeline, seconds. It covers `length * speed` of the take. */
   length: number
   /** Linear gain. */
   gain: number
@@ -649,6 +650,13 @@ export interface SmClip {
   /** Plays backwards. `offset` and `silent` are then in the backwards take's time,
    *  so trimming, splitting and comping treat it like any other clip. */
   reversed?: boolean
+  /** Playback speed: 0.5 plays at half speed, twice as long. Missing is 1. */
+  speed?: number
+  /** Hold the pitch while the speed changes (time-stretch) instead of letting it
+   *  follow like tape (sped up / slowed). */
+  keepPitch?: boolean
+  /** Pitch shift in semitones, on top of whatever the speed does. Missing is 0. */
+  pitch?: number
 }
 
 export const FX_KEYS = ['reverb', 'echo', 'chorus'] as const
@@ -808,7 +816,7 @@ export function silentSpans(c: SmClip): Span[] {
   if (c.muted) return [[0, c.length]]
   if (!c.silent) return []
   return c.silent
-    .map(([a, b]): Span => [Math.max(0, a - c.offset), Math.min(c.length, b - c.offset)])
+    .map(([a, b]): Span => [Math.max(0, (a - c.offset) / clipSpeed(c)), Math.min(c.length, (b - c.offset) / clipSpeed(c))])
     .filter(([a, b]) => b - a > 1e-6)
 }
 
@@ -852,11 +860,12 @@ function swipeRivals(p: SmProject, clipId: string): Set<string> {
 /** Swipe comping: `clipId` is heard from timeline `from` to `to`, and its rivals there are silent. */
 export function swipeComp(p: SmProject, clipId: string, from: number, to: number): SmProject {
   const rivals = swipeRivals(p, clipId)
-  const takeSpan = (c: SmClip): Span => [Math.max(c.start, from) - c.start + c.offset, Math.min(c.start + c.length, to) - c.start + c.offset]
+  const takeSpan = (c: SmClip): Span => [takeTime(c, Math.max(c.start, from)), takeTime(c, Math.min(c.start + c.length, to))]
   const settle = (c: SmClip, silent: Span[]): SmClip => {
     const { silent: _, ...rest } = c
-    const inside = normSpans(silent.map(([a, b]): Span => [Math.max(a, c.offset), Math.min(b, c.offset + c.length)]))
-    if (inside.length === 1 && inside[0][0] <= c.offset + 1e-6 && inside[0][1] >= c.offset + c.length - 1e-6) return { ...rest, muted: true }
+    const end = takeTime(c, c.start + c.length)
+    const inside = normSpans(silent.map(([a, b]): Span => [Math.max(a, c.offset), Math.min(b, end)]))
+    if (inside.length === 1 && inside[0][0] <= c.offset + 1e-6 && inside[0][1] >= end - 1e-6) return { ...rest, muted: true }
     return silent.length ? { ...rest, muted: false, silent } : { ...rest, muted: false }
   }
   return {
@@ -867,7 +876,7 @@ export function swipeComp(p: SmProject, clipId: string, from: number, to: number
         ...t,
         clips: t.clips.map((c) => {
           if (c.id === clipId) {
-            const base: Span[] = c.muted ? [[c.offset, c.offset + c.length]] : c.silent ?? []
+            const base: Span[] = c.muted ? [[c.offset, takeTime(c, c.start + c.length)]] : c.silent ?? []
             return settle(c, subtractSpan(base, takeSpan(c)))
           }
           if (!rivals.has(c.id) || c.muted) return c
@@ -1038,14 +1047,17 @@ const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x)
 
 /** Schedules one clip into `dest`: timeline time `from` lands at context time
  *  `at`, and nothing past timeline time `until` plays (a loop's end). */
-function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, buffer: AudioBuffer, from: number, at: number, until = Infinity): AudioBufferSourceNode | null {
+function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, audio: ClipAudio, from: number, at: number, until = Infinity): AudioBufferSourceNode | null {
   if (clip.muted || clip.length <= 0) return null
+  const { buffer, rate, stretch } = audio
+  const speed = clipSpeed(clip)
   const u0 = Math.max(0, from - clip.start)
-  const uEnd = Math.min(clip.length, until - clip.start, buffer.duration - clip.offset)
+  const uEnd = Math.min(clip.length, until - clip.start, (buffer.duration * stretch - clip.offset) / speed)
   if (uEnd <= u0) return null
   const base = at + (clip.start - from) // context time of the clip's u=0
   const src = ctx.createBufferSource()
   src.buffer = buffer
+  src.playbackRate.value = rate
   const g = ctx.createGain()
   const gainAt = (u: number): number => {
     let k = clip.gain
@@ -1094,7 +1106,8 @@ function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, buff
   } else {
     src.connect(g).connect(dest)
   }
-  src.start(Math.max(at, base + u0), clip.offset + u0, uEnd - u0)
+  // Offset and duration are in the buffer's own seconds: a stretched buffer runs `stretch` take seconds to each of its own.
+  src.start(Math.max(at, base + u0), (clip.offset + u0 * speed) / stretch, ((uEnd - u0) * speed) / stretch)
   return src
 }
 
@@ -1363,8 +1376,8 @@ export function reversedPeaks(p: Float32Array): Float32Array {
   return r
 }
 
-/** The audio a clip plays from: its take, or the take backwards when it's reversed. */
-function clipBuffer(c: SmClip, bufferFor: BufferFor): AudioBuffer | undefined {
+/** The take a clip reads: as recorded, or backwards when it's reversed. */
+function clipSource(c: SmClip, bufferFor: BufferFor): AudioBuffer | undefined {
   const b = bufferFor(c.takeId)
   return b && c.reversed ? reversedBuffer(b) : b
 }
@@ -1376,10 +1389,179 @@ export function reverseClip(c: SmClip, takeLength: number): SmClip {
   const flipped = silent?.map(([a, b]): [number, number] => [takeLength - b, takeLength - a]).reverse()
   return {
     ...rest,
-    offset: Math.max(0, takeLength - c.offset - c.length),
+    offset: Math.max(0, takeLength - c.offset - c.length * clipSpeed(c)),
     ...(flipped?.length ? { silent: flipped } : {}),
     ...(reversed ? {} : { reversed: true }),
   }
+}
+
+// ─── Pitch and speed ─────────────────────────────────────────────────────────
+// A clip reads its take at `rate` (the source's playbackRate), so speed and pitch
+// move together like tape. When the pitch has to move differently from the
+// speed - held while the speed changes, or shifted on its own - the take is first
+// time-stretched by `stretch`, then read at `rate`. Stretching runs in the
+// background once per take and amount; the clip is silent until it's ready.
+
+export const MIN_SPEED = 0.25
+export const MAX_SPEED = 4
+export const MAX_PITCH = 24
+
+export const clipSpeed = (c: SmClip): number => c.speed ?? 1
+
+/** How fast the take is read: the pitch shift, times the speed unless the pitch is held. */
+export const clipRate = (c: SmClip): number => 2 ** ((c.pitch ?? 0) / 12) * (c.keepPitch ? 1 : clipSpeed(c))
+
+/** The time-stretch the take needs before it's read at clipRate (1 = none). Rounded, so near-equal settings share one. */
+export const clipStretch = (c: SmClip): number => Math.round((clipSpeed(c) / clipRate(c)) * 1e4) / 1e4
+
+/** Where timeline time `t` falls in the clip's take, seconds. */
+export const takeTime = (c: SmClip, t: number): number => c.offset + (t - c.start) * clipSpeed(c)
+
+/** The buffer a clip plays, how fast it's read, and how many take seconds each of its seconds holds. */
+interface ClipAudio { buffer: AudioBuffer; rate: number; stretch: number }
+
+/** What a clip plays from right now - nothing while its stretch is still being made. */
+function clipAudio(c: SmClip, bufferFor: BufferFor): ClipAudio | undefined {
+  const src = clipSource(c, bufferFor)
+  if (!src) return undefined
+  const stretch = clipStretch(c)
+  if (stretch === 1) return { buffer: src, rate: clipRate(c), stretch }
+  const buffer = stretchEntry(src, stretch).buffer
+  return buffer && { buffer, rate: clipRate(c), stretch }
+}
+
+/** Whether a clip's audio is ready to play: false while its take is still being stretched. */
+export function clipAudioReady(c: SmClip, take: AudioBuffer): boolean {
+  const stretch = clipStretch(c)
+  return stretch === 1 || !!stretchEntry(c.reversed ? reversedBuffer(take) : take, stretch).buffer
+}
+
+/** Waits for every stretch the project's clips need - an export can't leave anything silent. */
+async function stretchAll(p: SmProject, bufferFor: BufferFor): Promise<void> {
+  await Promise.all(p.tracks.flatMap((t) => t.clips).map((c) => {
+    const src = c.muted ? undefined : clipSource(c, bufferFor)
+    return src && clipStretch(c) !== 1 ? stretchEntry(src, clipStretch(c)).promise : null
+  }))
+}
+
+/** Changes a clip's speed or pitch. It keeps its start and the same stretch of take,
+ *  so it grows or shrinks on the timeline, its fades with it. */
+export function retimeClip(c: SmClip, patch: { speed?: number; pitch?: number; keepPitch?: boolean }): SmClip {
+  const { speed: _s, pitch: _p, keepPitch: _k, ...rest } = c
+  const speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, patch.speed ?? clipSpeed(c)))
+  const pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, patch.pitch ?? c.pitch ?? 0))
+  const keepPitch = patch.keepPitch ?? c.keepPitch ?? false
+  const scale = clipSpeed(c) / speed
+  return {
+    ...rest,
+    length: c.length * scale,
+    fadeIn: c.fadeIn * scale,
+    fadeOut: c.fadeOut * scale,
+    ...(speed !== 1 ? { speed } : {}),
+    ...(pitch !== 0 ? { pitch } : {}),
+    ...(keepPitch ? { keepPitch } : {}),
+  }
+}
+
+interface StretchEntry { promise: Promise<AudioBuffer>; buffer?: AudioBuffer }
+const stretches = new WeakMap<AudioBuffer, Map<number, StretchEntry>>()
+/** Finished stretches kept per take; trying out settings shouldn't hold every one in memory. */
+const STRETCHES_KEPT = 6
+const stretchListeners = new Set<() => void>()
+let stretchVer = 0
+/** One stretch at a time, so a burst of them doesn't starve playback. */
+let stretchQueue: Promise<unknown> = Promise.resolve()
+
+/** Bumps each time a stretch finishes. */
+export const stretchVersion = (): number => stretchVer
+export function subscribeStretches(fn: () => void): () => void {
+  stretchListeners.add(fn)
+  return () => { stretchListeners.delete(fn) }
+}
+
+/** The take stretched by `stretch`, started on first ask. */
+function stretchEntry(src: AudioBuffer, stretch: number): StretchEntry {
+  let byAmount = stretches.get(src)
+  if (!byAmount) { byAmount = new Map(); stretches.set(src, byAmount) }
+  const have = byAmount.get(stretch)
+  if (have) return have
+  const job = stretchQueue.then(() => timeStretch(src, stretch))
+  stretchQueue = job.catch(() => {})
+  const entry: StretchEntry = { promise: job }
+  const all = byAmount
+  job.then((buf) => {
+    entry.buffer = buf
+    // Oldest finished ones go first.
+    for (const [k, e] of all) { if (all.size <= STRETCHES_KEPT) break; if (e.buffer && e !== entry) all.delete(k) }
+    stretchVer++
+    for (const fn of stretchListeners) fn()
+  }, () => { all.delete(stretch) })
+  all.set(stretch, entry)
+  return entry
+}
+
+/** WSOLA time-stretch: the result is 1/`tempo` as long, at the same pitch. 40 ms windows,
+ *  half-overlapped, each slid up to 12 ms from where it would fall so its waveform
+ *  carries on from the window before - which keeps a voice clean. */
+async function timeStretch(b: AudioBuffer, tempo: number): Promise<AudioBuffer> {
+  const sr = b.sampleRate, len = b.length, chs = b.numberOfChannels
+  const N = 2 * Math.round(sr * 0.02)
+  const H = N / 2
+  const search = Math.round(sr * 0.012)
+  // The coarse search runs on a mono copy at ~6 kHz; the pick is refined at full rate.
+  const D = Math.max(1, Math.round(sr / 6000))
+  const inp = Array.from({ length: chs }, (_, c) => b.getChannelData(c))
+  const mono = new Float32Array(Math.ceil(len / D))
+  for (const ch of inp) for (let i = 0; i < len; i++) mono[(i / D) | 0] += ch[i]
+  const L = Math.floor(H / D)
+  const outLen = Math.max(1, Math.ceil(len / tempo))
+  const out = new AudioBuffer({ numberOfChannels: chs, length: outLen, sampleRate: sr })
+  const outs = Array.from({ length: chs }, (_, c) => out.getChannelData(c))
+  // A periodic Hann window: half-overlapped copies sum to exactly 1.
+  const win = new Float32Array(N)
+  for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / N)
+  const x = inp[0]
+  let prev = -N
+  // Starts half a window early, so the opening isn't faded in by an unpartnered window.
+  for (let o = -H, k = 0; o < outLen; o += H, k++) {
+    // The first window reads the opening as is; the rest slide to line up.
+    let pos = k === 0 ? o : Math.round(o * tempo)
+    const nat = prev + H
+    const n0 = Math.round(nat / D)
+    const lo = Math.max(0, Math.round((pos - search) / D))
+    const hi = Math.min(mono.length - L - 1, Math.round((pos + search) / D))
+    if (k > 0 && nat >= 0 && nat + H <= len && n0 + L <= mono.length && hi >= lo) {
+      // Coarse: normalised cross-correlation against the natural continuation of the last window.
+      let energy = 0
+      for (let j = 0; j < L; j++) energy += mono[lo + j] ** 2
+      let best = lo, bestScore = -Infinity
+      for (let q = lo; q <= hi; q++) {
+        let dot = 0
+        for (let j = 0; j < L; j++) dot += mono[n0 + j] * mono[q + j]
+        const score = dot / Math.sqrt(energy + 1e-9)
+        if (score > bestScore) { bestScore = score; best = q }
+        energy += mono[q + L] ** 2 - mono[q] ** 2
+      }
+      // Fine: full rate, around the coarse pick.
+      const c0 = best * D
+      let fineScore = -Infinity
+      pos = c0
+      for (let q = Math.max(0, c0 - D); q <= Math.min(len - H, c0 + D); q++) {
+        let dot = 0
+        for (let j = 0; j < H; j += 2) dot += x[nat + j] * x[q + j]
+        if (dot > fineScore) { fineScore = dot; pos = q }
+      }
+    }
+    for (let c = 0; c < chs; c++) {
+      const src = inp[c], dst = outs[c]
+      const j0 = Math.max(0, -o, -pos), j1 = Math.min(N, outLen - o, len - pos)
+      for (let j = j0; j < j1; j++) dst[o + j] += src[pos + j] * win[j]
+    }
+    prev = pos
+    // Let the page breathe on long takes.
+    if (k % 500 === 499) await new Promise((r) => setTimeout(r, 0))
+  }
+  return out
 }
 
 export interface LoopRange { start: number; end: number }
@@ -1470,11 +1652,11 @@ export class SessionEngine {
         const tg = this.trackGains.get(t.id)
         if (!tg) continue
         for (const c of t.clips) {
-          const b = clipBuffer(c, bufferFor)
-          if (b) this.track(scheduleClip(ctx, tg, c, b, segFrom, at, until))
+          const a = clipAudio(c, bufferFor)
+          if (a) this.track(scheduleClip(ctx, tg, c, a, segFrom, at, until))
         }
       }
-      if (ref) this.track(scheduleClip(ctx, refIn, referenceClip(ref), ref.buffer, segFrom, at, until))
+      if (ref) this.track(scheduleClip(ctx, refIn, referenceClip(ref), { buffer: ref.buffer, rate: 1, stretch: 1 }, segFrom, at, until))
     }
 
     const at = ctx.currentTime + 0.06
@@ -1676,6 +1858,7 @@ export async function renderProject(p: SmProject, bufferFor: BufferFor, sampleRa
   const end = projectEnd(p)
   if (end <= 0) throw new Error('Nothing to export - the timeline is empty')
   // Let the reverb/echo tails ring out past the last clip.
+  await stretchAll(p, bufferFor)
   const lag = MIX_LATENCY_STAGES * (await compressorLatency(sampleRate))
   const ctx = new OfflineAudioContext(2, Math.ceil((end + (fxActive(p) ? fxTail(p) : 0.25)) * sampleRate) + lag, sampleRate)
   const master = ctx.createGain()
@@ -1703,8 +1886,8 @@ export async function renderProject(p: SmProject, bufferFor: BufferFor, sampleRa
     tg.connect(chain.input)
     chain.output.connect(pan).connect(limiter.input)
     for (const c of t.clips) {
-      const b = clipBuffer(c, bufferFor)
-      if (b) scheduleClip(ctx, tg, c, b, 0, 0)
+      const a = clipAudio(c, bufferFor)
+      if (a) scheduleClip(ctx, tg, c, a, 0, 0)
     }
   }
   const rendered = await ctx.startRendering()

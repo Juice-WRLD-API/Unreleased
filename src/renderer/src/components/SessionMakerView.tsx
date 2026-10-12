@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Activity, ArrowDown, ArrowLeft, ArrowUp, Check, Info, ClipboardCopy, CopyPlus, Eraser, FolderInput, FolderMinus, FolderPlus, Headphones, Highlighter, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Download, FileDown, FileUp, Flag, HardDrive, HardDriveDownload, Layers, Loader2, Magnet,
-  Minus, Pause, Play, Pencil, Plus, Redo2, Repeat, Rewind, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
+  Minus, Pause, Play, Pencil, Plus, Gauge, Redo2, Repeat, Rewind, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/useStore'
@@ -14,7 +14,7 @@ import {
   PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, duplicateProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
   loadProjects, loadTake, newProject, parseProjectFile, peakOf, peekLoadProgress, placeAllTakes, projectEnd, renderProject, scaleBuffer,
   saveProject, scanSession, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
-  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, chainActive, chainReadout, echoSeconds, reverseClip, reversedPeaks,
+  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, chainActive, chainReadout, clipAudioReady, clipSpeed, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
   type ChainKey, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
 } from '../lib/sessionMaker'
 
@@ -108,6 +108,7 @@ const HELP_ROWS: [string, string][] = [
   ['C', 'Comp'],
   ['K', 'Swipe comp: drag across a take to hear it there'],
   ['Folder chevron', 'Fold a take folder down to its comp lane'],
+  ['←→ / ↑↓', 'Move clips a grid step / a lane (Alt+←→ fine)'],
   ['M', 'Mute clip'],
   ['R', 'Original / your mix'],
   ['S', 'Split'],
@@ -709,9 +710,11 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     return clipsSig.current.ver
   }, [project.tracks, project.loop, project.reference])
   const loadedKey = loaded.size
+  // A clip's time-stretch finishing: it can be heard now.
+  const stretchKey = useSyncExternalStore(subscribeStretches, stretchVersion)
   useEffect(() => {
     if (engine.playing) engine.play(projectRef.current, engine.position(), bufferFor, playOpts())
-  }, [clipsKey, loadedKey, engine, bufferFor, playOpts])
+  }, [clipsKey, loadedKey, stretchKey, engine, bufferFor, playOpts])
   useEffect(() => { engine.applyMix(project) }, [project, engine])
 
   useEffect(() => () => engine.dispose(), [engine])
@@ -799,7 +802,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     try {
       const g = await detectTempo((await ensureLoaded(take)).buffer)
       if (!g) { if (!quiet) alert("Couldn't find a steady tempo in the beat"); return }
-      commit({ ...projectRef.current, bpm: g.bpm, gridOffset: clip.start - clip.offset + g.bar1 })
+      commit({ ...projectRef.current, bpm: g.bpm * clipSpeed(clip), gridOffset: clip.start + (g.bar1 - clip.offset) / clipSpeed(clip) })
       setGrid((v) => (v === 'off' ? 'beat' : v))
     } catch (err) {
       if (!quiet) alert(err instanceof Error ? err.message : String(err))
@@ -860,6 +863,12 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     }
     commit({ ...p, tracks: p.tracks.map((t) => (t.clips.some((c) => set.has(c.id)) ? { ...t, clips: t.clips.map((c) => (set.has(c.id) ? flip(c) : c)) } : t)) })
   }, [commit, takesById])
+  /** Sets speed / pitch on each clip - `patch` can depend on the clip, for relative moves. */
+  const retimeClips = useCallback((ids: string[], patch: RetimePatch | ((c: SmClip) => RetimePatch)) => {
+    let next = projectRef.current
+    for (const id of ids) next = mapClip(next, id, (c) => retimeClip(c, typeof patch === 'function' ? patch(c) : patch))
+    commit(next)
+  }, [commit])
 
   // ── Clip operations ──
   type Placement = { take: Take; trackIdx: number | null; at: number | null }
@@ -929,7 +938,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
         if (!set.has(clip.id)) return [clip]
         if (at <= clip.start + 0.02 || at >= clip.start + clip.length - 0.02) { picked.push(clip.id); return [clip] }
         const left: SmClip = { ...clip, length: at - clip.start, fadeOut: 0 }
-        const right: SmClip = { ...clip, id: uid(), start: at, offset: clip.offset + (at - clip.start), length: clip.start + clip.length - at, fadeIn: 0 }
+        const right: SmClip = { ...clip, id: uid(), start: at, offset: takeTime(clip, at), length: clip.start + clip.length - at, fadeIn: 0 }
         changed = true
         picked.push(right.id)
         return [left, right]
@@ -939,6 +948,25 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     commit({ ...p, tracks })
     setSelection(picked)
   }, [commit])
+
+  /** Arrow keys: shifts the clips `dt` seconds (not before 0) and `dLane` lanes (only if they all fit). Held keys make one undo step. */
+  const moveClips = useCallback((ids: string[], dt: number, dLane: number) => {
+    const p = projectRef.current
+    const set = new Set(ids)
+    const at = p.tracks.flatMap((t, i) => t.clips.filter((c) => set.has(c.id)).map((c) => ({ c, i })))
+    if (!at.length) return
+    const shift = Math.max(dt, -Math.min(...at.map((g) => g.c.start)))
+    const lanes = Math.min(...at.map((g) => g.i)) + dLane >= 0 && Math.max(...at.map((g) => g.i)) + dLane < p.tracks.length ? dLane : 0
+    if (!shift && !lanes) return
+    setLive({
+      ...p,
+      tracks: p.tracks.map((t, i) => {
+        const incoming = at.filter((g) => g.i + lanes === i).map((g): SmClip => ({ ...g.c, start: g.c.start + shift }))
+        const without = t.clips.filter((c) => !set.has(c.id))
+        return incoming.length || without.length !== t.clips.length ? { ...t, clips: [...without, ...incoming] } : t
+      }),
+    })
+  }, [setLive])
 
   /** Copies the whole selection as one block, placed right after it. */
   const duplicateClips = useCallback((ids: string[]) => {
@@ -1309,13 +1337,13 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
       }
     } else if (d.mode === 'trimL') {
       let start = snapAbs(o.start + dx, alt)
-      start = clamp(start, Math.max(0, o.start - o.offset), o.start + o.length - 0.05)
+      start = clamp(start, Math.max(0, o.start - o.offset / clipSpeed(o)), o.start + o.length - 0.05)
       const delta = start - o.start
       if (same(`${start}`)) return
-      next = mapClip(d.snapshot, o.id, (c) => ({ ...c, start, offset: o.offset + delta, length: o.length - delta, fadeIn: Math.min(c.fadeIn, o.length - delta) }))
+      next = mapClip(d.snapshot, o.id, (c) => ({ ...c, start, offset: takeTime(o, start), length: o.length - delta, fadeIn: Math.min(c.fadeIn, o.length - delta) }))
     } else if (d.mode === 'trimR') {
       let end = snapAbs(o.start + o.length + dx, alt)
-      end = clamp(end, o.start + 0.05, o.start + (takeLen - o.offset))
+      end = clamp(end, o.start + 0.05, o.start + (takeLen - o.offset) / clipSpeed(o))
       if (same(`${end}`)) return
       next = mapClip(d.snapshot, o.id, (c) => ({ ...c, length: end - o.start, fadeOut: Math.min(c.fadeOut, end - o.start) }))
     } else if (d.mode === 'fadeIn') {
@@ -1447,6 +1475,9 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
       else if (k === 'm' && !mod && selection.length) toggleClipMute(selection)
       else if (e.altKey && k === 'arrowup' && trackSelRef.current.length) nudgeTracks(-1)
       else if (e.altKey && k === 'arrowdown' && trackSelRef.current.length) nudgeTracks(1)
+      // Arrows move the selected clips: a grid step (or 0.1 s with snap off), Alt for a fine 10 ms; up/down a lane.
+      else if ((k === 'arrowleft' || k === 'arrowright') && !mod && selection.length) moveClips(selection, (k === 'arrowleft' ? -1 : 1) * (e.altKey ? 0.01 : snapStep || 0.1), 0)
+      else if ((k === 'arrowup' || k === 'arrowdown') && !mod && selection.length) moveClips(selection, 0, k === 'arrowup' ? -1 : 1)
       else if (k === ']' && !mod) cycleAlternate(1)
       else if (k === '[' && !mod) cycleAlternate(-1)
       else handled = false
@@ -1454,7 +1485,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [toggle, undo, redo, selected, selection, duplicateClips, deleteClips, splitClips, seek, engine, toggleLoop, toggleAB, compClip, toggleClipMute, cycleAlternate, closePreview, removeTrack, takesById, nudgeTracks])
+  }, [toggle, undo, redo, selected, selection, duplicateClips, deleteClips, splitClips, seek, engine, toggleLoop, toggleAB, compClip, toggleClipMute, cycleAlternate, closePreview, removeTrack, takesById, nudgeTracks, moveClips, snapStep])
 
   // ── Zoom around the pointer ──
   useEffect(() => {
@@ -1812,6 +1843,26 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
         items={[
           clip && { icon: clip.muted ? Volume2 : VolumeX, label: `${clip.muted ? 'Unmute' : 'Mute'}${many}`, kbd: ['M'], onSelect: () => toggleClipMute(clipSel) },
           clip && { icon: Rewind, label: `${clip.reversed ? 'Play forwards' : 'Reverse'}${many}`, active: !!clip.reversed, onSelect: () => reverseClips(clipSel) },
+          clip && {
+            icon: Gauge,
+            label: `Speed & pitch${many}`,
+            trailing: retimeLabel(clip) || undefined,
+            children: [
+              { label: 'Slowed (80%)', checked: clipSpeed(clip) === 0.8 && !clip.keepPitch, onSelect: () => retimeClips(clipSel, { speed: 0.8, keepPitch: false }) },
+              { label: 'Sped up (125%)', checked: clipSpeed(clip) === 1.25 && !clip.keepPitch, onSelect: () => retimeClips(clipSel, { speed: 1.25, keepPitch: false }) },
+              { label: 'Half speed, same pitch', checked: clipSpeed(clip) === 0.5 && !!clip.keepPitch, onSelect: () => retimeClips(clipSel, { speed: 0.5, keepPitch: true }) },
+              { label: 'Double speed, same pitch', checked: clipSpeed(clip) === 2 && !!clip.keepPitch, onSelect: () => retimeClips(clipSel, { speed: 2, keepPitch: true }) },
+              { label: 'Pitch up a semitone', separatorBefore: true, onSelect: () => retimeClips(clipSel, (c) => ({ pitch: (c.pitch ?? 0) + 1 })) },
+              { label: 'Pitch down a semitone', onSelect: () => retimeClips(clipSel, (c) => ({ pitch: (c.pitch ?? 0) - 1 })) },
+              {
+                icon: Pencil,
+                label: 'Custom…',
+                separatorBefore: true,
+                panel: ({ close }) => <RetimePanel clip={clip} onApply={(patch) => { retimeClips(clipSel, patch); close() }} />,
+              },
+              { icon: RotateCcw, label: 'Normal speed and pitch', disabled: !retimeLabel(clip), onSelect: () => retimeClips(clipSel, { speed: 1, pitch: 0, keepPitch: false }) },
+            ],
+          },
           clip && { icon: Scissors, label: `Split${many} at playhead`, kbd: ['S'], onSelect: () => splitClips(clipSel, engine.position()) },
           clip && { icon: Copy, label: `Duplicate${many}`, kbd: ['Ctrl', 'D'], onSelect: () => duplicateClips(clipSel) },
           clip && { icon: Repeat, label: 'Loop this clip', onSelect: () => setLoop({ start: clip.start, end: clip.start + clip.length }) },
@@ -2266,6 +2317,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
               count={selection.length}
               onToggleMute={() => toggleClipMute(selection)}
               onReverse={() => reverseClips(selection)}
+              onRetime={(patch) => retimeClips(selection, patch)}
               onLoop={() => setLoop({ start: sel.clip.start, end: sel.clip.start + sel.clip.length })}
               onSplit={() => splitClips(selection, engine.position())}
               onDuplicate={() => duplicateClips(selection)}
@@ -2741,7 +2793,7 @@ const CompLane = memo(function CompLane({ members, loaded, takesById, pps, width
   onMenu: (takeId: string, e: React.MouseEvent, clipId?: string) => void
 }): JSX.Element {
   const segs = members.flatMap((m) => (m.heard
-    ? m.track.clips.flatMap((c) => audibleSpans(c).map(([a, b]) => ({ key: `${c.id}:${a}`, clip: c, color: m.color, view: { ...c, start: c.start + a, offset: c.offset + a, length: b - a } })))
+    ? m.track.clips.flatMap((c) => audibleSpans(c).map(([a, b]) => ({ key: `${c.id}:${a}`, clip: c, color: m.color, view: { ...c, start: c.start + a, offset: takeTime(c, c.start + a), length: b - a } })))
     : []))
   // Sweep for stretches with two or more takes heard; comp edges meet exactly, so skip slivers.
   const edges = segs.flatMap((sg): [number, number][] => [[sg.view.start, 1], [sg.view.start + sg.view.length, -1]]).sort((x, y) => x[0] - y[0] || x[1] - y[1])
@@ -2969,6 +3021,8 @@ const ClipView = memo(function ClipView({ clip, take, zipPath, loaded, failed, p
   onMenu: (takeId: string, e: React.MouseEvent, clipId?: string) => void
 }): JSX.Element {
   const progress = useLoadProgress(takeKey(zipPath, clip.takeId))
+  useSyncExternalStore(subscribeStretches, stretchVersion)
+  const stretching = !!loaded && !clipAudioReady(clip, loaded.buffer)
   const w = Math.max(2, clip.length * pps)
   const left = clip.start * pps
   const tiles = Math.ceil(w / TILE_W)
@@ -3007,7 +3061,7 @@ const ClipView = memo(function ClipView({ clip, take, zipPath, loaded, failed, p
       {fadeInW > 0 && <svg className="absolute left-0 top-0 h-full pointer-events-none" width={fadeInW} preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M0 100 L100 0 L0 0 Z" fill="rgba(0,0,0,0.35)" /></svg>}
       {fadeOutW > 0 && <svg className="absolute right-0 top-0 h-full pointer-events-none" width={fadeOutW} preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M0 0 L100 100 L100 0 Z" fill="rgba(0,0,0,0.35)" /></svg>}
       <div className="absolute left-1.5 top-0.5 right-1.5 text-[11px] font-medium truncate pointer-events-none" style={{ color, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
-        {clip.muted ? '(muted) ' : ''}{take?.name ?? 'Missing take'}{clip.reversed ? ' · reversed' : ''}{clip.gain !== 1 ? ` · ${dbOf(clip.gain).toFixed(1)} dB` : ''}
+        {clip.muted ? '(muted) ' : ''}{take?.name ?? 'Missing take'}{clip.reversed ? ' · reversed' : ''}{retimeLabel(clip) ? ` · ${retimeLabel(clip)}` : ''}{stretching ? ' · stretching…' : ''}{clip.gain !== 1 ? ` · ${dbOf(clip.gain).toFixed(1)} dB` : ''}
       </div>
       {selected && <div className="absolute inset-0 rounded-[5px] ring-2 ring-inset ring-white/80 pointer-events-none z-10" />}
       <div className={`${handle} left-0`} onPointerDown={(e) => onPointerDown(e, clip.id, 'trimL')} />
@@ -3023,6 +3077,7 @@ const WaveTile = memo(function WaveTile({ peaks, clip, pps, x, width, color }: {
 }): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null)
   const h = LANE_H - 10
+  const speed = clipSpeed(clip)
   useEffect(() => {
     const c = ref.current
     if (!c) return
@@ -3037,15 +3092,15 @@ const WaveTile = memo(function WaveTile({ peaks, clip, pps, x, width, color }: {
     const mid = h / 2 + 6
     const amp = h / 2 - 8
     for (let px = 0; px < width; px++) {
-      const t0 = clip.offset + (x + px) / pps
+      const t0 = clip.offset + ((x + px) / pps) * speed
       const i0 = Math.floor(t0 * PEAKS_PER_SEC)
-      const i1 = Math.max(i0 + 1, Math.floor((t0 + 1 / pps) * PEAKS_PER_SEC))
+      const i1 = Math.max(i0 + 1, Math.floor((t0 + speed / pps) * PEAKS_PER_SEC))
       let m = 0
       for (let i = i0; i < i1 && i < peaks.length; i++) if (peaks[i] > m) m = peaks[i]
       const y = Math.max(0.5, Math.min(1, m) * amp)
       g.fillRect(px, mid - y, 1, y * 2)
     }
-  }, [peaks, clip.offset, pps, x, width, color, h])
+  }, [peaks, clip.offset, speed, pps, x, width, color, h])
   return <canvas ref={ref} className="absolute top-0 pointer-events-none" style={{ left: x, width, height: h, opacity: 0.85 }} />
 })
 
@@ -3217,12 +3272,92 @@ function TimeReadout({ engine, bpm, gridOffset }: { engine: SessionEngine; bpm: 
   return <div ref={ref} className="min-w-[128px] px-2 text-sm font-mono tabular-nums text-text-primary whitespace-pre" />
 }
 
-function ClipInspector({ count, clip, take, originalName, renaming, setRenaming, alternates, alternateIndex, onCycle, onComp, onToggleMute, onReverse, onLoop, onChange, onRename, onSplit, onDuplicate, onDelete, onLocate }: {
+type RetimePatch = { speed?: number; pitch?: number; keepPitch?: boolean }
+
+/** "80% · +2 st" for a clip at another speed or pitch; empty when it plays as recorded. */
+function retimeLabel(c: SmClip): string {
+  const parts: string[] = []
+  if (clipSpeed(c) !== 1) parts.push(`${Math.round(clipSpeed(c) * 1000) / 10}%${c.keepPitch ? ' (pitch held)' : ''}`)
+  if (c.pitch) parts.push(`${c.pitch > 0 ? '+' : ''}${Math.round(c.pitch * 100) / 100} st`)
+  return parts.join(' · ')
+}
+
+/** Exact speed and pitch for the clip menu: type the numbers, Enter or Apply. */
+function RetimePanel({ clip, onApply }: { clip: SmClip; onApply: (patch: RetimePatch) => void }): JSX.Element {
+  const [speed, setSpeed] = useState(String(Math.round(clipSpeed(clip) * 1000) / 10))
+  const [pitch, setPitch] = useState(String(clip.pitch ?? 0))
+  const [hold, setHold] = useState(!!clip.keepPitch)
+  const sp = Number(speed), pt = Number(pitch)
+  const valid = speed.trim() !== '' && pitch.trim() !== '' && Number.isFinite(sp) && Number.isFinite(pt)
+    && sp >= MIN_SPEED * 100 && sp <= MAX_SPEED * 100 && Math.abs(pt) <= MAX_PITCH
+  const apply = (): void => { if (valid) onApply({ speed: sp / 100, pitch: pt, keepPitch: hold }) }
+  const onKey = (e: React.KeyboardEvent): void => { if (e.key === 'Enter') { e.preventDefault(); apply() } }
+  return (
+    <div className="w-[220px] p-3 space-y-2.5">
+      <label className="flex items-center gap-2 text-xs text-text-secondary">
+        <span className="w-12 shrink-0">Speed</span>
+        <input autoFocus type="number" step="any" min={MIN_SPEED * 100} max={MAX_SPEED * 100} value={speed} onChange={(e) => setSpeed(e.target.value)} onKeyDown={onKey} className={`${input} h-7 flex-1 min-w-0 tabular-nums`} />
+        <span className="w-5 text-text-muted">%</span>
+      </label>
+      <label className="flex items-center gap-2 text-xs text-text-secondary">
+        <span className="w-12 shrink-0">Pitch</span>
+        <input type="number" step="any" min={-MAX_PITCH} max={MAX_PITCH} value={pitch} onChange={(e) => setPitch(e.target.value)} onKeyDown={onKey} className={`${input} h-7 flex-1 min-w-0 tabular-nums`} />
+        <span className="w-5 text-text-muted">st</span>
+      </label>
+      <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer" title="Off: pitch follows the speed, like tape (sped up / slowed). On: the speed changes, the pitch doesn't.">
+        <input type="checkbox" checked={hold} onChange={(e) => setHold(e.target.checked)} className="accent-[rgb(var(--accent-rgb))]" />
+        Hold pitch when the speed changes
+      </label>
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-[11px] text-text-muted">{valid ? '' : `Speed ${MIN_SPEED * 100}-${MAX_SPEED * 100}%, pitch ±${MAX_PITCH}`}</span>
+        <button className={`${btn} h-7 ${btnOn}`} disabled={!valid} onClick={apply}>Apply</button>
+      </div>
+    </div>
+  )
+}
+
+/** A number field that applies once typing or the arrows pause (or on Enter / leaving it).
+ *  Each new speed or pitch can mean re-stretching a whole take, so not every keystroke. */
+function CommitNumber({ value, min, max, step, onCommit, className }: {
+  value: number; min: number; max: number; step: number | 'any'; onCommit: (v: number) => void; className: string
+}): JSX.Element {
+  const [text, setText] = useState(String(value))
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => { setText(String(value)) }, [value])
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  const apply = (t: string): void => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null }
+    const v = Number(t)
+    if (t.trim() === '' || !Number.isFinite(v)) { setText(String(value)); return }
+    const c = clamp(v, min, max)
+    if (c !== value) onCommit(c)
+    else setText(String(value))
+  }
+  return (
+    <input
+      type="number" min={min} max={max} step={step} value={text}
+      onChange={(e) => {
+        const t = e.target.value
+        setText(t)
+        if (timer.current) clearTimeout(timer.current)
+        timer.current = setTimeout(() => apply(t), 600)
+      }}
+      onBlur={(e) => apply(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') apply((e.target as HTMLInputElement).value)
+        else if (e.key === 'Escape') { if (timer.current) clearTimeout(timer.current); setText(String(value)) }
+      }}
+      className={className}
+    />
+  )
+}
+
+function ClipInspector({ count, clip, take, originalName, renaming, setRenaming, alternates, alternateIndex, onCycle, onComp, onToggleMute, onReverse, onRetime, onLoop, onChange, onRename, onSplit, onDuplicate, onDelete, onLocate }: {
   clip: SmClip; take: Take | undefined; originalName: string | undefined
   renaming: boolean; setRenaming: (on: boolean) => void
   onRename: (takeId: string, name: string) => void
   alternates: number; alternateIndex: number
-  onCycle: (dir: 1 | -1) => void; onComp: () => void; onToggleMute: () => void; onReverse: () => void; onLoop: () => void
+  onCycle: (dir: 1 | -1) => void; onComp: () => void; onToggleMute: () => void; onReverse: () => void; onRetime: (patch: RetimePatch) => void; onLoop: () => void
   count: number
   onChange: (patch: Partial<SmClip>, history: boolean) => void
   onSplit: () => void; onDuplicate: () => void; onDelete: () => void; onLocate: () => void
@@ -3238,7 +3373,7 @@ function ClipInspector({ count, clip, take, originalName, renaming, setRenaming,
     </label>
   )
   return (
-    <div className="shrink-0 flex items-center gap-4 px-4 py-2 border-t border-[var(--border)] bg-[var(--surface-raised)]">
+    <div className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-t border-[var(--border)] bg-[var(--surface-raised)]">
       <div className="group/name min-w-0 flex items-center gap-1">
         {renaming && take
           ? <div className="w-[240px]"><RenameInput value={take.name} placeholder={originalName} onDone={(name) => { setRenaming(false); if (name != null) onRename(take.id, name) }} /></div>
@@ -3276,6 +3411,24 @@ File: ${originalName}` : ''}`}>
       <button className={`${btn} h-7 ${clip.reversed ? btnOn : ''}`} onClick={onReverse} title={clip.reversed ? 'Playing backwards - click to play forwards' : 'Play this clip backwards'}>
         <Rewind size={14} /> {clip.reversed ? 'Reversed' : 'Reverse'}
       </button>
+      <label className="flex items-center gap-1.5 text-xs text-text-muted" title="Playback speed - the clip grows or shrinks on the timeline">
+        Speed
+        <CommitNumber value={Math.round(clipSpeed(clip) * 1000) / 10} min={MIN_SPEED * 100} max={MAX_SPEED * 100} step="any" onCommit={(v) => onRetime({ speed: v / 100 })} className={`${input} w-[72px] h-7 tabular-nums`} />
+        %
+      </label>
+      <button
+        className={`${btn} h-7 ${clip.keepPitch ? btnOn : ''}`}
+        disabled={clipSpeed(clip) === 1}
+        onClick={() => onRetime({ keepPitch: !clip.keepPitch })}
+        title={clip.keepPitch ? 'Pitch held while the speed changes - click to let it follow, like tape' : 'Pitch follows the speed, like tape (sped up / slowed) - click to hold it'}
+      >
+        {clip.keepPitch ? 'Pitch held' : 'Hold pitch'}
+      </button>
+      <label className="flex items-center gap-1.5 text-xs text-text-muted" title="Pitch shift in semitones, without changing the speed">
+        Pitch
+        <CommitNumber value={clip.pitch ?? 0} min={-MAX_PITCH} max={MAX_PITCH} step="any" onCommit={(v) => onRetime({ pitch: v })} className={`${input} w-16 h-7 tabular-nums`} />
+        st
+      </label>
       {num('Fade in', clip.fadeIn, 'fadeIn', clip.length - clip.fadeOut)}
       {num('Fade out', clip.fadeOut, 'fadeOut', clip.length - clip.fadeIn)}
       <div className="flex-1" />
