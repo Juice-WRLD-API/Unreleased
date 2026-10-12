@@ -1,5 +1,5 @@
-// Unreleased's VST3 helper. The Session Maker mixes with Web Audio, which can't load
-// plug-ins, so Electron runs this next to it:
+// Unreleased's native Session Maker engine and VST3 host. Electron runs this
+// beside the renderer; Windows playback uses the persistent 'session' mode.
 //
 //   vsthost list                 JSON array of the .vst3 modules in the standard folders
 //   vsthost scan <module>        JSON { ok, name, classes: [{ cid, name, vendor, version, sub }] }
@@ -9,6 +9,8 @@
 //                                        or { ok: false, error, plugin }
 //   vsthost edit [--owner HWND]  stdin:  one JSON line { path, cid, state, title, sampleRate }, then "focus" / "close" lines
 //                                stdout: JSON lines { type: "open" | "state" | "closed" | "error", ... }
+//   vsthost session             persistent commands/assets, WASAPI output, JSON acknowledgements/position
+//   vsthost session-render      same native mixer, offline planar float32 output (no audio device)
 //
 // State is a host-side blob - the component's and controller's own state - base64'd so it
 // can live in the project JSON. Each mode is its own process, so a plug-in that crashes
@@ -36,6 +38,14 @@
 #include <fcntl.h>
 #include <io.h>
 #include <ole2.h>
+#include <audioclient.h>
+#include <mmdeviceapi.h>
+#include <mmreg.h>
+#include <stdexcept>
+#include <array>
+#include <condition_variable>
+#include <deque>
+#include <avrt.h>
 
 #include <algorithm>
 #include <atomic>
@@ -449,7 +459,7 @@ struct Plug
 	IPtr<IComponent> component;
 	IPtr<IEditController> controller;
 	IPtr<IAudioProcessor> processor;
-	IPtr<IConnectionPoint> compCP, ctrlCP;
+	IPtr<Steinberg::Vst::IConnectionPoint> compCP, ctrlCP;
 	bool single {false};
 	bool active {false};
 	bool processing {false};
@@ -507,8 +517,8 @@ struct Plug
 			}
 			if (controller)
 			{
-				compCP = U::cast<IConnectionPoint> (component);
-				ctrlCP = U::cast<IConnectionPoint> (controller);
+				compCP = U::cast<Steinberg::Vst::IConnectionPoint> (component);
+				ctrlCP = U::cast<Steinberg::Vst::IConnectionPoint> (controller);
 				if (compCP && ctrlCP)
 				{
 					compCP->connect (ctrlCP);
@@ -948,6 +958,7 @@ struct Editor : IComponentHandler, IPlugFrame
 		int32 qi = 0, pi = 0;
 		if (auto* q = pending.addParameterData (id, qi))
 			q->addPoint (0, value, pi);
+		sendLine ("{\"type\":\"parameter\",\"param\":" + std::to_string (id) + ",\"value\":" + std::to_string (value) + "}");
 		touched ();
 		return kResultOk;
 	}
@@ -1247,6 +1258,8 @@ int runEdit (HWND owner)
 	return 0;
 }
 
+#include "session_engine.h"
+
 } // namespace
 
 int wmain (int argc, wchar_t** argv)
@@ -1268,6 +1281,10 @@ int wmain (int argc, wchar_t** argv)
 		rc = runScan (args[1]);
 	else if (!args.empty () && args[0] == "process")
 		rc = runProcess ();
+	else if (!args.empty () && args[0] == "session")
+		rc = runSession ();
+	else if (!args.empty () && args[0] == "session-render")
+		rc = runSessionRender ();
 	else if (!args.empty () && args[0] == "edit")
 	{
 		HWND owner = nullptr;

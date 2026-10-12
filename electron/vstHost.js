@@ -1,6 +1,7 @@
 // VST3 plug-ins for the Session Maker. Web Audio can't load them, so the work goes to
-// native/vsthost (built into build/vsthost, shipped as resources/vsthost.exe): one helper
-// process per job, so a plug-in that crashes or hangs takes only that job with it.
+// native/vsthost (built into build/vsthost, shipped as resources/vsthost.exe).
+// Native Session Maker playback has one persistent helper; exports, scans, and
+// editor windows remain isolated jobs so their failures cannot crash Electron.
 //
 //   vst-available      whether plug-ins can be used here
 //   vst-scan           the installed effects, cached by module and re-checked when one changes
@@ -225,10 +226,10 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
   /** Runs a 'process' job, writing the audio that comes back straight into one
    *  Float32Array per channel - no gathering it all up first, so long takes don't
    *  sit in memory twice. */
-  const runProcess = (input, timeout) => new Promise((resolve) => {
+  const runProcess = (input, timeout, mode = 'process') => new Promise((resolve) => {
     const exe = helper()
     if (!exe) return resolve({ head: null, error: 'The plug-in host is missing' })
-    const child = spawn(exe, ['process'], { windowsHide: true })
+    const child = spawn(exe, [mode], { windowsHide: true })
     let killed = false
     const timer = setTimeout(() => { killed = true; child.kill() }, timeout)
     let pending = Buffer.alloc(0)
@@ -273,7 +274,22 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
     child.stdin.end()
   })
 
+  ipcMain.handle('session-native-render', async (_, req) => {
+    const input = []
+    for (const asset of req.assets) {
+      const channels = asset.channels
+      if (!channels.length || channels.length > 2 || channels.some((c) => !(c instanceof Float32Array) || c.length !== channels[0].length)) return { error: 'Invalid render audio' }
+      input.push(Buffer.from(JSON.stringify({ op: 'asset', id: asset.id, sampleRate: asset.sampleRate, frames: channels[0].length, channels: channels.length }) + '\n'))
+      for (const c of channels) input.push(Buffer.from(c.buffer, c.byteOffset, c.byteLength))
+    }
+    input.push(Buffer.from(JSON.stringify({ op: 'render', project: req.project, sampleRate: req.sampleRate, duration: req.duration }) + '\n'))
+    const result = await runProcess(input, 60000 + req.duration * 10000, 'session-render')
+    if (!result.head?.ok || !result.complete) return { error: result.head?.error || result.error || 'Native export failed' }
+    return { channels: result.channels }
+  })
+
   const editors = new Map()
+  const nativeSessions = require('./nativeSession').registerNativeSessions({ app, ipcMain, helper })
   ipcMain.handle('vst-edit-open', (event, req) => {
     const exe = helper()
     if (!exe) return { error: 'The plug-in host is missing' }
@@ -299,7 +315,8 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow }) {
         let msg
         try { msg = JSON.parse(line) } catch { continue }
         if (msg.type === 'closed') closed = true
-        send(msg)
+        nativeSessions.editor(event.sender, req, msg)
+        if (msg.type !== 'parameter') send(msg)
       }
     })
     child.stderr.on('data', () => {})

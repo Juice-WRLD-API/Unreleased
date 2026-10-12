@@ -16,6 +16,7 @@ import { useStore } from '../store/useStore'
 import { openRemoteZip, readEntry, readEntryHeads, type LocalZip, type RemoteZip, type ZipEntry } from './remoteZip'
 import { toFileUrl } from './fileTypes'
 import { vstApi, type PluginRef } from './vstPlugins'
+import { hasNativeSession, NativeSessionTransport, renderNativeSession, type NativeAsset } from './nativeSession'
 
 export const SESSIONS_ROOT = 'Studio Sessions'
 
@@ -1458,14 +1459,14 @@ export function clipAudioState(c: SmClip, take: AudioBuffer, fx: LaneFx | null):
   const stretch = clipStretch(c)
   const buffer = stretch === 1 ? src : stretchEntry(src, stretch).buffer
   if (!buffer) return { stage: 'stretching' }
-  if (!fx || c.muted) return { stage: 'ready' }
+  if (!fx || c.muted || hasNativeSession()) return { stage: 'ready' }
   const run = pluginRun(buffer, fx, clipSpan(c, buffer))
   return run.error ? { stage: 'failed', error: run.error } : run.buffer ? { stage: 'ready' } : { stage: 'plugins' }
 }
 
 /** Waits for every stretch and plug-in run the heard clips need - an export can't leave
  *  anything silent or dry. A plug-in that fails stops the export, named. */
-async function prepareAll(p: SmProject, bufferFor: BufferFor): Promise<void> {
+async function prepareAll(p: SmProject, bufferFor: BufferFor, plugins = true): Promise<void> {
   const audible = new Set(audibleTracks(p).map((t) => t.id))
   await Promise.all(p.tracks.filter((t) => audible.has(t.id)).flatMap((t) => {
     const fx = laneFx(t, p.bpm)
@@ -1473,7 +1474,7 @@ async function prepareAll(p: SmProject, bufferFor: BufferFor): Promise<void> {
       const src = c.muted ? undefined : clipSource(c, bufferFor)
       if (!src) return
       const buffer = clipStretch(c) === 1 ? src : await stretchEntry(src, clipStretch(c)).promise
-      if (!fx) return
+      if (!fx || !plugins) return
       const run = pluginRun(buffer, fx, clipSpan(c, buffer))
       await run.promise.catch(() => { throw new Error(`${t.name}: ${run.error ?? 'a plug-in failed'}`) })
     })
@@ -1622,6 +1623,114 @@ export interface SmPlugin {
   bypass?: boolean
 }
 
+// ─── Effects on several lanes at once ────────────────────────────────────────
+// The FX popover can act on one lane, the selected lanes or a whole take folder. Each
+// change lands on every one of them as just that change - one slider, one plug-in - so
+// whatever else differs between the lanes stays as it was. A plug-in added to several
+// lanes at once gets the same id on each, which links them: bypass, remove, reorder
+// and its window then act on all of them together.
+
+export type FxEdit =
+  | { kind: 'chain'; key: ChainKey; value: number }
+  | { kind: 'send'; key: FxKey; value: number }
+  | { kind: 'addPlugin'; plugin: SmPlugin }
+  | { kind: 'removePlugin'; id: string }
+  | { kind: 'bypassPlugin'; id: string; bypass: boolean }
+  /** One place earlier in each lane's chain. */
+  | { kind: 'movePlugin'; id: string }
+  /** Onto the lanes that don't have it yet, with the settings of the first lane that does. */
+  | { kind: 'spreadPlugin'; id: string }
+
+const withPlugins = (t: SmTrack, plugins: SmPlugin[]): SmTrack => {
+  const { plugins: _, ...rest } = t
+  return plugins.length ? { ...rest, plugins } : rest
+}
+
+function editOne(t: SmTrack, e: FxEdit, source?: SmPlugin): SmTrack {
+  const list = t.plugins ?? []
+  switch (e.kind) {
+    case 'chain': return { ...t, chain: { ...t.chain, [e.key]: e.value } }
+    case 'send': return { ...t, fx: { ...t.fx, [e.key]: e.value } }
+    case 'addPlugin': return list.some((pl) => pl.id === e.plugin.id) ? t : withPlugins(t, [...list, e.plugin])
+    case 'removePlugin': return list.some((pl) => pl.id === e.id) ? withPlugins(t, list.filter((pl) => pl.id !== e.id)) : t
+    case 'bypassPlugin':
+      return list.some((pl) => pl.id === e.id)
+        ? withPlugins(t, list.map((pl) => {
+          if (pl.id !== e.id) return pl
+          const { bypass: _, ...rest } = pl
+          return e.bypass ? { ...rest, bypass: true } : rest
+        }))
+        : t
+    case 'movePlugin': {
+      const i = list.findIndex((pl) => pl.id === e.id)
+      return i > 0 ? withPlugins(t, [...list.slice(0, i - 1), list[i], list[i - 1], ...list.slice(i + 1)]) : t
+    }
+    case 'spreadPlugin': return source && !list.some((pl) => pl.id === e.id) ? withPlugins(t, [...list, source]) : t
+  }
+}
+
+/** Applies one effects change to each of the lanes `ids`. */
+export function editTracksFx(p: SmProject, ids: readonly string[], e: FxEdit): SmProject {
+  const set = new Set(ids)
+  const source = e.kind === 'spreadPlugin'
+    ? p.tracks.find((t) => set.has(t.id) && t.plugins?.some((pl) => pl.id === e.id))?.plugins?.find((pl) => pl.id === e.id)
+    : undefined
+  let changed = false
+  const tracks = p.tracks.map((t) => {
+    if (!set.has(t.id)) return t
+    const next = editOne(t, e, source)
+    if (next !== t) changed = true
+    return next
+  })
+  return changed ? { ...p, tracks } : p
+}
+
+/** One row of a multi-lane plug-in list: the plug-in as the first lane has it, and every lane that has it. */
+export interface PluginRow { plugin: SmPlugin; lanes: string[] }
+
+/** The plug-ins across some lanes, linked ones as one row, in the order they first appear. */
+export function pluginRows(lanes: readonly SmTrack[]): PluginRow[] {
+  const rows = new Map<string, PluginRow>()
+  for (const t of lanes) {
+    for (const pl of t.plugins ?? []) {
+      const row = rows.get(pl.id)
+      if (row) row.lanes.push(t.id)
+      else rows.set(pl.id, { plugin: pl, lanes: [t.id] })
+    }
+  }
+  return [...rows.values()]
+}
+
+/** A lane's effects, as copied - its own chain, its sends and its plug-ins with their settings. */
+export interface FxCopy { chain?: TrackChain; fx?: TrackFx; plugins?: SmPlugin[] }
+
+export const hasEffects = (t: SmTrack): boolean =>
+  chainActive(t.chain) || FX_KEYS.some((k) => (t.fx?.[k] ?? 0) > 0) || !!t.plugins?.length
+
+export function copyEffects(t: SmTrack): FxCopy {
+  return structuredClone({ chain: t.chain, fx: t.fx, plugins: t.plugins })
+}
+
+/** Puts copied effects on each of the lanes, in place of theirs. The pasted plug-ins get
+ *  fresh ids, the same on every lane, so they come out linked. */
+export function pasteEffects(p: SmProject, ids: readonly string[], fx: FxCopy): SmProject {
+  const set = new Set(ids)
+  const plugins = fx.plugins?.map((pl) => ({ ...pl, id: uid() }))
+  return {
+    ...p,
+    tracks: p.tracks.map((t) => {
+      if (!set.has(t.id)) return t
+      const { chain: _c, fx: _f, plugins: _p, ...rest } = t
+      return {
+        ...rest,
+        ...(fx.chain ? { chain: { ...fx.chain } } : {}),
+        ...(fx.fx ? { fx: { ...fx.fx } } : {}),
+        ...(plugins?.length ? { plugins: plugins.map((pl) => ({ ...pl })) } : {}),
+      }
+    }),
+  }
+}
+
 /** Which plug-in window belongs to which lane's plug-in. */
 export const pluginEditorKey = (trackId: string, pluginId: string): string => `${trackId}:${pluginId}`
 
@@ -1764,7 +1873,37 @@ function referenceClip(r: Reference): SmClip {
   return { id: 'ref', takeId: 'ref', start: Math.max(0, r.offset), offset: into, length: r.buffer.duration - into, gain: 1, fadeIn: 0, fadeOut: 0 }
 }
 
+function nativeMix(p: SmProject): object {
+  const reverb = REVERB_SIZES[p.reverbSize ?? DEFAULT_REVERB_SIZE]
+  return { bpm: p.bpm ?? 120, masterGain: p.masterGain, echoSeconds: echoSeconds(p),
+    reverbSeconds: reverb.seconds, preDelay: reverb.preDelay,
+    tracks: p.tracks.map(({ clips: _clips, ...t }) => t) }
+}
+
+const nativeAssetIds = new WeakMap<AudioBuffer, string>()
+function nativeSnapshot(p: SmProject, bufferFor: BufferFor, reference: Reference | null, loop: LoopRange | null): { project: object; assets: NativeAsset[] } {
+  const assets = new Map<string, NativeAsset>()
+  const asset = (buffer: AudioBuffer): string => {
+    let id = nativeAssetIds.get(buffer)
+    if (!id) { id = uid(); nativeAssetIds.set(buffer, id) }
+    assets.set(id, { id, buffer })
+    return id
+  }
+  const clips = (t: SmTrack): object[] => t.clips.flatMap((c) => {
+    if (c.muted) return []
+    const a = clipAudio(c, bufferFor)
+    return a ? [{ ...c, asset: asset(a.buffer), offset: c.offset / a.stretch, rate: a.rate, silence: silentSpans(c) }] : []
+  })
+  const project = { ...nativeMix(p), tracks: p.tracks.map((t) => ({ ...t, clips: clips(t) })),
+    reference: reference ? { ...referenceClip(reference), asset: asset(reference.buffer), rate: 1 } : null,
+    loop, end: projectEnd(p) }
+  return { project, assets: [...assets.values()] }
+}
+
 export class SessionEngine {
+  readonly nativePlayback = hasNativeSession()
+  onError: ((message: string) => void) | null = null
+  private native: NativeSessionTransport | null = null
   private sources = new Set<AudioBufferSourceNode>()
   private trackGains = new Map<string, GainNode>()
   private trackPans = new Map<string, StereoPannerNode>()
@@ -1795,13 +1934,26 @@ export class SessionEngine {
 
   position(): number {
     if (!this.playing) return this.startedFrom
-    const t = this.startedFrom + Math.max(0, audioContext().currentTime - this.startedAt)
+    const t = this.native ? this.native.position() : this.startedFrom + Math.max(0, audioContext().currentTime - this.startedAt)
     const l = this.loop
     if (l && t >= l.end) return l.start + ((t - l.end) % (l.end - l.start))
     return t
   }
 
   play(p: SmProject, from: number, bufferFor: BufferFor, opts: { loop?: LoopRange | null; reference?: Reference | null } = {}): void {
+    if (this.nativePlayback) {
+      if (!this.native) this.native = new NativeSessionTransport((message) => {
+        this.startedFrom = this.native?.position() ?? this.startedFrom
+        this.playing = false
+        this.native?.dispose(); this.native = null
+        this.onError?.(message)
+      })
+      const loop = opts.loop && opts.loop.end - opts.loop.start > .05 && from < opts.loop.end ? opts.loop : null
+      const { project, assets } = nativeSnapshot(p, bufferFor, opts.reference ?? null, loop)
+      this.loop = loop; this.startedFrom = from; this.playing = true
+      this.native.play(project, assets, from, this.ab)
+      return
+    }
     this.stopSources()
     const ctx = audioContext()
     if (ctx.state === 'suspended') void ctx.resume()
@@ -1882,6 +2034,7 @@ export class SessionEngine {
 
   /** Volume/mute/solo and effect changes without restarting playback. */
   applyMix(p: SmProject): void {
+    if (this.native) { this.native.mix(nativeMix(p)); return }
     if (this.master) this.master.gain.value = p.masterGain
     this.fx?.set(p)
     const audible = new Set(audibleTracks(p).map((t) => t.id))
@@ -1900,6 +2053,7 @@ export class SessionEngine {
   /** Flips between the arrangement and the reference bounce, in sync. */
   setAB(ab: AB, instant = false): void {
     this.ab = ab
+    if (this.native) { this.native.setAB(ab); return }
     const now = audioContext().currentTime
     for (const [bus, on] of [[this.mixBus, ab === 'mix'], [this.refBus, ab === 'ref']] as const) {
       if (!bus) continue
@@ -1912,6 +2066,7 @@ export class SessionEngine {
 
   pause(): void {
     this.startedFrom = this.position()
+    if (this.native) { this.native.pause(); this.playing = false; return }
     this.stopSources()
     this.playing = false
   }
@@ -2039,6 +2194,7 @@ export class SessionEngine {
   }
 
   dispose(): void {
+    this.native?.dispose(); this.native = null
     this.stopSources()
     this.stopPreview()
     this.playing = false
@@ -2049,7 +2205,11 @@ export async function renderProject(p: SmProject, bufferFor: BufferFor, sampleRa
   const end = projectEnd(p)
   if (end <= 0) throw new Error('Nothing to export - the timeline is empty')
   // Let the reverb/echo tails ring out past the last clip.
-  await prepareAll(p, bufferFor)
+  await prepareAll(p, bufferFor, !hasNativeSession())
+  if (hasNativeSession()) {
+    const { project, assets } = nativeSnapshot(p, bufferFor, null, null)
+    return renderNativeSession(project, assets, end + (fxActive(p) ? fxTail(p) : .25), sampleRate)
+  }
   const lag = MIX_LATENCY_STAGES * (await compressorLatency(sampleRate))
   const ctx = new OfflineAudioContext(2, Math.ceil((end + (fxActive(p) ? fxTail(p) : 0.25)) * sampleRate) + lag, sampleRate)
   const master = ctx.createGain()

@@ -16,6 +16,9 @@ const SDK_PARTS = ['base', 'pluginterfaces', 'public.sdk']
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const sdk = join(root, 'build', 'vst3sdk')
 const out = join(root, 'build', 'vsthost')
+const tests = process.argv.includes('--tests')
+const entry = tests ? 'session_tests.cpp' : 'vsthost.cpp'
+const executable = tests ? 'session-tests.exe' : 'vsthost.exe'
 
 if (process.platform !== 'win32') {
   console.log('vsthost: only Windows builds are set up so far - skipping.')
@@ -73,12 +76,12 @@ mkdirSync(join(out, 'obj'), { recursive: true })
 const cl = [
   'cl', '/nologo', '/std:c++17', '/EHsc', '/O2', '/MT', '/W3', '/utf-8',
   '/DNOMINMAX', '/DUNICODE', '/D_UNICODE', '/DRELEASE=1', '/D_CRT_SECURE_NO_WARNINGS',
-  `/I"${sdk}"`, `/Fo"${join(out, 'obj')}\\\\"`, `/Fe"${join(out, 'vsthost.exe')}"`,
-  `"${join(root, 'native', 'vsthost', 'vsthost.cpp')}"`, ...sources.map((s) => `"${s}"`),
+  `/I"${sdk}"`, `/Fo"${join(out, 'obj')}\\\\"`, `/Fe"${join(out, executable)}"`,
+  `"${join(root, 'native', 'vsthost', entry)}"`, ...sources.map((s) => `"${s}"`),
   '/link', '/SUBSYSTEM:CONSOLE', 'ole32.lib', 'user32.lib', 'shell32.lib', 'gdi32.lib',
 ].join(' ')
 // cmd needs the whole line in one script to keep vcvars' environment for cl.
 const bat = join(out, 'build.bat')
 writeFileSync(bat, `@echo off\r\ncall "${vcvars}" >nul || exit /b 1\r\n${cl}\r\n`)
 execFileSync('cmd.exe', ['/d', '/c', bat], { stdio: 'inherit' })
-console.log(`vsthost: built ${join(out, 'vsthost.exe')}`)
+console.log(`vsthost: built ${join(out, executable)}`)

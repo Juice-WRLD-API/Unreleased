@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  Activity, ArrowDown, ArrowLeft, ArrowUp, Check, Info, ClipboardCopy, CopyPlus, Eraser, FolderInput, FolderMinus, FolderPlus, Headphones, Highlighter, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Download, FileDown, FileUp, Flag, HardDrive, HardDriveDownload, Layers, Loader2, Magnet,
-  Minus, Pause, Play, Pencil, Plus, Power, Gauge, Redo2, RefreshCw, Repeat, Rewind, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
+  Activity, ArrowDown, ArrowLeft, ArrowUp, Check, Info, ClipboardCopy, ClipboardPaste, CopyPlus, Eraser, FolderInput, FolderMinus, FolderPlus, Headphones, Highlighter, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Download, FileDown, FileUp, Flag, HardDrive, HardDriveDownload, Layers, Loader2, Magnet,
+  Minus, Pause, Play, Pencil, Plus, Power, Gauge, Redo2, RefreshCw, Repeat, Rewind, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, SlidersHorizontal, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/useStore'
@@ -15,8 +15,8 @@ import {
   PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, duplicateProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
   loadProjects, loadTake, newProject, parseProjectFile, peakOf, peekLoadProgress, placeAllTakes, projectEnd, renderProject, scaleBuffer,
   saveProject, scanSession, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
-  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, audioContext, chainActive, chainReadout, clipAudioState, clipSpeed, laneFx, pluginEditorKey, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
-  type ChainKey, type LaneFx, type SmPlugin, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
+  CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, audioContext, chainActive, chainReadout, clipAudioState, clipSpeed, copyEffects, editTracksFx, hasEffects, laneFx, pasteEffects, pluginEditorKey, pluginRows, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
+  type ChainKey, type FxCopy, type FxEdit, type LaneFx, type PluginRow, type SmPlugin, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
 } from '../lib/sessionMaker'
 
 const HEADER_W = 208
@@ -717,6 +717,10 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     if (engine.playing) engine.play(projectRef.current, engine.position(), bufferFor, playOpts())
   }, [clipsKey, loadedKey, stretchKey, engine, bufferFor, playOpts])
   useEffect(() => { engine.applyMix(project) }, [project, engine])
+  useEffect(() => {
+    engine.onError = (message) => { setPlaying(false); alert(`Session playback stopped: ${message}`) }
+    return () => { engine.onError = null }
+  }, [engine])
 
   useEffect(() => () => engine.dispose(), [engine])
   // The app's own player starting should stop us, not play on top.
@@ -1008,10 +1012,14 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
   const vst = useVstPlugins()
   const [openEditors, setOpenEditors] = useState<ReadonlySet<string>>(() => new Set())
   const openSettings = useStore((s) => s.openSettings)
-  const editPlugin = useCallback((trackId: string, trackName: string, pl: SmPlugin) => {
+  // A window opened on a plug-in several lanes share (added to them together) edits all of them.
+  const editorLinks = useRef(new Map<string, string[]>())
+  const editPlugin = useCallback((lanes: string[], pl: SmPlugin, where: string) => {
+    const key = pluginEditorKey(lanes[0], pl.id)
+    editorLinks.current.set(key, lanes)
     void vstApi()?.vstEditOpen({
-      key: pluginEditorKey(trackId, pl.id), path: pl.path, cid: pl.cid, state: pl.state ?? '',
-      title: `${pl.name} - ${trackName}`, sampleRate: audioContext().sampleRate,
+      key, lanes, path: pl.path, cid: pl.cid, state: pl.state ?? '',
+      title: `${pl.name} - ${where}`, sampleRate: engine.nativePlayback ? 48000 : audioContext().sampleRate,
     }).then((r) => { if (r.error) alert(r.error) })
   }, [])
   const closePlugin = useCallback((trackId: string, pluginId: string) => { void vstApi()?.vstEditClose(pluginEditorKey(trackId, pluginId)) }, [])
@@ -1021,25 +1029,71 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     const open = new Set<string>()
     const off = api.onVstEditor((e) => {
       if (e.type === 'open') { open.add(e.key); setOpenEditors(new Set(open)) }
-      else if (e.type === 'closed') { open.delete(e.key); setOpenEditors(new Set(open)) }
+      else if (e.type === 'closed') { open.delete(e.key); editorLinks.current.delete(e.key); setOpenEditors(new Set(open)) }
       else if (e.type === 'error') alert(e.error ?? 'The plug-in window failed')
       else if (e.type === 'state' && e.state) {
-        // Tweaks in the plug-in's window land on that lane's plug-in, grouped for undo like a slider drag.
+        // Tweaks in the plug-in's window land on its lane's plug-in - or every linked lane's -
+        // grouped for undo like a slider drag.
         const at = e.key.indexOf(':')
         const trackId = e.key.slice(0, at), pluginId = e.key.slice(at + 1)
+        const lanes = new Set(editorLinks.current.get(e.key) ?? [trackId])
         const p = projectRef.current
-        const t = p.tracks.find((x) => x.id === trackId)
-        if (!t?.plugins?.some((pl) => pl.id === pluginId && pl.state !== e.state)) return
-        const plugins = t.plugins.map((pl) => (pl.id === pluginId ? { ...pl, state: e.state } : pl))
-        setLive({ ...p, tracks: p.tracks.map((x) => (x === t ? { ...t, plugins } : x)) })
+        let changed = false
+        const tracks = p.tracks.map((t) => {
+          if (!lanes.has(t.id) || !t.plugins?.some((pl) => pl.id === pluginId && pl.state !== e.state)) return t
+          changed = true
+          return { ...t, plugins: t.plugins.map((pl) => (pl.id === pluginId ? { ...pl, state: e.state } : pl)) }
+        })
+        if (changed) setLive({ ...p, tracks })
       }
     })
     return () => { off(); for (const k of open) void api.vstEditClose(k) }
   }, [setLive])
   const pluginHost = useMemo<PluginHost | null>(
-    () => (vst.available ? { scan: vst.list, scanning: vst.scanning, open: openEditors, edit: editPlugin, close: closePlugin, manage: () => openSettings('plugins') } : null),
-    [vst.available, vst.list, vst.scanning, openEditors, editPlugin, closePlugin, openSettings],
+    () => (vst.available ? { scan: vst.list, scanning: vst.scanning, open: openEditors, edit: editPlugin, manage: () => openSettings('plugins') } : null),
+    [vst.available, vst.list, vst.scanning, openEditors, editPlugin, openSettings],
   )
+
+  // ── The FX popover: one lane, the selected lanes, or a take folder's lanes ──
+  const [fxPop, setFxPop] = useState<FxTarget | null>(null)
+  const [, setFxClipVer] = useState(0)
+  const fxPlace = (x: number, y: number): { left: number; top: number } => ({
+    left: Math.max(8, Math.min(x, window.innerWidth - 268)),
+    top: Math.max(8, Math.min(y, window.innerHeight - 430)),
+  })
+  const openLaneFx = useCallback((trackId: string, anchor: HTMLElement) => {
+    const p = projectRef.current
+    const sel = trackSelRef.current
+    const ids = sel.includes(trackId) && sel.length > 1 ? p.tracks.filter((t) => sel.includes(t.id)).map((t) => t.id) : [trackId]
+    const r = anchor.getBoundingClientRect()
+    setFxPop((cur) => (cur?.anchor === anchor ? null : { ids, anchor, ...fxPlace(r.left, r.bottom + 4) }))
+  }, [])
+  const openFolderFx = useCallback((folderId: string, anchor: HTMLElement) => {
+    const ids = projectRef.current.tracks.filter((t) => t.folder === folderId).map((t) => t.id)
+    const r = anchor.getBoundingClientRect()
+    setFxPop((cur) => (cur?.anchor === anchor ? null : { ids, folderId, anchor, ...fxPlace(r.left, r.bottom + 4) }))
+  }, [])
+  const editFx = useCallback((ids: string[], e: FxEdit, history: boolean) => {
+    if (e.kind === 'removePlugin') for (const id of ids) closePlugin(id, e.id)
+    const p = projectRef.current
+    const next = editTracksFx(p, ids, e)
+    if (next === p) return
+    if (history) commit(next)
+    else setLive(next)
+  }, [commit, setLive, closePlugin])
+  const copyLaneFx = useCallback((trackId: string) => {
+    const t = projectRef.current.tracks.find((x) => x.id === trackId)
+    if (!t) return
+    fxClipboard = { fx: copyEffects(t), from: t.name }
+    setFxClipVer((n) => n + 1)
+  }, [])
+  const pasteLaneFx = useCallback((ids: string[]) => {
+    if (!fxClipboard) return
+    const p = projectRef.current
+    // Their own plug-ins are replaced, so their windows go too.
+    for (const t of p.tracks) if (ids.includes(t.id)) for (const pl of t.plugins ?? []) closePlugin(t.id, pl.id)
+    commit(pasteEffects(p, ids, fxClipboard.fx))
+  }, [commit, closePlugin])
 
   const selectTrack = useCallback((trackId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const ids = projectRef.current.tracks.map((t) => t.id)
@@ -1693,6 +1747,16 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
           { icon: open ? ChevronDown : ChevronRight, label: open ? 'Fold to the comp lane' : 'Show the take lanes', onSelect: () => toggleFolder(folder.id) },
           { icon: Plus, label: 'Add a take lane', onSelect: addLane },
           clips.length > 0 && { icon: SquareDashedMousePointer, label: `Select its clips (${clips.length})`, onSelect: () => setSelection(clips.map((c) => c.id)) },
+          lanes.length > 0 && { icon: SlidersHorizontal, label: `Effects on all ${lanes.length} lane${lanes.length === 1 ? '' : 's'}…`, separatorBefore: true, onSelect: () => setFxPop({ ids: lanes.map((t) => t.id), folderId: folder.id, anchor: null, ...fxPlace(m.x, m.y) }) },
+          lanes.length > 0 && fxClipboard && { icon: ClipboardPaste, label: `Paste effects from ${fxClipboard.from} to all its lanes`, onSelect: () => pasteLaneFx(lanes.map((t) => t.id)) },
+          lanes.some(hasEffects) && {
+            icon: RotateCcw,
+            label: 'Clear effects on all its lanes',
+            onSelect: () => {
+              for (const t of lanes) for (const pl of t.plugins ?? []) closePlugin(t.id, pl.id)
+              commit({ ...p, tracks: p.tracks.map((t) => (t.folder === folder.id ? { ...t, fx: undefined, chain: undefined, plugins: undefined } : t)) })
+            },
+          },
           'divider',
           { icon: FolderMinus, label: 'Ungroup (keep the lanes)', onSelect: () => commit(ungroupFolder(p, folder.id)) },
           { icon: Trash2, label: `Delete the folder and its ${lanes.length} lane${lanes.length === 1 ? '' : 's'}`, danger: true, onSelect: deleteAll },
@@ -1756,7 +1820,10 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
           { icon: track.muted ? Volume2 : VolumeX, label: `${track.muted ? 'Unmute' : 'Mute'}${many ? ` ${what}` : ''}`, onSelect: () => updateTrack(track.id, { muted: !track.muted }) },
           { icon: Headphones, label: `${track.solo ? 'Unsolo' : 'Solo'}${many ? ` ${what}` : ''}`, active: track.solo, onSelect: () => updateTrack(track.id, { solo: !track.solo }) },
           track.gain !== 1 && { icon: RotateCcw, label: `Reset volume${many ? 's' : ''} to 0 dB`, onSelect: () => updateTrack(track.id, { gain: 1 }) },
-          (chainActive(track.chain) || FX_KEYS.some((k) => (track.fx?.[k] ?? 0) > 0) || !!track.plugins?.length) && {
+          { icon: SlidersHorizontal, label: many ? `Effects on ${what}…` : 'Effects…', separatorBefore: true, onSelect: () => setFxPop({ ids: group.map((t) => t.id), anchor: null, ...fxPlace(m.x, m.y) }) },
+          !many && { icon: Copy, label: 'Copy effects', disabled: !hasEffects(track), onSelect: () => copyLaneFx(track.id) },
+          fxClipboard && { icon: ClipboardPaste, label: `Paste effects from ${fxClipboard.from}${many ? ` to ${what}` : ''}`, onSelect: () => pasteLaneFx(group.map((t) => t.id)) },
+          group.some(hasEffects) && {
             icon: RotateCcw,
             label: `Clear effects${many ? ` on ${what}` : ''}`,
             onSelect: () => {
@@ -1989,6 +2056,21 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
       {renderTakeMenu()}
       {renderTrackMenu()}
       {renderFolderMenu()}
+      {fxPop && (
+        <FxPopover
+          target={fxPop}
+          lanes={project.tracks.filter((t) => fxPop.ids.includes(t.id))}
+          folderName={fxPop.folderId ? (project.folders ?? []).find((f) => f.id === fxPop.folderId)?.name || 'Take folder' : undefined}
+          shared={sharedFx}
+          host={pluginHost}
+          clipboard={fxClipboard}
+          onEdit={editFx}
+          onShared={setSharedFx}
+          onCopy={copyLaneFx}
+          onPaste={pasteLaneFx}
+          onClose={() => setFxPop(null)}
+        />
+      )}
       {renderCatMenu()}
       {/* Toolbar */}
       <div className="shrink-0 flex items-center gap-1 px-3 pt-8 pb-2 border-b border-[var(--border)]">
@@ -2254,6 +2336,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
                           onPointerDown={onFolderPointerDown}
                           onMute={folderMute}
                           onSolo={folderSolo}
+                          onFx={openFolderFx}
                           onMenu={openFolderMenu}
                         />
                         <CompLane
@@ -2282,10 +2365,8 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
                       selected={trackSelSet.has(track.id)}
                       groupSize={trackSelSet.has(track.id) ? trackSel.length : 1}
                       onSelect={onTrackPointerDown}
-                      shared={sharedFx}
-                      host={pluginHost}
+                      onFx={openLaneFx}
                       onChange={updateTrack}
-                      onShared={setSharedFx}
                       onRemove={removeTrack}
                       onMenu={openTrackMenu}
                     />
@@ -2778,13 +2859,15 @@ function PreviewDeck({ take, zipPath, engine, loaded, paused, loop, volume, plac
 }
 
 /** A take folder's header: fold, name, M/S for every lane in it. */
-const FolderHeader = memo(function FolderHeader({ folder, members, open, selected, onToggle, onRename, onPointerDown, onMute, onSolo, onMenu }: {
+const FolderHeader = memo(function FolderHeader({ folder, members, open, selected, onToggle, onRename, onPointerDown, onMute, onSolo, onFx, onMenu }: {
   folder: TakeFolder; members: SmTrack[]; open: boolean; selected: boolean
   onToggle: (id: string) => void
   onRename: (id: string, name: string) => void
   onPointerDown: (id: string, e: React.PointerEvent) => void
   onMute: (id: string) => void
   onSolo: (id: string) => void
+  /** Opens the FX popover on every lane in the folder. */
+  onFx: (id: string, anchor: HTMLElement) => void
   onMenu: (id: string, e: React.MouseEvent) => void
 }): JSX.Element {
   const muted = members.length > 0 && members.every((t) => t.muted)
@@ -2823,6 +2906,7 @@ const FolderHeader = memo(function FolderHeader({ folder, members, open, selecte
           />
           <button className={toggleCls(muted, 'bg-amber-500/80 text-black')} title="Mute every lane in the folder" onClick={() => onMute(folder.id)}>M</button>
           <button className={toggleCls(solo, 'bg-emerald-500/80 text-black')} title="Solo every lane in the folder" onClick={() => onSolo(folder.id)}>S</button>
+          {members.length > 0 && <FxButton active={members.some(hasEffects)} title="Effects on every lane in the folder" onOpen={(el) => onFx(folder.id, el)} />}
         </div>
         <div className="pl-7 text-[11px] text-text-muted truncate">
           {members.length} lane{members.length === 1 ? '' : 's'} · {takes} take{takes === 1 ? '' : 's'}
@@ -2879,11 +2963,12 @@ const CompLane = memo(function CompLane({ members, loaded, takesById, pps, width
           </div>
         )
       })}
-      {clashes.map((c) => (
+      {clashes.filter((c) => c.to > 0).map((c) => (
         <div
           key={c.from}
           className="absolute top-0 h-1.5 z-10 bg-amber-400/90"
-          style={{ left: c.from * pps, width: (c.to - c.from) * pps }}
+          // A take can start before time 0; keep the band inside the lane, off the header.
+          style={{ left: Math.max(0, c.from) * pps, width: (c.to - Math.max(0, c.from)) * pps }}
           title={`${c.n} takes play at once here - swipe one (K) or comp it (C)`}
         />
       ))}
@@ -2896,29 +2981,54 @@ const panLabel = (pan: number): string => (pan === 0 ? 'centre' : `${Math.round(
 /** Project-wide effect settings, shown in every lane's FX popover. */
 interface SharedFx { bpm: number | null; echoNote: EchoNote; reverbSize: ReverbSize }
 
-/** The FX button on a lane header and its popover: the lane's own chain, its sends, and the shared send settings. */
-function TrackFxButton({ track, shared, host, many, onChange, onShared }: {
-  track: SmTrack; shared: SharedFx; host: PluginHost | null; many: string
-  onChange: (patch: Partial<SmTrack>) => void
+/** The lanes an open FX popover acts on, where it sits, and the button that opened it (if one did). */
+interface FxTarget { ids: string[]; folderId?: string; anchor: HTMLElement | null; left: number; top: number }
+
+/** Effects copied from a lane, for pasting onto others - kept across projects this session. */
+let fxClipboard: { fx: FxCopy; from: string } | null = null
+
+/** The FX button on a lane or folder header. */
+function FxButton({ active, title, onOpen }: { active: boolean; title: string; onOpen: (anchor: HTMLElement) => void }): JSX.Element {
+  return (
+    <button
+      className={`h-6 px-1.5 shrink-0 rounded-md text-[10px] font-bold transition-colors ${active ? 'bg-accent/80 text-white' : 'bg-[var(--surface-raised)] text-text-muted hover:text-text-primary'}`}
+      title={title}
+      onClick={(e) => onOpen(e.currentTarget)}
+    >FX</button>
+  )
+}
+
+/** The FX popover: the lanes' plug-ins and own chain, their sends, and the shared send
+ *  settings. On several lanes each change goes to all of them; what's shown is the
+ *  first lane's, with "mixed" where the others differ. */
+function FxPopover({ target, lanes, folderName, shared, host, clipboard, onEdit, onShared, onCopy, onPaste, onClose }: {
+  target: FxTarget; lanes: SmTrack[]; folderName?: string; shared: SharedFx; host: PluginHost | null
+  clipboard: { fx: FxCopy; from: string } | null
+  onEdit: (ids: string[], e: FxEdit, history: boolean) => void
   onShared: (patch: Partial<Pick<SmProject, 'echoNote' | 'reverbSize'>>) => void
-}): JSX.Element {
-  const { fx, chain } = track
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  onCopy: (trackId: string) => void
+  onPaste: (ids: string[]) => void
+  onClose: () => void
+}): JSX.Element | null {
   const popRef = useRef<HTMLDivElement>(null)
-  const btnRef = useRef<HTMLButtonElement>(null)
-  const active = FX_KEYS.some((k) => (fx?.[k] ?? 0) > 0) || chainActive(chain) || !!track.plugins?.some((pl) => !pl.bypass)
   useEffect(() => {
-    if (!pos) return
     const close = (e: PointerEvent): void => {
       const t = e.target as Node
-      if (popRef.current?.contains(t) || btnRef.current?.contains(t)) return
-      setPos(null)
+      if (popRef.current?.contains(t) || target.anchor?.contains(t)) return
+      onClose()
     }
-    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape') setPos(null) }
+    const esc = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
     window.addEventListener('pointerdown', close, true)
     window.addEventListener('keydown', esc)
     return () => { window.removeEventListener('pointerdown', close, true); window.removeEventListener('keydown', esc) }
-  }, [pos])
+  }, [target, onClose])
+  useEffect(() => { if (!lanes.length) onClose() }, [lanes.length, onClose])
+  const lead = lanes[0]
+  if (!lead) return null
+  const ids = lanes.map((t) => t.id)
+  const many = lanes.length > 1 ? ` (all ${lanes.length} lanes)` : ''
+  const where = folderName ?? (lanes.length > 1 ? `${lanes.length} lanes` : lead.name)
+  const edit = (e: FxEdit, history = true): void => onEdit(ids, e, history)
   const slider = (label: string, value: number, readout: string, set: (v: number) => void, title: string): JSX.Element => (
     <label className="flex items-center gap-2 text-xs text-text-secondary">
       <span className="w-14 shrink-0">{label}</span>
@@ -2944,77 +3054,85 @@ function TrackFxButton({ track, shared, host, many, onChange, onShared }: {
     </div>
   )
   const heading = 'text-[10px] font-semibold uppercase tracking-wider text-text-muted'
-  return (
-    <>
-      <button
-        ref={btnRef}
-        className={`h-6 px-1.5 rounded-md text-[10px] font-bold transition-colors ${active ? 'bg-accent/80 text-white' : 'bg-[var(--surface-raised)] text-text-muted hover:text-text-primary'}`}
-        title={`Effects - ${host ? 'plug-ins, ' : ''}low cut, compressor, EQ, lo-fi, reverb, echo, chorus${many}`}
-        onClick={() => {
-          if (pos) { setPos(null); return }
-          const r = btnRef.current?.getBoundingClientRect()
-          if (r) setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 268)), top: Math.max(8, Math.min(r.bottom + 4, window.innerHeight - 430)) })
-        }}
-      >FX</button>
-      {pos && createPortal(
-        // Portal events still bubble through React to the header, which would select the lane.
-        <div
-          ref={popRef}
-          className="fixed z-50 w-[260px] p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-xl space-y-2 overflow-y-auto"
-          style={{ left: pos.left, top: pos.top, maxHeight: `calc(100vh - ${pos.top + 8}px)` }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.stopPropagation()}
-        >
-          {host && <PluginList host={host} track={track} many={many} heading={heading} onChange={onChange} />}
-          <div className={`${heading} ${host ? 'pt-1' : ''}`}>Lane</div>
-          {CHAIN_KEYS.map((k: ChainKey) => {
-            const v = chain?.[k] ?? 0
-            return <div key={k}>{slider(CHAIN_LABELS[k], v, chainReadout(k, v), (x) => onChange({ chain: { ...chain, [k]: x } }), CHAIN_TITLES[k])}</div>
-          })}
-          <div className={`${heading} pt-1`}>Sends</div>
-          {FX_KEYS.map((k: FxKey) => {
-            const v = fx?.[k] ?? 0
-            return <div key={k}>{slider(FX_LABELS[k], v, v > 0 ? `${Math.round(v * 100)}%` : 'off', (x) => onChange({ fx: { ...fx, [k]: x } }), `${FX_LABELS[k]} send`)}</div>
-          })}
-          <div className={`${heading} pt-1`}>Shared by every lane</div>
-          <div className="flex items-center gap-2 text-xs text-text-secondary" title={shared.bpm ? `Echo repeats at ${Math.round(echoSeconds(shared) * 1000)} ms - ${shared.echoNote} at ${shared.bpm.toFixed(1)} BPM` : 'Set the tempo to time the echo to the beat - it repeats every 375 ms until then'}>
-            <span className="w-14 shrink-0">Echo</span>
-            {seg(Object.keys(ECHO_NOTES) as EchoNote[], shared.echoNote, (v) => onShared({ echoNote: v }), (v) => v, !shared.bpm)}
+  const small = 'h-6 px-2 rounded-md text-[11px] flex items-center gap-1 bg-[var(--surface-raised)] text-text-secondary hover:text-text-primary disabled:opacity-40'
+  return createPortal(
+    // Portal events still bubble through React to the header, which would select the lane.
+    <div
+      ref={popRef}
+      className="fixed z-50 w-[260px] p-3 rounded-lg bg-[var(--surface)] border border-[var(--border)] shadow-xl space-y-2 overflow-y-auto"
+      style={{ left: target.left, top: target.top, maxHeight: `calc(100vh - ${target.top + 8}px)` }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+    >
+      {(lanes.length > 1 || folderName) && (
+        <div className="-mt-0.5 pb-1 border-b border-[var(--border)]">
+          <div className="text-xs font-semibold text-text-primary truncate">{folderName ? `${folderName} - every lane` : `${lanes.length} lanes`}</div>
+          <div className="text-[10px] text-text-muted truncate" title={lanes.map((t) => t.name).join(', ')}>
+            {lanes.length > 1 ? `Each change goes to all ${lanes.length}: ${lanes.map((t) => t.name).join(', ')}` : lead.name}
           </div>
-          <div className="flex items-center gap-2 text-xs text-text-secondary" title="Reverb size">
-            <span className="w-14 shrink-0">Reverb</span>
-            {seg(Object.keys(REVERB_SIZES) as ReverbSize[], shared.reverbSize, (v) => onShared({ reverbSize: v }), (v) => v[0].toUpperCase() + v.slice(1))}
-          </div>
-        </div>,
-        document.body,
+        </div>
       )}
-    </>
+      {host && <PluginList host={host} lanes={lanes} where={where} many={many} heading={heading} onEdit={edit} />}
+      <div className={`${heading} ${host ? 'pt-1' : ''}`}>Lane</div>
+      {CHAIN_KEYS.map((k: ChainKey) => {
+        const v = lead.chain?.[k] ?? 0
+        const mixed = lanes.some((t) => (t.chain?.[k] ?? 0) !== v)
+        return <div key={k}>{slider(CHAIN_LABELS[k], v, mixed ? 'mixed' : chainReadout(k, v), (x) => edit({ kind: 'chain', key: k, value: x }, false), CHAIN_TITLES[k])}</div>
+      })}
+      <div className={`${heading} pt-1`}>Sends</div>
+      {FX_KEYS.map((k: FxKey) => {
+        const v = lead.fx?.[k] ?? 0
+        const mixed = lanes.some((t) => (t.fx?.[k] ?? 0) !== v)
+        return <div key={k}>{slider(FX_LABELS[k], v, mixed ? 'mixed' : v > 0 ? `${Math.round(v * 100)}%` : 'off', (x) => edit({ kind: 'send', key: k, value: x }, false), `${FX_LABELS[k]} send`)}</div>
+      })}
+      <div className={`${heading} pt-1`}>Shared by every lane</div>
+      <div className="flex items-center gap-2 text-xs text-text-secondary" title={shared.bpm ? `Echo repeats at ${Math.round(echoSeconds(shared) * 1000)} ms - ${shared.echoNote} at ${shared.bpm.toFixed(1)} BPM` : 'Set the tempo to time the echo to the beat - it repeats every 375 ms until then'}>
+        <span className="w-14 shrink-0">Echo</span>
+        {seg(Object.keys(ECHO_NOTES) as EchoNote[], shared.echoNote, (v) => onShared({ echoNote: v }), (v) => v, !shared.bpm)}
+      </div>
+      <div className="flex items-center gap-2 text-xs text-text-secondary" title="Reverb size">
+        <span className="w-14 shrink-0">Reverb</span>
+        {seg(Object.keys(REVERB_SIZES) as ReverbSize[], shared.reverbSize, (v) => onShared({ reverbSize: v }), (v) => v[0].toUpperCase() + v.slice(1))}
+      </div>
+      <div className="flex items-center gap-1 pt-1 border-t border-[var(--border)]">
+        {lanes.length === 1 && (
+          <button className={small} disabled={!hasEffects(lead)} onClick={() => onCopy(lead.id)} title="Copy this lane's effects and plug-ins, to paste onto other lanes or a folder">
+            <Copy size={11} /> Copy
+          </button>
+        )}
+        {clipboard && (
+          <button className={small} onClick={() => onPaste(ids)} title={`Replace ${lanes.length > 1 ? 'these lanes\' effects' : 'this lane\'s effects'} with the ones copied from ${clipboard.from}`}>
+            <ClipboardPaste size={11} /> Paste from {clipboard.from}
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body,
   )
 }
 
-/** What the lane FX popovers need from the view to list, add and open VST3 plug-ins. */
+/** What the FX popover needs from the view to list, add and open VST3 plug-ins. */
 interface PluginHost {
   scan: VstScan | null
   scanning: boolean
   /** Plug-in windows open now, by pluginEditorKey. */
   open: ReadonlySet<string>
-  edit: (trackId: string, trackName: string, pl: SmPlugin) => void
-  close: (trackId: string, pluginId: string) => void
+  /** Opens a plug-in's window; `lanes` share it, the first one's settings show. */
+  edit: (lanes: string[], pl: SmPlugin, where: string) => void
   /** Settings → Plug-ins: folders, hidden plug-ins, the ones that failed. */
   manage: () => void
 }
 
-/** A lane's VST3 plug-ins, in order, and the picker for adding one. */
-function PluginList({ host, track, many, heading, onChange }: {
-  host: PluginHost; track: SmTrack; many: string; heading: string
-  onChange: (patch: Partial<SmTrack>) => void
+/** The lanes' VST3 plug-ins, in order (linked ones as one row), and the picker for adding one. */
+function PluginList({ host, lanes, where, many, heading, onEdit }: {
+  host: PluginHost; lanes: SmTrack[]; where: string; many: string; heading: string
+  onEdit: (e: FxEdit) => void
 }): JSX.Element {
   const [adding, setAdding] = useState(false)
   const [query, setQuery] = useState('')
   const { scan, scanning } = host
   useEffect(() => { if (adding && !scan && !scanning) void vstPlugins.load() }, [adding, scan, scanning])
-  const list = track.plugins ?? []
-  const set = (next: SmPlugin[]): void => onChange({ plugins: next.length ? next : undefined })
+  const rows: PluginRow[] = pluginRows(lanes)
   const q = query.trim().toLowerCase()
   const shown = (scan?.plugins ?? []).filter((info) => !info.hidden)
   const found = shown.filter((info) => !q || `${info.name} ${info.vendor}`.toLowerCase().includes(q))
@@ -3029,42 +3147,52 @@ function PluginList({ host, track, many, heading, onChange }: {
           {adding ? <X size={12} /> : <Plus size={12} />} {adding ? 'Done' : 'Add'}
         </button>
       </div>
-      {!list.length && !adding && (
+      {!rows.length && !adding && (
         <div className="text-[11px] leading-snug text-text-muted">
-          Your VST3 effects - Auto-Tune, EQs, anything installed. They run over each take in the background; the lane plays dry until they're done.
+          Your VST3 effects - Auto-Tune, EQs, anything installed. In the Windows app, changes are heard live during playback.
         </div>
       )}
-      {list.map((pl, i) => {
-        const open = host.open.has(pluginEditorKey(track.id, pl.id))
+      {rows.map(({ plugin: pl, lanes: on }, i) => {
+        const open = on.some((id) => host.open.has(pluginEditorKey(id, pl.id)))
+        const partial = on.length < lanes.length
         return (
           <div key={pl.id} className="flex items-center gap-1 text-xs">
             <button
               className={`${icon} ${pl.bypass ? 'text-text-muted hover:text-text-primary' : 'text-accent'}`}
               title={pl.bypass ? `Turn ${pl.name} back on${many}` : `Bypass ${pl.name}${many}`}
-              onClick={() => set(list.map((x) => (x.id === pl.id ? { ...x, bypass: !x.bypass || undefined } : x)))}
+              onClick={() => onEdit({ kind: 'bypassPlugin', id: pl.id, bypass: !pl.bypass })}
             >
               <Power size={12} />
             </button>
             <button
               className={`flex-1 min-w-0 truncate text-left rounded px-1 h-6 hover:bg-[var(--surface-raised)] ${pl.bypass ? 'text-text-muted line-through' : 'text-text-primary'}`}
-              title={`${open ? 'Bring up' : 'Open'} ${pl.name}'s window${pl.vendor ? ` (${pl.vendor})` : ''}`}
-              onClick={() => host.edit(track.id, track.name, pl)}
+              title={`${open ? 'Bring up' : 'Open'} ${pl.name}'s window${pl.vendor ? ` (${pl.vendor})` : ''}${on.length > 1 ? ` - its settings go to all ${on.length} lanes that have it` : ''}`}
+              onClick={() => host.edit(on, pl, on.length === lanes.length ? where : on.length > 1 ? `${on.length} lanes` : lanes.find((t) => t.id === on[0])?.name ?? where)}
             >
               {pl.name}{open && <span className="ml-1 text-accent">●</span>}
             </button>
+            {partial && (
+              <button
+                className="h-5 px-1 shrink-0 rounded text-[10px] tabular-nums text-text-muted hover:text-accent hover:bg-[var(--surface-raised)]"
+                title={`On ${on.length} of ${lanes.length} lanes (${on.map((id) => lanes.find((t) => t.id === id)?.name).join(', ')}) - click to add it, with the same settings, to the rest`}
+                onClick={() => onEdit({ kind: 'spreadPlugin', id: pl.id })}
+              >
+                {on.length}/{lanes.length}
+              </button>
+            )}
             {i > 0 && (
               <button
                 className={`${icon} text-text-muted hover:text-text-primary`}
                 title="Move earlier in the chain"
-                onClick={() => set([...list.slice(0, i - 1), pl, list[i - 1], ...list.slice(i + 1)])}
+                onClick={() => onEdit({ kind: 'movePlugin', id: pl.id })}
               >
                 <ArrowUp size={12} />
               </button>
             )}
             <button
               className={`${icon} text-text-muted hover:text-red-400`}
-              title={`Remove ${pl.name}${many}`}
-              onClick={() => { host.close(track.id, pl.id); set(list.filter((x) => x.id !== pl.id)) }}
+              title={`Remove ${pl.name}${on.length > 1 ? ` from all ${on.length} lanes that have it` : ''}`}
+              onClick={() => onEdit({ kind: 'removePlugin', id: pl.id })}
             >
               <X size={12} />
             </button>
@@ -3091,11 +3219,12 @@ function PluginList({ host, track, many, heading, onChange }: {
                 className="w-full flex items-baseline gap-1.5 px-1 py-1 rounded text-left text-xs hover:bg-[var(--surface-raised)]"
                 title={`${info.name}${info.version ? ` ${info.version}` : ''}${info.sub ? ` - ${info.sub.replace(/\|/g, ', ')}` : ''}\n${info.path}`}
                 onClick={() => {
+                  // One id on every lane links them.
                   const pl: SmPlugin = { id: uid(), path: info.path, cid: info.cid, name: info.name, ...(info.vendor ? { vendor: info.vendor } : {}) }
-                  set([...list, pl])
+                  onEdit({ kind: 'addPlugin', plugin: pl })
                   setAdding(false)
                   setQuery('')
-                  host.edit(track.id, track.name, pl)
+                  host.edit(lanes.map((t) => t.id), pl, where)
                 }}
               >
                 <span className="truncate text-text-primary">{info.name}</span>
@@ -3130,13 +3259,12 @@ const CHAIN_TITLES: Record<ChainKey, string> = {
   lofi: 'Lo-fi - telephone band-pass with grit',
 }
 
-const TrackHeader = memo(function TrackHeader({ track, nested = false, color, selected, groupSize, shared, host, onSelect, onChange, onShared, onRemove, onMenu }: {
+const TrackHeader = memo(function TrackHeader({ track, nested = false, color, selected, groupSize, onSelect, onFx, onChange, onRemove, onMenu }: {
   track: SmTrack; nested?: boolean; color: string; selected: boolean; groupSize: number
-  shared: SharedFx
-  host: PluginHost | null
   onSelect: (id: string, e: React.PointerEvent) => void
+  /** Opens the FX popover - on every selected lane when this one is among them. */
+  onFx: (id: string, anchor: HTMLElement) => void
   onChange: (id: string, patch: Partial<SmTrack>, history?: boolean) => void
-  onShared: (patch: Partial<Pick<SmProject, 'echoNote' | 'reverbSize'>>) => void
   onRemove: (id: string) => void
   onMenu: (id: string, e: React.MouseEvent) => void
 }): JSX.Element {
@@ -3169,7 +3297,7 @@ const TrackHeader = memo(function TrackHeader({ track, nested = false, color, se
           />
           <button className={toggleCls(track.muted, 'bg-amber-500/80 text-black')} title={`Mute${many}`} onClick={() => onChange(track.id, track.muted ? { muted: false } : { muted: true, solo: false })}>M</button>
           <button className={toggleCls(track.solo, 'bg-emerald-500/80 text-black')} title={`Solo${many}`} onClick={() => onChange(track.id, track.solo ? { solo: false } : { solo: true, muted: false })}>S</button>
-          <TrackFxButton track={track} shared={shared} host={host} many={many} onChange={(patch) => onChange(track.id, patch, !('chain' in patch || 'fx' in patch))} onShared={onShared} />
+          <FxButton active={chainActive(track.chain) || FX_KEYS.some((k) => (track.fx?.[k] ?? 0) > 0) || !!track.plugins?.some((pl) => !pl.bypass)} title={`Effects - plug-ins, low cut, compressor, EQ, lo-fi, reverb, echo, chorus${many}`} onOpen={(el) => onFx(track.id, el)} />
           <button className="w-6 h-6 rounded-md flex items-center justify-center text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition" title={groupSize > 1 ? `Delete ${groupSize} tracks` : 'Delete track'} onClick={() => onRemove(track.id)}>
             <Trash2 size={13} />
           </button>

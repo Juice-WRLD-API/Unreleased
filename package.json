@@ -1,6 +1,6 @@
 {
   "name": "unreleased",
-  "version": "3.0.2-beta.4",
+  "version": "3.0.2-beta.8",
   "description": "A music player for Juice WRLD",
   "desktopName": "com.juicewrldapi.player.desktop",
   "main": "electron/main.js",

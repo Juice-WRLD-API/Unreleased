@@ -38,7 +38,7 @@ interface VstApi {
   vstOpenFolder: (folder: string) => Promise<boolean>
   vstShowModule: (path: string) => Promise<boolean>
   vstProcess: (req: { sampleRate: number; bpm: number; chain: PluginRef[]; channels: Float32Array[] }) => Promise<{ channels?: Float32Array<ArrayBuffer>[]; error?: string; plugin?: number }>
-  vstEditOpen: (req: { key: string; path: string; cid: string; state: string; title: string; sampleRate: number }) => Promise<{ error?: string }>
+  vstEditOpen: (req: { key: string; lanes?: string[]; path: string; cid: string; state: string; title: string; sampleRate: number }) => Promise<{ error?: string }>
   vstEditClose: (key: string) => Promise<void>
   onVstEditor: (cb: (e: VstEditorEvent) => void) => () => void
   onVstPlugins: (cb: (l: VstScan) => void) => () => void
