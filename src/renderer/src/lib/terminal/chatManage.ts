@@ -7,6 +7,8 @@ import {
   updateRole, updateServer, upsertOverride, type ChatMessage, type ChatPermissionName,
 } from '../chatApi'
 import { splitForwardRef } from '../chatForwardRef'
+import { compileQuery, matches, snippetOf } from '../chatSearch'
+import { allKnownUsers, collectFacts, scopeRooms, startIndexing, type Scope } from '../chatSearchIndex'
 import { splitReplyRef } from '../chatReplyRef'
 import { formatBytes } from '../format'
 import { decryptAttachment, decryptAttachmentMeta } from '../chatE2E'
@@ -406,6 +408,50 @@ const historyCommand: TermCommand = {
   },
 }
 
+const searchCommand: TermCommand = {
+  name: 'grep', aliases: ['chatsearch'], group: 'People', chat: true, usage: 'grep [--in room|server|all] [--limit N] [--oldest] <query>',
+  description: 'Search chat messages, encrypted DMs included (decrypted on this device). Filters: from:me mentions:bob has:image in:general before:2025-06-01 after:7d is:pinned; -negates; "exact phrase"',
+  covers: ['chatApi.listChannelMessages', 'chatApi.listDmMessages', 'chatSearchIndex.startIndexing'],
+  run: async (args, ctx) => {
+    const { rest, bool, value } = parseArgs(args, ['in', 'limit'])
+    const query = rest.map((w) => (/\s/.test(w) ? `"${w}"` : w)).join(' ')
+    if (!query.trim()) fail('grep needs something to look for - e.g. grep from:me has:image, or grep "set list" --in all')
+    const scopeWord = (value.get('in') ?? 'room').toLowerCase()
+    const scope: Scope = scopeWord === 'room' || scopeWord === 'chat' ? 'room'
+      : scopeWord === 'server' || scopeWord === 'space' ? 'space'
+      : scopeWord === 'all' || scopeWord === 'everywhere' ? 'all'
+      : fail('--in takes room, server or all')
+    const limit = Math.min(200, Math.max(1, Number(value.get('limit')) || 30))
+    const compiled = compileQuery(query, { meId: cs().meId, users: allKnownUsers() })
+    const bad = compiled.clauses.find((c) => c.error)
+    if (bad) fail(bad.error!)
+    if (!compiled.active) fail('nothing to search for')
+    const targets = scopeRooms(scope, ctx.room)
+    if (targets.length === 0) fail('there is nothing to search in that scope')
+    ctx.print(`searching ${targets.length} chat${targets.length === 1 ? '' : 's'}…`, 'dim')
+    await new Promise<void>((resolve) => {
+      const stop = startIndexing(targets, (p) => { if (!p.running) resolve() })
+      ctx.signal.addEventListener('abort', () => { stop(); resolve() }, { once: true })
+    })
+    if (ctx.signal.aborted) return
+    const corpus = collectFacts(targets, [])
+    const hits = corpus.facts.filter((f) => matches(compiled, f)).sort((a, b) => new Date(a.m.created_at).getTime() - new Date(b.m.created_at).getTime())
+    const ordered = bool.has('oldest') ? hits : hits.reverse()
+    if (ordered.length === 0) { ctx.print(`no matches in ${corpus.total} messages`, 'dim'); return }
+    const lines = ordered.slice(0, limit).map((f) => {
+      const at = new Date(f.m.created_at)
+      const where = scope === 'room' ? '' : ` [${corpus.byRoom.get(f.m.id)?.label ?? '?'}]`
+      const text = snippetOf(f.text, compiled.terms, 140).parts.map((x) => x.text).join('')
+        || (f.shares.size ? '[shared card]' : f.readable ? '' : '[encrypted - key not available]')
+      const files = f.atts.length ? ` [${f.atts.length} file${f.atts.length === 1 ? '' : 's'}]` : ''
+      return `#${f.m.id}  ${at.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}${where}  ${displayName(f.m.author)}: ${text}${files}`
+    })
+    const more = ordered.length > limit ? `\n… ${ordered.length - limit} more (--limit ${Math.min(200, ordered.length)})` : ''
+    const locked = corpus.locked ? ` (${corpus.locked} encrypted messages unreadable)` : ''
+    ctx.print(`${ordered.length} match${ordered.length === 1 ? '' : 'es'} in ${corpus.total} messages${locked}\n${lines.join('\n')}${more}`)
+  },
+}
+
 const presenceCommand: TermCommand = {
   name: 'online', group: 'People', chat: true, usage: 'online', description: 'Who is online in chat right now',
   covers: ['chatApi.getPresence'],
@@ -416,4 +462,4 @@ const presenceCommand: TermCommand = {
   },
 }
 
-export const CHAT_MANAGE_COMMANDS: TermCommand[] = [serverCommand, memberCommand, roleCommand, roomCommand, convoCommand, msgCommand, attachCommand, attachmentCommand, historyCommand, presenceCommand]
+export const CHAT_MANAGE_COMMANDS: TermCommand[] = [serverCommand, memberCommand, roleCommand, roomCommand, convoCommand, msgCommand, attachCommand, attachmentCommand, historyCommand, searchCommand, presenceCommand]

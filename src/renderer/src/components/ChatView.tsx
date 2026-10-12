@@ -5,6 +5,7 @@ import { hasChatAccess, useChatStore, type RoomRef } from '../store/chatStore'
 import { ChannelList, DmList, ServerRail } from './chat/Navigator'
 import RoomHeader, { type SidePanel } from './chat/RoomHeader'
 import RoomPane from './chat/RoomPane'
+import SearchPanel from './chat/SearchPanel'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './chat/SidePanels'
 import { ModalHost } from './chat/modalHost'
 import { useOpenModal } from './chat/modalHost'
@@ -109,6 +110,7 @@ function ChatViewMain(): JSX.Element {
         {sideOpen && (
           <div className={sideClassName}>
             {active && showThread && <ThreadPanel room={active} rootId={threadRootId!} onClose={() => openThread(null)} />}
+            {active && !showThread && panel === 'search' && <SearchPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'pins' && <PinsPanel room={active} onClose={() => setPanel(null)} />}
             {active && !showThread && panel === 'members' && serverId !== null && (
               <MembersPanel serverId={serverId} onClose={() => setPanel(null)} onAddMembers={() => openModal({ kind: 'add-members', serverId })} />
