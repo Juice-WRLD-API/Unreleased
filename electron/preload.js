@@ -249,6 +249,10 @@ contextBridge.exposeInMainWorld('electron', {
     return () => ipcRenderer.removeListener('vst-controls', fn)
   },
   vstEditParam:  (key, param, value) => ipcRenderer.invoke('vst-edit-param', key, param, value),
+  vstPresets:      (key)       => ipcRenderer.invoke('vst-presets', key),
+  vstPresetSave:   (key, name) => ipcRenderer.invoke('vst-preset-save', key, name),
+  vstPresetLoad:   (key, name) => ipcRenderer.invoke('vst-preset-load', key, name),
+  vstPresetDelete: (key, name) => ipcRenderer.invoke('vst-preset-delete', key, name),
   sessionNativeOpen: (id) => ipcRenderer.invoke('session-native-open', id),
   sessionNativeCommand: (id, command, channels) => ipcRenderer.invoke('session-native-command', id, command, channels),
   sessionNativeClose: (id) => ipcRenderer.invoke('session-native-close', id),

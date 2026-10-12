@@ -317,7 +317,7 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow, openControls }) 
     // current list when it opens and gets changes as 'vst-controls' events.
     let controlsWin = null
     if (child.generic) {
-      controls.set(req.key, { params: [] })
+      controls.set(req.key, { params: [], plugin: `${req.path}|${req.cid}` })
       controlsWin = openControls(req.key, req.title)
       controlsWin.on('closed', () => { if (editors.get(req.key) === child) child.stdin.write('close\n') })
     }
@@ -364,6 +364,44 @@ function register({ app, ipcMain, dialog, shell, BrowserWindow, openControls }) 
     const child = editors.get(key)
     if (!child || !child.generic || !Number.isFinite(param) || !Number.isFinite(value)) return
     child.stdin.write(JSON.stringify({ cmd: 'set', param, value }) + '\n')
+  })
+  // Generic controls' presets: a name for the values of every parameter, kept per plug-in
+  // (module path + class) in userData. Loading one is a run of 'set's to the open editor.
+  const presetsFile = () => path.join(app.getPath('userData'), 'vst-presets.json')
+  const readPresets = () => { try { return JSON.parse(fs.readFileSync(presetsFile(), 'utf8')) } catch { return {} } }
+  const writePresets = (all) => { try { fs.writeFileSync(presetsFile(), JSON.stringify(all)) } catch {} }
+  ipcMain.handle('vst-presets', (_, key) => {
+    const plugin = controls.get(key)?.plugin
+    return plugin ? Object.keys(readPresets()[plugin] || {}).sort((a, b) => a.localeCompare(b)) : []
+  })
+  ipcMain.handle('vst-preset-save', (_, key, name) => {
+    const c = controls.get(key)
+    name = String(name || '').trim().slice(0, 60)
+    if (!c || !name) return false
+    const values = {}
+    for (const p of c.params) if (!p.ro) values[p.id] = p.value
+    const all = readPresets()
+    all[c.plugin] = { ...all[c.plugin], [name]: values }
+    writePresets(all)
+    return true
+  })
+  ipcMain.handle('vst-preset-load', (_, key, name) => {
+    const child = editors.get(key)
+    const c = controls.get(key)
+    const values = c && readPresets()[c.plugin]?.[name]
+    if (!child || !child.generic || !values) return false
+    for (const p of c.params) {
+      if (p.ro || !(p.id in values) || !Number.isFinite(values[p.id])) continue
+      child.stdin.write(JSON.stringify({ cmd: 'set', param: p.id, value: values[p.id] }) + '\n')
+    }
+    return true
+  })
+  ipcMain.handle('vst-preset-delete', (_, key, name) => {
+    const plugin = controls.get(key)?.plugin
+    const all = readPresets()
+    if (!plugin || !all[plugin]) return
+    delete all[plugin][name]
+    writePresets(all)
   })
   app.on('before-quit', () => { for (const child of editors.values()) try { child.stdin.write('close\n') } catch {} })
 }

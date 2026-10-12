@@ -27,7 +27,9 @@ export interface VstScan {
   scanning: boolean
 }
 /** One plug-in parameter in the generic controls. `value` is normalized 0-1; `text` is the plug-in's own readout. */
-export interface VstParam { id: number; name: string; units: string; steps: number; def: number; value: number; text: string; ro: boolean; bypass: boolean; options?: string[] | null }
+export interface VstParam { id: number; name: string; units: string; steps: number; def: number; value: number; text: string; ro: boolean; bypass: boolean; options?: string[] | null
+  /** For a choice the plug-in declares as continuous: the value that picks each option, and the values where one option gives way to the next. */
+  levels?: number[] | null; cuts?: number[] | null }
 export interface VstEditorEvent {
   key: string; type: 'open' | 'state' | 'closed' | 'error' | 'params' | 'param'
   state?: string; error?: string
@@ -48,6 +50,10 @@ interface VstApi {
   vstEditOpen: (req: { key: string; generic?: boolean; lanes?: string[]; path: string; cid: string; state: string; title: string; sampleRate: number }) => Promise<{ error?: string }>
   vstEditClose: (key: string) => Promise<void>
   vstEditParam: (key: string, param: number, value: number) => Promise<void>
+  vstPresets: (key: string) => Promise<string[]>
+  vstPresetSave: (key: string, name: string) => Promise<boolean>
+  vstPresetLoad: (key: string, name: string) => Promise<boolean>
+  vstPresetDelete: (key: string, name: string) => Promise<void>
   vstControlsGet: (key: string) => Promise<VstParam[] | null>
   onVstControls: (cb: (e: VstEditorEvent) => void) => () => void
   onVstEditor: (cb: (e: VstEditorEvent) => void) => () => void

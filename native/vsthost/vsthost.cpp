@@ -1006,22 +1006,67 @@ struct Editor : IComponentHandler, IPlugFrame
 			return std::string ();
 		return text16 (s);
 	}
-	/** The plug-in's own names for a stepped parameter's positions ("Off", "Low", "High"...). */
-	std::string paramOptions (const ParameterInfo& info)
+	/** The plug-in's own names for a parameter's positions ("Off", "Low", "High"...), as the
+	 *  "options", "levels" and "cuts" fields. A stepped parameter has them at k/stepCount. Plenty of
+	 *  plug-ins declare switches and mode pickers as continuous, though - those are found by reading
+	 *  the plug-in's label for 65 values: a few labels, each held across a stretch, is a choice.
+	 *  levels[i] is the value that picks option i; value v is option i when cuts[i-1] <= v < cuts[i]. */
+	std::string paramChoices (const ParameterInfo& info)
 	{
-		if (info.stepCount < 2 || info.stepCount > 32)
-			return "null";
-		std::string out = "[";
-		for (int32 k = 0; k <= info.stepCount; k++)
-			out += (k ? "," : "") + jsonStr (paramText (info.id, static_cast<double> (k) / info.stepCount));
-		return out + "]";
+		const std::string none = "\"options\":null,\"levels\":null,\"cuts\":null";
+		if (info.stepCount >= 2 && info.stepCount <= 32)
+		{
+			std::string out = "\"options\":[";
+			for (int32 k = 0; k <= info.stepCount; k++)
+				out += (k ? "," : "") + jsonStr (paramText (info.id, static_cast<double> (k) / info.stepCount));
+			return out + "],\"levels\":null,\"cuts\":null";
+		}
+		if (info.stepCount != 0)
+			return none;
+		const int N = 64;
+		std::vector<std::string> names;
+		std::vector<double> lo, hi;
+		bool numeric = true;
+		for (int k = 0; k <= N; k++)
+		{
+			double v = static_cast<double> (k) / N;
+			std::string t = paramText (info.id, v);
+			if (t.empty ())
+				return none;
+			if (!names.empty () && names.back () == t)
+			{
+				hi.back () = v;
+				continue;
+			}
+			// Back to an earlier label, or too many of them: a continuous parameter.
+			if (names.size () >= 16 || std::find (names.begin (), names.end (), t) != names.end ())
+				return none;
+			names.push_back (t);
+			lo.push_back (v);
+			hi.push_back (v);
+			if (!(std::isdigit (static_cast<unsigned char> (t[0])) || t[0] == '-' || t[0] == '+' || t[0] == '.'))
+				numeric = false;
+		}
+		// Numbers that only change a few times are a coarse readout, not choices - unless there are very few.
+		if (names.size () < 2 || (numeric && names.size () > 4))
+			return none;
+		std::string opts, levels, cuts;
+		for (size_t i = 0; i < names.size (); i++)
+		{
+			double level = i == 0 ? 0.0 : i + 1 == names.size () ? 1.0 : (lo[i] + hi[i]) / 2;
+			opts += (i ? "," : "") + jsonStr (names[i]);
+			levels += (i ? "," : "") + std::to_string (level);
+			if (i + 1 < names.size ())
+				cuts += (i ? "," : "") + std::to_string ((hi[i] + lo[i + 1]) / 2);
+		}
+		return "\"options\":[" + opts + "],\"levels\":[" + levels + "],\"cuts\":[" + cuts + "]";
 	}
 	std::string paramJson (int32 i, const ParameterInfo& info, double v)
 	{
 		return "{\"id\":" + std::to_string (info.id) + ",\"name\":" + jsonStr (text16 (info.title).empty () ? text16 (info.shortTitle) : text16 (info.title)) +
 		       ",\"units\":" + jsonStr (text16 (info.units)) + ",\"steps\":" + std::to_string (info.stepCount) +
 		       ",\"def\":" + std::to_string (info.defaultNormalizedValue) + ",\"value\":" + std::to_string (v) +
-		       ",\"text\":" + jsonStr (paramText (info.id, v)) + ",\"options\":" + paramOptions (info) +
+		       ",\"text\":" + jsonStr (paramText (info.id, v)) + "," + paramChoices (info) +
 		       ",\"ro\":" + (info.flags & ParameterInfo::kIsReadOnly ? "true" : "false") +
 		       ",\"bypass\":" + (info.flags & ParameterInfo::kIsBypass ? "true" : "false") + "}";
 	}

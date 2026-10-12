@@ -1,18 +1,25 @@
 import { memo, useRef, useState } from 'react'
-import { RotateCcw, Search } from 'lucide-react'
+import { Check, RotateCcw, Save, Search, Trash2, X } from 'lucide-react'
 import type { VstParam } from '../lib/vstPlugins'
 
 type SetFn = (id: number, value: number) => void
+export interface VstPresetApi {
+  names: string[]
+  save: (name: string) => Promise<void>
+  load: (name: string) => void
+  remove: (name: string) => Promise<void>
+}
 
 /** A plug-in's parameters as controls that fit them - switches for on/off, buttons or a menu for
  *  named steps, knobs for the rest - whatever the plug-in's own window looks like. */
-export default function VstControlsPanel({ params, onSet }: { params: VstParam[]; onSet: SetFn }): JSX.Element {
+export default function VstControlsPanel({ params, onSet, presets }: { params: VstParam[]; onSet: SetFn; presets?: VstPresetApi }): JSX.Element {
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
   const shown = q ? params.filter((p) => p.name.toLowerCase().includes(q)) : params
   const changed = params.filter((p) => !p.ro && Math.abs(p.value - p.def) > 1e-6)
   return (
     <div className="flex-1 min-h-0 flex flex-col">
+      {presets && <PresetBar presets={presets} />}
       <div className="px-2 pt-2 shrink-0 flex items-center gap-2">
         {params.length > 8 ? (
           <div className="flex-1 min-w-0 flex items-center gap-1.5 h-6 px-2 rounded bg-[var(--surface-raised)]">
@@ -40,9 +47,58 @@ export default function VstControlsPanel({ params, onSet }: { params: VstParam[]
   )
 }
 
+/** Pick a saved preset to load it; save the current values under a name; delete the picked one. */
+function PresetBar({ presets }: { presets: VstPresetApi }): JSX.Element {
+  const [active, setActive] = useState('')
+  const [naming, setNaming] = useState(false)
+  const [name, setName] = useState('')
+  const known = presets.names.includes(active) ? active : ''
+  const commit = (): void => {
+    const n = name.trim()
+    if (!n) return
+    void presets.save(n).then(() => setActive(n))
+    setNaming(false)
+  }
+  const btn = 'h-6 w-6 shrink-0 rounded-md flex items-center justify-center bg-[var(--surface-raised)] text-text-secondary hover:text-text-primary disabled:opacity-40'
+  return (
+    <div className="px-2 pt-2 shrink-0 flex items-center gap-1.5">
+      {naming ? (
+        <>
+          <input
+            autoFocus value={name} maxLength={60} placeholder="Preset name"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); else if (e.key === 'Escape') setNaming(false) }}
+            className="flex-1 min-w-0 h-6 px-2 rounded bg-[var(--surface-raised)] text-xs text-text-primary outline-none border border-[var(--accent)]"
+          />
+          <button className={btn} title="Save preset" disabled={!name.trim()} onClick={commit}><Check size={13} /></button>
+          <button className={btn} title="Cancel" onClick={() => setNaming(false)}><X size={13} /></button>
+        </>
+      ) : (
+        <>
+          <select
+            value={known} disabled={!presets.names.length}
+            onChange={(e) => { setActive(e.target.value); if (e.target.value) presets.load(e.target.value) }}
+            className="flex-1 min-w-0 h-6 rounded bg-[var(--surface-raised)] border border-[var(--border)] text-[11px] text-text-primary outline-none px-1"
+          >
+            <option value="">{presets.names.length ? 'Presets' : 'No presets saved yet'}</option>
+            {presets.names.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <button className={btn} title="Save the current values as a preset" onClick={() => { setName(known); setNaming(true) }}><Save size={13} /></button>
+          <button className={btn} title="Delete this preset" disabled={!known} onClick={() => { void presets.remove(known); setActive('') }}><Trash2 size={13} /></button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Which named option a value falls on, and the value that picks option `i`. */
+const optionAt = (p: VstParam): number => (p.cuts ? p.cuts.filter((c) => p.value >= c).length : Math.round(p.value * p.steps))
+const optionValue = (p: VstParam, i: number): number => p.levels?.[i] ?? i / p.steps
+
 const ParamCard = memo(function ParamCard({ param: p, onSet }: { param: VstParam; onSet: SetFn }): JSX.Element {
-  const isSwitch = p.steps === 1
-  const options = p.options && p.options.length > 2 ? p.options : null
+  const named = p.options && p.options.length >= 2 ? p.options : null
+  const isSwitch = p.steps === 1 || named?.length === 2
+  const options = named && named.length > 2 ? named : null
   // Long lists of names get a menu; a few short ones get buttons across the whole card.
   const menu = !!options && (options.length > 4 || options.some((o) => o.length > 7))
   const wide = !!options && !menu
@@ -54,18 +110,22 @@ const ParamCard = memo(function ParamCard({ param: p, onSet }: { param: VstParam
       title={`${p.name}${p.ro || options ? '' : ' - double-click to reset'}`}
     >
       <div className="w-full truncate text-center text-[10px] leading-3 text-text-secondary">{p.name}</div>
-      {isSwitch ? <Switch p={p} onSet={onSet} /> : options ? (menu ? <Menu p={p} options={options} onSet={onSet} /> : <Segments p={p} options={options} onSet={onSet} />) : <Knob p={p} onSet={onSet} />}
-      {!options && <div className="w-full truncate text-center text-[10px] leading-3 tabular-nums text-text-primary">{readout}</div>}
+      {/* Names line up along the top; whatever the control is sits in the middle of what's left. */}
+      <div className="flex-1 w-full flex flex-col items-center justify-center gap-1">
+        {isSwitch ? <Switch p={p} onSet={onSet} /> : options ? (menu ? <Menu p={p} options={options} onSet={onSet} /> : <Segments p={p} options={options} onSet={onSet} />) : <Knob p={p} onSet={onSet} />}
+        {!options && <div className="w-full truncate text-center text-[10px] leading-3 tabular-nums text-text-primary">{readout}</div>}
+      </div>
     </div>
   )
 })
 
 function Switch({ p, onSet }: { p: VstParam; onSet: SetFn }): JSX.Element {
-  const on = p.value >= 0.5
+  const named = p.options && p.options.length === 2
+  const on = named ? optionAt(p) === 1 : p.value >= 0.5
   return (
     <button
       role="switch" aria-checked={on} disabled={p.ro}
-      onClick={() => onSet(p.id, on ? 0 : 1)}
+      onClick={() => onSet(p.id, named ? optionValue(p, on ? 0 : 1) : on ? 0 : 1)}
       className={`relative w-10 h-[22px] rounded-full transition-colors disabled:cursor-default ${on ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}
     >
       <span className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : ''}`} />
@@ -74,12 +134,12 @@ function Switch({ p, onSet }: { p: VstParam; onSet: SetFn }): JSX.Element {
 }
 
 function Segments({ p, options, onSet }: { p: VstParam; options: string[]; onSet: SetFn }): JSX.Element {
-  const at = Math.round(p.value * p.steps)
+  const at = optionAt(p)
   return (
     <div className="flex w-full rounded overflow-hidden border border-[var(--border)]">
       {options.map((o, i) => (
         <button
-          key={i} disabled={p.ro} onClick={() => onSet(p.id, i / p.steps)} title={o}
+          key={i} disabled={p.ro} onClick={() => onSet(p.id, optionValue(p, i))} title={o}
           className={`flex-1 min-w-0 truncate h-5 px-1 text-[10px] transition-colors ${i === at ? 'bg-[var(--accent)] text-white' : 'text-text-secondary hover:text-text-primary hover:bg-[var(--surface-raised)]'}`}
         >
           {o}
@@ -92,8 +152,8 @@ function Segments({ p, options, onSet }: { p: VstParam; options: string[]; onSet
 function Menu({ p, options, onSet }: { p: VstParam; options: string[]; onSet: SetFn }): JSX.Element {
   return (
     <select
-      value={Math.round(p.value * p.steps)} disabled={p.ro}
-      onChange={(e) => onSet(p.id, Number(e.target.value) / p.steps)}
+      value={optionAt(p)} disabled={p.ro}
+      onChange={(e) => onSet(p.id, optionValue(p, Number(e.target.value)))}
       className="w-full h-6 rounded bg-[var(--surface-raised)] border border-[var(--border)] text-[11px] text-text-primary outline-none px-1"
     >
       {options.map((o, i) => <option key={i} value={i}>{o}</option>)}

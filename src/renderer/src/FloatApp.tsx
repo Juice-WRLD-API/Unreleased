@@ -215,10 +215,26 @@ function FloatPluginControls(): JSX.Element {
     setParams((cur) => cur && cur.map((p) => (p.id === id ? { ...p, value } : p)))
     void vstApi()?.vstEditParam(key, id, value)
   }
+  const [presets, setPresets] = useState<string[]>([])
+  useEffect(() => { void vstApi()?.vstPresets(key).then(setPresets) }, [key])
+  const presetApi = {
+    names: presets,
+    save: async (name: string): Promise<void> => {
+      const api = vstApi()
+      if (api && await api.vstPresetSave(key, name)) setPresets(await api.vstPresets(key))
+    },
+    load: (name: string): void => { void vstApi()?.vstPresetLoad(key, name) },
+    remove: async (name: string): Promise<void> => {
+      const api = vstApi()
+      if (!api) return
+      await api.vstPresetDelete(key, name)
+      setPresets(await api.vstPresets(key))
+    },
+  }
   if (!params) {
     return <div className="flex-1 flex items-center justify-center"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
   }
-  return <VstControlsPanel params={params} onSet={set} />
+  return <VstControlsPanel params={params} onSet={set} presets={presetApi} />
 }
 
 // Shell for floating pop-out windows: main.js createFloatWindow opens a second
