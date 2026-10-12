@@ -3,6 +3,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { IS_NATIVE_APP } from '../lib/platform'
 import { onMediaControlEvent, readLocalArtworkBase64, startMediaSession, updateMediaMetadata, updateMediaPlaybackState } from '../lib/mediaControl'
 import { runPlayerCommand, seekAudio } from './Player'
+import { startSiriCommands } from '../lib/siriCommands'
 
 /** Android's foreground service keeps the WebView player alive when locked. */
 export default function NativeMediaSession(): null {
@@ -53,5 +54,6 @@ export default function NativeMediaSession(): null {
     ]
     return () => { unsubscribe(); listeners.forEach((remove) => remove()) }
   }, [])
+  useEffect(() => startSiriCommands(), [])
   return null
 }
