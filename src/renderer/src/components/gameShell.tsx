@@ -1,4 +1,4 @@
-// Shared furniture for the Games tab — the pieces Heardle and Wordle both draw
+// Shared furniture for the Games tab - the pieces Heardle and Wordle both draw
 // so the two read as one tab rather than two apps that happen to sit together.
 //
 // The tab holds one view per game (see App's routing) instead of a wrapper that
@@ -18,13 +18,15 @@ const GAMES: { id: GameId; label: string }[] = [
   { id: 'tierlist', label: 'Tier List' },
 ]
 
-/** The games in the tab, as a pill row. Sits above each game's hero — the
+/** The games in the tab, as a pill row. Sits above each game's hero - the
  *  corner controls own the very top of the pane, so this is the first thing in
  *  the scroll flow rather than another floating layer to dodge them. */
 export function GameSwitcher({ current }: { current: GameId }): JSX.Element {
   const { setActiveView } = useStorePick('setActiveView')
   // Whichever game is on screen is the one the Games tab reopens on.
   useEffect(() => { rememberTabView(current) }, [current])
+  // No offset for the floating nav pill: it always auto-hides on desktop
+  // (see App.tsx), so it never covers this row.
   return (
     <div className="flex justify-center mb-5">
       <div className="inline-flex rounded-full border border-[var(--border)] bg-[var(--surface-raised)]/60 p-0.5">
@@ -32,10 +34,10 @@ export function GameSwitcher({ current }: { current: GameId }): JSX.Element {
           <button
             key={g.id}
             onClick={() => setActiveView(g.id)}
-            className={`h-9 px-4 rounded-full text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
+            className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-[0.18em] transition-colors ${
               current === g.id
                 ? 'bg-accent text-white'
-                : 'text-text-muted active:text-text-primary'
+                : 'text-text-muted hover:text-text-primary'
             }`}
           >
             {g.label}
@@ -70,7 +72,7 @@ export function GameBackdrop(): JSX.Element {
       <div
         aria-hidden
         className="absolute inset-x-0 top-0 h-80 pointer-events-none"
-        style={{ background: 'radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--accent) 32%, transparent), transparent)' }}
+        style={{ background: 'radial-gradient(60% 100% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), transparent)' }}
       />
     </>
   )
@@ -105,8 +107,8 @@ export function Segmented<T extends string>({ options, value, onChange }: {
         <button
           key={o.id}
           onClick={() => onChange(o.id)}
-          className={`h-8 px-2.5 text-xs font-semibold transition-colors ${
-            value === o.id ? 'bg-accent text-white' : 'text-text-muted active:text-text-primary'
+          className={`px-2.5 py-1 text-xs font-semibold transition-colors ${
+            value === o.id ? 'bg-accent text-white' : 'text-text-muted hover:text-text-primary'
           }`}
         >
           {o.label}

@@ -1,14 +1,12 @@
-import { useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { ModalOverlay, LockToggle } from './Modal'
 import { X, Download, Copy, Trash2, Moon, Sun, Check, RotateCcw } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import {
   SKIN_VAR_META, SKIN_OPTIONAL_VAR_META, createCustomSkin, skinToFileText, skinFileName,
   type Skin, type SkinVars,
 } from '../lib/skins'
-import { useBackToClose } from '../hooks/useBackToClose'
 
-// Downloads `text` as a file named `name` (renderer-side blob download — the
+// Downloads `text` as a file named `name` (renderer-side blob download - the
 // user's own generated skin, no server round-trip).
 function downloadText(text: string, name: string): void {
   const blob = new Blob([text], { type: 'application/json' })
@@ -35,7 +33,7 @@ function toColorInputValue(value: string): string {
 
 /**
  * The custom-skin editor. Edits happen against the live store skin (looked up
- * by id) and every change saves through `saveCustomSkin` — because the caller
+ * by id) and every change saves through `saveCustomSkin` - because the caller
  * makes this skin the active theme before opening, that gives a true live
  * preview of the whole app behind the modal.
  */
@@ -46,24 +44,16 @@ export default function SkinEditorModal({
 }: {
   skinId: string
   onClose: () => void
-  // Retarget the editor at another skin (used by Duplicate) — owned by the
+  // Retarget the editor at another skin (used by Duplicate) - owned by the
   // caller so the open/edit state stays local to its window.
   onEditSkin: (id: string) => void
 }): JSX.Element | null {
-  useBackToClose(onClose)
   const { customSkins, saveCustomSkin, deleteCustomSkin, setTheme } = useStorePick(
     'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'setTheme',
   )
   const skin = customSkins.find((s) => s.id === skinId) ?? null
-  const overlayRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  // The skin vanished from under us (deleted in another window) — bail out.
+  // The skin vanished from under us (deleted in another window) - bail out.
   if (!skin) return null
 
   const patch = (updates: Partial<Skin>): void => saveCustomSkin({ ...skin, ...updates })
@@ -85,28 +75,39 @@ export default function SkinEditorModal({
     const copy = createCustomSkin(skin, `${skin.name} copy`)
     saveCustomSkin(copy)
     setTheme(copy.id)
-    // Keep editing — retarget the editor at the fresh copy (now the active skin).
+    // Keep editing - retarget the editor at the fresh copy (now the active skin).
     onEditSkin(copy.id)
   }
 
-  return createPortal(
-    <div
-      ref={overlayRef}
-      onMouseDown={(e) => { if (e.target === overlayRef.current) onClose() }}
-      className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:p-4"
+  return (
+    <ModalOverlay
+      onClose={onClose}
+      zIndexClassName="z-[60]"
+      panelClassName="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl w-full max-w-lg max-h-[85vh]"
+      minWidth={420} minHeight={420}
     >
-      <div
-        className="w-full md:max-w-lg max-h-[88svh] md:max-h-[85vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl overflow-hidden"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div className="w-full h-full flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-raised)]">
+        <div
+          className={`flex items-center gap-3 px-5 py-4 border-b border-[var(--border)] bg-[var(--surface-raised)] ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          onMouseDown={onHandleMouseDown}
+        >
           <input
             value={skin.name}
             onChange={(e) => patch({ name: e.target.value.slice(0, 40) })}
             placeholder="Skin name"
-            className="flex-1 min-w-0 bg-transparent text-text-primary text-base font-semibold outline-none placeholder:text-text-muted"
+            className="flex-1 min-w-0 bg-transparent text-text-primary text-base font-semibold outline-none rounded focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
           />
+          {canLock && (
+            <LockToggle
+              locked={locked}
+              onClick={toggleLock}
+              className={`w-6 h-6 flex items-center justify-center rounded-lg transition-colors ${
+                locked ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+              }`}
+            />
+          )}
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
@@ -117,7 +118,7 @@ export default function SkinEditorModal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0">
           {/* Base mode */}
           <div className="flex items-center gap-2 mb-4">
             <span className="text-text-secondary text-xs mr-1">Base mode</span>
@@ -183,7 +184,7 @@ export default function SkinEditorModal({
             </div>
           ))}
 
-          {/* Advanced — optional overrides that inherit when left blank. */}
+          {/* Advanced - optional overrides that inherit when left blank. */}
           <div className="mt-3 pt-3 border-t border-[var(--border)]">
             <p className="text-text-secondary text-[11px] font-semibold uppercase tracking-wide mb-1">Advanced</p>
             {SKIN_OPTIONAL_VAR_META.map(({ key, label, hint }) => {
@@ -250,7 +251,7 @@ export default function SkinEditorModal({
           </button>
         </div>
       </div>
-    </div>,
-    document.body,
+      )}
+    </ModalOverlay>
   )
 }

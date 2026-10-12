@@ -2,7 +2,7 @@
 //
 // Every stack is built from fonts that ship with Windows/macOS/Linux (plus the
 // already-imported Josefin Sans), so switching fonts never waits on a network
-// fetch — this app runs offline and a webfont download would leave text
+// fetch - this app runs offline and a webfont download would leave text
 // swapping mid-session. useThemeEffects writes the chosen stacks onto <html>
 // as --font-app / --font-lyrics; Tailwind's `font-sans` resolves to the former
 // (see tailwind.config.js), so a change reaches every screen at once.
@@ -13,7 +13,7 @@ export interface FontChoice {
   stack: string
 }
 
-// 'system' must stay first — it's the fallback for unknown persisted ids.
+// 'system' must stay first - it's the fallback for unknown persisted ids.
 export const FONTS: FontChoice[] = [
   {
     id: 'system',

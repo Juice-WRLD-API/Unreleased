@@ -20,7 +20,6 @@ import {
 import type { PuzzleResponse } from '../lib/heardleApi'
 import type { Guess, GameStatus, HeardleSong } from '../lib/heardle'
 import { loadPools, searchPool, unlockedSeconds, revealCoverUrl } from '../lib/heardle'
-import { useBackToClose } from '../hooks/useBackToClose'
 
 interface Props {
   embedded?: boolean
@@ -112,8 +111,6 @@ function GuessRow({ guess, correct }: { guess: Guess; correct: boolean }) {
 }
 
 export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.Element {
-  // Embedded in a page it isn't a dismissable layer, so back shouldn't eat it.
-  useBackToClose(onClose, !embedded)
   const { account, volume, setVolume, isPlaying, setIsPlaying } = useStorePick('account', 'volume', 'setVolume', 'isPlaying', 'setIsPlaying')
   const [phase, setPhase] = useState<MatchPhase>('idle')
   const [matchId, setMatchId] = useState<string | null>(null)
@@ -184,7 +181,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
   }, [])
 
   const handleMatched = useCallback((id: string, round?: PuzzleResponse) => {
-    // Both transports can deliver this, so ignore the second one — but only
+    // Both transports can deliver this, so ignore the second one - but only
     // when it's the *same* match. Dropping it on phase alone stranded the
     // player in a match they'd been placed in from a stale queue entry: the
     // server considered them playing, the UI showed the idle screen, and the
@@ -289,7 +286,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
           era: payload.reveal.era ?? null,
           category: payload.reveal.category ?? '',
           // revealCoverUrl reads the runtime object, not MatchEndReveal's
-          // declared type — the websocket payload may carry `image_url`
+          // declared type - the websocket payload may carry `image_url`
           // (see the comment on revealCoverUrl) even though that field isn't
           // in this interface.
           imageUrl: revealCoverUrl(payload.reveal) ?? '',
@@ -331,8 +328,8 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
   }, [account?.id])
 
   // REST polling is a *fallback*, not a parallel channel. Running it while the
-  // socket is open would enqueue the same player twice — once over each
-  // transport — so it only fires when the socket can't do the job.
+  // socket is open would enqueue the same player twice - once over each
+  // transport - so it only fires when the socket can't do the job.
   useEffect(() => {
     if (phase !== 'queue') return
     let cancelled = false
@@ -377,7 +374,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
     if (status !== 'playing' || !matchId) return
     if (!sendMatchGuess(null, true, matchId)) {
       setConnected(false)
-      setError("Connection lost — that skip didn't send. Reconnecting…")
+      setError("Connection lost - that skip didn't send. Reconnecting…")
       return
     }
     stopPlayback()
@@ -387,7 +384,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
     if (finished || !matchId) return
     if (!sendMatchGuess(song.id, false, matchId)) {
       setConnected(false)
-      setError("Connection lost — that guess didn't send. Reconnecting…")
+      setError("Connection lost - that guess didn't send. Reconnecting…")
       return
     }
     stopPlayback()
@@ -405,12 +402,8 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
   const shell = (content: JSX.Element): JSX.Element => {
     if (embedded) return content
     return (
-      <div className="fixed inset-0 z-[200] flex items-end md:items-center justify-center bg-black/60 p-0 md:p-4" onClick={onClose}>
-        <div
-          className="w-full md:max-w-md max-h-[88svh] overflow-y-auto rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5"
-          style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom, 0px))' }}
-          onClick={(e) => e.stopPropagation()}
-        >
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+        <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5" onClick={(e) => e.stopPropagation()}>
           {content}
         </div>
       </div>
@@ -431,7 +424,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
       <Swords size={16} className="text-accent" />
       <h2 className="text-text-primary font-bold">1v1 Heardle</h2>
       {!embedded && (
-        <button onClick={onClose} className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary"><X size={16} /></button>
+        <button onClick={onClose} title="Close" className="ml-auto p-1 rounded-lg text-text-muted hover:text-text-primary"><X size={16} /></button>
       )}
     </div>
   )
@@ -587,7 +580,7 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
             {finished && phase === 'playing' && (
               <div className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-center">
                 <p className="text-sm font-semibold text-text-primary">
-                  {status === 'won' ? 'Correct — waiting for opponent…' : 'Out of guesses — waiting for opponent…'}
+                  {status === 'won' ? 'Correct - waiting for opponent…' : 'Out of guesses - waiting for opponent…'}
                 </p>
                 <p className="text-xs text-text-muted mt-1">Result is decided once both players finish</p>
               </div>

@@ -8,6 +8,7 @@ import {
   fetchTrackerChanges, fetchCompChanges,
   type TrackerChange, type CompChange,
 } from '../lib/changesApi'
+import { errorMessage } from '../lib/format'
 
 type FeedTab = 'tracker' | 'comp'
 type ChangeRow = (TrackerChange | CompChange) & { timestamp: string | null }
@@ -37,7 +38,7 @@ function fullDate(iso: string | null): string {
 }
 
 // Groups rows into day buckets (Today / Yesterday / weekday / date) without
-// re-sorting — the API already returns newest-first, so consecutive same-day
+// re-sorting - the API already returns newest-first, so consecutive same-day
 // items just land in the same bucket.
 function dayLabel(iso: string | null): string {
   if (!iso) return 'Unknown date'
@@ -93,7 +94,7 @@ const ACTION_ICONS: Record<string, typeof Plus> = {
   create_folder: FolderPlus,
 }
 
-// Icon-chip that anchors each row — the colored circle is the primary "what
+// Icon-chip that anchors each row - the colored circle is the primary "what
 // kind of change" cue, since a wall of same-shaped rows is hard to scan.
 function ActionIcon({ action }: { action: string }): JSX.Element {
   const cls = ACTION_STYLES[action] || 'bg-[var(--surface-overlay)] text-text-secondary border-[var(--border)]'
@@ -118,7 +119,7 @@ function CompRow({ item, onOpen }: { item: CompChange; onOpen: (i: CompChange) =
   return (
     <button
       onClick={() => onOpen(item)}
-      className="w-full text-left flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] active:border-accent/40 transition-colors p-3"
+      className="w-full text-left flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 transition-all duration-200 p-3 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
     >
       <ActionIcon action={item.action} />
       <div className="min-w-0 flex-1">
@@ -135,7 +136,7 @@ function CompRow({ item, onOpen }: { item: CompChange; onOpen: (i: CompChange) =
       <div className="shrink-0 text-right">
         <div className="text-xs text-text-secondary truncate max-w-[9rem]">{item.user}</div>
         <div title={fullDate(item.timestamp)} className="text-[11px] text-text-muted">{timeAgo(item.timestamp)}</div>
-        {/* Folders carry no meaningful byte count — the server sends 0 for them
+        {/* Folders carry no meaningful byte count - the server sends 0 for them
             and a "0 B" line next to a new folder just reads like a failure. */}
         {!item.is_folder && humanSize(item.size) && <div className="text-[11px] text-text-muted">{humanSize(item.size)}</div>}
       </div>
@@ -149,8 +150,8 @@ function TrackerRow({ item, onOpen }: { item: TrackerChange; onOpen: (i: Tracker
   return (
     <button
       onClick={() => clickable && onOpen(item)}
-      className={`w-full text-left flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 transition-colors ${
-        clickable ? 'active:border-accent/40 cursor-pointer' : 'cursor-default'
+      className={`w-full text-left flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3 transition-all duration-200 ${
+        clickable ? 'hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50' : 'cursor-default'
       }`}
     >
       <ActionIcon action={item.action} />
@@ -193,7 +194,7 @@ export default function ChangesFeedPanel(): JSX.Element {
       if (which === 'tracker') setTracker(await fetchTrackerChanges())
       else setComp(await fetchCompChanges())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load changes')
+      setError(errorMessage(err, 'Failed to load changes'))
     } finally {
       setLoading(false)
     }
@@ -215,15 +216,16 @@ export default function ChangesFeedPanel(): JSX.Element {
   const compGroups = useMemo(() => groupByDay(comp), [comp])
 
   return (
-    <div>
+    <div className="max-w-4xl mx-auto">
       <div className="flex items-center gap-2 mb-4">
         <div className="flex gap-0.5 rounded-lg bg-[var(--surface-raised)] border border-[var(--border)] p-0.5">
           {(['tracker', 'comp'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`h-9 px-3 text-xs font-semibold rounded-md transition-colors ${
-                tab === t ? 'bg-accent text-white' : 'text-text-muted'
+              aria-pressed={tab === t}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+                tab === t ? 'bg-accent text-white' : 'text-text-muted hover:text-text-primary'
               }`}
             >
               {t === 'tracker' ? 'Tracker edits' : 'Comp files'}
@@ -234,7 +236,8 @@ export default function ChangesFeedPanel(): JSX.Element {
           onClick={() => load(tab)}
           disabled={loading}
           title="Refresh"
-          className="ml-auto w-9 h-9 flex items-center justify-center rounded-lg text-text-muted active:bg-surface-overlay transition-colors disabled:opacity-50"
+          aria-label="Refresh feed"
+          className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
         >
           <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
         </button>
@@ -252,7 +255,7 @@ export default function ChangesFeedPanel(): JSX.Element {
           <p className="text-sm text-text-secondary mb-4">{error}</p>
           <button
             onClick={() => load(tab)}
-            className="h-10 px-4 rounded-lg text-sm font-medium bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary active:border-accent/40 transition-colors"
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary hover:border-accent/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             Try again
           </button>

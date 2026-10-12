@@ -1,13 +1,13 @@
-// Last.fm scrobbling client — auth (the desktop "token" flow), now-playing
+// Last.fm scrobbling client - auth (the desktop "token" flow), now-playing
 // updates, and an offline-tolerant scrobble queue. Runs entirely in the
 // renderer and works in both the Electron and web builds: ws.audioscrobbler.com
 // sends CORS headers, so no main-process code is involved.
 //
-// Needs a Last.fm API account (https://www.last.fm/api/account/create) — set
+// Needs a Last.fm API account (https://www.last.fm/api/account/create) - set
 // VITE_LASTFM_API_KEY / VITE_LASTFM_API_SECRET in .env.local before building.
 // Without them lastfmConfigured() is false, Settings shows the row as
 // unavailable, and everything here no-ops. Shipping the shared secret inside
-// an installed app is Last.fm's documented model for desktop clients — it
+// an installed app is Last.fm's documented model for desktop clients - it
 // only signs this app's own requests; user auth still happens on last.fm.
 
 const API_KEY = (import.meta.env.VITE_LASTFM_API_KEY as string | undefined) ?? ''
@@ -16,7 +16,7 @@ const API_ROOT = 'https://ws.audioscrobbler.com/2.0/'
 
 const SESSION_KEY = 'unreleased:lastfmSession'
 const QUEUE_KEY = 'unreleased:lastfmQueue'
-// Oldest scrobbles are dropped past this — protects localStorage if the user
+// Oldest scrobbles are dropped past this - protects localStorage if the user
 // listens offline (or with a revoked session) for a very long time.
 const QUEUE_CAP = 500
 
@@ -42,7 +42,7 @@ export class LastfmError extends Error {
 }
 
 // The saved session key can be revoked server-side (user removes the app on
-// last.fm) — when any call fails with "invalid session" the session is
+// last.fm) - when any call fails with "invalid session" the session is
 // cleared here, and this handler lets the UI layer (store) reflect it without
 // this module importing the store (which imports this module).
 let sessionInvalidHandler: (() => void) | null = null
@@ -102,7 +102,7 @@ export async function lastfmTryGetSession(token: string): Promise<LastfmSession 
   } catch (e) {
     if (e instanceof LastfmError && e.code === ERR_TOKEN_NOT_AUTHORIZED) return null
     if (e instanceof LastfmError && e.code === ERR_TOKEN_EXPIRED) {
-      throw new LastfmError(e.code, 'Authorization expired — try connecting again.')
+      throw new LastfmError(e.code, 'Authorization expired - try connecting again.')
     }
     throw e
   }
@@ -194,10 +194,10 @@ export async function lastfmFlushQueue(): Promise<void> {
           // Temporary server-side conditions: keep the batch, retry later.
           if (e.code === ERR_SERVICE_OFFLINE || e.code === ERR_TEMP_UNAVAILABLE || e.code === ERR_RATE_LIMITED) return
           // Any other API error is permanent for this payload (malformed
-          // params etc.) — fall through and drop the batch so one bad entry
+          // params etc.) - fall through and drop the batch so one bad entry
           // can't wedge the whole queue forever.
         } else {
-          return // network error — keep everything queued
+          return // network error - keep everything queued
         }
       }
       // Reload rather than reusing `queue`: new scrobbles may have been
@@ -223,7 +223,7 @@ function withSignature(params: Record<string, string>): URLSearchParams {
 async function apiCall<T>(params: Record<string, string>, post: boolean): Promise<T> {
   const search = withSignature(params)
   const res = await fetch(post ? API_ROOT : `${API_ROOT}?${search}`, post ? { method: 'POST', body: search } : undefined)
-  // Last.fm returns errors as JSON bodies (often with a 4xx status) — parse
+  // Last.fm returns errors as JSON bodies (often with a 4xx status) - parse
   // before checking res.ok so the API's own code/message wins over "HTTP 403".
   let json: unknown = null
   try { json = await res.json() } catch {}
@@ -235,7 +235,7 @@ async function apiCall<T>(params: Record<string, string>, post: boolean): Promis
 
 // ─── MD5 (RFC 1321) ───────────────────────────────────────────────────────────
 // Only needed for Last.fm's api_sig, which predates SubtleCrypto (which offers
-// no MD5 anyway) — a dependency isn't worth it for one legacy digest. Operates
+// no MD5 anyway) - a dependency isn't worth it for one legacy digest. Operates
 // on the UTF-8 encoding of the input, as the scrobbler spec requires.
 
 const MD5_S = [
@@ -244,7 +244,7 @@ const MD5_S = [
   4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
   6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
 ]
-// K[i] = floor(|sin(i+1)| · 2^32) — computed instead of a 64-entry literal
+// K[i] = floor(|sin(i+1)| · 2^32) - computed instead of a 64-entry literal
 // (the Uint32Array assignment truncates to uint32 exactly as the spec wants).
 const MD5_K = new Uint32Array(64)
 for (let i = 0; i < 64; i++) MD5_K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296)

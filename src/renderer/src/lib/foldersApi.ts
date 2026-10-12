@@ -1,33 +1,11 @@
-// Network layer for playlist folders. See lib/playlistFolders.ts for the data
-// shape and the store's folder slice for the local-first merge logic.
-//
-// The live backend stores folders as ONE JSON array (`playlist_folders`) on
-// the user profile — GET/PATCH /accounts/account/me/ — not as folder rows.
-// The client owns the array and PATCHes it in full; the store debounces the
-// pushes and merges the profile's copy on login. Only synced playlists reach
-// the server (toServerFolders maps each folder to { id, name, playlist_ids })
-// — device-local ("local:") members never leave this machine and are
-// re-attached after a pull by matching on the round-tripped folder id.
-import { JWAPI_BASE } from './juicewrldApi'
-import { getToken } from './userApi'
-import { apiRequest } from './apiClient'
-import { toServerFolders } from './playlistFolders'
-import type { PlaylistFolder } from './playlistFolders'
+// Feature flag for the playlist-folders profile-blob field. See
+// profilePushApi.ts for the actual PATCH /accounts/account/me/ network
+// layer - song prefs, listening plays, and playlist folders all push through
+// that single combined pusher now, rather than each field having its own
+// push function here. Only synced playlists reach the server (toServerFolders
+// maps each folder to { id, name, playlist_ids }) - device-local ("local:")
+// members never leave this machine and are re-attached after a pull by
+// matching on the round-tripped folder id.
 
 /** Live since the profile-blob fields shipped (2026-07-17). */
 export const foldersApiEnabled = true
-
-const ME_URL = `${JWAPI_BASE}/accounts/account/me/`
-
-/** Replaces the profile's `playlist_folders` with this device's folders
- *  (synced-playlist membership only). No-op when signed out. */
-export async function pushFolders(folders: PlaylistFolder[]): Promise<void> {
-  if (!foldersApiEnabled) return
-  const token = getToken()
-  if (!token) return
-  await apiRequest<unknown>(ME_URL, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
-    body: JSON.stringify({ playlist_folders: toServerFolders(folders) }),
-  })
-}

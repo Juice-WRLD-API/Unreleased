@@ -4,6 +4,8 @@ import { useStore, useStorePick } from '../store/useStore'
 import { apiFetch, buildStreamUrl, buildCoverArtUrl } from '../lib/juicewrldApi'
 import { liteSongToTrack, ApiSongLite } from '../lib/userApi'
 import { Track } from '../types'
+import { AlbumArtThumbnail } from './AlbumArtThumbnail'
+import { clickable } from '../lib/a11y'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObject = Record<string, any>
@@ -49,7 +51,7 @@ function parseTracks(data: unknown): Track[] {
   }
 
   const obj = data as AnyObject
-  // Named candidate fields — try recursively to handle any nesting
+  // Named candidate fields - try recursively to handle any nesting
   const ARRAY_KEYS = ['songs', 'items', 'tracks', 'results', 'playlist_songs', 'song_list', 'files', 'entries']
   for (const key of ARRAY_KEYS) {
     const list = obj[key]
@@ -72,7 +74,7 @@ function parseTracks(data: unknown): Track[] {
     if (dataParsed.length) return dataParsed
   }
 
-  // playlist field — API wraps songs in { playlist: { songs: [...] } }
+  // playlist field - API wraps songs in { playlist: { songs: [...] } }
   if (obj.playlist && typeof obj.playlist === 'object') {
     const playlistParsed = parseTracks(obj.playlist)
     if (playlistParsed.length) return playlistParsed
@@ -98,13 +100,13 @@ function parseTracks(data: unknown): Track[] {
 }
 
 export default function SharedPlaylistView(): JSX.Element {
-  const { playTrack, playCollection, setActiveView } = useStorePick('playTrack', 'playCollection', 'setActiveView')
+  const { playTrack, playCollection, setActiveView, previousView } = useStorePick('playTrack', 'playCollection', 'setActiveView', 'previousView')
+  const backView = previousView && previousView !== 'shared-playlist' ? previousView : 'wrld'
   const shareId = window.location.pathname.split('/shared/')[1]?.split('/')[0] ?? ''
 
   const [tracks, setTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [imgErrors, setImgErrors] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!shareId) { setError(true); setLoading(false); return }
@@ -131,7 +133,7 @@ export default function SharedPlaylistView(): JSX.Element {
         <Music2 size={40} className="opacity-20" />
         <p className="text-sm">Shared playlist not found or expired.</p>
         <button
-          onClick={() => setActiveView('wrld')}
+          onClick={() => setActiveView(backView)}
           className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
@@ -144,7 +146,7 @@ export default function SharedPlaylistView(): JSX.Element {
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
       {/* Header */}
       <button
-        onClick={() => setActiveView('wrld')}
+        onClick={() => setActiveView(backView)}
         className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
       >
         <ChevronLeft size={15} /> Back to app
@@ -178,20 +180,11 @@ export default function SharedPlaylistView(): JSX.Element {
           <div
             key={t.id}
             className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
-            onClick={() => playTrack(t, tracks)}
+            {...clickable(() => playTrack(t, tracks))}
           >
             <span className="text-text-muted text-xs w-6 text-right tabular-nums shrink-0">{i + 1}</span>
             <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
-              {!imgErrors.has(t.id) && (t.imageUrl || t.hasAlbumArt) ? (
-                <img
-                  src={t.imageUrl ?? ''}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  onError={() => setImgErrors(prev => new Set([...prev, t.id]))}
-                />
-              ) : (
-                <Music2 size={14} className="text-text-muted opacity-40" />
-              )}
+              <AlbumArtThumbnail track={t} fill className="w-full h-full" />
               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                 <Play size={12} fill="white" className="text-white ml-0.5" />
               </div>

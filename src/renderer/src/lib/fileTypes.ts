@@ -1,5 +1,4 @@
 import { useStore } from '../store/useStore'
-import { toStreamUrl } from './localLibrary'
 
 export const AUDIO_EXTS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac', '.opus', '.wma', '.alac', '.caf', '.aiff', '.aif'])
 export const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif'])
@@ -29,15 +28,18 @@ export function getMediaType(name: string): FileMediaType {
   return 'other'
 }
 
-// A local track's "path" is a Storage Access Framework `content://` URI, which
-// the WebView refuses to load directly from the app's https origin. Capacitor's
-// local server proxies it instead — see localLibrary.toStreamUrl for why that
-// matters beyond just loading (same-origin is what lets the EQ chain attach).
+// `local-media://` is a custom protocol the desktop app registers to stream
+// local files by absolute path. Unreachable in the web build - libraryTracks
+// only gets populated via scanLibrary(), which no-ops without window.electron
+// (see useStore.ts) - kept only so the shared Track/LibraryTrack conversion
+// stays platform-agnostic.
 export function toFileUrl(absPath: string): string {
-  return toStreamUrl(absPath)
+  const url = new URL('local-media://play/')
+  url.searchParams.set('p', absPath)
+  return url.toString()
 }
 
-// Converts a scanned library file into the queue/player Track shape — the
+// Converts a scanned library file into the queue/player Track shape - the
 // single conversion every local-file play path goes through. Cover art lives in
 // the store's libraryArt map (not on the track), so seed the queue thumbnail
 // from there if it's already been read; covers read later stream in via

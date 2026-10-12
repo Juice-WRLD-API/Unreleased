@@ -1,0 +1,20 @@
+{
+  "name": "Unreleased",
+  "short_name": "Unreleased",
+  "description": "Stream Juice WRLD's full catalog - released and unreleased - with playlists, synced lyrics, 999 FM radio and offline downloads.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "icons": [
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

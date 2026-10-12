@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { createPortal } from 'react-dom'
+import { ModalOverlay, LockToggle } from './Modal'
 import { X, Plus, Check, Trash2, Pencil, Hash } from 'lucide-react'
 import { createChannel, updateChannel, deleteChannel, type NewsChannel } from '../lib/newsApi'
-import { useBackToClose } from '../hooks/useBackToClose'
+import { errorMessage } from '../lib/format'
 
 interface Props {
   channels: NewsChannel[]
@@ -12,7 +12,6 @@ interface Props {
 }
 
 export default function NewsChannelsModal({ channels, onClose, onChanged }: Props): JSX.Element {
-  useBackToClose(onClose)
   const [newLabel, setNewLabel] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
@@ -28,7 +27,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
       await fn()
       onChanged()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setError(errorMessage(err, 'Something went wrong'))
     } finally {
       setBusy(false)
     }
@@ -56,28 +55,34 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
   const field = 'flex-1 bg-[var(--surface-raised)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 transition-colors'
   const iconBtn = 'p-2 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors disabled:opacity-40'
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[170] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4"
-      onClick={(e) => { if (e.currentTarget === e.target && !busy) onClose() }}
+  return (
+    <ModalOverlay
+      onClose={onClose}
+      zIndexClassName="z-[170]"
+      panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md max-h-[92svh]"
+      minWidth={380} minHeight={380}
     >
-      <div
-        className="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md max-h-[92svh] overflow-y-auto"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10">
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div className="bg-surface w-full h-full overflow-y-auto">
+        <div
+          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          onMouseDown={onHandleMouseDown}
+        >
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">
             <Hash size={15} className="text-accent" /> Manage channels
           </h2>
-          <button onClick={onClose} disabled={busy} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={onClose} title="Close" disabled={busy} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="px-5 py-4 space-y-3">
           {/* Existing channels */}
           {channels.length === 0 ? (
-            <p className="text-sm text-text-muted py-4 text-center">No channels yet — add one below.</p>
+            <p className="text-sm text-text-muted py-4 text-center">No channels yet - add one below.</p>
           ) : (
             <ul className="space-y-1.5">
               {channels.map((c) => (
@@ -89,7 +94,10 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
                         className={field}
                         value={editLabel}
                         onChange={(e) => setEditLabel(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(c.id); if (e.key === 'Escape') setEditingId(null) }}
+                        // Escape cancels the rename and stops there - without
+                        // stopPropagation it would also reach the modal's own
+                        // Escape handling and close the whole dialog.
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(c.id); if (e.key === 'Escape') { e.stopPropagation(); setEditingId(null) } }}
                         maxLength={40}
                       />
                       <button onClick={() => saveEdit(c.id)} disabled={busy} className={iconBtn} title="Save"><Check size={16} /></button>
@@ -135,7 +143,7 @@ export default function NewsChannelsModal({ channels, onClose, onChanged }: Prop
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
       </div>
-    </div>,
-    document.body,
+      )}
+    </ModalOverlay>
   )
 }

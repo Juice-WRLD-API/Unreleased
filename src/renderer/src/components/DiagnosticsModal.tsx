@@ -1,12 +1,11 @@
-﻿import { useRef, useState } from 'react'
-import { X, Info, FolderOpen, Terminal, Trash2 } from 'lucide-react'
-import { useStore, useStorePick } from '../store/useStore'
+import { useRef, useState } from 'react'
+import { ModalOverlay, LockToggle } from './Modal'
+import { X, Info } from 'lucide-react'
+import { useStorePick } from '../store/useStore'
 import { cacheStats } from '../lib/apiCache'
 import type { Track } from '../types'
-import { formatBytes } from '../lib/format'
+import { formatBytes, accountDisplayName } from '../lib/format'
 import { APP_VERSION } from '../lib/appVersion'
-import { isAndroidApp } from '../lib/androidUpdate'
-import { readLogFile, clearLogFile } from '../lib/runLog'
 
 function localStorageBytes(): number {
   let bytes = 0
@@ -18,7 +17,7 @@ function localStorageBytes(): number {
   return bytes
 }
 
-// The filename actually being played — local tracks carry a filesystem
+// The filename actually being played - local tracks carry a filesystem
 // `path`, API/stream tracks only have a `streamUrl` (the "file" is whatever
 // the URL's last path segment resolves to).
 function filenameOf(track: Track | null): string {
@@ -69,16 +68,13 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
   return (
     <div
       ref={ref}
-      className="fixed inset-0 z-[70] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm px-0 md:px-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
       onClick={(e) => { if (e.target === ref.current) onClose() }}
     >
-      <div
-        className="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-[420px] max-h-[80svh] md:max-h-[70vh] flex flex-col overflow-hidden"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
+      <div className="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-[420px] max-h-[70vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
           <span className="text-text-muted text-[10px] font-semibold uppercase tracking-widest">{label}</span>
-          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+          <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -91,17 +87,7 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
 }
 
 export default function DiagnosticsModal(): JSX.Element {
-  const overlayRef = useRef<HTMLDivElement>(null)
   const [expanded, setExpanded] = useState<{ label: string; value: string } | null>(null)
-  const [logText, setLogText] = useState<string | null>(null)
-  const [logLoading, setLogLoading] = useState(false)
-  const loadLog = (): void => {
-    setLogLoading(true)
-    readLogFile().then((text) => { setLogText(text ?? '(empty)'); setLogLoading(false) })
-  }
-  const clearLog = (): void => {
-    clearLogFile().then(() => setLogText('(empty)'))
-  }
   const R = ({ label, value }: { label: string; value: string }): JSX.Element => (
     <Row label={label} value={value} onExpand={(l, v) => setExpanded({ label: l, value: v })} />
   )
@@ -109,35 +95,38 @@ export default function DiagnosticsModal(): JSX.Element {
     setShowDiagnostics, activeView, queue, queueIndex, currentTrack, currentTrackFull,
     isPlaying, progress, currentTime, shuffle, repeat, volume, playbackSpeed,
     crossfadeEnabled, crossfadeDuration, preferOgVersion, lyricsOffset,
-    libraryTracks, libraryFolders, offlineTracks, offlinePlaylists,
     theme, accentColor, audioOutput, radioFmActive,
-    account, playlists, likedTrackIds, downloads, updateStatus,
-  } = useStorePick('setShowDiagnostics', 'activeView', 'queue', 'queueIndex', 'currentTrack', 'currentTrackFull', 'isPlaying', 'progress', 'currentTime', 'shuffle', 'repeat', 'volume', 'playbackSpeed', 'crossfadeEnabled', 'crossfadeDuration', 'preferOgVersion', 'lyricsOffset', 'libraryTracks', 'libraryFolders', 'offlineTracks', 'offlinePlaylists', 'theme', 'accentColor', 'audioOutput', 'radioFmActive', 'account', 'playlists', 'likedTrackIds', 'downloads', 'updateStatus')
+    account, playlists, likedTrackIds,
+  } = useStorePick('setShowDiagnostics', 'activeView', 'queue', 'queueIndex', 'currentTrack', 'currentTrackFull', 'isPlaying', 'progress', 'currentTime', 'shuffle', 'repeat', 'volume', 'playbackSpeed', 'crossfadeEnabled', 'crossfadeDuration', 'preferOgVersion', 'lyricsOffset', 'theme', 'accentColor', 'audioOutput', 'radioFmActive', 'account', 'playlists', 'likedTrackIds')
 
   const cache = cacheStats()
-  const offlineCount = Object.keys(offlineTracks).length
-  const offlinePlaylistCount = Object.keys(offlinePlaylists).length
   const lsBytes = localStorageBytes()
   const mem = (performance as any).memory as { usedJSHeapSize: number; totalJSHeapSize: number } | undefined
 
   return (
-    <div
-      ref={overlayRef}
-      className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm px-0 md:px-4"
-      onClick={(e) => { if (e.target === overlayRef.current) setShowDiagnostics(false) }}
+    <>
+    <ModalOverlay
+      onClose={() => setShowDiagnostics(false)}
+      zIndexClassName="z-[60]"
+      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[480px] h-[600px] max-h-[85vh]"
+      minWidth={420} minHeight={420}
     >
-      <div
-        className="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-3xl shadow-2xl w-full md:max-w-[480px] md:mx-3 h-[88svh] md:h-[600px] max-h-[88svh] md:max-h-[85vh] flex flex-col overflow-hidden"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0">
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
+        <div
+          className={`flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 ${canLock ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          onMouseDown={onHandleMouseDown}
+        >
           <div className="flex items-center gap-2">
             <Info size={16} className="text-accent" />
             <h2 className="text-text-primary font-black text-lg tracking-tight">Diagnostics</h2>
           </div>
-          <button onClick={() => setShowDiagnostics(false)} className="text-text-muted hover:text-text-primary transition-colors">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-1">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={() => setShowDiagnostics(false)} className="text-text-muted hover:text-text-primary transition-colors">
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -187,8 +176,8 @@ export default function DiagnosticsModal(): JSX.Element {
 
           <Section title="Account">
             <R label="Logged in" value={account ? 'yes' : 'no'} />
-            {account && <R label="User" value={account.display_name || account.discord_username} />}
-            {account && <R label="Role" value={account.is_administrator ? 'administrator' : account.is_editor ? 'editor' : 'standard'} />}
+            {account && <R label="User" value={accountDisplayName(account)} />}
+            {account && <R label="Role" value={account.is_administrator ? 'administrator' : account.is_manager ? 'manager' : account.is_editor ? 'editor' : account.is_contributor ? 'contributor' : 'standard'} />}
             <R label="Playlists" value={String(playlists.length)} />
             <R label="Liked songs" value={String(likedTrackIds.length)} />
           </Section>
@@ -206,37 +195,19 @@ export default function DiagnosticsModal(): JSX.Element {
             <R label="Language" value={navigator.language} />
             <R label="User agent" value={navigator.userAgent} />
           </Section>
-
-          {isAndroidApp() && (
-            <Section title="Logs">
-              <div className="flex items-center gap-2 py-1">
-                <button
-                  onClick={loadLog}
-                  disabled={logLoading}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-surface-overlay text-text-primary text-xs font-medium active:bg-surface-highest transition-colors disabled:opacity-50"
-                >
-                  <Terminal size={13} />{logLoading ? 'Loading…' : 'View on-device log'}
-                </button>
-                <button
-                  onClick={clearLog}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-surface-overlay text-text-muted text-xs font-medium active:bg-surface-highest transition-colors"
-                >
-                  <Trash2 size={13} />Clear
-                </button>
-              </div>
-            </Section>
-          )}
         </div>
-
       </div>
+      )}
+    </ModalOverlay>
 
-      {expanded && (
-        <ValuePopup label={expanded.label} value={expanded.value} onClose={() => setExpanded(null)} />
-      )}
-      {logText != null && (
-        <ValuePopup label="On-device log" value={logText} onClose={() => setLogText(null)} />
-      )}
-    </div>
+    {/* Outside ModalOverlay's panel - that panel is overflow-hidden (for its
+        rounded corners), which would clip this full-screen popup since a
+        fixed-position element is still clipped by an ancestor's overflow
+        despite being positioned relative to the viewport. */}
+    {expanded && (
+      <ValuePopup label={expanded.label} value={expanded.value} onClose={() => setExpanded(null)} />
+    )}
+    </>
   )
 }
 

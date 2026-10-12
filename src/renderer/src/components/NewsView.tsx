@@ -1,27 +1,67 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useIsMobile } from '../hooks/useIsMobile'
 import {
   ChevronLeft, Newspaper, RefreshCw, AlertCircle, Plus, Settings2,
   Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow,
+  Share2,
+  Link2,
+  Check,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
+import { newsShareUrl } from '../lib/platform'
 import {
-  fetchNews, fetchChannels, fetchNewsItem, deleteNewsItem, isImageAttachment, isAudioAttachment,
+  fetchNews, peekNews, fetchChannels, fetchNewsItem, deleteNewsItem, isImageAttachment, isAudioAttachment,
   buildNewsAttachmentStreamUrl, ensureHttpsMediaUrl,
   ALL_CHANNEL, DEFAULT_NEWS_CHANNEL, NEWS_CHANNELS,
   type NewsItem, type NewsChannel, type NewsAttachment, type NewsSort,
 } from '../lib/newsApi'
 import { isSubscribed, setSubscribed, ensureNotifyPermission } from '../lib/newsNotifications'
+import { errorMessage } from '../lib/format'
+import { hasChatAccess } from '../lib/chatAccess'
 import NewsComposeModal from './NewsComposeModal'
 import NewsChannelsModal from './NewsChannelsModal'
+import NewsContextMenu, { type NewsMenuState } from './NewsContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
 
-type ViewMode = 'news' | 'feed'
+// Staff-only (it pulls in the chat store) - fetched when opened.
+const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
+
+type NewsMode = 'news' | 'feed'
+
+// Post URLs are /news/<id> so an open article can be shared/refreshed/bookmarked.
+function postIdFromPath(pathname: string): number | null {
+  const m = pathname.match(/^\/news\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return ''
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+// Crude markdown -> plain text for the summary fallback below: strips the
+// syntax that would otherwise show up as literal symbols (headings,
+// emphasis, links, code, bullets) and collapses all whitespace to single
+// spaces so it reads as one flowing blurb regardless of the source's line
+// breaks.
+function stripMarkdown(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_~`-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// Falls back to a snippet of the body when no summary was written - the
+// composer no longer requires one.
+function displaySummary(item: NewsItem): string {
+  const trimmed = item.summary?.trim()
+  return trimmed || stripMarkdown(item.body || '')
 }
 
 function humanSize(bytes: number): string {
@@ -40,14 +80,15 @@ function CategoryTag({ label }: { label: string }) {
   )
 }
 
-// Edit/delete cluster for editors. Always visible on android — touch has no
-// hover state, so gating this behind group-hover (the desktop pattern) would
-// make it permanently unreachable here.
+// Edit/delete cluster, shown on hover for editors on desktop; always visible on
+// mobile since touch has no hover state. Rendered as a sibling of the card's
+// clickable button (never nested - a button can't contain buttons).
 function ManageActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
+  const isMobile = useIsMobile()
   return (
-    <div className="absolute top-2 right-2 flex items-center gap-1">
-      <button onClick={onEdit} title="Edit" aria-label="Edit post" className="p-1.5 rounded-lg bg-black/60 text-white active:bg-black/80 transition-colors"><Pencil size={13} /></button>
-      <button onClick={onDelete} title="Delete" aria-label="Delete post" className="p-1.5 rounded-lg bg-black/60 text-white active:bg-red-600 transition-colors"><Trash2 size={13} /></button>
+    <div className={`absolute top-2 right-2 flex items-center gap-1 transition-opacity ${isMobile ? '' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
+      <button onClick={onEdit} title="Edit" aria-label="Edit post" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"><Pencil size={13} /></button>
+      <button onClick={onDelete} title="Delete" aria-label="Delete post" className="p-1.5 rounded-lg bg-black/60 text-white hover:bg-red-600 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"><Trash2 size={13} /></button>
     </div>
   )
 }
@@ -58,14 +99,16 @@ interface CardProps {
   canManage: boolean
   onEdit: (item: NewsItem) => void
   onDelete: (item: NewsItem) => void
+  onContextMenu: (item: NewsItem, e: React.MouseEvent) => void
 }
 
-function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
+function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
   return (
     <div className="relative group">
       <button
         onClick={() => onOpen(item)}
-        className="w-full text-left rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] active:border-accent/40 transition-colors block"
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
+        className="w-full text-left rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 transition-all duration-200 block cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {item.image_url ? (
           <div className="relative aspect-[16/7] w-full overflow-hidden bg-[var(--surface-overlay)]">
@@ -73,7 +116,7 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) 
               src={ensureHttpsMediaUrl(item.image_url) ?? undefined}
               alt=""
               loading="lazy"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
             <div className="absolute inset-x-0 bottom-0 p-5">
@@ -83,7 +126,7 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) 
                 <span className="text-xs text-white/80 drop-shadow">{formatDate(item.published_at)}</span>
               </div>
               <h2 className="text-white text-xl font-bold leading-snug mb-1.5 drop-shadow-sm">{item.title}</h2>
-              <p className="text-sm text-white/85 leading-relaxed line-clamp-2 drop-shadow-sm">{item.summary}</p>
+              <p className="text-sm text-white/85 leading-relaxed line-clamp-2 drop-shadow-sm">{displaySummary(item)}</p>
             </div>
           </div>
         ) : (
@@ -94,7 +137,7 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) 
               <span className="text-xs text-text-muted">{formatDate(item.published_at)}</span>
             </div>
             <h2 className="text-text-primary text-lg font-bold leading-snug mb-1.5">{item.title}</h2>
-            <p className="text-sm text-text-secondary leading-relaxed line-clamp-3">{item.summary}</p>
+            <p className="text-sm text-text-secondary leading-relaxed line-clamp-3">{displaySummary(item)}</p>
           </div>
         )}
       </button>
@@ -103,12 +146,13 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) 
   )
 }
 
-function NewsCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
+function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: CardProps) {
   return (
     <div className="relative group h-full">
       <button
         onClick={() => onOpen(item)}
-        className="w-full h-full text-left flex flex-col rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] active:border-accent/40 transition-colors"
+        onContextMenu={(e) => { e.preventDefault(); onContextMenu(item, e) }}
+        className="w-full h-full text-left flex flex-col rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] hover:border-accent/40 hover:shadow-lg hover:shadow-black/5 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       >
         {item.image_url && (
           <div className="w-full aspect-[16/9] shrink-0 overflow-hidden bg-[var(--surface-overlay)]">
@@ -116,7 +160,7 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
               src={ensureHttpsMediaUrl(item.image_url) ?? undefined}
               alt=""
               loading="lazy"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             />
           </div>
         )}
@@ -129,7 +173,7 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete }: CardProps) {
             )}
           </div>
           <h3 className="text-text-primary text-sm font-semibold leading-snug mb-1 line-clamp-2">{item.title}</h3>
-          <p className="text-xs text-text-secondary leading-relaxed line-clamp-2">{item.summary}</p>
+          <p className="text-xs text-text-secondary leading-relaxed line-clamp-2">{displaySummary(item)}</p>
         </div>
       </button>
       {canManage && <ManageActions onEdit={() => onEdit(item)} onDelete={() => onDelete(item)} />}
@@ -166,7 +210,7 @@ function EmptyState({ canManage, onCompose }: { canManage: boolean; onCompose: (
       {canManage && (
         <button
           onClick={onCompose}
-          className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-white active:opacity-90 transition-opacity"
+          className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
         >
           <Plus size={15} /> Write the first post
         </button>
@@ -188,7 +232,7 @@ function AudioAttachment({ attachment }: { attachment: NewsAttachment }) {
         <a
           href={buildNewsAttachmentStreamUrl(attachment, true)}
           download={attachment.name}
-          className="text-text-muted active:text-accent transition-colors shrink-0"
+          className="text-text-muted hover:text-accent transition-colors shrink-0"
           aria-label={`Download ${attachment.name}`}
         >
           <Download size={15} />
@@ -222,7 +266,7 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
       {images.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {images.map((a, i) => (
-            <a key={i} href={ensureHttpsMediaUrl(a.url) ?? a.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-overlay)] active:border-accent/40 transition-colors">
+            <a key={i} href={ensureHttpsMediaUrl(a.url) ?? a.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-overlay)] hover:border-accent/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
               <img src={ensureHttpsMediaUrl(a.url) ?? undefined} alt={a.name} loading="lazy" className="w-full aspect-square object-cover" />
             </a>
           ))}
@@ -244,12 +288,12 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
               download={a.name}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2.5 active:border-accent/40 transition-colors group"
+              className="flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2.5 hover:border-accent/40 transition-colors group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
             >
               <Paperclip size={15} className="text-text-muted shrink-0" />
               <span className="text-sm text-text-primary truncate flex-1">{a.name}</span>
               <span className="text-xs text-text-muted shrink-0">{humanSize(a.size)}</span>
-              <Download size={15} className="text-text-muted active:text-accent transition-colors shrink-0" />
+              <Download size={15} className="text-text-muted group-hover:text-accent transition-colors shrink-0" />
             </a>
           ))}
         </div>
@@ -260,29 +304,45 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
 
 // ─── Article detail ───────────────────────────────────────────────────────────
 
-function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete }: {
+function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete, canShareToChat, onShare }: {
   item: NewsItem
   channelLabel: string | null
   onBack: () => void
   canManage: boolean
   onEdit: (item: NewsItem) => void
   onDelete: (item: NewsItem) => void
+  canShareToChat: boolean
+  onShare: (item: NewsItem) => void
 }) {
+  const [linkCopied, setLinkCopied] = useState(false)
+  const copyLink = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(newsShareUrl(item.id))
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 2500)
+    } catch {}
+  }
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center gap-2 mb-4">
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-primary transition-colors"
+          className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-primary transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 rounded-lg"
         >
           <ChevronLeft size={16} /> Back to news
         </button>
-        {canManage && (
-          <div className="ml-auto flex items-center gap-1">
-            <button onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"><Pencil size={13} /> Edit</button>
-            <button onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-red-400 hover:bg-surface-raised transition-colors"><Trash2 size={13} /> Delete</button>
-          </div>
-        )}
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => void copyLink()} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">{linkCopied ? <Check size={13} /> : <Link2 size={13} />} {linkCopied ? 'Link copied' : 'Copy link'}</button>
+          {canShareToChat && (
+            <button onClick={() => onShare(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Share2 size={13} /> Share to chat</button>
+          )}
+          {canManage && (
+            <>
+              <button onClick={() => onEdit(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Pencil size={13} /> Edit</button>
+              <button onClick={() => onDelete(item)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-red-400 hover:bg-surface-raised transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"><Trash2 size={13} /> Delete</button>
+            </>
+          )}
+        </div>
       </div>
       {item.image_url && (
         <div className="aspect-[16/7] w-full overflow-hidden rounded-2xl bg-[var(--surface-overlay)] mb-5">
@@ -306,8 +366,8 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewsView(): JSX.Element {
-  const { setActiveView, account } = useStorePick('setActiveView', 'account')
-  // News write access is its own role (is_news), separate from is_editor —
+  const { setActiveView, previousView, account } = useStorePick('setActiveView', 'previousView', 'account')
+  // News write access is its own role (is_news), separate from is_editor -
   // admins can post regardless. Only admins manage channels.
   const canPost = !!(account?.is_news || account?.is_administrator)
   const canManageChannels = !!account?.is_administrator
@@ -316,8 +376,9 @@ export default function NewsView(): JSX.Element {
   // buttons don't offer an action the API would reject.
   const canManageItem = (item: NewsItem): boolean =>
     !!account && (account.is_administrator || (!!account.is_news && item.author_id != null && item.author_id === account.id))
+  const canShareToChat = hasChatAccess(account)
 
-  const [mode, setMode] = useState<ViewMode>('news')
+  const [mode, setMode] = useState<NewsMode>('news')
   const [channel, setChannel] = useState<string>(DEFAULT_NEWS_CHANNEL)
   const [sort, setSort] = useState<NewsSort>('newest')
   const [channels, setChannels] = useState<NewsChannel[]>(NEWS_CHANNELS)
@@ -327,32 +388,45 @@ export default function NewsView(): JSX.Element {
   const [selected, setSelected] = useState<NewsItem | null>(null)
 
   // Whether the user follows the active channel (drives the bell toggle). "All"
-  // isn't subscribable — you follow specific channels.
+  // isn't subscribable - you follow specific channels.
   const [subscribed, setSubscribedState] = useState(false)
 
   // Modals
   const [composeOpen, setComposeOpen] = useState(false)
   const [editing, setEditing] = useState<NewsItem | null>(null)
   const [channelsOpen, setChannelsOpen] = useState(false)
+  const [sharing, setSharing] = useState<NewsItem | null>(null)
+  const [menu, setMenu] = useState<NewsMenuState | null>(null)
+  const openMenu = (item: NewsItem, e: React.MouseEvent): void => setMenu({ item, x: e.clientX, y: e.clientY })
+  const closeMenu = useCallback(() => setMenu(null), [])
 
   const loadChannels = useCallback(async () => {
     try {
       const list = await fetchChannels()
       setChannels(list)
     } catch {
-      // Keep whatever we have (the static fallback) — a channels fetch failure
+      // Keep whatever we have (the static fallback) - a channels fetch failure
       // shouldn't blank out the tab bar.
     }
   }, [])
 
   const load = useCallback(async () => {
-    setLoading(true)
+    // Stale-while-revalidate: show the last cached page for this exact
+    // channel+sort instantly (no spinner flash on every channel switch),
+    // then let the network response below replace it once it lands.
+    const cached = peekNews({ channel, sort })
+    if (cached) {
+      setItems(cached.results)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
       const res = await fetchNews({ channel, sort })
       setItems(res.results)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load news')
+      if (!cached) setError(errorMessage(err, 'Failed to load news'))
     } finally {
       setLoading(false)
     }
@@ -361,17 +435,32 @@ export default function NewsView(): JSX.Element {
   useEffect(() => { loadChannels() }, [loadChannels])
 
   // Reload whenever the channel changes (and on mount). Close any open article
-  // so we don't strand the reader on a story from the previous channel.
-  useEffect(() => { setSelected(null); load() }, [load])
+  // so we don't strand the reader on a story from the previous channel - but
+  // not on the very first run, which needs to leave a URL-deep-linked post
+  // (see the effect below) alone.
+  const didMount = useRef(false)
+  useEffect(() => {
+    if (didMount.current) closeArticle()
+    else didMount.current = true
+    load()
+  }, [load])
 
   // Reflect the follow state of whatever channel is active.
   useEffect(() => { setSubscribedState(channel !== ALL_CHANNEL && isSubscribed(channel)) }, [channel])
 
   // Open a specific post when a notification is clicked (NewsNotifier routes
   // here then dispatches the id). Also honor an id left in sessionStorage if the
-  // view mounts after the event fired.
+  // view mounts after the event fired, or one baked into the URL (deep link /
+  // page refresh / shared /news/<id> link).
   useEffect(() => {
-    const openById = (id: number): void => { fetchNewsItem(id).then(setSelected).catch(() => undefined) }
+    const openById = (id: number): void => {
+      fetchNewsItem(id).then((it) => {
+        setSelected(it)
+        if (postIdFromPath(window.location.pathname) !== it.id) {
+          window.history.pushState({}, '', `/news/${it.id}`)
+        }
+      }).catch(() => undefined)
+    }
     const onOpen = (e: Event): void => {
       const id = (e as CustomEvent<number>).detail
       // Already-mounted path: consume the id so a later remount doesn't reopen it.
@@ -382,9 +471,39 @@ export default function NewsView(): JSX.Element {
     try {
       const pending = sessionStorage.getItem('news:openPostId')
       if (pending) { sessionStorage.removeItem('news:openPostId'); openById(Number(pending)) }
+      else {
+        const fromUrl = postIdFromPath(window.location.pathname)
+        if (fromUrl != null) openById(fromUrl)
+      }
     } catch {}
     return () => window.removeEventListener('news:open', onOpen)
   }, [])
+
+  // Keep the URL and the open article in sync with browser back/forward.
+  useEffect(() => {
+    const onPopState = (): void => {
+      const id = postIdFromPath(window.location.pathname)
+      if (id == null) { setSelected(null); return }
+      fetchNewsItem(id).then(setSelected).catch(() => undefined)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // Push/pop /news/<id> as an article opens and closes, so the URL always
+  // reflects what's on screen and a post can be shared or reloaded directly.
+  const openItem = (item: NewsItem): void => {
+    setSelected(item)
+    if (postIdFromPath(window.location.pathname) !== item.id) {
+      window.history.pushState({}, '', `/news/${item.id}`)
+    }
+  }
+  const closeArticle = (): void => {
+    setSelected(null)
+    if (postIdFromPath(window.location.pathname) != null) {
+      window.history.pushState({}, '', '/news')
+    }
+  }
 
   const toggleSubscribe = async (): Promise<void> => {
     if (channel === ALL_CHANNEL) return
@@ -404,9 +523,9 @@ export default function NewsView(): JSX.Element {
     try {
       await deleteNewsItem(item.id)
       setItems((prev) => prev.filter((i) => i.id !== item.id))
-      setSelected((s) => (s?.id === item.id ? null : s))
+      if (selected?.id === item.id) closeArticle()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
+      setError(errorMessage(err, 'Failed to delete'))
     }
   }
 
@@ -430,78 +549,82 @@ export default function NewsView(): JSX.Element {
       <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
         <div className="flex items-center gap-3 mb-4">
           <button
-            onClick={() => setActiveView('wrld')}
+            onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')}
             title="Back"
-            className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0"
+            aria-label="Back"
+            className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             <ChevronLeft size={18} />
           </button>
           <h1 className="text-text-primary text-xl font-bold">News</h1>
-          {/* News/Feed switcher — the changes feed (tracker edits + comp-file
-              activity) is a real, live endpoint independent of NEWS_ENABLED, so
-              it stays reachable here even while News itself shows an empty
-              gated state. */}
-          <div className="flex gap-0.5 rounded-lg bg-[var(--surface-overlay)] p-0.5">
-            {(['news', 'feed'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`h-8 px-3 text-xs font-semibold rounded-md transition-colors ${
-                  mode === m ? 'bg-accent text-white' : 'text-text-muted active:text-text-primary'
-                }`}
-              >
-                {m === 'news' ? 'News' : 'Feed'}
-              </button>
-            ))}
-          </div>
+          {mode === 'news' && (
           <div className="ml-auto flex items-center gap-1">
-            {mode === 'news' && channel !== ALL_CHANNEL && (
+            {channel !== ALL_CHANNEL && (
               <button
                 onClick={toggleSubscribe}
-                title={subscribed ? `Following — notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
-                className={`p-1.5 rounded-lg transition-colors ${subscribed ? 'text-accent hover:bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`}
+                title={subscribed ? `Following - notify me of new ${channelLabel(channel) ?? ''} posts` : 'Follow for notifications'}
+                aria-label={subscribed ? 'Unfollow channel' : 'Follow channel for notifications'}
+                aria-pressed={subscribed}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${subscribed ? 'text-accent hover:bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`}
               >
                 {subscribed ? <Bell size={16} /> : <BellOff size={16} />}
               </button>
             )}
-            {mode === 'news' && canManageChannels && (
+            {canManageChannels && (
               <button
                 onClick={() => setChannelsOpen(true)}
                 title="Manage channels"
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+                aria-label="Manage channels"
+                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
               >
                 <Settings2 size={16} />
               </button>
             )}
-            {mode === 'news' && (
-              <button
-                onClick={() => setSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
-                title={sort === 'newest' ? 'Newest first — switch to oldest' : 'Oldest first — switch to newest'}
-                className="flex items-center gap-1 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
-              >
-                {sort === 'newest' ? <ArrowDownWideNarrow size={15} /> : <ArrowUpWideNarrow size={15} />}
-                <span className="text-xs hidden sm:inline">{sort === 'newest' ? 'Newest' : 'Oldest'}</span>
-              </button>
-            )}
-            {mode === 'news' && (
-              <button
-                onClick={load}
-                disabled={loading}
-                title="Refresh"
-                className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50"
-              >
-                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-              </button>
-            )}
-            {mode === 'news' && canPost && (
+            <button
+              onClick={() => setSort((s) => (s === 'newest' ? 'oldest' : 'newest'))}
+              title={sort === 'newest' ? 'Newest first - switch to oldest' : 'Oldest first - switch to newest'}
+              aria-label={sort === 'newest' ? 'Sort: newest first, switch to oldest' : 'Sort: oldest first, switch to newest'}
+              className="flex items-center gap-1 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            >
+              {sort === 'newest' ? <ArrowDownWideNarrow size={15} /> : <ArrowUpWideNarrow size={15} />}
+              <span className="text-xs hidden sm:inline">{sort === 'newest' ? 'Newest' : 'Oldest'}</span>
+            </button>
+            <button
+              onClick={load}
+              disabled={loading}
+              title="Refresh"
+              aria-label="Refresh news"
+              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            >
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+            {canPost && (
               <button
                 onClick={openNew}
-                className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-accent text-white hover:opacity-90 transition-opacity"
+                className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
               >
                 <Plus size={15} /> New post
               </button>
             )}
           </div>
+          )}
+        </div>
+        {/* Primary tabs */}
+        <div className="flex gap-1 mb-1">
+          {(['news', 'feed'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              aria-pressed={mode === m}
+              className={`px-3 py-1.5 text-sm font-semibold rounded-lg border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+                mode === m
+                  ? 'bg-[var(--surface-raised)] text-accent border-[var(--border)]'
+                  : 'border-transparent text-text-muted hover:text-text-primary'
+              }`}
+            >
+              {m === 'news' ? 'News' : 'Feed'}
+            </button>
+          ))}
         </div>
         {/* Channels */}
         {mode === 'news' && (
@@ -510,7 +633,8 @@ export default function NewsView(): JSX.Element {
             <button
               key={ch.id}
               onClick={() => setChannel(ch.id)}
-              className={`flex-shrink-0 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              aria-pressed={channel === ch.id}
+              className={`flex-shrink-0 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
                 channel === ch.id
                   ? 'text-accent border-accent'
                   : 'text-text-muted border-transparent hover:text-text-primary'
@@ -531,10 +655,12 @@ export default function NewsView(): JSX.Element {
           <ArticleDetail
             item={selected}
             channelLabel={channelLabel(selected.channel)}
-            onBack={() => setSelected(null)}
+            onBack={closeArticle}
             canManage={canManageItem(selected)}
             onEdit={openEdit}
             onDelete={handleDelete}
+            canShareToChat={canShareToChat}
+            onShare={setSharing}
           />
         ) : (
           <div className="max-w-6xl mx-auto">
@@ -551,7 +677,7 @@ export default function NewsView(): JSX.Element {
                 <p className="text-sm text-text-secondary mb-4">{error}</p>
                 <button
                   onClick={load}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary active:border-accent/40 transition-colors"
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary hover:border-accent/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
                 >
                   Try again
                 </button>
@@ -560,10 +686,10 @@ export default function NewsView(): JSX.Element {
               <EmptyState canManage={canPost} onCompose={openNew} />
             ) : (
               <div className="space-y-5">
-                {featured && <FeaturedCard item={featured} onOpen={setSelected} canManage={canManageItem(featured)} onEdit={openEdit} onDelete={handleDelete} />}
+                {featured && <FeaturedCard item={featured} onOpen={openItem} canManage={canManageItem(featured)} onEdit={openEdit} onDelete={handleDelete} onContextMenu={openMenu} />}
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                   {rest.map((item) => (
-                    <NewsCard key={item.id} item={item} onOpen={setSelected} canManage={canManageItem(item)} onEdit={openEdit} onDelete={handleDelete} />
+                    <NewsCard key={item.id} item={item} onOpen={openItem} canManage={canManageItem(item)} onEdit={openEdit} onDelete={handleDelete} onContextMenu={openMenu} />
                   ))}
                 </div>
               </div>
@@ -588,6 +714,17 @@ export default function NewsView(): JSX.Element {
           onChanged={loadChannels}
         />
       )}
+      {menu && (
+        <NewsContextMenu
+          state={menu}
+          onClose={closeMenu}
+          onOpen={() => openItem(menu.item)}
+          onShare={canShareToChat ? () => setSharing(menu.item) : undefined}
+          onEdit={canManageItem(menu.item) ? () => openEdit(menu.item) : undefined}
+          onDelete={canManageItem(menu.item) ? () => { void handleDelete(menu.item) } : undefined}
+        />
+      )}
+      {sharing && <ShareNewsModal item={sharing} onClose={() => setSharing(null)} />}
     </div>
   )
 }
