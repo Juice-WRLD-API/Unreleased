@@ -74,8 +74,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p build/bundled
-          tag=$(gh api repos/Juice-WRLD-API/Unreleased/releases --paginate \
-            -q '.[] | select(.assets[]?.name=="Unreleased-Setup.exe") | .tag_name' | head -n1)
+          # Collect every match first, then take the first: piping --paginate
+          # straight into `head -n1` closes the pipe early and gh dies with
+          # "write /dev/stdout: The pipe is being closed" under pipefail.
+          tags=$(gh api repos/Juice-WRLD-API/Unreleased/releases --paginate \
+            -q '.[] | select(.assets[]?.name=="Unreleased-Setup.exe") | .tag_name')
+          tag=$(printf '%s\n' "$tags" | head -n1)
           if [ -z "$tag" ]; then
             echo "::error::No Juice-WRLD-API/Unreleased release has an Unreleased-Setup.exe asset to seed build/bundled/ from"
             exit 1
