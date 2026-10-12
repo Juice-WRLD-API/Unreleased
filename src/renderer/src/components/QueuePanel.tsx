@@ -5,7 +5,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { formatDuration } from '../lib/format'
 import { Track } from '../types'
 import { useResizablePanel } from '../hooks/useResizablePanel'
-import { useIsMobile } from '../hooks/useIsMobile'
+import { useIsMobile, isMobileViewport } from '../hooks/useIsMobile'
 
 const MAX_HISTORY_SHOWN = 10
 const MAX_UPCOMING_SHOWN = 60
@@ -436,7 +436,7 @@ function QueueRow({
       onDoubleClick={onPlay}
       // Double-click has no touch equivalent worth relying on - same
       // tap-to-play treatment as the Tracker/Playlists rows.
-      onClick={() => { if (window.matchMedia('(max-width: 767px)').matches && onPlay && !isActive) onPlay() }}
+      onClick={() => { if (isMobileViewport() && onPlay && !isActive) onPlay() }}
     >
       {/* Drag handle or spacer */}
       {showDrag ? (

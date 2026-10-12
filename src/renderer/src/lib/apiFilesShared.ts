@@ -1,3 +1,5 @@
+import { IS_NATIVE_APP } from './platform'
+import { saveUrl } from './fileSave'
 // Pure helpers shared by ApiFilesView.desktop.tsx and .mobile.tsx - the
 // /files/* browser's path/sort/track-building logic, identical on both.
 import { apiFetch, apiFilePathToTrack, buildStreamUrl, JWApiFileEntry, JWApiPaginatedResponse, JWApiSong } from './juicewrldApi'
@@ -80,7 +82,8 @@ export async function findSongByFilename(name: string): Promise<JWApiSong | null
 
 /** Downloads a URL via a throwaway anchor click - the same trick used for a
  *  file's stream URL and for a completed ZIP job's download_url. */
-export function triggerDownload(url: string, filename: string): void {
+export async function triggerDownload(url: string, filename: string): Promise<void> {
+  if (IS_NATIVE_APP) { await saveUrl(filename, url); return }
   const a = document.createElement('a')
   a.href = url
   a.download = filename

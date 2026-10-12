@@ -1,3 +1,4 @@
+import { saveFile, reportSaveError } from './fileSave'
 import { useEffect, useState } from 'react'
 import { SyncedLyricLine } from '../types'
 
@@ -143,12 +144,5 @@ export function downloadSyncedLyrics(title: string, artist: string, lrcContent: 
   // Strip characters that are invalid in filenames on Windows/macOS.
   const safeName = `${title} - ${artist}`.replace(/[/\\?%*:|"<>]/g, '').trim() || 'lyrics'
   const blob = new Blob([lrcContent], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${safeName}.lrc`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  void saveFile(`${safeName}.lrc`, blob).catch(reportSaveError)
 }

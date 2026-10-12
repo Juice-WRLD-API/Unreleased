@@ -1,3 +1,4 @@
+import { saveFile, reportSaveError } from '../lib/fileSave'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Download, Copy, Trash2, Moon, Sun, Check, RotateCcw } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -10,15 +11,7 @@ import {
 // user's own generated skin, no server round-trip).
 function downloadText(text: string, name: string): void {
   const blob = new Blob([text], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  // Revoke on the next tick so the click's navigation has grabbed the URL.
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  void saveFile(name, blob).catch(reportSaveError)
 }
 
 // Reflects a possibly-rgba/keyword value back to a hex the native color input

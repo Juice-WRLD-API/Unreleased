@@ -1,3 +1,6 @@
+import { IS_NATIVE_APP } from '../lib/platform'
+import { triggerDownload } from '../lib/apiFilesShared'
+import { reportSaveError } from '../lib/fileSave'
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
@@ -86,12 +89,7 @@ function downloadTrack(track: Track, songId: number | null): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${track.title}.mp3`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
+      void triggerDownload(url, `${track.title}.mp3`).catch(reportSaveError)
     })
     return
   }
@@ -101,25 +99,11 @@ function downloadTrack(track: Track, songId: number | null): void {
     void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
     return
   }
-  const a = document.createElement('a')
-  a.href = track.streamUrl ?? buildStreamUrl(track.path)
-  a.download = `${track.title}.mp3`
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+  void triggerDownload(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`).catch(reportSaveError)
 }
 
 function downloadZipEntry(entry: JWApiFileEntry): void {
-  const a = document.createElement('a')
-  a.href = buildStreamUrl(entry.path)
-  a.download = entry.name
-  a.target = '_blank'
-  a.rel = 'noopener noreferrer'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
+  void triggerDownload(buildStreamUrl(entry.path), entry.name).catch(reportSaveError)
 }
 
 export default function SongContextMenu({
@@ -135,6 +119,7 @@ export default function SongContextMenu({
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
     }))
   )
+  const offline = useStore(s => !!s.offlineTracks[state.track.id])
   const { track, songId } = state
   // After "Download session (ZIP)" finds more than one candidate the menu swaps
   // to a pick-one page.
@@ -371,6 +356,7 @@ export default function SongContextMenu({
         showSessionLink && { icon: FileAudio2, label: 'Link session file…', onSelect: onLinkSessionFile },
         showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
         canDownload && 'divider',
+        IS_NATIVE_APP && songId != null && { icon: offline ? Trash2 : Download, label: offline ? 'Remove download' : 'Download offline', onSelect: () => offline ? useStore.getState().removeOfflineTrack(track.id) : useStore.getState().downloadTrackOffline(songId) },
         canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
         removeAction && 'divider',
         removeAction && { icon: Trash2, label: removeAction.label, danger: true, onSelect: removeAction.onClick },

@@ -1,3 +1,4 @@
+import { saveUrl, reportSaveError } from '../../lib/fileSave'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -246,10 +247,7 @@ function Attachment({ att, conversationId, encrypted, onOpenMedia }: {
   useEffect(() => {
     if (!requested || !encrypted || !data || data.kind !== 'file' || autoSaved.current) return
     autoSaved.current = true
-    const a = document.createElement('a')
-    a.href = data.downloadUrl
-    a.download = data.name
-    a.click()
+    void saveUrl(data.name, data.downloadUrl).catch(reportSaveError)
   }, [requested, encrypted, data])
 
   if (att.id < 0) return <FileCard name={att.name} size={att.size} busy />

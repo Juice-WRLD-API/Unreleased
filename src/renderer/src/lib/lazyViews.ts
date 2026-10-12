@@ -54,6 +54,7 @@ export const LikedSongsView = lazyView(() => import('../components/LikedSongsVie
 export const DiagnosticsModal = lazyView(() => import('../components/DiagnosticsModal'))
 export const ChatView = lazyView(() => import('../components/ChatView'))
 export const TerminalPage = lazyView(() => import('../components/TerminalPage'))
+export const LibraryTab = lazyView(() => import('../components/LibraryTab'))
 
 // The same import() factories again, keyed by view, for warming a chunk ahead
 // of the navigation that needs it. Deliberately a second reference to the same
@@ -62,6 +63,7 @@ export const TerminalPage = lazyView(() => import('../components/TerminalPage'))
 // chunk makes the later render resolve from the module cache synchronously.
 // Split views warm only the half the current viewport will render.
 const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
+  library: () => import('../components/LibraryTab'),
   'api-tracker': ApiTrackerView.preload,
   editor: EditorPage.preload,
   admin: AdminPage.preload,

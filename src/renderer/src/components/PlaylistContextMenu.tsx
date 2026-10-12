@@ -1,3 +1,6 @@
+import { IS_NATIVE_APP } from '../lib/platform'
+import { togglePlaylistOffline } from './PlaylistOfflineAction'
+import { downloadBlob } from '../lib/playlistExport'
 import { useState } from 'react'
 import {
   Play, Shuffle, ListEnd, Archive, Link, Globe, Lock, Pencil, Trash2, FolderInput, Check, Download, Share2,
@@ -40,6 +43,8 @@ export default function PlaylistContextMenu({ state, onClose }: {
     }))
   )
 
+  const offline = useStore(s => !!s.offlinePlaylists[`api-${state.playlist.id}`])
+  const offlineBusy = useStore(s => s.offlineSync[`api-${state.playlist.id}`]?.state === 'syncing')
   const [playlist, setPlaylist] = useState(state.playlist)
   const [renaming, setRenaming] = useState(false)
   const [renameVal, setRenameVal] = useState(state.playlist.name)
@@ -90,12 +95,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
     setTimeout(() => setZipState('idle'), 2500)
   }
 
-  const downloadBlob = (content: string, mime: string, filename: string): void => {
-    const blob = new Blob([content], { type: mime })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
-  }
 
   const exportJson = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
@@ -208,6 +207,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
       body={renaming ? renameBody : undefined}
       items={[
         { icon: Play, label: 'Open', onSelect: open },
+        IS_NATIVE_APP && { icon: Download, label: offlineBusy ? 'Downloading…' : offline ? 'Remove offline download' : 'Download offline', disabled: offlineBusy, onSelect: () => togglePlaylistOffline(playlist.id, playlist.name) },
         { icon: Shuffle, label: 'Play all', onSelect: playAll },
         { icon: ListEnd, label: 'Add all to queue', onSelect: queueAll },
         {

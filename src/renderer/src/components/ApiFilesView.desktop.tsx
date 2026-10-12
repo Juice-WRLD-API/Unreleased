@@ -1,3 +1,4 @@
+import { reportSaveError } from '../lib/fileSave'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
@@ -256,7 +257,7 @@ export default function ApiFilesView(): JSX.Element {
   // file of the same name) and falls back to the direct stream URL.
   const handleDownload = (entry: JWApiFileEntry): void => {
     const streamUrl = buildStreamUrl(entry.path, activeChannel)
-    if (!isPrimary) { triggerDownload(streamUrl, entry.name); return }
+    if (!isPrimary) { void triggerDownload(streamUrl, entry.name).catch(reportSaveError); return }
     startCdnFileDownload(entry.path, entry.name, streamUrl).then((isDonor) => {
       if (!isDonor) return
       setBoostToast(true)

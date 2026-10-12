@@ -57,7 +57,7 @@ import { DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, DEFAULT_NAV_CONTROL_ORDER, D
 import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
 import { getLastfmSession } from '../lib/lastfm'
 import { useSandboxStore } from '../components/Modal'
-import { runWhenIdle, IS_ANDROID } from '../lib/platform'
+import { runWhenIdle, IS_NATIVE_APP } from '../lib/platform'
 import * as localLibrary from '../lib/localLibrary'
 import { saveFile } from '../lib/fileSave'
 import { parseM3u, serializeM3u, pickM3uFile, nameFromFilename } from '../lib/m3u'
@@ -1426,6 +1426,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // entries or churn subscribers that key off previousView.
     if (get().activeView === view) return
     const paths: Partial<Record<ViewType, string>> = {
+      library: '/library',
       'home': '/home',
       'api-tracker': '/tracker',
       'api-files': '/files',
@@ -2486,7 +2487,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   loginWithDiscord: async () => {
     const redirectUri = userApi.discordRedirectUri()
     const { authorize_url, state } = await userApi.getDiscordAuthUrl(redirectUri)
-    if (IS_ANDROID) {
+    if (IS_NATIVE_APP) {
       // No page navigation to hand the redirect back to on Android - open
       // the authorize page in an in-app browser and pull code/state off the
       // callback navigation directly (see loginWithDiscordInAppBrowser).
@@ -3261,8 +3262,17 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const key = INDIVIDUAL_DOWNLOADS_KEY
     const id = `jw-${songId}`
     await enqueueOfflineWork(key, async () => {
+      const downloadId = 'offline-' + id
+      get().removeUpload(downloadId)
+      get().addUpload({ id: downloadId, filename: 'Song ' + songId, type: 'playlist', state: 'downloading', percent: 0 })
+      get().setShowUploadManager(true)
+      let detach: (() => void) | undefined
       try {
+        detach = await el.onDownloadProgress((progress) => {
+          if (progress.id === id) get().updateUpload(downloadId, { percent: progress.percent, received: progress.received, total: progress.total })
+        })
         const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+        get().updateUpload(downloadId, { filename: song.name })
         const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
         const meta = {
           title: song.track_titles?.[0] || song.name,
@@ -3285,9 +3295,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
         const nextIds = existingIds.includes(id) ? existingIds : [...existingIds, id]
         await el.setPlaylist(key, nextIds, 'Downloaded songs')
         set((s) => ({ offlinePlaylists: { ...s.offlinePlaylists, [key]: { songIds: nextIds, name: 'Downloaded songs', updatedAt: Date.now() } } }))
+        get().updateUpload(downloadId, { state: 'done', percent: 100 })
       } catch (e) {
         console.error('downloadTrackOffline error:', e)
-      }
+        get().updateUpload(downloadId, { state: 'error', error: e instanceof Error ? e.message : 'Download failed' })
+      } finally { detach?.() }
     })
   },
 

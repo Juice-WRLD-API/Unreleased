@@ -6,7 +6,8 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { LibraryTrack } from '../types'
-import { libraryTrackToTrack as toQueueTrack } from '../lib/fileTypes'
+import { libraryTrackToTrack as toQueueTrack, offlineTrackToLibraryTrack } from '../lib/fileTypes'
+import { reportSaveError } from '../lib/fileSave'
 import { fisherYates } from '../store/queueSlice'
 import * as userApi from '../lib/userApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
@@ -166,7 +167,7 @@ const inflightArt = new Set<string>()
 
 function useTrackArt(track: LibraryTrack): string | null | undefined {
   const { applyLibraryArt } = useStorePick('applyLibraryArt')
-  const art = useStore((s) => s.libraryArt[track.id])
+  const art = useStore((s) => s.libraryArt[track.id] !== undefined ? s.libraryArt[track.id] : s.offlineTracks[track.id]?.imageUrl)
   useEffect(() => {
     // undefined = never asked; null = asked, and this file has no embedded art.
     // Only the first state should trigger a read, or a track without a cover
@@ -539,13 +540,18 @@ function EmptyState({ onOpenSettings }: { onOpenSettings: () => void }): JSX.Ele
 
 export default function LibraryTab(): JSX.Element {
   const {
-    libraryTracks, libraryScanning, libraryScanProgress, scanLibrary, libraryFolders, loadLibrary, openSettings,
+    libraryTracks: scannedTracks, libraryScanning, libraryScanProgress, scanLibrary, libraryFolders, loadLibrary, openSettings,
     playTrack, playCollection, playNext, addToQueue, account, likedTrackIds,
     toggleLike, currentTrack, isPlaying, setIsPlaying,
   } = useStorePick(
     'libraryTracks', 'libraryScanning', 'libraryScanProgress', 'scanLibrary', 'libraryFolders', 'loadLibrary', 'openSettings',
     'playTrack', 'playCollection', 'playNext', 'addToQueue', 'account', 'likedTrackIds',
     'toggleLike', 'currentTrack', 'isPlaying', 'setIsPlaying')
+  const offlineTracks = useStore((s) => s.offlineTracks)
+  const libraryTracks = useMemo(() => [
+    ...scannedTracks,
+    ...Object.entries(offlineTracks).map(([id, track]) => offlineTrackToLibraryTrack(id, track)),
+  ], [scannedTracks, offlineTracks])
 
   const [tab, setTabState] = useState<Tab>(() => {
     const saved = localStorage.getItem(LS_TAB)
@@ -1199,6 +1205,18 @@ export default function LibraryTab(): JSX.Element {
 
       {sheet === 'more' && (
         <Sheet onClose={() => setSheet(null)} title="Library">
+          <SheetItem icon={ListMusic} label="Import M3U playlist" onClick={async () => {
+            try {
+              const result = await useStore.getState().importM3uFromDevice()
+              if (result.ok) {
+                useStore.getState().setPlaylistsSelectedId(null)
+                useStore.getState().setPendingPlaylistId(null)
+                useStore.getState().setPlaylistsSelectedLocalId(result.playlistId)
+                useStore.getState().setActiveView('playlists')
+                setSheet(null)
+              } else if (!result.canceled) reportSaveError(new Error(result.error))
+            } catch (error) { reportSaveError(error) }
+          }} />
           <SheetItem
             icon={libraryScanning ? Loader2 : RefreshCw}
             label={libraryScanning ? 'Scanning…' : 'Scan for new music'}

@@ -10,6 +10,7 @@ import { useIsMobile, isMobileViewport } from './hooks/useIsMobile'
 import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
 import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
+import { useAndroidBackButton } from './hooks/useAndroidBackButton'
 
 // Minimum gap between window-focus-triggered refetches (playlists, news) -
 // alt-tabbing back and forth shouldn't refire a request on every focus event.
@@ -22,6 +23,7 @@ const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
 function getViewFromPath(pathname: string): ViewType {
+  if (pathname === '/library') return 'library'
   if (pathname === '/home') return 'home'
   // Desktop and installed apps land on Home; a mobile browser tab still gets
   // the Tracker. `/` is the canonical, indexed URL for the catalog
@@ -78,6 +80,7 @@ import InstallPrompt from './components/InstallPrompt'
 import CookieNotice from './components/CookieNotice'
 import DonationNotice from './components/DonationNotice'
 import Player from './components/Player'
+import NativeMediaSession from './components/NativeMediaSession'
 import NowPlaying from './components/NowPlaying'
 import QueuePanel from './components/QueuePanel'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -96,7 +99,7 @@ import {
   DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
   StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
-  LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, preloadView,
+  LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, LibraryTab, preloadView,
 } from './lib/lazyViews'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
 
@@ -110,6 +113,28 @@ const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
 export default function App(): JSX.Element {
+  useAndroidBackButton()
+  const { loadLibrary, loadOfflineLibrary, scanLibrary, libraryAutoRefresh, libraryFolders } = useStorePick(
+    'loadLibrary', 'loadOfflineLibrary', 'scanLibrary', 'libraryAutoRefresh', 'libraryFolders')
+  useEffect(() => runWhenIdle(() => {
+    void loadLibrary()
+    void loadOfflineLibrary().then(() => useStore.getState().syncOfflinePlaylists())
+  }), [loadLibrary, loadOfflineLibrary])
+  useEffect(() => {
+    const sync = (): void => { void useStore.getState().syncOfflinePlaylists() }
+    const onVisible = (): void => { if (document.visibilityState === 'visible') sync() }
+    document.addEventListener('visibilitychange', onVisible)
+    const interval = setInterval(sync, 15 * 60 * 1000)
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
+  }, [])
+  useEffect(() => {
+    if (!libraryAutoRefresh || libraryFolders.length === 0) return
+    void loadLibrary().then(() => scanLibrary())
+    const onVisible = (): void => { if (document.visibilityState === 'visible') void scanLibrary() }
+    document.addEventListener('visibilitychange', onVisible)
+    const interval = setInterval(() => { void scanLibrary() }, 15 * 60 * 1000)
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
+  }, [libraryAutoRefresh, libraryFolders, loadLibrary, scanLibrary])
   const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
     'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
@@ -221,7 +246,12 @@ export default function App(): JSX.Element {
       refreshPlaylists()
     }
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
+    const onVisible = (): void => { if (document.visibilityState === 'visible') onFocus() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [refreshPlaylists])
 
   // Warm the Tracker/Files offline cache on startup (public data - no auth
@@ -328,6 +358,7 @@ export default function App(): JSX.Element {
               : bgView === 'home' ? <HomeView />
               : bgView === 'api-tracker' ? <ApiTrackerView />
               : bgView === 'api-files' ? <ApiFilesView />
+              : bgView === 'library' ? <LibraryTab />
               : bgView === 'contributor-profile' ? <ContributorProfileView />
               : bgView === 'admin' ? <AdminPage />
               : bgView === 'liked' ? <LikedSongsView />
@@ -399,6 +430,7 @@ export default function App(): JSX.Element {
           centered, dismissible card. */}
       <ErrorBoundary fallback={<div className="h-20 shrink-0 border-t border-[var(--border)] flex items-center justify-center text-text-muted text-xs">Player crashed - reload the app to restore playback controls.</div>}>
         <Player />
+        <NativeMediaSession />
       </ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioFmPlayer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioVotePopup /></ErrorBoundary>

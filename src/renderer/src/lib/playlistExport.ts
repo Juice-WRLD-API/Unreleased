@@ -1,12 +1,11 @@
 // Shared playlist-export helpers for PlaylistsView desktop/mobile.
 import type { PlaylistDetail } from './userApi'
 import type { Track } from '../types'
+import { saveFile, reportSaveError } from './fileSave'
 
 export function downloadBlob(content: string, mime: string, filename: string): void {
   const blob = new Blob([content], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
+  void saveFile(filename, blob).catch(reportSaveError)
 }
 
 export function playlistJsonPayload(detail: PlaylistDetail): {

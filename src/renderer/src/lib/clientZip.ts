@@ -1,3 +1,5 @@
+import { IS_NATIVE_APP } from './platform'
+import { saveFile } from './fileSave'
 // Builds ZIP archives in the browser now that backend ZIP jobs are disabled
 // (see ZIP_OPERATIONS_ENABLED in juicewrldApi.ts). Every file is fetched from
 // its stream URL (the API sends Access-Control-Allow-Origin) and fed into
@@ -48,7 +50,7 @@ export class ZipTooLargeError extends Error {
 
 // In-memory fallback ceiling - well under what a desktop tab can hold, and
 // mobile Safari tends to kill tabs not far past it.
-const MEMORY_ZIP_LIMIT = 1024 * 1024 * 1024
+const MEMORY_ZIP_LIMIT = (IS_NATIVE_APP ? 64 : 1024) * 1024 * 1024
 // Files fetched ahead of the one being written. Keeps the pipe full without
 // hammering the API with a whole folder's worth of requests at once.
 const PREFETCH = 3
@@ -62,6 +64,7 @@ type SavePicker = (opts: {
  *  save dialog. Must be called before the handler's first await. */
 export async function openZipTarget(baseName: string): Promise<ZipTarget | null> {
   const filename = `${sanitizeName(baseName) || 'download'}.zip`
+  if (IS_NATIVE_APP) return { kind: 'memory', filename }
   const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker
   if (!picker) return fallbackTarget(filename)
   try {
@@ -189,9 +192,7 @@ export async function writeZip(
     }
     chunks.push(value)
   }
-  const url = URL.createObjectURL(new Blob(chunks as BlobPart[], { type: 'application/zip' }))
-  triggerDownload(url, target.filename)
-  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  await saveFile(target.filename, new Blob(chunks as BlobPart[], { type: 'application/zip' }))
   return result
 }
 
@@ -302,7 +303,7 @@ export async function saveItems(
  *  ZIPs. Spaced out so Chrome doesn't block it as a download flood. */
 export async function downloadItemsIndividually(items: ZipItem[]): Promise<void> {
   for (const item of items) {
-    triggerDownload(item.url, item.name.split('/').pop() || item.name)
+    await triggerDownload(item.url, item.name.split('/').pop() || item.name)
     await new Promise((r) => setTimeout(r, 350))
   }
 }

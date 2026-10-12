@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { useState } from 'react'
 import { useResizablePanel } from '../hooks/useResizablePanel'
 import { X, Music, ChevronUp, ChevronDown, Pencil, Info, MicVocal } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -23,13 +24,7 @@ export default function NowPlaying(): JSX.Element {
   const [artCollapsed, setArtCollapsed] = useState(false)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [panelWidth, dragHandle] = useResizablePanel(360, 280, 520)
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
-
-  useEffect(() => {
-    const check = (): void => setIsMobile(window.innerWidth < 768)
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
+  const isMobile = useIsMobile()
 
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab (this component itself unmounts when the Wrld tab is

@@ -242,7 +242,7 @@ export async function downloadPath(cwd: FilesCwd, arg: string, onLine?: (text: s
         shown = step
         onLine?.(step >= 100 ? `${single.name}: verifying` : `${single.name} ${step}%`)
       })
-    } else triggerDownload(streamUrl, single.name)
+    } else await triggerDownload(streamUrl, single.name)
     return { message: `downloading ${single.name}${single.size != null ? ` (${formatBytes(single.size)})` : ''}` }
   }
 

@@ -3,6 +3,9 @@ export default {
   content: ['./src/renderer/src/**/*.{js,ts,jsx,tsx}', './src/renderer/index.html'],
   darkMode: 'class',
   theme: {
+    // This bundle is the Android app: keep the mobile shell on tablets and
+    // in landscape too. Small responsive grids may still use `sm:`.
+    screens: { sm: '640px', md: '100000px', lg: '100001px', xl: '100002px', '2xl': '100003px' },
     extend: {
       colors: {
         surface: {

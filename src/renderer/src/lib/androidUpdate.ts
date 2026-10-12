@@ -50,15 +50,7 @@ export function isAndroidApp(): boolean {
   return !!cap?.isNativePlatform?.() && cap.getPlatform?.() === 'android'
 }
 
-/**
- * Origin to build shareable/absolute links against. In the Android wrap,
- * `window.location.origin` is `file://` (the webview loads dist/ off disk),
- * which produces broken links like `file:///playlists?id=1`. Use the real
- * deployed site there instead.
- */
-export function shareOrigin(): string {
-  return isAndroidApp() ? 'https://player.juicewrldapi.com' : window.location.origin
-}
+export { shareOrigin } from './platform'
 
 /**
  * Numeric semver compare. Returns >0 when `a` is newer than `b`.

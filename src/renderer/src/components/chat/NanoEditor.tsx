@@ -1,3 +1,4 @@
+import { saveFile, reportSaveError } from '../../lib/fileSave'
 import { useEffect, useRef, useState } from 'react'
 
 type Prompt =
@@ -44,12 +45,7 @@ function lineRange(text: string, caret: number): { start: number; end: number } 
 }
 
 function saveCopy(name: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  void saveFile(name, new Blob([text], { type: 'text/plain;charset=utf-8' })).catch(reportSaveError)
 }
 
 // A small nano for the admin terminal. It edits one buffer; "write out"

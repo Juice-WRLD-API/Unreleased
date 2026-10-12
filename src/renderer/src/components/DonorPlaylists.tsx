@@ -1,3 +1,4 @@
+import { saveFile } from '../lib/fileSave'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowDown, ArrowUp, Check, Cloud, MoreVertical, Music2, Pencil, Play, Plus, Shuffle, Trash2, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -475,14 +476,7 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
 
 async function downloadFile(f: DonorFile): Promise<void> {
   try {
-    const url = URL.createObjectURL(await fetchDonorFileBlob(f.file_id))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = f.filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+    await saveFile(f.filename, await fetchDonorFileBlob(f.file_id))
   } catch (err) {
     console.error('Could not download donor file', err)
   }

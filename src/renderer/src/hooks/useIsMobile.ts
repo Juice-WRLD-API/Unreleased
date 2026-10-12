@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { IS_NATIVE_APP } from '../lib/platform'
 
 // Matches Tailwind's default `md` breakpoint - the same cutoff Sidebar/
 // BottomNav already switch on via `hidden md:flex` / `md:hidden`, so a view
@@ -8,7 +9,7 @@ export const MOBILE_MEDIA_QUERY = '(max-width: 767px)'
 /** One-shot read of the same breakpoint, for code that runs before React
  *  does (the URL-to-view router in App.tsx) and can't hold a subscription. */
 export function isMobileViewport(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA_QUERY).matches
+  return IS_NATIVE_APP || (typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA_QUERY).matches)
 }
 
 /** True below the `md` breakpoint. Viewport-based (not user-agent based -
@@ -17,10 +18,11 @@ export function isMobileViewport(): boolean {
  *  the app's responsive chrome. */
 export function useIsMobile(): boolean {
   const [isMobile, setIsMobile] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA_QUERY).matches
+    isMobileViewport
   )
 
   useEffect(() => {
+    if (IS_NATIVE_APP) return
     const mql = window.matchMedia(MOBILE_MEDIA_QUERY)
     const onChange = (): void => setIsMobile(mql.matches)
     onChange()

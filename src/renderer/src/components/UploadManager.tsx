@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine, FolderPlus, FolderInput, Send, Pencil, Trash2, Plus, Archive } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine, FolderPlus, FolderInput, Send, Pencil, Trash2, Plus, Archive, ListMusic } from 'lucide-react'
 import { useStorePick, UploadItem, StagedFileChange, StagedSongChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
@@ -207,6 +207,7 @@ function UploadRow({ item }: { item: UploadItem }): JSX.Element {
           {isDone ? <CheckCircle2 size={13} className="text-emerald-400" />
             : isError ? <AlertCircle size={13} className="text-red-400" />
             : isUpload ? <ArrowUpFromLine size={13} className="text-[var(--accent)] animate-pulse" />
+            : item.type === 'playlist' ? <ListMusic size={13} className="text-[var(--accent)] animate-pulse" />
             : isZip ? <Archive size={13} className="text-[var(--accent)] animate-pulse" />
             : <Loader2 size={13} className="text-[var(--accent)] animate-spin" />}
         </div>

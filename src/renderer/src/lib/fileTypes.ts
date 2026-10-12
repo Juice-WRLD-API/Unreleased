@@ -1,4 +1,6 @@
 import { useStore } from '../store/useStore'
+import { toStreamUrl } from './localLibrary'
+import { IS_NATIVE_APP } from './platform'
 
 export const AUDIO_EXTS = new Set(['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac', '.opus', '.wma', '.alac', '.caf', '.aiff', '.aif'])
 export const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif'])
@@ -28,12 +30,10 @@ export function getMediaType(name: string): FileMediaType {
   return 'other'
 }
 
-// `local-media://` is a custom protocol the desktop app registers to stream
-// local files by absolute path. Unreachable in the web build - libraryTracks
-// only gets populated via scanLibrary(), which no-ops without window.electron
-// (see useStore.ts) - kept only so the shared Track/LibraryTrack conversion
-// stays platform-agnostic.
+// Capacitor proxies content/file URIs through its local server. Desktop's
+// custom protocol remains the fallback for non-native builds.
 export function toFileUrl(absPath: string): string {
+  if (IS_NATIVE_APP) return toStreamUrl(absPath)
   const url = new URL('local-media://play/')
   url.searchParams.set('p', absPath)
   return url.toString()
@@ -45,10 +45,11 @@ export function toFileUrl(absPath: string): string {
 // from there if it's already been read; covers read later stream in via
 // applyLibraryArt's queue fan-out.
 export function libraryTrackToTrack(t: import('../types').LibraryTrack): import('../types').Track {
-  const art = useStore.getState().libraryArt[t.id]
+  const offline = useStore.getState().offlineTracks[t.id]
+  const art = useStore.getState().libraryArt[t.id] ?? offline?.imageUrl
   return {
     id: t.id,
-    path: t.filePath,
+    path: offline?.path ?? t.filePath,
     streamUrl: toFileUrl(t.filePath),
     imageUrl: art || '',
     title: t.title,
@@ -60,5 +61,15 @@ export function libraryTrackToTrack(t: import('../types').LibraryTrack): import(
     duration: t.duration,
     genre: t.genre,
     hasAlbumArt: t.hasAlbumArt,
+  }
+}
+
+export function offlineTrackToLibraryTrack(id: string, t: import('../types').OfflineTrackMeta): import('../types').LibraryTrack {
+  return {
+    id, filePath: t.localPath, ext: t.ext, title: t.title, artist: t.artist,
+    album: t.album, albumArtist: t.artist, year: null, trackNumber: null,
+    discNumber: null, composer: '', genre: '', duration: t.duration, bitrate: null,
+    sampleRate: null, fileSize: 0, lastModified: t.downloadedAt,
+    hasAlbumArt: !!t.imageUrl, addedAt: t.downloadedAt,
   }
 }

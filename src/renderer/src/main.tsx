@@ -4,9 +4,12 @@ import App from './App'
 import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
+import { IS_NATIVE_APP, isStandalonePWA } from './lib/platform'
+import { installNativeDownloads } from './lib/fileSave'
 
 installGlobalErrorLogging()
 installTranslateDomGuard()
+installNativeDownloads()
 
 // iOS home-screen apps have shipped several WebKit versions that size the
 // viewport as if Safari's bottom toolbar could still appear - chrome that
@@ -18,8 +21,7 @@ installTranslateDomGuard()
 // keeps dvh, where lvh would instead run content under the visible toolbar.
 document.documentElement.classList.toggle(
   'standalone',
-  window.matchMedia('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true,
+  isStandalonePWA(),
 )
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
@@ -31,6 +33,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
 // Register the PWA service worker, only over http(s). Registered after load so
 // it never competes with first paint.
 if (
+  !IS_NATIVE_APP &&
   'serviceWorker' in navigator &&
   (location.protocol === 'https:' || location.protocol === 'http:')
 ) {

@@ -27,7 +27,7 @@ interface MediaControlPlugin {
     duration: number
   }): Promise<void>
   updatePlaybackState(opts: { playing: boolean; position: number; speed: number }): Promise<void>
-  addListener(eventName: string, cb: (data: unknown) => void): { remove: () => void }
+  addListener(eventName: string, cb: (data: unknown) => void): Promise<{ remove: () => void }>
 }
 
 function plugin(): MediaControlPlugin | null {
@@ -41,8 +41,10 @@ let started = false
  *  on every track load; only actually does anything the first time. */
 export function startMediaSession(): void {
   if (!isAndroidApp() || started) return
+  const p = plugin()
+  if (!p) return
   started = true
-  plugin()?.start().catch(() => {})
+  p.start().catch(() => { started = false })
 }
 
 export function updateMediaMetadata(opts: {
@@ -67,8 +69,13 @@ export function updateMediaPlaybackState(opts: { playing: boolean; position: num
 export function onMediaControlEvent<T = unknown>(eventName: string, cb: (data: T) => void): () => void {
   const p = plugin()
   if (!p) return () => {}
-  const handle = p.addListener(eventName, cb as (data: unknown) => void)
-  return () => handle.remove()
+  let removed = false
+  let handle: { remove: () => void } | undefined
+  Promise.resolve(p.addListener(eventName, cb as (data: unknown) => void)).then((listener) => {
+    if (removed) listener.remove()
+    else handle = listener
+  }).catch(() => {})
+  return () => { removed = true; handle?.remove() }
 }
 
 // ── Local-track artwork ─────────────────────────────────────────────────────

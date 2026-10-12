@@ -8,7 +8,7 @@ import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
-import { IS_ANDROID, shareOrigin } from './platform'
+import { IS_NATIVE_APP, shareOrigin } from './platform'
 import { cacheGet, cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
@@ -357,7 +357,7 @@ export function discordRedirectUri(): string {
   // Electron (file://) and the Android WebView (https://localhost) have no
   // origin of their own Discord knows about, so both use the production
   // callback URL - the registered Discord redirect URI.
-  if (IS_ANDROID || window.location.protocol === 'file:') {
+  if (IS_NATIVE_APP || window.location.protocol === 'file:') {
     return 'https://player.juicewrldapi.com/auth/discord/callback'
   }
   return `${shareOrigin()}/auth/discord/callback`
@@ -859,6 +859,7 @@ export async function addToPlaylist(id: number, songId: number): Promise<Playlis
   })
   playlistDetailCache.set(id, result)
   cacheSet(playlistDetailUrl(id), result)
+  if (IS_NATIVE_APP) void import('../store/useStore').then(({ useStore }) => useStore.getState().autoDownloadIfOffline(id, [songId])).catch(console.error)
   return result
 }
 

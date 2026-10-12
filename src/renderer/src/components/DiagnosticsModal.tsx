@@ -87,6 +87,7 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
 }
 
 export default function DiagnosticsModal(): JSX.Element {
+  const { offlineTracks, offlinePlaylists } = useStorePick('offlineTracks', 'offlinePlaylists')
   const [expanded, setExpanded] = useState<{ label: string; value: string } | null>(null)
   const R = ({ label, value }: { label: string; value: string }): JSX.Element => (
     <Row label={label} value={value} onExpand={(l, v) => setExpanded({ label: l, value: v })} />
@@ -183,6 +184,8 @@ export default function DiagnosticsModal(): JSX.Element {
           </Section>
 
           <Section title="Storage">
+            <R label="Offline tracks" value={String(Object.keys(offlineTracks).length)} />
+            <R label="Offline collections" value={String(Object.keys(offlinePlaylists).length)} />
             <R label="API cache" value={`${cache.count} entries · ${formatBytes(cache.bytes)}`} />
             <R label="localStorage" value={formatBytes(lsBytes)} />
             {mem && <R label="JS heap" value={`${formatBytes(mem.usedJSHeapSize)} / ${formatBytes(mem.totalJSHeapSize)}`} />}

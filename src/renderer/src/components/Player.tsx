@@ -48,6 +48,7 @@ import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
+import { readArt } from '../lib/localLibrary'
 
 // Only opened from the "more" button / right-click, so it loads on first use
 // instead of riding in the startup bundle with the player itself.
@@ -57,6 +58,8 @@ const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
 // so their `donor://` marker resolves to a fetched blob URL - or '' while that
 // fetch is still pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
+  const offline = useStore.getState().offlineTracks[track.id]
+  if (offline?.localPath) return toFileUrl(offline.localPath)
   if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
   return track.streamUrl ?? toFileUrl(track.path)
 }
@@ -516,18 +519,24 @@ export default function Player(): JSX.Element {
     // metadata (this is what caused a finished song's metadata to bleed
     // into the next one).
     const trackId = currentTrack.id
+    const offline = useStore.getState().offlineTracks[trackId]
     const isStale = (): boolean => useStore.getState().currentTrack?.id !== trackId
     // Build synthetic FullTrack immediately so cover art + artist show
     const synthetic: FullTrack = {
       ...currentTrack,
       albumArt: currentTrack.imageUrl ?? null,
-      lyrics: null,
-      syncedLyrics: null,
+      lyrics: offline?.lyrics ?? null,
+      syncedLyrics: offline?.syncedLyrics ?? null,
       producer: null,
       notes: null,
       ext: '',
     }
     setCurrentTrackFull(synthetic)
+    if (currentTrack.hasAlbumArt && !synthetic.albumArt) {
+      void readArt(currentTrack.path).then((art) => {
+        if (art && !isStale()) setCurrentTrackFull({ ...synthetic, albumArt: art })
+      })
+    }
     // Donor files carry their art embedded in the file itself (MP3 ID3), not
     // on the API - fetch just the tag and show it once it's read.
     const donorFileId = donorFileIdFromTrackId(currentTrack.id)
@@ -538,7 +547,7 @@ export default function Player(): JSX.Element {
     }
     // Fetch lyrics from API if this is a tracker song (id = "jw-{n}")
     const match = currentTrack.id.match(/^jw-(\d+)$/)
-    if (match) {
+    if (match && !offline) {
       const songId = Number(match[1])
       // Serve from session cache to avoid re-hitting /songs/ when replaying
       // or revisiting a song.
@@ -973,6 +982,8 @@ export default function Player(): JSX.Element {
       if (audio.ended) { onAudioEnded(audio); return }
       if (audio.error) { recoverPlayback('error'); return }
       if (audio.paused) { audio.play().catch(() => recoverPlayback('play-rejected')); return }
+      // Background WebViews throttle timeupdate even while audio is healthy.
+      if (document.hidden) { lastProgressAt.current = Date.now(); return }
       // Playing on paper, but the clock isn't moving. Very common on mobile:
       // the connection goes away without the element ever firing 'error', so it
       // sits in a rebuffer that will never finish. Nothing else detects this.

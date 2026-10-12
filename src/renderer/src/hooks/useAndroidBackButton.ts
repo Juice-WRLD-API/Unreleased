@@ -41,6 +41,7 @@ export function useAndroidBackButton(): void {
       if (s.showEqPanel)       { s.setShowEqPanel(false); return }
       if (s.showDiagnostics)   { s.setShowDiagnostics(false); return }
       if (s.showQueue)         { s.setShowQueue(false); return }
+      if (s.showNowPlaying)    { s.setShowNowPlaying(false); return }
 
       if (canGoBack) { window.history.back(); return }
       if (s.activeView !== HOME_VIEW) { s.setActiveView(HOME_VIEW); return }

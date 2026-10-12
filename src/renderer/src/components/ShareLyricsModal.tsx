@@ -1,3 +1,4 @@
+import { saveUrl } from '../lib/fileSave'
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
@@ -315,12 +316,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     setBusy('download')
     try {
       const dataUrl = await withExportMode(() => toPng(cardRef.current!, renderOpts))
-      const a = document.createElement('a')
-      a.href = dataUrl
-      a.download = `${fileName}.png`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
+      await saveUrl(`${fileName}.png`, dataUrl)
     } catch {
       setError('Could not generate the image.')
     } finally {

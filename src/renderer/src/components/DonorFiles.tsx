@@ -1,3 +1,4 @@
+import { saveFile } from '../lib/fileSave'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown, ArrowUp, Check, Copy, Download, FileAudio, FileImage, ImagePlus, Link2, Link2Off,
@@ -276,14 +277,7 @@ export default function DonorFiles(): JSX.Element {
     setBusy(f.file_id)
     try {
       const blob = await fetchDonorFileBlob(f.file_id)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = f.filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      await saveFile(f.filename, blob)
     } catch (err) {
       setError((err as Error).message || 'Could not download file')
     } finally {

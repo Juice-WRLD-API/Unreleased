@@ -1,3 +1,4 @@
+import { saveFile, reportSaveError } from '../../lib/fileSave'
 import { useEffect, useRef, useState } from 'react'
 import { Check, Copy, Download, Loader2, QrCode, Upload } from 'lucide-react'
 import { exportKeys, importKeys } from '../../lib/chatKeyTransfer'
@@ -65,12 +66,7 @@ function ExportPanel({ userId }: { userId: number }): JSX.Element {
 
   const download = (): void => {
     if (!result) return
-    const url = URL.createObjectURL(new Blob([result.blob], { type: 'text/plain' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'unreleased-chat-keys.txt'
-    a.click()
-    URL.revokeObjectURL(url)
+    void saveFile('unreleased-chat-keys.txt', new Blob([result.blob], { type: 'text/plain' })).catch(reportSaveError)
   }
 
   return (

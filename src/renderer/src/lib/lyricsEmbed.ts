@@ -77,11 +77,11 @@ export async function downloadWithEmbed(url: string, filename: string, path: str
       if (res.ok) {
         const blob = await embedSafe(await res.blob(), embed)
         const objectUrl = URL.createObjectURL(blob)
-        triggerDownload(objectUrl, filename)
+        await triggerDownload(objectUrl, filename)
         setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
         return
       }
     } catch { /* fall through to the plain download */ }
   }
-  triggerDownload(url, filename)
+  await triggerDownload(url, filename)
 }

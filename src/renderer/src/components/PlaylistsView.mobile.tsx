@@ -1,3 +1,5 @@
+import PlaylistOfflineAction from './PlaylistOfflineAction'
+import { reportSaveError } from '../lib/fileSave'
 import React, { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft, X, Check, Heart, Shuffle,
@@ -1873,6 +1875,7 @@ export default function PlaylistsView(): JSX.Element {
           }}
         />
         <SheetItem icon={Folder} label="Move to folder" onClick={() => setSheet({ kind: 'moveToFolder', keys: [key] })} />
+        {isApi && <PlaylistOfflineAction id={Number(pl.id)} name={pl.name} />}
         {isApi && (
           <>
             <SheetItem
@@ -2004,6 +2007,11 @@ export default function PlaylistsView(): JSX.Element {
             )}
           </>
         )}
+        {isLocal && localPl && <SheetItem icon={Download} label="Export M3U" onClick={async () => {
+          const result = await useStore.getState().exportLocalPlaylistM3u(localPl.id)
+          if (!result.ok && !result.canceled) reportSaveError(new Error(result.error))
+        }} />}
+        {!isLocal && selectedId != null && <PlaylistOfflineAction id={selectedId} name={name || 'playlist'} />}
         {!isLocal && (
           <>
             <SheetDivider />

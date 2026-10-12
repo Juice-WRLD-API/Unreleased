@@ -239,13 +239,13 @@ export async function downloadFileSmart(
     } catch { /* plain download below */ }
   }
   if (!blob) {
-    triggerDownload(streamUrl, filename)
+    await triggerDownload(streamUrl, filename)
     return false
   }
   if (embed) blob = await embedSafe(blob, embed)
 
   const objectUrl = URL.createObjectURL(blob)
-  triggerDownload(objectUrl, filename)
+  await triggerDownload(objectUrl, filename)
   // Give the download a moment to actually start before freeing the blob.
   setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
   return result?.isDonor ?? false

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
 import ChatNavIcon from '../components/chat/ChatNavIcon'
+import { localLibraryAvailable } from './localLibrary'
 
 // The primary nav destinations available to the desktop side menu (Sidebar).
 // `view` doubles as the stable id persisted in the saved order/visibility -
@@ -40,6 +41,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { view: 'home', label: 'Home', icon: <House size={18} />, alwaysVisible: true },
   { view: 'api-tracker', label: 'Tracker', icon: <SearchCode size={18} /> },
   { view: 'api-files', label: 'Files', icon: <HardDrive size={18} /> },
+  ...(localLibraryAvailable() ? [{ view: 'library' as const, label: 'Library', icon: <ListMusic size={18} /> }] : []),
   // `view` stays 'heardle' - it's the persisted id (and the /heardle route);
   // only the label is Games, so the tab can hold more than one game later.
   // Excluded from the mobile bar/More entirely (see useMobileNavTabs'

@@ -1,3 +1,5 @@
+import { IS_NATIVE_APP } from './platform'
+import { saveFile } from './fileSave'
 // Copying and saving cover art. Most covers the app displays are readable
 // from the renderer: the API sends Access-Control-Allow-Origin on its own
 // endpoints (same as it does for audio - see the CORS notes in
@@ -115,6 +117,11 @@ export function coverFileName(title: string, mime: string): string {
 
 /** Puts the cover on the clipboard as an image, pasteable into other apps. */
 export async function copyCoverImage(url: string): Promise<void> {
+  if (IS_NATIVE_APP) {
+    const { Clipboard } = await import('@capacitor/clipboard')
+    await Clipboard.write({ image: await fetchImageDataUrl(url) })
+    return
+  }
   const png = await toPngBlob(await fetchImageBlob(url))
   await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
 }
@@ -139,13 +146,6 @@ export async function saveCoverImage(url: string, title: string): Promise<'saved
   // The cover's own URL is cross-origin, where `download` is ignored and the
   // browser navigates to the image instead - so hand the anchor a same-origin
   // blob: URL, which does honour the attribute (and the filename).
-  const href = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = name
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(href), 10_000)
+  await saveFile(name, blob)
   return 'saved'
 }

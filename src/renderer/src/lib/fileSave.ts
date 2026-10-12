@@ -77,8 +77,32 @@ export async function saveFile(filename: string, blob: Blob): Promise<void> {
     const a = document.createElement('a')
     a.href = url
     a.download = filename
+    document.body.appendChild(a)
     a.click()
+    a.remove()
   } finally {
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
+}
+
+export function reportSaveError(error: unknown): void {
+  console.error('Download failed', error)
+  window.alert(`Could not save the file: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+export async function saveUrl(filename: string, url: string): Promise<void> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`Download failed (${response.status})`)
+  await saveFile(filename, await response.blob())
+}
+
+/** Covers declarative download links in shared web views, including chat. */
+export function installNativeDownloads(): void {
+  if (!isAndroidApp()) return
+  document.addEventListener('click', (event) => {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[download]') : null
+    if (!anchor || event.defaultPrevented) return
+    event.preventDefault()
+    void saveUrl(anchor.download || 'download', anchor.href).catch(reportSaveError)
+  })
 }
