@@ -462,7 +462,14 @@ export async function downloadedZip(zipPath: string): Promise<LocalZip | null> {
 
 export interface DownloadedSession { zipPath: string; size: number }
 export async function listDownloadedSessions(): Promise<DownloadedSession[]> {
-  if (zipApi() && sessionFolder()) return (await folderZips()).map(({ zipPath, size }) => ({ zipPath, size }))
+  if (!(zipApi() && sessionFolder())) return cachedSessions()
+  // Sessions downloaded before folder mode still live in the cache (and still open from it).
+  const inFolder = (await folderZips()).map(({ zipPath, size }) => ({ zipPath, size }))
+  const seen = new Set(inFolder.map((d) => d.zipPath))
+  return [...inFolder, ...(await cachedSessions()).filter((d) => !seen.has(d.zipPath))]
+}
+
+async function cachedSessions(): Promise<DownloadedSession[]> {
   if (!hasCacheStorage) return [...memZips].map(([zipPath, b]) => ({ zipPath, size: b.size }))
   try {
     const cache = await caches.open(ZIP_CACHE)
