@@ -220,6 +220,17 @@ contextBridge.exposeInMainWorld('electron', {
     return () => ipcRenderer.removeListener('offline-download-progress', fn)
   },
 
+  // Session Maker whole-session zips
+  sessionZipDownload: (payload)        => ipcRenderer.invoke('session-zip-download', payload),
+  sessionZipDefaultDir: ()             => ipcRenderer.invoke('session-zip-default-dir'),
+  sessionZipList:     (dir)            => ipcRenderer.invoke('session-zip-list', dir),
+  sessionZipRemove:   (dir, filename)  => ipcRenderer.invoke('session-zip-remove', dir, filename),
+  onSessionZipProgress: (cb) => {
+    const fn = (_, d) => cb(d)
+    ipcRenderer.on('session-zip-progress', fn)
+    return () => ipcRenderer.removeListener('session-zip-progress', fn)
+  },
+
   // WrldData (albums JSON)
   loadWrldData: ()       => ipcRenderer.invoke('load-wrlddata'),
   saveWrldData: (data)   => ipcRenderer.invoke('save-wrlddata', data),

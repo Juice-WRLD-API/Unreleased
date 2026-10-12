@@ -278,6 +278,9 @@ html.wrld-active #root {
 ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* Session Maker timeline: the horizontal bar starts after the sticky track-header column (--track-header-w) */
+.timeline-scroll::-webkit-scrollbar-track:horizontal { margin-left: var(--track-header-w, 0px); }
+
 /* Thin scrollbar inset from the edge, for rounded popovers */
 .slim-scroll { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
 .slim-scroll::-webkit-scrollbar { width: 10px; }

@@ -1919,9 +1919,10 @@ export default function Player(): JSX.Element {
         document.body
       )}
 
-      {/* Bottom bar hidden on the WRLD page — it has its own full playback controls.
+      {/* Bottom bar hidden on the WRLD page — it has its own full playback controls —
+          and in the Session Maker, which has its own transport and needs the room.
           Audio elements above stay mounted regardless so playback is unaffected. */}
-      {activeView !== 'wrld' && (
+      {activeView !== 'wrld' && activeView !== 'session-maker' && (
       <>
       {/* ── Mobile player ── */}
       {/* No safe-area-inset-bottom padding here: the BottomNav sits directly

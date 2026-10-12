@@ -11,6 +11,8 @@
 // request count is what matters: the directory usually arrives with the
 // first (suffix) request, the server answers multi-range requests, so all the
 // takes' headers come back in a request or two, and a whole entry is one.
+// Once a session has been downloaded whole (RemoteZip.local), the same reads
+// are served from the Blob instead.
 
 export interface ZipEntry {
   name: string
@@ -22,11 +24,18 @@ export interface ZipEntry {
   isDir: boolean
 }
 
+/** A zip already on this device: a Blob, or a file read lazily in ranges. */
+export interface LocalZip { size: number; slice(start: number, end: number): { arrayBuffer(): Promise<ArrayBuffer> } }
+
 export interface RemoteZip {
   url: string
   size: number
   entries: ZipEntry[]
+  /** The whole zip, once it's been downloaded - entries are then read from it, not the network. */
+  local?: LocalZip
 }
+
+interface Source { url: string; local?: LocalZip }
 
 interface Part { start: number; bytes: Uint8Array }
 
@@ -36,7 +45,9 @@ function parseContentRange(v: string | null): { start: number; end: number; tota
 }
 
 /** One request for `ranges` ("a-b" or "-n" strings); the parts that came back. */
-async function fetchRanges(url: string, ranges: string[], signal?: AbortSignal): Promise<{ parts: Part[]; total: number }> {
+async function fetchRanges(src: Source, ranges: string[], signal?: AbortSignal): Promise<{ parts: Part[]; total: number }> {
+  if (src.local) return localRanges(src.local, ranges)
+  const url = src.url
   const res = await fetch(url, { headers: { Range: `bytes=${ranges.join(',')}` }, signal })
   if (res.status !== 206) throw new Error(res.ok ? 'Server ignored the byte range' : `HTTP ${res.status}`)
   const body = new Uint8Array(await res.arrayBuffer())
@@ -68,6 +79,16 @@ async function fetchRanges(url: string, ranges: string[], signal?: AbortSignal):
   return { parts, total }
 }
 
+async function localRanges(blob: LocalZip, ranges: string[]): Promise<{ parts: Part[]; total: number }> {
+  const parts = await Promise.all(ranges.map(async (r) => {
+    const [a, b] = r.split('-')
+    const start = a === '' ? Math.max(0, blob.size - Number(b)) : Number(a)
+    const end = a === '' || b === '' ? blob.size - 1 : Math.min(blob.size - 1, Number(b))
+    return { start, bytes: new Uint8Array(await blob.slice(start, end + 1).arrayBuffer()) }
+  }))
+  return { parts, total: blob.size }
+}
+
 const CRLF_CRLF = new Uint8Array([13, 10, 13, 10])
 function indexOf(hay: Uint8Array, needle: Uint8Array, from: number): number {
   outer: for (let i = from; i <= hay.length - needle.length; i++) {
@@ -93,11 +114,13 @@ const u32 = (v: DataView, o: number): number => v.getUint32(o, true)
 const u64 = (v: DataView, o: number): number => Number(v.getBigUint64(o, true))
 const view = (b: Uint8Array): DataView => new DataView(b.buffer, b.byteOffset, b.byteLength)
 
-export async function openRemoteZip(url: string, signal?: AbortSignal): Promise<RemoteZip> {
+/** `local`, when given, is the whole zip already on this device - nothing is fetched. */
+export async function openRemoteZip(url: string, signal?: AbortSignal, local?: LocalZip): Promise<RemoteZip> {
+  const src: Source = { url, local }
   // End of central directory: 22 bytes + up to 64 KB comment, plus the 20-byte
   // zip64 locator before it. Asking for more means the directory itself
   // usually rides along for sessions of a few hundred files.
-  const { parts: [tailPart], total } = await fetchRanges(url, ['-262144'], signal)
+  const { parts: [tailPart], total } = await fetchRanges(src, ['-262144'], signal)
   const tail = tailPart.bytes
   const tailStart = tailPart.start
   const tv = view(tail)
@@ -112,7 +135,7 @@ export async function openRemoteZip(url: string, signal?: AbortSignal): Promise<
     const loc = eocd - 20
     if (loc < 0 || u32(tv, loc) !== 0x07064b50) throw new Error('Broken zip64 archive')
     const z64 = u64(tv, loc + 8)
-    const zb = z64 >= tailStart ? tail.subarray(z64 - tailStart, z64 - tailStart + 56) : (await fetchRanges(url, [`${z64}-${z64 + 55}`], signal)).parts[0].bytes
+    const zb = z64 >= tailStart ? tail.subarray(z64 - tailStart, z64 - tailStart + 56) : (await fetchRanges(src, [`${z64}-${z64 + 55}`], signal)).parts[0].bytes
     const zv = view(zb)
     count = u64(zv, 32)
     cdSize = u64(zv, 40)
@@ -121,7 +144,7 @@ export async function openRemoteZip(url: string, signal?: AbortSignal): Promise<
 
   const cd = cdOffset >= tailStart
     ? tail.subarray(cdOffset - tailStart, cdOffset - tailStart + cdSize)
-    : (await fetchRanges(url, [`${cdOffset}-${cdOffset + cdSize - 1}`], signal)).parts[0].bytes
+    : (await fetchRanges(src, [`${cdOffset}-${cdOffset + cdSize - 1}`], signal)).parts[0].bytes
   const cv = view(cd)
   const utf8 = new TextDecoder('utf-8')
   const entries: ZipEntry[] = []
@@ -154,7 +177,7 @@ export async function openRemoteZip(url: string, signal?: AbortSignal): Promise<
     entries.push({ name, method, compressedSize, size, localHeaderOffset, isDir: name.endsWith('/') })
     p += 46 + nameLen + extraLen + commentLen
   }
-  return { url, size: total, entries }
+  return { url, size: total, entries, local }
 }
 
 /** Offset of an entry's data within `local`, which starts at its local header.
@@ -194,7 +217,7 @@ export async function readEntryHeads(zip: RemoteZip, entries: ZipEntry[], want: 
       if (next) end = Math.min(end, next.localHeaderOffset - 1)
       return { e, start, end }
     })
-    const { parts } = await fetchRanges(zip.url, ranges.map((r) => `${r.start}-${r.end}`), signal)
+    const { parts } = await fetchRanges(zip, ranges.map((r) => `${r.start}-${r.end}`), signal)
     await Promise.all(ranges.map(async ({ e, start, end }) => {
       const local = slice(parts, start, end - start + 1)
       if (!local) return
@@ -246,6 +269,11 @@ export async function readEntry(zip: RemoteZip, entry: ZipEntry, signal?: AbortS
   assertSupported(entry)
   const start = entry.localHeaderOffset
   const end = Math.min(zip.size - 1, start + LOCAL_SLACK + entry.compressedSize - 1)
+  if (zip.local) {
+    const local = new Uint8Array(await zip.local.slice(start, end + 1).arrayBuffer())
+    onProgress?.(entry.compressedSize, entry.compressedSize)
+    return inflateEntry(entry, local)
+  }
   const res = await fetch(zip.url, { headers: { Range: `bytes=${start}-${end}` }, signal })
   if (res.status !== 206 || !res.body) throw new Error(`HTTP ${res.status}`)
   const expected = end - start + 1
@@ -259,7 +287,10 @@ export async function readEntry(zip: RemoteZip, entry: ZipEntry, signal?: AbortS
     received += value.length
     onProgress?.(Math.min(received, entry.compressedSize), entry.compressedSize)
   }
-  const local = buf.subarray(0, received)
+  return inflateEntry(entry, buf.subarray(0, received))
+}
+
+async function inflateEntry(entry: ZipEntry, local: Uint8Array): Promise<ArrayBuffer> {
   const off = dataOffset(local)
   const comp = local.subarray(off, off + entry.compressedSize)
   if (entry.method === 0) return comp.slice().buffer

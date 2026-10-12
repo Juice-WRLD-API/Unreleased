@@ -12,7 +12,9 @@
 
 import { apiFetch, buildStreamUrl, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
 import { ls } from './persist'
-import { openRemoteZip, readEntry, readEntryHeads, type RemoteZip, type ZipEntry } from './remoteZip'
+import { useStore } from '../store/useStore'
+import { openRemoteZip, readEntry, readEntryHeads, type LocalZip, type RemoteZip, type ZipEntry } from './remoteZip'
+import { toFileUrl } from './fileTypes'
 
 export const SESSIONS_ROOT = 'Studio Sessions'
 
@@ -194,7 +196,7 @@ export function scanSession(zipPath: string, onProgress?: (done: number, total: 
 }
 
 async function doScan(zipPath: string, onProgress?: (done: number, total: number) => void, signal?: AbortSignal): Promise<ScannedSession> {
-  const zip = await openRemoteZip(buildStreamUrl(zipPath), signal)
+  const zip = await openRemoteZip(buildStreamUrl(zipPath), signal, (await downloadedZip(zipPath)) ?? undefined)
   const files = zip.entries.filter((e) =>
     !e.isDir && AUDIO_RE.test(e.name) && !e.name.includes('__MACOSX/') && !/(^|\/)\._/.test(e.name) && e.size > 0)
 
@@ -359,6 +361,272 @@ export function peekLoadedTake(zipPath: string, takeId: string): Promise<LoadedT
   return loadCache.get(takeKey(zipPath, takeId))
 }
 
+// ─── Whole-session downloads ─────────────────────────────────────────────────
+// Streaming a take costs ~2 s before the first byte; with the whole zip on the
+// device, previews and loads are just a local read + decode. Kept in Cache
+// Storage so it survives restarts (in memory only where that's unavailable).
+
+// In the desktop app they go to a folder instead (chosen on first download, see
+// "Folder mode" below) and are read back from there in byte ranges.
+
+const ZIP_CACHE = 'session-maker-zips'
+const hasCacheStorage = typeof caches !== 'undefined'
+const memZips = new Map<string, Blob>()
+
+export interface DownloadState { received: number; total: number; error?: string }
+const downloads = new Map<string, DownloadState & { ac: AbortController }>()
+const downloadListeners = new Set<() => void>()
+let downloadVersion = 0
+const emitDownloads = (): void => { downloadVersion++; for (const l of downloadListeners) l() }
+export function subscribeDownloads(fn: () => void): () => void { downloadListeners.add(fn); return () => { downloadListeners.delete(fn) } }
+/** Changes whenever any download starts, progresses, finishes or is removed. */
+export const downloadsVersion = (): number => downloadVersion
+export function peekDownload(zipPath: string): DownloadState | undefined { return downloads.get(zipPath) }
+
+// ─── Folder mode (desktop app) ───────────────────────────────────────────────
+
+interface SessionZipApi {
+  pickFolder: () => Promise<string | null>
+  sessionZipDownload: (p: { url: string; dir: string; filename: string }) => Promise<{ path?: string; size?: number; error?: string }>
+  sessionZipDefaultDir: () => Promise<string>
+  sessionZipList: (dir: string) => Promise<{ filename: string; path: string; size: number }[]>
+  sessionZipRemove: (dir: string, filename: string) => Promise<boolean>
+  onSessionZipProgress: (cb: (d: { filename: string; received: number; total: number }) => void) => () => void
+}
+const zipApi = (): SessionZipApi | null =>
+  (typeof window !== 'undefined' ? (window as unknown as { electron?: SessionZipApi }).electron : undefined)?.sessionZipDownload ? (window as unknown as { electron: SessionZipApi }).electron : null
+
+const DIR_KEY = 'sessionMaker.zipDir'
+const NAMES_KEY = 'sessionMaker.zipNames'
+export const sessionFolder = (): string | null => (zipApi() ? ls.get<string>(DIR_KEY) : null)
+export const hasSessionFolderSupport = (): boolean => !!zipApi()
+/** Until the user picks one, downloads go to Music/Unreleased/Sessions/Downloaded (created on first download). */
+async function useDefaultSessionFolder(): Promise<string | null> {
+  const api = zipApi()
+  if (!api || ls.get<string>(DIR_KEY)) return ls.get<string>(DIR_KEY)
+  const dir = await api.sessionZipDefaultDir().catch(() => null)
+  if (dir && !ls.get<string>(DIR_KEY)) { ls.set(DIR_KEY, dir); emitDownloads() }
+  return ls.get<string>(DIR_KEY)
+}
+void useDefaultSessionFolder()
+export async function chooseSessionFolder(): Promise<string | null> {
+  const api = zipApi()
+  const dir = api && (await api.pickFolder())
+  if (dir) { ls.set(DIR_KEY, dir); emitDownloads() }
+  return dir || null
+}
+const zipNames = (): Record<string, string> => ls.get<Record<string, string>>(NAMES_KEY) ?? {}
+const zipFilename = (zipPath: string): string => (zipPath.split("/").pop() || "session.zip").replace(/[<>:"\|?*]/g, "_")
+
+/** A zip file on disk, read lazily in ranges through the app's local-media protocol. */
+function fileZip(filePath: string, size: number): LocalZip {
+  const url = toFileUrl(filePath)
+  return {
+    size,
+    slice: (start, end) => ({
+      arrayBuffer: async () => {
+        const res = await fetch(url, { headers: { Range: `bytes=${start}-${Math.min(end, size) - 1}` } })
+        if (res.status !== 206 && res.status !== 200) throw new Error(`Could not read the saved session (HTTP ${res.status})`)
+        return res.arrayBuffer()
+      },
+    }),
+  }
+}
+
+async function folderZips(): Promise<(DownloadedSession & { local: LocalZip })[]> {
+  const api = zipApi()
+  const dir = sessionFolder()
+  if (!api || !dir) return []
+  const names = zipNames()
+  const files = new Map((await api.sessionZipList(dir)).map((f) => [f.filename, f]))
+  const out: (DownloadedSession & { local: LocalZip })[] = []
+  for (const [zipPath, filename] of Object.entries(names)) {
+    const f = files.get(filename)
+    if (f) out.push({ zipPath, size: f.size, local: fileZip(f.path, f.size) })
+  }
+  return out
+}
+
+export async function downloadedZip(zipPath: string): Promise<LocalZip | null> {
+  if (zipApi() && sessionFolder()) {
+    const hit = (await folderZips()).find((z) => z.zipPath === zipPath)
+    if (hit) return hit.local
+  }
+  if (!hasCacheStorage) return memZips.get(zipPath) ?? null
+  try {
+    const res = await (await caches.open(ZIP_CACHE)).match(buildStreamUrl(zipPath))
+    return res ? await res.blob() : null
+  } catch { return null }
+}
+
+export interface DownloadedSession { zipPath: string; size: number }
+export async function listDownloadedSessions(): Promise<DownloadedSession[]> {
+  if (zipApi() && sessionFolder()) return (await folderZips()).map(({ zipPath, size }) => ({ zipPath, size }))
+  if (!hasCacheStorage) return [...memZips].map(([zipPath, b]) => ({ zipPath, size: b.size }))
+  try {
+    const cache = await caches.open(ZIP_CACHE)
+    const out: DownloadedSession[] = []
+    for (const req of await cache.keys()) {
+      const res = await cache.match(req)
+      const zipPath = new URL(req.url).searchParams.get('path')
+      if (res && zipPath) out.push({ zipPath, size: Number(res.headers.get('content-length')) || 0 })
+    }
+    return out
+  } catch { return [] }
+}
+
+/** A scan made before the download finished keeps its own copy of the zip; point it at the local one. */
+function markLocal(zipPath: string, local: LocalZip): void {
+  void scanCache.get(zipPath)?.then((s) => { s.zip.local = local }, () => {})
+}
+
+/** Starts downloading a session from just its path and size, without scanning it first. */
+export function downloadSessionByPath(zipPath: string, size: number): void {
+  downloadSession({ zipPath, zip: { url: buildStreamUrl(zipPath), size, entries: [] }, takes: [], bpm: null })
+}
+
+// Session downloads also appear as rows in the app's Download Manager (store.downloads).
+const MGR_PREFIX = 'session-dl:'
+export const isSessionDownloadId = (id: string): boolean => id.startsWith(MGR_PREFIX)
+export function cancelSessionDownloadRow(id: string): void { cancelDownload(id.slice(MGR_PREFIX.length)) }
+
+function trackInManager(zipPath: string, total: number) {
+  const id = MGR_PREFIX + zipPath
+  const { addDownload, removeDownload, updateDownload, setShowDownloadManager } = useStore.getState()
+  removeDownload(id)
+  addDownload({ id, filename: sessionTitle(zipFilename(zipPath).replace(/\.zip$/i, '')), type: 'file', state: 'downloading', percent: 0, received: 0, total, detail: 'Session download' })
+  setShowDownloadManager(true)
+  let last = { bytes: 0, time: Date.now() }
+  let lastPush = 0
+  return {
+    progress(received: number, tot?: number): void {
+      const now = Date.now()
+      if (now - lastPush < 250) return
+      lastPush = now
+      const dt = (now - last.time) / 1000
+      const speedBps = dt >= 0.4 ? Math.max(0, (received - last.bytes) / dt) : undefined
+      if (dt >= 0.4) last = { bytes: received, time: now }
+      const t = tot || total
+      updateDownload(id, { received, bytesReceived: received, total: t, percent: t ? Math.min(99, Math.round((received / t) * 100)) : 0, ...(speedBps !== undefined ? { speedBps } : {}) })
+    },
+    done(savePath?: string): void { updateDownload(id, { state: 'done', percent: 100, received: total, speedBps: undefined, savePath }) },
+    fail(error: string): void { updateDownload(id, { state: 'error', speedBps: undefined, error }) },
+    cancelled(): void { updateDownload(id, { state: 'cancelled', speedBps: undefined, error: 'Cancelled' }) },
+  }
+}
+
+/** Downloads the whole session zip; from then on its takes load from the device. */
+export function downloadSession(session: ScannedSession): void {
+  const { zipPath, zip } = session
+  const existing = downloads.get(zipPath)
+  if (zip.local || (existing && !existing.error)) return
+  const ac = new AbortController()
+  const state: DownloadState & { ac: AbortController } = { received: 0, total: zip.size, ac }
+  downloads.set(zipPath, state)
+  emitDownloads()
+  const mgr = trackInManager(zipPath, zip.size)
+  let lastEmit = 0
+  const api = zipApi()
+  if (api) {
+    void (async () => {
+      const dir = sessionFolder() ?? (await useDefaultSessionFolder())
+      if (!dir) { downloads.delete(zipPath); mgr.cancelled(); emitDownloads(); return }
+      const filename = zipFilename(zipPath)
+      const off = api.onSessionZipProgress((d) => {
+        if (d.filename !== filename) return
+        state.received = d.received
+        if (d.total) state.total = d.total
+        mgr.progress(state.received, state.total)
+        emitDownloads()
+      })
+      try {
+        const res = await api.sessionZipDownload({ url: zip.url, dir, filename })
+        if (ac.signal.aborted) { void api.sessionZipRemove(dir, filename); mgr.cancelled(); return }
+        if (res.error || res.size == null) throw new Error(res.error ?? 'Download failed')
+        if (res.size !== zip.size) { void api.sessionZipRemove(dir, filename); throw new Error('Download was incomplete') }
+        ls.set(NAMES_KEY, { ...zipNames(), [zipPath]: filename })
+        zip.local = fileZip(res.path ?? '', res.size)
+        markLocal(zipPath, zip.local)
+        downloads.delete(zipPath)
+        mgr.done(res.path)
+      } catch (err) {
+        if (ac.signal.aborted) { downloads.delete(zipPath); mgr.cancelled() }
+        else { state.error = err instanceof Error ? err.message : String(err); mgr.fail(state.error) }
+      } finally {
+        off()
+        emitDownloads()
+      }
+    })()
+    return
+  }
+  void (async () => {
+    const res = await fetch(zip.url, { signal: ac.signal })
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+    const counted = res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, ctl) {
+        state.received += chunk.length
+        mgr.progress(state.received)
+        const now = performance.now()
+        if (now - lastEmit > 200) { lastEmit = now; emitDownloads() }
+        ctl.enqueue(chunk)
+      },
+    }))
+    let blob: Blob
+    if (hasCacheStorage) {
+      const cache = await caches.open(ZIP_CACHE)
+      if (navigator.storage?.persist) void navigator.storage.persist().catch(() => {})
+      await cache.put(zip.url, new Response(counted, { headers: { 'content-type': 'application/zip', 'content-length': String(zip.size) } }))
+      const stored = await cache.match(zip.url)
+      if (!stored) throw new Error('Could not store the session')
+      blob = await stored.blob()
+    } else {
+      blob = await new Response(counted).blob()
+      memZips.set(zipPath, blob)
+    }
+    if (blob.size !== zip.size) {
+      void removeDownloadedSession(zipPath)
+      throw new Error('Download was incomplete')
+    }
+    zip.local = blob
+    markLocal(zipPath, blob)
+    downloads.delete(zipPath)
+    mgr.done()
+    emitDownloads()
+  })().catch((err) => {
+    if (ac.signal.aborted) { downloads.delete(zipPath); mgr.cancelled() }
+    else {
+      const quota = err instanceof DOMException && err.name === 'QuotaExceededError'
+      Object.assign(state, { error: quota ? 'Not enough storage space' : err instanceof Error ? err.message : String(err) })
+      mgr.fail(state.error ?? 'Download failed')
+    }
+    emitDownloads()
+  })
+}
+
+export function cancelDownload(zipPath: string): void {
+  const d = downloads.get(zipPath)
+  if (!d) return
+  d.ac.abort()
+  useStore.getState().updateDownload(MGR_PREFIX + zipPath, { state: 'cancelled', speedBps: undefined, error: 'Cancelled' })
+  downloads.delete(zipPath)
+  emitDownloads()
+}
+
+export async function removeDownloadedSession(zipPath: string): Promise<void> {
+  const api = zipApi()
+  const dir = sessionFolder()
+  const names = zipNames()
+  if (api && dir && names[zipPath]) {
+    await api.sessionZipRemove(dir, names[zipPath])
+    delete names[zipPath]
+    ls.set(NAMES_KEY, names)
+  }
+  memZips.delete(zipPath)
+  if (hasCacheStorage) await (await caches.open(ZIP_CACHE)).delete(buildStreamUrl(zipPath)).catch(() => false)
+  void scanCache.get(zipPath)?.then((s) => { s.zip.local = undefined }, () => {})
+  emitDownloads()
+}
+
 // ─── Project model ───────────────────────────────────────────────────────────
 
 export interface SmClip {
@@ -375,18 +643,30 @@ export interface SmClip {
   fadeOut: number
   /** Left on the timeline but silent - an alternate take while comping. */
   muted?: boolean
+  /** Stretches left silent by swipe comping, in take seconds (offset-relative, so
+   *  they stay with the audio when the clip is moved, trimmed or split). Sorted, apart. */
+  silent?: [number, number][]
 }
 
 export interface SmTrack {
   id: string
   name: string
   gain: number
+  /** -1 (left) to 1 (right); missing is centre. */
+  pan?: number
   muted: boolean
   solo: boolean
   clips: SmClip[]
   /** The beat lane is left out of comping. Older projects only have the name. */
   role?: 'beat'
+  /** The take folder this lane is in (SmProject.folders). Its lanes sit together. */
+  folder?: string
 }
+
+/** Lanes holding takes of the same parts, shown under one comp lane. */
+export interface TakeFolder { id: string; name: string }
+
+export interface TakeCategory { id: string; name: string }
 
 export interface SmProject {
   v: 1
@@ -401,6 +681,14 @@ export interface SmProject {
   loop?: { start: number; end: number; on: boolean } | null
   /** The original bounce to A/B against: a take id and where it starts on the timeline. */
   reference?: { takeId: string; offset: number } | null
+  /** Display names the user gave takes, by take id. The files themselves keep their names. */
+  takeNames?: Record<string, string>
+  /** User-made groups for the take bin ("Adlibs", "Hooks"…), in display order. */
+  takeCategories?: TakeCategory[]
+  /** Which category each take is in, by take id. Takes not listed sit in the plain "Takes" section. */
+  takeCategory?: Record<string, string>
+  /** Take folders, in no particular order - their lanes' positions place them. */
+  folders?: TakeFolder[]
   createdAt: number
   updatedAt: number
 }
@@ -416,12 +704,13 @@ export function newProject(session: ScannedSession, name: string): SmProject {
       clips: [{ id: uid(), takeId: beat.id, start: beat.position ?? 0, offset: 0, length: beat.duration, gain: 1, fadeIn: 0, fadeOut: 0 }],
     })
   }
-  for (let i = 1; i <= 3; i++) tracks.push({ id: uid(), name: `Vocals ${i}`, gain: 1, muted: false, solo: false, clips: [] })
+  const folder: TakeFolder = { id: uid(), name: 'Vocals' }
+  for (let i = 1; i <= 3; i++) tracks.push({ id: uid(), name: `Vocals ${i}`, gain: 1, muted: false, solo: false, clips: [], folder: folder.id })
   const now = Date.now()
   const ref = defaultReference(session)
   return {
     v: 1, id: uid(), name, zipPath: session.zipPath, bpm: session.bpm, gridOffset: beat?.position ?? 0, masterGain: 1, tracks,
-    loop: null, reference: ref ? { takeId: ref.id, offset: 0 } : null, createdAt: now, updatedAt: now,
+    loop: null, reference: ref ? { takeId: ref.id, offset: 0 } : null, folders: [folder], createdAt: now, updatedAt: now,
   }
 }
 
@@ -445,11 +734,50 @@ export function alternatesOf(p: SmProject, clipId: string): SmClip[] {
   for (const t of p.tracks) {
     if (isBeatTrack(t)) continue
     for (const c of [...t.clips].sort((a, b) => a.start - b.start)) {
+      // Takes of the same part: each covers at least half of the other. A long
+      // take isn't an alternate of a short punch-in or ad-lib that sits inside it.
       const overlap = Math.min(e, c.start + c.length) - Math.max(s, c.start)
-      if (c.id === clipId || overlap > Math.min(0.5, (c.length + target.length) / 4)) out.push(c)
+      if (c.id === clipId || (overlap > 0 && overlap >= c.length / 2 && overlap >= target.length / 2)) out.push(c)
     }
   }
   return out
+}
+
+// ─── Swipe comping ───────────────────────────────────────────────────────────
+
+type Span = [number, number]
+/** Crossfade across each comp edge, seconds. Silent stretches shorter than this, or closer together, merge away. */
+export const COMP_XF = 0.01
+
+function normSpans(spans: Span[]): Span[] {
+  const out: Span[] = []
+  for (const [a, b] of [...spans].sort((x, y) => x[0] - y[0])) {
+    const last = out[out.length - 1]
+    if (last && a - last[1] < COMP_XF) last[1] = Math.max(last[1], b)
+    else out.push([a, b])
+  }
+  return out.filter(([a, b]) => b - a >= COMP_XF)
+}
+
+function subtractSpan(spans: Span[], [a, b]: Span): Span[] {
+  return normSpans(spans.flatMap(([x, y]): Span[] => (y <= a || x >= b ? [[x, y]] : [...(x < a ? [[x, a] as Span] : []), ...(y > b ? [[b, y] as Span] : [])])))
+}
+
+/** The clip's silent stretches within it, in clip time (0 = its left edge). A muted clip is one stretch. */
+export function silentSpans(c: SmClip): Span[] {
+  if (c.muted) return [[0, c.length]]
+  if (!c.silent) return []
+  return c.silent
+    .map(([a, b]): Span => [Math.max(0, a - c.offset), Math.min(c.length, b - c.offset)])
+    .filter(([a, b]) => b - a > 1e-6)
+}
+
+const isComped = (c: SmClip): boolean => c.muted || silentSpans(c).length > 0
+export const hasMutedClips = (p: SmProject): boolean => p.tracks.some((t) => t.clips.some(isComped))
+
+export function unmuteAll(p: SmProject): SmProject {
+  const clear = (c: SmClip): SmClip => { const { silent: _, ...rest } = c; return { ...rest, muted: false } }
+  return { ...p, tracks: p.tracks.map((t) => (t.clips.some((c) => c.muted || c.silent) ? { ...t, clips: t.clips.map((c) => (c.muted || c.silent ? clear(c) : c)) } : t)) }
 }
 
 /** Makes `clipId` the only take heard over its stretch: its alternates are muted, it's unmuted. */
@@ -458,8 +786,58 @@ export function compTo(p: SmProject, clipId: string): SmProject {
   return {
     ...p,
     tracks: p.tracks.map((t) => (t.clips.some((c) => alts.has(c.id))
-      ? { ...t, clips: t.clips.map((c) => (alts.has(c.id) ? { ...c, muted: c.id !== clipId } : c)) }
+      ? { ...t, clips: t.clips.map((c) => { if (!alts.has(c.id)) return c; const { silent: _, ...rest } = c; return { ...rest, muted: c.id !== clipId } }) }
       : t)),
+  }
+}
+
+/** What a swipe on `clipId` silences: its alternates, and a longer take it sits
+ *  over (swiping a punch-in uses it in place of the take under it). Not shorter
+ *  clips inside it - those may be ad-libs. */
+function swipeRivals(p: SmProject, clipId: string): Set<string> {
+  const out = new Set(alternatesOf(p, clipId).map((c) => c.id))
+  let target: SmClip | undefined
+  for (const t of p.tracks) target ??= t.clips.find((c) => c.id === clipId)
+  if (!target) return out
+  for (const t of p.tracks) {
+    if (isBeatTrack(t)) continue
+    for (const c of t.clips) {
+      const overlap = Math.min(target.start + target.length, c.start + c.length) - Math.max(target.start, c.start)
+      if (c.length > target.length && overlap >= target.length / 2) out.add(c.id)
+    }
+  }
+  out.delete(clipId)
+  return out
+}
+
+/** Swipe comping: `clipId` is heard from timeline `from` to `to`, and its rivals there are silent. */
+export function swipeComp(p: SmProject, clipId: string, from: number, to: number): SmProject {
+  const rivals = swipeRivals(p, clipId)
+  const takeSpan = (c: SmClip): Span => [Math.max(c.start, from) - c.start + c.offset, Math.min(c.start + c.length, to) - c.start + c.offset]
+  const settle = (c: SmClip, silent: Span[]): SmClip => {
+    const { silent: _, ...rest } = c
+    const inside = normSpans(silent.map(([a, b]): Span => [Math.max(a, c.offset), Math.min(b, c.offset + c.length)]))
+    if (inside.length === 1 && inside[0][0] <= c.offset + 1e-6 && inside[0][1] >= c.offset + c.length - 1e-6) return { ...rest, muted: true }
+    return silent.length ? { ...rest, muted: false, silent } : { ...rest, muted: false }
+  }
+  return {
+    ...p,
+    tracks: p.tracks.map((t) => {
+      if (!t.clips.some((c) => c.id === clipId || rivals.has(c.id))) return t
+      return {
+        ...t,
+        clips: t.clips.map((c) => {
+          if (c.id === clipId) {
+            const base: Span[] = c.muted ? [[c.offset, c.offset + c.length]] : c.silent ?? []
+            return settle(c, subtractSpan(base, takeSpan(c)))
+          }
+          if (!rivals.has(c.id) || c.muted) return c
+          const span = takeSpan(c)
+          if (span[1] - span[0] <= 0) return c
+          return settle(c, normSpans([...(c.silent ?? []), span]))
+        }),
+      }
+    }),
   }
 }
 
@@ -469,25 +847,108 @@ export function projectEnd(p: SmProject): number {
   return end
 }
 
-/** Every take placed at its recorded position, packed onto as few lanes as don't overlap. */
+/** Every take placed at its recorded position, packed onto as few lanes as don't overlap
+ *  (the take folder's, when there is one). */
 export function placeAllTakes(project: SmProject, session: ScannedSession): SmProject {
   const placed = new Set(project.tracks.flatMap((t) => t.clips.map((c) => c.takeId)))
   const todo = session.takes.filter((t) => t.kind === 'take' && t.position != null && t.duration && !placed.has(t.id))
   if (!todo.length) return project
   const tracks = project.tracks.map((t) => ({ ...t, clips: [...t.clips] }))
-  const lanes = tracks.filter((t) => !isBeatTrack(t))
+  // With a take folder, takes go in its lanes - not an ad-lib or reference lane that happens to be free.
+  const home = lastFolder(tracks)
+  const lanes = tracks.filter((t) => !isBeatTrack(t) && (!home || t.folder === home))
   const fits = (t: SmTrack, s: number, e: number): boolean => t.clips.every((c) => c.start >= e - 1e-3 || c.start + c.length <= s + 1e-3)
   for (const take of todo) {
     const s = take.position!, e = s + take.duration!
     let lane = lanes.find((t) => fits(t, s, e))
     if (!lane) {
-      lane = { id: uid(), name: `Vocals ${lanes.length + 1}`, gain: 1, muted: false, solo: false, clips: [] }
+      lane = { id: uid(), name: `Vocals ${lanes.length + 1}`, gain: 1, muted: false, solo: false, clips: [], folder: lastFolder(tracks) }
       lanes.push(lane)
       tracks.push(lane)
     }
     lane.clips.push({ id: uid(), takeId: take.id, start: s, offset: 0, length: take.duration!, gain: 1, fadeIn: 0, fadeOut: 0 })
   }
-  return { ...project, tracks }
+  return normalizeFolders({ ...project, tracks })
+}
+
+// ─── Take folders ────────────────────────────────────────────────────────────
+
+const withoutFolder = (t: SmTrack): SmTrack => { const { folder: _, ...rest } = t; return rest }
+
+/** The folder of the last vocal lane that's in one - where new take lanes go. */
+export function lastFolder(tracks: SmTrack[]): string | undefined {
+  for (let i = tracks.length - 1; i >= 0; i--) if (!isBeatTrack(tracks[i]) && tracks[i].folder) return tracks[i].folder
+  return undefined
+}
+
+/** Each folder's lanes together, where its first lane is; no empty folders, no
+ *  lanes in a missing one, the beat in none. Returns `p` itself when that already holds. */
+export function normalizeFolders(p: SmProject): SmProject {
+  const folders = p.folders ?? []
+  if (!folders.length && !p.tracks.some((t) => t.folder)) return p
+  const known = new Set(folders.map((f) => f.id))
+  const clean = p.tracks.map((t) => (t.folder && (!known.has(t.folder) || isBeatTrack(t)) ? withoutFolder(t) : t))
+  const tracks: SmTrack[] = []
+  const placed = new Set<string>()
+  for (const t of clean) {
+    if (!t.folder) { tracks.push(t); continue }
+    if (placed.has(t.folder)) continue
+    placed.add(t.folder)
+    tracks.push(...clean.filter((x) => x.folder === t.folder))
+  }
+  const kept = folders.filter((f) => placed.has(f.id))
+  if (kept.length === folders.length && tracks.every((t, i) => t === p.tracks[i])) return p
+  return { ...p, tracks, folders: kept }
+}
+
+export type TimelineRow =
+  | { kind: 'folder'; folder: TakeFolder; open: boolean; members: number[] }
+  | { kind: 'track'; trackIdx: number; folder?: string }
+
+/** What the timeline shows top to bottom: a folder's row, then its lanes unless it's folded. */
+export function timelineRows(p: SmProject, closed: ReadonlySet<string>): TimelineRow[] {
+  const byId = new Map((p.folders ?? []).map((f) => [f.id, f]))
+  const rows: TimelineRow[] = []
+  const folderRows = new Map<string, Extract<TimelineRow, { kind: 'folder' }>>()
+  p.tracks.forEach((t, i) => {
+    const f = t.folder ? byId.get(t.folder) : undefined
+    if (!f) { rows.push({ kind: 'track', trackIdx: i }); return }
+    let row = folderRows.get(f.id)
+    if (!row) {
+      row = { kind: 'folder', folder: f, open: !closed.has(f.id), members: [] }
+      folderRows.set(f.id, row)
+      rows.push(row)
+    }
+    row.members.push(i)
+    if (row.open) rows.push({ kind: 'track', trackIdx: i, folder: f.id })
+  })
+  return rows
+}
+
+/** Puts the lanes (never the beat) in a new folder, gathered where the first of them is. */
+export function groupIntoFolder(p: SmProject, trackIds: string[], name: string): { project: SmProject; folderId: string | null } {
+  const ids = new Set(p.tracks.filter((t) => trackIds.includes(t.id) && !isBeatTrack(t)).map((t) => t.id))
+  if (!ids.size) return { project: p, folderId: null }
+  const folder: TakeFolder = { id: uid(), name }
+  const tracks = p.tracks.map((t) => (ids.has(t.id) ? { ...t, folder: folder.id } : t))
+  return { project: normalizeFolders({ ...p, tracks, folders: [...(p.folders ?? []), folder] }), folderId: folder.id }
+}
+
+/** Removes the folder; its lanes stay where they are. */
+export function ungroupFolder(p: SmProject, folderId: string): SmProject {
+  return normalizeFolders({ ...p, tracks: p.tracks.map((t) => (t.folder === folderId ? withoutFolder(t) : t)), folders: (p.folders ?? []).filter((f) => f.id !== folderId) })
+}
+
+/** The heard stretches of a clip, in clip time - what's left between its silences. */
+export function audibleSpans(c: SmClip): [number, number][] {
+  const out: [number, number][] = []
+  let at = 0
+  for (const [a, b] of silentSpans(c)) {
+    if (a > at) out.push([at, a])
+    at = Math.max(at, b)
+  }
+  if (at < c.length) out.push([at, c.length])
+  return out.filter(([a, b]) => b - a > 1e-6)
 }
 
 // ─── Saved projects ──────────────────────────────────────────────────────────
@@ -522,6 +983,8 @@ function audibleTracks(p: SmProject): SmTrack[] {
   return p.tracks.filter((t) => !t.muted && (!anySolo || t.solo))
 }
 
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x)
+
 /** Schedules one clip into `dest`: timeline time `from` lands at context time
  *  `at`, and nothing past timeline time `until` plays (a loop's end). */
 function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, buffer: AudioBuffer, from: number, at: number, until = Infinity): AudioBufferSourceNode | null {
@@ -551,7 +1014,35 @@ function scheduleClip(ctx: BaseAudioContext, dest: AudioNode, clip: SmClip, buff
     g.gain.setValueAtTime(gainAt(uEnd - 0.005), base + uEnd - 0.005)
     g.gain.linearRampToValueAtTime(0, base + uEnd)
   }
-  src.connect(g).connect(dest)
+  // Swipe-comp silences: their own gain stage, crossfading COMP_XF across each edge.
+  const spans = silentSpans(clip)
+  if (spans.length) {
+    const h = COMP_XF / 2
+    const level = (u: number): number => {
+      let k = 1
+      for (const [a, b] of spans) {
+        const down = a <= 0 ? 0 : clamp01((a + h - u) / COMP_XF)
+        const up = b >= clip.length ? 0 : clamp01((u - (b - h)) / COMP_XF)
+        k = Math.min(k, Math.max(down, up))
+      }
+      return k
+    }
+    const sg = ctx.createGain()
+    sg.gain.setValueAtTime(level(u0), base + u0)
+    for (const [a, b] of spans) {
+      const ramps: [number, number, number][] = []
+      if (a > 0) ramps.push([a - h, a + h, 0])
+      if (b < clip.length) ramps.push([b - h, b + h, 1])
+      for (const [t1, t2, v] of ramps) {
+        if (t2 <= u0 || t1 >= uEnd) continue
+        if (t1 > u0) sg.gain.setValueAtTime(1 - v, base + t1)
+        sg.gain.linearRampToValueAtTime(v, base + t2)
+      }
+    }
+    src.connect(sg).connect(g).connect(dest)
+  } else {
+    src.connect(g).connect(dest)
+  }
   src.start(Math.max(at, base + u0), clip.offset + u0, uEnd - u0)
   return src
 }
@@ -569,6 +1060,7 @@ function referenceClip(r: Reference): SmClip {
 export class SessionEngine {
   private sources = new Set<AudioBufferSourceNode>()
   private trackGains = new Map<string, GainNode>()
+  private trackPans = new Map<string, StereoPannerNode>()
   private master: GainNode | null = null
   private mixBus: GainNode | null = null
   private refBus: GainNode | null = null
@@ -579,6 +1071,14 @@ export class SessionEngine {
   private pump: ReturnType<typeof setInterval> | null = null
   private ab: AB = 'mix'
   private preview: AudioBufferSourceNode | null = null
+  private previewBuf: AudioBuffer | null = null
+  private previewOut: GainNode | null = null
+  private previewMeter: AnalyserNode | null = null
+  private previewStartedAt = 0
+  private previewFrom = 0
+  private previewOnEnd: (() => void) | null = null
+  private previewVol = 1
+  previewLooping = false
   playing = false
 
   position(): number {
@@ -601,8 +1101,10 @@ export class SessionEngine {
     refBus.connect(this.master)
     for (const t of p.tracks) {
       const tg = ctx.createGain()
-      tg.connect(mixBus)
+      const pan = ctx.createStereoPanner()
+      tg.connect(pan).connect(mixBus)
       this.trackGains.set(t.id, tg)
+      this.trackPans.set(t.id, pan)
     }
     const ref = opts.reference ?? null
     const segment = (segFrom: number, until: number, at: number): void => {
@@ -654,6 +1156,8 @@ export class SessionEngine {
     for (const t of p.tracks) {
       const g = this.trackGains.get(t.id)
       if (g) g.gain.value = audible.has(t.id) ? t.gain : 0
+      const pan = this.trackPans.get(t.id)
+      if (pan) pan.pan.value = t.pan ?? 0
     }
     this.setAB(this.ab, true)
   }
@@ -687,27 +1191,108 @@ export class SessionEngine {
     this.sources.clear()
     for (const g of this.trackGains.values()) g.disconnect()
     this.trackGains.clear()
+    for (const pan of this.trackPans.values()) pan.disconnect()
+    this.trackPans.clear()
     for (const n of [this.mixBus, this.refBus, this.master]) n?.disconnect()
     this.mixBus = this.refBus = this.master = null
     this.loop = null
   }
 
-  playPreview(buffer: AudioBuffer, onEnd: () => void): void {
+  /** Plays a take on its own, outside the arrangement. Pause/seek/loop keep the buffer around. */
+  playPreview(buffer: AudioBuffer, onEnd: () => void, from = 0): void {
     this.stopPreview()
-    const ctx = audioContext()
-    if (ctx.state === 'suspended') void ctx.resume()
-    const s = ctx.createBufferSource()
-    s.buffer = buffer
-    s.connect(ctx.destination)
-    s.onended = () => { if (this.preview === s) { this.preview = null; onEnd() } }
-    s.start()
-    this.preview = s
+    this.previewBuf = buffer
+    this.previewOnEnd = onEnd
+    this.startPreview(from)
   }
 
-  stopPreview(): void {
+  private startPreview(from: number): void {
+    const buffer = this.previewBuf
+    if (!buffer) return
+    this.haltPreviewSource()
+    const ctx = audioContext()
+    if (ctx.state === 'suspended') void ctx.resume()
+    if (!this.previewOut) {
+      this.previewOut = ctx.createGain()
+      this.previewMeter = ctx.createAnalyser()
+      this.previewMeter.fftSize = 64
+      this.previewMeter.smoothingTimeConstant = 0.7
+      this.previewOut.connect(this.previewMeter)
+      this.previewMeter.connect(ctx.destination)
+    }
+    this.previewOut.gain.value = this.previewVol
+    const at = Math.max(0, Math.min(from, buffer.duration - 0.01))
+    const s = ctx.createBufferSource()
+    s.buffer = buffer
+    s.loop = this.previewLooping
+    s.connect(this.previewOut)
+    s.onended = () => {
+      if (this.preview !== s) return
+      this.preview = null
+      this.previewFrom = 0
+      this.previewOnEnd?.()
+    }
+    s.start(0, at)
+    this.preview = s
+    this.previewFrom = at
+    this.previewStartedAt = ctx.currentTime
+  }
+
+  private haltPreviewSource(): void {
     const s = this.preview
     this.preview = null
     if (s) { try { s.stop() } catch {} s.disconnect() }
+  }
+
+  get previewActive(): boolean { return !!this.previewBuf }
+  get previewPlaying(): boolean { return !!this.preview }
+  get previewDuration(): number { return this.previewBuf?.duration ?? 0 }
+
+  previewPosition(): number {
+    const d = this.previewDuration
+    if (!this.preview || !d) return this.previewFrom
+    const t = this.previewFrom + (audioContext().currentTime - this.previewStartedAt)
+    return this.previewLooping ? t % d : Math.min(t, d)
+  }
+
+  pausePreview(): void {
+    if (!this.preview) return
+    const t = this.previewPosition()
+    this.haltPreviewSource()
+    this.previewFrom = t
+  }
+
+  resumePreview(): void {
+    if (this.previewBuf && !this.preview) this.startPreview(this.previewFrom >= this.previewDuration - 0.02 ? 0 : this.previewFrom)
+  }
+
+  seekPreview(t: number): void {
+    const to = Math.max(0, Math.min(t, this.previewDuration))
+    if (this.preview) this.startPreview(to)
+    else this.previewFrom = to
+  }
+
+  setPreviewLoop(on: boolean): void {
+    this.previewLooping = on
+    if (this.preview) this.startPreview(this.previewPosition())
+  }
+
+  setPreviewVolume(v: number): void {
+    this.previewVol = v
+    if (this.previewOut) this.previewOut.gain.value = v
+  }
+
+  /** Fills `out` with the preview's spectrum (0-255); all zeros when nothing is sounding. */
+  previewLevels(out: Uint8Array<ArrayBuffer>): void {
+    if (this.preview && this.previewMeter) this.previewMeter.getByteFrequencyData(out)
+    else out.fill(0)
+  }
+
+  stopPreview(): void {
+    this.haltPreviewSource()
+    this.previewBuf = null
+    this.previewOnEnd = null
+    this.previewFrom = 0
   }
 
   dispose(): void {
@@ -729,13 +1314,289 @@ export async function renderProject(p: SmProject, bufferFor: BufferFor, sampleRa
     if (!audible.has(t.id)) continue
     const tg = ctx.createGain()
     tg.gain.value = t.gain
-    tg.connect(master)
+    const pan = ctx.createStereoPanner()
+    pan.pan.value = t.pan ?? 0
+    tg.connect(pan).connect(master)
     for (const c of t.clips) {
       const b = bufferFor(c.takeId)
       if (b) scheduleClip(ctx, tg, c, b, 0, 0)
     }
   }
   return ctx.startRendering()
+}
+
+// ─── Reference alignment ─────────────────────────────────────────────────────
+// Lines the original bounce up with the arrangement. The bounce contains the
+// very same beat audio, so the waveforms themselves are matched: both are
+// rendered to mono, cross-correlated at 1 kHz with phase-transform weighting
+// (GCC-PHAT - every frequency counts equally, so mastering EQ and the vocals
+// the arrangement doesn't have barely move the peak), then refined at 8 kHz
+// around that lag. Tested against repeating 4-bar loops, where envelope
+// matching kept landing a loop off.
+
+const ALIGN_SR = 8000
+/** Coarse pass runs at ALIGN_SR / ALIGN_DECIMATE. */
+const ALIGN_DECIMATE = 8
+/** The best peak must beat every other lag (outside ±50 ms) by this much to count as a clear match. */
+const ALIGN_CLEAR_RATIO = 4
+
+async function toMono(buffer: AudioBuffer, sampleRate: number): Promise<Float32Array> {
+  const ctx = new OfflineAudioContext(1, Math.max(1, Math.ceil(buffer.duration * sampleRate)), sampleRate)
+  const src = ctx.createBufferSource()
+  src.buffer = buffer
+  src.connect(ctx.destination)
+  src.start()
+  return (await ctx.startRendering()).getChannelData(0)
+}
+
+/** Box-filter decimation: crude, but the coarse pass only needs the lows. */
+function decimate(x: Float32Array, f: number): Float32Array {
+  const out = new Float32Array(Math.floor(x.length / f))
+  for (let i = 0; i < out.length; i++) {
+    let sum = 0
+    for (let j = i * f, end = j + f; j < end; j++) sum += x[j]
+    out[i] = sum / f
+  }
+  return out
+}
+
+/** In-place radix-2 FFT; `inverse` leaves the result unscaled. */
+function fft(re: Float64Array, im: Float64Array, inverse = false): void {
+  const n = re.length
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1
+    for (; j & bit; bit >>= 1) j ^= bit
+    j ^= bit
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]] }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = ((inverse ? 2 : -2) * Math.PI) / len
+    const wr = Math.cos(ang), wi = Math.sin(ang)
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr
+        re[b] = re[a] - tr; im[b] = im[a] - ti
+        re[a] += tr; im[a] += ti
+        const nr = cr * wr - ci * wi
+        ci = cr * wi + ci * wr
+        cr = nr
+      }
+    }
+  }
+}
+
+/** The k in (-a.length, b.length) maximising the phase-transform cross-correlation
+ *  of a[i] with b[i+k], and how many times the next best lag (outside ±50 ms) it is. */
+function bestLag(a: Float32Array, b: Float32Array, sampleRate: number): { lag: number; ratio: number } {
+  let n = 1
+  while (n < a.length + b.length) n <<= 1
+  const ar = new Float64Array(n), ai = new Float64Array(n), br = new Float64Array(n), bi = new Float64Array(n)
+  ar.set(a); br.set(b)
+  fft(ar, ai); fft(br, bi)
+  // conj(A)·B, normalised to unit magnitude
+  for (let i = 0; i < n; i++) {
+    const r = ar[i] * br[i] + ai[i] * bi[i], im = ar[i] * bi[i] - ai[i] * br[i]
+    const m = Math.hypot(r, im) + 1e-12
+    ar[i] = r / m; ai[i] = im / m
+  }
+  fft(ar, ai, true)
+  let best = -Infinity, lag = 0
+  for (let k = -(a.length - 1); k < b.length; k++) {
+    const v = ar[(k + n) % n]
+    if (v > best) { best = v; lag = k }
+  }
+  const gap = Math.round(0.05 * sampleRate)
+  let second = -Infinity
+  for (let k = -(a.length - 1); k < b.length; k++) {
+    if (Math.abs(k - lag) > gap) second = Math.max(second, ar[(k + n) % n])
+  }
+  return { lag, ratio: second > 0 ? best / second : Infinity }
+}
+
+/** Best sample lag of `b` against `a` within lag ± radius, by direct correlation of their first differences. */
+function refineLag(a: Float32Array, b: Float32Array, lag: number, radius: number): number {
+  const da = new Float32Array(a.length), db = new Float32Array(b.length)
+  for (let i = 1; i < a.length; i++) da[i] = a[i] - a[i - 1]
+  for (let i = 1; i < b.length; i++) db[i] = b[i] - b[i - 1]
+  // The overlap at the rough lag, capped to 30 s around its middle.
+  const lo = Math.max(radius, -lag + radius), hi = Math.min(a.length - radius, b.length - lag - radius)
+  if (hi - lo < ALIGN_SR) return lag
+  const span = Math.min(hi - lo, 30 * ALIGN_SR)
+  const s0 = lo + Math.floor((hi - lo - span) / 2), s1 = s0 + span
+  let best = -Infinity, out = lag
+  for (let k = lag - radius; k <= lag + radius; k++) {
+    let v = 0
+    for (let i = s0; i < s1; i++) v += da[i] * db[i + k]
+    if (v > best) { best = v; out = k }
+  }
+  return out
+}
+
+export interface Alignment {
+  /** Where the original should start on the timeline, seconds. */
+  offset: number
+  /** True when the match stands well clear of every other candidate. */
+  confident: boolean
+}
+
+/** Finds where `reference` lines up with the arrangement. Every track is heard
+ *  (mute and solo are listening state); muted clips stay out, as they're comp choices. */
+export async function alignReference(p: SmProject, bufferFor: BufferFor, reference: AudioBuffer): Promise<Alignment | null> {
+  const all = { ...p, masterGain: 1, tracks: p.tracks.map((t) => ({ ...t, muted: false, solo: false })) }
+  if (!all.tracks.some((t) => t.clips.some((c) => !c.muted && bufferFor(c.takeId)))) return null
+  const stereo = await renderProject(all, bufferFor, ALIGN_SR)
+  const mix = new Float32Array(stereo.length)
+  for (let c = 0; c < stereo.numberOfChannels; c++) {
+    const d = stereo.getChannelData(c)
+    for (let i = 0; i < d.length; i++) mix[i] += d[i] / stereo.numberOfChannels
+  }
+  const ref = await toMono(reference, ALIGN_SR)
+  const rough = bestLag(decimate(ref, ALIGN_DECIMATE), decimate(mix, ALIGN_DECIMATE), ALIGN_SR / ALIGN_DECIMATE)
+  const lag = refineLag(ref, mix, rough.lag * ALIGN_DECIMATE, 2 * ALIGN_DECIMATE)
+  // ref[i] lines up with mix[i + lag], and the mix starts at timeline 0.
+  return { offset: lag / ALIGN_SR, confident: rough.ratio >= ALIGN_CLEAR_RATIO }
+}
+
+// ─── Tempo and bar 1 ─────────────────────────────────────────────────────────
+// Studio beats run at one fixed tempo, so a single grid fits the whole file. A
+// comb over 30 s of the beat picks the tempo, then one over the whole file pins
+// tempo and phase (a tenth of a BPM off drifts ~100 ms over a song). Bar 1 is
+// the first beat at the first hit - beats are bounced from the downbeat, and
+// when that's wrong "Bar 1 at playhead" fixes it.
+
+/** 5 ms frames at ALIGN_SR. */
+const TEMPO_HOP = 40
+const TEMPO_WIN = 4 * TEMPO_HOP
+const FRAME_SEC = TEMPO_HOP / ALIGN_SR
+/** A frame's rise means a hit about here in its window: the energy jumps as the hit enters it. */
+const ONSET_LAG = (TEMPO_WIN - TEMPO_HOP / 2) / ALIGN_SR
+/** Half- and double-time read the same, so this picks the double-time one trap beats are made at. */
+const TEMPO_MIN = 90, TEMPO_MAX = 180
+/** How well (vs the best grid) a grid through the first hit must fit for that hit to be taken as bar 1. */
+const BAR1_FIT = 0.7
+
+/** Rise in log energy of the first difference, in 20 ms windows 5 ms apart: peaks at hits. */
+function onsetStrength(x: Float32Array): Float32Array {
+  const n = Math.max(0, Math.floor((x.length - TEMPO_WIN) / TEMPO_HOP))
+  const sq = (i: number): number => { const d = i > 0 ? x[i] - x[i - 1] : 0; return d * d }
+  let e = 0
+  for (let i = 0; i < TEMPO_WIN; i++) e += sq(i)
+  const out = new Float32Array(n)
+  let prev = Math.log(1 + 1000 * e)
+  for (let f = 1; f < n; f++) {
+    for (let i = (f - 1) * TEMPO_HOP, end = i + TEMPO_HOP; i < end; i++) e += sq(i + TEMPO_WIN) - sq(i)
+    const l = Math.log(1 + 1000 * Math.max(0, e))
+    out[f] = Math.max(0, l - prev)
+    prev = l
+  }
+  // A little smoothing so beat positions rounded to a frame still land on the peak.
+  const sm = new Float32Array(n)
+  for (let f = 0; f < n; f++) sm[f] = 0.25 * (out[f - 1] ?? 0) + 0.5 * out[f] + 0.25 * (out[f + 1] ?? 0)
+  return sm
+}
+
+/** Mean onset strength on beats every `period` frames from `phase`, over env[from, to). */
+function combAt(env: Float32Array, period: number, phase: number, from: number, to: number): number {
+  let s = 0, k = 0
+  for (let t = from + phase; t < to; t += period, k++) s += env[Math.round(t)] ?? 0
+  return k ? s / k : 0
+}
+
+/** Beats score, and so do the 8ths between them - that's what tells the real
+ *  tempo from one that lands on every third 8th. */
+function gridScore(env: Float32Array, period: number, phase: number, from = 0, to = env.length): number {
+  to = Math.min(to, env.length - 1)
+  return combAt(env, period, phase, from, to) + 0.5 * combAt(env, period, phase + period / 2, from, to)
+}
+
+/** Best phase for `bpm` over env[from, to). */
+function fitTempo(env: Float32Array, bpm: number, from = 0, to = env.length): { phase: number; score: number } {
+  const period = 60 / bpm / FRAME_SEC
+  let best = -Infinity, phase = 0
+  for (let p = 0; p < period; p++) {
+    const s = gridScore(env, period, p, from, to)
+    if (s > best) { best = s; phase = p }
+  }
+  return { phase, score: best }
+}
+
+export interface TempoGuess {
+  bpm: number
+  /** Where bar 1 beat 1 falls in the audio, seconds. */
+  bar1: number
+}
+
+/** Tempo and where bar 1 starts, from a beat (or any steady-tempo audio). */
+export async function detectTempo(buffer: AudioBuffer): Promise<TempoGuess | null> {
+  // A window of silence in front, so a hit at the very start rises into a window like every other one.
+  const mono = await toMono(buffer, ALIGN_SR)
+  const padded = new Float32Array(mono.length + TEMPO_WIN)
+  padded.set(mono, TEMPO_WIN)
+  const env = onsetStrength(padded)
+  if (env.length * FRAME_SEC < 8) return null
+  // Rough: 30 s from the middle, in 0.1 BPM steps - coarser lets an in-between
+  // tempo drift off its own hits and lose to a triplet relative.
+  const span = Math.min(env.length, Math.round(30 / FRAME_SEC))
+  const from = Math.floor((env.length - span) / 2)
+  let bpm = TEMPO_MIN, best = { phase: 0, score: -Infinity }
+  for (let b = TEMPO_MIN; b < TEMPO_MAX; b += 0.1) {
+    const f = fitTempo(env, b, from, from + span)
+    if (f.score > best.score) { best = f; bpm = b }
+  }
+  if (best.score <= 0) return null
+  // Then over the whole file: 0.02 BPM steps, then 0.002.
+  best = fitTempo(env, bpm)
+  for (const [range, step] of [[0.3, 0.02], [0.02, 0.002]]) {
+    const centre = bpm
+    for (let b = centre - range; b <= centre + range + 1e-9; b += step) {
+      const f = fitTempo(env, b)
+      if (f.score > best.score) { best = f; bpm = b }
+    }
+  }
+  // Producers set whole (or half) BPMs: prefer one when it fits about as well.
+  for (const round of [Math.round(bpm), Math.round(bpm * 2) / 2]) {
+    const f = fitTempo(env, round)
+    if (Math.abs(round - bpm) < 0.01 || f.score >= best.score * 0.98) { bpm = round; best = f; break }
+  }
+  bpm = Math.round(bpm * 1000) / 1000
+  const period = 60 / bpm / FRAME_SEC
+  // First hit: the first frame reaching a third of the loud hits' strength.
+  const sorted = Float32Array.from(env).sort()
+  const loud = sorted[Math.floor(sorted.length * 0.995)]
+  const first = Math.max(0, env.findIndex((v) => v >= loud / 3))
+  // Bar 1 on the first hit, as long as a grid through it fits nearly as well as
+  // the best one - the best can sit on the offbeats when the 8ths hit hardest.
+  // Otherwise (a pickup before the downbeat), the first grid beat at or after it.
+  // The first frame over the threshold is the hit's rising edge; its peak is a frame or two on.
+  let peak = first, peakScore = -Infinity
+  for (let f = Math.max(0, first - 3); f <= first + 3; f++) {
+    const sc = gridScore(env, period, f % period)
+    if (sc > peakScore) { peakScore = sc; peak = f }
+  }
+  const bar1 = peakScore >= best.score * BAR1_FIT
+    ? peak
+    : best.phase + Math.ceil((first - period / 4 - best.phase) / period) * period
+  return { bpm, bar1: Math.max(0, bar1 * FRAME_SEC + ONSET_LAG - TEMPO_WIN / ALIGN_SR) }
+}
+
+/** Highest absolute sample over every channel - above 1 the WAV clips. */
+export function peakOf(buffer: AudioBuffer): number {
+  let peak = 0
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const d = buffer.getChannelData(c)
+    for (let i = 0; i < d.length; i++) { const v = d[i] < 0 ? -d[i] : d[i]; if (v > peak) peak = v }
+  }
+  return peak
+}
+
+/** Scales every channel in place. */
+export function scaleBuffer(buffer: AudioBuffer, k: number): void {
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const d = buffer.getChannelData(c)
+    for (let i = 0; i < d.length; i++) d[i] *= k
+  }
 }
 
 /** 24-bit PCM WAV - the takes are 24-bit, so this doesn't throw resolution away. */

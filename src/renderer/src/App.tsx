@@ -368,12 +368,12 @@ export default function App(): JSX.Element {
               : <ApiTrackerView />}
             </Suspense>
           </ErrorBoundary>
-            {showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
+            {showNowPlaying && activeView !== 'wrld' && activeView !== 'session-maker' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
             {queueEverOpened && (
               <ErrorBoundary>
                 {/* flex so QueuePanel stretches to the full height; a plain
                     block wrapper let it collapse to its content height. */}
-                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
+                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' && activeView !== 'session-maker' ? undefined : { display: 'none' }}>
                   <QueuePanel />
                 </div>
               </ErrorBoundary>

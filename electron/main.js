@@ -2189,6 +2189,52 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
   return { localPath, size }
 })
 
+// ── Session Maker: whole-session zips saved to a user-chosen folder ───────────
+// The renderer reads them back through local-media:// (range requests), so a
+// multi-hundred-MB zip never has to sit in memory.
+const sessionZipJobs = new Map()
+function sessionZipTarget(dir, filename) {
+  if (typeof dir !== 'string' || !dir || typeof filename !== 'string') return null
+  const name = path.basename(filename)
+  if (!name || !name.toLowerCase().endsWith('.zip')) return null
+  return path.join(dir, name)
+}
+ipcMain.handle('session-zip-download', async (event, { url, dir, filename }) => {
+  if (!isAllowedLibraryDownloadHost(url)) return { error: 'Download blocked: untrusted host' }
+  const dest = sessionZipTarget(dir, filename)
+  if (!dest) return { error: 'Bad destination' }
+  if (sessionZipJobs.has(dest)) return { error: 'Already downloading' }
+  try { fs.mkdirSync(dir, { recursive: true }) } catch (e) { return { error: e.message } }
+  sessionZipJobs.set(dest, true)
+  try {
+    await downloadFile(url, dest, (percent, received, total) => {
+      if (!event.sender.isDestroyed()) event.sender.send('session-zip-progress', { filename: path.basename(dest), received, total })
+    })
+    return { path: dest, size: fs.statSync(dest).size }
+  } catch (e) {
+    return { error: e.message }
+  } finally {
+    sessionZipJobs.delete(dest)
+  }
+})
+ipcMain.handle('session-zip-default-dir', () => {
+  let musicDir
+  try { musicDir = app.getPath('music') } catch { musicDir = path.join(app.getPath('home'), 'Music') }
+  return path.join(musicDir, 'Unreleased', 'Sessions', 'Downloaded')
+})
+ipcMain.handle('session-zip-list', (_, dir) => {
+  try {
+    return fs.readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith('.zip'))
+      .map((f) => ({ filename: f, path: path.join(dir, f), size: fs.statSync(path.join(dir, f)).size }))
+  } catch { return [] }
+})
+ipcMain.handle('session-zip-remove', (_, dir, filename) => {
+  const dest = sessionZipTarget(dir, filename)
+  if (!dest) return false
+  try { fs.unlinkSync(dest); return true } catch { return false }
+})
+
 ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {
     const entry = library.tracks[id]

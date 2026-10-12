@@ -6,6 +6,7 @@ import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
 import { cancelDonorUpload, cancelAllDonorUploads, isDonorUploadId } from '../lib/donorUploads'
 import { cancelChatUpload, cancelAllChatUploads, isChatUploadId } from '../lib/chatUploads'
 import { cancelZipTask, isZipTaskId } from '../lib/clientZip'
+import { cancelSessionDownloadRow, isSessionDownloadId } from '../lib/sessionMaker'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 import { proposeStagedSongChanges, stagedSongChangeLabel } from '../lib/compStagedSongChanges'
 
@@ -280,6 +281,7 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
   const isUpload = item.type === 'upload'
   // A ZIP being built in the browser (lib/clientZip) - cancellable like an upload.
   const isZip = isZipTaskId(item.id)
+  const isSessionDl = isSessionDownloadId(item.id)
 
   const sizeLabel = item.type === 'playlist'
     ? [
@@ -327,6 +329,12 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
           {isActive && <span className="text-[var(--text-muted)] text-[10px]">{item.percent}%</span>}
           {isActive && isZip && (
             <button onClick={() => cancelZipTask(item.id)} title="Cancel download"
+              className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 transition-colors">
+              <X size={12} />
+            </button>
+          )}
+          {isActive && isSessionDl && (
+            <button onClick={() => cancelSessionDownloadRow(item.id)} title="Cancel download"
               className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 transition-colors">
               <X size={12} />
             </button>
