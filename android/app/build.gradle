@@ -9,8 +9,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Keep versionName in step with package.json's version when releasing;
         // bump versionCode by 1 each APK (Android compares the integer, not the name).
-        versionCode 40
-        versionName "3.2.1"
+        versionCode 41
+        versionName "3.2.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

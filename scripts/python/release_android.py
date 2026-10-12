@@ -462,7 +462,9 @@ def _publish_github_release(owner, repo, tag, notes, token, state, id_key, new_k
             # would misattach an android tag to unrelated history.
             {"tag_name": tag, "name": tag, "body": notes,
              "target_commitish": ANDROID_BRANCH,
-             "draft": False, "prerelease": True})
+             "draft": False, "prerelease": False,
+             # keep desktop v* as GitHub's "Latest" so the desktop auto-updater is unaffected
+             "make_latest": "false"})
         state[id_key] = release["id"]
         state[new_key] = True
         ok(f"Release created  (id={release['id']})")
@@ -472,7 +474,7 @@ def _publish_github_release(owner, repo, tag, notes, token, state, id_key, new_k
                 f"/repos/{owner}/{repo}/releases/tags/{tag}", token)
             api("PATCH",
                 f"/repos/{owner}/{repo}/releases/{release['id']}", token,
-                {"prerelease": True, "body": notes})
+                {"prerelease": False, "make_latest": "false", "body": notes})
             state[id_key] = release["id"]
             state[new_key] = False
             ok(f"Release already exists — updated  (id={release['id']})")
