@@ -17,6 +17,7 @@
     "electron:dev:x11": "concurrently \"npm run dev\" \"wait-on http://localhost:3018 && electron . --ozone-platform=x11\"",
     "electron:build": "npm run build && electron-builder",
     "electron:smoke": "electron . --smoke-test",
+    "build:vsthost": "node scripts/build-vsthost.mjs",
     "terminal:check-coverage": "node scripts/check-terminal-coverage.mjs"
   },
   "keywords": [],
@@ -89,6 +90,7 @@
       "!release/**/*",
       "!beta-builds/**/*",
       "!scripts/**/*",
+      "!native/**/*",
       "!.github/**/*",
       "!.git/**/*",
       "!.claude/**/*",
@@ -147,6 +149,10 @@
         {
           "from": "electron/icon.ico",
           "to": "icon.ico"
+        },
+        {
+          "from": "build/vsthost/vsthost.exe",
+          "to": "vsthost.exe"
         }
       ]
     },

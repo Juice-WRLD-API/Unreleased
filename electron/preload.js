@@ -231,6 +231,19 @@ contextBridge.exposeInMainWorld('electron', {
     return () => ipcRenderer.removeListener('session-zip-progress', fn)
   },
 
+  // Session Maker VST3 plug-ins
+  vstAvailable:  ()        => ipcRenderer.invoke('vst-available'),
+  vstScan:       (force)   => ipcRenderer.invoke('vst-scan', force),
+  vstAddFolder:  ()        => ipcRenderer.invoke('vst-add-folder'),
+  vstProcess:    (req)     => ipcRenderer.invoke('vst-process', req),
+  vstEditOpen:   (req)     => ipcRenderer.invoke('vst-edit-open', req),
+  vstEditClose:  (key)     => ipcRenderer.invoke('vst-edit-close', key),
+  onVstEditor: (cb) => {
+    const fn = (_, d) => cb(d)
+    ipcRenderer.on('vst-editor', fn)
+    return () => ipcRenderer.removeListener('vst-editor', fn)
+  },
+
   // WrldData (albums JSON)
   loadWrldData: ()       => ipcRenderer.invoke('load-wrlddata'),
   saveWrldData: (data)   => ipcRenderer.invoke('save-wrlddata', data),

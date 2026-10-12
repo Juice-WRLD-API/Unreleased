@@ -59,6 +59,10 @@ copyright and permission notices be preserved — which this file does.
 | @xhayper/discord-rpc | ISC | <https://github.com/xhayper/discord-rpc> |
 | electron-updater | MIT | <https://github.com/electron-userland/electron-builder> |
 | ffmpeg-static | GPL-3.0-or-later (binary) | <https://github.com/eugeneware/ffmpeg-static> |
+| Steinberg VST 3 SDK (in the Windows plug-in host, `vsthost.exe`) | MIT | <https://github.com/steinbergmedia/vst3sdk> |
+
+VST is a registered trademark of Steinberg Media Technologies GmbH. The VST 3 SDK
+is Copyright (c) Steinberg Media Technologies GmbH.
 
 Electron itself bundles **Chromium** (BSD-3-Clause and numerous other permissive
 licenses) and **Node.js** (MIT). The complete license texts for those components

@@ -83,6 +83,11 @@ jobs:
           curl -fL -o build/bundled/Unreleased-Setup.exe \
             "https://github.com/Juice-WRLD-API/Unreleased/releases/download/$tag/Unreleased-Setup.exe"
 
+      # The Session Maker's VST3 host (native/vsthost) - win.extraResources ships it.
+      # The runner's Visual Studio has the C++ tools; the script fetches the SDK.
+      - name: Build VST3 plug-in host
+        run: node scripts/build-vsthost.mjs
+
       - name: Package installers (offline + web)
         run: npx electron-builder --win --publish never
 

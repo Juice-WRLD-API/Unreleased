@@ -9,6 +9,7 @@ const { pathToFileURL, fileURLToPath } = require('url')
 const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
+const vstHost = require('./vstHost')
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -2234,6 +2235,9 @@ ipcMain.handle('session-zip-remove', (_, dir, filename) => {
   if (!dest) return false
   try { fs.unlinkSync(dest); return true } catch { return false }
 })
+
+// Session Maker VST3 plug-ins (see vstHost.js)
+vstHost.register({ app, ipcMain, dialog, BrowserWindow })
 
 ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {
