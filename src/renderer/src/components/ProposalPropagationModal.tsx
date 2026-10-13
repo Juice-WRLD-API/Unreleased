@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { X, Loader2, Globe, CheckCircle, Wifi, WifiOff } from 'lucide-react'
 import { ModalOverlay } from './Modal'
-import { countryFlag } from './cdnNodesShared'
+import { FlagIcon } from './cdnNodesShared'
 import { fetchProposalPropagation } from '../lib/cdnAdminApi'
 import type { ProposalPropagation, PropagationNode, PropagationState } from '../lib/cdnAdminApi'
 
@@ -75,9 +75,9 @@ function DottedWorldMap({ nodes }: { nodes: PropagationNode[] }): JSX.Element {
             key={i}
             cx={projectX(lon, MAP_W)}
             cy={projectY(lat, MAP_H)}
-            r={1}
+            r={1.3}
             fill="var(--text-muted)"
-            opacity={0.2}
+            opacity={0.45}
           />
         ))}
         {nodes.map((n) => {
@@ -120,13 +120,13 @@ function StateBadge({ state, online }: { state: PropagationState; online: boolea
 }
 
 function NodeRow({ node }: { node: PropagationNode }): JSX.Element {
-  const flag = countryFlag(node.country_code)
-  const location = [node.city, node.country_code].filter(Boolean).join(', ')
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] last:border-b-0">
-      <span className="text-lg shrink-0">{flag || '🌐'}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-text-primary truncate">{node.name || location || 'Unknown'}</p>
+        <p className="text-sm font-medium text-text-primary truncate flex items-center gap-1.5">
+          <FlagIcon code={node.country_code} size={16} />
+          {node.name || node.city || 'Unknown'}
+        </p>
         <p className="text-xs text-text-muted truncate">{node.continent || node.region || ''}</p>
       </div>
       <StateBadge state={node.state} online={node.online} />
