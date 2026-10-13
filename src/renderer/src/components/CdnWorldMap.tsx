@@ -222,7 +222,7 @@ export default function CdnWorldMap({ nodes, dimmedIds, selectedId, onSelect, wh
         }}
       >
         <svg viewBox={`${view.x} ${view.y} ${vw} ${vh}`} className="block w-full h-auto" role="group" aria-label="Map of CDN node locations">
-          <path d={LAND_PATH} stroke="var(--text-muted)" strokeOpacity={0.4} strokeWidth={2.3} strokeLinecap="round" fill="none" />
+          <path d={LAND_PATH} stroke="var(--text-muted)" strokeOpacity={0.55} strokeWidth={2.6} strokeLinecap="round" fill="none" />
           {clusters.map((c) => {
             const fill = BUCKET_FILL[c.bucket]
             const multi = c.items.length > 1
