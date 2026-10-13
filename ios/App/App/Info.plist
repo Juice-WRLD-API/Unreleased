@@ -76,5 +76,20 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.juicewrldapi.player.play999fm</string>
+	</array>
+	<key>INIntentsSupported</key>
+	<array>
+		<string>INPlayMediaIntent</string>
+	</array>
+	<key>INSupportedMediaCategories</key>
+	<array>
+		<string>INMediaCategoryMusic</string>
+		<string>INMediaCategoryRadio</string>
+	</array>
+	<key>NSSiriUsageDescription</key>
+	<string>Control playback with Siri voice commands and Shortcuts.</string>
 </dict>
 </plist>

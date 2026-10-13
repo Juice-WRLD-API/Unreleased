@@ -7,17 +7,20 @@
 
 import { registerPlugin } from '@capacitor/core'
 import { IS_IOS, IS_NATIVE_APP } from './platform'
-import { searchSongs, songToTrack } from './juicewrldApi'
+import { cleanTitleForSearch, loadAllSongs, searchSongs, songToTrack } from './juicewrldApi'
 import { useStore } from '../store/useStore'
 import { runPlayerCommand } from '../components/Player'
+import { getActiveRadioClient } from './radioSocketService'
+import { resumeEffectsContext } from './audioEffects'
 
 interface SiriCommand {
-  action: 'play' | 'pause' | 'next' | 'previous' | 'toggleShuffle' | 'like' | 'playSong'
+  action: 'play' | 'pause' | 'next' | 'previous' | 'toggleShuffle' | 'like' | 'playSong' | 'play999Fm'
   query?: string
 }
 
 interface SiriCommandsPlugin {
   consume(): Promise<{ commands: SiriCommand[] }>
+  setSongTitles(options: { titles: string[] }): Promise<void>
   addListener(eventName: 'command', cb: () => void): Promise<{ remove: () => void }>
 }
 
@@ -40,7 +43,41 @@ async function run(cmd: SiriCommand): Promise<void> {
       if (song) state.playTrack(songToTrack(song), [songToTrack(song)])
       break
     }
+    case 'play999Fm': {
+      state.setIsPlaying(false)
+      resumeEffectsContext()
+      state.setRadioFmActive(true)
+      state.setActiveView('wrld')
+      const startRadio = (): boolean => {
+        const client = getActiveRadioClient()
+        if (!client) return false
+        void client.startListening().catch(() => useStore.getState().setRadioFmActive(false))
+        return true
+      }
+      if (!startRadio()) {
+        const started = performance.now()
+        const tick = (): void => {
+          if (startRadio() || performance.now() - started > 12_000) {
+            window.clearInterval(handle)
+          }
+        }
+        const handle = window.setInterval(tick, 250)
+        tick()
+      }
+      break
+    }
   }
+}
+
+async function registerSongTitles(plugin: SiriCommandsPlugin): Promise<void> {
+  const songs = await loadAllSongs()
+  const titles = new Set<string>()
+  for (const s of songs) {
+    if (['unsurfaced', 'recording_session'].includes(s.category)) continue
+    const title = cleanTitleForSearch(s.name)
+    if (title) titles.add(title)
+  }
+  await plugin.setSongTitles({ titles: [...titles] })
 }
 
 /** Starts listening for Siri commands; returns an unsubscribe. No-op off iOS. */
@@ -59,6 +96,7 @@ export function startSiriCommands(): () => void {
   }
   let handle: { remove: () => void } | undefined
   void drain()
+  registerSongTitles(plugin).catch(() => {})
   Promise.resolve(plugin.addListener('command', () => { void drain() }))
     .then((l) => { if (stopped) l.remove(); else handle = l })
     .catch(() => {})

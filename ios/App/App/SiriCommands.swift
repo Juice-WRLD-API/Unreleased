@@ -19,6 +19,18 @@ struct SiriCommand {
     }
 }
 
+enum SiriSongTitles {
+    private static let key = "siriSongTitles"
+
+    static func store(_ titles: [String]) {
+        UserDefaults.standard.set(titles, forKey: key)
+    }
+
+    static func load() -> [String] {
+        UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+}
+
 final class SiriCommandCenter {
     static let shared = SiriCommandCenter()
 
@@ -31,7 +43,16 @@ final class SiriCommandCenter {
         lock.lock()
         pending.append(SiriCommand(action: action, query: query))
         lock.unlock()
-        DispatchQueue.main.async { self.plugin?.ping() }
+        DispatchQueue.main.async { self.pingWhenReady(attempt: 0) }
+    }
+
+    private func pingWhenReady(attempt: Int) {
+        if plugin != nil {
+            plugin?.ping()
+            return
+        }
+        guard attempt < 40 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.pingWhenReady(attempt: attempt + 1) }
     }
 
     func drain() -> [SiriCommand] {
@@ -49,6 +70,7 @@ public class SiriCommandsPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "SiriCommands"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "consume", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setSongTitles", returnType: CAPPluginReturnPromise),
     ]
 
     override public func load() {
@@ -63,6 +85,15 @@ public class SiriCommandsPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func consume(_ call: CAPPluginCall) {
         call.resolve(["commands": SiriCommandCenter.shared.drain().map { $0.payload }])
+    }
+
+    @objc func setSongTitles(_ call: CAPPluginCall) {
+        let titles = call.getArray("titles", String.self) ?? []
+        SiriSongTitles.store(titles)
+        if #available(iOS 16.0, *) {
+            UnreleasedShortcuts.updateAppShortcutParameters()
+        }
+        call.resolve()
     }
 }
 

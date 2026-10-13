@@ -11,6 +11,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.rootViewController = BridgeViewController()
         window?.makeKeyAndVisible()
 
+        for activity in connectionOptions.userActivities where activity.activityType == SiriRadioDonation.activityType {
+            SiriCommandCenter.shared.send("play999Fm")
+        }
+
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
 
@@ -19,6 +23,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        if userActivity.activityType == SiriRadioDonation.activityType {
+            SiriCommandCenter.shared.send("play999Fm")
+        }
         SceneDelegateProxy.shared.scene(scene, continue: userActivity)
     }
 }

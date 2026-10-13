@@ -1,4 +1,6 @@
+import AppIntents
 import AVFoundation
+import Intents
 import UIKit
 import Capacitor
 
@@ -9,7 +11,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         configureAudioSession()
+        if #available(iOS 16.0, *) {
+            UnreleasedShortcuts.updateAppShortcutParameters()
+        }
         return true
+    }
+
+    func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
+        if userActivity.activityType == SiriRadioDonation.activityType {
+            SiriCommandCenter.shared.send("play999Fm")
+            return true
+        }
+        return false
+    }
+
+    func application(_ application: UIApplication, handlerFor intent: INIntent) -> Any? {
+        intent is INPlayMediaIntent ? PlayMediaIntentHandler() : nil
     }
 
     // Makes the WebView's <audio> elements behave like a music app instead of
