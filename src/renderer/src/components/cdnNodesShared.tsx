@@ -179,6 +179,30 @@ export function countryFlag(code: string): string {
   return String.fromCodePoint(0x1f1e6 + a.charCodeAt(0) - 65, 0x1f1e6 + b.charCodeAt(0) - 65)
 }
 
+function flagSvgUrl(code: string): string | null {
+  if (!/^[a-z]{2}$/i.test(code)) return null
+  const [a, b] = code.toUpperCase()
+  const cp1 = (0x1f1e6 + a.charCodeAt(0) - 65).toString(16)
+  const cp2 = (0x1f1e6 + b.charCodeAt(0) - 65).toString(16)
+  return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${cp1}-${cp2}.svg`
+}
+
+export function FlagIcon({ code, size = 18 }: { code: string; size?: number }): JSX.Element {
+  const url = flagSvgUrl(code)
+  if (!url) return <span style={{ fontSize: size }}>🌐</span>
+  return (
+    <img
+      src={url}
+      alt={code}
+      width={size}
+      height={size}
+      className="inline-block shrink-0"
+      style={{ verticalAlign: 'middle' }}
+      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+    />
+  )
+}
+
 let regionNames: Intl.DisplayNames | null | undefined
 function countryName(code: string): string {
   if (regionNames === undefined) {
