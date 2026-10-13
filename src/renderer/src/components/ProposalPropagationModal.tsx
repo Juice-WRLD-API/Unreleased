@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { X, Loader2, Globe, CheckCircle, Wifi, WifiOff } from 'lucide-react'
+import { X, Loader2, Globe, CheckCircle, Wifi, WifiOff, MinusCircle } from 'lucide-react'
 import { ModalOverlay } from './Modal'
 import { FlagIcon } from './cdnNodesShared'
 import { fetchProposalPropagation } from '../lib/cdnAdminApi'
-import type { ProposalPropagation, PropagationNode, PropagationState } from '../lib/cdnAdminApi'
+import type { ProposalPropagation, PropagationNode, PropagationSkipReason, PropagationState } from '../lib/cdnAdminApi'
 
 const POLL_INTERVAL = 10_000
 
@@ -11,6 +11,13 @@ const STATE_COLORS: Record<PropagationState, string> = {
   propagated: '#22c55e',
   propagating: '#3b82f6',
   offline: '#6b7280',
+  skipped: '#f59e0b',
+}
+
+const SKIP_REASON_LABELS: Record<Exclude<PropagationSkipReason, ''>, string> = {
+  channel: 'Channel not selected on this node',
+  folder: 'Folder not selected on this node',
+  storage: 'Node storage is full',
 }
 
 function projectX(lon: number, width: number): number {
@@ -88,7 +95,7 @@ function DottedWorldMap({ nodes }: { nodes: PropagationNode[] }): JSX.Element {
           return (
             <g key={n.node_id}>
               <circle cx={cx} cy={cy} r={8} fill={color} opacity={0.15} />
-              <circle cx={cx} cy={cy} r={5} fill={color} opacity={n.state === 'offline' ? 0.5 : 0.9} />
+              <circle cx={cx} cy={cy} r={5} fill={color} opacity={n.state === 'offline' || n.state === 'skipped' ? 0.5 : 0.9} />
             </g>
           )
         })}
@@ -102,6 +109,13 @@ function StateBadge({ state, online }: { state: PropagationState; online: boolea
     return (
       <span className="flex items-center gap-1 text-xs font-semibold text-text-muted">
         <WifiOff size={12} /> OFFLINE
+      </span>
+    )
+  }
+  if (state === 'skipped') {
+    return (
+      <span className="flex items-center gap-1 text-xs font-semibold text-amber-400">
+        <MinusCircle size={12} /> NOT SYNCED
       </span>
     )
   }
@@ -127,7 +141,11 @@ function NodeRow({ node }: { node: PropagationNode }): JSX.Element {
           <FlagIcon code={node.country_code} size={16} />
           {node.name || node.city || 'Unknown'}
         </p>
-        <p className="text-xs text-text-muted truncate">{node.continent || node.region || ''}</p>
+        <p className="text-xs text-text-muted truncate">
+          {node.state === 'skipped' && node.skip_reason
+            ? SKIP_REASON_LABELS[node.skip_reason]
+            : node.continent || node.region || ''}
+        </p>
       </div>
       <StateBadge state={node.state} online={node.online} />
     </div>
@@ -155,9 +173,9 @@ export default function ProposalPropagationModal({ proposalId, onClose }: {
   }, [proposalId])
 
   const propagatedCount = data?.nodes.filter(n => n.state === 'propagated').length ?? 0
-  const totalCount = data?.nodes.length ?? 0
-  // Nothing left to wait for once every node has the change.
-  const settled = totalCount > 0 && propagatedCount === totalCount
+  const totalCount = data?.nodes.filter(n => n.state !== 'skipped').length ?? 0
+  const pendingCount = data?.nodes.filter(n => n.state === 'propagating').length ?? 0
+  const settled = !!data && pendingCount === 0
 
   useEffect(() => {
     load()
@@ -222,6 +240,12 @@ export default function ProposalPropagationModal({ proposalId, onClose }: {
                       <span className="flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-gray-500 inline-block" />
                         Offline
+                      </span>
+                    )}
+                    {data.nodes.some(n => n.state === 'skipped') && (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                        Not synced
                       </span>
                     )}
                     <span className="ml-auto">{propagatedCount}/{totalCount} nodes</span>
