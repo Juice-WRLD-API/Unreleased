@@ -1,7 +1,9 @@
-import { Loader2, Sparkles, X } from 'lucide-react'
+import { Check, Loader2, Sparkles, Ban, X } from 'lucide-react'
 import type { CompFileProposal } from '../lib/userApi'
 import { compChangeTypeLabel } from '../lib/userApi'
 import { StatusChip, relativeTime } from './adminShared'
+import { compApproveBlockedReason } from '../lib/compProposalShared'
+import { useStore } from '../store/useStore'
 
 // A contributor's own comp proposals, with the status filter above them.
 // Three pages show this exact list - the submit page, the contributor profile,
@@ -61,7 +63,7 @@ export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
   )
 }
 
-export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, onToggleNewLeak, togglingLeakId, empty = 'No comp proposals yet.' }: {
+export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, onToggleNewLeak, togglingLeakId, onReview, reviewingId, empty = 'No comp proposals yet.' }: {
   proposals: CompFileProposal[]
   loading?: boolean
   /** Clicking a row - omit to render the rows as plain, unclickable cards. */
@@ -74,8 +76,12 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
    *  is where those get flagged. */
   onToggleNewLeak?: (proposal: CompFileProposal) => void
   togglingLeakId?: number | null
+  /** Staff approving/denying a pending proposal in place - omit to hide. */
+  onReview?: (proposal: CompFileProposal, action: 'approve' | 'reject') => void
+  reviewingId?: number | null
   empty?: string
 }): JSX.Element {
+  const account = useStore((s) => s.account)
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-text-muted" /></div>
   if (proposals.length === 0) return <p className="text-sm text-text-muted text-center py-12">{empty}</p>
 
@@ -123,6 +129,26 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
                 {togglingLeakId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
               </button>
             )}
+            {onReview && p.status === 'pending' && (() => {
+              // Same gate as the admin queue: folder deletions need a
+              // different administrator, so your own can only be denied.
+              const blocked = compApproveBlockedReason(p, account)
+              const busy = reviewingId === p.id
+              return (
+                <div className="flex items-center gap-0.5 my-2 shrink-0">
+                  <button onClick={() => onReview(p, 'approve')} disabled={busy || !!blocked}
+                    title={blocked ?? 'Approve proposal'}
+                    className="p-2 rounded-lg text-text-muted hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:hover:text-text-muted disabled:hover:bg-transparent transition-colors">
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  </button>
+                  <button onClick={() => onReview(p, 'reject')} disabled={busy}
+                    title="Deny proposal"
+                    className="p-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors">
+                    <Ban size={14} />
+                  </button>
+                </div>
+              )
+            })()}
             {onWithdraw && p.status === 'pending' && (
               <button onClick={() => onWithdraw(p.id)} disabled={withdrawingId === p.id}
                 title="Withdraw this proposal"

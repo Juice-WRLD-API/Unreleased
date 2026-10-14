@@ -7,6 +7,7 @@ import {
 import { useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { useStaffRoles } from '../hooks/useStaffRoles'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import type { CompFileProposal, CompProposalChangeType, EditorApplication } from '../lib/userApi'
 import type { ViewType } from '../types'
@@ -144,6 +145,7 @@ export default function ContributorPage(): JSX.Element {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
   const [togglingLeakId, setTogglingLeakId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<number | null>(null)
   const [picker, setPicker] = useState<PickerTarget | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // React state lags a render behind, so `submitState` alone can't stop a
@@ -153,6 +155,7 @@ export default function ContributorPage(): JSX.Element {
   const submitLatch = useRef(false)
 
   const isContributor = userApi.isChannelContributor(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
+  const { canReviewProposals } = useStaffRoles(account, activeChannel, channels)
 
   // Where "back" goes. Prefer the profile the user actually arrived from -
   // an editor-contributor reaches this page from the editor profile, and
@@ -386,6 +389,21 @@ export default function ContributorPage(): JSX.Element {
       setSubmitError(errorMessage(e, 'Could not withdraw that proposal'))
     } finally {
       setWithdrawingId(null)
+    }
+  }
+
+  // Staff approving/denying their own proposal in place - same endpoint as
+  // the admin Comp queue.
+  const review = async (p: CompFileProposal, action: 'approve' | 'reject'): Promise<void> => {
+    setReviewingId(p.id)
+    setSubmitError(null)
+    try {
+      const updated = await userApi.adminReviewCompProposal(p.id, { action, channel: activeChannel })
+      setProposals(prev => prev.map(x => (x.id === p.id ? updated : x)))
+    } catch (e) {
+      setSubmitError(errorMessage(e, `Could not ${action} that proposal`))
+    } finally {
+      setReviewingId(null)
     }
   }
 
@@ -691,6 +709,8 @@ export default function ContributorPage(): JSX.Element {
               withdrawingId={withdrawingId}
               onToggleNewLeak={toggleNewLeak}
               togglingLeakId={togglingLeakId}
+              onReview={canReviewProposals ? review : undefined}
+              reviewingId={reviewingId}
               empty="No proposals yet."
             />
           </section>

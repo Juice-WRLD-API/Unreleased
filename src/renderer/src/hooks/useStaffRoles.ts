@@ -11,6 +11,9 @@ export interface StaffRoles {
   isAdmin: boolean
   canReviewReports: boolean
   canReviewStaff: boolean
+  /** Approve/deny proposals from the user's own lists: staff review rights,
+   *  and an admin also needs 2FA on (the server refuses otherwise). */
+  canReviewProposals: boolean
 }
 
 // Wraps userApi's per-channel role helpers so the same
@@ -35,6 +38,7 @@ export function useStaffRoles(
   const isAdmin = !!account?.is_administrator
   const canReviewReports = !!(account?.is_editor || account?.is_administrator)
   const canReviewStaff = isAdmin || isManager
+  const canReviewProposals = canReviewStaff && !(isAdmin && !account?.otp_enabled)
 
-  return { isPrimary, isContributor, isEditor, isManager, isAdmin, canReviewReports, canReviewStaff }
+  return { isPrimary, isContributor, isEditor, isManager, isAdmin, canReviewReports, canReviewStaff, canReviewProposals }
 }
