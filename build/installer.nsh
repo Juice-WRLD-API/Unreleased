@@ -20,6 +20,10 @@
 ;    Skipped for silent installs, auto-updates and elevated inner instances.
 ;  - customInstall: after an auto-update, restarts the app when it asked for
 ;    that (the relaunch-after-update marker, see electron/main.js).
+;  - customFinishPage: the stock finish page, skipped on auto-updates. The app
+;    runs update installers non-silently so the install progress bar shows;
+;    every other page already skips itself for updates, and this plus
+;    SetAutoClose in customInstall lets the installer close on its own.
 
 !include "LogicLib.nsh"
 !include "WinMessages.nsh"
@@ -442,6 +446,10 @@
   ; leftover pre-2.4.1 watcher script (see customInit) counts as the same
   ; request.
   ${if} ${isUpdated}
+    ; Non-silent update runs (the progress-bar install, see customFinishPage)
+    ; move past the progress page by themselves instead of waiting on Next.
+    SetAutoClose true
+
     StrCpy $R3 "0"
     ${if} $installMode == "all"
       SetShellVarContext current
@@ -474,6 +482,34 @@
       ${endif}
     ${endif}
   ${endIf}
+!macroend
+
+!macro customFinishPage
+  ; Same as electron-builder's default finish page (assistedInstaller.nsh),
+  ; plus a pre-function that skips it for updates — customInstall already
+  ; relaunched the app if it asked for that.
+  !ifndef HIDE_RUN_AFTER_FINISH
+    Function StartApp
+      ${if} ${isUpdated}
+        StrCpy $1 "--updated"
+      ${else}
+        StrCpy $1 ""
+      ${endif}
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+    FunctionEnd
+
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
+  !endif
+
+  Function SkipFinishPageIfUpdated
+    ${if} ${isUpdated}
+      Abort
+    ${endif}
+  FunctionEnd
+
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipFinishPageIfUpdated
+  !insertmacro MUI_PAGE_FINISH
 !macroend
 
 !macro customUnInstall

@@ -211,6 +211,7 @@ contextBridge.exposeInMainWorld('electron', {
   offlineGetStats:      ()                        => ipcRenderer.invoke('offline-get-stats'),
   offlineDownloadTrack: (payload)                  => ipcRenderer.invoke('offline-download-track', payload),
   offlineRemoveTrack:   (id)                       => ipcRenderer.invoke('offline-remove-track', id),
+  offlineUpdateTrackMeta: (id, patch)              => ipcRenderer.invoke('offline-update-track-meta', id, patch),
   offlineSetPlaylist:   (key, songIds, name)        => ipcRenderer.invoke('offline-set-playlist', key, songIds, name),
   offlineRemovePlaylist: (key)                     => ipcRenderer.invoke('offline-remove-playlist', key),
   offlineSetLibraryPath: (newPath)                 => ipcRenderer.invoke('offline-set-library-path', newPath),

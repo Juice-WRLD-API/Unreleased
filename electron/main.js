@@ -2126,6 +2126,78 @@ function updateOfflineLibrary(mutate) {
   })
 }
 
+// Image fetch for covers: follows redirects (incl. 307/308, which a pasted
+// custom-cover URL may well use) and caps the body so a non-image response
+// can't balloon in memory. Shared by fetch-image-as-data-url and the offline
+// cover snapshot below.
+function fetchImageBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const MAX_BYTES = 20 * 1024 * 1024 // guard against a non-image response
+    function doGet(u, redirects) {
+      const opts = new URL(u)
+      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
+          res.resume()
+          if (redirects <= 0) return reject(new Error('Too many redirects'))
+          return doGet(new URL(res.headers.location, u).toString(), redirects - 1)
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
+        const chunks = []
+        let received = 0
+        res.on('data', (c) => {
+          received += c.length
+          if (received > MAX_BYTES) { res.destroy(); return reject(new Error('Image too large')) }
+          chunks.push(c)
+        })
+        res.on('end', () => resolve(Buffer.concat(chunks)))
+        res.on('error', reject)
+      }).on('error', reject)
+    }
+    doGet(url, 5)
+  })
+}
+
+// Offline covers live under userData rather than the (user-movable) audio
+// folder, so offline-set-library-path never has to carry them along. One JPEG
+// per track id, capped at 640px like every other stored cover.
+const offlineCoversDir = path.join(app.getPath('userData'), 'offline-covers')
+
+// Snapshots the track's cover — the user's personalized one when they've set
+// it, else the song's own — to disk so it renders with no network at all.
+// `imageUrl` is the already-resolved URL the renderer displays. Skips the
+// fetch when the same source is already on disk. Best-effort: a failed cover
+// never fails the audio download; the entry just keeps its remote imageUrl.
+async function snapshotOfflineCover(id, imageUrl, existing) {
+  if (!imageUrl) {
+    if (existing?.localImagePath) { try { fs.unlinkSync(existing.localImagePath) } catch {} }
+    return { localImagePath: null, coverSourceUrl: null }
+  }
+  if (existing?.coverSourceUrl === imageUrl && existing.localImagePath && fs.existsSync(existing.localImagePath)) {
+    return { localImagePath: existing.localImagePath, coverSourceUrl: imageUrl }
+  }
+  try {
+    let buf
+    const dataMatch = /^data:[^;,]*;base64,(.*)$/i.exec(imageUrl)
+    if (dataMatch) buf = Buffer.from(dataMatch[1], 'base64')
+    else if (/^https:\/\//i.test(imageUrl)) buf = await fetchImageBuffer(imageUrl)
+    else return { localImagePath: existing?.localImagePath ?? null, coverSourceUrl: existing?.coverSourceUrl ?? null }
+    const dataUri = coverToThumbDataUri(buf, 'image/jpeg', 640)
+    const b64 = dataUri.slice(dataUri.indexOf(',') + 1)
+    fs.mkdirSync(offlineCoversDir, { recursive: true })
+    const localImagePath = path.join(offlineCoversDir, `${id}.jpg`)
+    fs.writeFileSync(localImagePath, Buffer.from(b64, 'base64'))
+    return { localImagePath, coverSourceUrl: imageUrl }
+  } catch (e) {
+    log('offline cover snapshot failed for', id, e instanceof Error ? e.message : String(e))
+    return { localImagePath: existing?.localImagePath ?? null, coverSourceUrl: existing?.coverSourceUrl ?? null }
+  }
+}
+
+function deleteOfflineTrackFiles(entry) {
+  try { fs.unlinkSync(entry.localPath) } catch {}
+  if (entry.localImagePath) { try { fs.unlinkSync(entry.localImagePath) } catch {} }
+}
+
 ipcMain.handle('offline-get-library', () => loadOfflineLibrary())
 
 // Reads actual file sizes off disk (rather than trusting cached metadata)
@@ -2164,12 +2236,13 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
   // Audio unchanged and still on disk — just refresh the display metadata
   // (title/lyrics/art may have been edited without the file itself moving).
   if (existing && existing.path === songPath && fs.existsSync(existing.localPath)) {
+    const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
     updateOfflineLibrary((library) => {
-      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, path: songPath }
+      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, ...cover, path: songPath }
     })
     let size = 0
     try { size = fs.statSync(existing.localPath).size } catch {}
-    return { localPath: existing.localPath, skipped: true, size }
+    return { localPath: existing.localPath, skipped: true, size, ...cover }
   }
 
   try { fs.mkdirSync(getOfflineAudioDir(), { recursive: true }) } catch {}
@@ -2181,19 +2254,40 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
     return { error: 'Download failed: ' + e.message }
   }
 
+  const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
   updateOfflineLibrary((library) => {
-    library.tracks[id] = { ...meta, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
+    library.tracks[id] = { ...meta, ...cover, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
   })
   let size = 0
   try { size = fs.statSync(localPath).size } catch {}
-  return { localPath, size }
+  return { localPath, size, ...cover }
+})
+
+// Personalization changed (custom name/cover set or cleared) on a track that's
+// already downloaded — patch the stored snapshot and re-save the cover file
+// without touching the audio. No-op for tracks that aren't offline.
+ipcMain.handle('offline-update-track-meta', async (_, id, patch) => {
+  const existing = loadOfflineLibrary().tracks[id]
+  if (!existing || !patch || typeof patch !== 'object') return null
+  const { title, imageUrl } = patch
+  const cover = imageUrl !== undefined ? await snapshotOfflineCover(id, imageUrl, existing) : {}
+  const library = updateOfflineLibrary((lib) => {
+    if (!lib.tracks[id]) return
+    lib.tracks[id] = {
+      ...lib.tracks[id],
+      ...(typeof title === 'string' ? { title } : {}),
+      ...(imageUrl !== undefined ? { imageUrl } : {}),
+      ...cover,
+    }
+  })
+  return library.tracks[id] ?? null
 })
 
 ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {
     const entry = library.tracks[id]
     if (!entry) return
-    try { fs.unlinkSync(entry.localPath) } catch {}
+    deleteOfflineTrackFiles(entry)
     delete library.tracks[id]
   })
   return true
@@ -2208,7 +2302,7 @@ ipcMain.handle('offline-set-playlist', (_, key, songIds, name) => {
     const stillReferenced = new Set(Object.values(library.playlists).flatMap(p => p.songIds))
     for (const trackId of Object.keys(library.tracks)) {
       if (!stillReferenced.has(trackId)) {
-        try { fs.unlinkSync(library.tracks[trackId].localPath) } catch {}
+        deleteOfflineTrackFiles(library.tracks[trackId])
         delete library.tracks[trackId]
       }
     }
@@ -2222,7 +2316,7 @@ ipcMain.handle('offline-remove-playlist', (_, key) => {
     const stillReferenced = new Set(Object.values(library.playlists).flatMap(p => p.songIds))
     for (const trackId of Object.keys(library.tracks)) {
       if (!stillReferenced.has(trackId)) {
-        try { fs.unlinkSync(library.tracks[trackId].localPath) } catch {}
+        deleteOfflineTrackFiles(library.tracks[trackId])
         delete library.tracks[trackId]
       }
     }
@@ -3469,30 +3563,7 @@ ipcMain.handle('select-image-file', async () => {
 ipcMain.handle('fetch-image-as-data-url', async (_, url) => {
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { error: 'Invalid image URL' }
   try {
-    const buf = await new Promise((resolve, reject) => {
-      const MAX_BYTES = 20 * 1024 * 1024 // guard against a non-image response
-      function doGet(u, redirects) {
-        const opts = new URL(u)
-        https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
-          if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
-            res.resume()
-            if (redirects <= 0) return reject(new Error('Too many redirects'))
-            return doGet(new URL(res.headers.location, u).toString(), redirects - 1)
-          }
-          if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
-          const chunks = []
-          let received = 0
-          res.on('data', (c) => {
-            received += c.length
-            if (received > MAX_BYTES) { res.destroy(); return reject(new Error('Image too large')) }
-            chunks.push(c)
-          })
-          res.on('end', () => resolve(Buffer.concat(chunks)))
-          res.on('error', reject)
-        }).on('error', reject)
-      }
-      doGet(url, 5)
-    })
+    const buf = await fetchImageBuffer(url)
     return { dataUrl: coverToThumbDataUri(buf, 'image/jpeg', 640) }
   } catch (e) {
     return { error: e.message || 'Failed to fetch image' }
@@ -3549,6 +3620,7 @@ app.whenReady().then(() => {
         '.aif': 'audio/aiff', '.caf': 'audio/x-caf',
         '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
         '.m4v': 'video/mp4', '.mkv': 'video/x-matroska',
+        '.jpg': 'image/jpeg', // offline cover snapshots (offline-covers/)
       }
       const mime = mimeByExt[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
 
@@ -3734,12 +3806,16 @@ function installUpdateAndRestart() {
   } catch (e) {
     log('Failed to write relaunch marker:', e.message)
   }
+  // Not silent: with --updated the installer skips every page but its
+  // progress bar (customFinishPage / SetAutoClose in build/installer.nsh), so
+  // the user sees the install happening instead of the app just vanishing.
+  // A plain quit with an update pending (autoInstallOnAppQuit) stays silent.
   if (betaInstallerPath) {
     // Run it the way electron-updater would: --updated marks it as an update
-    // (so the installer skips its first-run pages) and /S keeps it silent.
+    // (so the installer skips its first-run pages).
     log('Running installer:', betaInstallerPath)
     try {
-      spawn(betaInstallerPath, ['--updated', '/S'], { detached: true, stdio: 'ignore' }).unref()
+      spawn(betaInstallerPath, ['--updated'], { detached: true, stdio: 'ignore' }).unref()
     } catch (e) {
       log('Installer spawn failed, opening it instead:', e.message)
       shell.openPath(betaInstallerPath)
@@ -3747,7 +3823,7 @@ function installUpdateAndRestart() {
     app.quit()
     return
   }
-  autoUpdater.quitAndInstall(true, false)
+  autoUpdater.quitAndInstall(false, false)
 }
 
 autoUpdater.on('update-downloaded', (info) => {
@@ -3776,9 +3852,8 @@ autoUpdater.on('update-downloaded', (info) => {
     buttons: ['Restart now', 'Later'],
     defaultId: 0,
   }).then(({ response }) => {
-    // Silent install: the Windows installer is an assisted (wizard) installer
-    // now, so a non-silent run here would pop the wizard mid-update. The
-    // installer relaunches the app — see installUpdateAndRestart.
+    // The installer shows only its progress bar for updates and relaunches
+    // the app itself — see installUpdateAndRestart.
     if (response === 0) installUpdateAndRestart()
   })
 })
