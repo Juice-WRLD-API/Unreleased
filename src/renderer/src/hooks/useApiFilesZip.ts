@@ -14,14 +14,14 @@ import { buildStreamUrl, JWApiFileEntry, listFilesRecursive } from '../lib/juice
 import { ZipStatus } from '../lib/apiFilesShared'
 import { openZipTarget, saveItems, ZipItem, ZipProgress } from '../lib/clientZip'
 
-export function useApiFilesZip(opts: { activeChannel: string; getSelectedEntries: () => JWApiFileEntry[] }): {
+export function useApiFilesZip(opts: { activeChannel: string; useCdn: boolean; getSelectedEntries: () => JWApiFileEntry[] }): {
   zipStatus: ZipStatus
   zipProgress: ZipProgress | null
   resetZip: () => void
   downloadZip: () => Promise<void>
   downloadFolder: (entry: { path: string; name: string }) => Promise<void>
 } {
-  const { activeChannel, getSelectedEntries } = opts
+  const { activeChannel, useCdn, getSelectedEntries } = opts
   const [zipStatus, setZipStatus] = useState<ZipStatus>('idle')
   const [zipProgress, setZipProgress] = useState<ZipProgress | null>(null)
 
@@ -41,14 +41,13 @@ export function useApiFilesZip(opts: { activeChannel: string; getSelectedEntries
     try {
       for (const entry of entries) {
         if (entry.type === 'file') {
-          items.push({ name: entry.name, url: buildStreamUrl(entry.path, activeChannel), size: entry.size })
+          items.push({ name: entry.name, url: buildStreamUrl(entry.path, activeChannel), size: entry.size, cdnPath: useCdn ? entry.path : undefined })
           continue
         }
-        // Keep the folder's own name and layout inside the archive.
         const prefix = entry.path.replace(/\/+$/, '') + '/'
         for (const file of await listFilesRecursive(entry.path, activeChannel)) {
           const rel = file.path.startsWith(prefix) ? file.path.slice(prefix.length) : file.name
-          items.push({ name: `${entry.name}/${rel}`, url: buildStreamUrl(file.path, activeChannel), size: file.size })
+          items.push({ name: `${entry.name}/${rel}`, url: buildStreamUrl(file.path, activeChannel), size: file.size, cdnPath: useCdn ? file.path : undefined })
         }
       }
       if (items.length === 0) { setZipStatus('idle'); return }

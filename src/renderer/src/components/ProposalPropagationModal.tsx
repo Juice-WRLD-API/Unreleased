@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { X, Loader2, Globe, CheckCircle, Wifi, WifiOff } from 'lucide-react'
+import { X, Loader2, Globe, CheckCircle, Wifi, WifiOff, MinusCircle } from 'lucide-react'
 import { ModalOverlay } from './Modal'
 import { FlagIcon } from './cdnNodesShared'
 import { fetchProposalPropagation } from '../lib/cdnAdminApi'
-import type { ProposalPropagation, PropagationNode, PropagationState } from '../lib/cdnAdminApi'
+import type { ProposalPropagation, PropagationNode, PropagationSkipReason, PropagationState } from '../lib/cdnAdminApi'
+import { DOT_COLS, DOT_LAT_TOP, DOT_ROWS, DOT_STEP } from '../lib/worldDots'
 
 const POLL_INTERVAL = 10_000
 
@@ -11,6 +12,13 @@ const STATE_COLORS: Record<PropagationState, string> = {
   propagated: '#22c55e',
   propagating: '#3b82f6',
   offline: '#6b7280',
+  skipped: '#f59e0b',
+}
+
+const SKIP_REASON_LABELS: Record<Exclude<PropagationSkipReason, ''>, string> = {
+  channel: 'Channel not selected on this node',
+  folder: 'Folder not selected on this node',
+  storage: 'Node storage is full',
 }
 
 function projectX(lon: number, width: number): number {
@@ -24,47 +32,20 @@ function projectY(lat: number, height: number): number {
 const MAP_W = 480
 const MAP_H = 260
 
-const LAND_RANGES: [number, [number, number][]][] = [
-  [70, [[-170,-55],[20,175]]],
-  [66, [[-170,-60],[-52,-36],[10,175]]],
-  [62, [[-168,-58],[-52,-22],[5,170]]],
-  [58, [[-140,-52],[-8,15],[28,168]]],
-  [54, [[-136,-55],[-10,30],[36,148]]],
-  [50, [[-132,-92],[-80,-52],[-8,42],[48,142]]],
-  [46, [[-126,-66],[-8,48],[52,145]]],
-  [42, [[-124,-70],[-10,45],[50,145]]],
-  [38, [[-124,-75],[-10,42],[44,78],[82,142]]],
-  [34, [[-120,-76],[-8,36],[38,80],[84,122],[128,142]]],
-  [30, [[-104,-80],[-12,34],[36,80],[84,122]]],
-  [26, [[-112,-82],[-16,34],[36,92],[98,118]]],
-  [22, [[-108,-96],[-84,-76],[-16,50],[68,92],[96,110],[120,122]]],
-  [18, [[-106,-96],[-92,-84],[-16,48],[72,86],[96,108]]],
-  [14, [[-92,-84],[-18,48],[74,80],[96,108],[120,126]]],
-  [10, [[-84,-76],[-16,50],[76,80],[96,116],[120,126]]],
-  [6, [[-78,-56],[-12,46],[78,82],[98,128]]],
-  [2, [[-80,-72],[-68,-35],[-8,42],[96,136]]],
-  [-2, [[-72,-34],[10,42],[96,140]]],
-  [-6, [[-76,-34],[12,40],[100,140]]],
-  [-10, [[-76,-34],[14,40],[115,132]]],
-  [-14, [[-76,-38],[20,42],[124,142]]],
-  [-18, [[-68,-40],[22,38],[44,50],[118,148]]],
-  [-22, [[-65,-40],[24,36],[114,152]]],
-  [-26, [[-66,-46],[26,34],[112,154]]],
-  [-30, [[-70,-48],[18,32],[114,154]]],
-  [-34, [[-72,-56],[18,28],[116,152]]],
-  [-38, [[-72,-62],[140,150],[170,178]]],
-  [-42, [[-74,-64],[144,148],[168,178]]],
-  [-46, [[-76,-68],[166,174]]],
-  [-50, [[-76,-68]]],
-]
-
-const LAND_DOTS = LAND_RANGES.flatMap(([lat, ranges]) =>
-  ranges.flatMap(([lo, hi]) => {
-    const dots: [number, number][] = []
-    for (let lon = lo; lon <= hi; lon += 5) dots.push([lon, lat])
-    return dots
+const LAND_DOTS: [number, number][] = (() => {
+  const step = 360 / DOT_COLS
+  const dots: [number, number][] = []
+  DOT_ROWS.forEach((row, r) => {
+    const lat = DOT_LAT_TOP - (r + 0.5) * DOT_STEP
+    for (let i = 0; i < row.length; i++) {
+      const nib = parseInt(row[i], 16)
+      for (let j = 0; j < 4; j++) {
+        if (nib & (8 >> j)) dots.push([-180 + (i * 4 + j + 0.5) * step, lat])
+      }
+    }
   })
-)
+  return dots
+})()
 
 function DottedWorldMap({ nodes }: { nodes: PropagationNode[] }): JSX.Element {
   return (
@@ -75,9 +56,9 @@ function DottedWorldMap({ nodes }: { nodes: PropagationNode[] }): JSX.Element {
             key={i}
             cx={projectX(lon, MAP_W)}
             cy={projectY(lat, MAP_H)}
-            r={1.3}
+            r={1}
             fill="var(--text-muted)"
-            opacity={0.45}
+            opacity={0.5}
           />
         ))}
         {nodes.map((n) => {
@@ -88,7 +69,7 @@ function DottedWorldMap({ nodes }: { nodes: PropagationNode[] }): JSX.Element {
           return (
             <g key={n.node_id}>
               <circle cx={cx} cy={cy} r={8} fill={color} opacity={0.15} />
-              <circle cx={cx} cy={cy} r={5} fill={color} opacity={n.state === 'offline' ? 0.5 : 0.9} />
+              <circle cx={cx} cy={cy} r={5} fill={color} opacity={n.state === 'offline' || n.state === 'skipped' ? 0.5 : 0.9} />
             </g>
           )
         })}
@@ -102,6 +83,13 @@ function StateBadge({ state, online }: { state: PropagationState; online: boolea
     return (
       <span className="flex items-center gap-1 text-xs font-semibold text-text-muted">
         <WifiOff size={12} /> OFFLINE
+      </span>
+    )
+  }
+  if (state === 'skipped') {
+    return (
+      <span className="flex items-center gap-1 text-xs font-semibold text-amber-400">
+        <MinusCircle size={12} /> NOT SYNCED
       </span>
     )
   }
@@ -127,7 +115,11 @@ function NodeRow({ node }: { node: PropagationNode }): JSX.Element {
           <FlagIcon code={node.country_code} size={16} />
           {node.name || node.city || 'Unknown'}
         </p>
-        <p className="text-xs text-text-muted truncate">{node.continent || node.region || ''}</p>
+        <p className="text-xs text-text-muted truncate">
+          {node.state === 'skipped' && node.skip_reason
+            ? SKIP_REASON_LABELS[node.skip_reason]
+            : node.continent || node.region || ''}
+        </p>
       </div>
       <StateBadge state={node.state} online={node.online} />
     </div>
@@ -155,9 +147,9 @@ export default function ProposalPropagationModal({ proposalId, onClose }: {
   }, [proposalId])
 
   const propagatedCount = data?.nodes.filter(n => n.state === 'propagated').length ?? 0
-  const totalCount = data?.nodes.length ?? 0
-  // Nothing left to wait for once every node has the change.
-  const settled = totalCount > 0 && propagatedCount === totalCount
+  const totalCount = data?.nodes.filter(n => n.state !== 'skipped').length ?? 0
+  const pendingCount = data?.nodes.filter(n => n.state === 'propagating').length ?? 0
+  const settled = !!data && pendingCount === 0
 
   useEffect(() => {
     load()
@@ -222,6 +214,12 @@ export default function ProposalPropagationModal({ proposalId, onClose }: {
                       <span className="flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-gray-500 inline-block" />
                         Offline
+                      </span>
+                    )}
+                    {data.nodes.some(n => n.state === 'skipped') && (
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                        Not synced
                       </span>
                     )}
                     <span className="ml-auto">{propagatedCount}/{totalCount} nodes</span>

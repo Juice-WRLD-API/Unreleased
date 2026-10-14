@@ -526,6 +526,7 @@ export default function ApiFilesBrowser(): JSX.Element {
   // (lib/clientZip) from the entries' stream URLs.
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
+    useCdn: isPrimary,
     getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
   })
   zipResetRef.current = resetZip

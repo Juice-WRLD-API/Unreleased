@@ -113,7 +113,9 @@ export function wasAutoDisabled(n: CdnAdminNode): boolean {
   return n.trust_score <= 0 || n.hash_violations >= VIOLATION_LIMIT
 }
 
-export type PropagationState = 'propagated' | 'propagating' | 'offline'
+export type PropagationState = 'propagated' | 'propagating' | 'offline' | 'skipped'
+
+export type PropagationSkipReason = '' | 'channel' | 'folder' | 'storage'
 
 export interface PropagationServer {
   host: string
@@ -132,6 +134,7 @@ export interface PropagationNode {
   longitude: number | null
   online: boolean
   state: PropagationState
+  skip_reason?: PropagationSkipReason
 }
 
 export interface ProposalPropagation {
@@ -141,6 +144,7 @@ export interface ProposalPropagation {
     status: string
     change_type: string
     file_path: string
+    channel_slug?: string
   }
   nodes: PropagationNode[]
 }
