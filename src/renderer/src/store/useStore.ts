@@ -42,7 +42,7 @@ import * as foldersApi from '../lib/foldersApi'
 import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
 import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
-import { createQueueSlice, QueueSlice } from './queueSlice'
+import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import type { GifResult } from '../lib/gifApi'
 import { listDonorFiles } from '../lib/donorFilesApi'
@@ -70,6 +70,26 @@ import { useSandboxStore } from '../components/Modal'
 // downloaded track would look "unreferenced" the next time any playlist
 // resyncs and get deleted out from under the user.
 const INDIVIDUAL_DOWNLOADS_KEY = 'individual-downloads'
+
+// Set once loadOfflineLibrary has kicked off its one-time cover backfill.
+let _offlineCoverBackfillDone = false
+
+// The display snapshot a downloaded song is stored with. Name and cover go
+// through songToTrack so they carry the user's personalization (custom name,
+// custom/rotated/era cover) - what they actually see for the song - rather
+// than the API's raw values; main then saves that cover to disk.
+function offlineMetaFor(song: JWApiSong) {
+  const track = songToTrack(song)
+  return {
+    title: track.title,
+    artist: song.credited_artists || 'Juice WRLD',
+    album: song.album || song.era?.name || '',
+    imageUrl: track.imageUrl ?? null,
+    lyrics: song.lyrics || null,
+    syncedLyrics: song.synced_lyrics || null,
+    duration: parseDuration(song.length),
+  }
+}
 
 // True when this renderer is a pop-out window (FloatApp, ?float=<view>).
 // Pop-outs share localStorage with the main window, so only the main window
@@ -115,11 +135,19 @@ export interface DownloadItem {
 export interface StagedFileChange {
   id: string
   /** The subset of comp proposal change types drag-and-drop can produce. */
-  changeType: 'move' | 'move_folder' | 'create_folder'
-  /** Source path - the file/folder being moved, or the folder to create. */
+  changeType: 'move' | 'move_folder' | 'create_folder' | 'upload'
+  /** Source path - the file/folder being moved, the folder to create, or
+   *  where an uploaded file will land. */
   path: string
-  /** Full destination path; absent for create_folder. */
+  /** Full destination path; only for moves. */
   destination?: string
+  /** The local file body, for an upload dropped in from the OS. Staged
+   *  changes live in memory only, so holding the File here is fine. */
+  file?: File
+  /** Uploads only: flags the proposal as a new leak. */
+  isNewLeak?: boolean
+  /** Sent as the proposal's contributor_notes. */
+  notes?: string
   /** Channel slug the change belongs to, since the Files tab can switch
    *  channels with changes still queued and each proposal carries its own. */
   channel: string
@@ -800,6 +828,9 @@ interface AppActions {
   _writeSongPref: (songId: number, patch: SongPrefPatch) => void
   /** Internal � pushes a row's name/cover onto Tracks already in the queue. */
   _reapplySongPref: (songId: number) => void
+  /** Internal - re-saves a downloaded song's offline name/cover snapshot after
+   *  its personalization changed. No-op when the song isn't downloaded. */
+  _refreshOfflinePref: (songId: number) => Promise<void>
 
   /** Opens the report dialog for general feedback or a specific song. */
   openReport: (target: ReportTarget) => void
@@ -2036,6 +2067,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
     })
   },
 
+  _refreshOfflinePref: async (songId) => {
+    const el = (window as any).electron
+    const id = `jw-${songId}`
+    if (!el?.offlineUpdateTrackMeta || !get().offlineTracks[id]) return
+    // The cached song row is enough to re-derive the personalized title/cover;
+    // only hit the network when there isn't one.
+    const song = apiPeek<JWApiSong>(`/songs/${songId}/`)
+      ?? await apiFetch<JWApiSong>(`/songs/${songId}/`).catch(() => undefined)
+    if (!song) return
+    const { title, imageUrl } = offlineMetaFor(song)
+    try {
+      const entry = await el.offlineUpdateTrackMeta(id, { title, imageUrl })
+      if (entry) set((s) => (s.offlineTracks[id] ? { offlineTracks: { ...s.offlineTracks, [id]: entry } } : {}))
+    } catch (e) { console.error('offlineUpdateTrackMeta error:', e) }
+  },
+
   _setListeningPlays: (next) => {
     set({ listeningPlays: next })
     ls.set('listeningPlays', next)
@@ -2061,7 +2108,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   _writeSongPref: (songId, patch) => {
     get()._setSongPrefs(patchPrefMap(get().songPrefs, songId, patch))
-    if (patch.name !== undefined || patch.cover_url !== undefined) get()._reapplySongPref(songId)
+    if (patch.name !== undefined || patch.cover_url !== undefined) {
+      get()._reapplySongPref(songId)
+      void get()._refreshOfflinePref(songId)
+    }
     // No rollback on push failure: the local write is already durable, and the
     // profile blob is replaced wholesale on the next push or login merge � a
     // transient PATCH failure shouldn't undo an edit the user just made.
@@ -2081,6 +2131,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     delete next[songId]
     get()._setSongPrefs(next)
     get()._reapplySongPref(songId)
+    void get()._refreshOfflinePref(songId)
     get()._scheduleProfilePush(['songPrefs'])
   },
 
@@ -2840,13 +2891,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // it from the new path � see its `track.streamUrl ?? toFileUrl(track.path)`.
     const rekey = <T extends { id: string }>(t: T): T =>
       t.id === id ? { ...t, id: newId, path: newPath, streamUrl: undefined } : t
-    set({
+    withoutPlayHistory(() => set({
       libraryTracks: nextTracks,
       libraryArt: nextArt,
       localPlaylists: nextPlaylists,
       queue: queue.map(rekey),
       currentTrack: currentTrack ? rekey(currentTrack) : currentTrack,
-    })
+      playHistory: get().playHistory.map(rekey),
+    }))
 
     el.saveLibraryData({ tracks: nextTracks, folders: libraryFolders, lastScanned: libraryLastScanned })
     if (touchedPlaylists) el.saveLocalPlaylists(nextPlaylists)
@@ -3140,7 +3192,21 @@ export const useStore = create<AppStore>((set, get, store) => ({
     try {
       const lib = await el.offlineGetLibrary()
       set({ offlineTracks: lib.tracks || {}, offlinePlaylists: lib.playlists || {} })
-    } catch (e) { console.error('loadOfflineLibrary error:', e) }
+    } catch (e) { console.error('loadOfflineLibrary error:', e); return }
+    // Songs downloaded before covers were saved locally (or whose cover save
+    // failed) have no on-disk art. Playlist resyncs skip already-downloaded
+    // songs, so backfill them here - once per session, one at a time, and not
+    // awaited so callers (startup's playlist sync) aren't held up by it.
+    if (_offlineCoverBackfillDone || IS_FLOAT_WINDOW) return
+    _offlineCoverBackfillDone = true
+    const missing = Object.entries(get().offlineTracks)
+      .filter(([, t]) => t.imageUrl && !t.localImagePath)
+      .map(([id]) => userApi.trackIdToSongId(id))
+    void (async () => {
+      for (const songId of missing) {
+        if (songId != null) await get()._refreshOfflinePref(songId)
+      }
+    })()
   },
 
   downloadPlaylistOffline: async (key, name, songIds, opts) => {
@@ -3232,15 +3298,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
         try {
           const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
           const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
-          const meta = {
-            title: song.name,
-            artist: song.credited_artists || 'Juice WRLD',
-            album: song.album || song.era?.name || '',
-            imageUrl: buildImageUrl(song.image_url) ?? null,
-            lyrics: song.lyrics || null,
-            syncedLyrics: song.synced_lyrics || null,
-            duration: parseDuration(song.length),
-          }
+          const meta = offlineMetaFor(song)
           const result = await el.offlineDownloadTrack({ id, url: buildStreamUrl(song.path), ext, path: song.path, meta })
           if (result?.error) throw new Error(result.error)
           if (!result?.skipped) {
@@ -3251,7 +3309,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
           set((s) => ({
             offlineTracks: {
               ...s.offlineTracks,
-              [id]: { ...meta, path: song.path, localPath: result.localPath, ext, downloadedAt: Date.now() },
+              [id]: { ...meta, path: song.path, localPath: result.localPath, localImagePath: result.localImagePath ?? null, coverSourceUrl: result.coverSourceUrl ?? null, ext, downloadedAt: Date.now() },
             },
           }))
         } catch (e) {
@@ -3327,21 +3385,13 @@ export const useStore = create<AppStore>((set, get, store) => ({
       try {
         const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
         const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
-        const meta = {
-          title: song.name,
-          artist: song.credited_artists || 'Juice WRLD',
-          album: song.album || song.era?.name || '',
-          imageUrl: buildImageUrl(song.image_url) ?? null,
-          lyrics: song.lyrics || null,
-          syncedLyrics: song.synced_lyrics || null,
-          duration: parseDuration(song.length),
-        }
+        const meta = offlineMetaFor(song)
         const result = await el.offlineDownloadTrack({ id, url: buildStreamUrl(song.path), ext, path: song.path, meta })
         if (result?.error) throw new Error(result.error)
         set((s) => ({
           offlineTracks: {
             ...s.offlineTracks,
-            [id]: { ...meta, path: song.path, localPath: result.localPath, ext, downloadedAt: Date.now() },
+            [id]: { ...meta, path: song.path, localPath: result.localPath, localImagePath: result.localImagePath ?? null, coverSourceUrl: result.coverSourceUrl ?? null, ext, downloadedAt: Date.now() },
           },
         }))
         const existingIds = get().offlinePlaylists[key]?.songIds ?? []

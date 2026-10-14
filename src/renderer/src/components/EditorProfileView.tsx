@@ -115,6 +115,7 @@ export default function EditorProfileView(): JSX.Element {
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
     leaderboard, loadingLeaderboard, myEntry,
     loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
+    reviewingCompId, handleReviewComp,
     compTabCount, filteredCompProposals,
     reports, reportStatus, setReportStatus, loadingReports,
     adminPreview, otpLocked, handleEdit,
@@ -485,6 +486,8 @@ export default function EditorProfileView(): JSX.Element {
                       onSelect={() => go('contributor')}
                       onWithdraw={handleWithdrawComp}
                       withdrawingId={withdrawingCompId}
+                      onReview={canReviewProposals ? handleReviewComp : undefined}
+                      reviewingId={reviewingCompId}
                       empty={compSearch.trim() ? `No comp files match "${compSearch.trim()}"` : undefined}
                     />
                   </div>

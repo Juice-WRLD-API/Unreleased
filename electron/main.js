@@ -331,7 +331,7 @@ function fetchBetaVersions(code) {
 }
 
 // The installer a beta check downloaded, waiting to be run (see
-// quitAndInstallSilently). Null when the pending update came from the stable feed.
+// installUpdateAndRestart). Null when the pending update came from the stable feed.
 let betaInstallerPath = null
 
 // Looks for a build newer than this one in the beta list and, if there is one,
@@ -378,7 +378,7 @@ async function checkBetaUpdate({ startup = false, force = false } = {}) {
 
   // Same rule as a stable download: at launch nothing is in progress, so
   // install silently; mid-session ask first.
-  if (startup) { quitAndInstallSilently(); return true }
+  if (startup) { installUpdateAndRestart(); return true }
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update ready',
@@ -387,7 +387,7 @@ async function checkBetaUpdate({ startup = false, force = false } = {}) {
     buttons: ['Restart now', 'Later'],
     defaultId: 0,
   })
-  if (response === 0) quitAndInstallSilently()
+  if (response === 0) installUpdateAndRestart()
   return true
 }
 
@@ -1170,7 +1170,7 @@ ipcMain.handle('check-for-updates', async () => {
 })
 ipcMain.handle('install-update', () => {
   log('Manual install-update triggered')
-  quitAndInstallSilently()
+  installUpdateAndRestart()
 })
 ipcMain.handle('minimize-window', () => {
   if (appSettings.minimizeTo === 'tray' && tray) {
@@ -1744,7 +1744,7 @@ async function installLatestStable() {
     betaInstallerPath = dest
     updateDownloadedPending = true
     broadcastToWindows('update-status', { type: 'downloaded', version })
-    quitAndInstallSilently()
+    installUpdateAndRestart()
   } catch (err) {
     log('Return to stable failed:', err.message)
     broadcastToWindows('update-status', { type: 'error', message: `Couldn't switch back to stable: ${err.message}` })
@@ -2134,6 +2134,78 @@ function updateOfflineLibrary(mutate) {
   })
 }
 
+// Image fetch for covers: follows redirects (incl. 307/308, which a pasted
+// custom-cover URL may well use) and caps the body so a non-image response
+// can't balloon in memory. Shared by fetch-image-as-data-url and the offline
+// cover snapshot below.
+function fetchImageBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const MAX_BYTES = 20 * 1024 * 1024 // guard against a non-image response
+    function doGet(u, redirects) {
+      const opts = new URL(u)
+      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
+          res.resume()
+          if (redirects <= 0) return reject(new Error('Too many redirects'))
+          return doGet(new URL(res.headers.location, u).toString(), redirects - 1)
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
+        const chunks = []
+        let received = 0
+        res.on('data', (c) => {
+          received += c.length
+          if (received > MAX_BYTES) { res.destroy(); return reject(new Error('Image too large')) }
+          chunks.push(c)
+        })
+        res.on('end', () => resolve(Buffer.concat(chunks)))
+        res.on('error', reject)
+      }).on('error', reject)
+    }
+    doGet(url, 5)
+  })
+}
+
+// Offline covers live under userData rather than the (user-movable) audio
+// folder, so offline-set-library-path never has to carry them along. One JPEG
+// per track id, capped at 640px like every other stored cover.
+const offlineCoversDir = path.join(app.getPath('userData'), 'offline-covers')
+
+// Snapshots the track's cover — the user's personalized one when they've set
+// it, else the song's own — to disk so it renders with no network at all.
+// `imageUrl` is the already-resolved URL the renderer displays. Skips the
+// fetch when the same source is already on disk. Best-effort: a failed cover
+// never fails the audio download; the entry just keeps its remote imageUrl.
+async function snapshotOfflineCover(id, imageUrl, existing) {
+  if (!imageUrl) {
+    if (existing?.localImagePath) { try { fs.unlinkSync(existing.localImagePath) } catch {} }
+    return { localImagePath: null, coverSourceUrl: null }
+  }
+  if (existing?.coverSourceUrl === imageUrl && existing.localImagePath && fs.existsSync(existing.localImagePath)) {
+    return { localImagePath: existing.localImagePath, coverSourceUrl: imageUrl }
+  }
+  try {
+    let buf
+    const dataMatch = /^data:[^;,]*;base64,(.*)$/i.exec(imageUrl)
+    if (dataMatch) buf = Buffer.from(dataMatch[1], 'base64')
+    else if (/^https:\/\//i.test(imageUrl)) buf = await fetchImageBuffer(imageUrl)
+    else return { localImagePath: existing?.localImagePath ?? null, coverSourceUrl: existing?.coverSourceUrl ?? null }
+    const dataUri = coverToThumbDataUri(buf, 'image/jpeg', 640)
+    const b64 = dataUri.slice(dataUri.indexOf(',') + 1)
+    fs.mkdirSync(offlineCoversDir, { recursive: true })
+    const localImagePath = path.join(offlineCoversDir, `${id}.jpg`)
+    fs.writeFileSync(localImagePath, Buffer.from(b64, 'base64'))
+    return { localImagePath, coverSourceUrl: imageUrl }
+  } catch (e) {
+    log('offline cover snapshot failed for', id, e instanceof Error ? e.message : String(e))
+    return { localImagePath: existing?.localImagePath ?? null, coverSourceUrl: existing?.coverSourceUrl ?? null }
+  }
+}
+
+function deleteOfflineTrackFiles(entry) {
+  try { fs.unlinkSync(entry.localPath) } catch {}
+  if (entry.localImagePath) { try { fs.unlinkSync(entry.localImagePath) } catch {} }
+}
+
 ipcMain.handle('offline-get-library', () => loadOfflineLibrary())
 
 // Reads actual file sizes off disk (rather than trusting cached metadata)
@@ -2172,12 +2244,13 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
   // Audio unchanged and still on disk — just refresh the display metadata
   // (title/lyrics/art may have been edited without the file itself moving).
   if (existing && existing.path === songPath && fs.existsSync(existing.localPath)) {
+    const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
     updateOfflineLibrary((library) => {
-      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, path: songPath }
+      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, ...cover, path: songPath }
     })
     let size = 0
     try { size = fs.statSync(existing.localPath).size } catch {}
-    return { localPath: existing.localPath, skipped: true, size }
+    return { localPath: existing.localPath, skipped: true, size, ...cover }
   }
 
   try { fs.mkdirSync(getOfflineAudioDir(), { recursive: true }) } catch {}
@@ -2189,12 +2262,33 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
     return { error: 'Download failed: ' + e.message }
   }
 
+  const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
   updateOfflineLibrary((library) => {
-    library.tracks[id] = { ...meta, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
+    library.tracks[id] = { ...meta, ...cover, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
   })
   let size = 0
   try { size = fs.statSync(localPath).size } catch {}
-  return { localPath, size }
+  return { localPath, size, ...cover }
+})
+
+// Personalization changed (custom name/cover set or cleared) on a track that's
+// already downloaded — patch the stored snapshot and re-save the cover file
+// without touching the audio. No-op for tracks that aren't offline.
+ipcMain.handle('offline-update-track-meta', async (_, id, patch) => {
+  const existing = loadOfflineLibrary().tracks[id]
+  if (!existing || !patch || typeof patch !== 'object') return null
+  const { title, imageUrl } = patch
+  const cover = imageUrl !== undefined ? await snapshotOfflineCover(id, imageUrl, existing) : {}
+  const library = updateOfflineLibrary((lib) => {
+    if (!lib.tracks[id]) return
+    lib.tracks[id] = {
+      ...lib.tracks[id],
+      ...(typeof title === 'string' ? { title } : {}),
+      ...(imageUrl !== undefined ? { imageUrl } : {}),
+      ...cover,
+    }
+  })
+  return library.tracks[id] ?? null
 })
 
 // ── Session Maker: whole-session zips saved to a user-chosen folder ───────────
@@ -2250,7 +2344,7 @@ ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {
     const entry = library.tracks[id]
     if (!entry) return
-    try { fs.unlinkSync(entry.localPath) } catch {}
+    deleteOfflineTrackFiles(entry)
     delete library.tracks[id]
   })
   return true
@@ -2265,7 +2359,7 @@ ipcMain.handle('offline-set-playlist', (_, key, songIds, name) => {
     const stillReferenced = new Set(Object.values(library.playlists).flatMap(p => p.songIds))
     for (const trackId of Object.keys(library.tracks)) {
       if (!stillReferenced.has(trackId)) {
-        try { fs.unlinkSync(library.tracks[trackId].localPath) } catch {}
+        deleteOfflineTrackFiles(library.tracks[trackId])
         delete library.tracks[trackId]
       }
     }
@@ -2279,7 +2373,7 @@ ipcMain.handle('offline-remove-playlist', (_, key) => {
     const stillReferenced = new Set(Object.values(library.playlists).flatMap(p => p.songIds))
     for (const trackId of Object.keys(library.tracks)) {
       if (!stillReferenced.has(trackId)) {
-        try { fs.unlinkSync(library.tracks[trackId].localPath) } catch {}
+        deleteOfflineTrackFiles(library.tracks[trackId])
         delete library.tracks[trackId]
       }
     }
@@ -3526,30 +3620,7 @@ ipcMain.handle('select-image-file', async () => {
 ipcMain.handle('fetch-image-as-data-url', async (_, url) => {
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { error: 'Invalid image URL' }
   try {
-    const buf = await new Promise((resolve, reject) => {
-      const MAX_BYTES = 20 * 1024 * 1024 // guard against a non-image response
-      function doGet(u, redirects) {
-        const opts = new URL(u)
-        https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
-          if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
-            res.resume()
-            if (redirects <= 0) return reject(new Error('Too many redirects'))
-            return doGet(new URL(res.headers.location, u).toString(), redirects - 1)
-          }
-          if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
-          const chunks = []
-          let received = 0
-          res.on('data', (c) => {
-            received += c.length
-            if (received > MAX_BYTES) { res.destroy(); return reject(new Error('Image too large')) }
-            chunks.push(c)
-          })
-          res.on('end', () => resolve(Buffer.concat(chunks)))
-          res.on('error', reject)
-        }).on('error', reject)
-      }
-      doGet(url, 5)
-    })
+    const buf = await fetchImageBuffer(url)
     return { dataUrl: coverToThumbDataUri(buf, 'image/jpeg', 640) }
   } catch (e) {
     return { error: e.message || 'Failed to fetch image' }
@@ -3615,6 +3686,7 @@ app.whenReady().then(() => {
         '.aif': 'audio/aiff', '.caf': 'audio/x-caf',
         '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
         '.m4v': 'video/mp4', '.mkv': 'video/x-matroska',
+        '.jpg': 'image/jpeg', // offline cover snapshots (offline-covers/)
       }
       const mime = mimeByExt[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
 
@@ -3761,75 +3833,63 @@ autoUpdater.on('download-progress', (p) => {
   })
 })
 
-// electron-builder's assisted (oneClick: false) NSIS installer only relaunches
-// the app from its interactive Finish-page checkbox — the --force-run flag
-// electron-updater passes on quitAndInstall(silent, forceRunAfter) is never
-// read by the template in silent (/S) mode, so a silent install just quits
-// and never comes back. Work around it ourselves: spawn a detached watcher
-// before quitting that waits for this process to exit and for the installer
-// process itself to finish, then starts the app back up. The exe becoming
-// unlockable is NOT a safe "installer is done" signal on its own: it unlocks
-// the instant we exit, before the installer has uninstalled the old version,
-// so relaunching on that alone starts the old exe and the installer's
-// running-app check kills it again.
-function quitAndInstallSilently() {
+// Restarting into an update on Windows is the installer's job, not ours. The
+// old approach relaunched from outside it (a detached PowerShell watcher
+// guessing from process lists and exe file locks when the install was done)
+// and kept getting the timing wrong: it started the OLD exe mid-install, which
+// found the same update again and re-ran the installer. Only the installer
+// knows when the new files are in place, so it relaunches the app itself
+// (customInstall in build/installer.nsh, which runs after extraction). This
+// marker asks it to: we write it right before handing off, it deletes it and
+// starts the new exe. A plain quit with an update pending
+// (autoInstallOnAppQuit) writes no marker, so that install stays quiet and the
+// app stays closed. electron-updater's --force-run isn't used: the template
+// only honours it through a shell launch of the Start-menu shortcut, and it
+// would double-launch alongside ours.
+const relaunchMarkerPath = path.join(app.getPath('userData'), 'relaunch-after-update')
+let installingUpdate = false
+
+// The installer deletes the marker before starting us, so one still here means
+// a handoff whose install never ran or failed. Clear it, or the next quiet
+// install-on-quit would reopen the app. Not in a second instance: the first
+// may be mid-handoff with its marker freshly written.
+if (gotSingleInstanceLock) {
+  try { fs.rmSync(relaunchMarkerPath, { force: true }) } catch {}
+}
+
+function installUpdateAndRestart() {
+  // Startup install, the "Restart now" prompt and the renderer's install
+  // button can race; a second handoff would start a second installer.
+  if (installingUpdate) return
+  installingUpdate = true
   if (process.platform !== 'win32') {
+    // Squirrel.Mac and the AppImage updater relaunch on their own.
     autoUpdater.quitAndInstall(true, true)
     return
   }
-  const exePath = process.execPath
-  // electron-updater runs the installer out of its cache dir (see
-  // clearUpdaterCache); installerPath is the exact file when it exposes it.
-  // A beta download is ours instead, in temp (see checkBetaUpdate).
-  const installerPath = betaInstallerPath || autoUpdater.installerPath || ''
-  const watcherPath = path.join(app.getPath('temp'), `unreleased-update-relaunch-${process.pid}.ps1`)
-  const script = [
-    `param([int]$AppPid, [string]$AppExePath, [string]$InstallerPath = '', [int]$TimeoutSeconds = 120)`,
-    `try { Wait-Process -Id $AppPid -ErrorAction SilentlyContinue -Timeout $TimeoutSeconds } catch {}`,
-    `$detectUntil = (Get-Date).AddSeconds(20)`,
-    `while ((Get-Date) -lt $detectUntil) {`,
-    `  $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -and (($InstallerPath -and $_.ExecutablePath -ieq $InstallerPath) -or $_.ExecutablePath -like '*\\unreleased-updater\\*') })`,
-    `  if ($procs.Count -gt 0) {`,
-    `    foreach ($p in $procs) { try { Wait-Process -Id $p.ProcessId -Timeout 600 -ErrorAction SilentlyContinue } catch {} }`,
-    `    break`,
-    `  }`,
-    `  Start-Sleep -Milliseconds 300`,
-    `}`,
-    `$deadline = (Get-Date).AddSeconds($TimeoutSeconds)`,
-    `while ((Get-Date) -lt $deadline) {`,
-    `  try { $s = [System.IO.File]::Open($AppExePath, 'Open', 'ReadWrite', 'None'); $s.Close(); break } catch { Start-Sleep -Milliseconds 400 }`,
-    `}`,
-    `Start-Sleep -Milliseconds 500`,
-    `if (Test-Path $AppExePath) { Start-Process -FilePath $AppExePath }`,
-    `Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue`,
-  ].join('\n')
   try {
-    fs.writeFileSync(watcherPath, script, 'utf-8')
-    // Only pass -InstallerPath when known: Windows PowerShell's -File binder
-    // rejects an empty-string argument as "missing", which kills the script
-    // before it does anything (the param already defaults to '').
-    const child = spawn('powershell.exe', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
-      '-File', watcherPath, '-AppPid', String(process.pid), '-AppExePath', exePath,
-      ...(installerPath ? ['-InstallerPath', installerPath] : []),
-    ], { detached: true, stdio: 'ignore' })
-    child.unref()
+    fs.writeFileSync(relaunchMarkerPath, String(Date.now()))
   } catch (e) {
-    log('Failed to spawn update relaunch watcher:', e.message)
+    log('Failed to write relaunch marker:', e.message)
   }
+  // Not silent: with --updated the installer skips every page but its
+  // progress bar (customFinishPage / SetAutoClose in build/installer.nsh), so
+  // the user sees the install happening instead of the app just vanishing.
+  // A plain quit with an update pending (autoInstallOnAppQuit) stays silent.
   if (betaInstallerPath) {
     // Run it the way electron-updater would: --updated marks it as an update
-    // (so the installer skips its first-run pages) and /S keeps it silent.
+    // (so the installer skips its first-run pages).
+    log('Running installer:', betaInstallerPath)
     try {
-      spawn(betaInstallerPath, ['--updated', '/S'], { detached: true, stdio: 'ignore' }).unref()
+      spawn(betaInstallerPath, ['--updated'], { detached: true, stdio: 'ignore' }).unref()
     } catch (e) {
-      log('Beta installer spawn failed, opening it instead:', e.message)
+      log('Installer spawn failed, opening it instead:', e.message)
       shell.openPath(betaInstallerPath)
     }
     app.quit()
     return
   }
-  autoUpdater.quitAndInstall(true, false)
+  autoUpdater.quitAndInstall(false, false)
 }
 
 autoUpdater.on('update-downloaded', (info) => {
@@ -3846,7 +3906,7 @@ autoUpdater.on('update-downloaded', (info) => {
   if (isStartupUpdateCheck) {
     isStartupUpdateCheck = false
     log('Update ready at launch — installing silently')
-    quitAndInstallSilently()
+    installUpdateAndRestart()
     return
   }
 
@@ -3858,10 +3918,9 @@ autoUpdater.on('update-downloaded', (info) => {
     buttons: ['Restart now', 'Later'],
     defaultId: 0,
   }).then(({ response }) => {
-    // Silent install: the Windows installer is an assisted (wizard) installer
-    // now, so a non-silent run here would pop the wizard mid-update. Relaunch
-    // is handled ourselves — see quitAndInstallSilently.
-    if (response === 0) quitAndInstallSilently()
+    // The installer shows only its progress bar for updates and relaunches
+    // the app itself — see installUpdateAndRestart.
+    if (response === 0) installUpdateAndRestart()
   })
 })
 

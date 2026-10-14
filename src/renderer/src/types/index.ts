@@ -134,10 +134,16 @@ export interface FollowedPlaylist {
 // file plus a snapshot of the song's own metadata at download time.
 export interface OfflineTrackMeta {
   path: string                // API song.path - changing this means the audio itself changed
-  title: string
+  title: string               // the user's custom name when they've set one, else the song's
   artist: string
   album: string
-  imageUrl: string | null
+  imageUrl: string | null     // the user's custom cover when they've set one, else the song's
+  /** On-disk JPEG of imageUrl (userData/offline-covers), so the cover shows
+   *  with no network. Null/absent when there's no cover or the save failed. */
+  localImagePath?: string | null
+  /** The imageUrl localImagePath was saved from - lets a resync skip
+   *  re-fetching an unchanged cover. */
+  coverSourceUrl?: string | null
   lyrics: string | null
   syncedLyrics: string | null
   duration: number

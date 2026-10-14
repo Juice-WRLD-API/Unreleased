@@ -1,10 +1,11 @@
-import { ChevronLeft, Info, Lock, Pin, Terminal, Users } from 'lucide-react'
+import { useEffect } from 'react'
+import { ChevronLeft, Info, Lock, Pin, Search, Terminal, Users } from 'lucide-react'
 import { useChatStore, type RoomRef } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { useRoomInfo } from './RoomPane'
 import { IconButton } from './ui'
 
-export type SidePanel = 'members' | 'pins' | 'info' | null
+export type SidePanel = 'members' | 'pins' | 'info' | 'search' | null
 
 export default function RoomHeader({ room, panel, onPanel, onBack }: {
   room: RoomRef
@@ -15,6 +16,18 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
   const info = useRoomInfo(room)
   const pinCount = useChatStore((s) => s.rooms[`${room.kind === 'channel' ? 'c' : 'd'}:${room.id}`]?.items.filter((m) => m.pinned && !m.deleted_at).length ?? 0)
   const toggle = (p: SidePanel): void => onPanel(panel === p ? null : p)
+
+  // Ctrl/Cmd+F opens chat search instead of the browser's find-in-page, which
+  // can't see messages that aren't scrolled into the DOM yet.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'f') return
+      e.preventDefault()
+      onPanel('search')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onPanel])
   // The frameless window's min/max/close buttons float over the top 28px of the
   // window; drop the header below them instead of letting the two rows overlap
   // (unless the app menu already reserves its own title bar row).
@@ -44,6 +57,7 @@ export default function RoomHeader({ room, panel, onPanel, onBack }: {
         </span>
       )}
       <IconButton label="Open terminal" onClick={() => useStore.getState().setActiveView('terminal')}><Terminal size={17} /></IconButton>
+      <IconButton label="Search messages" active={panel === 'search'} onClick={() => toggle('search')}><Search size={17} /></IconButton>
       <div className="relative">
         <IconButton label="Pinned messages" active={panel === 'pins'} onClick={() => toggle('pins')}><Pin size={17} /></IconButton>
         {pinCount > 0 && <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400 pointer-events-none" />}

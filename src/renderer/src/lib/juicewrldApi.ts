@@ -670,20 +670,29 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
   // API resolves to a placeholder that visibly reads "null".
   if (!imageUrl || imageUrl === 'null') return undefined
   if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-  // Relative path - ensure single leading slash
-  const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl
-  return `https://${JWAPI_HOST}${rel}`
+  // Leading slash - a site-relative asset ("/assets/wod.jpg")
+  if (imageUrl.startsWith('/')) return `https://${JWAPI_HOST}${imageUrl}`
+  // Anything else is a raw file-storage path ("Compilation/4. Cover Art/…png"),
+  // the shape the editor's file picker stores
+  return buildStreamUrl(imageUrl)
 }
 
-/** The inverse of buildImageUrl: strips the API host off an absolute URL so
- *  it's stored site-relative ("/juicewrld/files/download/?path=…"), the same
- *  shape a song's own `image_url` uses ("/assets/wod.jpg"). URLs on any other
+/** The inverse of buildImageUrl for a file-picker selection: a download URL
+ *  for a primary-channel file collapses to its raw storage path
+ *  ("Compilation/4. Cover Art/…png"), the same shape a song's `path` uses.
+ *  Other URLs on the API host are stored site-relative ("/juicewrld/…") -
+ *  a non-primary channel can't be expressed by a bare path. URLs on any other
  *  host (a custom server override included) stay absolute, since
  *  buildImageUrl would otherwise resolve them against the wrong host. */
 export function toSiteRelativeImageUrl(url: string): string {
   try {
     const u = new URL(url)
-    if (u.protocol === 'https:' && u.hostname === JWAPI_HOST) return u.pathname + u.search
+    if (u.protocol === 'https:' && u.hostname === JWAPI_HOST) {
+      const path = u.searchParams.get('path')
+      const channel = u.searchParams.get('channel')
+      if (u.pathname.endsWith('/files/download/') && path && (!channel || channel === 'comp')) return path
+      return u.pathname + u.search
+    }
   } catch {}
   return url
 }

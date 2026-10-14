@@ -497,9 +497,16 @@ export default function Player(): JSX.Element {
     const trackId = currentTrack.id
     const isStale = (): boolean => useStore.getState().currentTrack?.id !== trackId
     // Build synthetic FullTrack immediately so cover art + artist show
+    // A downloaded song's cover is saved to disk alongside its audio - use that
+    // copy so the (possibly personalized) art shows with no network, as long
+    // as it was saved from the cover this track currently resolves to.
+    const offlineCover = useStore.getState().offlineTracks[currentTrack.id]
+    const localArt = offlineCover?.localImagePath && offlineCover.coverSourceUrl === currentTrack.imageUrl
+      ? toFileUrl(offlineCover.localImagePath)
+      : null
     const synthetic: FullTrack = {
       ...currentTrack,
-      albumArt: currentTrack.imageUrl ?? null,
+      albumArt: localArt ?? currentTrack.imageUrl ?? null,
       lyrics: null,
       syncedLyrics: null,
       producer: null,
@@ -530,7 +537,7 @@ export default function Player(): JSX.Element {
         // the live fetch below overwrites it with fresh data when it succeeds.
         const offlineMeta = useStore.getState().offlineTracks[currentTrack.id]
         if (offlineMeta) {
-          setCurrentTrackFull({ ...synthetic, albumArt: offlineMeta.imageUrl ?? synthetic.albumArt, lyrics: offlineMeta.lyrics, syncedLyrics: offlineMeta.syncedLyrics })
+          setCurrentTrackFull({ ...synthetic, albumArt: localArt ?? offlineMeta.imageUrl ?? synthetic.albumArt, lyrics: offlineMeta.lyrics, syncedLyrics: offlineMeta.syncedLyrics })
         } else {
           // Flagged pending so WRLD's layout doesn't read the still-null
           // lyrics as "this song has none" and snap to the centered,
