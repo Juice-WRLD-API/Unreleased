@@ -1060,6 +1060,94 @@ async function renderRadio() {
   return renderPage({ title, description, image, imageAlt: title, url, componentEmbed })
 }
 
+// /download. Same GitHub releases list DownloadAppView.tsx reads, picked
+// apart the same way: by asset extension, since desktop, Android (android-v*)
+// and iOS (ios-v*) tags interleave and macOS builds skip some versions.
+// Unauthenticated GitHub API is 60 req/hr per IP, so the list is cached here.
+const RELEASES_URL = 'https://github.com/Juice-WRLD-API/Unreleased/releases'
+const RELEASES_API = 'https://api.github.com/repos/Juice-WRLD-API/Unreleased/releases?per_page=20'
+const RELEASES_TTL_MS = 10 * 60 * 1000
+const DOWNLOAD_DESCRIPTION = 'Get unreleased for Windows, macOS and Linux - local file playback, offline downloads, Discord Rich Presence, global hotkeys, and pop-out windows.'
+let releasesCache = { at: 0, value: null }
+
+async function fetchReleases() {
+  if (releasesCache.value && Date.now() - releasesCache.at < RELEASES_TTL_MS) return releasesCache.value
+  const json = await fetchJson(RELEASES_API)
+  if (!Array.isArray(json)) return releasesCache.value // stale beats nothing on a rate limit
+  const value = json
+    .filter((r) => r && !r.draft && !r.prerelease)
+    .map((r) => ({
+      version: String(r.tag_name ?? '').replace(/^(android-|ios-)?v/, ''),
+      publishedAt: r.published_at ?? '',
+      assets: (Array.isArray(r.assets) ? r.assets : []).map((a) => ({ name: String(a.name ?? ''), size: a.size, url: a.browser_download_url })),
+    }))
+  releasesCache = { at: Date.now(), value }
+  return value
+}
+
+async function renderDownload() {
+  const url = `${origin()}/download`
+  const title = 'Download the desktop app'
+  const releases = (await fetchReleases()) ?? []
+
+  const withAsset = (re) => releases.find((r) => r.assets.some((a) => re.test(a.name))) ?? null
+  const desktop = withAsset(/\.(exe|AppImage|dmg)$/i)
+  const mac = withAsset(/\.dmg$/i)
+  const android = withAsset(/\.apk$/i)
+  const ios = withAsset(/\.ipa$/i)
+  const pick = (release, test) => release?.assets.find((a) => test(a.name)) ?? null
+
+  const platforms = [
+    { name: 'Windows', emoji: '🪟', release: desktop, asset: pick(desktop, (n) => /^Unreleased-Setup-.+\.exe$/i.test(n)) },
+    { name: 'macOS', emoji: '🍎', release: mac, asset: pick(mac, (n) => n.endsWith('-arm64.dmg')) ?? pick(mac, (n) => n.endsWith('.dmg')) },
+    { name: 'Linux', emoji: '🐧', release: desktop, asset: pick(desktop, (n) => n.endsWith('.AppImage')) },
+    { name: 'Android', emoji: '🤖', release: android, asset: pick(android, (n) => n.endsWith('.apk')) },
+    { name: 'iOS', emoji: '📱', release: ios, asset: pick(ios, (n) => n.endsWith('.ipa')), note: 'sideload' },
+  ].filter((p) => p.asset?.url)
+
+  const mb = (bytes) => (Number.isFinite(bytes) ? `${bytes >= 10 * 1048576 ? Math.round(bytes / 1048576) : (bytes / 1048576).toFixed(1)} MB` : null)
+  const md = escapeDiscordMarkdown
+  const released = desktop?.publishedAt ? Date.parse(desktop.publishedAt) : NaN
+  const headline = desktop
+    ? [`**v${md(desktop.version)}**`, Number.isFinite(released) && `released <t:${Math.floor(released / 1000)}:R>`].filter(Boolean).join(' · ')
+    : null
+  const platformLines = platforms.map((p) =>
+    [`${p.emoji} [**${p.name}**](${p.asset.url})`, `v${md(p.release.version)}`, mb(p.asset.size), p.note].filter(Boolean).join(' · '))
+
+  const description = [desktop && `v${desktop.version}`, platforms.length && platforms.map((p) => p.name).join(', ')].filter(Boolean).join(' · ')
+    || DOWNLOAD_DESCRIPTION
+
+  const componentEmbed = fitComponentEmbed(
+    ({ withAbout, withButtons }) =>
+      container([
+        section(
+          [
+            text(`### [Unreleased for desktop & mobile](${url})`),
+            text(`-# ${headline ?? 'Free · Windows, macOS, Linux, Android & iOS'}`),
+            ...(withAbout ? [text(md(DOWNLOAD_DESCRIPTION))] : []),
+          ],
+          thumbnail(defaultImage(), SITE),
+        ),
+        ...(platformLines.length ? [separator(), text(platformLines.join('\n'))] : []),
+        separator(),
+        ...(withButtons && platforms.length
+          ? [linkButtons(...platforms.map((p) => ({ label: p.name, url: p.asset.url, emoji: p.emoji })))]
+          : []),
+        linkButtons(
+          { label: 'Download page', url, emoji: '⬇️' },
+          { label: 'All releases', url: RELEASES_URL, emoji: '📦' },
+        ),
+      ]),
+    [
+      { withAbout: true, withButtons: true },
+      { withAbout: false, withButtons: true },
+      { withAbout: false, withButtons: false },
+    ],
+  )
+
+  return renderPage({ title, description, image: defaultImage(), imageAlt: title, url, componentEmbed })
+}
+
 // Profile avatars are stored inline as base64 data: URLs, which crawlers
 // can't fetch - this service re-serves the decoded bytes at
 // /u/:id/avatar.<ext> (see the nginx snippet) so embeds get a real image URL.
@@ -1488,6 +1576,8 @@ async function handle(req, res) {
       html = await renderRadio()
     } else if (/^\/statistics\/?$/.test(pathname)) {
       html = await renderStatistics()
+    } else if (/^\/download\/?$/.test(pathname)) {
+      html = await renderDownload()
     } else if (pathname === '/' || /^\/(home|playlists)\/?$/.test(pathname)) {
       html = await renderHome()
     }
