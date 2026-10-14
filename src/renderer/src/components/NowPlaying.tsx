@@ -7,7 +7,7 @@ import { lazyOverlay } from '../lib/lazyView'
 import { smallCoverUrl } from '../lib/juicewrldApi'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useCanEdit } from '../hooks/useChannelRoles'
-import { useLyricsVisible } from '../lib/lyrics'
+import { useLyricsVisible, lyricsLoading } from '../lib/lyrics'
 
 // Pulls in html-to-image for the export - only worth downloading once opened.
 const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
@@ -50,7 +50,7 @@ export default function NowPlaying(): JSX.Element {
   const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
   const canEdit = useCanEdit()
   const hasLyricsNatural = !!(currentTrackFull?.lyrics || currentTrackFull?.syncedLyrics)
-  const hasLyrics = useLyricsVisible(hasLyricsNatural, lyricsOverride)
+  const hasLyrics = useLyricsVisible(hasLyricsNatural, lyricsOverride, lyricsLoading(currentTrack, currentTrackFull))
 
   return (
     <div

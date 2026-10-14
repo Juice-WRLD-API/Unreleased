@@ -6,7 +6,7 @@ import { ModalOverlay, LockToggle } from './Modal'
 import CoverEditor from './CoverEditor'
 import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible } from '../lib/lyrics'
+import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible, lyricsLoading } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { setEqAnchor } from '../lib/eqAnchor'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
@@ -357,7 +357,10 @@ export default function WrldView(): JSX.Element {
   // FM's Radio/Lyrics tabs stand on their own regardless of lyrics
   // availability, so the manual override only applies to normal playback -
   // same scope as the auto-collapse behavior it's overriding.
-  const lyricsVisible = useLyricsVisible(!!rawLyrics, lyricsOverride, !radioFmActive && !!currentTrackFull?.lyricsPending)
+  // currentTrackFull is null (or still the previous song's) for a beat after
+  // every track change - that counts as pending too, or with lyrics toggled
+  // off (override on) the empty lyrics flipped the column open until they loaded.
+  const lyricsVisible = useLyricsVisible(!!rawLyrics, lyricsOverride, !radioFmActive && lyricsLoading(currentTrack, currentTrackFull))
   // FM's column is on by default and the override turns it off; otherwise the
   // override is XORed against whether lyrics exist.
   const showLyricsColumn = radioFmActive ? !lyricsOverride : showQueue || lyricsVisible
@@ -793,7 +796,10 @@ export default function WrldView(): JSX.Element {
               artist={displayArtist ?? ''}
               trackKey={radioFmActive ? (radioFmNowPlaying?.title ?? null) : (currentTrack?.id ?? null)}
               albumKey={displayAlbum ?? null}
-              hasLyrics={!!rawLyrics}
+              // The held value, not !!rawLyrics: the toolbar derives its own
+              // panel state from this, so the raw one flashed its icon/OSD
+              // to "Lyrics" on every track change while lyrics were off.
+              hasLyrics={lyricsVisible !== lyricsOverride}
               txtPri={txtPri}
               txtSec={txtSec}
               fm={{ active: radioFmActive, live: radioFmIsLive === true, label: fmLabel, disabled: fmDisabled, toggle: toggleFm, tab: fmTab, setTab: setFmTab }}
@@ -1264,9 +1270,13 @@ export default function WrldView(): JSX.Element {
                   unmounted on close - same reasoning as the app-wide
                   QueuePanel: unmounting destroyed every cover <img>, forcing
                   a visible reload/re-decode of the whole list on reopen. */}
+              {/* pt-24 clears WrldVisualizer's toolbar (top-10 under Electron,
+                  ~48px tall) in the top-right corner - with py-7 the panel's
+                  header (and its Clear/close buttons) slid underneath it and
+                  its settings popup. */}
               {queueEverOpened && (
                 <div
-                  className="h-full flex items-stretch justify-center px-6 xl:px-10 py-7 animate-wrld-queue-in"
+                  className="h-full flex items-stretch justify-center px-6 xl:px-10 pt-24 pb-7 animate-wrld-queue-in"
                   style={showQueue && !radioFmActive ? undefined : { display: 'none' }}
                 >
                   <div className="w-full max-w-[440px] h-full">
@@ -1620,7 +1630,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
   // 'panel' fills the desktop right column in place of the lyrics view.
   variant: 'inline' | 'sheet' | 'panel'
 }): JSX.Element {
-  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue, onLightBackdrop } = useStore(useShallow(s => ({
+  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playHistory, playFromHistory, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue, onLightBackdrop } = useStore(useShallow(s => ({
     queue: s.queue,
     queueIndex: s.queueIndex,
     currentTrack: s.currentTrack,
@@ -1629,6 +1639,8 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
     radioMode: s.radioMode,
     playTrack: s.playTrack,
     jumpToTrack: s.jumpToTrack,
+    playHistory: s.playHistory,
+    playFromHistory: s.playFromHistory,
     removeFromQueue: s.removeFromQueue,
     clearQueue: s.clearQueue,
     reorderQueue: s.reorderQueue,
@@ -1641,7 +1653,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
     onLightBackdrop: s.wrldThemeBackground && !getSkin(s.theme).dark,
   })))
 
-  const history = queue.slice(0, queueIndex) // played tracks, oldest first
+  const history = playHistory // what was actually played, newest first - see QueuePanel
   const upcoming = queue.slice(queueIndex + 1)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -1748,20 +1760,17 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
               <ChevronDown size={12} className={`transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
             </button>
             {historyOpen && (() => {
-              // Displayed newest-first, so reversed index i maps back to
-              // absolute queue position history.length - 1 - i.
-              const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
-              const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
+              const filtered = query ? history.filter(matchesQuery) : history
               const shown = query ? filtered : filtered.slice(0, WRLD_MAX_HISTORY_SHOWN)
               return (
                 <div className="opacity-60">
-                  {shown.map(({ track, i }) => (
+                  {shown.map((track) => (
                     <WrldQueueRow
-                      key={`hist-${track.id}-${i}`}
+                      key={`hist-${track.id}`}
                       track={track}
                       isActive={false}
                       isPlaying={false}
-                      onPlay={() => radioMode ? jumpToTrack(track) : playTrack(track)}
+                      onPlay={() => playFromHistory(track)}
                     />
                   ))}
                   {!query && filtered.length > WRLD_MAX_HISTORY_SHOWN && (

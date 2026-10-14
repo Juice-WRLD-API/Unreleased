@@ -270,10 +270,10 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list | clear | add <song> | next <song> | remove N | jump N|title]',
-    description: 'Show or change the play queue. <song> is a title or a number from find',
+    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title]]',
+    description: 'Show or change the play queue. <song> is a title or a number from find. history lists what was played before this song (newest first); history N|title replays one',
     complete: (before, partial) => {
-      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump'].filter((w) => w.startsWith(partial))
+      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump', 'history'].filter((w) => w.startsWith(partial))
       return ['add', 'next'].includes(before[0].toLowerCase()) ? completeSongs(before.slice(1), partial) : []
     },
     run: async (args, ctx) => {
@@ -305,7 +305,20 @@ export const PLAYER_COMMANDS: TermCommand[] = [
           ctx.print(`▶ ${s.queue[n].title}`, 'ok')
           return
         }
-        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title]')
+        case 'history': case 'hist': {
+          const h = s.playHistory
+          if (!rest) {
+            if (h.length === 0) { ctx.print('nothing played yet', 'dim'); return }
+            ctx.print(pageRows(h.length, (i) => `  ${String(i + 1).padStart(3)}  ${trackLine(h[i])}`, 40))
+            return
+          }
+          if (h.length === 0) fail('nothing played yet')
+          const n = queueIndexFor(rest, h.map((t) => t.title))
+          s.playFromHistory(h[n])
+          ctx.print(`▶ ${h[n].title}`, 'ok')
+          return
+        }
+        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title]]')
       }
     },
   },

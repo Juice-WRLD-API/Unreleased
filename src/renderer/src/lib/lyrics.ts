@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react'
-import { SyncedLyricLine } from '../types'
+import { FullTrack, SyncedLyricLine, Track } from '../types'
+
+/**
+ * True while the playing track's lyrics aren't known yet: Player hasn't built
+ * its FullTrack (queue actions reset currentTrackFull to null on every track
+ * change), or it has and the /songs/ fetch is still out. Pass as
+ * useLyricsVisible's `pending`.
+ */
+export function lyricsLoading(track: Track | null, full: FullTrack | null): boolean {
+  return !!track && (full?.id !== track.id || !!full.lyricsPending)
+}
 
 /**
  * Whether a lyrics section should be shown, debounced against the

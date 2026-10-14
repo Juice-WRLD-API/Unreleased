@@ -42,7 +42,7 @@ import * as foldersApi from '../lib/foldersApi'
 import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
 import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
-import { createQueueSlice, QueueSlice } from './queueSlice'
+import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import type { GifResult } from '../lib/gifApi'
 import { listDonorFiles } from '../lib/donorFilesApi'
@@ -2839,13 +2839,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // it from the new path � see its `track.streamUrl ?? toFileUrl(track.path)`.
     const rekey = <T extends { id: string }>(t: T): T =>
       t.id === id ? { ...t, id: newId, path: newPath, streamUrl: undefined } : t
-    set({
+    withoutPlayHistory(() => set({
       libraryTracks: nextTracks,
       libraryArt: nextArt,
       localPlaylists: nextPlaylists,
       queue: queue.map(rekey),
       currentTrack: currentTrack ? rekey(currentTrack) : currentTrack,
-    })
+      playHistory: get().playHistory.map(rekey),
+    }))
 
     el.saveLibraryData({ tracks: nextTracks, folders: libraryFolders, lastScanned: libraryLastScanned })
     if (touchedPlaylists) el.saveLocalPlaylists(nextPlaylists)
