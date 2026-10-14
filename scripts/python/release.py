@@ -683,23 +683,43 @@ def step_publish_beta(version, notes):
 
     url = f"{BETA_API_BASE}/admin/versions/"
     info(f"Publishing {_c(version, WHT, BOLD)} to {url} …")
-    try:
-        upload_beta(
-            url, token,
-            fields={
-                "version": version, "notes": notes, "is_active": "true",
-                "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            },
-            files={"file": exe},
-        )
-    except urllib.error.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        hint = ""
-        if e.code in (401, 403):
-            hint = "\n     BETA_ADMIN_TOKEN must be an administrator's token with 2FA enabled."
-        elif e.code == 409:
-            hint = f"\n     Version {version} already exists - pick a new version, or delete it on the Admin page's Beta tab."
-        raise RuntimeError(f"Beta publish failed: HTTP {e.code}\n{body[:300]}{hint}")
+    # A dropped connection mid-upload (WinError 10054 at 92% on a slow link)
+    # used to fall straight through to rollback, throwing away a multi-minute
+    # build over a network blip. Retry those; HTTP errors are real answers
+    # from the backend and still fail immediately.
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            upload_beta(
+                url, token,
+                fields={
+                    "version": version, "notes": notes, "is_active": "true",
+                    "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                },
+                files={"file": exe},
+            )
+            break
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            if e.code == 409 and attempt > 1:
+                # The previous attempt's body reached the server even though
+                # the connection died before its response came back.
+                warn(f"Version {version} already exists — the previous attempt landed after all.")
+                break
+            hint = ""
+            if e.code in (401, 403):
+                hint = "\n     BETA_ADMIN_TOKEN must be an administrator's token with 2FA enabled."
+            elif e.code == 409:
+                hint = f"\n     Version {version} already exists - pick a new version, or delete it on the Admin page's Beta tab."
+            raise RuntimeError(f"Beta publish failed: HTTP {e.code}\n{body[:300]}{hint}")
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+            print()
+            if attempt == attempts:
+                raise RuntimeError(f"Beta upload failed after {attempts} attempts: {e}\n"
+                                   f"     The installer is still at {exe}")
+            wait = 10 * attempt
+            warn(f"Upload interrupted ({e}) — retrying in {wait}s  (attempt {attempt + 1}/{attempts})")
+            time.sleep(wait)
 
     ok("Beta build published — private, not a public GitHub release")
     print()

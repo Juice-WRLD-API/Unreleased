@@ -865,10 +865,11 @@ export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.
 export function newProject(session: ScannedSession, name: string): SmProject {
   const beat = session.takes.find((t) => t.kind === 'beat')
   const tracks: SmTrack[] = []
-  if (beat && beat.duration) {
+  // A blank project still gets an empty beat lane, so a dropped beat sets the tempo.
+  if ((beat && beat.duration) || !session.zipPath) {
     tracks.push({
       id: uid(), name: 'Beat', role: 'beat', gain: 1, muted: false, solo: false,
-      clips: [{ id: uid(), takeId: beat.id, start: beat.position ?? 0, offset: 0, length: beat.duration, gain: 1, fadeIn: 0, fadeOut: 0 }],
+      clips: beat?.duration ? [{ id: uid(), takeId: beat.id, start: beat.position ?? 0, offset: 0, length: beat.duration, gain: 1, fadeIn: 0, fadeOut: 0 }] : [],
     })
   }
   const folder: TakeFolder = { id: uid(), name: 'Vocals' }
@@ -879,6 +880,23 @@ export function newProject(session: ScannedSession, name: string): SmProject {
     v: 1, id: uid(), name, zipPath: session.zipPath, bpm: session.bpm, gridOffset: beat?.position ?? 0, masterGain: 1, tracks,
     loop: null, reference: ref ? { takeId: ref.id, offset: 0 } : null, folders: [folder], createdAt: now, updatedAt: now,
   }
+}
+
+// A project with no studio session behind it (zipPath ''): everything in it is
+// audio the user imported.
+export const isBlankProject = (p: SmProject): boolean => !p.zipPath
+
+/** The stand-in session a blank project opens with - no zip, no takes. */
+export function blankSession(): ScannedSession {
+  return { zipPath: '', zip: { url: '', size: 0, entries: [] }, takes: [], bpm: null }
+}
+
+/** A new project of the user's own files, under an unused "Untitled project" name. */
+export function newBlankProject(): SmProject {
+  const taken = new Set(loadProjects().map((x) => x.name))
+  let name = 'Untitled project'
+  for (let i = 2; taken.has(name); i++) name = `Untitled project ${i}`
+  return newProject(blankSession(), name)
 }
 
 /** The bounce to A/B against: a WAV over its MP3 copy, the latest version by name. */

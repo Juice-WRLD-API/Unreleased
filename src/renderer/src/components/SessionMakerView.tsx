@@ -15,7 +15,7 @@ import type { JWApiFileEntry } from '../lib/juicewrldApi'
 import {
   PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, duplicateProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
   loadProjects, loadTake, newProject, parseProjectFile, peakOf, peekLoadProgress, placeAllTakes, projectEnd, renderProject, scaleBuffer,
-  saveProject, scanSession, importAudioFiles, importedTakes, isAudioFile, removeImport, sweepImports, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
+  saveProject, scanSession, blankSession, isBlankProject, newBlankProject, importAudioFiles, importedTakes, isAudioFile, removeImport, sweepImports, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
   CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, audioContext, chainActive, chainReadout, clipAudioState, clipSpeed, copyEffects, editTracksFx, hasEffects, laneFx, pasteEffects, pluginEditorKey, pluginRows, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
   type ChainKey, type FxCopy, type FxEdit, type LaneFx, type PluginRow, type SmPlugin, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
 } from '../lib/sessionMaker'
@@ -51,6 +51,12 @@ export default function SessionMakerView(): JSX.Element {
     const ac = new AbortController()
     abortRef.current = ac
     setError(null)
+    // A project made without a session has nothing to scan.
+    if (existing && isBlankProject(existing)) {
+      saveProject(existing)
+      setOpened({ project: existing, session: blankSession() })
+      return
+    }
     const label = sessionTitle(zipPath.split('/').pop() ?? zipPath)
     setOpening({ label, done: 0, total: 0 })
     try {
@@ -94,7 +100,7 @@ export default function SessionMakerView(): JSX.Element {
     return <SessionEditor key={opened.project.id} initial={opened.project} session={opened.session} onClose={() => setOpened(null)} onOpenCopy={(project) => setOpened({ project, session: opened.session })} />
   }
 
-  return <SessionBrowser opening={opening} error={error} onOpenZip={(p) => void open(p)} onOpenProject={(p) => void open(p.zipPath, p)} />
+  return <SessionBrowser opening={opening} error={error} onOpenZip={(p) => void open(p)} onOpenProject={(p) => void open(p.zipPath, p)} onNewProject={() => void open('', newBlankProject())} />
 }
 
 const HELP_ROWS: [string, string][] = [
@@ -188,11 +194,12 @@ function SessionDownloadButton({ session, full }: { session: ScannedSession; ful
 
 // ─── Browser ─────────────────────────────────────────────────────────────────
 
-function SessionBrowser({ opening, error, onOpenZip, onOpenProject }: {
+function SessionBrowser({ opening, error, onOpenZip, onOpenProject, onNewProject }: {
   opening: { label: string; done: number; total: number } | null
   error: string | null
   onOpenZip: (zipPath: string) => void
   onOpenProject: (p: SmProject) => void
+  onNewProject: () => void
 }): JSX.Element {
   const [folders, setFolders] = useState<SessionFolder[] | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -357,14 +364,19 @@ function SessionBrowser({ opening, error, onOpenZip, onOpenProject }: {
           <aside>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-text-primary">Your projects</h2>
-              <button className={btn} onClick={() => fileRef.current?.click()} title="Open a project file">
-                <FileUp size={15} /> Import
-              </button>
+              <div className="flex items-center gap-1">
+                <button className={btn} onClick={onNewProject} disabled={!!opening} title="Start a project without a studio session - bring in your own audio">
+                  <Plus size={15} /> New
+                </button>
+                <button className={btn} onClick={() => fileRef.current?.click()} title="Open a project file">
+                  <FileUp size={15} /> Import
+                </button>
+              </div>
               <input ref={fileRef} type="file" accept=".json,application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importFile(f) }} />
             </div>
             {projects.length === 0 ? (
               <div className="text-sm text-text-muted p-4 rounded-xl border border-dashed border-[var(--border)]">
-                Projects you make are saved here automatically.
+                Projects you make are saved here automatically. Open a session to start one, or start a blank one with New.
               </div>
             ) : (
               <div className="space-y-1">
@@ -373,7 +385,7 @@ function SessionBrowser({ opening, error, onOpenZip, onOpenProject }: {
                     <button className="flex-1 min-w-0 text-left" disabled={!!opening} onClick={() => onOpenProject(p)}>
                       <div className="text-sm text-text-primary truncate">{p.name}</div>
                       <div className="text-xs text-text-muted truncate">
-                        {sessionTitle(p.zipPath.split('/').pop() ?? '')} · {p.tracks.reduce((n, t) => n + t.clips.length, 0)} clips · {new Date(p.updatedAt).toLocaleDateString()}
+                        {isBlankProject(p) ? 'Your own files' : sessionTitle(p.zipPath.split('/').pop() ?? '')} · {p.tracks.reduce((n, t) => n + t.clips.length, 0)} clips · {new Date(p.updatedAt).toLocaleDateString()}
                       </div>
                     </button>
                     <button
@@ -2274,7 +2286,7 @@ function SessionEditor({ initial, session: zipSession, onClose, onOpenCopy }: { 
                   {project.reference && alignNote && <div className="text-xs text-amber-400">{alignNote}</div>}
                 </div>
               )}
-              <SessionDownloadButton session={session} full />
+              {session.zipPath && <SessionDownloadButton session={session} full />}
               <button className={`${btn} w-full justify-start`} title="Save the project as a file (share it - it holds no audio)" onClick={() => { exportProject(); setProjMenu(false) }}>
                 <FileDown size={15} /> Save project file
               </button>
@@ -2344,14 +2356,14 @@ function SessionEditor({ initial, session: zipSession, onClose, onOpenCopy }: { 
                 onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ''; void importFiles(files) }}
               />
             </div>
-            <button
+            {session.zipPath && <button
               className={`${btn} w-full justify-start`}
               disabled={!unplacedWithPos}
               title="Put every take back where it was recorded, on as many lanes as needed"
               onClick={() => commit(placeAllTakes(projectRef.current, session))}
             >
               <Wand2 size={15} /> Place all takes at original positions
-            </button>
+            </button>}
           </div>
           {binSel.length > 1 && (
             <div className="shrink-0 flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border)] bg-accent/10 text-xs animate-fade-in">
@@ -2414,6 +2426,11 @@ function SessionEditor({ initial, session: zipSession, onClose, onOpenCopy }: { 
               </button>
             )}
             {showBounces && binRows(bounces)}
+            {!session.takes.length && importing == null && (
+              <div className="mx-3 mt-2 px-3 py-4 rounded-lg border border-dashed border-[var(--border)] text-xs text-text-muted text-center">
+                No audio yet. Drop files here or on a lane, use the import button, or browse the Files tab.
+              </div>
+            )}
           </div>
           </>}
           {binFileDrop && (
