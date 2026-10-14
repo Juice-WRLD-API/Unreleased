@@ -158,6 +158,12 @@ export default function App(): JSX.Element {
     heldViewRef.current = null
   }
   const heldView = heldViewRef.current
+  // Session Maker holds a whole open arrangement (clips, undo history, playhead,
+  // loaded audio), so once visited it stays mounted and is just hidden on other
+  // tabs. Set during render so leaving it never unmounts it for a commit.
+  const sessionMakerKeptRef = useRef(false)
+  if (activeView === 'session-maker') sessionMakerKeptRef.current = true
+  const keepSessionMaker = sessionMakerKeptRef.current
   useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
   const isMobile = useIsMobile()
   useThemeEffects()
@@ -340,6 +346,11 @@ export default function App(): JSX.Element {
                   : <ChatView />}
               </div>
             ))}
+            {keepSessionMaker && (
+              <div className={activeView === 'session-maker' ? 'contents' : 'hidden'}>
+                <SessionMakerView />
+              </div>
+            )}
             {HOLD_UNDER_TERMINAL.includes(activeView) ? null
               : activeView === 'home' ? <HomeView />
               : activeView === 'api-tracker' ? <ApiTrackerView />
@@ -357,7 +368,7 @@ export default function App(): JSX.Element {
               : activeView === 'heardle' ? <HeardleView />
               : activeView === 'wordle' ? <WordleView />
               : activeView === 'tierlist' ? <TierlistView />
-              : activeView === 'session-maker' ? <SessionMakerView />
+              : activeView === 'session-maker' ? null
               : activeView === 'stats' ? <StatsView />
               : activeView === 'statistics' ? <StatisticsView />
               : activeView === 'public-profile' ? <PublicProfileView />

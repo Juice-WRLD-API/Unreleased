@@ -68,6 +68,8 @@ export interface Take {
   /** Original timeline position in seconds (already relative to the session origin), or null if the file carries none. */
   position: number | null
   rawTimeRef: number | null
+  /** A file the user brought in (SmProject.imports), not part of the zip. `entries` is empty. */
+  imported?: boolean
 }
 
 export interface ScannedSession {
@@ -331,6 +333,7 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
 export const takeKey = (zipPath: string, takeId: string): string => `${zipPath}\u0000${takeId}`
 
 export function loadTake(session: ScannedSession, take: Take): Promise<LoadedTake> {
+  if (take.imported) return loadImportedTake(take)
   const key = takeKey(session.zipPath, take.id)
   const cached = loadCache.get(key)
   if (cached) return cached
@@ -361,6 +364,119 @@ export function loadTake(session: ScannedSession, take: Take): Promise<LoadedTak
 
 export function peekLoadedTake(zipPath: string, takeId: string): Promise<LoadedTake> | undefined {
   return loadCache.get(takeKey(zipPath, takeId))
+}
+
+// ─── Imported files ──────────────────────────────────────────────────────────
+// The user's own audio, added to a project next to the session's takes. The
+// files are copied into IndexedDB so the project keeps working after a restart
+// (and on the site, where there's no path to read back); the project only holds
+// their names. Copies no saved project uses any more are swept away.
+
+export interface ImportedTake { id: string; name: string; size: number; duration: number; channels: number; sampleRate: number }
+
+const IMPORT_DB = 'session-maker-imports'
+const IMPORT_STORE = 'files'
+let importDb: Promise<IDBDatabase> | null = null
+function openImportDb(): Promise<IDBDatabase> {
+  if (!importDb) {
+    importDb = new Promise((resolve, reject) => {
+      const req = indexedDB.open(IMPORT_DB, 1)
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(IMPORT_STORE)) req.result.createObjectStore(IMPORT_STORE) }
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => { importDb = null; reject(req.error) }
+    })
+  }
+  return importDb
+}
+async function importStore<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest): Promise<T> {
+  const db = await openImportDb()
+  return new Promise<T>((resolve, reject) => {
+    const req = fn(db.transaction(IMPORT_STORE, mode).objectStore(IMPORT_STORE))
+    req.onsuccess = () => resolve(req.result as T)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export const isAudioFile = (f: File): boolean => AUDIO_RE.test(f.name) || f.type.startsWith('audio/')
+export const isAudioName = (name: string): boolean => AUDIO_RE.test(name)
+
+/** Decodes a file for a quick listen (AIFF too, which the browser can't play itself). */
+export async function decodeAudioFile(f: File): Promise<AudioBuffer> {
+  const raw = await f.arrayBuffer()
+  const ctx = audioContext()
+  return /\.aiff?$/i.test(f.name) ? decodeAiff(raw, ctx) : ctx.decodeAudioData(raw)
+}
+
+const importedLoads = new Map<string, Promise<LoadedTake>>()
+
+async function decodeFile(raw: ArrayBuffer, name: string): Promise<LoadedTake> {
+  const ctx = audioContext()
+  const buffer = /\.aiff?$/i.test(name) ? decodeAiff(raw, ctx) : await ctx.decodeAudioData(raw)
+  return { buffer, peaks: computePeaks(buffer) }
+}
+
+function loadImportedTake(take: Take): Promise<LoadedTake> {
+  const cached = importedLoads.get(take.id)
+  if (cached) return cached
+  const p = (async () => {
+    const blob = await importStore<Blob | undefined>('readonly', (s) => s.get(take.id)).catch(() => undefined)
+    if (!blob) throw new Error(`The imported file "${take.name}" is no longer on this device - import it again`)
+    return decodeFile(await blob.arrayBuffer(), blob instanceof File ? blob.name : take.name)
+  })()
+  importedLoads.set(take.id, p)
+  p.catch(() => importedLoads.delete(take.id))
+  return p
+}
+
+/** Decodes and stores each file. Ones that aren't audio, or won't decode, come back in `failed`. */
+export async function importAudioFiles(files: File[]): Promise<{ imported: ImportedTake[]; failed: string[] }> {
+  const imported: ImportedTake[] = []
+  const failed: string[] = []
+  for (const f of files) {
+    if (!isAudioFile(f)) { failed.push(f.name); continue }
+    try {
+      const lt = await decodeFile(await f.arrayBuffer(), f.name)
+      const id = `import:${uid()}`
+      await importStore('readwrite', (s) => s.put(f, id))
+      importedLoads.set(id, Promise.resolve(lt))
+      imported.push({
+        id, name: f.name.replace(/\.[^.]+$/, '') || f.name, size: f.size,
+        duration: lt.buffer.duration, channels: lt.buffer.numberOfChannels, sampleRate: lt.buffer.sampleRate,
+      })
+    } catch { failed.push(f.name) }
+  }
+  return { imported, failed }
+}
+
+/** The project's imported files as takes for the bin and timeline. */
+export function importedTakes(imports: readonly ImportedTake[] | undefined): Take[] {
+  return (imports ?? []).map((t) => ({
+    id: t.id, name: t.name, kind: 'take', entries: [], channels: t.channels, sampleRate: t.sampleRate,
+    duration: t.duration, position: null, rawTimeRef: null, imported: true,
+  }))
+}
+
+/** Takes an imported file out of the project, along with its clips and anything else naming it. */
+export function removeImport(p: SmProject, id: string): SmProject {
+  const { [id]: _n, ...takeNames } = p.takeNames ?? {}
+  const { [id]: _c, ...takeCategory } = p.takeCategory ?? {}
+  return {
+    ...p,
+    imports: (p.imports ?? []).filter((t) => t.id !== id),
+    tracks: p.tracks.map((t) => (t.clips.some((c) => c.takeId === id) ? { ...t, clips: t.clips.filter((c) => c.takeId !== id) } : t)),
+    reference: p.reference?.takeId === id ? null : p.reference,
+    takeNames, takeCategory,
+  }
+}
+
+/** Drops stored files no saved project imports any more. Undo can bring one back
+ *  inside an open editor, so this only runs when none is open. */
+export async function sweepImports(): Promise<void> {
+  try {
+    const used = new Set(loadProjects().flatMap((p) => (p.imports ?? []).map((t) => t.id)))
+    const keys = await importStore<IDBValidKey[]>('readonly', (s) => s.getAllKeys())
+    for (const k of keys) if (typeof k === 'string' && !used.has(k)) { importedLoads.delete(k); await importStore('readwrite', (s) => s.delete(k)) }
+  } catch { /* storage unavailable - nothing to sweep */ }
 }
 
 // ─── Whole-session downloads ─────────────────────────────────────────────────
@@ -738,6 +854,8 @@ export interface SmProject {
   takeCategory?: Record<string, string>
   /** Take folders, in no particular order - their lanes' positions place them. */
   folders?: TakeFolder[]
+  /** Audio files the user imported into this project (stored on the device, see importAudioFiles). */
+  imports?: ImportedTake[]
   createdAt: number
   updatedAt: number
 }
@@ -1025,6 +1143,7 @@ export function saveProject(p: SmProject): void {
 
 export function deleteProject(id: string): void {
   ls.set(LS_PROJECTS, loadProjects().filter((x) => x.id !== id))
+  void sweepImports()
 }
 
 /** Saves a copy of the project under a fresh id and an unused "<name> copy" name, and returns it. */

@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  Activity, ArrowDown, ArrowLeft, ArrowUp, Check, Info, ClipboardCopy, ClipboardPaste, CopyPlus, Eraser, FolderInput, FolderMinus, FolderPlus, Headphones, Highlighter, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Download, FileDown, FileUp, Flag, HardDrive, HardDriveDownload, Layers, Loader2, Magnet,
+  Activity, ArrowDown, FolderOpen, ArrowLeft, ArrowUp, Check, Info, ClipboardCopy, ClipboardPaste, CopyPlus, Eraser, FolderInput, FolderMinus, FolderPlus, Headphones, Highlighter, ChevronDown, ChevronLeft, ChevronRight, Copy, Crosshair, Download, FileDown, FileUp, Flag, HardDrive, HardDriveDownload, Layers, Loader2, Magnet,
   Minus, Pause, Play, Pencil, Plus, Power, Gauge, Redo2, RefreshCw, Repeat, Rewind, RotateCcw, RotateCw, Scissors, Search, SquareDashedMousePointer, Settings2, SkipBack, SlidersHorizontal, Trash2, Undo2, Volume2, VolumeX, Wand2, X,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -10,11 +10,12 @@ import { onOpenSessionRequest, takePendingSession } from '../lib/sessionMakerOpe
 import { formatBytes } from '../lib/format'
 import { useVstPlugins, vstApi, vstPlugins, type VstScan } from '../lib/vstPlugins'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
+import SessionFileExplorer, { FS_DRAG, draggedFsFiles } from './SessionFileExplorer'
 import type { JWApiFileEntry } from '../lib/juicewrldApi'
 import {
   PEAKS_PER_SEC, SessionEngine, alignReference, detectTempo, cancelDownload, chooseSessionFolder, downloadSession, downloadSessionByPath, hasSessionFolderSupport, sessionFolder, downloadsVersion, listDownloadedSessions, peekDownload, removeDownloadedSession, subscribeDownloads, alternatesOf, compTo, hasMutedClips, unmuteAll, defaultReference, deleteProject, duplicateProject, isBeatTrack, downloadBlob, encodeWav, formatTime, listSessionFolders, listSessionZips,
   loadProjects, loadTake, newProject, parseProjectFile, peakOf, peekLoadProgress, placeAllTakes, projectEnd, renderProject, scaleBuffer,
-  saveProject, scanSession, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
+  saveProject, scanSession, importAudioFiles, importedTakes, isAudioFile, removeImport, sweepImports, searchSessionZips, sessionTitle, silentSpans, swipeComp, audibleSpans, groupIntoFolder, lastFolder, normalizeFolders, timelineRows, ungroupFolder, subscribeLoadProgress, takeKey, uid,
   CHAIN_KEYS, CHAIN_LABELS, DEFAULT_ECHO_NOTE, DEFAULT_REVERB_SIZE, ECHO_NOTES, FX_KEYS, FX_LABELS, REVERB_SIZES, audioContext, chainActive, chainReadout, clipAudioState, clipSpeed, copyEffects, editTracksFx, hasEffects, laneFx, pasteEffects, pluginEditorKey, pluginRows, echoSeconds, retimeClip, reverseClip, reversedPeaks, stretchVersion, subscribeStretches, takeTime, MAX_PITCH, MAX_SPEED, MIN_SPEED,
   type ChainKey, type FxCopy, type FxEdit, type LaneFx, type PluginRow, type SmPlugin, type EchoNote, type FxKey, type ReverbSize, type TrackChain, type TrackFx, type AB, type DownloadedSession, type LoadedTake, type LoopRange, type ScannedSession, type SessionFolder, type SmClip, type SmProject, type SmTrack, type Take, type TakeCategory, type TakeFolder, type TimelineRow,
 } from '../lib/sessionMaker'
@@ -99,6 +100,7 @@ export default function SessionMakerView(): JSX.Element {
 const HELP_ROWS: [string, string][] = [
   ['Drag takes onto a lane', 'Place a take'],
   ['Double-click a take', 'Drop it where it was recorded'],
+  ['Drop audio files on the bin / a lane', 'Import your own takes'],
   ['Ctrl/Shift+click', 'Select several takes or track headers'],
   ['Enter', 'Place the selected takes'],
   ['Drag headers / Alt+↑↓', 'Reorder tracks'],
@@ -207,6 +209,8 @@ function SessionBrowser({ opening, error, onOpenZip, onOpenProject }: {
   const dlVersion = useSyncExternalStore(subscribeDownloads, downloadsVersion)
   const [downloaded, setDownloaded] = useState<DownloadedSession[]>([])
   useEffect(() => { void listDownloadedSessions().then(setDownloaded) }, [dlVersion])
+  // No editor is open here, so imported files no saved project uses can go.
+  useEffect(() => { void sweepImports() }, [])
   const downloadedPaths = useMemo(() => new Set(downloaded.map((d) => d.zipPath)), [downloaded])
 
   useEffect(() => {
@@ -478,11 +482,11 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 const dbOf = (g: number): number => (g <= 0 ? -60 : 20 * Math.log10(g))
 const gainOf = (db: number): number => (db <= -60 ? 0 : Math.pow(10, db / 20))
 
-function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { initial: SmProject; session: ScannedSession; onClose: () => void; onOpenCopy: (p: SmProject) => void }): JSX.Element {
+function SessionEditor({ initial, session: zipSession, onClose, onOpenCopy }: { initial: SmProject; session: ScannedSession; onClose: () => void; onOpenCopy: (p: SmProject) => void }): JSX.Element {
   // Projects saved before references existed get the default one.
   const [project, setProject] = useState<SmProject>(() => {
     if (initial.reference !== undefined) return initial
-    const ref = defaultReference(scanned)
+    const ref = defaultReference(zipSession)
     return { ...initial, reference: ref ? { takeId: ref.id, offset: 0 } : null }
   })
   const projectRef = useRef(project)
@@ -490,6 +494,12 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
   const undoRef = useRef<SmProject[]>([])
   const redoRef = useRef<SmProject[]>([])
   const [, bumpHistory] = useState(0)
+  // The zip's takes plus any files the user imported, under their own names.
+  const imports = project.imports
+  const scanned = useMemo<ScannedSession>(
+    () => (imports?.length ? { ...zipSession, takes: [...zipSession.takes, ...importedTakes(imports)] } : zipSession),
+    [zipSession, imports],
+  )
   // The session as the editor sees it: takes carry any names the user gave them.
   const takeNames = project.takeNames
   const session = useMemo<ScannedSession>(
@@ -568,6 +578,9 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     return () => window.removeEventListener('pointerdown', onDown)
   }, [projMenu])
   const [binQuery, setBinQuery] = useState('')
+  // The bin shows the session's takes, or a file explorer for pulling in audio from this device.
+  const [binTab, setBinTabState] = useState<'takes' | 'files'>(() => (localStorage.getItem('sm-bin-tab') === 'files' ? 'files' : 'takes'))
+  const setBinTab = (t: 'takes' | 'files'): void => { setBinTabState(t); try { localStorage.setItem('sm-bin-tab', t) } catch { /* storage off */ } }
   const [showBounces, setShowBounces] = useState(false)
   const [ab, setAb] = useState<AB>('mix')
 
@@ -583,6 +596,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
   const rows = useMemo(() => timelineRows(project, closedFolders), [project, closedFolders])
   const rowsLayoutRef = useRef(rows)
   rowsLayoutRef.current = rows
+  const importedKeys = useMemo(() => new Set((project.imports ?? []).map((t) => `${t.name}|${t.size}`)), [project.imports])
   const scannedNames = useMemo(() => new Map(scanned.takes.map((t) => [t.id, t.name])), [scanned])
   const loadedRef = useRef(loaded)
   loadedRef.current = loaded
@@ -713,9 +727,16 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
   const loadedKey = loaded.size
   // A clip's time-stretch finishing: it can be heard now.
   const stretchKey = useSyncExternalStore(subscribeStretches, stretchVersion)
+  // A clip drag re-schedules once on drop, not on every step: rebuilding the whole arrangement
+  // per pointer move stutters playback, even when the clip being moved isn't playing.
+  const dragRestart = useRef(false)
+  const [dropKey, bumpDrop] = useState(0)
   useEffect(() => {
-    if (engine.playing) engine.play(projectRef.current, engine.position(), bufferFor, playOpts())
-  }, [clipsKey, loadedKey, stretchKey, engine, bufferFor, playOpts])
+    if (!engine.playing) return
+    if (dragRef.current?.moved) { dragRestart.current = true; return }
+    dragRestart.current = false
+    engine.play(projectRef.current, engine.position(), bufferFor, playOpts())
+  }, [clipsKey, loadedKey, stretchKey, dropKey, engine, bufferFor, playOpts])
   useEffect(() => { engine.applyMix(project) }, [project, engine])
   useEffect(() => {
     engine.onError = (message) => { setPlaying(false); alert(`Session playback stopped: ${message}`) }
@@ -1460,6 +1481,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     dragRef.current = null
     if (d?.moved) commit(projectRef.current, d.snapshot)
     else if (d?.collapseTo) setSelected(d.collapseTo)
+    if (dragRestart.current) bumpDrop((n) => n + 1)
   }, [commit, setSelected])
   const dragMoveRef = useRef(onClipPointerMove)
   dragMoveRef.current = onClipPointerMove
@@ -1525,6 +1547,17 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
 
   // ── Drop from the take bin ──
   const onDrop = (e: React.DragEvent): void => {
+    if (e.dataTransfer.types.includes(FS_DRAG)) {
+      e.preventDefault()
+      const at = { trackIdx: laneAt(e.clientY), time: timeAt(e.clientX), alt: e.altKey }
+      void draggedFsFiles().then((files) => importFiles(files, at))
+      return
+    }
+    if (draggingFiles(e)) {
+      e.preventDefault()
+      void importFiles(droppedAudio(e), { trackIdx: laneAt(e.clientY), time: timeAt(e.clientX), alt: e.altKey })
+      return
+    }
     const id = e.dataTransfer.getData('text/x-session-take')
     const take = id ? takesById.get(id) : undefined
     if (!take) return
@@ -1540,13 +1573,51 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
     ], e.altKey)
   }
 
+  // ── Importing the user's own audio files ──
+  const [importing, setImporting] = useState<number | null>(null)
+  const [binFileDrop, setBinFileDrop] = useState(false)
+  const importInputRef = useRef<HTMLInputElement>(null)
+  /** Adds the files to the bin; dropped on the timeline (`at`), they're placed there too: the first on the drop lane, the rest on free ones. */
+  const importFiles = useStableCallback(async (files: File[], at?: { trackIdx: number; time: number; alt: boolean }) => {
+    if (!files.length || importing != null) return
+    setImporting(files.length)
+    try {
+      const { imported, failed } = await importAudioFiles(files)
+      if (imported.length) {
+        let next: SmProject = { ...projectRef.current, imports: [...(projectRef.current.imports ?? []), ...imported] }
+        const ids: string[] = []
+        if (at) {
+          for (const [i, take] of importedTakes(imported).entries()) {
+            const r = withPlacedTake(next, take, take.duration!, i === 0 ? at.trackIdx : null, at.time, at.alt)
+            next = r.project
+            ids.push(r.clipId)
+          }
+        }
+        commit(next)
+        if (ids.length) setSelection(ids)
+        else setBinSel(imported.map((t) => t.id))
+      }
+      if (failed.length) alert(`Couldn't import ${failed.length === 1 ? failed[0] : `${failed.length} files:\n${failed.join('\n')}`}. Only audio files (WAV, AIFF, MP3, M4A, FLAC, OGG) can be imported.`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err))
+    } finally {
+      setImporting(null)
+    }
+  })
+  const draggingFiles = (e: React.DragEvent): boolean => e.dataTransfer.types.includes('Files')
+  const droppedAudio = (e: React.DragEvent): File[] => [...e.dataTransfer.files].filter(isAudioFile)
+
   // ── Keyboard ──
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // The view stays mounted (hidden) while another tab is open; its shortcuts mustn't fire there.
+      if (useStore.getState().activeView !== 'session-maker') return
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       const mod = e.ctrlKey || e.metaKey
       const k = e.key.toLowerCase()
+      // The file explorer has its own arrows, Enter, Space and friends; undo and the like still reach the editor.
+      if ((e.target as HTMLElement | null)?.closest?.('[data-fs-explorer]') && (!mod || k === 'a') && !['l', 'r', 'k', '[', ']', '=', '+', '-'].includes(k)) return
       let handled = true
       // With a take in the preview deck, Space drives the preview instead of the arrangement.
       if (e.code === 'Space' && previewingRef.current) {
@@ -2005,6 +2076,18 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
           sendToItem([take.id]),
           { icon: ClipboardCopy, label: 'Copy name', onSelect: () => void navigator.clipboard.writeText(take.name).catch(() => {}) },
           { icon: FileDown, label: 'Export as WAV', onSelect: () => exportTake(take) },
+          take.imported && 'divider',
+          take.imported && {
+            icon: Trash2,
+            label: 'Remove from project',
+            danger: true,
+            onSelect: () => {
+              if (onTimeline.length && !confirm(`Remove ${take.name}? Its ${onTimeline.length} clip${onTimeline.length === 1 ? '' : 's'} on the timeline go too.`)) return
+              if (previewingRef.current === take.id) closePreview()
+              setBinSel((cur) => cur.filter((id) => id !== take.id))
+              commit(removeImport(p, take.id))
+            },
+          },
         ]}
       />
     )
@@ -2033,10 +2116,11 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
   const categories = project.takeCategories ?? []
   const catOf = (t: Take): string | null => { const c = project.takeCategory?.[t.id]; return c && categories.some((x) => x.id === c) ? c : null }
   // The beat keeps its own section; any other take in a category is listed there instead.
-  const vocals = binTakes.filter((t) => (t.kind === 'take' || t.kind === 'other') && !catOf(t))
+  const vocals = binTakes.filter((t) => (t.kind === 'take' || t.kind === 'other') && !t.imported && !catOf(t))
+  const yours = binTakes.filter((t) => t.imported && !catOf(t))
   const byCat = categories.map((c) => ({ cat: c, takes: binTakes.filter((t) => t.kind !== 'beat' && catOf(t) === c.id) }))
   const bounces = binTakes.filter((t) => t.kind === 'bounce' && !catOf(t))
-  binOrderRef.current = [...beats, ...byCat.flatMap((g) => (closedCats.has(g.cat.id) ? [] : g.takes)), ...vocals, ...(showBounces ? bounces : [])].map((t) => t.id)
+  binOrderRef.current = [...beats, ...byCat.flatMap((g) => (closedCats.has(g.cat.id) ? [] : g.takes)), ...vocals, ...yours, ...(showBounces ? bounces : [])].map((t) => t.id)
   const unplacedWithPos = session.takes.some((t) => t.kind === 'take' && t.position != null && !placedIds.has(t.id))
 
   const laneGrid = beatLen && grid !== 'off'
@@ -2216,11 +2300,49 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
 
       <div className="flex-1 flex overflow-hidden">
         {/* Take bin */}
-        <div className="w-72 shrink-0 flex flex-col border-r border-[var(--border)]">
+        <div
+          className={`relative ${binTab === 'files' ? 'w-80' : 'w-72'} transition-[width] duration-200 shrink-0 flex flex-col border-r border-[var(--border)] ${binFileDrop ? 'bg-accent/10' : ''}`}
+          onDragOver={(e) => { if (draggingFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setBinFileDrop(true) } }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setBinFileDrop(false) }}
+          onDrop={(e) => { if (!draggingFiles(e)) return; e.preventDefault(); setBinFileDrop(false); void importFiles(droppedAudio(e)) }}
+        >
+          <div className="shrink-0 px-2 pt-2">
+            <div className="relative grid grid-cols-2 p-0.5 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] text-xs">
+              <div className={`absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-[10px] bg-[var(--surface)] shadow-sm ring-1 ring-[var(--border)] transition-transform duration-200 ${binTab === 'files' ? 'translate-x-[calc(100%)]' : 'translate-x-0'}`} style={{ left: 2 }} />
+              <button className={`relative h-7 flex items-center justify-center gap-1.5 transition-colors ${binTab === 'takes' ? 'text-text-primary font-medium' : 'text-text-muted hover:text-text-secondary'}`} onClick={() => setBinTab('takes')}>
+                <Layers size={13} /> Takes <span className="tabular-nums text-text-muted">{session.takes.length}</span>
+              </button>
+              <button className={`relative h-7 flex items-center justify-center gap-1.5 transition-colors ${binTab === 'files' ? 'text-text-primary font-medium' : 'text-text-muted hover:text-text-secondary'}`} onClick={() => setBinTab('files')}>
+                <FolderOpen size={13} /> Files
+              </button>
+            </div>
+          </div>
+          <div className={binTab === 'files' ? 'flex-1 flex flex-col min-h-0' : 'hidden'}>
+            <SessionFileExplorer active={binTab === 'files'} importing={importing != null} importedKeys={importedKeys} onImport={(files) => void importFiles(files)} onPreviewStart={closePreview} />
+          </div>
+          {binTab === 'takes' && <>
           <div className="p-2 space-y-2 border-b border-[var(--border)]">
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
-              <input value={binQuery} onChange={(e) => setBinQuery(e.target.value)} placeholder={`Filter ${session.takes.length} files…`} className={`${input} w-full pl-8`} />
+            <div className="flex gap-1.5">
+              <div className="relative flex-1 min-w-0">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input value={binQuery} onChange={(e) => setBinQuery(e.target.value)} placeholder={`Filter ${session.takes.length} files…`} className={`${input} w-full pl-8`} />
+              </div>
+              <button
+                className={`${btn} shrink-0 w-8 px-0`}
+                disabled={importing != null}
+                title="Import your own audio files (or drop them on the bin or a lane)"
+                onClick={() => importInputRef.current?.click()}
+              >
+                {importing != null ? <Loader2 size={15} className="animate-spin" /> : <FileUp size={15} />}
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                multiple
+                accept="audio/*,.wav,.aif,.aiff,.mp3,.m4a,.aac,.flac,.ogg"
+                className="hidden"
+                onChange={(e) => { const files = [...(e.target.files ?? [])]; e.target.value = ''; void importFiles(files) }}
+              />
             </div>
             <button
               className={`${btn} w-full justify-start`}
@@ -2278,6 +2400,14 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
               </button>
             </div>
             {binRows(vocals)}
+            {(yours.length > 0 || importing != null) && (
+              <div className="flex items-center mx-1">
+                <BinHeading>Your files · {yours.length}</BinHeading>
+                <div className="flex-1" />
+                {importing != null && <span className="mr-2 mt-2 flex items-center gap-1 text-[11px] text-text-muted"><Loader2 size={12} className="animate-spin" /> Importing {importing}…</span>}
+              </div>
+            )}
+            {binRows(yours)}
             {bounces.length > 0 && (
               <button className="w-full flex items-center gap-1 px-3 pt-3 pb-1 text-[11px] uppercase tracking-wider text-text-muted hover:text-text-secondary" onClick={() => setShowBounces(!showBounces)}>
                 {showBounces ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Bounces · {bounces.length}
@@ -2285,7 +2415,13 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
             )}
             {showBounces && binRows(bounces)}
           </div>
-          {previewTake && (
+          </>}
+          {binFileDrop && (
+            <div className="pointer-events-none absolute inset-2 rounded-xl border-2 border-dashed border-accent/60 flex items-center justify-center text-sm text-accent bg-[var(--surface)]/70">
+              Drop to import into this project
+            </div>
+          )}
+          {previewTake && binTab === 'takes' && (
             <PreviewDeck
               key={previewTake.id}
               take={previewTake}
@@ -2316,7 +2452,7 @@ function SessionEditor({ initial, session: scanned, onClose, onOpenCopy }: { ini
               </div>
 
               {/* Lanes */}
-              <div ref={rowsRef} className="relative flex-1 flex flex-col" onDragOver={(e) => { if (e.dataTransfer.types.includes('text/x-session-take')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }} onDrop={onDrop}>
+              <div ref={rowsRef} className="relative flex-1 flex flex-col" onDragOver={(e) => { if (e.dataTransfer.types.includes('text/x-session-take') || e.dataTransfer.types.includes(FS_DRAG) || draggingFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }} onDrop={onDrop}>
                 {trackDrag && (
                   // Where the dragged tracks will land; a line across the full width, stronger over the header column.
                   <div className="absolute left-0 right-0 z-40 pointer-events-none" style={{ top: trackDrag.insertAt * LANE_H - 1 }}>
