@@ -72,6 +72,16 @@ export interface QueueSlice {
   _radioWaiting: boolean
   radioFilter: { category: string; era: string; search: string; total: number } | null
 
+  /**
+   * Songs that were actually playing before the current one, newest first.
+   * Unlike the queue's own played portion this survives the queue being
+   * replaced (playing something from the Tracker, starting radio...), so it
+   * reflects what the user listened to rather than where they are in the
+   * current list. Session-only, one entry per song (a replay moves it to the
+   * front), capped at PLAY_HISTORY_LIMIT.
+   */
+  playHistory: Track[]
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   /**
@@ -118,6 +128,13 @@ export interface QueueSlice {
    * contain the same track twice; falls back to first id match.
    */
   jumpToTrack: (track: Track, absoluteIndex?: number) => void
+
+  /**
+   * Replay a song from `playHistory`. Jumps to it if it's still in the
+   * current queue; otherwise slots it in right after the current track and
+   * plays it, leaving the rest of the queue (and radio mode) untouched.
+   */
+  playFromHistory: (track: Track) => void
 
   toggleShuffle: () => void
   reshuffleQueue: () => void
@@ -169,6 +186,19 @@ function insertRandom<T>(base: T[], items: T[]): T[] {
 }
 
 const RADIO_HISTORY_LIMIT = 30
+const PLAY_HISTORY_LIMIT = 100
+
+// Set while a currentTrack change is the same song under a new identity (a
+// preferred-version swap, a moved local file being re-keyed) rather than the
+// user moving on - the playHistory subscriber skips those.
+let _suppressPlayHistory = false
+
+/** Run `fn` (which swaps currentTrack for a stand-in of the same song)
+ *  without the outgoing track being recorded in playHistory. */
+export function withoutPlayHistory(fn: () => void): void {
+  _suppressPlayHistory = true
+  try { fn() } finally { _suppressPlayHistory = false }
+}
 
 // Bumped whenever a new radio session starts. Prefetch callbacks and 3s error
 // retries capture the value at their start and bail if it has moved on -
@@ -275,7 +305,18 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
 // ─── Slice factory ────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get) => ({
+export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get, api) => {
+  // Every path that changes the playing song (queue actions, Player's
+  // crossfade advance, terminal `stop`...) goes through set(), so one
+  // subscriber catches them all instead of each call site remembering to.
+  api.subscribe((state: QueueSlice, prev: QueueSlice) => {
+    const outgoing = prev.currentTrack
+    if (!outgoing || outgoing.id === state.currentTrack?.id || _suppressPlayHistory) return
+    const rest = state.playHistory.filter((t) => t.id !== outgoing.id)
+    set({ playHistory: [outgoing, ...rest].slice(0, PLAY_HISTORY_LIMIT) })
+  })
+
+  return {
   // ── Initial state ──────────────────────────────────────────────────────────
   queue: [],
   queueIndex: -1,
@@ -297,6 +338,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   radioNext: null,
   _radioWaiting: false,
   radioFilter: null,
+  playHistory: [],
 
   // ── Simple setters ─────────────────────────────────────────────────────────
   setIsPlaying: (isPlaying) => set({ isPlaying }),
@@ -480,6 +522,16 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     set({ queueIndex: idx, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
     get()._loadMore()
     get()._maybeSwapToPreferredVersion(track)
+  },
+
+  // ── playFromHistory ─────────────────────────────────────────────────────────
+  playFromHistory: (track) => {
+    const { queue, queueIndex } = get()
+    const idx = queue.findIndex((t: Track) => t.id === track.id)
+    if (idx >= 0) { get().jumpToTrack(track, idx); return }
+    const at = queueIndex + 1
+    set({ queue: [...queue.slice(0, at), track, ...queue.slice(at)] })
+    get().jumpToTrack(track, at)
   },
 
   // ── toggleShuffle ──────────────────────────────────────────────────────────
@@ -698,12 +750,13 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
         const state = get()
         // Bail if the user has since moved on to a different track.
         if (state.currentTrack?.id !== track.id) return
-        set({
+        withoutPlayHistory(() => set({
           currentTrack: swapped,
           currentTrackFull: null,
           queue: state.queue.map((t: Track) => (t.id === track.id ? swapped : t)),
-        })
+        }))
       })
       .catch(() => {})
   },
-})
+  }
+}

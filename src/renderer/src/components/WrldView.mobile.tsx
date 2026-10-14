@@ -973,7 +973,7 @@ const MAX_HISTORY_SHOWN = 10
 const QUEUE_SHEET_EXIT_MS = 200
 
 function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
-  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue } = useStore(useShallow(s => ({
+  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playHistory, playFromHistory, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue } = useStore(useShallow(s => ({
     queue: s.queue,
     queueIndex: s.queueIndex,
     currentTrack: s.currentTrack,
@@ -982,13 +982,15 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
     radioMode: s.radioMode,
     playTrack: s.playTrack,
     jumpToTrack: s.jumpToTrack,
+    playHistory: s.playHistory,
+    playFromHistory: s.playFromHistory,
     removeFromQueue: s.removeFromQueue,
     clearQueue: s.clearQueue,
     reorderQueue: s.reorderQueue,
     reshuffleQueue: s.reshuffleQueue,
   })))
 
-  const history = queue.slice(0, queueIndex) // played tracks, oldest first
+  const history = playHistory // what was actually played, newest first - see QueuePanel
   const upcoming = queue.slice(queueIndex + 1)
   const [historyOpen, setHistoryOpen] = useState(false)
   // reorderQueue's (from, to) are indices within `upcoming` itself - see its
@@ -1103,18 +1105,15 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
             <ChevronDown size={15} className={`transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
           </button>
           {historyOpen && (() => {
-            // Displayed newest-first, so reversed index i maps back to
-            // absolute queue position history.length - 1 - i.
-            const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
-            const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
+            const filtered = query ? history.filter(matchesQuery) : history
             const shown = query ? filtered : filtered.slice(0, MAX_HISTORY_SHOWN)
             return (
               <div className="opacity-70">
-                {shown.map(({ track, i }) => (
+                {shown.map((track) => (
                   <QueueRow
-                    key={`hist-${track.id}-${i}`}
+                    key={`hist-${track.id}`}
                     track={track}
-                    onPlay={() => jumpToTrack(track, history.length - 1 - i)}
+                    onPlay={() => playFromHistory(track)}
                   />
                 ))}
                 {!query && filtered.length > MAX_HISTORY_SHOWN && (

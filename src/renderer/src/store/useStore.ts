@@ -42,7 +42,7 @@ import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
 import type { AdminTab } from '../hooks/useAdminQueue'
 import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
-import { createQueueSlice, QueueSlice } from './queueSlice'
+import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import { getFont } from '../lib/fonts'
 import {
@@ -2673,7 +2673,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
 
     const newPath: string = res.path
     const newId = `local-${newPath}`
-    const { libraryTracks, libraryArt, localPlaylists, queue, currentTrack, libraryFolders, libraryLastScanned } = get()
+    const { libraryTracks, libraryArt, localPlaylists, queue, currentTrack, playHistory, libraryFolders, libraryLastScanned } = get()
 
     // A track's id is derived from its path, so moving it re-keys the track
     // everywhere it's referenced rather than just editing one field.
@@ -2689,13 +2689,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // it from the new path - see its `track.streamUrl ?? toFileUrl(track.path)`.
     const rekey = <T extends { id: string }>(t: T): T =>
       t.id === id ? { ...t, id: newId, path: newPath, streamUrl: undefined } : t
-    set({
+    withoutPlayHistory(() => set({
       libraryTracks: nextTracks,
       libraryArt: nextArt,
       localPlaylists: nextPlaylists,
       queue: queue.map(rekey),
       currentTrack: currentTrack ? rekey(currentTrack) : currentTrack,
-    })
+      playHistory: playHistory.map(rekey),
+    }))
 
     el.saveLibraryData({ tracks: nextTracks, folders: libraryFolders, lastScanned: libraryLastScanned })
     if (touchedPlaylists) el.saveLocalPlaylists(nextPlaylists)

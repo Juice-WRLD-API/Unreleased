@@ -13,9 +13,9 @@ const MAX_UPCOMING_SHOWN = 60
 export default function QueuePanel(): JSX.Element {
   const {
     queue, queueIndex, currentTrack, isPlaying, shuffle, queueFilter, queueLoadingMore,
-    radioMode, radioNext,
-    setShowQueue, removeFromQueue, clearQueue, reorderQueue, jumpToTrack, _loadMore, reshuffleQueue,
-  } = useStorePick('queue', 'queueIndex', 'currentTrack', 'isPlaying', 'shuffle', 'queueFilter', 'queueLoadingMore', 'radioMode', 'radioNext', 'setShowQueue', 'removeFromQueue', 'clearQueue', 'reorderQueue', 'jumpToTrack', '_loadMore', 'reshuffleQueue')
+    radioMode, radioNext, playHistory,
+    setShowQueue, removeFromQueue, clearQueue, reorderQueue, jumpToTrack, playFromHistory, _loadMore, reshuffleQueue,
+  } = useStorePick('queue', 'queueIndex', 'currentTrack', 'isPlaying', 'shuffle', 'queueFilter', 'queueLoadingMore', 'radioMode', 'radioNext', 'playHistory', 'setShowQueue', 'removeFromQueue', 'clearQueue', 'reorderQueue', 'jumpToTrack', 'playFromHistory', '_loadMore', 'reshuffleQueue')
 
   const [panelWidth, dragHandle] = useResizablePanel(300, 240, 480)
   const isMobile = useIsMobile()
@@ -25,7 +25,9 @@ export default function QueuePanel(): JSX.Element {
   const [search, setSearch] = useState('')
 
   // Derived sections
-  const history = queue.slice(0, queueIndex)           // played tracks, oldest first
+  // What was actually played before this song, newest first - not the queue's
+  // own played slice, which a new queue (e.g. playing from the Tracker) wipes.
+  const history = playHistory
   const upcoming = queue.slice(queueIndex + 1)          // unplayed tracks
 
   const query = search.trim().toLowerCase()
@@ -162,20 +164,17 @@ export default function QueuePanel(): JSX.Element {
                 />
               </button>
               {historyOpen && (() => {
-                // Displayed newest-first, so reversed index i maps back to
-                // absolute queue position history.length - 1 - i.
-                const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
-                const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
+                const filtered = query ? history.filter(matchesQuery) : history
                 const shown = query ? filtered : filtered.slice(0, MAX_HISTORY_SHOWN)
                 return (
                   <div className="opacity-50 space-y-0.5">
-                    {shown.map(({ track, i }) => (
+                    {shown.map((track) => (
                       <QueueRow
-                        key={`hist-${track.id}-${i}`}
+                        key={`hist-${track.id}`}
                         track={track}
                         isActive={false}
                         isPlaying={false}
-                        onPlay={() => jumpToTrack(track, history.length - 1 - i)}
+                        onPlay={() => playFromHistory(track)}
                       />
                     ))}
                     {!query && filtered.length > MAX_HISTORY_SHOWN && (
