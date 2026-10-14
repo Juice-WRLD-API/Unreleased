@@ -345,6 +345,7 @@ export default function ApiFilesView(): JSX.Element {
 
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
+    useCdn: isPrimary,
     getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
   })
 

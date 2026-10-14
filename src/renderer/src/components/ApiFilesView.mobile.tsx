@@ -242,6 +242,7 @@ export default function ApiFilesView(): JSX.Element {
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
+    useCdn: isPrimary,
     getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
   })
 

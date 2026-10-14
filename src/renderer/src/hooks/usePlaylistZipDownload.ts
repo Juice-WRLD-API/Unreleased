@@ -7,6 +7,8 @@
 import { useCallback, useState } from 'react'
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { buildStreamUrl } from '../lib/juicewrldApi'
+import { isPrimaryChannelSlug } from './useChannelRoles'
+import { useStore } from '../store/useStore'
 import type { Track } from '../types'
 
 export function usePlaylistZipDownload(): {
@@ -25,9 +27,12 @@ export function usePlaylistZipDownload(): {
     setZipState('loading')
     try {
       const all = Array.isArray(trackList) ? trackList : await trackList()
+      const { channels, activeChannel } = useStore.getState()
+      const useCdn = isPrimaryChannelSlug(channels, activeChannel)
       const items = all.filter(t => t.path).map(t => ({
         name: t.path.split('/').pop() || t.title,
         url: t.streamUrl ?? buildStreamUrl(t.path),
+        cdnPath: useCdn ? t.path : undefined,
       }))
       const { saved, cancelled } = items.length ? await saveItems(target, items, setZipProgress) : { saved: 0, cancelled: false }
       if (cancelled) { setZipState('idle'); setZipProgress(null); return }
