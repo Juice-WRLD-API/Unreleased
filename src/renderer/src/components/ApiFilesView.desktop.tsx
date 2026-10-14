@@ -37,7 +37,6 @@ import { useFileLightbox } from '../hooks/useFileLightbox'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
 import { basename } from '../lib/compStagedChanges'
-import { queueCompUploads } from '../lib/compUploads'
 import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
 import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
 import { collectDroppedFiles, filesFromInput, isFileDrag, type LocalUpload } from '../lib/droppedFiles'
@@ -365,7 +364,7 @@ export default function ApiFilesView(): JSX.Element {
   const stagedMoves = useMemo(() => {
     const m = new Map<string, StagedFileChange>()
     for (const c of stagedFileChanges) {
-      if (c.channel === activeChannel && c.changeType !== 'create_folder') m.set(c.path, c)
+      if (c.channel === activeChannel && (c.changeType === 'move' || c.changeType === 'move_folder')) m.set(c.path, c)
     }
     return m
   }, [stagedFileChanges, activeChannel])
@@ -428,8 +427,9 @@ export default function ApiFilesView(): JSX.Element {
 
   // ── Uploading local files ──────────────────────────────────────────────────
   // Files or whole folders dragged in from the OS, or picked from the context
-  // menu, go straight to the background upload queue as one upload proposal
-  // per file. A dropped folder keeps its nesting under the target folder.
+  // menu, are staged like any other change - one upload per file - and only
+  // go to the background upload queue when Propose is hit in the Uploads
+  // panel. A dropped folder keeps its nesting under the target folder.
   const [fileDragOver, setFileDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
@@ -438,18 +438,15 @@ export default function ApiFilesView(): JSX.Element {
 
   const uploadLocalFiles = (folder: string, files: LocalUpload[]): void => {
     if (files.length === 0) return
-    queueCompUploads(files.map(({ file, relPath }) => {
-      const path = folder ? `${folder}/${relPath}` : relPath
-      const form = new FormData()
-      form.append('file_path', path)
-      form.append('change_type', 'upload')
-      form.append('contributor_notes', '')
-      // No form to tick it on here - flag it afterwards from the proposals list.
-      form.append('is_new_leak', 'false')
-      form.append('file', file)
-      if (activeChannel) form.append('channel', activeChannel)
-      return { label: relPath, form, bytes: file.size }
-    }))
+    // Read fresh: drops resolve asynchronously, after this render's closure.
+    const wasEmpty = useStore.getState().stagedFileChanges.length === 0
+    stageFileChanges(files.map(({ file, relPath }) => ({
+      changeType: 'upload' as const,
+      path: folder ? `${folder}/${relPath}` : relPath,
+      file,
+      channel: activeChannel,
+    })))
+    if (wasEmpty) setShowUploadManager(true)
   }
 
   const openUploadPicker = (folder: string, kind: 'files' | 'folder'): void => {

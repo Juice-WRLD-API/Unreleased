@@ -95,11 +95,19 @@ export interface UploadItem {
 export interface StagedFileChange {
   id: string
   /** The subset of comp proposal change types drag-and-drop can produce. */
-  changeType: 'move' | 'move_folder' | 'create_folder'
-  /** Source path - the file/folder being moved, or the folder to create. */
+  changeType: 'move' | 'move_folder' | 'create_folder' | 'upload'
+  /** Source path - the file/folder being moved, the folder to create, or
+   *  where an uploaded file will land. */
   path: string
-  /** Full destination path; absent for create_folder. */
+  /** Full destination path; only for moves. */
   destination?: string
+  /** The local file body, for an upload dropped in from the OS. Staged
+   *  changes live in memory only, so holding the File here is fine. */
+  file?: File
+  /** Uploads only: flags the proposal as a new leak. */
+  isNewLeak?: boolean
+  /** Sent as the proposal's contributor_notes. */
+  notes?: string
   /** Channel slug the change belongs to, since the Files tab can switch
    *  channels with changes still queued and each proposal carries its own. */
   channel: string

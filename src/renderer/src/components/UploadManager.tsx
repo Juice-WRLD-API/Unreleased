@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine, FolderPlus, FolderInput, Send, Pencil, Trash2, Plus, Archive } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, ArrowUpFromLine, FolderPlus, FolderInput, Send, Pencil, Trash2, Plus, Archive, Check } from 'lucide-react'
 import { useStorePick, UploadItem, StagedFileChange, StagedSongChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
@@ -94,8 +94,8 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
   songChanges: StagedSongChange[]
   onResult: (message: string | null) => void
 }): JSX.Element {
-  const { unstageFileChange, clearStagedFileChanges, unstageSongChange, clearStagedSongChanges } =
-    useStorePick('unstageFileChange', 'clearStagedFileChanges', 'unstageSongChange', 'clearStagedSongChanges')
+  const { clearStagedFileChanges, clearStagedSongChanges } =
+    useStorePick('clearStagedFileChanges', 'clearStagedSongChanges')
   const [proposing, setProposing] = useState(false)
 
   const total = fileChanges.length + songChanges.length
@@ -130,50 +130,8 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
         </button>
       </div>
       <div className="divide-y divide-[var(--border)]/40">
-        {fileChanges.map((change) => (
-          <div key={change.id} className="flex items-start gap-2 px-3 py-2">
-            <div className="mt-0.5 shrink-0">
-              {change.changeType === 'create_folder'
-                ? <FolderPlus size={13} className="text-[var(--accent)]" />
-                : <FolderInput size={13} className="text-[var(--accent)]" />}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={change.path}>{stagedChangeLabel(change)}</p>
-              <p className="text-[var(--text-muted)] text-[10px] truncate" title={change.destination ?? change.path}>
-                {change.destination ? `→ ${change.destination}` : change.path}
-              </p>
-              {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
-            </div>
-            <button onClick={() => unstageFileChange(change.id)} disabled={proposing} title="Remove from queue"
-              className="shrink-0 p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors">
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-        {songChanges.map((change) => (
-          <div key={change.id} className="flex items-start gap-2 px-3 py-2">
-            <div className="mt-0.5 shrink-0">
-              {change.changeType === 'delete'
-                ? <Trash2 size={13} className="text-red-400" />
-                : change.changeType === 'create'
-                  ? <Plus size={13} className="text-[var(--accent)]" />
-                  : <Pencil size={13} className="text-[var(--accent)]" />}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={change.title}>{stagedSongChangeLabel(change)}</p>
-              {(change.changeType === 'update' || change.changeType === 'create') && (
-                <p className="text-[var(--text-muted)] text-[10px] truncate">
-                  {Object.keys(change.proposedData).length} field{Object.keys(change.proposedData).length === 1 ? '' : 's'} changed
-                </p>
-              )}
-              {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
-            </div>
-            <button onClick={() => unstageSongChange(change.id)} disabled={proposing} title="Remove from queue"
-              className="shrink-0 p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors">
-              <X size={12} />
-            </button>
-          </div>
-        ))}
+        {fileChanges.map((change) => <StagedFileRow key={change.id} change={change} disabled={proposing} />)}
+        {songChanges.map((change) => <StagedSongRow key={change.id} change={change} disabled={proposing} />)}
       </div>
       <div className="px-3 py-2 flex items-center gap-2">
         <button onClick={propose} disabled={proposing}
@@ -183,6 +141,217 @@ function StagedChanges({ fileChanges, songChanges, onResult }: {
             : <><Send size={12} /> Propose {total} change{total === 1 ? '' : 's'}</>}
         </button>
       </div>
+    </div>
+  )
+}
+
+const inputClass = 'w-full px-2 py-1 rounded-md bg-[var(--surface-overlay)] border border-[var(--border)] text-[var(--text-primary)] text-[11px] focus:outline-none focus:border-[var(--accent)]'
+
+function RowActions({ editing, disabled, onEdit, onRemove }: {
+  editing: boolean
+  disabled: boolean
+  onEdit: () => void
+  onRemove: () => void
+}): JSX.Element {
+  return (
+    <div className="flex items-center shrink-0">
+      {!editing && (
+        <button onClick={onEdit} disabled={disabled} title="Edit"
+          className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors">
+          <Pencil size={11} />
+        </button>
+      )}
+      <button onClick={onRemove} disabled={disabled} title="Remove from queue"
+        className="p-1 rounded hover:bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-red-400 disabled:opacity-40 transition-colors">
+        <X size={12} />
+      </button>
+    </div>
+  )
+}
+
+function EditButtons({ onCancel, onSave, canSave = true }: { onCancel: () => void; onSave: () => void; canSave?: boolean }): JSX.Element {
+  return (
+    <div className="flex justify-end gap-1.5 pt-0.5">
+      <button onClick={onCancel} className="px-2 py-0.5 rounded-md text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">Cancel</button>
+      <button onClick={onSave} disabled={!canSave}
+        className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--accent)] text-white text-[10px] font-medium disabled:opacity-40 hover:opacity-90 transition-opacity">
+        <Check size={10} /> Save
+      </button>
+    </div>
+  )
+}
+
+/** Normalizes a typed comp path: forward slashes, no empty/leading/trailing segments. */
+function cleanPath(path: string): string {
+  return path.replace(/\\/g, '/').split('/').map(p => p.trim()).filter(Boolean).join('/')
+}
+
+function StagedFileRow({ change, disabled }: { change: StagedFileChange; disabled: boolean }): JSX.Element {
+  const { updateStagedFileChange, unstageFileChange } = useStorePick('updateStagedFileChange', 'unstageFileChange')
+  const isMove = change.changeType === 'move' || change.changeType === 'move_folder'
+  const [editing, setEditing] = useState(false)
+  // The one path that can change: where a move lands, or where a new folder
+  // or upload goes. A move's source is fixed - it's the thing being moved.
+  const [target, setTarget] = useState('')
+  const [notes, setNotes] = useState('')
+  const [isNewLeak, setIsNewLeak] = useState(false)
+
+  const startEdit = (): void => {
+    setTarget((isMove ? change.destination : change.path) ?? '')
+    setNotes(change.notes ?? '')
+    setIsNewLeak(!!change.isNewLeak)
+    setEditing(true)
+  }
+  const cleaned = cleanPath(target)
+  const save = (): void => {
+    if (!cleaned) return
+    updateStagedFileChange(change.id, {
+      ...(isMove ? { destination: cleaned } : { path: cleaned }),
+      notes: notes.trim() || undefined,
+      ...(change.changeType === 'upload' ? { isNewLeak } : {}),
+      error: undefined,
+    })
+    setEditing(false)
+  }
+
+  return (
+    <div className="flex items-start gap-2 px-3 py-2">
+      <div className="mt-0.5 shrink-0">
+        {change.changeType === 'create_folder'
+          ? <FolderPlus size={13} className="text-[var(--accent)]" />
+          : change.changeType === 'upload'
+            ? <ArrowUpFromLine size={13} className="text-[var(--accent)]" />
+            : <FolderInput size={13} className="text-[var(--accent)]" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={change.path}>{stagedChangeLabel(change)}</p>
+        {editing ? (
+          <div className="mt-1.5 space-y-1.5">
+            <label className="block text-[10px] text-[var(--text-muted)]">
+              {isMove ? 'Move to' : change.changeType === 'upload' ? 'Upload to' : 'Folder path'}
+              <input autoFocus value={target} onChange={e => setTarget(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+                className={`${inputClass} mt-0.5`} />
+            </label>
+            <label className="block text-[10px] text-[var(--text-muted)]">
+              Notes
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                placeholder="Optional notes for reviewers" className={`${inputClass} mt-0.5 resize-none`} />
+            </label>
+            {change.changeType === 'upload' && (
+              <label className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+                <input type="checkbox" checked={isNewLeak} onChange={e => setIsNewLeak(e.target.checked)} className="accent-[var(--accent)]" />
+                New leak
+              </label>
+            )}
+            <EditButtons onCancel={() => setEditing(false)} onSave={save} canSave={!!cleaned} />
+          </div>
+        ) : (
+          <>
+            <p className="text-[var(--text-muted)] text-[10px] truncate" title={change.destination ?? change.path}>
+              {change.destination ? `→ ${change.destination}` : change.path}
+              {change.file ? ` · ${formatBytes(change.file.size)}` : ''}
+              {change.isNewLeak ? ' · new leak' : ''}
+            </p>
+            {change.notes && <p className="text-[var(--text-muted)] text-[10px] italic truncate" title={change.notes}>{change.notes}</p>}
+          </>
+        )}
+        {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
+      </div>
+      <RowActions editing={editing} disabled={disabled} onEdit={startEdit} onRemove={() => unstageFileChange(change.id)} />
+    </div>
+  )
+}
+
+/** A staged value as editable text: strings as-is, everything else as JSON. */
+function toEditText(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+/** Reads edited text back in the original value's shape, or null if it doesn't parse. */
+function fromEditText(text: string, original: unknown): { value: unknown } | null {
+  if (typeof original === 'string') return { value: text }
+  if (typeof original === 'number') {
+    const n = Number(text)
+    return text.trim() !== '' && Number.isFinite(n) ? { value: n } : null
+  }
+  try { return { value: JSON.parse(text) } } catch { return null }
+}
+
+function StagedSongRow({ change, disabled }: { change: StagedSongChange; disabled: boolean }): JSX.Element {
+  const { updateStagedSongChange, unstageSongChange } = useStorePick('updateStagedSongChange', 'unstageSongChange')
+  const [editing, setEditing] = useState(false)
+  const [notes, setNotes] = useState('')
+  // Field name -> edited text; a field missing here was dropped in this edit.
+  const [fields, setFields] = useState<Record<string, string>>({})
+  const hasFields = change.changeType === 'update' || change.changeType === 'create'
+  const fieldCount = Object.keys(change.proposedData).length
+
+  const startEdit = (): void => {
+    setNotes(change.editorNotes ?? '')
+    setFields(Object.fromEntries(Object.entries(change.proposedData).map(([k, v]) => [k, toEditText(v)])))
+    setEditing(true)
+  }
+  const parsed = Object.entries(fields).map(([k, text]) => [k, fromEditText(text, change.proposedData[k])] as const)
+  const invalid = new Set(parsed.filter(([, r]) => r === null).map(([k]) => k))
+  const save = (): void => {
+    if (invalid.size > 0) return
+    updateStagedSongChange(change.id, {
+      editorNotes: notes.trim(),
+      ...(hasFields ? { proposedData: Object.fromEntries(parsed.map(([k, r]) => [k, r?.value])) } : {}),
+      error: undefined,
+    })
+    setEditing(false)
+  }
+
+  return (
+    <div className="flex items-start gap-2 px-3 py-2">
+      <div className="mt-0.5 shrink-0">
+        {change.changeType === 'delete'
+          ? <Trash2 size={13} className="text-red-400" />
+          : change.changeType === 'create'
+            ? <Plus size={13} className="text-[var(--accent)]" />
+            : <Pencil size={13} className="text-[var(--accent)]" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[var(--text-primary)] text-xs truncate leading-snug" title={change.title}>{stagedSongChangeLabel(change)}</p>
+        {editing ? (
+          <div className="mt-1.5 space-y-1.5">
+            {hasFields && Object.entries(fields).map(([key, text]) => (
+              <div key={key} className="text-[10px] text-[var(--text-muted)]">
+                <div className="flex items-center gap-1">
+                  <span className="flex-1 truncate font-mono">{key}</span>
+                  <button title="Drop this field from the proposal"
+                    onClick={() => setFields(f => { const n = { ...f }; delete n[key]; return n })}
+                    className="p-0.5 rounded hover:text-red-400 transition-colors">
+                    <X size={10} />
+                  </button>
+                </div>
+                <textarea value={text} rows={text.length > 60 || text.includes('\n') ? 3 : 1}
+                  onChange={e => setFields(f => ({ ...f, [key]: e.target.value }))}
+                  className={`${inputClass} mt-0.5 resize-y ${invalid.has(key) ? 'border-red-400' : ''}`} />
+              </div>
+            ))}
+            <label className="block text-[10px] text-[var(--text-muted)]">
+              Notes
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                placeholder="Optional notes for reviewers" className={`${inputClass} mt-0.5 resize-none`} />
+            </label>
+            <EditButtons onCancel={() => setEditing(false)} onSave={save} canSave={invalid.size === 0} />
+          </div>
+        ) : (
+          <>
+            {hasFields && (
+              <p className="text-[var(--text-muted)] text-[10px] truncate">
+                {fieldCount} field{fieldCount === 1 ? '' : 's'} changed
+              </p>
+            )}
+            {change.editorNotes && <p className="text-[var(--text-muted)] text-[10px] italic truncate" title={change.editorNotes}>{change.editorNotes}</p>}
+          </>
+        )}
+        {change.error && <p className="text-red-400 text-[10px] mt-0.5 truncate" title={change.error}>{change.error}</p>}
+      </div>
+      <RowActions editing={editing} disabled={disabled} onEdit={startEdit} onRemove={() => unstageSongChange(change.id)} />
     </div>
   )
 }
