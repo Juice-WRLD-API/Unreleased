@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { getMyCompProposals, withdrawCompProposal } from '../lib/userApi'
+import { getMyCompProposals, withdrawCompProposal, adminReviewCompProposal } from '../lib/userApi'
 import type { CompFileProposal } from '../lib/userApi'
 import type { CompFilterTab } from '../components/CompProposalList'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
@@ -24,6 +24,7 @@ export function useMyCompProposals(
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<CompFilterTab>('all')
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<number | null>(null)
 
   useStrictModeSafeEffect((isCancelled) => {
     if (!enabled) return
@@ -46,5 +47,17 @@ export function useMyCompProposals(
     }
   }
 
-  return { compProposals, loading, filter, setFilter, withdrawingId, handleWithdraw }
+  // Staff reviewing their own comp proposal straight from this list - same
+  // endpoint as the admin Comp queue; the returned row replaces the local one
+  // so the status chip flips without a refetch.
+  const handleReview = async (p: CompFileProposal, action: 'approve' | 'reject'): Promise<void> => {
+    setReviewingId(p.id)
+    try {
+      const updated = await adminReviewCompProposal(p.id, { action, channel: activeChannel })
+      setCompProposals(prev => prev.map(x => x.id === p.id ? updated : x))
+    } catch (e) { console.error('comp review failed:', e) }
+    finally { setReviewingId(null) }
+  }
+
+  return { compProposals, loading, filter, setFilter, withdrawingId, handleWithdraw, reviewingId, handleReview }
 }

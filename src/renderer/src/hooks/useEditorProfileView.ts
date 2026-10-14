@@ -107,6 +107,8 @@ export function useEditorProfileView(): {
   setCompFilter: ReturnType<typeof useMyCompProposals>['setFilter']
   withdrawingCompId: ReturnType<typeof useMyCompProposals>['withdrawingId']
   handleWithdrawComp: ReturnType<typeof useMyCompProposals>['handleWithdraw']
+  reviewingCompId: ReturnType<typeof useMyCompProposals>['reviewingId']
+  handleReviewComp: ReturnType<typeof useMyCompProposals>['handleReview']
   compTabCount: (tab: CompFilterTab) => number
   filteredCompProposals: ReturnType<typeof filterCompProposals>
   reports: ReturnType<typeof useReportsQueue>['reports']
@@ -234,6 +236,7 @@ export function useEditorProfileView(): {
   const {
     compProposals, loading: loadingComp, filter: compFilter, setFilter: setCompFilter,
     withdrawingId: withdrawingCompId, handleWithdraw: handleWithdrawComp,
+    reviewingId: reviewingCompId, handleReview: handleReviewComp,
   } = useMyCompProposals(isContributor, activeChannel, refreshKey, () => setRefreshKey(k => k + 1))
 
   const compTabCount = (tab: CompFilterTab): number => filterCompProposals(compProposals, tab).length
@@ -335,6 +338,7 @@ export function useEditorProfileView(): {
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
+    reviewingCompId, handleReviewComp,
     compTabCount, filteredCompProposals,
     reports, reportStatus, setReportStatus, loadingReports,
     adminPreview, otpLocked, handleEdit,

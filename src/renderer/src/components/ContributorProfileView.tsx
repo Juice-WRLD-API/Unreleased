@@ -57,10 +57,11 @@ export default function ContributorProfileView(): JSX.Element {
     }
   }
 
-  const { isContributor, isAdmin, isManager, isEditor } = useStaffRoles(account, activeChannel, channels)
+  const { isContributor, isAdmin, isManager, isEditor, canReviewProposals } = useStaffRoles(account, activeChannel, channels)
 
   const {
     compProposals: proposals, loading, filter, setFilter, withdrawingId, handleWithdraw: withdraw,
+    reviewingId, handleReview,
   } = useMyCompProposals(isContributor, activeChannel, refreshKey, () => setRefreshKey(k => k + 1))
 
   const filtered = filterCompProposals(proposals, filter)
@@ -196,6 +197,8 @@ export default function ContributorProfileView(): JSX.Element {
                 onSelect={() => go('contributor')}
                 onWithdraw={withdraw}
                 withdrawingId={withdrawingId}
+                onReview={canReviewProposals ? handleReview : undefined}
+                reviewingId={reviewingId}
               />
             </div>
           </Tile>
