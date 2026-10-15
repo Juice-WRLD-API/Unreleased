@@ -669,11 +669,19 @@ export function toSiteRelativeImageUrl(url: string): string {
  *  through the cover-art endpoint. Worth re-checking against the real column
  *  once /library/preferences/ ships - this is the one place that has to know. */
 export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string | undefined {
-  if (!coverUrl) return undefined
+  if (!coverUrl || coverUrl === 'null') return undefined
   if (/^(https?:|data:|blob:)/.test(coverUrl)) return coverUrl
   if (coverUrl.startsWith('/')) return buildImageUrl(coverUrl)
+  // A bare path to an image file is the cover itself - the shape the file
+  // pickers now store ("Compilation/4. Cover Art/…png"). /files/cover-art/
+  // only extracts art embedded in audio and 404s on a plain image.
+  if (IMAGE_PATH_RE.test(coverUrl)) return buildStreamUrl(coverUrl)
   return buildCoverArtUrl(coverUrl)
 }
+
+// Local rather than lib/fileTypes' getMediaType - that module imports the
+// store, which already imports this one.
+const IMAGE_PATH_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i
 
 // Discord's classic (local IPC) Rich Presence only reliably applies a
 // `large_url` up to roughly this many characters - longer ones get silently
