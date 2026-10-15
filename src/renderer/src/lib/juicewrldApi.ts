@@ -669,7 +669,10 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
   // gets built into a real-looking but bogus "/null" URL otherwise, which the
   // API resolves to a placeholder that visibly reads "null".
   if (!imageUrl || imageUrl === 'null') return undefined
-  if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
+  // local-media:// is a downloaded song's on-disk cover (Player swaps it into
+  // currentTrackFull.albumArt) - treating it as a storage path below built a
+  // bogus download URL, so every offline song's WRLD art came up empty.
+  if (/^(https?:|data:|blob:|local-media:)/.test(imageUrl)) return imageUrl
   // Leading slash - a site-relative asset ("/assets/wod.jpg")
   if (imageUrl.startsWith('/')) return `https://${JWAPI_HOST}${imageUrl}`
   // Anything else is a raw file-storage path ("Compilation/4. Cover Art/…png"),
