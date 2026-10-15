@@ -257,7 +257,10 @@ export default function Sidebar(): JSX.Element {
   if (navStyle === 'pill') {
     const horizontal = sidebarPosition === 'top' || sidebarPosition === 'bottom'
     return (
+      // no-drag: on the top edge the pill floats over the window's drag strip
+      // (App.tsx), which would otherwise swallow its clicks.
       <aside
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
         <NavPillGrip horizontal={horizontal} />

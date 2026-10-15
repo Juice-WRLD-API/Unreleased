@@ -300,6 +300,21 @@ export default function App(): JSX.Element {
           <AppMenu variant="titlebar" />
         </div>
       )}
+      {/* Frameless-window drag strip. Skipped only when the nav bar sits on
+          top as a real in-flow bar (md+; it's hidden on narrow windows),
+          which touches the window edge and carries its own strip. The pill
+          and auto-hide bars float over the page and don't, so they keep it.
+          Rendered before the nav in the DOM: the later of two overlapping
+          app-region rects wins, so the pill's no-drag still punches through.
+          ELECTRON_TITLEBAR_CLEARANCE_X clears the min/max/close buttons
+          (132px) plus the fixed downloads trigger next to them (right: 144px
+          + 36px wide — see DownloadManager). */}
+      {isElectron && appMenuPosition !== 'title-bar' && (
+        <div
+          className={`fixed top-0 left-0 right-0 h-7 z-20 select-none pointer-events-none ${sidebarPosition === 'top' && navStyle !== 'pill' && !autoHideNav ? 'md:hidden' : ''}`}
+          style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties}
+        />
+      )}
       {/* Sidebar stays first in the DOM; reverse variants place it visually
           on the right/bottom without reordering focus/tab order. */}
       <div className={`flex flex-1 overflow-hidden ${
@@ -312,17 +327,6 @@ export default function App(): JSX.Element {
           ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav && navStyle !== 'pill'} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
           : <Sidebar />}
         <main className="flex-1 overflow-hidden flex flex-col relative">
-          {/* Frameless-window drag strip — when the nav bar sits on top (md+
-              only; it's hidden on narrow windows) the bar touches the window
-              edge instead and carries its own strip. ELECTRON_TITLEBAR_CLEARANCE_X
-              clears the min/max/close buttons (132px) plus the fixed downloads
-              trigger next to them (right: 144px + 36px wide — see DownloadManager). */}
-          {isElectron && appMenuPosition !== 'title-bar' && (
-            <div
-              className={`absolute top-0 left-0 right-0 h-7 z-20 select-none pointer-events-none ${sidebarPosition === 'top' ? 'md:hidden' : ''}`}
-              style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties}
-            />
-          )}
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
             <Suspense fallback={null}>
