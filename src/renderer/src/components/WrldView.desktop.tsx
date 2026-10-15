@@ -10,7 +10,7 @@ import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords
 import { formatDuration } from '../lib/format'
 import { setEqAnchor } from '../lib/eqAnchor'
 import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand } from './Player'
-import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource, loadAllSongs } from '../lib/juicewrldApi'
+import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource, loadAllSongs, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album as WrldAlbum } from '../lib/albumsApi'
@@ -244,6 +244,20 @@ export default function WrldView(): JSX.Element {
       .then(list => setAlbumSongIndex(new Map(list.filter(s => s.path).map(s => [s.path as string, s]))))
       .catch(() => {})
   }, [])
+
+  // Subscribed rather than peeked so a cover/name personalized while the
+  // notch is open shows up without a reload.
+  const songPrefs = useStore(s => s.songPrefs)
+
+  // The lead track's personalized cover wins, then the album's own cover,
+  // then the lead track's API art. The raw `image_url` alone skipped both of
+  // the first two - and comes back "null" for most unreleased songs.
+  const albumCoverUrl = (album: WrldAlbum, leadPath: string | undefined): string | undefined => {
+    const song = albumSongIndex.get(leadPath ?? '')
+    return (song ? resolvePrefCoverUrl(songPrefs[song.id]?.cover_url) : undefined)
+      ?? buildImageUrl(album.cover_url)
+      ?? buildImageUrl(song?.image_url)
+  }
 
   const handlePlayAlbumSong = (path: string) => {
     const song = albumSongIndex.get(path)
@@ -582,7 +596,7 @@ export default function WrldView(): JSX.Element {
     <div className="grid grid-cols-2 gap-2.5 pb-2">
       {wrldAlbums.map(album => {
         const firstPath = [...album.songs].sort((a, b) => a.order - b.order)[0]?.path
-        const coverUrl = buildImageUrl(albumSongIndex.get(firstPath ?? '')?.image_url)
+        const coverUrl = albumCoverUrl(album, firstPath)
         return (
           <button
             key={album.id}
@@ -622,7 +636,7 @@ export default function WrldView(): JSX.Element {
     const album = wrldAlbums.find(a => a.id === albumId)
     if (!album) return null
     const tracks = [...album.songs].sort((a, b) => a.order - b.order)
-    const coverUrl = buildImageUrl(albumSongIndex.get(tracks[0]?.path ?? '')?.image_url)
+    const coverUrl = albumCoverUrl(album, tracks[0]?.path)
 
     return (
       <div className="flex flex-col gap-3">
@@ -692,9 +706,9 @@ export default function WrldView(): JSX.Element {
                       ? 'text-[var(--accent)] font-semibold'
                       : 'text-white/70 group-hover/song:text-white/95'
                   }`}
-                  title={song?.name ?? track.path}
+                  title={(song && songPrefs[song.id]?.name) || song?.name || track.path}
                 >
-                  {song?.name ?? track.path.split('/').pop()}
+                  {(song && songPrefs[song.id]?.name) || song?.name || track.path.split('/').pop()}
                 </span>
               </button>
             )
