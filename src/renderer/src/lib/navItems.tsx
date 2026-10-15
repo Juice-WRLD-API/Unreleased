@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Download, Gamepad2, HardDrive, Heart, Home, House, Info, Library, ListMusic, LogOut, Newspaper, SearchCode, Settings, Shield, SquareTerminal, Upload, User } from 'lucide-react'
+import { BarChart3, BookOpen, Download, Gamepad2, HardDrive, Heart, Home, House, Info, Library, ListMusic, LogOut, MicVocal, Newspaper, SearchCode, Settings, Shield, SquareTerminal, Upload, User } from 'lucide-react'
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
@@ -58,6 +58,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   // like any other optional tab - a direct bar slot, subject to the cap.)
   { view: 'stats', label: 'Wrapped', icon: <BarChart3 size={18} />, defaultHidden: true },
   { view: 'news', label: 'News', icon: <Newspaper size={18} />, defaultHidden: true },
+  { view: 'personal-dj', label: 'Your DJ', icon: <MicVocal size={18} />, defaultHidden: true, mobileOverflow: true },
   // Extras - off by default, addable from Settings → Appearance → Menu items.
   { view: 'liked', label: 'Liked Songs', icon: <Heart size={18} />, defaultHidden: true },
   { view: 'docs', label: 'API Docs', icon: <BookOpen size={18} />, defaultHidden: true },

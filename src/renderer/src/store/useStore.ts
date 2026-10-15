@@ -1518,6 +1518,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'playlists': '/playlists',
       'docs': '/docs',
       'wrld': '/wrld',
+      'personal-dj': '/my-dj',
       'news': '/news',
       'heardle': '/heardle',
       'wordle': '/wordle',

@@ -98,6 +98,7 @@ const ROUTES: Record<ViewType, SeoEntry> = {
   // index, and in several cases they render empty for a signed-out crawler.
   liked: { path: '/liked', title: 'Liked songs', description: 'Your liked Juice WRLD songs.', noindex: true },
   playlists: { path: '/playlists', title: 'Playlists', description: 'Your playlists and folders.', noindex: true },
+  'personal-dj': { path: '/my-dj', title: 'Your DJ', description: 'Your personal Juice WRLD radio station, hosted by an AI DJ.', noindex: true },
   stats: { path: '/wrapped', title: 'Listening stats', description: 'Your all-time listening stats.', noindex: true },
   settings: { path: '/settings', title: 'Settings', description: 'App settings and preferences.', noindex: true },
   editor: { path: '/editor', title: 'Editor', description: 'Catalog editing tools.', noindex: true },

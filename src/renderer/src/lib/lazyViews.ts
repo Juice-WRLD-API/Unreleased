@@ -17,6 +17,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   'not-found': () => import('../components/NotFoundView'),
   docs: () => import('../components/DocsPage'),
   wrld: () => import('../components/WrldView'),
+  'personal-dj': () => import('../components/PersonalDjView'),
   news: () => import('../components/NewsView'),
   heardle: () => import('../components/HeardleView'),
   wordle: () => import('../components/WordleView'),

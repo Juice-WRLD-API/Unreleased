@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, MicVocal } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -324,7 +324,7 @@ export default function HomeView(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, openOwnPublicProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
-    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
+    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm, openPersonalDj,
   } = useHomeData()
   const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
   const canEdit = useCanEdit()
@@ -343,13 +343,14 @@ export default function HomeView(): JSX.Element {
   // TEMP: albums hidden on the home page
   const showAlbums = false && showSection('albums') && albumRow.length > 0
   const showRadio = showSection('radio')
+  const showPersonalDj = showSection('personal-dj')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')
   const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
 
   const mainShown = showRecent || showPlaylists || showAlbums
-  const sideShown = showChat || showNews || showRadio || showLiked || showGames
+  const sideShown = showChat || showNews || showRadio || showPersonalDj || showLiked || showGames
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -493,6 +494,14 @@ export default function HomeView(): JSX.Element {
                         : 'Juice WRLD radio, live 24/7'
                     }
                     onClick={openRadioFm}
+                  />
+                )}
+                {showPersonalDj && (
+                  <ShortcutCard
+                    icon={<MicVocal size={18} className="text-accent" />}
+                    title="Your DJ"
+                    subtitle={account ? 'A station picked just for you' : 'Log in for your own AI-hosted station'}
+                    onClick={openPersonalDj}
                   />
                 )}
                 {showLiked && (

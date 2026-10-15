@@ -259,12 +259,14 @@ export function useHomeData() {
     setActiveView('wrld')
   }
 
+  const openPersonalDj = (): void => { setActiveView('personal-dj') }
+
   return {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying,
     setActiveView, openProfile, openOwnPublicProfile,
     showSection,
     recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats,
-    openTrack, openNewsItem, openRadioFm,
+    openTrack, openNewsItem, openRadioFm, openPersonalDj,
   }
 }
