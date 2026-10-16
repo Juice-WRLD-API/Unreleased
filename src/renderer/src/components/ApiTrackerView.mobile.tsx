@@ -31,7 +31,7 @@ import type { CompactGroup } from '../lib/compactGroups'
 import { parseSearchQuery, matchesFieldFilters, filterApiFields } from '../lib/trackerSearch'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
-import { formatDuration } from '../lib/format'
+import { formatDuration, dateSortValue, compareDates } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useBackToClose } from '../hooks/useBackToClose'
@@ -66,7 +66,7 @@ const StatisticsPanel = lazyView(() => import('./StatisticsPanel.mobile'))
 // mobile mode and is shared with Liked Songs, Playlists, the Player and WRLD, so
 // it belongs to whichever pass rewrites those.
 
-type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length'
+type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length' | 'date_leaked'
 type SheetKind = 'filters' | 'sort' | 'view' | 'fields' | 'bulk' | null
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -92,6 +92,7 @@ const SORT_OPTIONS: { field: OrderField; label: string }[] = [
   { field: 'era__name', label: 'Era' },
   { field: 'category', label: 'Category' },
   { field: 'length', label: 'Length' },
+  { field: 'date_leaked', label: 'Date leaked' },
 ]
 
 const CATEGORY_OPTIONS: { key: Exclude<Category, ''>; label: string }[] = [
@@ -831,8 +832,9 @@ export default function ApiTrackerView(): JSX.Element {
   })
   const setViewMode = (v: ViewMode): void => { setViewModeState(v); localStorage.setItem(LS_TRACKER_VIEW, v) }
 
-  const [orderField, setOrderField] = useState<OrderField | null>(null)
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc')
+  // Default: Date Leaked, newest first (matches the desktop tracker).
+  const [orderField, setOrderField] = useState<OrderField | null>('date_leaked')
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc')
   // A new search/filter starts the list back at the top. The list itself
   // re-derives (filters) or refetches (search) on its own.
   const resetSongs = useCallback((): void => {
@@ -891,6 +893,7 @@ export default function ApiTrackerView(): JSX.Element {
   const bulkOmit = useTrackerOmit([
     ...(viewMode === 'detail' ? apiFieldsFor(mobileDetailFields) : []),
     ...filterApiFields(parsedSearch.filters),
+    ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
   ])
 
   useEffect(() => {
@@ -1116,6 +1119,10 @@ export default function ApiTrackerView(): JSX.Element {
   // Client-side sort over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
     if (!orderField) return songs
+    if (orderField === 'date_leaked') {
+      const t = new Map(songs.map((s) => [s.id, dateSortValue(s.date_leaked)]))
+      return [...songs].sort((a, b) => compareDates(t.get(a.id) ?? null, t.get(b.id) ?? null, orderDir))
+    }
     return [...songs].sort((a, b) => {
       let av: string | number, bv: string | number
       switch (orderField) {
@@ -1914,7 +1921,7 @@ export default function ApiTrackerView(): JSX.Element {
               sub={!orderField ? 'Loads the full catalog first' : undefined}
               active={orderField === opt.field}
               trailing={orderField === opt.field ? <Check size={17} className="text-accent shrink-0" /> : undefined}
-              onClick={() => setOrderField(opt.field)}
+              onClick={() => { if (orderField !== opt.field) setOrderDir(opt.field === 'date_leaked' ? 'desc' : 'asc'); setOrderField(opt.field) }}
             />
           ))}
           {orderField && (

@@ -36,7 +36,7 @@ import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCach
 import type { CompactGroup } from '../lib/compactGroups'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
-import { formatDuration } from '../lib/format'
+import { formatDuration, displayDate, dateSortValue, compareDates } from '../lib/format'
 import { parseSearchQuery, matchesFieldFilters, filterApiFields, SEARCH_FIELD_HELP } from '../lib/trackerSearch'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useMultiSelect } from '../hooks/useMultiSelect'
@@ -82,11 +82,7 @@ function safeSetLS(key: string, value: string): void {
   try { localStorage.setItem(key, value) } catch (e) { console.warn(`[ApiTrackerView] failed to save "${key}":`, e) }
 }
 
-function safeRemoveLS(key: string): void {
-  try { localStorage.removeItem(key) } catch (e) { console.warn(`[ApiTrackerView] failed to remove "${key}":`, e) }
-}
-
-type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length' | 'date_added'
+type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length' | 'date_added' | 'date_leaked'
 
 // Defined at module scope (not inline in render) so React keeps a stable
 // component identity across re-renders - an inline definition gets recreated
@@ -533,6 +529,7 @@ const LIST_COLUMN_WIDTH: Partial<Record<TrackerFieldKey, string>> = {
 const listColumnWidth = (key: TrackerFieldKey): string => LIST_COLUMN_WIDTH[key] ?? 'w-36'
 const LIST_COLUMN_SORT: Partial<Record<TrackerFieldKey, OrderField>> = {
   artist: 'credited_artists', era: 'era__name', category: 'category', length: 'length',
+  date_leaked: 'date_leaked',
 }
 // Compact-view member rows only line up under the compact header's Category
 // column, so they ignore the user's column choice.
@@ -1263,9 +1260,9 @@ const CARD_SECTIONS: CardSection[] = [
   {
     key: 'dates', label: 'Important Dates', icon: <CalendarDays size={13} />,
     fields: (s) => [
-      ['Date Leaked', s.date_leaked],
-      ['Preview Date', s.preview_date],
-      ['Release Date', s.release_date],
+      ['Date Leaked', displayDate(s.date_leaked)],
+      ['Preview Date', displayDate(s.preview_date)],
+      ['Release Date', displayDate(s.release_date)],
       ['Dates', s.dates],
     ],
   },
@@ -1318,8 +1315,8 @@ const SongCard = memo(function SongCard({
 
   // The site's status line: leak type, then the release/leak date after it.
   const statusDate = song.release_date
-    ? `Released ${song.release_date}`
-    : song.date_leaked ? `Leaked ${song.date_leaked}` : ''
+    ? `Released ${displayDate(song.release_date)}`
+    : song.date_leaked ? `Leaked ${displayDate(song.date_leaked)}` : ''
 
   return (
     // Hover highlights the border only. Tinting the card body would land on the
@@ -2050,16 +2047,18 @@ export default function ApiTrackerView(): JSX.Element {
 
   const setViewMode = (v: ViewMode): void => { setViewModeState(v); localStorage.setItem(LS_TRACKER_VIEW, v) }
 
+  // Nothing stored = never picked a sort: default to Date Leaked, newest
+  // first. Clearing the sort stores 'none' so that choice sticks.
   const [orderField, setOrderField] = useState<OrderField | null>(() => {
     const stored = localStorage.getItem(LS_TRACKER_ORDER_FIELD)
-    const valid: OrderField[] = ['name', 'credited_artists', 'era__name', 'category', 'length', 'date_added']
+    if (stored === null) return 'date_leaked'
+    const valid: OrderField[] = ['name', 'credited_artists', 'era__name', 'category', 'length', 'date_added', 'date_leaked']
     return valid.includes(stored as OrderField) ? (stored as OrderField) : null
   })
   const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(() =>
-    localStorage.getItem(LS_TRACKER_ORDER_DIR) === 'desc' ? 'desc' : 'asc')
+    localStorage.getItem(LS_TRACKER_ORDER_FIELD) === null || localStorage.getItem(LS_TRACKER_ORDER_DIR) === 'desc' ? 'desc' : 'asc')
   useEffect(() => {
-    if (orderField) safeSetLS(LS_TRACKER_ORDER_FIELD, orderField)
-    else safeRemoveLS(LS_TRACKER_ORDER_FIELD)
+    safeSetLS(LS_TRACKER_ORDER_FIELD, orderField ?? 'none')
   }, [orderField])
   useEffect(() => { safeSetLS(LS_TRACKER_ORDER_DIR, orderDir) }, [orderDir])
 
@@ -2085,15 +2084,16 @@ export default function ApiTrackerView(): JSX.Element {
   }, [])
 
   const handleSort = (field: OrderField): void => {
+    // Dates start newest-first; everything else starts ascending. Third click clears.
+    const first = field === 'date_leaked' ? 'desc' : 'asc'
     if (orderField === field) {
-      if (orderDir === 'desc') {
-        // Third click: clear sort, go back to infinite scroll
+      if (orderDir !== first) {
         setOrderField(null); setOrderDir('asc'); resetSongs()
       } else {
-        setOrderDir('desc')
+        setOrderDir(first === 'asc' ? 'desc' : 'asc')
       }
     } else {
-      setOrderField(field); setOrderDir('asc')
+      setOrderField(field); setOrderDir(first)
     }
   }
 
@@ -2113,6 +2113,7 @@ export default function ApiTrackerView(): JSX.Element {
   const bulkOmit = useTrackerOmit([
     ...(viewMode === 'grid' ? GRID_API_FIELDS : apiFieldsFor(viewMode === 'list' ? listColumns : detailFields)),
     ...filterApiFields(parsedSearch.filters),
+    ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
   ])
   const [showSearchHelp, setShowSearchHelp] = useState(false)
   // Sets rather than single values so "Search Settings" can filter by more
@@ -2414,6 +2415,10 @@ export default function ApiTrackerView(): JSX.Element {
     const base = orderField === 'date_added'
       ? (recentlyAddedMap ? linked.filter((s) => recentlyAddedMap.has(s.path)) : [])
       : linked
+    if (orderField === 'date_leaked') {
+      const t = new Map(base.map((s) => [s.id, dateSortValue(s.date_leaked)]))
+      return [...base].sort((a, b) => compareDates(t.get(a.id) ?? null, t.get(b.id) ?? null, orderDir))
+    }
     return [...base].sort((a, b) => {
       let av: string | number, bv: string | number
       switch (orderField) {

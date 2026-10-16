@@ -12,7 +12,7 @@ import { useDragToDismiss } from '../hooks/useDragToDismiss'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongById, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import { versionsEnabled, getVersionGroup, SongVersionMeta } from '../lib/versionsApi'
-import { formatDuration } from '../lib/format'
+import { formatDuration, displayDate } from '../lib/format'
 import { copyCoverImage, saveCoverImage } from '../lib/coverImage'
 import SongPrefsSection from './SongPrefsSection'
 import { ProgressiveCover } from './ProgressiveCover'
@@ -397,15 +397,15 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
 
           <TextSection icon={MapPin} label="Recording Location" value={displaySong.recording_locations} />
           <TextSection icon={Calendar} label="Record Date(s)" value={displaySong.record_dates} />
-          <TextSection icon={CalendarClock} label="Preview Date" value={displaySong.preview_date} />
-          <TextSection icon={CalendarDays} label="Release Date" value={displaySong.release_date} />
+          <TextSection icon={CalendarClock} label="Preview Date" value={displayDate(displaySong.preview_date)} />
+          <TextSection icon={CalendarDays} label="Release Date" value={displayDate(displaySong.release_date)} />
           <TextSection icon={CalendarDays} label="Other Date(s)" value={displaySong.dates} />
 
           {(displaySong.leak_type || displaySong.date_leaked) && (
             <Section icon={Droplets} label="Leak Info">
               <div className="space-y-0.5">
                 <SubVal label="Type" value={displaySong.leak_type} />
-                <SubVal label="Date leaked" value={displaySong.date_leaked} />
+                <SubVal label="Date leaked" value={displayDate(displaySong.date_leaked)} />
               </div>
             </Section>
           )}
