@@ -397,10 +397,18 @@ export default function EditorProfileView(): JSX.Element {
                           </button>
                         )
                       })}
+                      <button
+                        onClick={() => setRefreshKey(k => k + 1)}
+                        disabled={refreshing}
+                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        title="Refresh"
+                      >
+                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                      </button>
                       {(account?.is_editor || account?.is_administrator) && (
                         <button
                           onClick={() => setShowAddSong(true)}
-                          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
                           title="Propose a new song"
                         >
                           <Plus size={12} /> New song
@@ -471,8 +479,16 @@ export default function EditorProfileView(): JSX.Element {
                         size="md"
                       />
                       <button
+                        onClick={() => setRefreshKey(k => k + 1)}
+                        disabled={refreshing}
+                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        title="Refresh"
+                      >
+                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                      </button>
+                      <button
                         onClick={() => go('contributor')}
-                        className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
                         title="Propose a comp file change"
                       >
                         <Plus size={12} /> New comp proposal
