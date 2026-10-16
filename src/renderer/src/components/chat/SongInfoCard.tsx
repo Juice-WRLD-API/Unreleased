@@ -4,6 +4,7 @@ import type { SharedSongInfoPayload } from '../../lib/chatShare'
 import { buildImageUrl, CATEGORY_COLORS, CATEGORY_LABELS, getSongById, type JWApiSong } from '../../lib/juicewrldApi'
 import { useStore } from '../../store/useStore'
 import { clickable } from '../../lib/a11y'
+import { displayDate } from '../../lib/format'
 
 // The message only ever carries a songId (see chatShare.ts) - every field
 // shown here comes from a fresh lookup, never from whatever text the
@@ -44,7 +45,7 @@ export default function SongInfoCard({ info }: { info: SharedSongInfoPayload }):
   const rows: [string, string][] = [
     ...(song.credited_artists ? [['Artists', song.credited_artists] as [string, string]] : []),
     ...(song.producers ? [['Producers', song.producers] as [string, string]] : []),
-    ...(song.release_date ? [['Released', song.release_date] as [string, string]] : (song.date_leaked ? [['Leaked', song.date_leaked] as [string, string]] : [])),
+    ...(song.release_date ? [['Released', displayDate(song.release_date)] as [string, string]] : (song.date_leaked ? [['Leaked', displayDate(song.date_leaked)] as [string, string]] : [])),
   ]
   return (
     <div
