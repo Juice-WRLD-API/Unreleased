@@ -573,24 +573,19 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     return m
   }, [proposals])
 
-  // Approves every pending proposal from one editor in sequence (not
-  // parallel - these mutate the same song's data, and later ones may build
-  // on fields an earlier one just touched). Each success is applied via
-  // onReviewed as it lands, same as a single Approve; a per-item failure is
-  // swallowed so one bad row doesn't stop the rest of the batch.
+  // Reviews every pending proposal from one editor - parallel across songs,
+  // in order within a song (see adminReviewProposalsBatch). Each success is
+  // applied via onReviewed as it lands, same as a single Approve.
   const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
     const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
     setAcceptingAllUser(editorId)
     try {
-      for (const item of pending) {
-        try {
-          const updated = await userApi.adminReviewProposal(item.id, { action, channel })
-          dropCache(item.id); setArchive(null)
-          onReviewed(updated)
-        } catch {}
-      }
+      await userApi.adminReviewProposalsBatch(pending, action, channel, (updated) => {
+        dropCache(updated.id); setArchive(null)
+        onReviewed(updated)
+      })
       onChanged()
     } finally {
       setAcceptingAllUser(null)

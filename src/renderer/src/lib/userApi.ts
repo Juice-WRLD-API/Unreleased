@@ -1114,6 +1114,36 @@ export async function adminReviewProposal(id: number, payload: {
   })
 }
 
+// Reviews a batch of proposals with the same action. Proposals targeting the
+// same song stay sequential (oldest first - a later edit can build on fields
+// an earlier one touched); different songs run in parallel, capped so a big
+// batch doesn't flood the API. A per-item failure is swallowed so one bad row
+// doesn't stop the rest; onEach fires as each success lands.
+export async function adminReviewProposalsBatch(
+  proposals: SongEditProposal[],
+  action: 'approve' | 'reject',
+  channel: string | undefined,
+  onEach?: (updated: SongEditProposal) => void,
+  concurrency = 6,
+): Promise<void> {
+  const lanes = new Map<string, SongEditProposal[]>()
+  for (const p of [...proposals].sort((a, b) => a.id - b.id)) {
+    // New-song proposals have no target yet, so each gets its own lane.
+    const key = p.song != null ? `s${p.song}` : `p${p.id}`
+    const lane = lanes.get(key)
+    if (lane) lane.push(p); else lanes.set(key, [p])
+  }
+  const queue = [...lanes.values()]
+  const worker = async (): Promise<void> => {
+    for (let lane = queue.shift(); lane; lane = queue.shift()) {
+      for (const p of lane) {
+        try { onEach?.(await adminReviewProposal(p.id, { action, channel })) } catch {}
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
+}
+
 export async function adminReverseProposal(id: number, channel?: string): Promise<SongEditProposal> {
   const url = new URL(`${ACCOUNT_BASE}/admin/proposals/${id}/reverse/`)
   if (channel) url.searchParams.set('channel', channel)
