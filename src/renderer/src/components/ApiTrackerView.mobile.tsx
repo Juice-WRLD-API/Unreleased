@@ -23,6 +23,7 @@ import {
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
@@ -1257,9 +1258,10 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
-  const bulkAddToPlaylist = async (playlistId: number): Promise<void> => {
-    await Promise.all(selectedSongs.map(s => userApi.addToPlaylist(playlistId, s.id).catch(() => {})))
-    await refreshPlaylists()
+  // Optimistic: select mode closes right away and the adds run in the
+  // background (failures toast).
+  const bulkAddToPlaylist = (playlistId: number): void => {
+    void addSongsInBackground(playlistId, selectedSongs.map(s => s.id))
     exitSelectMode()
   }
 

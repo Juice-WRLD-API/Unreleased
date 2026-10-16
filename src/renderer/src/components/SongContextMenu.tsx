@@ -16,6 +16,7 @@ import ContextMenu from './ContextMenu'
 import { versionsEnabled } from '../lib/versionsApi'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
+import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const ShareSongModal = lazyOverlay(() => import('./chat/ShareSongModal'))
@@ -158,18 +159,25 @@ export default function SongContextMenu({
           .then(d => ({ id: p.id, has: (d.items ?? []).some(it => it.song.id === songId) }))
           .catch(() => ({ id: p.id, has: false }))
       )
-    ).then(results => setContained(new Set(results.filter(r => r.has).map(r => r.id))))
+    // Merged rather than replaced, so a playlist ticked optimistically while
+    // this was in flight doesn't get unticked by the older answer.
+    ).then(results => setContained(prev => new Set([...prev, ...results.filter(r => r.has).map(r => r.id)])))
   }, [playlists, songId, account])
 
-  const addTo = async (id: number): Promise<void> => {
-    if (songId == null) return
-    setBusyId(id)
-    try {
-      await userApi.addToPlaylist(id, songId)
-      setDoneId(id)
-      setContained(prev => new Set([...prev, id]))
-      await refreshPlaylists()
-    } catch {} finally { setBusyId(null) }
+  // Optimistic: tick the row now, send the request in the background, and
+  // untick it (with a toast) if the server says no.
+  const addTo = (id: number): void => {
+    if (songId == null || contained.has(id)) return
+    const name = playlists.find(p => p.id === id)?.name ?? 'playlist'
+    setDoneId(id)
+    setContained(prev => new Set([...prev, id]))
+    userApi.addToPlaylist(id, songId)
+      .then(() => refreshPlaylists())
+      .catch(() => {
+        setDoneId(prev => (prev === id ? null : prev))
+        setContained(prev => { const next = new Set(prev); next.delete(id); return next })
+        showAppToast(`Couldn't add to "${name}"`)
+      })
   }
 
   const createAndAdd = async (): Promise<void> => {
@@ -262,10 +270,8 @@ export default function SongContextMenu({
           label: p.name,
           icon: ListMusic,
           checked: contained.has(p.id) || doneId === p.id,
-          loading: busyId === p.id,
-          disabled: busyId === p.id,
           keepOpen: true,
-          onSelect: () => { void addTo(p.id) },
+          onSelect: () => addTo(p.id),
         }))
 
   const playlistFooter = !isLocalOnly && !account

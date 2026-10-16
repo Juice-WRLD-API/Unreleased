@@ -58,6 +58,7 @@ import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
 import { getLastfmSession } from '../lib/lastfm'
 import { useSandboxStore } from '../components/Modal'
 import { runWhenIdle } from '../lib/platform'
+import { showAppToast } from '../lib/appToast'
 
 // Lightweight localStorage persistence helper - see lib/persist.ts (it lives
 // there so queueSlice can share it without importing this module back).
@@ -1778,6 +1779,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
             : current.filter((id) => id !== trackId)
           set({ likedTrackIds: reverted })
           ls.set('likedTrackIds', reverted)
+          showAppToast(wasLiked ? "Couldn't unlike the song" : "Couldn't like the song")
         })
       }
     }

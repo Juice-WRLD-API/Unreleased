@@ -177,7 +177,7 @@ export default function ApiFilesView(): JSX.Element {
   // of opening the info modal on nothing. undefined = not looked up yet,
   // null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
-  const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
 
@@ -1218,8 +1218,6 @@ export default function ApiFilesView(): JSX.Element {
                   label: p.name,
                   icon: ListMusic,
                   checked: playlistDoneId === p.id,
-                  loading: playlistBusyId === p.id,
-                  disabled: playlistBusyId === p.id,
                   keepOpen: true,
                   onSelect: () => {
                     const songId = trackerMatches.get(entry.path)

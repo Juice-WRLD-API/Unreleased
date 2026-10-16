@@ -237,7 +237,7 @@ export default function ApiFilesView(): JSX.Element {
   // actions can be hidden for files with no match instead of doing nothing.
   // undefined = not looked up yet, null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
-  const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
@@ -958,12 +958,7 @@ export default function ApiFilesView(): JSX.Element {
                   key={p.id}
                   icon={ListMusic}
                   label={p.name}
-                  disabled={playlistBusyId === p.id}
-                  trailing={
-                    playlistBusyId === p.id ? <Loader2 size={16} className="animate-spin text-text-muted shrink-0" />
-                      : playlistDoneId === p.id ? <Check size={17} className="text-accent shrink-0" />
-                      : undefined
-                  }
+                  trailing={playlistDoneId === p.id ? <Check size={17} className="text-accent shrink-0" /> : undefined}
                   onClick={() => { if (sheetTrackerId != null) addToPlaylist(p.id, sheetTrackerId) }}
                 />
               ))

@@ -1,28 +1,29 @@
-// "Add to playlist" busy/done state, shared by ApiFilesView.desktop.tsx and
+// "Add to playlist" done state, shared by ApiFilesView.desktop.tsx and
 // .mobile.tsx - identical logic in both. Server playlists are keyed by
 // numeric Tracker song id, so this only ever runs for audio files that
 // resolved to a Tracker match (see useTrackerMatches) - the action stays
-// hidden otherwise.
+// hidden otherwise. Optimistic: the row ticks immediately and unticks (with
+// a toast) if the request fails.
 import { useState } from 'react'
 import * as userApi from '../lib/userApi'
+import { showAppToast } from '../lib/appToast'
 
 export function useAddFileToPlaylist(refreshPlaylists: () => Promise<void>): {
-  playlistBusyId: number | null
   playlistDoneId: number | null
-  addToPlaylist: (playlistId: number, songId: number) => Promise<void>
+  addToPlaylist: (playlistId: number, songId: number) => void
   resetPlaylistDone: () => void
 } {
-  const [playlistBusyId, setPlaylistBusyId] = useState<number | null>(null)
   const [playlistDoneId, setPlaylistDoneId] = useState<number | null>(null)
 
-  const addToPlaylist = async (playlistId: number, songId: number): Promise<void> => {
-    setPlaylistBusyId(playlistId)
-    try {
-      await userApi.addToPlaylist(playlistId, songId)
-      setPlaylistDoneId(playlistId)
-      await refreshPlaylists()
-    } catch {} finally { setPlaylistBusyId(null) }
+  const addToPlaylist = (playlistId: number, songId: number): void => {
+    setPlaylistDoneId(playlistId)
+    userApi.addToPlaylist(playlistId, songId)
+      .then(() => refreshPlaylists())
+      .catch(() => {
+        setPlaylistDoneId(prev => (prev === playlistId ? null : prev))
+        showAppToast("Couldn't add to playlist")
+      })
   }
 
-  return { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone: () => setPlaylistDoneId(null) }
+  return { playlistDoneId, addToPlaylist, resetPlaylistDone: () => setPlaylistDoneId(null) }
 }

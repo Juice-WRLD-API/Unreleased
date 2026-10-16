@@ -26,6 +26,7 @@ import { CdnDownloadToast } from './CdnDownloadToast'
 import { fisherYates } from '../store/queueSlice'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { useCanEdit, useCanContribute, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { loadRecentlyAddedMap } from '../lib/changesApi'
 import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
@@ -2621,11 +2622,11 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
-  const bulkAddToPlaylist = async (playlistId: number): Promise<void> => {
-    // Only reachable when canBulkAddToPlaylist is true, i.e. every selected
-    // song is eligible.
-    await Promise.all(selectedSongs.map(s => userApi.addToPlaylist(playlistId, s.id).catch(() => {})))
-    await refreshPlaylists()
+  // Optimistic: select mode closes right away and the adds run in the
+  // background (failures toast). Only reachable when canBulkAddToPlaylist is
+  // true, i.e. every selected song is eligible.
+  const bulkAddToPlaylist = (playlistId: number): void => {
+    void addSongsInBackground(playlistId, selectedSongs.map(s => s.id))
     exitSelectMode()
   }
 

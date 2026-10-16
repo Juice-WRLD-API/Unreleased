@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
+import { addSongsInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { showAppToast } from '../lib/appToast'
 import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -544,7 +546,6 @@ export default function PlaylistsView(): JSX.Element {
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
 
   // Zip / share / bulk-add
-  const [addingAll, setAddingAll] = useState(false)
   const [isSharedView, setIsSharedView] = useState(false)
   const [importState, setImportState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
 
@@ -865,7 +866,7 @@ export default function PlaylistsView(): JSX.Element {
     setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => i.song.id !== songId) } : null)
     membershipCache.current.get(selectedId)?.delete(songId)
     try { await userApi.removeFromPlaylist(selectedId, songId); await refreshPlaylists() }
-    catch { await loadDetail(selectedId) }
+    catch { showAppToast("Couldn't remove the song"); await loadDetail(selectedId) }
   }, [selectedId, loadDetail, refreshPlaylists])
 
   // ── Multi-select bulk actions ─────────────────────────────────────────────
@@ -893,14 +894,16 @@ export default function PlaylistsView(): JSX.Element {
       .map(t => (t.id ? userApi.trackIdToSongId(t.id) : null))
       .filter((id): id is number => id != null && id > 0)
     if (!ids.length) return
+    // Optimistic: mark membership and leave select mode now, add in the
+    // background, and drop whatever failed back out of the cache.
     setShowBulkPlaylists(false)
-    await Promise.all(ids.map(id => userApi.addToPlaylist(targetId, id).catch(() => {})))
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
     ids.forEach(id => targetSet.add(id))
     membershipCache.current.set(targetId, targetSet)
-    await refreshPlaylists()
     exitSelectMode()
-  }, [selectedTrackList, refreshPlaylists, exitSelectMode])
+    const failed = await addSongsInBackground(targetId, ids)
+    failed.forEach(id => membershipCache.current.get(targetId)?.delete(id))
+  }, [selectedTrackList, exitSelectMode])
 
   // "Edit" needs full song objects (producers, dates, lyrics, …), but a
   // playlist's own items only carry the lite shape the list endpoint returns
@@ -997,7 +1000,7 @@ export default function PlaylistsView(): JSX.Element {
     try {
       const updated = await userApi.reorderPlaylist(selectedId, newItems.map(it => it.song.id))
       setDetail(updated)
-    } catch { await loadDetail(selectedId) }
+    } catch { showAppToast("Couldn't reorder the playlist"); await loadDetail(selectedId) }
   }, [dragIdx, detail, selectedId, loadDetail])
 
   // Global infoSongId (not local state) so the info panel survives switching
@@ -1035,16 +1038,16 @@ export default function PlaylistsView(): JSX.Element {
     downloadBlob(playlistM3uContent(tracks), 'audio/x-mpegurl', `${name}.m3u`)
   }, [detail, summary, tracks])
 
+  // Optimistic like bulkAddToPlaylist: membership is marked up front and
+  // whatever fails comes back out once the background adds settle.
   const handleAddAllTo = useCallback(async (targetId: number, srcDetail: PlaylistDetail) => {
-    setAddingAll(true)
-    const eligible = srcDetail.items.filter(item => item.song.category !== 'unsurfaced' && (item.song.category !== 'recording_session' || !!resolveSessionEditSource(item.song).path))
-    await Promise.all(eligible.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
+    const ids = srcDetail.items.filter(item => item.song.category !== 'unsurfaced' && (item.song.category !== 'recording_session' || !!resolveSessionEditSource(item.song).path)).map(item => item.song.id)
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
-    srcDetail.items.forEach(i => targetSet.add(i.song.id))
+    ids.forEach(id => targetSet.add(id))
     membershipCache.current.set(targetId, targetSet)
-    setAddingAll(false)
-    await refreshPlaylists()
-  }, [refreshPlaylists])
+    const failed = await addSongsInBackground(targetId, ids)
+    failed.forEach(id => membershipCache.current.get(targetId)?.delete(id))
+  }, [])
 
   const handleImportPlaylist = useCallback(async () => {
     if (!detail) return
@@ -1235,10 +1238,7 @@ export default function PlaylistsView(): JSX.Element {
         {
           icon: apiPl.is_public ? Globe : Lock,
           label: apiPl.is_public ? 'Make private' : 'Make public',
-          onSelect: async () => {
-            await userApi.updatePlaylist(apiPl.id, { is_public: !apiPl.is_public })
-            await refreshPlaylists()
-          },
+          onSelect: () => { void setPlaylistPublic(apiPl.id, !apiPl.is_public) },
         },
         'divider',
         { icon: Pencil, label: 'Rename', keepOpen: true, onSelect: startRename },
@@ -2220,7 +2220,6 @@ export default function PlaylistsView(): JSX.Element {
                             otherPlaylists.length > 0 && tracks.length > 0 && {
                               icon: FolderInput,
                               label: 'Add all to playlist',
-                              disabled: addingAll,
                               children: otherPlaylists.map(p => ({ label: p.name, onSelect: () => handleAddAllTo(p.id, detail) })),
                             },
                             'divider',
