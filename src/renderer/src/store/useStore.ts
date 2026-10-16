@@ -61,6 +61,7 @@ import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
 import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
+import { showAppToast } from '../lib/appToast'
 
 // Key used to track songs downloaded individually (song context menu ?
 // "Download offline"), rather than through a synced playlist. It's just
@@ -2029,6 +2030,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
             : current.filter((id) => id !== trackId)
           set({ likedTrackIds: reverted })
           ls.set('likedTrackIds', reverted)
+          showAppToast(wasLiked ? "Couldn't unlike the song" : "Couldn't like the song")
         })
       }
     }

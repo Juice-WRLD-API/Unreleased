@@ -18,6 +18,7 @@ import { getActiveRadioClient } from '../lib/radioSocketService'
 import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
 import { getVersionGroup } from '../lib/versionsApi'
 import * as userApi from '../lib/userApi'
+import { showAppToast } from '../lib/appToast'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
@@ -399,7 +400,7 @@ export default function WrldView(): JSX.Element {
     if (isNaN(numericId)) return
     try {
       await userApi.addToPlaylist(playlistId, numericId)
-    } catch { /* silent */ }
+    } catch { showAppToast("Couldn't add to playlist") }
   }
 
   type NotchCategory = 'albums' | 'mixtapes' | 'unreleased' | 'playlists'

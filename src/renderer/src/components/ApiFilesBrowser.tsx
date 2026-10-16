@@ -180,7 +180,7 @@ export default function ApiFilesBrowser(): JSX.Element {
   const { lightboxItems, setLightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
-  const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
   // Whether a right-clicked audio file actually has a matching song in the
   // Tracker — resolved lazily per path on menu-open (not for every row up
@@ -1653,8 +1653,6 @@ export default function ApiFilesBrowser(): JSX.Element {
                   label: p.name,
                   icon: ListMusic,
                   checked: playlistDoneId === p.id,
-                  loading: playlistBusyId === p.id,
-                  disabled: playlistBusyId === p.id,
                   keepOpen: true,
                   onSelect: () => {
                     const songId = trackerMatches.get(entry.path)

@@ -6,6 +6,7 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
+import { setPlaylistPublic } from '../lib/optimisticPlaylist'
 import type { PlaylistSummary } from '../lib/userApi'
 import { JWAPI_BASE, buildStreamUrl } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
@@ -48,7 +49,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
   const [renameVal, setRenameVal] = useState(state.playlist.name)
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [shareCopied, setShareCopied] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [shareToChatOpen, setShareToChatOpen] = useState(false)
   const canShareToChat = hasChatAccess(account)
 
@@ -171,14 +171,12 @@ export default function PlaylistContextMenu({ state, onClose }: {
     setShareToChatOpen(true)
   }
 
+  // Optimistic: the label flips now and flips back (with a toast) on failure.
   const togglePublic = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    try {
-      await userApi.updatePlaylist(playlist.id, { is_public: !playlist.is_public })
-      setPlaylist(p => ({ ...p, is_public: !p.is_public }))
-      await refreshPlaylists()
-    } catch {} finally { setBusy(false) }
+    const next = !playlist.is_public
+    setPlaylist(p => ({ ...p, is_public: next }))
+    const actual = await setPlaylistPublic(playlist.id, next)
+    if (actual !== next) setPlaylist(p => ({ ...p, is_public: actual }))
   }
 
   const addAllTo = async (targetId: number): Promise<void> => {
@@ -258,7 +256,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
         'divider',
         canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => void shareToChat() },
         { icon: shareCopied ? Check : Link, label: shareCopied ? 'Link copied!' : 'Copy share link', keepOpen: true, onSelect: copyShare },
-        { icon: playlist.is_public ? Globe : Lock, label: playlist.is_public ? 'Make private' : 'Make public', disabled: busy, keepOpen: true, onSelect: togglePublic },
+        { icon: playlist.is_public ? Globe : Lock, label: playlist.is_public ? 'Make private' : 'Make public', keepOpen: true, onSelect: togglePublic },
         'divider',
         { icon: Pencil, label: 'Rename', keepOpen: true, onSelect: () => { setRenameVal(playlist.name); setRenaming(true) } },
         otherPlaylists.length > 0 && {
