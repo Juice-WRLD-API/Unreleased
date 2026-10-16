@@ -343,10 +343,18 @@ export default function EditorProfileView(): JSX.Element {
                         </button>
                       )
                     })}
+                    <button
+                      onClick={() => setRefreshKey(k => k + 1)}
+                      disabled={refreshing}
+                      className="shrink-0 ml-auto w-8 h-8 flex items-center justify-center rounded-full bg-surface-overlay text-text-muted active:text-text-primary disabled:opacity-40"
+                      aria-label="Refresh"
+                    >
+                      <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                    </button>
                     {(account?.is_editor || account?.is_administrator) && (
                       <button
                         onClick={() => setShowAddSong(true)}
-                        className="shrink-0 ml-auto flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                        className="shrink-0 flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
                       >
                         <Plus size={12} /> New song
                       </button>
@@ -414,8 +422,16 @@ export default function EditorProfileView(): JSX.Element {
                     counts={{ all: compTabCount('all'), pending: compTabCount('pending'), approved: compTabCount('approved'), rejected: compTabCount('rejected') }}
                   />
                   <button
+                    onClick={() => setRefreshKey(k => k + 1)}
+                    disabled={refreshing}
+                    className="ml-auto w-7 h-7 flex items-center justify-center rounded-full bg-surface-overlay text-text-muted active:text-text-primary disabled:opacity-40 shrink-0"
+                    aria-label="Refresh"
+                  >
+                    <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+                  </button>
+                  <button
                     onClick={() => setActiveView('contributor')}
-                    className="ml-auto flex items-center gap-1 h-7 px-2.5 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-[11px] font-semibold transition-colors shrink-0"
+                    className="flex items-center gap-1 h-7 px-2.5 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-[11px] font-semibold transition-colors shrink-0"
                   >
                     <Plus size={11} /> New comp proposal
                   </button>
