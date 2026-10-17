@@ -4,7 +4,7 @@ import {
   DEFAULT_TRUST_SCORE, deleteCdnNode, fetchCdnNodes, fetchCdnStats, updateCdnNode, wasAutoDisabled,
   type CdnAdminNode,
 } from '../cdnAdminApi'
-import { fail, type TermCommand, type TermCtx } from './types'
+import { fail, profileLink, type TermCommand, type TermCtx } from './types'
 
 // The Admin page's CDN nodes tab (lib/cdnAdminApi.ts on the site): the roster
 // of volunteer nodes, approvals and CDN-wide stats under /cdn/admin/. Nodes
@@ -48,7 +48,7 @@ function describeNode(n: CdnNode, latest?: number): string {
   return [
     `${n.name || n.node_id} · ${state(n)}`,
     `node id          ${n.node_id}`,
-    `owner            ${n.owner_username || 'unclaimed'}`,
+    `owner            ${n.owner_username ? (n.owner != null ? profileLink(n.owner, n.owner_username) : n.owner_username) : 'unclaimed'}`,
     `region           ${n.region || '—'} · ${n.is_public ? 'public' : 'private'}`,
     `address          ${n.ip_address ? (n.port ? `${n.ip_address}:${n.port}` : n.ip_address) : '—'}${n.public_base_url ? `  ${n.public_base_url}` : ''}`,
     `storage          ${formatBytes(n.current_storage_bytes)}${pct} · ${n.file_count.toLocaleString()} files`,

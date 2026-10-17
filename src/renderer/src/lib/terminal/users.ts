@@ -6,7 +6,7 @@ import { splitReplyRef } from '../chatReplyRef'
 import { adminGetUser, adminListUsers, getNowPlaying, getPublicProfile, type AdminUser } from '../userApi'
 import { getSongsByIds } from '../juicewrldApi'
 import { termAccess } from './access'
-import { fail, type TermCommand } from './types'
+import { fail, profileLink, profileLinkPadded, type TermCommand } from './types'
 
 // A searchable list of everyone the terminal can name. The app has no public
 // "find a user" endpoint, so this is the union of what chat already knows
@@ -140,7 +140,7 @@ async function describeUser(u: DirUser): Promise<string> {
   const cs = useChatStore.getState()
   const name = p?.username ?? a?.username ?? u.username
   const shown = p?.display_name || u.display
-  const lines = [`${name}${shown && shown !== name ? ` (${shown})` : ''}   #${u.id}`]
+  const lines = [`${profileLink(u.id, name)}${shown && shown !== name ? ` (${shown})` : ''}   #${u.id}`]
 
   const roles = a ? roleBits(a) : [p?.is_editor ? 'editor' : '', p?.is_contributor ? 'contributor' : ''].filter(Boolean)
   lines.push(`roles: ${roles.length ? roles.join(', ') : 'standard user'}${p?.is_donor ? ' · donor' : ''}${a && !a.is_active ? ' · ACCOUNT DISABLED' : ''}`)
@@ -184,7 +184,7 @@ export const USER_COMMANDS: TermCommand[] = [
         const p = await getPublicProfile(u.id).catch(() => null)
         if (p?.display_name) u.display = p.display_name
       }))
-      ctx.print(`${shown.map((u) => `${String(u.id).padEnd(7)}${u.username.padEnd(22)}${(u.display || u.discord).padEnd(22)}${u.role}`).join('\n')}\n${hits.length} match${hits.length === 1 ? '' : 'es'}${hits.length > 25 ? ' (showing 25)' : ''} · user <exact name or id> for details`)
+      ctx.print(`${shown.map((u) => `${String(u.id).padEnd(7)}${profileLinkPadded(u.id, u.username, 22)}${(u.display || u.discord).padEnd(22)}${u.role}`).join('\n')}\n${hits.length} match${hits.length === 1 ? '' : 'es'}${hits.length > 25 ? ' (showing 25)' : ''} · user <exact name or id> for details`)
     },
   },
   {

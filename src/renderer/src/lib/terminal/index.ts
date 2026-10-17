@@ -25,7 +25,7 @@ import { MORE_COMMANDS } from './more'
 import { LIBRARY_COMMANDS } from './library'
 import { PLAYER_COMMANDS } from './player'
 import { SETTINGS_COMMANDS, searchSettings } from './settings'
-import type { TermCommand, TermGroup } from './types'
+import { profileLink, type TermCommand, type TermGroup } from './types'
 import { directory, matchUsers, USER_COMMANDS } from './users'
 
 export type { TermCommand, TermCtx, TermGroup, TermScreen, TermTone } from './types'
@@ -63,7 +63,7 @@ const LOOKUP: TermCommand = {
     ]
 
     const out = [
-      section('People', users.slice(0, 8).map((u) => `${u.username}${u.display && u.display !== u.username ? ` (${u.display})` : ''}  #${u.id}   → user ${u.username}`), users.length),
+      section('People', users.slice(0, 8).map((u) => `${profileLink(u.id, u.username)}${u.display && u.display !== u.username ? ` (${u.display})` : ''}  #${u.id}   → user ${u.username}`), users.length),
       section('Rooms', rooms.slice(0, 8), rooms.length),
       section('Playlists', playlists.slice(0, 8), playlists.length),
       section('Songs', songs.map((s, i) => `${s.name}  (${s.era?.name ?? s.category})   → find ${s.name}`).slice(0, 5)),

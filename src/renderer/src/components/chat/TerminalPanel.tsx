@@ -4,6 +4,7 @@ import { findChatCommand } from '../../lib/chatHelp'
 import { hasChatAccess } from '../../lib/chatAccess'
 import { canRun, chatCommandsFor, moderationChatCommandsFor, plainChatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
 import { termThemeVars, useTermTheme } from '../../lib/terminal/themeStore'
+import { plainOutput, PROFILE_LINK_RE } from '../../lib/terminal/types'
 import { catFile, diskUsage, grepFiles, headTailFile, locateName, treeView, wcFile } from '../../lib/terminalFileTools'
 import { commandCardText } from '../../lib/commandCardText'
 import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
@@ -309,6 +310,20 @@ const LINK = 'underline decoration-dotted underline-offset-2 cursor-pointer hove
 // command (or the handle) is a button that puts it on the prompt. It never runs
 // it - clicking is only a shortcut for typing.
 function linkLine(line: string, onPick: (command: string) => void): JSX.Element | string {
+  // A username a command marked with profileLink (lib/terminal/types): it opens
+  // their public profile. The text around it is handled as usual, piece by piece.
+  if (line.includes('')) {
+    const parts: (string | JSX.Element)[] = []
+    let last = 0
+    for (const m of line.matchAll(PROFILE_LINK_RE)) {
+      if (m.index > last) parts.push(linkLine(line.slice(last, m.index), onPick))
+      const userId = Number(m[1])
+      parts.push(<button type="button" className={LINK} title="Open their profile" onClick={() => useStore.getState().openPublicProfile(userId)}>{m[2]}</button>)
+      last = m.index + m[0].length
+    }
+    if (last < line.length) parts.push(linkLine(line.slice(last), onPick))
+    return <>{parts.map((p, i) => <Fragment key={i}>{p}</Fragment>)}</>
+  }
   // Structured output gets colour so the parts read apart: a leading [tag]
   // (levels have their own colours, any other tag takes the accent), a trailing
   // "- author, date" tail goes dim, and a "Heading:" line is bold. What is left
@@ -776,7 +791,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   // What the watch screen shows: the command's output (errors included) as text.
   runCaptured.current = async (line: string): Promise<string> => {
     locked.current += 1
-    try { return (await withCapture(() => dispatch(line), true)).join('\n') || '(no output)' } finally { locked.current -= 1 }
+    try { return plainOutput((await withCapture(() => dispatch(line), true)).join('\n')) || '(no output)' } finally { locked.current -= 1 }
   }
 
   // Each command gets its own abort controller; Ctrl+C aborts it (see onKeyDown).
