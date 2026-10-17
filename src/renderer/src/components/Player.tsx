@@ -61,6 +61,28 @@ function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: strin
   return track.streamUrl ?? toFileUrl(track.path)
 }
 
+// Whether a source that failed before playing a single frame is worth another
+// try. Chrome reports an HTTP error on that first request exactly like a file
+// it can't decode ("Format error", MEDIA_ERR_SRC_NOT_SUPPORTED), so a server
+// having a bad moment (the API's intermittent 500/502s) used to read as a
+// broken file and skip straight to the next song. Ask the server instead: a
+// 5xx/429 or no answer at all is transient, and so is a file that downloads
+// fine now in a type this browser plays. A 4xx, or a type it can't play, won't
+// come back.
+async function sourceFailureIsTransient(url: string): Promise<boolean> {
+  if (!/^https?:/.test(url)) return false
+  try {
+    const res = await fetch(url, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' })
+    void res.body?.cancel().catch(() => {})
+    if (res.status >= 500 || res.status === 429) return true
+    if (!res.ok) return false
+    const type = res.headers.get('Content-Type')?.split(';')[0].trim() ?? ''
+    return !!type && document.createElement('audio').canPlayType(type) !== ''
+  } catch {
+    return true
+  }
+}
+
 // How long the pause-fade ramps volume when "smooth fade when pausing" is on.
 const PAUSE_FADE_MS = 400
 
@@ -909,9 +931,19 @@ export default function Player(): JSX.Element {
     console.error(`Audio error (${slot}): code ${err.code}`, err.message)
     if (!useStore.getState().isPlaying) return
     // Unsupported before a single frame played = the file itself is the
-    // problem. Mid-song it means the connection died, which is recoverable.
+    // problem, or the server errored on the first request (see
+    // sourceFailureIsTransient) - retry that, skip the rest. Mid-song it means
+    // the connection died, which is recoverable.
     if (err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && lastProgressTime.current === 0) {
-      skipUnplayableTrack()
+      const trackId = useStore.getState().currentTrack?.id
+      void sourceFailureIsTransient(audio.currentSrc || audio.src).then((transient) => {
+        // Moved on while the server answered: skipped, paused, or a reload
+        // already cleared the error.
+        if (audio !== getActive() || !audio.error || !useStore.getState().isPlaying
+          || useStore.getState().currentTrack?.id !== trackId) return
+        if (transient) recoverPlayback('server error')
+        else skipUnplayableTrack()
+      })
       return
     }
     recoverPlayback('error')

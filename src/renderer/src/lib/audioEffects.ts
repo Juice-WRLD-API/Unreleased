@@ -61,6 +61,8 @@ export interface CommunityEdit {
   songId?: number
   duration?: number
   imageUrl?: string
+  // The player's artist line while it plays, in place of "Community edit".
+  artist?: string
 }
 
 export interface AudioEffectSettings {
