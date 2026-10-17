@@ -38,8 +38,9 @@ export default function EqualizerPanel({ floating = false }: { floating?: boolea
     preferOgVersion, setPreferOgVersion,
     sleepTimerEnd, setSleepTimer,
     audioOutput, setAudioOutput,
-    radioFmActive,
+    radioFmActive, currentTrack,
     balanceLabel, sleepMinutes, setSleepMinutes, outputDevices,
+    instrumentalsSong, instrumentals, playInstrumental,
   } = useEqualizerPanelData()
   const setShowEqPanel = useStore((s) => s.setShowEqPanel)
 
@@ -90,18 +91,39 @@ export default function EqualizerPanel({ floating = false }: { floating?: boolea
         </select>
       </div>
 
-      {/* Community edits - community-made audio FILES (sped-up, remixes, …),
-          not effect presets: clicking one plays that file through the normal
-          queue. The API endpoints for them don't exist yet, so the store list
-          stays empty and only the empty state renders for now. */}
+      {/* Community edits - community-made audio FILES (instrumentals,
+          sped-up, remixes, …), not effect presets: clicking one plays that
+          file in place of the current song, keeping the queue. Instrumentals
+          come from the file tree's Instrumentals folder for the playing song;
+          the API endpoints for the rest don't exist yet, so the store list
+          stays empty for now. */}
       <div className="px-4 pb-3">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted pb-1.5">Community edits</p>
-        {communityEdits.length === 0 ? (
+        {instrumentalsSong && instrumentals == null ? (
+          <p className="text-[11px] text-text-muted px-1 py-1.5">Looking for instrumentals…</p>
+        ) : !instrumentals?.length && communityEdits.length === 0 ? (
           <p className="text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">
-            Nothing here yet - community-made edits will appear once they go live.
+            {instrumentalsSong ? 'No instrumentals or edits for this song yet.' : 'Play a song to see its instrumentals and edits.'}
           </p>
         ) : (
-          <div className="space-y-1 max-h-32 overflow-y-auto">
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {instrumentals?.map((inst) => {
+              const playing = currentTrack?.path === inst.path
+              return (
+                <button
+                  key={inst.path}
+                  onClick={() => playInstrumental(inst)}
+                  title={`Play this instrumental\n${inst.path}`}
+                  className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left bg-[var(--surface-overlay)] border transition-colors ${playing ? 'border-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--accent)]'}`}
+                >
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-xs truncate ${playing ? 'text-accent font-semibold' : 'text-text-primary'}`}>{inst.name}</span>
+                    <span className="block text-[10px] text-text-muted truncate">Instrumental · {inst.folder} · {inst.era}</span>
+                  </span>
+                  {inst.duration > 0 && <span className="text-[10px] text-text-muted tabular-nums shrink-0">{formatDuration(inst.duration)}</span>}
+                </button>
+              )
+            })}
             {communityEdits.map((edit) => (
               <button
                 key={edit.id}

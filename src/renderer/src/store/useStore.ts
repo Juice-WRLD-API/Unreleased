@@ -1432,14 +1432,16 @@ export const useStore = create<AppStore>((set, get, store) => ({
   clearAbLoop: () => set({ abLoopStart: null, abLoopEnd: null }),
   communityEdits: [],
   // A community edit is a real audio file, so playing one goes through the
-  // normal queue machinery as a single-track play � the effects chain, prefs,
-  // scrobbling etc. all apply to it like any other track.
+  // normal queue machinery - the effects chain, prefs, scrobbling etc. all
+  // apply to it like any other track. It's an edit of the song that's
+  // playing, so it takes that song's place the way "Change version" does,
+  // keeping the rest of the queue.
   playCommunityEdit: (edit) => {
     const track: Track = {
       id: `community-edit-${edit.id}`,
       path: edit.path,
       title: edit.name,
-      artist: edit.author ? `Community edit · ${edit.author}` : 'Community edit',
+      artist: edit.artist ?? (edit.author ? `Community edit · ${edit.author}` : 'Community edit'),
       album: '',
       albumArtist: '',
       year: null,
@@ -1450,7 +1452,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
       streamUrl: buildStreamUrl(edit.path),
       imageUrl: edit.imageUrl ?? '',
     }
-    get().playTrack(track, [track])
+    const current = get().currentTrack
+    if (current) get().changeVersion(current, track)
+    else get().playTrack(track, [track])
   },
 
   // ── UI ────────────────────────────────────────────────────────────────────
