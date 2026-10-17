@@ -2,7 +2,7 @@ import { Loader2, Music, Play } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { SharedSongPayload } from '../../lib/chatShare'
 import { formatDuration } from '../../lib/format'
-import { getSongById, songToTrack } from '../../lib/juicewrldApi'
+import { getSongById, smallCoverUrl, songToTrack } from '../../lib/juicewrldApi'
 import { useStore } from '../../store/useStore'
 import type { Track } from '../../types'
 
@@ -47,7 +47,7 @@ export default function SongShareCard({ song }: { song: SharedSongPayload }): JS
           <Loader2 size={16} className="text-text-muted animate-spin" />
         ) : (
           <>
-            {track.imageUrl && <img src={track.imageUrl} alt="" className="w-full h-full object-cover" />}
+            {track.imageUrl && <img src={smallCoverUrl(track.imageUrl)} alt="" className="w-full h-full object-cover" />}
             <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 transition-colors">
               <Play size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity fill-current" />
             </span>

@@ -10,7 +10,7 @@ import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords
 import { formatDuration } from '../lib/format'
 import { setEqAnchor } from '../lib/eqAnchor'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
-import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, resolveSessionEditSource, loadAllSongs, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, fullCoverUrl, resolveSessionEditSource, loadAllSongs, resolvePrefCoverUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album as WrldAlbum } from '../lib/albumsApi'
@@ -21,7 +21,7 @@ import * as userApi from '../lib/userApi'
 import { showAppToast } from '../lib/appToast'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
-import { ProgressiveCover } from './ProgressiveCover'
+import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import ContextMenu from './ContextMenu'
 import { getSkin } from '../lib/skins'
@@ -468,7 +468,7 @@ export default function WrldView(): JSX.Element {
           // Keyed for the same reason as ProgressiveCover: reusing the element
           // across a track change leaves the old cover painted until the new
           // one decodes.
-          ? <img key={artSrc} src={smallCoverUrl(artSrc)} alt="Album art" className="w-full h-full object-cover" onError={() => setArtError(true)} />
+          ? <FallbackImg key={artSrc} sources={[smallCoverUrl(artSrc), fullCoverUrl(artSrc), artSrc]} alt="Album art" className="w-full h-full object-cover" onError={() => setArtError(true)} />
           : <ProgressiveCover src={artSrc} alt="Album art" className="w-full h-full object-cover" onError={() => setArtError(true)} />
       ) : radioFmActive ? (
         <div className="w-full h-full bg-gradient-to-br from-red-900/60 to-black flex flex-col items-center justify-center gap-2">
@@ -790,7 +790,7 @@ export default function WrldView(): JSX.Element {
             ) : artSrc && !artError ? (
               // Blurred to 60px, so resolution is meaningless here - always the
               // degraded copy, which also gets the backdrop up on the first frame.
-              <img src={smallCoverUrl(artSrc)} alt=""
+              <FallbackImg key={artSrc} sources={[smallCoverUrl(artSrc), fullCoverUrl(artSrc), artSrc]}
                 className="absolute inset-0 w-full h-full object-cover"
                 style={{ filter: `blur(60px) brightness(${isDarkSkin ? 0.22 : 0.45}) saturate(${isDarkSkin ? 2.4 : 1.8})`, transform: 'scale(1.2)' }}
                 onError={() => setArtError(true)}
