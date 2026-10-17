@@ -25,7 +25,7 @@ import ContextMenu from './ContextMenu'
 import { eventToCombo, resolveAction, registerHotkeyDispatch } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
 import { takeEqAnchor } from '../lib/eqAnchor'
-import { getSongById, smallCoverUrl } from '../lib/juicewrldApi'
+import { getSongById, smallCoverUrl, fullCoverUrl } from '../lib/juicewrldApi'
 import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
 import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -1162,7 +1162,9 @@ export default function Player(): JSX.Element {
       ? radioFmMatchedSong?.imageUrl
       : (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)
     // Only pass HTTP URLs to MediaMetadata - data URIs crash Windows media transport
-    const artSrc = rawArt?.startsWith('http') ? rawArt : undefined
+    // The browser fetches artwork itself, so a raw /files/download/ cover would
+    // pull the whole original (often several MB) - cap it like every other cover.
+    const artSrc = rawArt?.startsWith('http') ? fullCoverUrl(rawArt) : undefined
     navigator.mediaSession.metadata = new MediaMetadata({
       title,
       artist,
