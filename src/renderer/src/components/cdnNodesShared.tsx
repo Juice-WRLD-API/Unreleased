@@ -269,7 +269,7 @@ export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: s
         <Fact label="Requests" value={node.total_requests.toLocaleString()} />
         <Fact label="Trust" value={String(Math.round(node.trust_score))} />
         <Fact label="Violations" value={String(node.hash_violations)} />
-        <Fact label="Owner" value={node.owner_username || 'Unclaimed'} />
+        <Fact label="Owner" value={node.owner_username || 'Unclaimed'} copy={node.owner_username || undefined} />
         <Fact label="Region" value={node.region || '—'} />
         <Fact label="Location" value={nodeLocation(node)} />
         <Fact label="Tunnel" value={node.tunnel_hostname ? `${node.tunnel_hostname}${node.serve_ready ? '' : ' (not ready)'}` : '—'} copy={node.tunnel_hostname || undefined} />
