@@ -55,7 +55,7 @@ export default function CoverEditor({
   useEffect(() => { setSearchedCovers(null) }, [songId])
   useEffect(() => {
     if (searchedCovers != null) return
-    const queries = [apiTitle, ...versions.map((v) => v.song.name)]
+    const queries = [apiTitle, ...versions.map((v) => v.song.name), ...altTitles]
       .map(cleanTitleForSearch)
       .filter((q, i, arr) => q && arr.indexOf(q) === i)
     if (queries.length === 0) { setSearchedCovers([]); return }
@@ -83,7 +83,7 @@ export default function CoverEditor({
     }).finally(() => { if (!cancelled) setSearchedLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchedCovers, apiTitle, versions])
+  }, [searchedCovers, apiTitle, versions, altTitles.join('\u0000')])
 
   const coverDraftPreview = resolvePrefCoverUrl(coverDraft.trim())
 
