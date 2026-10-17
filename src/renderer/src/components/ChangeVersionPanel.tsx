@@ -15,8 +15,9 @@ interface VersionOption { song: JWApiSong; label: string | null; version: string
  *  the needless-fetch pattern that made compact view laggy before.
  *
  *  Clicking a sibling's name plays it now (a one-off). The star marks it as a
- *  *preferred* version (lib/versionPrefs) so every future play of any version
- *  of this song resolves to one of the preferred ones - the persistent counterpart to the
+ *  *preferred* version (lib/versionPrefs) so any version of this song the app
+ *  picks or reaches in the queue resolves to one of the preferred ones (a
+ *  version the user clicks still plays as itself) - the persistent counterpart to the
  *  one-off switch, set right where the user is already comparing versions. The
  *  ban excludes it from auto-picking. */
 export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: {
