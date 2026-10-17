@@ -215,7 +215,7 @@ export const FUN_COMMANDS: TermCommand[] = [
       const limit = Math.min(30, Math.max(3, Number(words.find((w) => /^\d+$/.test(w) && !PERIODS.includes(w))) || 10))
       const plays = useStore.getState().listeningPlays
       if (plays.length === 0) { ctx.print('nothing played yet', 'dim'); return }
-      const prefs = prefsForPeriod(plays, period)
+      const prefs = prefsForPeriod(plays, period, useStore.getState().songPrefs)
       if (prefs.length === 0) { ctx.print(`no plays in the last ${period} days`, 'dim'); return }
       ctx.print(`reading ${prefs.length} played songs…`, 'dim')
       const songs = await resolveStatsSongs(prefs.map((p) => p.song), () => undefined, () => false, ctx.signal)

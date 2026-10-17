@@ -20,7 +20,7 @@ const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'uploads', 'showUploadManager', 'setShowUploadManager')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, uploads, stagedFileChanges, stagedSongChanges, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'uploads', 'stagedFileChanges', 'stagedSongChanges', 'showUploadManager', 'setShowUploadManager')
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(LS_COLLAPSED) === 'true'
@@ -146,7 +146,10 @@ export default function Sidebar(): JSX.Element {
   // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) -
   // ordered and filtered to what's both available and toggled on in Settings.
   // Log in and the collapse toggle are rendered separately (never hideable).
-  const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads: uploads.length > 0 }
+  // Staged proposals count as "something to show": the Transfers panel is
+  // the only place to propose them, so hiding it strands them.
+  const stagedCount = stagedFileChanges.length + stagedSongChanges.length
+  const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads: uploads.length > 0 || stagedCount > 0 }
   const controls = orderedNavControls(navControlOrder).filter((c) => isNavControlVisible(c, navControlVisibility, controlCtx))
 
   const rowCls = 'flex items-center w-full py-2 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3'
@@ -154,7 +157,9 @@ export default function Sidebar(): JSX.Element {
   const labelCls = `truncate transition-opacity duration-200 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
 
   // Full-width control row for the vertical (left/right) side menu.
-  const activeUploadCount = uploads.filter((u) => u.state === 'downloading').length
+  // Staged changes count alongside in-flight transfers (same as the mobile
+  // More sheet): they still need the user to open the panel and Propose.
+  const activeUploadCount = uploads.filter((u) => u.state === 'downloading').length + stagedCount
 
   const renderControl = (id: NavControlId): JSX.Element | null => {
     switch (id) {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStorePick } from '../store/useStore'
 import { loadRecentTracks } from '../lib/recentTracks'
 import { filterListeningPlaysByDays } from '../lib/listeningPlays'
+import { allTimePrefs } from '../lib/listeningStats'
 import { playlistCoverUrl, apiFetch, apiPeek, buildImageUrl, loadAllSongs, songToTrack, type JWApiStats, type JWApiSong } from '../lib/juicewrldApi'
 import { peekPlaylistCover } from '../lib/userApi'
 import { loadRecentPlaylistIds } from '../lib/recentPlaylists'
@@ -65,12 +66,12 @@ export interface HomePlaylistCard {
 export function useHomeData() {
   const {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
-    listeningPlays, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
+    listeningPlays, songPrefs, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
     homeSectionVisibility, refreshPlaylists, setIsPlaying, recentTracksRev,
   } = useStorePick(
     'account', 'playlists', 'guestPlaylists', 'followedPlaylists', 'likedTrackIds',
-    'listeningPlays', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
+    'listeningPlays', 'songPrefs', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
     'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
     'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying', 'recentTracksRev',
   )
@@ -167,11 +168,11 @@ export function useHomeData() {
     ]
   }, [])
 
-  const totalPlays = listeningPlays.length
-  const distinctSongs = useMemo(
-    () => new Set(listeningPlays.map((e) => e.song)).size,
-    [listeningPlays],
-  )
+  // All-time totals come off songPrefs' aggregate counts - the log is capped,
+  // so its length alone stalls at SERVER_LISTENING_PLAYS_LIMIT.
+  const allTime = useMemo(() => allTimePrefs(listeningPlays, songPrefs), [listeningPlays, songPrefs])
+  const totalPlays = useMemo(() => allTime.reduce((n, p) => n + p.playcount, 0), [allTime])
+  const distinctSongs = allTime.length
   const weekPlays = useMemo(
     () => filterListeningPlaysByDays(listeningPlays, 7).length,
     [listeningPlays],
