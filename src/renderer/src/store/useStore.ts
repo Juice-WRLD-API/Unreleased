@@ -62,6 +62,7 @@ import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
 import { showAppToast } from '../lib/appToast'
+import { setNotificationsSignedIn } from '../lib/notificationSocket'
 
 // Key used to track songs downloaded individually (song context menu ?
 // "Download offline"), rather than through a synced playlist. It's just
@@ -3680,6 +3681,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   })),
   clearStagedSongChanges: () => set({ stagedSongChanges: [] })
 }))
+
+// Notification-socket tickets wait for a confirmed account, not just a stored token.
+useStore.subscribe((s, prev) => {
+  if (s.account !== prev.account) setNotificationsSignedIn(!!s.account)
+})
 
 // Dev-only console handle for driving store state while debugging (e.g.
 // forcing auth-gated views to render without an account). Never set in
