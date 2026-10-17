@@ -129,10 +129,10 @@ export default function SongContextMenu({
   liked, onToggleLike, removeAction, song, disableChangeVersion,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
-  const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
+  const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
     useShallow(s => ({
       playlists: s.playlists, account: s.account, refreshPlaylists: s.refreshPlaylists,
-      setShowUserAuth: s.setShowUserAuth, playTrack: s.playTrack,
+      setShowUserAuth: s.setShowUserAuth, changeVersion: s.changeVersion,
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
     }))
   )
@@ -360,7 +360,7 @@ export default function SongContextMenu({
             <ChangeVersionPanel
               songId={songId as number}
               mobile={mobile}
-              onChangeVersion={(s) => { const t = songToTrack(s); playTrack(t, [t]); close() }}
+              onChangeVersion={(s) => { changeVersion(track, songToTrack(s)); close() }}
             />
           ),
         },

@@ -159,6 +159,11 @@ export interface QueueSlice {
    * plays it, leaving the rest of the queue (and radio mode) untouched.
    */
   playFromHistory: (track: Track) => void
+  /** "Change version": swaps `from` for `to` in place in the queue (the
+   *  current row when `from` is playing) and plays it, keeping the rest of the
+   *  queue and its order. Falls back to a standalone play when `from` isn't
+   *  queued. A deliberate pick, so no preferred-version swap afterwards. */
+  changeVersion: (from: Track, to: Track) => void
 
   toggleShuffle: () => void
   reshuffleQueue: () => void
@@ -194,6 +199,10 @@ export interface PlayTrackOpts {
   /** `context` is already in its final shuffled order (shufflePlay) - don't
    *  shuffle it again even if the shuffle toggle is on. */
   preshuffled?: boolean
+  /** The app chose `track` (first of a collection or shuffle), not the user -
+   *  so it's subject to the preferred-version swap. A track the user picked
+   *  plays as the exact version they clicked. */
+  autoPick?: boolean
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -304,6 +313,14 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
   return songToTrack(await apiFetch<JWApiSong>(`/songs/${ogSibling.songId}/`))
 }
 
+/** resolveVersionSwap, skipped outright when nothing could possibly swap - no
+ *  per-song default, no exclusions, and the global toggle off - rather than
+ *  pay a /versions/ round trip on every track change for the common case. */
+function preferredVersionOf(track: Track, preferOg: boolean): Promise<Track | null> {
+  if (!preferOg && !hasAnyDefaultVersion() && !hasAnyExcludedVersion()) return Promise.resolve(null)
+  return resolveVersionSwap(track, preferOg)
+}
+
 // ─── Slice factory ────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -316,6 +333,26 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     if (!outgoing || outgoing.id === state.currentTrack?.id || _suppressPlayHistory) return
     const rest = state.playHistory.filter((t) => t.id !== outgoing.id)
     set({ playHistory: [outgoing, ...rest].slice(0, PLAY_HISTORY_LIMIT) })
+  })
+
+  // Resolve the up-next row's preferred version ahead of time, so when the
+  // queue reaches it (nextTrack or Player's crossfade advance) it starts as
+  // that version - swapping only once it's playing meant the queued one was
+  // audible for a second first. Keyed on the up-next row changing, so the
+  // replacement itself just re-checks once and stops.
+  api.subscribe((state: QueueSlice, prev: QueueSlice) => {
+    if (state.radioMode) return
+    const i = state.queueIndex + 1
+    const next = state.queue[i]
+    if (!next || next.id === prev.queue[prev.queueIndex + 1]?.id) return
+    preferredVersionOf(next, get().preferOgVersion)
+      .then((swapped) => {
+        if (!swapped) return
+        const now: QueueSlice = get()
+        if (now.queue[i]?.id !== next.id || now.queueIndex + 1 !== i) return
+        set({ queue: now.queue.map((t, j) => (j === i ? swapped : t)) })
+      })
+      .catch(() => {})
   })
 
   return {
@@ -376,7 +413,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       currentTime: 0,
     })
     if (filter?.hasMore) get()._loadMore()
-    get()._maybeSwapToPreferredVersion(track)
+    if (opts.autoPick) get()._maybeSwapToPreferredVersion(track)
     if (reshuffle) void get()._repickBySong()
   },
 
@@ -385,12 +422,12 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     if (tracks.length === 0) return
     if (!bySong) {
       const shuffled = fisherYates(tracks)
-      get().playTrack(shuffled[0], shuffled, filter, source, { preshuffled: true })
+      get().playTrack(shuffled[0], shuffled, filter, source, { preshuffled: true, autoPick: true })
       return
     }
     const units = await groupPlaylistBySong<Track>(tracks, t => apiSongId(t) ?? -1)
     const shuffled = fisherYates(await pickSongVersions(units))
-    if (shuffled.length) get().playTrack(shuffled[0], shuffled, filter, source, { preshuffled: true, songPool: tracks })
+    if (shuffled.length) get().playTrack(shuffled[0], shuffled, filter, source, { preshuffled: true, songPool: tracks, autoPick: true })
   },
 
   // ── playCollection ─────────────────────────────────────────────────────────
@@ -399,7 +436,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     if (get().shuffle && source !== 'tracker') {
       void get().shufflePlay(tracks, { filter, source })
     } else {
-      get().playTrack(tracks[0], tracks, filter, source)
+      get().playTrack(tracks[0], tracks, filter, source, { autoPick: true })
     }
   },
 
@@ -533,9 +570,9 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       ? absoluteIndex
       : queue.findIndex((t: Track) => t.id === track.id)
     if (idx < 0) return
+    // A row the user clicked - plays as that exact version, no preferred swap.
     set({ queueIndex: idx, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
     get()._loadMore()
-    get()._maybeSwapToPreferredVersion(track)
   },
 
   // ── playFromHistory ─────────────────────────────────────────────────────────
@@ -546,6 +583,25 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     const at = queueIndex + 1
     set({ queue: [...queue.slice(0, at), track, ...queue.slice(at)] })
     get().jumpToTrack(track, at)
+  },
+
+  // ── changeVersion ───────────────────────────────────────────────────────────
+  changeVersion: (from, to) => {
+    const { queue, queueIndex, currentTrack } = get()
+    const idx = currentTrack?.id === from.id && queue[queueIndex]?.id === from.id
+      ? queueIndex
+      : queue.findIndex((t: Track) => t.id === from.id)
+    if (idx < 0) { get().playTrack(to, [to]); return }
+    set({
+      queue: queue.map((t: Track, i: number) => (i === idx ? to : t)),
+      queueIndex: idx,
+      currentTrack: to,
+      currentTrackFull: null,
+      isPlaying: true,
+      progress: 0,
+      currentTime: 0,
+    })
+    get()._loadMore()
   },
 
   // ── toggleShuffle ──────────────────────────────────────────────────────────
@@ -707,7 +763,10 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     const session = _radioSession
     const live = (): boolean => get().radioMode && session === _radioSession
 
-    const handleTrack = (track: Track): void => {
+    const handleTrack = async (picked: Track): Promise<void> => {
+      // Resolved before it's queued, so a preferred version starts as itself
+      // instead of the picked one playing for a moment and then switching.
+      const track = (await preferredVersionOf(picked, get().preferOgVersion).catch(() => null)) ?? picked
       if (!live()) return
       const wasWaiting = get()._radioWaiting
       set({ radioNext: track, _radioWaiting: false })
@@ -739,7 +798,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
           if (!live()) return
           const playable = data.results.filter((s: JWApiSong) => !!s.path)
           if (playable.length === 0) { handleError(); return }
-          handleTrack(songToTrack(playable[Math.floor(Math.random() * playable.length)]))
+          void handleTrack(songToTrack(playable[Math.floor(Math.random() * playable.length)]))
         })
         .catch(handleError)
     } else {
@@ -778,12 +837,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   // ── Preferred-version swap ─────────────────────────────────────────────────
   _maybeSwapToPreferredVersion: (track) => {
-    const preferOg = get().preferOgVersion
-    // Nothing could possibly swap - no per-song default, no exclusions, and
-    // the global toggle off - so skip the version lookup rather than pay a
-    // /versions/ round trip on every track change for the common case.
-    if (!preferOg && !hasAnyDefaultVersion() && !hasAnyExcludedVersion()) return
-    resolveVersionSwap(track, preferOg)
+    preferredVersionOf(track, get().preferOgVersion)
       .then((swapped) => {
         if (!swapped) return
         const state = get()
