@@ -12,7 +12,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand } from './Player'
-import { apiFetch, getSongsByIds } from '../lib/juicewrldApi'
+import { apiFetch, getSongsByIds, fullCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
 import { getVersionGroup } from '../lib/versionsApi'
@@ -23,7 +23,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import SongInfoModal from './SongInfoModal'
 import CoverEditor from './CoverEditor'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
-import { ProgressiveCover } from './ProgressiveCover'
+import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
 import { IS_IOS } from '../lib/platform'
@@ -680,7 +680,7 @@ function ArtBackdrop({ artSrc, artError, isDarkSkin, radioFmActive, onError, ext
         // patches this was reported against. transform's own upscale is a
         // separate, always-smooth bilinear step, so the visible result is
         // softer even though the source blur radius is smaller.
-        <img src={artSrc} alt=""
+        <FallbackImg key={artSrc} sources={[artSrc, fullCoverUrl(artSrc), smallCoverUrl(artSrc)]}
           className="absolute object-cover"
           style={{
             width: '50%', height: '50%', left: '50%', top: '50%',

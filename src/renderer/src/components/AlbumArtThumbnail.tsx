@@ -1,7 +1,7 @@
 import { Music2 } from 'lucide-react'
 import { useState } from 'react'
 import { Track } from '../types'
-import { smallCoverUrl, sizedCoverUrl } from '../lib/juicewrldApi'
+import { fullCoverUrl, smallCoverUrl, sizedCoverUrl } from '../lib/juicewrldApi'
 
 interface Props {
   track: Track
@@ -39,11 +39,13 @@ export function AlbumArtThumbnail(props: Props): JSX.Element {
 function Thumbnail({ track, size = 40, className = '', fill = false, eager = false, res }: Props): JSX.Element {
   const [attempt, setAttempt] = useState(0)
   // A resize can fail even when the underlying cover is available. Try the
-  // small variant and then the source, once each, before showing the icon.
+  // small variant and then the 1024px capped copy, once each, before showing
+  // the icon - never the raw original, which for a custom cover can be a
+  // 20MB+ PNG pulled down for a 40px row.
   const sources = [...new Set([
     res ? sizedCoverUrl(track.imageUrl, res) : smallCoverUrl(track.imageUrl),
     smallCoverUrl(track.imageUrl),
-    track.imageUrl,
+    fullCoverUrl(track.imageUrl),
   ].filter((src): src is string => !!src))]
   const src = sources[attempt]
   const rem = `${size / 16}rem`

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AccountUser } from '../lib/userApi'
 import type { Track, FullTrack } from '../types'
 import type { RadioTrack, RadioVote } from '../lib/radioLive'
-import { buildImageUrl, apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { buildImageUrl, apiFetch, songToTrack, smallCoverUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
@@ -88,7 +88,8 @@ export function useArtTextContrast(
       } catch { setTextIsDark(false) }
     }
     img.onerror = () => setTextIsDark(false)
-    img.src = artSrc
+    // Averaged over 50x50, so the degraded copy reads the same as the original.
+    img.src = smallCoverUrl(artSrc) ?? artSrc
   }, [artSrc, artError, isDarkSkin, radioFmActive, override])
   return textIsDark
 }
