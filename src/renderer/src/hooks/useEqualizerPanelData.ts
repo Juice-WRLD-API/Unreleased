@@ -59,13 +59,19 @@ export function useEqualizerPanelData(): Pick<AppStore, typeof EQ_STORE_KEYS[num
     // eslint-disable-next-line react-hooks/exhaustive-deps -- instrumentalsSong only matters through its key
   }, [key])
 
+  // Plays under the song's own title (kept from the song, or from the
+  // instrumental already playing in its place), with the file name as the
+  // artist line. A raw Instrumentals file from the Files tab carries the file
+  // name as its title, so its folder stands in there.
   const playInstrumental = (inst: Instrumental): void => {
+    const keepTitle = currentTrack
+      && (currentTrack.id.startsWith('community-edit-') || !instrumentalSongTitle(currentTrack.path))
     playCommunityEdit({
       id: inst.path,
-      name: inst.name,
+      name: keepTitle ? currentTrack.title : inst.folder,
       path: inst.path,
       duration: inst.duration,
-      artist: `Instrumental · ${inst.folder}`,
+      artist: `Instrumental · ${inst.name}`,
       // Keeps the song's cover rather than falling back to a blank one.
       imageUrl: currentTrack?.imageUrl,
     })
