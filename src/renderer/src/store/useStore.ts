@@ -59,6 +59,7 @@ import { getLastfmSession } from '../lib/lastfm'
 import { useSandboxStore } from '../components/Modal'
 import { runWhenIdle } from '../lib/platform'
 import { showAppToast } from '../lib/appToast'
+import { setNotificationsSignedIn } from '../lib/notificationSocket'
 
 // Lightweight localStorage persistence helper - see lib/persist.ts (it lives
 // there so queueSlice can share it without importing this module back).
@@ -3070,6 +3071,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   })),
   clearStagedSongChanges: () => set({ stagedSongChanges: [] }),
 }))
+
+// Notification-socket tickets wait for a confirmed account, not just a stored token.
+useStore.subscribe((s, prev) => {
+  if (s.account !== prev.account) setNotificationsSignedIn(!!s.account)
+})
 
 // Dev-only console handle for driving store state while debugging (e.g.
 // forcing auth-gated views to render without an account). Never set in
