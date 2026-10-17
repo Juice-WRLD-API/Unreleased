@@ -26,6 +26,7 @@ function mount(initialProps) {
     if (name === '../lib/juicewrldApi') return {
       smallCoverUrl: (url) => variant(url, 128),
       sizedCoverUrl: variant,
+      fullCoverUrl: (url) => variant(url, 1024),
     }
     return require(name)
   }
@@ -40,7 +41,7 @@ function mount(initialProps) {
 
 const track = { id: 'jw-1', title: 'Burn (v2)', imageUrl: 'https://covers.example/burn.png' }
 
-test('a failed Home resize recovers with a small cover, then the original', () => {
+test('a failed Home resize recovers with a small cover, then the 1024px copy', () => {
   const render = mount({ track, fill: true, res: 512 })
   let image = render()
   assert.equal(image.props.src, `${track.imageUrl}?size=512`)
@@ -51,7 +52,7 @@ test('a failed Home resize recovers with a small cover, then the original', () =
   assert.equal(image.props.style, undefined)
   image.props.onError()
   image = render()
-  assert.equal(image.props.src, track.imageUrl)
+  assert.equal(image.props.src, `${track.imageUrl}?size=1024`)
   image.props.onError()
   const fallback = render()
   assert.equal(fallback.type, 'div')
@@ -61,7 +62,7 @@ test('a failed Home resize recovers with a small cover, then the original', () =
 test('row thumbnails skip duplicate small variants', () => {
   const render = mount({ track })
   render().props.onError()
-  assert.equal(render().props.src, track.imageUrl)
+  assert.equal(render().props.src, `${track.imageUrl}?size=1024`)
   render().props.onError()
   assert.equal(render().type, 'div')
 })
