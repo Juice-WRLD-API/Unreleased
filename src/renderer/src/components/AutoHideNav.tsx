@@ -85,6 +85,19 @@ export default function AutoHideNav({ position, autoHide = true, pill = false, c
     }
   }, [autoHide, hovered])
 
+  // A top pill floats over the page, so publish how far down it reaches -
+  // page overlays pinned to the top (WRLD's visualizer toolbar) sit below it.
+  useEffect(() => {
+    const pillEl = wrapRef.current?.firstElementChild
+    if (!pill || position !== 'top' || !pillEl) return
+    const root = document.documentElement
+    const update = (): void => root.style.setProperty('--nav-pill-top', `${Math.ceil(pillEl.getBoundingClientRect().bottom)}px`)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(pillEl)
+    return () => { ro.disconnect(); root.style.removeProperty('--nav-pill-top') }
+  }, [pill, position, wrldFullscreen])
+
   if (wrldFullscreen) return <></>
   return (
     <>
