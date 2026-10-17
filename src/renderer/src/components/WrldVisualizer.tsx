@@ -373,7 +373,9 @@ export default function WrldVisualizer({
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
 
       <div
-        className={`absolute top-4 right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
+        // Clear of a top-docked floating nav pill (0 when there isn't one).
+        style={{ top: 'calc(var(--nav-pill-top, 0px) + 1rem)' }}
+        className={`absolute right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
           idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
