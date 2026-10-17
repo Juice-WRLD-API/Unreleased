@@ -134,6 +134,8 @@ function inTriangle(p: Pt, a: Pt, b: Pt, c: Pt): boolean {
 // How long the pointer may sit still inside the safe-triangle before the menu
 // stops waiting for it to reach the flyout and switches to the row under it.
 const SAFE_TRIANGLE_STALL_MS = 150
+// How far the pointer must move after a menu opens before hovering a row opens its flyout.
+const HOVER_ARM_PX = 4
 // Used to predict, before a flyout exists, which side it will open on.
 const EST_FLYOUT_W = 240
 
@@ -358,7 +360,19 @@ function ItemList({ entries, containerRef, depth, cfg, onLeave, focusFirst }: {
   // is inside the triangle (where it last was on the owning row -> the
   // flyout's near edge) the current flyout stays open; leaving the triangle, or
   // stopping in it for SAFE_TRIANGLE_STALL_MS, switches to the row underneath.
+  // A menu opened from a click appears under the resting pointer, and the
+  // browser fires a mousemove for the row it lands on - which would pop that
+  // row's flyout open before the user has moved. The top level ignores hover
+  // until the pointer has actually travelled a few pixels.
+  const restRef = useRef<Pt | null>(null)
+  const armedRef = useRef(depth > 0)
   const onRowsMouseMove = (e: React.MouseEvent): void => {
+    if (!armedRef.current) {
+      const rest = restRef.current
+      if (!rest) { restRef.current = { x: e.clientX, y: e.clientY }; return }
+      if (Math.hypot(e.clientX - rest.x, e.clientY - rest.y) < HOVER_ARM_PX) return
+      armedRef.current = true
+    }
     const t = e.target as Node
     const hit = rowRefs.current.findIndex(r => r?.contains(t))
     if (hit < 0) return
