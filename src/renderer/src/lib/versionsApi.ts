@@ -19,6 +19,7 @@
 import { routeUrl, apiFetch } from './juicewrldApi'
 import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
+import { loadSessionSongIds } from './sessionEditsApi'
 
 /** Always true now that this is core juicewrldapi functionality rather than
  *  optional Supabase config - kept as an export so existing call sites that
@@ -33,6 +34,8 @@ interface VersionRow {
   title: string | null
   created_at: string
   created_by: string | null
+  /** Client-side: the row's song is a recording session (see fetchAllRows). */
+  is_session?: boolean
 }
 
 interface VersionsPage {
@@ -49,10 +52,14 @@ export interface SongVersionMeta {
   version: string | null
   versionTitle: string | null
   addedBy: string | null
+  /** The song is a recording session - it plays through its session edit, if
+   *  it has one, and counts as a "Session" version for preferences (see
+   *  lib/versionPrefs' prefLabel). */
+  isSession?: boolean
 }
 
 function toMeta(row: VersionRow): SongVersionMeta {
-  return { songId: row.song_id, groupId: row.group_id, version: row.version, versionTitle: row.title, addedBy: row.created_by }
+  return { songId: row.song_id, groupId: row.group_id, version: row.version, versionTitle: row.title, addedBy: row.created_by, isSession: row.is_session }
 }
 
 async function getRow(songId: number): Promise<VersionRow | null> {
@@ -116,7 +123,12 @@ function unifyByTitle(rows: VersionRow[]): VersionRow[] {
 }
 
 async function fetchAllRows(): Promise<VersionRow[]> {
-  return unifyByTitle(await apiFetch<VersionRow[]>('/versions/', { all: 'true' }))
+  // Fetched alongside, not after; no session data just means no session marks.
+  const [rows, sessionIds] = await Promise.all([
+    apiFetch<VersionRow[]>('/versions/', { all: 'true' }),
+    loadSessionSongIds().catch(() => new Set<number>()),
+  ])
+  return unifyByTitle(rows.map(r => (sessionIds.has(r.song_id) ? { ...r, is_session: true } : r)))
 }
 
 async function getAllRows(): Promise<VersionRow[]> {

@@ -29,6 +29,7 @@ import { groupPreferredVersions, groupExcludedVersions, isExcludedVersion, hasVe
 import { groupPlaylistBySong, pickSongVersions } from '../lib/compactGroups'
 import type { SongUnit } from '../lib/compactGroups'
 import { ls } from '../lib/persist'
+import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
 import { resolveQueueContext } from './queueContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -268,6 +269,14 @@ const apiSongId = (track: Track): number | null => {
   return Number.isFinite(songId) ? songId : null
 }
 
+/** Drops session members with no session edit - nothing to swap to there.
+ *  Only checked for the members actually in the running, since a miss isn't
+ *  cached and would otherwise re-search on every track change. */
+async function playableMembers(members: SongVersionMeta[]): Promise<SongVersionMeta[]> {
+  const ok = await Promise.all(members.map(m => (m.isSession ? hasPlayableSessionEdit(m.songId) : true)))
+  return members.filter((_, i) => ok[i])
+}
+
 /** Given an API-sourced track, works out which song should actually play and
  *  returns a Track for it - or null when the current one is already right (or
  *  there's nothing to swap to).
@@ -288,7 +297,7 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
   const preferred = groupPreferredVersions(songId, group)
   if (preferred.size > 0) {
     if (hasVersionLabelIn(own, preferred)) return null
-    const targets = group.filter(m => hasVersionLabelIn(m, preferred))
+    const targets = await playableMembers(group.filter(m => hasVersionLabelIn(m, preferred)))
     if (targets.length === 0) return null
     const target = targets[Math.floor(Math.random() * targets.length)]
     return songToTrack(await apiFetch<JWApiSong>(`/songs/${target.songId}/`))
@@ -302,7 +311,7 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
   // excluded too - better to keep playing something than nothing.
   if (isExcludedVersion(own, excluded)) {
     const preferredOg = preferOg ? group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded)) : undefined
-    const fallback = preferredOg ?? group.find(m => m.songId !== songId && !isExcludedVersion(m, excluded))
+    const fallback = preferredOg ?? (await playableMembers(group.filter(m => m.songId !== songId && !isExcludedVersion(m, excluded))))[0]
     if (!fallback) return null
     return songToTrack(await apiFetch<JWApiSong>(`/songs/${fallback.songId}/`))
   }

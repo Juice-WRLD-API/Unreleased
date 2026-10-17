@@ -6,6 +6,8 @@ import { JWApiSong, resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldA
 import { getOwnVersionMeta, SongVersionMeta } from '../lib/versionsApi'
 import CoverEditor from './CoverEditor'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
+import { prefLabel } from '../lib/versionPrefs'
+import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
 
 // The "Personalize" editor shown inside SongInfoModal - the one place a user
 // sets the per-song overrides in lib/songPrefs (custom name, custom cover,
@@ -77,6 +79,17 @@ export default function SongPrefsSection({
     return () => { alive = false }
   }, [songId])
 
+  // Sibling sessions have no `path` but count as playable when they have a
+  // session edit - looked up here, since the modal doesn't know.
+  const [playableSessions, setPlayableSessions] = useState<Set<number>>(new Set())
+  useEffect(() => {
+    let alive = true
+    const sessions = versions.filter(v => !v.song.path && v.song.category === 'recording_session').map(v => v.song.id)
+    Promise.all(sessions.map(id => hasPlayableSessionEdit(id).then(ok => (ok ? id : null))))
+      .then(ids => { if (alive) setPlayableSessions(new Set(ids.filter((id): id is number => id != null))) })
+    return () => { alive = false }
+  }, [versions])
+
   // ── Default-version choices ───────────────────────────────────────────────
   // One entry per distinct version label across the whole group (this song +
   // siblings). Storing the label (not a song id) is what lets a default set
@@ -91,15 +104,15 @@ export default function SongPrefsSection({
       seen.add(label.toLowerCase())
       out.push({ label, title })
     }
-    push(ownMeta?.version, apiTitle, ownHasFile)
-    for (const v of versions) push(v.meta.version, v.song.name, !!v.song.path)
+    push(prefLabel(ownMeta), apiTitle, ownHasFile)
+    for (const v of versions) push(prefLabel(v.meta), v.song.name, !!v.song.path || playableSessions.has(v.song.id))
     return out
-  }, [ownMeta, versions, apiTitle, ownHasFile])
+  }, [ownMeta, versions, apiTitle, ownHasFile, playableSessions])
 
   // Preferred versions are a group-wide union (see lib/versionPrefs), so the
   // toggles need every member - this song plus its siblings.
   const prefMembers = useMemo(
-    () => [{ songId, version: ownMeta?.version ?? null }, ...versions.map(v => ({ songId: v.song.id, version: v.meta.version }))],
+    () => [{ songId, version: prefLabel(ownMeta) }, ...versions.map(v => ({ songId: v.song.id, version: prefLabel(v.meta) }))],
     [songId, ownMeta, versions]
   )
   const { preferred, isPreferred, togglePreferred, clearPreferred } = useVersionPrefToggles(prefMembers)

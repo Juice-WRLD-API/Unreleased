@@ -8,6 +8,8 @@ import { formatDuration } from '../lib/format'
 import { eraLabel } from '../lib/eras'
 import { useStore } from '../store/useStore'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
+import { prefLabel } from '../lib/versionPrefs'
+import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
 
 interface VersionEntry { meta: SongVersionMeta; track: Track; inPlaylist: boolean }
 
@@ -19,7 +21,8 @@ interface VersionEntry { meta: SongVersionMeta; track: Track; inPlaylist: boolea
  *
  *  Versions outside the playlist are fetched only once the row is opened, the
  *  same lazy pattern ChangeVersionPanel uses. Versions with no file are
- *  skipped - there's nothing to play or prefer. */
+ *  skipped - there's nothing to play or prefer - except recording sessions
+ *  with a session edit, which play that and are starred under "Session". */
 export default function CompactVersionRows({
   versions, playlistTracks, layout, gridCols, selectMode, rowHeight, onPlay, onMenu,
 }: {
@@ -45,8 +48,10 @@ export default function CompactVersionRows({
     if (missingIds.length === 0) { setFetched(new Map()); return }
     let cancelled = false
     getSongsByIds(missingIds)
+      .then(songs => Promise.all(songs.map(async s =>
+        s.path || (s.category === 'recording_session' && await hasPlayableSessionEdit(s.id)) ? s : null)))
       .then(songs => {
-        if (!cancelled) setFetched(new Map(songs.filter(s => s.path).map(s => [s.id, songToTrack(s)])))
+        if (!cancelled) setFetched(new Map(songs.filter(s => !!s).map(s => [s!.id, songToTrack(s!)])))
       })
       .catch(() => { if (!cancelled) setFetched(new Map()) })
     return () => { cancelled = true }
@@ -62,29 +67,30 @@ export default function CompactVersionRows({
     return out
   }, [versions, playlistTracks, fetched])
 
-  const members = useMemo(() => versions.map(v => ({ songId: v.songId, version: v.version })), [versions])
+  const members = useMemo(() => versions.map(v => ({ songId: v.songId, version: prefLabel(v) })), [versions])
   const { isPreferred, isExcluded, togglePreferred, toggleExcluded } = useVersionPrefToggles(members)
 
   const mobile = layout === 'mobile'
   const toggles = (meta: SongVersionMeta): JSX.Element | null => {
-    if (!meta.version) return null
-    const preferred = isPreferred(meta.version)
-    const excluded = isExcluded(meta.version)
+    const version = prefLabel(meta)
+    if (!version) return null
+    const preferred = isPreferred(version)
+    const excluded = isExcluded(version)
     const btn = mobile ? 'w-9 h-9 rounded-full' : 'w-7 h-7 rounded-md hover:bg-surface-overlay transition-colors'
     const icon = mobile ? 16 : 13
     return (
       <>
         <button
-          onClick={e => { e.stopPropagation(); togglePreferred(meta) }}
-          title={preferred ? 'Preferred - click to unset' : `Prefer "${meta.version}" (several preferred = one picked at random)`}
+          onClick={e => { e.stopPropagation(); togglePreferred({ songId: meta.songId, version }) }}
+          title={preferred ? 'Preferred - click to unset' : `Prefer "${version}" (several preferred = one picked at random)`}
           aria-pressed={preferred}
           className={`${btn} shrink-0 flex items-center justify-center ${preferred ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
         >
           <Star size={icon} fill={preferred ? 'currentColor' : 'none'} />
         </button>
         <button
-          onClick={e => { e.stopPropagation(); toggleExcluded(meta) }}
-          title={excluded ? 'Excluded - click to allow again' : `Never auto-pick "${meta.version}"`}
+          onClick={e => { e.stopPropagation(); toggleExcluded({ songId: meta.songId, version }) }}
+          title={excluded ? 'Excluded - click to allow again' : `Never auto-pick "${version}"`}
           aria-pressed={excluded}
           className={`${btn} shrink-0 flex items-center justify-center ${excluded ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
         >
@@ -102,7 +108,7 @@ export default function CompactVersionRows({
 
   const subtitle = ({ meta, track, inPlaylist }: VersionEntry): JSX.Element => (
     <p className="text-text-muted text-xs truncate flex items-center gap-1">
-      <span className="truncate">{[meta.version, track.artist, track.album].filter(Boolean).join(' · ')}</span>
+      <span className="truncate">{[prefLabel(meta), track.artist, track.album].filter(Boolean).join(' · ')}</span>
       {!inPlaylist && <span className="shrink-0 px-1 rounded border border-[var(--border)] text-[10px]">Not in playlist</span>}
     </p>
   )
@@ -112,7 +118,7 @@ export default function CompactVersionRows({
       <div className="ml-6 border-l border-[var(--border)]">
         {entries.map(entry => {
           const { meta, track, inPlaylist } = entry
-          const dim = isExcluded(meta.version)
+          const dim = isExcluded(prefLabel(meta))
           return (
             <div
               key={meta.songId}
@@ -147,7 +153,7 @@ export default function CompactVersionRows({
     <div className="bg-surface-overlay/40 rounded-lg">
       {entries.map(entry => {
         const { meta, track, inPlaylist } = entry
-        const dim = isExcluded(meta.version)
+        const dim = isExcluded(prefLabel(meta))
         return (
           <div
             key={meta.songId}
