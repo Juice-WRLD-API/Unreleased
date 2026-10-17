@@ -433,18 +433,21 @@ export function shortcodesToGlyphs(text: string): string {
 
 // iOS-style PNGs for every glyph above, keyed by the same shortcode name.
 //
-// `?no-inline` is load-bearing: without it Vite base64s every PNG under its
-// 4KB inline threshold straight into the chat bundle, which is nearly all
-// 1900 of them. That put ~2.4MB of data: URLs in the JS - parsed on every
-// chat open, re-downloaded on every deploy, and barely compressible (base64
-// of already-compressed PNGs). As real asset URLs the browser fetches only
-// the handful actually on screen and caches them independently of the app.
-const iosImages = import.meta.glob('../../assets/emoji/apple/*.png', { eager: true, import: 'default', query: '?no-inline' }) as Record<string, string>
-export const EMOJI_IMG: Record<string, string> = {}
-for (const [path, url] of Object.entries(iosImages)) {
-  const name = path.slice(path.lastIndexOf('/') + 1, -'.png'.length)
-  EMOJI_IMG[name] = url
-}
+// They live in public/emoji/apple/<name>.png - one file per EMOJI key - and
+// are referenced by URL, never imported. Importing them (an eager glob) made
+// the dev server serve each of the ~1900 PNGs as its own JS module on every
+// load, and without `?no-inline` the build base64'd them into the chat bundle.
+// Plain URLs mean the browser fetches only the handful actually on screen.
+//
+// Built, the folder is resolved against this chunk (always in dist/assets/)
+// rather than the page: under file:// a root path points at the drive root,
+// and a page-relative one breaks once pushState rewrites the path (/news/<id>).
+// Kept in a variable so Vite doesn't try to resolve it as a build-time asset.
+const EMOJI_DIR_FROM_CHUNK = '../emoji/apple/'
+const EMOJI_DIR = import.meta.env.DEV ? '/emoji/apple/' : new URL(EMOJI_DIR_FROM_CHUNK, import.meta.url).href
+export const EMOJI_IMG: Record<string, string> = Object.fromEntries(
+  Object.keys(EMOJI).map((name) => [name, `${EMOJI_DIR}${name}.png`]),
+)
 
 // Reverse lookup so raw glyphs typed or pasted into message text can be
 // swapped for their iOS image too, longest glyph first to prefer full
