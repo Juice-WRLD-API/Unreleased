@@ -3,6 +3,8 @@ import { Loader2, Star, Ban } from 'lucide-react'
 import { getVersionGroup } from '../lib/versionsApi'
 import { getSongsByIds, JWApiSong } from '../lib/juicewrldApi'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
+import { prefLabel } from '../lib/versionPrefs'
+import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
 
 interface VersionOption { song: JWApiSong; label: string | null; version: string | null }
 
@@ -42,21 +44,23 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
         const metas = await getVersionGroup(songId)
         const songs = await getSongsByIds(metas.map(m => m.songId))
         const byId = new Map(songs.map(s => [s.id, s]))
-        // Songs with no `path` (recording sessions, some unsurfaced entries)
-        // have nothing to actually play - hidden here since both switching to
-        // one and starring it as the group default would break playback.
-        const fetched = metas
-          .map((m): VersionOption | null => {
+        // Songs with nothing to actually play are hidden, since both switching
+        // to one and starring it would break playback: no `path` (some
+        // unsurfaced entries), unless it's a recording session that has a
+        // session edit - those play the edit, starred under "Session".
+        const fetched = (await Promise.all(metas.map(async (m): Promise<VersionOption | null> => {
             const song = byId.get(m.songId)
-            if (!song?.path) return null
+            if (!song) return null
+            if (!song.path && !(song.category === 'recording_session' && await hasPlayableSessionEdit(song.id))) return null
+            const version = prefLabel(m)
             return {
               song,
-              version: m.version,
-              label: m.version
-                ? (m.versionTitle ? `${m.version} - ${m.versionTitle}` : m.version)
+              version,
+              label: version
+                ? (m.versionTitle ? `${version} - ${m.versionTitle}` : version)
                 : m.versionTitle,
             }
-          })
+          })))
           .filter((v): v is VersionOption => !!v)
         if (!cancelled) setVersions(fetched)
       } catch {

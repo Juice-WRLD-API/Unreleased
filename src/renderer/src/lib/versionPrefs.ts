@@ -19,11 +19,22 @@ import type { SongVersionMeta } from './versionsApi'
 
 const norm = (label: string): string => label.trim().toLowerCase()
 
-/** Matches a member against a version label ("v1", "TV Mix"). Compares the
- *  per-song `version` field only - `versionTitle` is shared by every member of
- *  a group and so can't distinguish between them. */
-export const matchesVersionLabel = (meta: SongVersionMeta | null | undefined, label: string): boolean =>
-  !!meta?.version && norm(meta.version) === norm(label)
+/** Label a recording-session member is preferred/excluded under when editors
+ *  haven't given it a version label of its own. */
+export const SESSION_VERSION_LABEL = 'Session'
+
+/** The label preferences key a member by: its per-song `version` field (never
+ *  `versionTitle`, which every member of a group shares and so can't tell them
+ *  apart), or SESSION_VERSION_LABEL for an unlabelled session. Null = the
+ *  member can be neither preferred nor excluded. */
+export const prefLabel = (meta: Pick<SongVersionMeta, 'version' | 'isSession'> | null | undefined): string | null =>
+  meta?.version || (meta?.isSession ? SESSION_VERSION_LABEL : null)
+
+/** Matches a member against a version label ("v1", "TV Mix", "Session"). */
+export const matchesVersionLabel = (meta: SongVersionMeta | null | undefined, label: string): boolean => {
+  const own = prefLabel(meta)
+  return !!own && norm(own) === norm(label)
+}
 
 /** Every version label this user prefers within `songId`'s group, normalized.
  *  Excluded labels are removed - an explicit exclusion beats a stale star. */
@@ -52,11 +63,12 @@ export function groupExcludedVersions(songId: number, group: SongVersionMeta[]):
   return excluded
 }
 
-/** True if `meta`'s version label is in `labels` (a set from one of the
- *  helpers above). Members with no version label (recording sessions, etc.)
- *  never match, so they can be neither preferred nor excluded. */
-export const hasVersionLabelIn = (meta: SongVersionMeta | null | undefined, labels: Set<string>): boolean =>
-  !!meta?.version && labels.has(norm(meta.version))
+/** True if `meta`'s label (prefLabel) is in `labels` (a set from one of the
+ *  helpers above). Members with no label never match. */
+export const hasVersionLabelIn = (meta: SongVersionMeta | null | undefined, labels: Set<string>): boolean => {
+  const label = prefLabel(meta)
+  return !!label && labels.has(norm(label))
+}
 
 /** Kept under its old name for the exclusion call sites. */
 export const isExcludedVersion = hasVersionLabelIn
