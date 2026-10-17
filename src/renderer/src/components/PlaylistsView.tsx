@@ -26,13 +26,13 @@ import { ProgressiveCover } from './ProgressiveCover'
 import { buildImageUrl, buildStreamUrl, JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
-import { fisherYates, groupExcludedVersions, isExcludedVersion } from '../store/queueSlice'
 import LikedSongsView from './LikedSongsView'
 import { AlbumArtThumb } from './LibraryTab'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
-import { CompactGroupRow, CompactEmptyIcon, useExpandedGroups } from './CompactGroupRow'
-import { groupItemsByVersion, filterCompactGroups, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
-import type { CompactGroup } from '../lib/compactGroups'
+import { useExpandedGroups } from './CompactGroupRow'
+import CompactVersionRows from './CompactVersionRows'
+import { groupPlaylistBySong, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
+import type { SongUnit } from '../lib/compactGroups'
 import { versionsEnabled } from '../lib/versionsApi'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
@@ -406,7 +406,7 @@ function layoutGridEntries(entries: GridEntry[], columns: number): JSX.Element[]
 }
 
 export default function PlaylistsView(): JSX.Element {
-  const { account, playlists, refreshPlaylists, playTrack, playNext, playCollection, addToQueue, setShowUserAuth, likedTrackIds, toggleLike, setActiveView, setPendingEditorSongId,
+  const { account, playlists, refreshPlaylists, playTrack, shufflePlay, playNext, playCollection, addToQueue, setShowUserAuth, likedTrackIds, toggleLike, setActiveView, setPendingEditorSongId,
     localPlaylists, libraryTracks, libraryArt, loadLibrary, deleteLocalPlaylist, renameLocalPlaylist, updateLocalPlaylist, addToLocalPlaylist, importM3uEntriesLocal, exportLocalPlaylistM3u,
     pendingPlaylistId, setPendingPlaylistId,
     playlistsSelectedId: selectedId, setPlaylistsSelectedId: setSelectedId,
@@ -419,7 +419,7 @@ export default function PlaylistsView(): JSX.Element {
     // Subscribed purely so the track memo below re-derives when a custom
     // name/cover changes — liteSongToTrack bakes the override in at conversion
     // time, so without this the rows keep the old name until a refetch.
-    songPrefs, openBulkEditor, fullEraNames, theme, playlistHeroEnabledDark, playlistHeroEnabledLight } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'playNext', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'importM3uEntriesLocal', 'exportLocalPlaylistM3u', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistsOpenFolderId', 'setPlaylistsOpenFolderId', 'offlinePlaylists', 'offlineSync', 'offlineTracks', 'downloadPlaylistOffline', 'removePlaylistOffline', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'songPrefs', 'openBulkEditor', 'fullEraNames', 'theme', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight')
+    songPrefs, openBulkEditor, fullEraNames, theme, playlistHeroEnabledDark, playlistHeroEnabledLight } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'shufflePlay', 'playNext', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'importM3uEntriesLocal', 'exportLocalPlaylistM3u', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistsOpenFolderId', 'setPlaylistsOpenFolderId', 'offlinePlaylists', 'offlineSync', 'offlineTracks', 'downloadPlaylistOffline', 'removePlaylistOffline', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'songPrefs', 'openBulkEditor', 'fullEraNames', 'theme', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight')
   // Cast back to the component's own SortField union — the store keeps the
   // field as a plain string so it doesn't have to import this component's type.
   const sort = sortRaw as SortState
@@ -571,16 +571,17 @@ export default function PlaylistsView(): JSX.Element {
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // Compact view — same grouping as the Tracker's (see lib/compactGroups.ts):
-  // collapses tracks sharing a version_title into one row. Uses the
-  // playlist-scoped groupItemsByVersion since `tracks` here is already the
-  // playlist's full, unpaginated list — no need to ask juicewrldapi's
-  // /versions/ table for every group app-wide like the Tracker has to.
+  // Compact view — the normal list, but one row per SONG: every version of a
+  // song the playlist holds collapses into its first entry, and a song with
+  // other versions (in the playlist or not) gets an arrow that opens them
+  // underneath with prefer/exclude toggles. Shuffle in this view picks songs,
+  // not tracks (see playShuffle). Grouping is lib/compactGroups'
+  // groupPlaylistBySong.
   const [compactView, setCompactView] = useState(false)
   // Grid view — mutually exclusive with compact, so only one of the two
   // non-default track layouts is ever active at once.
   const [gridView, setGridView] = useState(false)
-  const [compactGroups, setCompactGroups] = useState<CompactGroup<Track>[]>([])
+  const [songUnits, setSongUnits] = useState<SongUnit<Track>[]>([])
   const [loadingCompact, setLoadingCompact] = useState(false)
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
 
@@ -860,14 +861,29 @@ export default function PlaylistsView(): JSX.Element {
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
     useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, TRACK_ROW_H)
 
-  // groupItemsByVersion doesn't know about the search box, so without this
-  // typing a query while compact view is active would just do nothing.
-  const filteredCompactGroups = useMemo(() => {
-    const filtered = filterCompactGroups(compactGroups, search, t => `${t.title} ${t.artist}`)
-    // Compact view only exposes the # column (see the header row), so
-    // index sort is the only sort that applies here — reverse for desc.
-    return sort.field === 'index' && sort.dir === 'desc' ? [...filtered].reverse() : filtered
-  }, [compactGroups, search, sort])
+  // Compact view's rows: one per song, in whatever order (search + sort)
+  // displayTracks has, led by the song's first visible entry. A track the
+  // grouping hasn't caught up with yet (just added) shows as its own row.
+  const compactRows = useMemo(() => {
+    const unitOf = new Map<Track, SongUnit<Track>>()
+    for (const u of songUnits) for (const { item } of u.items) unitOf.set(item, u)
+    const seen = new Set<SongUnit<Track>>()
+    const rows: { lead: Track; unit: SongUnit<Track> }[] = []
+    for (const t of displayTracks) {
+      const unit = unitOf.get(t)
+      if (!unit) { rows.push({ lead: t, unit: { groupId: null, items: [{ item: t, meta: null }], versions: [] } }); continue }
+      if (seen.has(unit)) continue
+      seen.add(unit)
+      rows.push({ lead: t, unit })
+    }
+    return rows
+  }, [songUnits, displayTracks])
+  const compactLeads = useMemo(() => compactRows.map(r => r.lead), [compactRows])
+  // songId → this playlist's Track, for the expanded version rows.
+  const playlistTrackBySong = useMemo(
+    () => new Map(tracks.map(t => [userApi.trackIdToSongId(t.id) ?? -1, t])),
+    [tracks]
+  )
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
@@ -891,22 +907,12 @@ export default function PlaylistsView(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (!compactView || !versionsEnabled) { setCompactGroups([]); return }
+    if (!compactView) { setSongUnits([]); return }
     let cancelled = false
     setLoadingCompact(true)
-    groupItemsByVersion(tracks, t => userApi.trackIdToSongId(t.id) ?? -1).then(groups => {
+    groupPlaylistBySong(tracks, t => userApi.trackIdToSongId(t.id) ?? -1).then(units => {
       if (cancelled) return
-      // groupItemsByVersion builds groups from a Map keyed by version-group id,
-      // so they come back in whatever order the /versions/ lookup happened to
-      // return — not the playlist's actual track order. Re-sort both the
-      // groups and each group's members by their position in `tracks` so
-      // compact view lines up with what normal/grid view shows, instead of
-      // silently reshuffling the playlist.
-      const trackIndex = new Map(tracks.map((t, i) => [t.id, i]))
-      const ordered = groups
-        .map(g => ({ ...g, members: [...g.members].sort((a, b) => (trackIndex.get(a.item.id) ?? 0) - (trackIndex.get(b.item.id) ?? 0)) }))
-        .sort((a, b) => (trackIndex.get(a.members[0]?.item.id) ?? 0) - (trackIndex.get(b.members[0]?.item.id) ?? 0))
-      setCompactGroups(ordered)
+      setSongUnits(units)
       setLoadingCompact(false)
     })
     return () => { cancelled = true }
@@ -2024,7 +2030,7 @@ export default function PlaylistsView(): JSX.Element {
             <div className="relative z-10 flex items-center gap-3 mt-5">
               {localQTracks.length > 0 && <HeroPlayButton onClick={() => playCollection(localQTracks)} />}
               {localQTracks.length > 1 && (
-                <HeroShuffleButton onClick={() => { const sh = fisherYates(localQTracks); playTrack(sh[0], sh) }} />
+                <HeroShuffleButton onClick={() => { void shufflePlay(localQTracks) }} />
               )}
             </div>
           </div>
@@ -2199,33 +2205,108 @@ export default function PlaylistsView(): JSX.Element {
       ? '1.25rem 1rem 1.75rem 2.5rem 1fr 6rem 5rem 3.5rem 2.25rem'
       : '1rem 1.75rem 2.5rem 1fr 6rem 5rem 3.5rem 2.25rem'
 
-    // Shuffles by SONG, not by track — a song with several versions (a demo,
-    // a TV mix, etc.) would otherwise flood the shuffle with itself, since
-    // plain fisherYates(tracks) treats every version as an independent equal
-    // chance. Grouping first means e.g. a 2-version song and a 1-version song
-    // both get a 1-in-N shot of playing first; only *which version* of the
-    // 2-version song is then a coin flip. Only applied in compact view — that's
-    // the mode where version-grouping is the user's stated mental model of the
-    // playlist; in normal/grid view each row is still its own independent track.
-    const playShuffle = async () => {
-      if (!tracks.length) return
-      if (!compactView || !versionsEnabled) { const shuffled = fisherYates(tracks); playTrack(shuffled[0], shuffled); return }
-      const groups = await groupItemsByVersion(tracks, t => userApi.trackIdToSongId(t.id) ?? -1)
-      const groupedIds = new Set(groups.flatMap(g => g.members.map(m => m.item.id)))
-      const units: Track[][] = [
-        ...groups.map(g => {
-          // Excluded versions don't get an automatic pick here - if that
-          // empties the group (every version excluded, which shouldn't
-          // normally happen), fall back to the full group rather than
-          // dropping the song from shuffle entirely.
-          const excluded = groupExcludedVersions(g.members[0].meta.songId, g.members.map(m => m.meta))
-          const playable = g.members.filter(m => !isExcludedVersion(m.meta, excluded))
-          return (playable.length > 0 ? playable : g.members).map(m => m.item)
-        }),
-        ...tracks.filter(t => !groupedIds.has(t.id)).map(t => [t]),
-      ]
-      const shuffled = fisherYates(units).flatMap(u => (u.length > 1 ? fisherYates(u) : u))
-      playTrack(shuffled[0], shuffled)
+    // Compact view shuffles by SONG, not by track — each song one slot, its
+    // version picked by preference (see the store's shufflePlay /
+    // lib/versionPrefs' pickGroupVersion). In normal/grid view each row is
+    // still its own independent track.
+    const playShuffle = (): void => {
+      void shufflePlay(tracks, { bySong: compactView && versionsEnabled })
+    }
+
+    // Plays one of a compact row's versions, in place of that row's lead in
+    // the queue — so playing a version outside the playlist still continues
+    // into the rest of the list. The song pool keeps any later reshuffle of
+    // this queue per-song too.
+    const playCompactVersion = (track: Track, lead: Track): void => {
+      playTrack(track, compactLeads.map(t => (t === lead ? track : t)), null, null, { songPool: tracks })
+    }
+
+    // One track-list row — shared by the normal (windowed) list and compact
+    // view, so compact view's rows are the exact same markup. `queue` is what
+    // playing the row plays through; `expander` swaps the drag grip for the
+    // arrow that opens a song's versions (compact view only).
+    const renderTrackRow = (track: Track, displayIdx: number, { style, canDrag, queue, songPool, expander }: {
+      style?: React.CSSProperties
+      canDrag: boolean
+      queue: Track[]
+      /** Compact view — see the store's queueSongPool. */
+      songPool?: Track[]
+      expander?: { expanded: boolean; count: number; onToggle: () => void }
+    }): JSX.Element => {
+      const originalIdx = trackIndexOf.get(track) ?? -1
+      const songId = track.id ? (userApi.trackIdToSongId(track.id) ?? -1) : -1
+      const isDragging = canDrag && dragIdx === originalIdx
+      const isDropTarget = canDrag && dropIdx === displayIdx && dragIdx !== null && dragIdx !== displayIdx
+      const isSelected = selectedTracks.has(track.id)
+
+      return (
+        <div
+          key={track.id}
+          draggable={!isSharedView && canDrag && !selectMode}
+          onDragStart={() => !isSharedView && canDrag && !selectMode && setDragIdx(originalIdx)}
+          onDragOver={e => { if (!canDrag || selectMode) return; e.preventDefault(); setDropIdx(displayIdx) }}
+          onDragEnd={() => { setDragIdx(null); setDropIdx(null) }}
+          onDrop={() => canDrag && !selectMode && handleDrop(displayIdx)}
+          onClick={e => { if (e.ctrlKey || e.metaKey || selectMode) toggleTrackSelect(track) }}
+          onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
+          className={`group grid items-center gap-3 px-4 py-2 rounded-lg transition-colors cursor-default select-none ${
+            isDragging ? 'opacity-40 bg-surface-raised' : isDropTarget ? 'border-t-2 border-accent bg-surface-overlay' : isSelected ? 'bg-accent/10' : 'hover:bg-surface-raised'
+          }`}
+          style={{ gridTemplateColumns: gridCols, height: TRACK_ROW_H, ...style }}
+        >
+          {selectMode && (
+            <span className="flex items-center justify-center shrink-0">
+              {isSelected ? <CheckSquare2 size={16} className="text-accent" /> : <Square size={16} className="text-text-muted opacity-50" />}
+            </span>
+          )}
+          {expander ? (
+            <button
+              onClick={e => { e.stopPropagation(); expander.onToggle() }}
+              onDoubleClick={e => e.stopPropagation()}
+              className={`flex items-center justify-center transition-colors ${expander.expanded ? 'text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
+              title={`${expander.expanded ? 'Hide' : 'Show'} ${expander.count} versions`}
+              aria-expanded={expander.expanded}
+            >
+              <ChevronRight size={14} className={`transition-transform ${expander.expanded ? 'rotate-90' : ''}`} />
+            </button>
+          ) : (
+            <span className={`flex items-center justify-center text-text-muted ${!isSharedView && canDrag && !selectMode ? 'opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing' : 'opacity-0 pointer-events-none'}`}>
+              <GripVertical size={14} />
+            </span>
+          )}
+          <span className="text-center text-xs text-text-muted tabular-nums group-hover:hidden">{displayIdx + 1}</span>
+          <button className="hidden group-hover:flex items-center justify-center text-text-primary" onClick={e => { e.stopPropagation(); if (selectMode) toggleTrackSelect(track); else playTrack(track, queue, null, null, { songPool }) }}>
+            <Play size={14} fill="currentColor" />
+          </button>
+          <AlbumArtThumbnail track={track} size={40} className="rounded-md" shimmer={false} eager />
+          <div className="min-w-0" onDoubleClick={() => { if (!selectMode) playTrack(track, queue, null, null, { songPool }) }}>
+            <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{track.title}</p>
+            <p className="text-text-muted text-xs truncate flex items-center gap-1">
+              {!!track.id && offlineTracks[track.id] && (
+                <span className="shrink-0 text-emerald-400" title="Downloaded for offline playback">
+                  <CircleArrowDown size={11} fill="currentColor" />
+                </span>
+              )}
+              <span className="truncate">{track.artist}{track.album ? ` · ${track.album}` : ''}</span>
+            </p>
+          </div>
+          <span className="text-text-muted text-xs truncate" title={track.era || undefined}>{track.era ? eraLabel(track.era, fullEraNames) : '—'}</span>
+          <span
+            className={`text-xs px-1.5 py-0.5 rounded border text-center truncate ${CATEGORY_COLORS[track.genre] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}
+          >
+            {CATEGORY_LABELS[track.genre] ?? (track.genre || '—')}
+          </span>
+          <span className="text-text-muted text-xs tabular-nums text-center">
+            {formatDuration(track.duration, '--:--')}
+          </span>
+          <div className={`flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
+            <button onClick={e => { e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
+              className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-overlay transition-colors hidden md:flex" title="More options">
+              <MoreHorizontal size={13} />
+            </button>
+          </div>
+        </div>
+      )
     }
 
     const heroLight = isDarkSkin && playlistHeroEnabled && !!(playlistCoverUrl(coverData ?? {}) ?? tracks[0]?.imageUrl)
@@ -2572,7 +2653,7 @@ export default function PlaylistsView(): JSX.Element {
                     <button
                       onClick={() => { setCompactView(true); setGridView(false); clearExpandedGroups() }}
                       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                      title="Compact view — collapse tracks into their version groups"
+                      title="Compact view — one row per song, with its versions under an arrow"
                     >
                       <Layers size={15} />
                     </button>
@@ -2580,7 +2661,7 @@ export default function PlaylistsView(): JSX.Element {
                 </div>
                 {compactView && (
                   <span className="text-text-muted text-xs uppercase tracking-widest ml-1">
-                    {loadingCompact ? 'Loading…' : `${filteredCompactGroups.length} group${filteredCompactGroups.length === 1 ? '' : 's'}`}
+                    {loadingCompact ? 'Loading…' : `${compactRows.length} song${compactRows.length === 1 ? '' : 's'}`}
                   </span>
                 )}
               </div>
@@ -2588,16 +2669,14 @@ export default function PlaylistsView(): JSX.Element {
               {/* Always rendered (just hidden) rather than conditionally mounted —
                   otherwise toggling to grid/compact view drops this row's height
                   and the track list jumps up. Grid view's cards don't line up
-                  with this table layout at all, so it's hidden wholesale there;
-                  compact view keeps the # column live (groups are numbered too)
-                  since it doesn't depend on the table layout, but hides the
-                  columns that don't apply to grouped rows (Title/Era/Category/
-                  duration/select-all). */}
+                  with this table layout at all, so it's hidden wholesale there.
+                  Compact view uses the same rows as the list, so every column
+                  (and its sort) stays live. */}
               <div className={`grid items-center gap-3 text-text-muted text-xs uppercase tracking-widest ${gridView ? 'invisible' : ''}`} style={{ gridTemplateColumns: gridCols }}>
                   {selectMode && (
                     <button
                       onClick={selectAllTracks}
-                      className={`flex items-center justify-center text-text-muted hover:text-text-primary ${compactView ? 'invisible' : ''}`}
+                      className="flex items-center justify-center text-text-muted hover:text-text-primary"
                       title="Select all / none"
                     >
                       {displayTracks.length > 0 && displayTracks.every(t => selectedTracks.has(t.id))
@@ -2609,11 +2688,11 @@ export default function PlaylistsView(): JSX.Element {
                   <div className="flex justify-center">
                     <SortHeader label="#" field="index" sort={sort} onSort={handleSort} />
                   </div>
-                  <span className={compactView ? 'invisible' : ''} />
-                  <span className={compactView ? 'invisible' : ''}><SortHeader label="Title" field="title" sort={sort} onSort={handleSort} /></span>
-                  <span className={compactView ? 'invisible' : ''}><SortHeader label="Era" field="era" sort={sort} onSort={handleSort} /></span>
-                  <span className={compactView ? 'invisible' : ''}><SortHeader label="Category" field="category" sort={sort} onSort={handleSort} /></span>
-                  <div className={`flex justify-center ${compactView ? 'invisible' : ''}`}>
+                  <span />
+                  <span><SortHeader label="Title" field="title" sort={sort} onSort={handleSort} /></span>
+                  <span><SortHeader label="Era" field="era" sort={sort} onSort={handleSort} /></span>
+                  <span><SortHeader label="Category" field="category" sort={sort} onSort={handleSort} /></span>
+                  <div className="flex justify-center">
                     <SortHeader label={<Clock size={12} className="inline" />} field="duration" sort={sort} onSort={handleSort} />
                   </div>
                   <span />
@@ -2621,75 +2700,43 @@ export default function PlaylistsView(): JSX.Element {
             </div>
 
             {compactView ? (
-              loadingCompact ? (
+              loadingCompact && songUnits.length === 0 ? (
                 <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
                   <Loader2 size={18} className="animate-spin" />
-                  <span className="text-sm">Loading version groups…</span>
+                  <span className="text-sm">Loading versions…</span>
                 </div>
-              ) : filteredCompactGroups.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 gap-2">
-                  <CompactEmptyIcon size={32} className="text-text-muted opacity-30" />
-                  <p className="text-text-muted text-sm">
-                    {compactGroups.length === 0 ? 'No version groups in this playlist' : `No version groups match "${search}"`}
-                  </p>
-                </div>
+              ) : compactRows.length === 0 ? (
+                <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div className="space-y-0.5">
-                  {filteredCompactGroups.map((group, groupIdx) => (
-                    <div key={group.groupId}>
-                      <CompactGroupRow
-                        coverTrack={group.members[0].item}
-                        title={group.title}
-                        count={group.members.length}
-                        expanded={expandedGroups.has(group.groupId)}
-                        index={groupIdx + 1}
-                        onToggle={() => toggleGroupExpanded(group.groupId)}
-                        onPlay={() => playTrack(group.members[0].item, tracks)}
-                      />
-                      {expandedGroups.has(group.groupId) && (
-                        <div className="ml-4 pl-4 border-l border-[var(--border)] space-y-0.5">
-                          {group.members.map(({ item: track, meta }) => {
-                            const songId = track.id ? (userApi.trackIdToSongId(track.id) ?? -1) : -1
-                            return (
-                              <div
-                                key={track.id}
-                                onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
-                                className="group flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-surface-raised transition-colors cursor-default"
-                                onDoubleClick={() => playTrack(track, tracks)}
-                              >
-                                <div className="relative shrink-0 w-8 h-8 rounded-md overflow-hidden">
-                                  <AlbumArtThumbnail track={track} size={32} shimmer={false} eager />
-                                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                                    <button
-                                      onClick={e => { e.stopPropagation(); playTrack(track, tracks) }}
-                                      className="text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                      title="Play"
-                                    >
-                                      <Play size={14} fill="currentColor" />
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-text-primary text-sm font-medium truncate" title={track.title}>
-                                    {track.title}
-                                    {meta.version && <span className="text-text-muted"> ({meta.version})</span>}
-                                  </p>
-                                  <p className="text-text-muted text-xs truncate">{track.album || track.artist}</p>
-                                </div>
-                                <button
-                                  onClick={e => { e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
-                                  className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-overlay transition-colors shrink-0"
-                                  title="More options"
-                                >
-                                  <MoreHorizontal size={13} />
-                                </button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                <div>
+                  {compactRows.map(({ lead, unit }, idx) => {
+                    const hasVersions = unit.versions.length > 1
+                    const open = hasVersions && expandedGroups.has(unit.groupId!)
+                    return (
+                      <div key={unit.groupId ?? lead.id}>
+                        {renderTrackRow(lead, idx, {
+                          canDrag: false,
+                          queue: compactLeads,
+                          songPool: tracks,
+                          expander: hasVersions
+                            ? { expanded: open, count: unit.versions.length, onToggle: () => toggleGroupExpanded(unit.groupId!) }
+                            : undefined,
+                        })}
+                        {open && (
+                          <CompactVersionRows
+                            versions={unit.versions}
+                            playlistTracks={playlistTrackBySong}
+                            layout="desktop"
+                            gridCols={gridCols}
+                            selectMode={selectMode}
+                            rowHeight={TRACK_ROW_H}
+                            onPlay={track => playCompactVersion(track, lead)}
+                            onMenu={(track, songId, e) => setTrackMenu({ track, songId, x: e.clientX, y: e.clientY })}
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )
             ) : gridView ? (
@@ -2744,68 +2791,11 @@ export default function PlaylistsView(): JSX.Element {
             <div ref={setListContentEl} style={{ height: rowsTotalHeight, position: 'relative' }}>
             {displayTracks.slice(rowStart, rowEnd).map((track, sliceIdx) => {
               const displayIdx = rowStart + sliceIdx
-              const originalIdx = trackIndexOf.get(track) ?? -1
-              const songId = track.id ? (userApi.trackIdToSongId(track.id) ?? -1) : -1
-              const isDragging = dragEnabled && dragIdx === originalIdx
-              const isDropTarget = dragEnabled && dropIdx === displayIdx && dragIdx !== null && dragIdx !== displayIdx
-              const isSelected = selectedTracks.has(track.id)
-
-              return (
-                <div
-                  key={track.id}
-                  draggable={!isSharedView && dragEnabled && !selectMode}
-                  onDragStart={() => !isSharedView && dragEnabled && !selectMode && setDragIdx(originalIdx)}
-                  onDragOver={e => { if (!dragEnabled || selectMode) return; e.preventDefault(); setDropIdx(displayIdx) }}
-                  onDragEnd={() => { setDragIdx(null); setDropIdx(null) }}
-                  onDrop={() => dragEnabled && !selectMode && handleDrop(displayIdx)}
-                  onClick={e => { if (e.ctrlKey || e.metaKey || selectMode) toggleTrackSelect(track) }}
-                  onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
-                  className={`group grid items-center gap-3 px-4 py-2 rounded-lg transition-colors cursor-default select-none ${
-                    isDragging ? 'opacity-40 bg-surface-raised' : isDropTarget ? 'border-t-2 border-accent bg-surface-overlay' : isSelected ? 'bg-accent/10' : 'hover:bg-surface-raised'
-                  }`}
-                  style={{ gridTemplateColumns: gridCols, position: 'absolute', top: displayIdx * TRACK_ROW_H, left: 0, right: 0, height: TRACK_ROW_H }}
-                >
-                  {selectMode && (
-                    <span className="flex items-center justify-center shrink-0">
-                      {isSelected ? <CheckSquare2 size={16} className="text-accent" /> : <Square size={16} className="text-text-muted opacity-50" />}
-                    </span>
-                  )}
-                  <span className={`flex items-center justify-center text-text-muted ${!isSharedView && dragEnabled && !selectMode ? 'opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing' : 'opacity-0 pointer-events-none'}`}>
-                    <GripVertical size={14} />
-                  </span>
-                  <span className="text-center text-xs text-text-muted tabular-nums group-hover:hidden">{displayIdx + 1}</span>
-                  <button className="hidden group-hover:flex items-center justify-center text-text-primary" onClick={e => { e.stopPropagation(); if (selectMode) toggleTrackSelect(track); else playTrack(track, displayTracks) }}>
-                    <Play size={14} fill="currentColor" />
-                  </button>
-                  <AlbumArtThumbnail track={track} size={40} className="rounded-md" shimmer={false} eager />
-                  <div className="min-w-0" onDoubleClick={() => { if (!selectMode) playTrack(track, displayTracks) }}>
-                    <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{track.title}</p>
-                    <p className="text-text-muted text-xs truncate flex items-center gap-1">
-                      {!!track.id && offlineTracks[track.id] && (
-                        <span className="shrink-0 text-emerald-400" title="Downloaded for offline playback">
-                          <CircleArrowDown size={11} fill="currentColor" />
-                        </span>
-                      )}
-                      <span className="truncate">{track.artist}{track.album ? ` · ${track.album}` : ''}</span>
-                    </p>
-                  </div>
-                  <span className="text-text-muted text-xs truncate" title={track.era || undefined}>{track.era ? eraLabel(track.era, fullEraNames) : '—'}</span>
-                  <span
-                    className={`text-xs px-1.5 py-0.5 rounded border text-center truncate ${CATEGORY_COLORS[track.genre] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}
-                  >
-                    {CATEGORY_LABELS[track.genre] ?? (track.genre || '—')}
-                  </span>
-                  <span className="text-text-muted text-xs tabular-nums text-center">
-                    {formatDuration(track.duration, '--:--')}
-                  </span>
-                  <div className={`flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <button onClick={e => { e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
-                      className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-overlay transition-colors hidden md:flex" title="More options">
-                      <MoreHorizontal size={13} />
-                    </button>
-                  </div>
-                </div>
-              )
+              return renderTrackRow(track, displayIdx, {
+                style: { position: 'absolute', top: displayIdx * TRACK_ROW_H, left: 0, right: 0 },
+                canDrag: dragEnabled,
+                queue: displayTracks,
+              })
             })}
             </div>
               </>
@@ -2978,7 +2968,7 @@ export default function PlaylistsView(): JSX.Element {
               <div className="flex items-center gap-2 flex-wrap">
                 {localQTracks.length > 0 && <HeroPlayButton onClick={() => playCollection(localQTracks)} />}
                 {localQTracks.length > 1 && (
-                  <HeroShuffleButton onClick={() => { const s = fisherYates(localQTracks); playTrack(s[0], s) }} />
+                  <HeroShuffleButton onClick={() => { void shufflePlay(localQTracks) }} />
                 )}
                 {!localRenaming && (
                   <button onClick={() => { setLocalRenameVal(localPl.name); setLocalRenaming(true) }} className={`p-2.5 rounded-full text-sm transition-colors ${heroLight ? 'text-white/60 hover:text-white hover:bg-white/10' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'}`} title="Rename">

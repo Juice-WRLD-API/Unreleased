@@ -1,5 +1,6 @@
 import { getAudioCurrentTime, getAudioDuration, seekAudio } from '../../components/Player'
 import { useStore } from '../../store/useStore'
+import { fisherYates } from '../../store/queueSlice'
 import { EQ_PRESETS } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
 import { loadAllSongsWithLyricsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
@@ -169,13 +170,10 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       const era = pickByName(names, (n) => n, name) ?? fail(`no single era matches "${name}" (try: shuffle <tab>)`)
       const pool = [...catalog.values()].filter((s) => s.era?.name === era)
       if (pool.length === 0) fail(`no songs in ${era}`)
-      // Fisher-Yates, then the first `count`.
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [pool[i], pool[j]] = [pool[j], pool[i]]
-      }
-      const picks = pool.slice(0, count)
-      st().playCollection(picks.map(statsSongToTrack), null, null)
+      // A random `count` of them, played in that random order - the same
+      // shufflePlay every Shuffle button uses.
+      const picks = fisherYates(pool).slice(0, count)
+      void st().shufflePlay(picks.map(statsSongToTrack))
       ctx.print(`playing ${picks.length} random song${picks.length === 1 ? '' : 's'} from ${era}`, 'ok')
     },
   },
@@ -218,7 +216,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       runHotkeyAction('pause')
       useStore.setState({
         isPlaying: false, currentTrack: null, currentTrackFull: null, queue: [], queueIndex: -1, progress: 0, currentTime: 0,
-        queueFilter: null, queueSource: null, radioMode: false, radioNext: null, _radioWaiting: false,
+        queueFilter: null, queueSource: null, queueSongPool: null, radioMode: false, radioNext: null, _radioWaiting: false,
       })
       ctx.print('⏹ stopped', 'ok')
     },

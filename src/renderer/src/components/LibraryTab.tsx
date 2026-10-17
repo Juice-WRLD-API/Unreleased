@@ -10,7 +10,6 @@ import { LibraryTrack } from '../types'
 import { libraryTrackToTrack as toQueueTrack } from '../lib/fileTypes'
 import { loadAllSongs, normalizeSongTitle } from '../lib/juicewrldApi'
 import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
-import { fisherYates } from '../store/queueSlice'
 import * as userApi from '../lib/userApi'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
@@ -34,7 +33,6 @@ const CARD_TEXT_H = 60      // fixed text block beneath square art, px
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 const byTrackNo = (a: LibraryTrack, b: LibraryTrack) => (a.trackNumber ?? 999) - (b.trackNumber ?? 999)
-const shuffled = fisherYates
 
 // ─── multi-select ─────────────────────────────────────────────────────────────
 // Song rows appear three levels down in some views (song list, album detail,
@@ -411,19 +409,20 @@ function DetailHeader({ art, eyebrow, title, subtitle, meta, round, onBack, onPl
 function AlbumDetail({ album, onBack, onContext }: {
   album: Album; onBack: () => void; onContext: (track: LibraryTrack, queue: LibraryTrack[], x: number, y: number) => void
 }): JSX.Element {
-  const { playCollection } = useStorePick('playCollection')
+  const { playCollection, shufflePlay } = useStorePick('playCollection', 'shufflePlay')
   const art = useTrackArt(album.coverTrack)
   const tracks = useMemo(() => [...album.tracks].sort(byTrackNo), [album])
   useVisibleTracks(tracks)
   const total = tracks.reduce((s, t) => s + t.duration, 0)
   const play = (list: LibraryTrack[]) => { const q = list.map(toQueueTrack); if (q.length) playCollection(q) }
+  const shuffle = (list: LibraryTrack[]) => { void shufflePlay(list.map(toQueueTrack)) }
   return (
     <div className="flex-1 overflow-y-auto relative view-enter">
       <DetailHeader
         art={art} eyebrow="Album" title={album.name}
         subtitle={`${album.artist}${album.year ? ` · ${album.year}` : ''}`}
         meta={`${tracks.length} songs · ${formatTotalDuration(total)}`}
-        onBack={onBack} onPlay={() => play(tracks)} onShuffle={() => play(shuffled(tracks))}
+        onBack={onBack} onPlay={() => play(tracks)} onShuffle={() => shuffle(tracks)}
         fallbackIcon={<Music size={48} className="text-text-muted" />}
       />
       <div className="px-3 pb-8">
@@ -442,19 +441,20 @@ function ArtistDetail({ artist, albums, onBack, onOpenAlbum, onContext }: {
   onOpenAlbum: (a: Album) => void
   onContext: (track: LibraryTrack, queue: LibraryTrack[], x: number, y: number) => void
 }): JSX.Element {
-  const { playCollection } = useStorePick('playCollection')
+  const { playCollection, shufflePlay } = useStorePick('playCollection', 'shufflePlay')
   const art = useTrackArt(artist.coverTrack)
   const allTracks = useMemo(() => [...artist.tracks].sort((a, b) => a.title.localeCompare(b.title)), [artist])
   useVisibleTracks(allTracks)
   const total = artist.tracks.reduce((s, t) => s + t.duration, 0)
   const play = (list: LibraryTrack[]) => { const q = list.map(toQueueTrack); if (q.length) playCollection(q) }
+  const shuffle = (list: LibraryTrack[]) => { void shufflePlay(list.map(toQueueTrack)) }
   return (
     <div className="flex-1 overflow-y-auto relative view-enter">
       <DetailHeader
         art={art} round eyebrow="Artist" title={artist.name}
         subtitle={`${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`}
         meta={`${artist.tracks.length} songs · ${formatTotalDuration(total)}`}
-        onBack={onBack} onPlay={() => play(allTracks)} onShuffle={() => play(shuffled(allTracks))}
+        onBack={onBack} onPlay={() => play(allTracks)} onShuffle={() => shuffle(allTracks)}
         fallbackIcon={<User size={48} className="text-text-muted" />}
       />
       {albums.length > 0 && (
@@ -635,7 +635,7 @@ function ApiCompareDropdown({ value, onChange, disabled, failed, onRetry }: {
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 export default function LibraryTab(): JSX.Element {
-  const { libraryTracks, libraryScanning, scanLibrary, libraryFolders, loadLibrary, setShowSettings, playTrack, playCollection, playNext, addToQueue, account, openLocalEditor, likedTrackIds, toggleLike, openUrlImport, openBulkTrackEditor, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStorePick('libraryTracks', 'libraryScanning', 'scanLibrary', 'libraryFolders', 'loadLibrary', 'setShowSettings', 'playTrack', 'playCollection', 'playNext', 'addToQueue', 'account', 'openLocalEditor', 'likedTrackIds', 'toggleLike', 'openUrlImport', 'openBulkTrackEditor', 'localPlaylists', 'addToLocalPlaylist', 'createLocalPlaylist')
+  const { libraryTracks, libraryScanning, scanLibrary, libraryFolders, loadLibrary, setShowSettings, playTrack, playCollection, shufflePlay, playNext, addToQueue, account, openLocalEditor, likedTrackIds, toggleLike, openUrlImport, openBulkTrackEditor, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStorePick('libraryTracks', 'libraryScanning', 'scanLibrary', 'libraryFolders', 'loadLibrary', 'setShowSettings', 'playTrack', 'playCollection', 'shufflePlay', 'playNext', 'addToQueue', 'account', 'openLocalEditor', 'likedTrackIds', 'toggleLike', 'openUrlImport', 'openBulkTrackEditor', 'localPlaylists', 'addToLocalPlaylist', 'createLocalPlaylist')
 
   const [nav, setNav] = useState<Nav>(() => ({ kind: 'lib', key: (localStorage.getItem('library:view') as LibKey) || 'albums' }))
   const [drill, setDrill] = useState<{ kind: 'album'; album: Album } | { kind: 'artist'; name: string } | null>(null)
@@ -832,7 +832,7 @@ export default function LibraryTab(): JSX.Element {
   const drillArtist = drill?.kind === 'artist' ? artists.find(a => a.name === drill.name) : undefined
   const drillArtistAlbums = drillArtist ? albums.filter(a => a.artist === drillArtist.name).sort((x, y) => (y.year ?? 0) - (x.year ?? 0)) : []
 
-  const playAll = (list: LibraryTrack[], rnd = false) => { const q2 = (rnd ? shuffled(list) : list).map(toQueueTrack); if (q2.length) playCollection(q2) }
+  const playAll = (list: LibraryTrack[], rnd = false) => { const q2 = list.map(toQueueTrack); if (!q2.length) return; if (rnd) void shufflePlay(q2); else playCollection(q2) }
   const playAlbum = (a: Album) => playAll([...a.tracks].sort(byTrackNo))
 
   const showEmpty = libraryTracks.length === 0 && !libraryScanning
