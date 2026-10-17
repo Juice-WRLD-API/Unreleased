@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Star, Ban } from 'lucide-react'
 import { getVersionGroup } from '../lib/versionsApi'
 import { getSongsByIds, JWApiSong } from '../lib/juicewrldApi'
-import { useStore } from '../store/useStore'
-import { useShallow } from 'zustand/react/shallow'
+import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
 
 interface VersionOption { song: JWApiSong; label: string | null; version: string | null }
 
@@ -15,9 +14,9 @@ interface VersionOption { song: JWApiSong; label: string | null; version: string
  *  every song regardless of whether the user ever clicks the item is exactly
  *  the needless-fetch pattern that made compact view laggy before.
  *
- *  Clicking a sibling's name plays it now (a one-off). The star pins it as the
- *  group's *default* version (lib/songPrefs) so every future play of any
- *  version of this song resolves to it - the persistent counterpart to the
+ *  Clicking a sibling's name plays it now (a one-off). The star marks it as a
+ *  *preferred* version (lib/versionPrefs) so every future play of any version
+ *  of this song resolves to one of the preferred ones - the persistent counterpart to the
  *  one-off switch, set right where the user is already comparing versions. The
  *  ban excludes it from auto-picking. */
 export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: {
@@ -27,39 +26,13 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
 }): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [versions, setVersions] = useState<VersionOption[] | null>(null)
-  const { songPrefs, setSongDefaultVersion, setSongExcludedVersions } = useStore(
-    useShallow((s) => ({
-      songPrefs: s.songPrefs,
-      setSongDefaultVersion: s.setSongDefaultVersion,
-      setSongExcludedVersions: s.setSongExcludedVersions,
-    }))
+  // The panel only lists siblings, so this song's own row joins them for the
+  // group-wide preferred/excluded union (its label isn't needed for that).
+  const members = useMemo(
+    () => [{ songId, version: null }, ...(versions ?? []).map(v => ({ songId: v.song.id, version: v.version }))],
+    [songId, versions]
   )
-
-  // Own row wins if set, else the first sibling that has one - mirrors
-  // queueSlice's groupDefaultVersion so the star here matches what playback
-  // actually resolves to, even when the default was set from a *different*
-  // version's own menu rather than this song's.
-  const defaultVersion = useMemo(() => {
-    const own = songPrefs[songId]?.default_version
-    if (own) return own
-    for (const v of versions ?? []) {
-      const d = songPrefs[v.song.id]?.default_version
-      if (d) return d
-    }
-    return null
-  }, [songPrefs, songId, versions])
-
-  // Union of every member's excluded labels - exclusion, like the default
-  // version, is really a property of the whole group (queueSlice's
-  // groupExcludedVersions mirrors this for the actual shuffle-play filter).
-  const excludedVersions = useMemo(() => {
-    const set = new Set<string>()
-    for (const label of songPrefs[songId]?.excluded_versions ?? []) set.add(label.toLowerCase())
-    for (const v of versions ?? []) {
-      for (const label of songPrefs[v.song.id]?.excluded_versions ?? []) set.add(label.toLowerCase())
-    }
-    return set
-  }, [songPrefs, songId, versions])
+  const { isPreferred, isExcluded, togglePreferred, toggleExcluded } = useVersionPrefToggles(members)
 
   useEffect(() => {
     let cancelled = false
@@ -94,32 +67,6 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
     return () => { cancelled = true }
   }, [songId])
 
-  const toggleDefault = (version: string, isDefault: boolean): void => {
-    if (!isDefault) { setSongDefaultVersion(songId, version); return }
-    // Unstarring has to clear wherever the label actually lives (own row or an
-    // inherited sibling's) or the star would stay lit next render.
-    if (songPrefs[songId]?.default_version?.toLowerCase() === version.toLowerCase()) setSongDefaultVersion(songId, null)
-    for (const v of versions ?? []) {
-      if (songPrefs[v.song.id]?.default_version?.toLowerCase() === version.toLowerCase()) setSongDefaultVersion(v.song.id, null)
-    }
-  }
-
-  const toggleExcluded = (version: string, isExcluded: boolean): void => {
-    const label = version.toLowerCase()
-    if (!isExcluded) {
-      setSongExcludedVersions(songId, [...(songPrefs[songId]?.excluded_versions ?? []), version])
-      return
-    }
-    // Un-excluding clears wherever the label actually lives, same reasoning as
-    // the star above.
-    const own = songPrefs[songId]?.excluded_versions ?? []
-    if (own.some(v => v.toLowerCase() === label)) setSongExcludedVersions(songId, own.filter(v => v.toLowerCase() !== label))
-    for (const v of versions ?? []) {
-      const sib = songPrefs[v.song.id]?.excluded_versions ?? []
-      if (sib.some(x => x.toLowerCase() === label)) setSongExcludedVersions(v.song.id, sib.filter(x => x.toLowerCase() !== label))
-    }
-  }
-
   const msg = mobile ? 'px-5 py-3 text-sm text-text-muted' : 'px-3.5 py-2 text-xs text-text-muted'
   if (loading) {
     return <p className={`${msg} flex items-center gap-1.5`}><Loader2 size={mobile ? 14 : 12} className="animate-spin" /> Loading…</p>
@@ -132,8 +79,8 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
   return (
     <>
       {versions.map(({ song, label, version }) => {
-        const isDefault = !!version && defaultVersion?.toLowerCase() === version.toLowerCase()
-        const isExcluded = !!version && excludedVersions.has(version.toLowerCase())
+        const isDefault = isPreferred(version)
+        const excluded = isExcluded(version)
         return (
           <div
             key={song.id}
@@ -148,8 +95,8 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
             </button>
             {version && (
               <button
-                onClick={() => toggleDefault(version, isDefault)}
-                title={isDefault ? 'Default version - click to unset' : `Always play "${version}" for this song`}
+                onClick={() => togglePreferred({ songId: song.id, version })}
+                title={isDefault ? 'Preferred version - click to unset' : `Prefer "${version}" for this song (several preferred = one picked at random)`}
                 className={`${btn} flex items-center justify-center ${isDefault ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
               >
                 <Star size={icon} fill={isDefault ? 'currentColor' : 'none'} />
@@ -157,9 +104,9 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
             )}
             {version && (
               <button
-                onClick={() => toggleExcluded(version, isExcluded)}
-                title={isExcluded ? 'Excluded - click to allow again' : `Never auto-pick "${version}" for this song`}
-                className={`${btn} flex items-center justify-center ${isExcluded ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
+                onClick={() => toggleExcluded({ songId: song.id, version })}
+                title={excluded ? 'Excluded - click to allow again' : `Never auto-pick "${version}" for this song`}
+                className={`${btn} flex items-center justify-center ${excluded ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
               >
                 <Ban size={icon} />
               </button>

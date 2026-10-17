@@ -9,6 +9,13 @@
  *    positions in the upcoming list instead of piling up at the end
  *  - Radio mode: when shuffle is active from the Tracker, uses /radio/random/
  *    instead of a pre-built queue. Queue stays empty (only history is kept).
+ *
+ * Every non-radio shuffle goes through the same two steps - shuffleUpcoming
+ * reorders, then _repickBySong re-chooses versions when the queue is a
+ * one-row-per-song one (queueSongPool, set by Playlists' compact view). The
+ * one-shot Shuffle buttons all call shufflePlay; the player's toggle,
+ * reshuffleQueue and repeat-all's wrap reuse the same pieces, so they can't
+ * drift apart.
  */
 
 import type { StateCreator } from 'zustand'
@@ -17,7 +24,10 @@ import { apiFetch, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiPaginatedResponse, JWApiSong } from '../lib/juicewrldApi'
 import { getOwnVersionMeta, getVersionGroup } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
-import { peekSongPref, hasAnyDefaultVersion, hasAnyExcludedVersion } from '../lib/songPrefs'
+import { hasAnyDefaultVersion, hasAnyExcludedVersion } from '../lib/songPrefs'
+import { groupPreferredVersions, groupExcludedVersions, isExcludedVersion, hasVersionLabelIn } from '../lib/versionPrefs'
+import { groupPlaylistBySong, pickSongVersions } from '../lib/compactGroups'
+import type { SongUnit } from '../lib/compactGroups'
 import { ls } from '../lib/persist'
 import { resolveQueueContext } from './queueContext'
 
@@ -59,6 +69,11 @@ export interface QueueSlice {
   queueLoadingMore: boolean
   /** Where the current queue came from - used to activate radio on shuffle. */
   queueSource: 'tracker' | 'playlist' | null
+  /** Set when the queue is one row per SONG (Playlists' compact view): the
+   *  playlist's full track list, versions and all. Any shuffle of such a
+   *  queue keeps one track per song and re-picks each song's version by the
+   *  user's prefer/exclude settings (see _repickBySong). Null otherwise. */
+  queueSongPool: Track[] | null
 
   /**
    * Radio mode: enabled when the user clicks a track from the Tracker with
@@ -93,7 +108,16 @@ export interface QueueSlice {
    * Start playback. Omitting `context` means standalone playback; callers
    * representing a collection must pass its tracks explicitly.
    */
-  playTrack: (track: Track, context?: Track[], filter?: QueueFilter | null, source?: 'tracker' | 'playlist' | null) => void
+  playTrack: (track: Track, context?: Track[], filter?: QueueFilter | null, source?: 'tracker' | 'playlist' | null, opts?: PlayTrackOpts) => void
+
+  /**
+   * The one "Shuffle" button behaviour: plays `tracks` in a random order.
+   * With `bySong`, each song gets one slot however many of its versions are
+   * in `tracks`, and the version is picked by preference (pickGroupVersion) -
+   * the queue then remembers `tracks` as its song pool so later reshuffles
+   * keep working that way. Doesn't change the shuffle toggle itself.
+   */
+  shufflePlay: (tracks: Track[], opts?: { bySong?: boolean; filter?: QueueFilter | null; source?: 'tracker' | 'playlist' | null }) => Promise<void>
 
   /**
    * Play a whole collection without a specific starting track (hero Play
@@ -159,6 +183,17 @@ export interface QueueSlice {
    *  version" is on - once it becomes the current track. No-op when neither
    *  applies. */
   _maybeSwapToPreferredVersion: (track: Track) => void
+  /** Song-pool queues only: re-picks the version of every upcoming song (see
+   *  queueSongPool). Run after each shuffle of such a queue. */
+  _repickBySong: () => Promise<void>
+}
+
+export interface PlayTrackOpts {
+  /** Marks the queue as one row per song - see QueueSlice.queueSongPool. */
+  songPool?: Track[]
+  /** `context` is already in its final shuffled order (shufflePlay) - don't
+   *  shuffle it again even if the shuffle toggle is on. */
+  preshuffled?: boolean
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -171,6 +206,12 @@ export function fisherYates<T>(arr: T[]): T[] {
     ;[a[i], a[j]] = [a[j], a[i]]
   }
   return a
+}
+
+/** The current track and everything before it stay put; what's upcoming is
+ *  reordered. The single reorder step behind every non-radio shuffle. */
+function shuffleUpcoming(queue: Track[], queueIndex: number): Track[] {
+  return [...queue.slice(0, queueIndex + 1), ...fisherYates(queue.slice(queueIndex + 1))]
 }
 
 /**
@@ -212,48 +253,6 @@ let _radioSession = 0
 const isOgVersion = (meta: SongVersionMeta | null | undefined): boolean =>
   !!meta && /\bog\b/i.test(`${meta.version ?? ''} ${meta.versionTitle ?? ''}`)
 
-/** Matches a member against a user's preferred version label ("v1", "TV Mix").
- *  Compares the per-song `version` field only - `versionTitle` is shared by
- *  every member of a group and so can't distinguish between them. */
-const matchesVersionLabel = (meta: SongVersionMeta | null | undefined, label: string): boolean =>
-  !!meta?.version && meta.version.trim().toLowerCase() === label.trim().toLowerCase()
-
-/** The version label this user wants to hear from `songId`'s group.
- *
- *  Preferences are stored per song, but a default version is really a property
- *  of the GROUP - so a default set on any member governs all of them, and
- *  playing a sibling (or a compact-view group row, which can start from
- *  whichever member it likes) honours it. The song's own row wins when several
- *  members disagree. */
-function groupDefaultVersion(songId: number, group: SongVersionMeta[]): string | null {
-  const own = peekSongPref(songId)?.default_version
-  if (own) return own
-  for (const member of group) {
-    const label = peekSongPref(member.songId)?.default_version
-    if (label) return label
-  }
-  return null
-}
-
-/** Version labels this user never wants auto-picked from `songId`'s group
- *  (e.g. compact view's shuffle-play) - a union across every member's own
- *  excluded list, since exclusion (like the default version) is really a
- *  property of the group rather than any one row. */
-export function groupExcludedVersions(songId: number, group: SongVersionMeta[]): Set<string> {
-  const excluded = new Set<string>()
-  for (const label of peekSongPref(songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
-  for (const member of group) {
-    for (const label of peekSongPref(member.songId)?.excluded_versions ?? []) excluded.add(label.trim().toLowerCase())
-  }
-  return excluded
-}
-
-/** True if `meta`'s version label is in `excluded` - used to filter a
- *  group's members before an automatic pick. Members with no version label
- *  (recording sessions, etc.) are never excludable this way. */
-export const isExcludedVersion = (meta: SongVersionMeta | null | undefined, excluded: Set<string>): boolean =>
-  !!meta?.version && excluded.has(meta.version.trim().toLowerCase())
-
 const apiSongId = (track: Track): number | null => {
   if (!track.id.startsWith('jw-')) return null
   const songId = Number(track.id.slice(3))
@@ -264,10 +263,12 @@ const apiSongId = (track: Track): number | null => {
  *  returns a Track for it - or null when the current one is already right (or
  *  there's nothing to swap to).
  *
- *  A per-song default version is explicit intent about this exact group, so it
- *  wins over the global prefer-OG toggle. If a default is set but no member
- *  carries that label, nothing is swapped: quietly falling back to OG would
- *  play something the user didn't ask for. */
+ *  Preferred versions are explicit intent about this exact group, so they win
+ *  over the global prefer-OG toggle. Playing a preferred version keeps it;
+ *  playing any other member swaps to a preferred one, picked at random when
+ *  several are starred. If labels are preferred but no member carries them,
+ *  nothing is swapped: quietly falling back to OG would play something the
+ *  user didn't ask for. */
 async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Track | null> {
   const songId = apiSongId(track)
   if (songId == null) return null
@@ -275,11 +276,12 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
   const [own, group] = await Promise.all([getOwnVersionMeta(songId), getVersionGroup(songId)])
   const excluded = groupExcludedVersions(songId, group)
 
-  const wanted = groupDefaultVersion(songId, group)
-  if (wanted && !excluded.has(wanted.trim().toLowerCase())) {
-    if (matchesVersionLabel(own, wanted)) return null
-    const target = group.find(m => matchesVersionLabel(m, wanted))
-    if (!target) return null
+  const preferred = groupPreferredVersions(songId, group)
+  if (preferred.size > 0) {
+    if (hasVersionLabelIn(own, preferred)) return null
+    const targets = group.filter(m => hasVersionLabelIn(m, preferred))
+    if (targets.length === 0) return null
+    const target = targets[Math.floor(Math.random() * targets.length)]
     return songToTrack(await apiFetch<JWApiSong>(`/songs/${target.songId}/`))
   }
 
@@ -334,6 +336,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   queueFilter: null,
   queueLoadingMore: false,
   queueSource: null,
+  queueSongPool: null,
   radioMode: false,
   radioNext: null,
   _radioWaiting: false,
@@ -346,20 +349,15 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   setCurrentTime: (currentTime) => set({ currentTime }),
 
   // ── playTrack ──────────────────────────────────────────────────────────────
-  playTrack: (track, context?, filter = null, source = null) => {
+  playTrack: (track, context?, filter = null, source = null, opts = {}) => {
     // Without an explicit context this is a standalone play request, not a
     // request to graft the song onto whatever queue happened to be active.
     // Always keep currentTrack aligned with queue[queueIndex], including when
     // a malformed/partial context does not contain the requested track.
     const { tracks, index: idx } = resolveQueueContext(track, context)
 
-    const { shuffle } = get()
-    let finalQueue = tracks
-    if (shuffle && source !== 'tracker') {
-      const played = tracks.slice(0, idx + 1)
-      const upcoming = fisherYates(tracks.slice(idx + 1))
-      finalQueue = [...played, ...upcoming]
-    }
+    const reshuffle = get().shuffle && source !== 'tracker' && !opts.preshuffled
+    const finalQueue = reshuffle ? shuffleUpcoming(tracks, idx) : tracks
 
     set({
       queue: finalQueue,
@@ -369,6 +367,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       isPlaying: true,
       queueFilter: filter,
       queueSource: source,
+      queueSongPool: opts.songPool ?? null,
       radioMode: false,
       radioNext: null,
       _radioWaiting: false,
@@ -378,14 +377,27 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     })
     if (filter?.hasMore) get()._loadMore()
     get()._maybeSwapToPreferredVersion(track)
+    if (reshuffle) void get()._repickBySong()
+  },
+
+  // ── shufflePlay ────────────────────────────────────────────────────────────
+  shufflePlay: async (tracks, { bySong = false, filter = null, source = null } = {}) => {
+    if (tracks.length === 0) return
+    if (!bySong) {
+      const shuffled = fisherYates(tracks)
+      get().playTrack(shuffled[0], shuffled, filter, source, { preshuffled: true })
+      return
+    }
+    const units = await groupPlaylistBySong<Track>(tracks, t => apiSongId(t) ?? -1)
+    const shuffled = fisherYates(await pickSongVersions(units))
+    if (shuffled.length) get().playTrack(shuffled[0], shuffled, filter, source, { preshuffled: true, songPool: tracks })
   },
 
   // ── playCollection ─────────────────────────────────────────────────────────
   playCollection: (tracks, filter = null, source = null) => {
     if (tracks.length === 0) return
     if (get().shuffle && source !== 'tracker') {
-      const shuffled = fisherYates(tracks)
-      get().playTrack(shuffled[0], shuffled, filter, source)
+      void get().shufflePlay(tracks, { filter, source })
     } else {
       get().playTrack(tracks[0], tracks, filter, source)
     }
@@ -400,6 +412,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   startRadio: (track, filter = null, opts) => {
     _radioSession++
     set({
+      queueSongPool: null,
       queue: [track],
       queueIndex: 0,
       currentTrack: track,
@@ -475,11 +488,12 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       nextIdx = queueIndex + 1
       if (nextIdx >= queue.length) {
         if (repeat === 'all') {
-          const reshuffled = fisherYates(queue)
+          const reshuffled = shuffleUpcoming(queue, -1)
           const first = reshuffled[0]
           set({ queue: reshuffled, queueIndex: 0, currentTrack: first, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
           get()._loadMore()
           get()._maybeSwapToPreferredVersion(first)
+          void get()._repickBySong()
           return first
         } else {
           set({ isPlaying: false }); return null
@@ -564,9 +578,8 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     }
 
     // Turning ON (playlist/files/non-tracker): shuffle the upcoming portion
-    const played = queue.slice(0, queueIndex + 1)
-    const upcoming = fisherYates(queue.slice(queueIndex + 1))
-    set({ shuffle: true, queue: [...played, ...upcoming] })
+    set({ shuffle: true, queue: shuffleUpcoming(queue, queueIndex) })
+    void get()._repickBySong()
   },
 
   // ── reshuffleQueue ─────────────────────────────────────────────────────────
@@ -602,9 +615,8 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       return
     }
 
-    const played = queue.slice(0, queueIndex + 1)
-    const upcoming = fisherYates(queue.slice(queueIndex + 1))
-    set({ shuffle: true, queue: [...played, ...upcoming] })
+    set({ shuffle: true, queue: shuffleUpcoming(queue, queueIndex) })
+    void get()._repickBySong()
   },
 
   // ── toggleRepeat ───────────────────────────────────────────────────────────
@@ -735,6 +747,33 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
         .then((data) => handleTrack(songToTrack(data.song)))
         .catch(handleError)
     }
+  },
+
+  // ── Per-song re-pick ───────────────────────────────────────────────────────
+  _repickBySong: async () => {
+    const { queue, queueIndex, queueSongPool }: { queue: Track[]; queueIndex: number; queueSongPool: Track[] | null } = get()
+    if (!queueSongPool || queueIndex + 1 >= queue.length) return
+    const units = await groupPlaylistBySong<Track>(queueSongPool, t => apiSongId(t) ?? -1)
+    // Keyed by every version's song id, not just the pool's - an earlier pick
+    // may be a preferred version from outside the playlist.
+    const unitBySong = new Map<number, SongUnit<Track>>()
+    for (const u of units) {
+      for (const v of u.versions) unitBySong.set(v.songId, u)
+      for (const { item } of u.items) {
+        const id = apiSongId(item)
+        if (id != null) unitBySong.set(id, u)
+      }
+    }
+    // Anything not from the pool (added to the queue by hand) stays as is.
+    const upcoming = queue.slice(queueIndex + 1).map((t: Track): SongUnit<Track> => {
+      const id = apiSongId(t)
+      return (id != null ? unitBySong.get(id) : undefined) ?? { groupId: null, items: [{ item: t, meta: null }], versions: [] }
+    })
+    const picks = await pickSongVersions(upcoming)
+    // The queue moved on while this was fetching - its result no longer fits.
+    const now = get()
+    if (now.queue !== queue || now.queueIndex !== queueIndex) return
+    set({ queue: [...queue.slice(0, queueIndex + 1), ...picks] })
   },
 
   // ── Preferred-version swap ─────────────────────────────────────────────────

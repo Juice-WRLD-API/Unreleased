@@ -5,7 +5,6 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { registerBackHandler } from '../lib/backHandlers'
 import { donorFileToTrack, isDonorAudio } from '../lib/donorPlayback'
 import { formatBytes } from '../lib/format'
-import { fisherYates } from '../store/queueSlice'
 import type { DonorPlaylist } from '../types'
 import type { DonorFile } from '../lib/donorFilesApi'
 import PlaylistCard from './PlaylistCard'
@@ -224,6 +223,7 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
   const removeFromDonorPlaylist = useStore((s) => s.removeFromDonorPlaylist)
   const reorderDonorPlaylist = useStore((s) => s.reorderDonorPlaylist)
   const playTrack = useStore((s) => s.playTrack)
+  const shufflePlay = useStore((s) => s.shufflePlay)
   const playCollection = useStore((s) => s.playCollection)
   const currentTrackId = useStore((s) => s.currentTrack?.id)
   const { files, loading } = useDonorPlaylistFiles(playlist)
@@ -351,7 +351,7 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
 
             <PlayShuffleRow
               onPlay={() => playCollection(tracks)}
-              onShuffle={() => { const s = fisherYates(tracks); playTrack(s[0], s) }}
+              onShuffle={() => { void shufflePlay(tracks) }}
               disabled={tracks.length === 0}
             />
           </div>
@@ -442,7 +442,7 @@ export function DonorPlaylistDetail({ id, onBack }: { id: string; onBack: () => 
               )}
               {tracks.length > 1 && (
                 <button
-                  onClick={() => { const s = fisherYates(tracks); playTrack(s[0], s) }}
+                  onClick={() => { void shufflePlay(tracks) }}
                   className={iconBtn}
                   title="Shuffle"
                 ><Shuffle size={16} /></button>

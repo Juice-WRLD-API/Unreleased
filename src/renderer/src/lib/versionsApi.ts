@@ -216,6 +216,39 @@ export async function getVersionMetaForSongs(songIds: number[]): Promise<Map<num
   }
 }
 
+/** Whole version groups for a known set of songs - unlike
+ *  getVersionMetaForSongs, each group carries *every* member (the songs
+ *  themselves included), not just the ones in `songIds`. Playlists' compact
+ *  view uses this to list a song's versions even when the playlist only holds
+ *  one of them. Untitled groups count too, and members are deduped by song
+ *  the same way getVersionGroup does. */
+export async function getVersionGroupsForSongs(songIds: number[]): Promise<{
+  groupOf: Map<number, number>
+  groups: Map<number, SongVersionMeta[]>
+}> {
+  const groupOf = new Map<number, number>()
+  const groups = new Map<number, SongVersionMeta[]>()
+  if (songIds.length === 0) return { groupOf, groups }
+  try {
+    const ids = new Set(songIds)
+    const all = await getAllRows()
+    for (const row of all) if (ids.has(row.song_id)) groupOf.set(row.song_id, row.group_id)
+    const wanted = new Set(groupOf.values())
+    const byGroup = new Map<number, Map<number, VersionRow>>()
+    for (const r of all) {
+      if (!wanted.has(r.group_id)) continue
+      if (!byGroup.has(r.group_id)) byGroup.set(r.group_id, new Map())
+      const members = byGroup.get(r.group_id)!
+      const existing = members.get(r.song_id)
+      if (!existing || r.created_at > existing.created_at) members.set(r.song_id, r)
+    }
+    for (const [groupId, members] of byGroup) groups.set(groupId, [...members.values()].map(toMeta))
+  } catch {
+    // Same as the other bulk lookups - no version data just means no groups.
+  }
+  return { groupOf, groups }
+}
+
 /** Groups two songs as versions of each other. If one is already in a group,
  *  the other joins it (inheriting its title); if both are in different
  *  groups already, the groups merge (all members repointed to the lower
