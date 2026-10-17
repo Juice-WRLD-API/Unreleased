@@ -86,7 +86,7 @@ export default function WrldView(): JSX.Element {
     gradientsEnabled: s.gradientsEnabled,
     toggleEqPanel: s.toggleEqPanel,
     // Same "anything non-neutral" indicator as the player bar's EQ button.
-    eqFxActive: s.eqEnabled || s.playbackSpeed !== 1 || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled,
+    eqFxActive: s.playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (s.eqEnabled || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled)),
     lyricsOverride: s.lyricsOverride,
   })))
 
@@ -915,16 +915,14 @@ export default function WrldView(): JSX.Element {
                 </>
               )}
               <div className="flex items-center gap-2.5">
-                {EFFECTS_SUPPORTED && (
-                  <button
-                    onClick={(e) => { setEqAnchor(e.currentTarget); toggleEqPanel() }}
-                    title="Equalizer"
-                    className="shrink-0 transition-opacity hover:opacity-70"
-                    style={{ color: eqFxActive ? 'var(--accent)' : txtTer }}
-                  >
-                    <SlidersHorizontal size={16} />
-                  </button>
-                )}
+                <button
+                  onClick={(e) => { setEqAnchor(e.currentTarget); toggleEqPanel() }}
+                  title="Equalizer"
+                  className="shrink-0 transition-opacity hover:opacity-70"
+                  style={{ color: eqFxActive ? 'var(--accent)' : txtTer }}
+                >
+                  <SlidersHorizontal size={16} />
+                </button>
                 <button
                   onClick={toggleMute}
                   title={volume === 0 ? 'Unmute' : 'Mute'}
@@ -1114,16 +1112,14 @@ export default function WrldView(): JSX.Element {
 
                 {/* Volume row */}
                 <div className="flex items-center gap-2.5">
-                  {EFFECTS_SUPPORTED && (
-                    <button
-                      onClick={(e) => { setEqAnchor(e.currentTarget); toggleEqPanel() }}
-                      title="Equalizer"
-                      className="shrink-0 transition-opacity hover:opacity-70"
-                      style={{ color: eqFxActive ? 'var(--accent)' : txtTer }}
-                    >
-                      <SlidersHorizontal size={14} />
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => { setEqAnchor(e.currentTarget); toggleEqPanel() }}
+                    title="Equalizer"
+                    className="shrink-0 transition-opacity hover:opacity-70"
+                    style={{ color: eqFxActive ? 'var(--accent)' : txtTer }}
+                  >
+                    <SlidersHorizontal size={14} />
+                  </button>
                   <button
                     onClick={toggleMute}
                     title={volume === 0 ? 'Unmute' : 'Mute'}

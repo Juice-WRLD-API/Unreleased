@@ -98,7 +98,7 @@ export default function WrldView(): JSX.Element {
     setShowQueue: s.setShowQueue,
     toggleEqPanel: s.toggleEqPanel,
     // Same "anything non-neutral" indicator as the player bar's EQ button.
-    eqFxActive: s.eqEnabled || s.playbackSpeed !== 1 || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled,
+    eqFxActive: s.playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (s.eqEnabled || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled)),
   })))
 
   // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
@@ -481,9 +481,7 @@ export default function WrldView(): JSX.Element {
             {!radioFmActive && songVersions.length > 0 && (
               <ActionChip icon={Layers} label="Versions" onClick={() => setSheet('versions')} light={textIsDark} />
             )}
-            {EFFECTS_SUPPORTED && (
-              <ActionChip icon={SlidersHorizontal} label="EQ" onClick={toggleEqPanel} active={eqFxActive} light={textIsDark} />
-            )}
+            <ActionChip icon={SlidersHorizontal} label="EQ" onClick={toggleEqPanel} active={eqFxActive} light={textIsDark} />
           </div>
         </div>
       </div>

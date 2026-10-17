@@ -177,12 +177,17 @@ export default function EqualizerPanel(): JSX.Element {
       <div className="flex items-center justify-between px-5 pb-2">
         <span className="text-xs text-text-secondary">Enabled</span>
         <div className="flex items-center gap-3">
-          {EFFECTS_SUPPORTED && (eqBalance !== 0 || eqMono || skipSilence || reverbEnabled || playbackSpeed !== 1 || eqGains.some(g => g !== 0)) && (
+          {(playbackSpeed !== 1 || pitchShift || (EFFECTS_SUPPORTED && (eqBalance !== 0 || eqMono || skipSilence || reverbEnabled || eqGains.some(g => g !== 0)))) && (
             <button
               onClick={() => {
-                setEqPreset('flat')
-                setEqBalance(0); setEqMono(false); setSkipSilence(false)
-                setReverbEnabled(false); setReverbMix(0.4); setReverbDecay(3)
+                // iOS: only speed/pitch actually apply here. Leave the synced
+                // EQ/effects settings alone so this doesn't flatten them on
+                // the user's other devices too.
+                if (EFFECTS_SUPPORTED) {
+                  setEqPreset('flat')
+                  setEqBalance(0); setEqMono(false); setSkipSilence(false)
+                  setReverbEnabled(false); setReverbMix(0.4); setReverbDecay(3)
+                }
                 setPlaybackSpeed(1); setPitchShift(false)
               }}
               className="flex items-center gap-1 text-[11px] font-semibold text-text-muted active:text-accent transition-colors"

@@ -1564,7 +1564,7 @@ export default function Player(): JSX.Element {
     },
     'speed-up':    () => setPlaybackSpeed(clampSpeed(playbackSpeed + 0.25)),
     'speed-down':  () => setPlaybackSpeed(clampSpeed(playbackSpeed - 0.25)),
-    'equalizer':   () => { if (EFFECTS_SUPPORTED) useStore.getState().toggleEqPanel() },
+    'equalizer':   () => useStore.getState().toggleEqPanel(),
     'ab-loop':     () => { if (currentTrack && !radioFmActive) setAbLoopPoint() },
     'crossfade':   () => { const s = useStore.getState(); s.setCrossfade(!s.crossfadeEnabled, s.crossfadeDuration) },
     'smooth-playback': () => { const s = useStore.getState(); s.setPauseFade(!s.pauseFadeEnabled) },
@@ -1707,7 +1707,9 @@ export default function Player(): JSX.Element {
     }
   }, [showEqPanel])
   // Accent the button when anything in the panel deviates from neutral.
-  const eqActive = eqEnabled || playbackSpeed !== 1 || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled
+  // On iOS only speed applies (the effects chain never runs there), so synced
+  // EQ settings from another device don't light the button up.
+  const eqActive = playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled))
 
 
   // (Play/pause on Space is handled by the unified hotkey system above - the
@@ -1782,7 +1784,7 @@ export default function Player(): JSX.Element {
           anchor button to position a popover against (the bar this ref lives
           on is desktop-only, `hidden md:flex`), so it opens as a full bottom
           sheet there instead of the desktop anchored popover. */}
-      {showEqPanel && EFFECTS_SUPPORTED && (isMobile ? (
+      {showEqPanel && (isMobile ? (
         <Sheet onClose={() => setShowEqPanel(false)} title="Equalizer">
           <Suspense fallback={null}><EqualizerPanel /></Suspense>
         </Sheet>
@@ -2141,19 +2143,18 @@ export default function Player(): JSX.Element {
         <div className="flex items-center gap-3 w-72 justify-end">
           {/* Equalizer (EQ, balance, mono, skip silence, playback speed).
               Stays visible during FM - the effects chain applies to the live
-              stream too; only the speed row hides inside the panel. Hidden
-              entirely on iOS: EFFECTS_SUPPORTED is false there since routing
-              through Web Audio kills background playback (see audioEffects.ts). */}
-          {EFFECTS_SUPPORTED && (
-            <button
-              ref={eqBtnRef}
-              onClick={toggleEqPanel}
-              title="Equalizer"
-              className={`transition-colors ${eqActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
-            >
-              <SlidersHorizontal size={16} />
-            </button>
-          )}
+              stream too; only the speed row hides inside the panel. On iOS the
+              effects chain is off (routing through Web Audio kills background
+              playback, see audioEffects.ts) but the panel still opens for speed,
+              pitch, sleep timer and A-B loop, which don't use the chain. */}
+          <button
+            ref={eqBtnRef}
+            onClick={toggleEqPanel}
+            title="Equalizer"
+            className={`transition-colors ${eqActive ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
+          >
+            <SlidersHorizontal size={16} />
+          </button>
 
           {!radioFmActive && <button onClick={() => setShowQueue(!showQueue)}
             className={`relative transition-colors ${showQueue ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}
