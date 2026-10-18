@@ -219,26 +219,14 @@ let updateCheckInProgress = false
 let updateDownloadedPending = false
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 
-// Set for the duration of the app-launch check so 'update-downloaded' can tell
-// a fresh-at-startup download (or a previous session's update that never got
-// installed, e.g. the user declined the restart prompt and later relaunched
-// instead of hitting Restart) apart from one found mid-session. Startup
-// installs silently and relaunches; mid-session still asks before restarting
-// the user's active work.
-let isStartupUpdateCheck = false
-
 async function runUpdateCheck(reason) {
   if (isDev || updateCheckInProgress || updateDownloadedPending) return
   log(`Checking for updates (${reason})...`)
   updateCheckInProgress = true
-  if (reason === 'startup') isStartupUpdateCheck = true
   try {
     // A beta user checks the gated beta list first; only when it has nothing
     // newer does the normal stable check run.
-    if (await checkBetaUpdate({ startup: reason === 'startup' })) {
-      isStartupUpdateCheck = false
-      return
-    }
+    if (await checkBetaUpdate()) return
     await autoUpdater.checkForUpdatesAndNotify()
   } catch (err) {
     log('checkForUpdates error:', err.message)
@@ -339,7 +327,7 @@ let betaInstallerPath = null
 // list couldn't be had — a revoked code or an unreachable backend just means
 // "no beta update" and the stable check carries on. Windows only: the beta
 // builds are NSIS installers. `force` ignores the auto-download setting.
-async function checkBetaUpdate({ startup = false, force = false } = {}) {
+async function checkBetaUpdate({ force = false } = {}) {
   const code = activeBetaCode
   if (!code || process.platform !== 'win32') return false
   let list
@@ -354,7 +342,7 @@ async function checkBetaUpdate({ startup = false, force = false } = {}) {
 
   log('Newer beta available:', newest)
   broadcastToWindows('update-status', { type: 'available', version: newest })
-  if (!appSettings.autoDownload && !startup && !force) return true
+  if (!appSettings.autoDownload && !force) return true
 
   const dest = path.join(app.getPath('temp'), `Unreleased-Setup-${newest}.exe`)
   try {
@@ -375,9 +363,8 @@ async function checkBetaUpdate({ startup = false, force = false } = {}) {
   log('Beta installer ready:', dest)
   broadcastToWindows('update-status', { type: 'downloaded', version: newest })
 
-  // Same rule as a stable download: at launch nothing is in progress, so
-  // install silently; mid-session ask first.
-  if (startup) { installUpdateAndRestart(); return true }
+  // Same rule as a stable download: never restart without asking — a launch
+  // download can finish well after the user has started listening.
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update ready',
@@ -3741,6 +3728,20 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+// autoInstallOnAppQuit only covers electron-updater's own download; a beta
+// installer we fetched ourselves would otherwise sit in temp forever. Run it
+// silently on a plain quit, same as a stable install-on-quit: no relaunch
+// marker, so the app stays closed and the next launch is the new build.
+app.on('will-quit', () => {
+  if (!betaInstallerPath || installingUpdate) return
+  log('Installing pending beta on quit:', betaInstallerPath)
+  try {
+    spawn(betaInstallerPath, ['--updated', '/S'], { detached: true, stdio: 'ignore' }).unref()
+  } catch (e) {
+    log('Beta install-on-quit failed:', e.message)
+  }
+})
+
 // ── Auto-updater events ───────────────────────────────────────────────────────
 autoUpdater.on('checking-for-update', () => {
   log('Checking for update...')
@@ -3754,7 +3755,6 @@ autoUpdater.on('update-available', (info) => {
 
 autoUpdater.on('update-not-available', (info) => {
   log('Up to date:', info.version)
-  isStartupUpdateCheck = false
   broadcastToWindows('update-status', { type: 'not-available', version: info.version })
 })
 
@@ -3832,18 +3832,10 @@ autoUpdater.on('update-downloaded', (info) => {
   betaInstallerPath = null
   broadcastToWindows('update-status', { type: 'downloaded', version: info.version })
 
-  // At launch there's no in-progress work to interrupt — and this is also the
-  // path that catches an update the user downloaded but declined to restart
-  // into last time (checkForUpdatesAndNotify re-validates the cached
-  // installer against latest.yml and fires this same event without
-  // re-downloading). Install it now instead of prompting again.
-  if (isStartupUpdateCheck) {
-    isStartupUpdateCheck = false
-    log('Update ready at launch — installing silently')
-    installUpdateAndRestart()
-    return
-  }
-
+  // Always ask, even at launch: the launch check's download can finish
+  // minutes in, mid-playback, and restarting then looked like the app
+  // updating on its own. "Later" leaves it to autoInstallOnAppQuit, which
+  // installs quietly on the next quit without reopening the app.
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update ready',
@@ -3899,6 +3891,5 @@ autoUpdater.on('error', (err) => {
     updateDownloadedPending = false
   }
 
-  isStartupUpdateCheck = false
   broadcastToWindows('update-status', { type: 'error', message: msg })
 })
