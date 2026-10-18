@@ -39,6 +39,9 @@ export function useApiFilesBrowse(opts: {
   searchResults: JWApiFileEntry[]
   searchLoading: boolean
   isSearching: boolean
+  /** Limit search to the folder being browsed (and its subfolders). */
+  searchInFolder: boolean
+  setSearchInFolder: (v: boolean) => void
 } {
   const { activeChannel, setActiveChannel, channels, loadChannels, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, onNavigateStart } = opts
 
@@ -53,6 +56,7 @@ export function useApiFilesBrowse(opts: {
   const [searchResults, setSearchResults] = useState<JWApiFileEntry[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const isSearching = debouncedSearch.trim().length > 0
+  const [searchInFolder, setSearchInFolder] = useState(false)
 
   const navigateRequestId = useRef(0)
 
@@ -121,13 +125,15 @@ export function useApiFilesBrowse(opts: {
     setSearchLoading(true)
     const extra: Record<string, string> = {}
     if (activeChannel) extra.channel = activeChannel
+    // Search doesn't navigate, so currentPath is still the folder searched from.
+    if (searchInFolder && currentPath) extra.path = currentPath
     searchFiles(debouncedSearch, extra)
       .then(entries => { if (!cancelled) setSearchResults(entries) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, isSearching, activeChannel])
+  }, [debouncedSearch, isSearching, activeChannel, searchInFolder])
 
   // Remember the browsed folder in the store so switching to another tab and
   // back restores it - the component unmounts on tab switch, so local state
@@ -188,5 +194,6 @@ export function useApiFilesBrowse(opts: {
   return {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
     search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
+    searchInFolder, setSearchInFolder,
   }
 }

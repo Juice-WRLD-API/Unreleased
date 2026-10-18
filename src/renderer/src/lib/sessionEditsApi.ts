@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl, OMIT_BULK, parseBrowseEntries, normalizeSongTitle, loadAllSongs, getSongById, searchFiles, buildStreamUrl, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
+import { apiFetch, apiUrl, titleVariants, OMIT_BULK, parseBrowseEntries, normalizeSongTitle, loadAllSongs, getSongById, searchFiles, buildStreamUrl, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
 import { apiRequest } from './apiClient'
 import { createTtlCache } from './ttlCache'
 import { peekActiveChannel } from './activeChannelState'
@@ -93,8 +93,10 @@ async function fetchSessionEditMatches(): Promise<SessionEditMatches> {
       if (!primaryBySongId.has(primaryNorm)) primaryBySongId.set(primaryNorm, new Set())
       primaryBySongId.get(primaryNorm)!.add(song.id)
     }
-    for (const key of song.track_titles ?? []) {
+    const altKeys = [song.name, ...(song.track_titles ?? [])].flatMap(titleVariants)
+    for (const key of altKeys) {
       const norm = normalizeSongTitle(key)
+      if (norm === primaryNorm) continue
       if (!norm) continue
       if (!altBySongId.has(norm)) altBySongId.set(norm, new Set())
       altBySongId.get(norm)!.add(song.id)
@@ -155,6 +157,7 @@ const lookups = new Map<string, Promise<SessionEditLink | null>>()
 async function lookupSessionEdit(songId: number, channel: string): Promise<SessionEditLink | null> {
   const song = await getSongById(songId)
   const terms = [song.name, ...(song.track_titles ?? [])]
+    .flatMap(titleVariants)
     .map((t) => stripSessionEditSuffix(t))
     .filter((t, i, a) => t && a.indexOf(t) === i)
   const extra: Record<string, string> = channel ? { channel } : {}

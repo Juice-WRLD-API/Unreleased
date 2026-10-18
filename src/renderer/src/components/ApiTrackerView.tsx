@@ -2719,7 +2719,7 @@ export default function ApiTrackerView(): JSX.Element {
     setActiveView('api-files')
   }, [setApiFilesPath, setActiveView])
 
-  const handleSessionFilePicked = useCallback(async (path: string): Promise<void> => {
+  const handleSessionFilePicked = useCallback(async (path: string, fileChannel: string): Promise<void> => {
     const song = linkingSessionSong
     setLinkingSessionSong(null)
     if (!song) return
@@ -2728,12 +2728,12 @@ export default function ApiTrackerView(): JSX.Element {
       const parts = path.split('/')
       const folder = parts.slice(0, -1).join('/')
       const params: Record<string, string> = folder ? { path: folder } : {}
-      if (activeChannel) params.channel = activeChannel
+      if (fileChannel) params.channel = fileChannel
       const data = apiPeek<JWApiBrowseResponse>('/files/browse/', params) ?? await apiFetch<JWApiBrowseResponse>('/files/browse/', params)
       const entry = parseBrowseEntries(data).find((e) => e.path === path)
       duration = entry?.duration ?? null
     } catch (err) { console.error(err) }
-    setSessionEditOverride(song.id, activeChannel, { path, duration })
+    setSessionEditOverride(song.id, activeChannel, { path, duration, channel: fileChannel })
     setSessionEditOverrideVersion((v) => v + 1)
   }, [linkingSessionSong, activeChannel])
 
@@ -3722,6 +3722,7 @@ export default function ApiTrackerView(): JSX.Element {
           kind="audio"
           songTitle={linkingSessionSong.name}
           title="Link Session Edit file"
+          switchableChannel
           onSelect={handleSessionFilePicked}
           onClose={() => setLinkingSessionSong(null)}
         />
