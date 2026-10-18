@@ -4,7 +4,9 @@ import App from './App'
 import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
+import { installDebugRecorder } from './lib/debugRecorder'
 
+installDebugRecorder()
 installGlobalErrorLogging()
 installTranslateDomGuard()
 

@@ -73,6 +73,7 @@ import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import BroadcastNotifier from './components/BroadcastNotifier'
 import AppToastHost from './components/AppToastHost'
+import DebugRecordingPill from './components/DebugRecorder'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import ReportModal from './components/ReportModal'
 import InstallPrompt from './components/InstallPrompt'
@@ -408,6 +409,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><AppToastHost /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><DebugRecordingPill /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       <ErrorBoundary fallback={null}><MoreNavSheet /></ErrorBoundary>

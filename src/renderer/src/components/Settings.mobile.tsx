@@ -6,7 +6,9 @@ import {
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Wrench, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
+  Activity,
 } from 'lucide-react'
+import { DebugRecordButton } from './DebugRecorder'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
@@ -161,6 +163,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'preferences', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
@@ -1415,6 +1418,14 @@ export default function Settings(): JSX.Element {
                     sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
                   >
                     <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
+                  <Row
+                    icon={Activity}
+                    iconColor="#dc2626"
+                    label="Record debug log"
+                    sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
+                  >
+                    <DebugRecordButton size="lg" />
                   </Row>
                   <Row
                     icon={Wrench}

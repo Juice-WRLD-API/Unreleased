@@ -15,6 +15,7 @@ import { useVizStore, type CaptionPos, type VizCycle } from '../../store/vizStor
 import { VISUALIZERS, type Boost, type Quality } from '../viz'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
+import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, isDebugRecording, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
 import { fail, parseBool, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -319,6 +320,38 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       const section = HOME_SECTIONS.find((x) => x.id === name.toLowerCase()) ?? pickByName(HOME_SECTIONS, (x) => x.id, name) ?? pickByName(HOME_SECTIONS, (x) => x.label, name) ?? fail(`no section "${name}" (try: home-sections)`)
       st().setHomeSectionVisible(section.id, v === 'toggle' ? !vis(section.id) : v === 'show')
       ctx.print(`${section.label}: ${vis(section.id) ? 'shown' : 'hidden'}`, 'ok')
+    },
+  },
+  {
+    name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start|stop|discard]',
+    description: 'Record console messages and network requests, then save them to a file to send us (same as Settings > Preferences > Record debug log)',
+    complete: (before, partial) => before.length === 0 ? ['start', 'stop', 'discard'].filter((v) => v.startsWith(partial.toLowerCase())) : [],
+    run: (args, ctx) => {
+      const verb = args.trim().toLowerCase()
+      const on = isDebugRecording()
+      if (!verb || verb === 'status') {
+        ctx.print(on ? `recording - ${Math.round((Date.now() - debugRecordingStartedAt()) / 1000)}s, ${debugRecordingCount()} events (debuglog stop saves it)` : 'not recording (debuglog start)', on ? 'ok' : 'dim')
+        return
+      }
+      if (verb === 'start') {
+        if (on) { ctx.print('already recording', 'dim'); return }
+        startDebugRecording()
+        ctx.print('recording console and network activity - reproduce the problem, then run debuglog stop', 'ok')
+        return
+      }
+      if (verb === 'stop' || verb === 'save') {
+        if (!on) fail('debuglog: not recording')
+        const n = stopAndDownloadDebugRecording()
+        ctx.print(`saved debug log (${n} events)`, 'ok')
+        return
+      }
+      if (verb === 'discard') {
+        if (!on) fail('debuglog: not recording')
+        discardDebugRecording()
+        ctx.print('recording discarded', 'ok')
+        return
+      }
+      fail('usage: debuglog [start|stop|discard]')
     },
   },
   {
