@@ -2,7 +2,9 @@ import { copyText } from '../lib/clipboard'
 import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } from 'react'
 import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud, FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical, PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2, ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload, ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal, Bell, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, LogIn,
+  Activity,
 } from 'lucide-react'
+import { DebugRecordButton } from './DebugRecorder'
 import VizControls from './VizControls'
 import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
@@ -169,6 +171,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'preferences', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
@@ -1729,6 +1732,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                   sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
                 >
                   <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                </Row>
+                <Row
+                  icon={Activity}
+                  iconColor="#dc2626"
+                  label="Record debug log"
+                  sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
+                >
+                  <DebugRecordButton />
                 </Row>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                   <div className="flex items-center gap-2.5 mb-2.5">

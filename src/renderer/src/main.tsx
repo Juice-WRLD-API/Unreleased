@@ -6,7 +6,9 @@ import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { initWindowSync } from './lib/windowSync'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
+import { installDebugRecorder } from './lib/debugRecorder'
 
+installDebugRecorder()
 installGlobalErrorLogging()
 installTranslateDomGuard()
 

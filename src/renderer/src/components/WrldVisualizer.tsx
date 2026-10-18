@@ -11,6 +11,7 @@ import { useStore } from '../store/useStore'
 import { useVizStore } from '../store/vizStore'
 import VizControls from './VizControls'
 import LyricsControls from './LyricsControls'
+import { NAV_PILL_EVENT } from './AutoHideNav'
 
 // Audio-reactive backdrop for the WRLD tab, plus its toolbar, keys and (in
 // fullscreen) the visualizer-only caption. WRLD only mounts while its tab is
@@ -260,6 +261,34 @@ export default function WrldVisualizer({
   // Cursor hiding and the chrome fade are fullscreen-only; on the tab only the toolbar fades.
   useEffect(() => { rootRef.current?.toggleAttribute('data-viz-idle', idle && fullscreen) }, [rootRef, idle, fullscreen])
 
+  // ── Clear of a top nav pill, only when the two would actually overlap ──────
+  // The toolbar is right-anchored, so its horizontal span doesn't depend on
+  // its top - compare it to the pill's published edges.
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const [underPill, setUnderPill] = useState(false)
+  useEffect(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const GAP = 8
+    const update = (): void => {
+      const cs = getComputedStyle(document.documentElement)
+      const left = parseFloat(cs.getPropertyValue('--nav-pill-left'))
+      const right = parseFloat(cs.getPropertyValue('--nav-pill-right'))
+      const r = el.getBoundingClientRect()
+      setUnderPill(Number.isFinite(left) && Number.isFinite(right) && r.left < right + GAP && r.right > left - GAP)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    window.addEventListener('resize', update)
+    window.addEventListener(NAV_PILL_EVENT, update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+      window.removeEventListener(NAV_PILL_EVENT, update)
+    }
+  }, [])
+
   // ── Actions ────────────────────────────────────────────────────────────────
   // Everything the keys can reach reads the stores fresh, since the key
   // listener is registered once.
@@ -375,9 +404,10 @@ export default function WrldVisualizer({
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
 
       <div
+        ref={toolbarRef}
         // Clear of the Electron title bar, and of a top-docked floating nav
-        // pill when there is one (--nav-pill-top is 0 otherwise).
-        style={{ top: `max(calc(var(--nav-pill-top, 0px) + 1rem), ${navigator.userAgent.includes('Electron') ? '2.5rem' : '1rem'})` }}
+        // pill only when they'd overlap.
+        style={{ top: `max(${underPill ? 'calc(var(--nav-pill-top, 0px) + 1rem)' : '1rem'}, ${navigator.userAgent.includes('Electron') ? '2.5rem' : '1rem'})` }}
         className={`absolute right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
           idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
