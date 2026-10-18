@@ -15,6 +15,7 @@ import { searchRadioLibrary } from '../lib/radioLibrary'
 import type { RadioLibraryTrack } from '../lib/radioLibrary'
 import { isLrcFormat, parseLrc } from '../lib/lyrics'
 import { resumeEffectsContext } from '../lib/audioEffects'
+import { useStore } from '../store/useStore'
 
 type RadioFmMatchedSong = {
   songId: number | null
@@ -155,12 +156,15 @@ export function useWrldNowPlaying(
  * Byte-identical in both views - fetching songVersions itself is NOT shared,
  * since desktop gates playability via resolveSessionEditSource(song).path
  * while mobile only checks song.path, a genuine behavioral difference. */
-export function usePlayVersion(playTrack: (t: Track, context?: Track[]) => void): (songId: number) => Promise<void> {
+export function usePlayVersion(): (songId: number) => Promise<void> {
   return async (songId: number): Promise<void> => {
     try {
       const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
       const track = songToTrack(song)
-      playTrack(track, [track])
+      // Swap in place so the rest of the queue survives the version change.
+      const { currentTrack, changeVersion, playTrack } = useStore.getState()
+      if (currentTrack) changeVersion(currentTrack, track)
+      else playTrack(track, [track])
     } catch {}
   }
 }

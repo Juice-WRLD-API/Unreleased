@@ -166,6 +166,7 @@ export default function ApiFilesView(): JSX.Element {
   const {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
     search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
+    searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
@@ -639,8 +640,8 @@ export default function ApiFilesView(): JSX.Element {
           </div>
 
           {/* Search - recursive across the whole file tree (same /files/browse/
-              `search` param the session-ZIP lookup uses), not scoped to the
-              current folder. */}
+              `search` param the session-ZIP lookup uses), or with the folder
+              toggle on, just the current folder and its subfolders. */}
           {(
             <div className="relative mb-2">
               <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
@@ -648,18 +649,30 @@ export default function ApiFilesView(): JSX.Element {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search files…"
-                className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 pr-8 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+                placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}…` : 'Search files…'}
+                className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${currentPath ? 'pr-14' : 'pr-8'} py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
               />
-              {search && (
-                <button
-                  onClick={() => { setSearch(''); setDebouncedSearch('') }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
-                  title="Clear search"
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                {search && (
+                  <button
+                    onClick={() => { setSearch(''); setDebouncedSearch('') }}
+                    className="text-text-muted hover:text-text-primary transition-colors"
+                    title="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+                {currentPath && (
+                  <button
+                    onClick={() => setSearchInFolder(!searchInFolder)}
+                    className={`transition-colors ${searchInFolder ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+                    title={searchInFolder ? 'Searching this folder only - click to search all files' : 'Search this folder only'}
+                    aria-pressed={searchInFolder}
+                  >
+                    <Folder size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

@@ -333,7 +333,7 @@ export default function WrldView(): JSX.Element {
     return () => window.removeEventListener('resize', place)
   }, [songVersionMenuOpen, songVersions])
 
-  const handlePlayVersion = usePlayVersion(playTrack)
+  const handlePlayVersion = usePlayVersion()
 
   const { rawLyrics, isSynced, isEditor, syncedLines } = useWrldLyricsSource(
     radioFmActive, radioFmMatchedSong, currentTrackFull, account,

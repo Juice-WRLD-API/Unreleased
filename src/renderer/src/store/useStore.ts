@@ -19,6 +19,7 @@ import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
+import { getVersionGroup } from '../lib/versionsApi'
 import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
 import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
@@ -2015,7 +2016,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   setSongName: (songId, name) => get()._writeSongPref(songId, { name: normalizePrefText(name) }),
-  setSongCover: (songId, coverUrl) => get()._writeSongPref(songId, { cover_url: normalizePrefText(coverUrl) }),
+  setSongCover: (songId, coverUrl) => {
+    const cover = normalizePrefText(coverUrl)
+    get()._writeSongPref(songId, { cover_url: cover })
+    if (!cover) return
+    // The song's other versions pick the cover up too - unless they already
+    // have a personalized one of their own. Clearing never spreads.
+    void getVersionGroup(songId).then((siblings) => {
+      for (const { songId: id } of siblings) {
+        if (!get().songPrefs[id]?.cover_url) get()._writeSongPref(id, { cover_url: cover })
+      }
+    })
+  },
   setSongDefaultVersion: (songId, version) => get()._writeSongPref(songId, { default_version: normalizePrefText(version) }),
 
   setSongExcludedVersions: (songId, versions) => get()._writeSongPref(songId, { excluded_versions: versions }),

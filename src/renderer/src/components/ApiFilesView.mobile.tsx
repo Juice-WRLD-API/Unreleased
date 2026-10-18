@@ -226,6 +226,7 @@ export default function ApiFilesView(): JSX.Element {
   const {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
     search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
+    searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
@@ -631,7 +632,8 @@ export default function ApiFilesView(): JSX.Element {
               >{viewMode === 'list' ? <LayoutGrid size={19} /> : <LayoutList size={19} />}</button>
             </div>
 
-            {/* Search - recursive across the whole tree, not the current folder. */}
+            {/* Search - recursive across the whole tree, or (with the folder
+                toggle on) just the folder being browsed and its subfolders. */}
             <div className="px-4 pt-2 pb-2">
               <div className="relative flex items-center">
                 <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
@@ -639,20 +641,30 @@ export default function ApiFilesView(): JSX.Element {
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search all files"
+                  placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}` : 'Search all files'}
                   enterKeyHint="search"
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  className="w-full h-11 bg-surface-overlay rounded-full pl-10 pr-10 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden"
+                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${currentPath ? 'pr-20' : 'pr-10'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
                 />
-                {search && (
-                  <button
-                    onClick={() => { setSearch(''); setDebouncedSearch('') }}
-                    className="absolute right-1 w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
-                    aria-label="Clear search"
-                  ><X size={16} /></button>
-                )}
+                <div className="absolute right-1 flex items-center">
+                  {search && (
+                    <button
+                      onClick={() => { setSearch(''); setDebouncedSearch('') }}
+                      className="w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
+                      aria-label="Clear search"
+                    ><X size={16} /></button>
+                  )}
+                  {currentPath && (
+                    <button
+                      onClick={() => setSearchInFolder(!searchInFolder)}
+                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${searchInFolder ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
+                      aria-label={searchInFolder ? 'Search all files' : 'Search this folder only'}
+                      aria-pressed={searchInFolder}
+                    ><Folder size={16} /></button>
+                  )}
+                </div>
               </div>
             </div>
 

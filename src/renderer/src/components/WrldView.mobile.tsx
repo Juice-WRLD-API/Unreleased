@@ -170,7 +170,7 @@ export default function WrldView(): JSX.Element {
     return () => { cancelled = true }
   }, [currentTrack?.id, radioFmActive])
 
-  const handlePlayVersion = usePlayVersion(playTrack)
+  const handlePlayVersion = usePlayVersion()
 
   // Long-press the cover for a quick "Change cover" sheet - the same picker
   // Personalize's "Custom cover" section offers (see CoverEditor), just

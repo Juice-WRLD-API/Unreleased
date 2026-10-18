@@ -3,6 +3,9 @@ import { ls } from './persist'
 export interface SessionEditOverride {
   path: string
   duration: string | null
+  /** The comp the file lives in, when it was picked from another one than
+   *  the override is filed under. Absent on older overrides. */
+  channel?: string
 }
 
 type OverridesByChannel = Record<string, Record<number, SessionEditOverride>>

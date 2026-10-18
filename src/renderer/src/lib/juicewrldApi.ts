@@ -201,6 +201,13 @@ export function cleanTitleForSearch(title: string): string {
   return title.replace(/\s*[[(].*$/, '').trim()
 }
 
+/** A title as-is, then without "<3"/"</3" hearts - file names can't hold "<"
+ *  or "/", so "My Fault </3" is filed as plain "My Fault". */
+export function titleVariants(title: string): string[] {
+  const noHearts = title.replace(/\s*<\/?3+/g, ' ').replace(/\s+/g, ' ').trim()
+  return noHearts && noHearts !== title ? [title, noHearts] : [title]
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -895,12 +902,17 @@ export function resolveSessionEditSource(song: { id: number; category: string; p
   if (song.category !== 'recording_session') return { path: song.path, length: song.length, channel: undefined }
   const channel = peekActiveChannel()
   const override = peekSessionEditOverride(song.id, channel)
-  if (override) return { path: override.path, length: override.duration ?? song.length, channel }
+  if (override) return { path: override.path, length: override.duration ?? song.length, channel: override.channel ?? channel }
   if (song.path && !isSessionEditPlaceholder(song.path)) return { path: song.path, length: song.length, channel }
   const link = peekSessionEditLink(song.id, channel)
   if (link) return { path: link.path, length: link.duration ?? song.length, channel }
   // Not looked up yet: playable, resolved by the Player when it's actually played.
   return { path: sessionEditPlaceholder(song.id), length: song.length, channel: undefined }
+}
+
+/** "Session Edits/5. BDM (Sessions)/My Fault (Sessions).mp3" → "My Fault (Sessions)". */
+export function fileStem(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')
 }
 
 export function songToTrack(song: JWApiSong): Track {
@@ -922,7 +934,11 @@ export function songToTrack(song: JWApiSong): Track {
     title: pref?.name || apiTitle,
     apiTitle,
     apiImageUrl,
-    artist: song.credited_artists || 'Juice WRLD',
+    // A session plays a file, so the file it plays stands in for the artist
+    // line (filled in by the Player once a not-yet-looked-up one resolves).
+    artist: song.category === 'recording_session' && resolvedPath && !isSessionEditPlaceholder(resolvedPath)
+      ? fileStem(resolvedPath)
+      : song.credited_artists || 'Juice WRLD',
     album: song.album || song.era?.name || '',
     era: song.era?.name || undefined,
     albumArtist: 'Juice WRLD',

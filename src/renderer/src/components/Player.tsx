@@ -25,7 +25,7 @@ import ContextMenu from './ContextMenu'
 import { eventToCombo, resolveAction, registerHotkeyDispatch } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
 import { takeEqAnchor } from '../lib/eqAnchor'
-import { getSongById, smallCoverUrl, fullCoverUrl } from '../lib/juicewrldApi'
+import { getSongById, smallCoverUrl, fullCoverUrl, fileStem } from '../lib/juicewrldApi'
 import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
 import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -43,7 +43,8 @@ import {
 import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
-import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { isSessionEditPlaceholder, peekSessionEditLink, sessionEditSongId } from '../lib/sessionEditLinksMirror'
+import { peekActiveChannel } from '../lib/activeChannelState'
 import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
 import PlaybackNotice from './PlaybackNotice'
@@ -59,6 +60,22 @@ const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
   return track.streamUrl ?? toFileUrl(track.path)
+}
+
+// A session whose file wasn't known when its Track was built shows the file's
+// name as its artist line once the lookup finds it, like songToTrack does.
+function fillSessionArtist(trackId: string, streamUrl: string | undefined): void {
+  if (!isSessionEditPlaceholder(streamUrl)) return
+  const link = peekSessionEditLink(sessionEditSongId(streamUrl), peekActiveChannel())
+  if (!link) return
+  const artist = fileStem(link.path)
+  const { currentTrack, currentTrackFull, queue } = useStore.getState()
+  if (currentTrack?.id !== trackId || currentTrack.artist === artist) return
+  useStore.setState({
+    currentTrack: { ...currentTrack, artist },
+    currentTrackFull: currentTrackFull?.id === trackId ? { ...currentTrackFull, artist } : currentTrackFull,
+    queue: queue.map((t) => (t.id === trackId ? { ...t, artist } : t)),
+  })
 }
 
 // Whether a source that failed before playing a single frame is worth another
@@ -591,6 +608,7 @@ export default function Player(): JSX.Element {
   useEffect(() => {
     const audio = getActive()
     if (!audio || !currentTrack) return
+    fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
 
     if (skipNextLoad.current) {
       // Crossfade just swapped - audio already playing on active slot, and it
@@ -617,6 +635,7 @@ export default function Player(): JSX.Element {
         const s = useStore.getState()
         const a = getActive()
         if (!a || s.currentTrack?.id !== trackId) return
+        fillSessionArtist(trackId, streamUrl)
         a.src = url
         a.volume = volumeRef.current
         applyRate(a)

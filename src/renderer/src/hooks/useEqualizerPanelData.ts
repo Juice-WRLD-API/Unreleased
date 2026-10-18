@@ -71,7 +71,7 @@ export function useEqualizerPanelData(): Pick<AppStore, typeof EQ_STORE_KEYS[num
       name: keepTitle ? currentTrack.title : inst.folder,
       path: inst.path,
       duration: inst.duration,
-      artist: `Instrumental · ${inst.name}`,
+      artist: inst.name,
       // Keeps the song's cover rather than falling back to a blank one.
       imageUrl: currentTrack?.imageUrl,
     })
