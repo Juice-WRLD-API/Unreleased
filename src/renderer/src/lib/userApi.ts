@@ -586,17 +586,36 @@ export async function getPlaylists(): Promise<PlaylistSummary[]> {
     if (Array.isArray(items)) {
       const detail = { ...summary, items } as unknown as PlaylistDetail
       playlistDetailCache.set(row.id, detail)
-      playlistCoverCache.set(row.id, {
-        cover_image_url: buildImageUrl(row.cover_image_url) ?? null,
-        cover_image: buildImageUrl(row.cover_image) ?? null,
-        trackImages: items.slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[],
-      })
+      const trackImages = items.slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
+      if (coverFieldsKnown(row)) {
+        playlistCoverCache.set(row.id, {
+          cover_image_url: buildImageUrl(row.cover_image_url) ?? null,
+          cover_image: buildImageUrl(row.cover_image) ?? null,
+          trackImages,
+        })
+      } else {
+        // The row may have a custom cover we can't see - keep whatever cover
+        // is already cached (e.g. one just uploaded) rather than blanking it,
+        // and leave an uncached one for getPlaylistCover's full fetch.
+        const prev = playlistCoverCache.get(row.id)
+        if (prev) playlistCoverCache.set(row.id, { ...prev, trackImages })
+      }
     }
     return summary
   })
 }
 
 type PlaylistCoverEntry = { cover_image_url?: string | null; cover_image?: string | null; trackImages: string[] }
+
+// omit_cover_image drops cover_image from the response, and the server reports
+// cover_image_url as null whenever a custom cover exists. So an omitted
+// response with a null cover_image_url can't tell "custom cover" from "no
+// cover" - only a present cover_image or a non-null cover_image_url is
+// trustworthy. Seeding the cache from the ambiguous case is what made a
+// freshly added cover vanish after a reload.
+function coverFieldsKnown(d: { cover_image?: string | null; cover_image_url?: string | null }): boolean {
+  return 'cover_image' in d || !!d.cover_image_url
+}
 
 // In-memory cache so re-opening a playlist (or re-rendering the playlists
 // grid after switching tabs) shows its cover instantly instead of re-hitting
@@ -620,9 +639,9 @@ export async function getPlaylistCover(id: number): Promise<PlaylistCoverEntry> 
   // getPlaylist too, so the Playlists grid's cover loader and the startup
   // prefetch share one fetch instead of racing a full + an omit_cover_image
   // request for every playlist. Only falls back to the full fetch if that
-  // response genuinely lacks the cover fields.
+  // response can't settle the cover (see coverFieldsKnown).
   const detail = peekPlaylistDetail(id) ?? await getPlaylist(id)
-  const d = 'cover_image_url' in detail || 'cover_image' in detail
+  const d = coverFieldsKnown(detail)
     ? detail
     : await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/`)
   const trackImages = (d.items ?? []).slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
