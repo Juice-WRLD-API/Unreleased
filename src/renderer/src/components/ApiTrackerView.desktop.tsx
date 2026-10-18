@@ -26,7 +26,7 @@ import { CdnDownloadToast } from './CdnDownloadToast'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
 import { addSongsInBackground } from '../lib/optimisticPlaylist'
-import { useCanEdit, useCanContribute, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { useCanEdit, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { loadRecentlyAddedMap } from '../lib/changesApi'
 import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
@@ -1891,8 +1891,6 @@ export default function ApiTrackerView(): JSX.Element {
   })))
 
   const canEdit = useCanEdit()
-  const canContribute = useCanContribute()
-  const canLinkSessions = canEdit || canContribute
   const [sessionEditOverrideVersion, setSessionEditOverrideVersion] = useState(0)
   const [linkingSessionSong, setLinkingSessionSong] = useState<JWApiSong | null>(null)
 
@@ -3677,7 +3675,7 @@ export default function ApiTrackerView(): JSX.Element {
           onSelect={() => toggleSelect(contextMenu.song)}
           liked={likedTrackIds.includes(`jw-${contextMenu.song.id}`)}
           onToggleLike={() => toggleLike(`jw-${contextMenu.song.id}`)}
-          canLinkSessionFile={canLinkSessions}
+          canLinkSessionFile
           hasSessionLinkOverride={!!peekSessionEditOverride(contextMenu.song.id, activeChannel)}
           onLinkSessionFile={() => setLinkingSessionSong(contextMenu.song)}
           onClearSessionLink={() => handleClearSessionLink(contextMenu.song)}
