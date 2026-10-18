@@ -600,7 +600,17 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     const idx = currentTrack?.id === from.id && queue[queueIndex]?.id === from.id
       ? queueIndex
       : queue.findIndex((t: Track) => t.id === from.id)
-    if (idx < 0) { get().playTrack(to, [to]); return }
+    if (idx < 0) {
+      // The playing song isn't in the queue (e.g. radio): swap just what's
+      // playing and leave the queue untouched.
+      if (currentTrack?.id === from.id) {
+        set({ currentTrack: to, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+        get()._loadMore()
+        return
+      }
+      get().playTrack(to, [to])
+      return
+    }
     set({
       queue: queue.map((t: Track, i: number) => (i === idx ? to : t)),
       queueIndex: idx,
