@@ -961,16 +961,31 @@ export function fileStem(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')
 }
 
+/** The cover a song shows instead of its own API art, if any. A user-set
+ *  cover always wins; a rotated suggestion fills in next; an era cover
+ *  override fills in after that - and only for songs that aren't released,
+ *  since released songs have their own real art JWA already shows. Undefined
+ *  = show the song's own art. Every song→display path (songToTrack,
+ *  liteSongToTrack, the store's applyPrefToTrack, Tier List) goes through
+ *  this so they can't drift. `songId` null (a non-library track) gets only
+ *  its user cover; `eraCoverOf` lets a reactive caller pass its own map. */
+export function overrideCoverUrl(
+  songId: number | null,
+  prefCover: string | null | undefined,
+  category: string | null | undefined,
+  era: string | null | undefined,
+  eraCoverOf: (era: string | null | undefined) => string | undefined = peekEraCover,
+): string | undefined {
+  return resolvePrefCoverUrl(prefCover)
+    ?? (songId != null ? peekRotatedCover(songId) : undefined)
+    ?? (songId != null && category !== 'released' && era ? resolvePrefCoverUrl(eraCoverOf(era)) : undefined)
+}
+
 export function songToTrack(song: JWApiSong): Track {
   const apiTitle = song.name
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
-  // A user-set cover always wins; a rotated suggestion fills in next; an era
-  // cover override fills in after that - and only for songs that aren't
-  // released, since released songs have their own real art JWA already shows.
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? peekRotatedCover(song.id)
-    ?? (song.category !== 'released' ? resolvePrefCoverUrl(peekEraCover(song.era?.name)) : undefined)
+  const coverUrl = overrideCoverUrl(song.id, pref?.cover_url, song.category, song.era?.name)
   const { path: resolvedPath, length: resolvedLength, channel: streamChannel } = resolveSessionEditSource(song)
   return {
     id: `jw-${song.id}`,

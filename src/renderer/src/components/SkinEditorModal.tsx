@@ -1,5 +1,6 @@
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Download, Copy, Trash2, Moon, Sun, Check, RotateCcw } from 'lucide-react'
+import ThemedColorPicker from './ThemedColorPicker'
 import { useStorePick } from '../store/useStore'
 import {
   SKIN_VAR_META, SKIN_OPTIONAL_VAR_META, createCustomSkin, skinToFileText, skinFileName,
@@ -147,11 +148,10 @@ export default function SkinEditorModal({
               <p className="text-text-primary text-sm">Accent color</p>
               <p className="text-text-muted text-[11px]">Buttons, highlights, the active state</p>
             </div>
-            <input
-              type="color"
+            <ThemedColorPicker
               value={toColorInputValue(skin.accent ?? '#1db954')}
-              onChange={(e) => patch({ accent: e.target.value })}
-              className="w-8 h-8 rounded-md cursor-pointer border-0 p-0 bg-transparent shrink-0"
+              onChange={(hex) => patch({ accent: hex })}
+              className="w-8 h-8 rounded-md"
               title="Accent color"
             />
             <input
@@ -169,11 +169,10 @@ export default function SkinEditorModal({
                 <p className="text-text-primary text-sm truncate">{label}</p>
                 <p className="text-text-muted text-[11px] truncate">{hint}</p>
               </div>
-              <input
-                type="color"
+              <ThemedColorPicker
                 value={toColorInputValue(skin.vars[key] ?? '')}
-                onChange={(e) => setVar(key, e.target.value)}
-                className="w-8 h-8 rounded-md cursor-pointer border-0 p-0 bg-transparent shrink-0"
+                onChange={(hex) => setVar(key, hex)}
+                className="w-8 h-8 rounded-md"
                 title={`Pick ${label}`}
               />
               <input
@@ -204,11 +203,10 @@ export default function SkinEditorModal({
                       <RotateCcw size={13} />
                     </button>
                   )}
-                  <input
-                    type="color"
+                  <ThemedColorPicker
                     value={toColorInputValue(value ?? '#808080')}
-                    onChange={(e) => setOptionalVar(key, e.target.value)}
-                    className="w-8 h-8 rounded-md cursor-pointer border-0 p-0 bg-transparent shrink-0"
+                    onChange={(hex) => setOptionalVar(key, hex)}
+                    className="w-8 h-8 rounded-md"
                     title={`Pick ${label}`}
                   />
                   <input

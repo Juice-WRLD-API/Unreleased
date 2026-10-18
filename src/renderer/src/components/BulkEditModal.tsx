@@ -18,6 +18,8 @@ import type { SongVersionMeta } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
 import { cleanDate, errorMessage } from '../lib/format'
 import { loadEraFullNames, listEras } from '../lib/eras'
+import ThemedSelect from './ThemedSelect'
+import ThemedCheckbox from './ThemedCheckbox'
 
 // Bulk editor - one dialog, two sources:
 //
@@ -711,12 +713,10 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
         }`}
       >
         <label className={`flex items-center gap-2.5 select-none ${f.pending ? 'cursor-default opacity-60' : 'cursor-pointer'}`}>
-          <input
-            type="checkbox"
+          <ThemedCheckbox
             checked={on}
             disabled={f.pending}
             onChange={() => toggleField(f)}
-            className="accent-[var(--accent)] w-3.5 h-3.5 shrink-0"
           />
           <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">{f.label}</span>
           <span className="ml-auto flex items-center gap-1.5 text-[11px] text-text-muted opacity-60 truncate max-w-[45%]" title={f.pending ? undefined : summaryFor(f)}>
@@ -785,16 +785,12 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
                   ))}
                 </div>
               ) : (
-                <select
+                <ThemedSelect
                   value={value}
-                  onChange={e => setValue(f.key, e.target.value)}
-                  className={`${inputClass()} appearance-none cursor-pointer`}
-                >
-                  <option value="" style={{ color: '#111', backgroundColor: '#fff' }}>Pick one…</option>
-                  {f.options.map(o => (
-                    <option key={o.value} value={o.value} style={{ color: '#111', backgroundColor: '#fff' }}>{o.label}</option>
-                  ))}
-                </select>
+                  onChange={v => setValue(f.key, v)}
+                  options={[{ value: '', label: 'Pick one…' }, ...f.options]}
+                  className={inputClass()}
+                />
               )
             ) : f.kind === 'textarea' ? (
               <textarea

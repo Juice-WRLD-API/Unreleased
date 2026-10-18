@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, Globe, Hash, ImagePlus, Loader2, Lock, Plus, Search, ShieldCheck, Slash, Trash2, X } from 'lucide-react'
+import ThemedColorPicker from '../ThemedColorPicker'
 import * as api from '../../lib/chatApi'
 import { CHAT_PERMISSIONS, type ChannelOverride, type ChatChannel, type ChatMember, type ChatPermissionName, type ChatUserBrief, type PublicServerSummary, type ServerRoleDef } from '../../lib/chatApi'
 import { adminListUsers, compressImageFile } from '../../lib/userApi'
@@ -699,7 +700,7 @@ function RoleRow({ serverId, role, canManage }: { serverId: number; role: Server
       {open && (
         <div className="px-3 pb-3 border-t border-[var(--border)] pt-3">
           <div className="flex items-center gap-2 mb-3">
-            <input type="color" value={color || '#8a8f98'} onChange={(e) => setColor(e.target.value)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-transparent cursor-pointer" />
+            <ThemedColorPicker value={color || '#8a8f98'} onChange={setColor} title="Role color" className="w-9 h-9 rounded-lg border border-[var(--border)]" />
             {!role.is_default ? (
               <input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} flex-1`} />
             ) : (
@@ -766,7 +767,7 @@ function NewRoleRow({ serverId, onDone }: { serverId: number; onDone: () => void
   return (
     <div className="rounded-xl border border-accent/40 bg-accent/5 p-3 mb-2">
       <div className="flex items-center gap-2 mb-3">
-        <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-transparent cursor-pointer" />
+        <ThemedColorPicker value={color} onChange={setColor} title="Role color" className="w-9 h-9 rounded-lg border border-[var(--border)]" />
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} flex-1`} />
       </div>
       <PermissionCheckboxes value={permissions} onChange={setPermissions} />

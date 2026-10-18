@@ -3,6 +3,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
 import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check, MessagesSquare } from 'lucide-react'
+import ThemedColorPicker from './ThemedColorPicker'
 import { ModalOverlay } from './Modal'
 import { parseLrc, isLrcFormat, getCurrentLineIndex, splitColorWords } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
@@ -575,20 +576,15 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   ))}
                   {/* Custom color - the swatch doubles as the picker's own
                       trigger, so there's no separate "choose color" button. */}
-                  <label
+                  <ThemedColorPicker
+                    value={customTextColor}
+                    onChange={(hex) => { setCustomTextColor(hex); setTextColor('custom') }}
                     title="Custom color"
-                    className={`relative w-6 h-6 rounded-full border-2 transition-transform cursor-pointer overflow-hidden ${
+                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
                       textColor === 'custom' ? 'scale-110 border-text-primary' : 'border-transparent hover:scale-105'
                     }`}
-                    style={{ background: customTextColor, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
-                  >
-                    <input
-                      type="color"
-                      value={customTextColor}
-                      onChange={(e) => { setCustomTextColor(e.target.value); setTextColor('custom') }}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                  </label>
+                    style={{ boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
+                  />
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2">

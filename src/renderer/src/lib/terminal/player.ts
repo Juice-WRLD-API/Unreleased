@@ -3,7 +3,9 @@ import { useStore } from '../../store/useStore'
 import { fisherYates } from '../../store/queueSlice'
 import { EQ_PRESETS } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
-import { loadAllSongsWithLyricsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { loadAllSongs, loadAllSongsWithLyricsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { parseSearchQuery, matchesFieldFilters, songsById } from '../trackerSearch'
+import { trackIdToSongId } from '../userApi'
 import { loadCatalog, statsSongToTrack } from '../statsCatalog'
 import { bestLyricLine, searchLyrics } from '../lyricSearch'
 import { pageRows } from './more'
@@ -101,7 +103,14 @@ export const PLAYER_COMMANDS: TermCommand[] = [
   },
   {
     name: 'next', aliases: ['skip'], group: 'Player', usage: 'next', description: 'Skip to the next track',
-    run: (_a, ctx) => { currentTrack(); runHotkeyAction('next'); ctx.print('⏭ next', 'ok') },
+    run: (_a, ctx) => {
+      currentTrack()
+      const before = st().queueIndex
+      runHotkeyAction('next')
+      const s = st()
+      if (!s.radioMode && s.repeat === 'none' && s.queueIndex === before) { ctx.print('nothing left in the queue - queue radio plays random songs', 'dim'); return }
+      ctx.print('⏭ next', 'ok')
+    },
   },
   {
     name: 'prev', aliases: ['previous', 'back'], group: 'Player', usage: 'prev', description: 'Go to the previous track (or the start of this one)',
@@ -268,10 +277,10 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title]]',
-    description: 'Show or change the play queue. <song> is a title or a number from find. history lists what was played before this song (newest first); history N|title replays one',
+    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list [filter] | clear | add <song> | next <song> | remove N | jump N|title | history [N|title] | radio]',
+    description: 'Show or change the play queue. <song> is a title or a number from find. list <filter> takes the Tracker search syntax (plain words, field:"value"). history lists what was played before this song (newest first); history N|title replays one; radio switches to random tracker songs',
     complete: (before, partial) => {
-      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump', 'history'].filter((w) => w.startsWith(partial))
+      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump', 'history', 'radio'].filter((w) => w.startsWith(partial))
       return ['add', 'next'].includes(before[0].toLowerCase()) ? completeSongs(before.slice(1), partial) : []
     },
     run: async (args, ctx) => {
@@ -281,6 +290,26 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       switch (sub.toLowerCase() || 'list') {
         case 'list': case 'ls': {
           if (s.queue.length === 0) { ctx.print('queue is empty', 'dim'); return }
+          if (rest) {
+            // Same syntax as the queue panel's search: plain words match
+            // title/artist, field:"value" tokens are checked by song id
+            // against the catalogue.
+            const { freeText, filters } = parseSearchQuery(rest)
+            const q = freeText.toLowerCase()
+            const byId = filters.length ? songsById(await loadAllSongs()) : null
+            const hits = s.queue
+              .map((t, i) => ({ t, i }))
+              .filter(({ t }) => {
+                if (q && !t.title.toLowerCase().includes(q) && !t.artist.toLowerCase().includes(q)) return false
+                if (!byId) return true
+                const id = trackIdToSongId(t.id)
+                const song = id != null ? byId.get(id) : undefined
+                return !!song && matchesFieldFilters(song, filters)
+              })
+            if (hits.length === 0) { ctx.print(`nothing in the queue matches "${rest}"`, 'dim'); return }
+            ctx.print(pageRows(hits.length, (k) => `${hits[k].i === s.queueIndex ? '▶' : ' '} ${String(hits[k].i + 1).padStart(3)}  ${trackLine(hits[k].t)}`, 40))
+            return
+          }
           const from = Math.max(0, s.queueIndex - 5)
           const rows = pageRows(s.queue.length - from, (i) => `${from + i === s.queueIndex ? '▶' : ' '} ${String(from + i + 1).padStart(3)}  ${trackLine(s.queue[from + i])}`, 40)
           ctx.print(`${from > 0 ? `  … ${from} earlier\n` : ''}${rows}`)
@@ -316,7 +345,13 @@ export const PLAYER_COMMANDS: TermCommand[] = [
           ctx.print(`▶ ${h[n].title}`, 'ok')
           return
         }
-        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title]]')
+        case 'radio': {
+          currentTrack()
+          s.startRandomRadio()
+          ctx.print('📻 radio on - playing random songs', 'ok')
+          return
+        }
+        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title] | radio]')
       }
     },
   },

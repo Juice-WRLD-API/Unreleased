@@ -1,17 +1,18 @@
-import { useState, useEffect, useRef, memo, type ReactNode } from 'react'
+import { useState, useEffect, useRef, memo, type ReactNode, type CSSProperties } from 'react'
 import { IS_FLOAT_WINDOW } from '../store/useStore'
 import { attachToMainWindow } from '../lib/windowSync'
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ChevronLeft, ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2, FolderOpen, PictureInPicture2, Minimize2,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
+import ThemedSelect from './ThemedSelect'
 import { buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication } from '../lib/userApi'
 import { versionsEnabled } from '../lib/versionsApi'
 import type { SuggestField } from '../lib/fieldSuggestions'
-import { accountDisplayName, errorMessage } from '../lib/format'
+import { errorMessage } from '../lib/format'
 import {
   CATEGORIES, CAT_PILL, CAT_BADGE,
   parseSynced, serializeSynced, type SyncedLine,
@@ -61,6 +62,12 @@ function FieldLabel({ label, changed }: { label: string; changed: boolean }): JS
     </span>
   )
 }
+
+// The top bar sits under App's frameless-window drag strip (top 28px), and an
+// app-region rect swallows clicks regardless of stacking - so each control
+// carves itself out. Not the whole bar: a full-width no-drag would erase the
+// strip (see LibraryTab).
+const NO_DRAG = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
 const fieldInputClass = (changed: boolean, mono: boolean): string =>
   `w-full bg-surface-overlay/70 rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none placeholder:text-text-muted placeholder:opacity-30 border transition-colors ${mono ? 'font-mono' : ''} ${
@@ -144,16 +151,14 @@ function SelectRow({ label, value, original, onChange, options, placeholder }: {
 }): JSX.Element {
   const changed = value !== original
   return (
-    <label className="flex flex-col min-w-0">
+    <div className="flex flex-col min-w-0">
       <FieldLabel label={label} changed={changed} />
-      <select
-        value={value} onChange={e => onChange(e.target.value)}
-        className={`${fieldInputClass(changed, false)} appearance-none cursor-pointer`}
-      >
-        <option value="" style={{ color: '#111', backgroundColor: '#fff' }}>{placeholder || '—'}</option>
-        {options.map(o => <option key={o.value} value={o.value} style={{ color: '#111', backgroundColor: '#fff' }}>{o.label}</option>)}
-      </select>
-    </label>
+      <ThemedSelect
+        value={value} onChange={onChange}
+        options={[{ value: '', label: placeholder || '—' }, ...options]}
+        className={fieldInputClass(changed, false)}
+      />
+    </div>
   )
 }
 
@@ -389,7 +394,7 @@ export default function EditorPage({ initialSongId = null }: {
 } = {}): JSX.Element {
   const {
     account, isAdmin, canEdit, backView, setActiveView, activeChannel, channels,
-    application, appLoading, onSubmitted, onSignOut, setShowUserAuth, logoutAccount,
+    application, appLoading, onSubmitted, onSignOut, setShowUserAuth,
     song, loading, loadError, lastLoadIdRef, loadSong, eras,
     isNewSongDraft, editingPropId, cancelEditProposal, closeSong,
     name, setName, artists, setArtists, album, setAlbum, cat, setCat, eraId, setEraId,
@@ -449,12 +454,13 @@ export default function EditorPage({ initialSongId = null }: {
       {/* Top bar */}
       {/* 188px clears the window controls (132px) plus the fixed downloads
           trigger next to them (right: 144px + 36px wide - see DownloadManager) */}
-      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]" style={(window as any).electron ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
+      <div className="shrink-0 flex items-center gap-3 px-5 py-3" style={(window as any).electron ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
         {/* Back - only in the in-app editor; the pop-out window has nowhere to go back to */}
         {!IS_FLOAT_WINDOW && (
           <button
             onClick={() => setActiveView(backView)}
             title="Back"
+            style={NO_DRAG}
             className="p-1.5 -ml-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0"
           >
             <ChevronLeft size={16} />
@@ -474,6 +480,7 @@ export default function EditorPage({ initialSongId = null }: {
               closeSong()
             }}
             title="Open in a separate window"
+            style={NO_DRAG}
             className="text-text-muted opacity-65 hover:opacity-100 transition-colors"
           >
             <PictureInPicture2 size={15} />
@@ -496,7 +503,7 @@ export default function EditorPage({ initialSongId = null }: {
         )}
         <span className="flex-1" />
         {/* Layout switch - full cards vs. the flat basic form */}
-        <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-overlay border border-[var(--border)]">
+        <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-surface-overlay border border-[var(--border)]" style={NO_DRAG}>
           {([['full', 'Full'], ['basic', 'Basic']] as const).map(([mode, label]) => {
             const active = (mode === 'basic') === basicView
             return (
@@ -515,8 +522,6 @@ export default function EditorPage({ initialSongId = null }: {
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${isAdmin ? 'bg-accent/20 text-accent' : 'bg-emerald-500/20 text-emerald-400'}`}>
           {isAdmin ? 'admin' : 'editor'}
         </span>
-        <span className="text-text-muted opacity-75 text-xs truncate max-w-[140px]">{accountDisplayName(account)}</span>
-        <button onClick={() => logoutAccount()} className="text-text-muted opacity-65 hover:opacity-100 text-xs transition-colors">Sign out</button>
       </div>
 
       {/* Scrollable body */}

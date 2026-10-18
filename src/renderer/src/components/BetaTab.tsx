@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { AlertCircle, Check, Copy, KeyRound, Loader2, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import ThemedDatePicker from './ThemedDatePicker'
+import ThemedCheckbox from './ThemedCheckbox'
 import { useStrictModeSafeEffect } from '../hooks/useStrictModeSafeEffect'
 import { copyText } from '../lib/clipboard'
 import * as betaAdminApi from '../lib/betaAdminApi'
@@ -59,7 +61,7 @@ function Toggle({ on, busy, onChange, label }: { on: boolean; busy: boolean; onC
   return (
     <label className="flex items-center gap-1.5 text-[11px] text-text-muted cursor-pointer shrink-0" title={label}>
       {busy ? <Loader2 size={12} className="animate-spin" /> : (
-        <input type="checkbox" checked={on} onChange={e => onChange(e.target.checked)} className="w-3.5 h-3.5 accent-[var(--accent)]" />
+        <ThemedCheckbox checked={on} onChange={onChange} />
       )}
       {on ? 'Active' : 'Off'}
     </label>
@@ -165,7 +167,7 @@ function BuildsSection({ versions, setVersions, loading }: {
       <div className="rounded-xl border border-[var(--border)] overflow-hidden">
         {versions.length === 0 && !loading && <Empty label="No beta builds" />}
         {versions.map(v => (
-          <div key={v.id} className={`px-3 py-2.5 border-b border-[var(--border)] last:border-b-0 ${v.is_active ? '' : 'opacity-60'}`}>
+          <div key={v.id} className={`px-3 py-2.5 ${v.is_active ? '' : 'opacity-60'}`}>
             <div className="flex items-center gap-3">
               <span className="font-mono text-xs font-semibold text-text-primary">{v.version}</span>
               <span className="text-[11px] text-text-muted truncate flex-1 min-w-0">
@@ -265,7 +267,7 @@ function CodesSection({ codes, setCodes, loading }: {
               className="shrink-0 px-2 rounded-lg bg-surface-raised border border-[var(--border)] text-[11px] text-text-muted hover:text-text-primary">Gen</button>
           </div>
           <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Label (who it's for)" className={field} />
-          <input type="date" value={expires} onChange={e => setExpires(e.target.value)} title="Expires after this day (optional)" className={field} />
+          <ThemedDatePicker value={expires} onChange={setExpires} placeholder="No expiry" title="Expires after this day (optional)" className={field} />
         </div>
         <div className="flex items-center gap-3">
           <button onClick={create} disabled={busy || !code.trim()}
@@ -286,7 +288,7 @@ function CodesSection({ codes, setCodes, loading }: {
           const live = c.is_valid
           const expired = c.is_active && !live
           return (
-            <div key={c.id} className={`flex items-center gap-3 px-3 py-2.5 border-b border-[var(--border)] last:border-b-0 ${live ? '' : 'opacity-60'}`}>
+            <div key={c.id} className={`flex items-center gap-3 px-3 py-2.5 ${live ? '' : 'opacity-60'}`}>
               <button onClick={() => copy(c)} title="Copy code"
                 className="flex items-center gap-1.5 font-mono text-xs text-text-primary hover:text-accent transition-colors min-w-0">
                 <span className="truncate">{c.code}</span>

@@ -33,6 +33,8 @@ import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import ThemedSelect from './ThemedSelect'
+import ThemedColorPicker from './ThemedColorPicker'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -224,7 +226,7 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
 // One line of the "Lyric colors" setting: presets + a custom picker, with
 // "Auto" (value === null) meaning "leave it to the surface's own colors" —
 // the theme's text vars in the mini/now-playing lyrics, the cover-art-derived
-// ones in the WRLD tab. The <input type="color"> always needs a concrete hex,
+// ones in the WRLD tab. The color picker always needs a concrete hex,
 // so `fallback` is what it shows while the setting is on Auto.
 function LyricColorRow({ label, presets, value, fallback, onChange }: {
   label: string
@@ -258,16 +260,14 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
           title={c}
         />
       ))}
-      <input
-        type="color"
+      <ThemedColorPicker
         value={custom}
-        onChange={(e) => {
-          const next = e.target.value
+        onChange={(next) => {
           setCustom(next)
           if (debounceRef.current) clearTimeout(debounceRef.current)
           debounceRef.current = setTimeout(() => onChange(next), 80)
         }}
-        className="w-6 h-6 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+        className="w-6 h-6 rounded-full"
         title="Custom color"
       />
     </div>
@@ -1434,15 +1434,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                         style={{ backgroundColor: c, outline: accentColor === c ? `2px solid ${c}` : 'none', outlineOffset: '2px' }}
                       />
                     ))}
-                    <input
-                      type="color"
+                    <ThemedColorPicker
                       value={customAccent}
-                      onChange={(e) => {
-                        setCustomAccent(e.target.value)
+                      onChange={(next) => {
+                        setCustomAccent(next)
                         if (accentDebounceRef.current) clearTimeout(accentDebounceRef.current)
-                        accentDebounceRef.current = setTimeout(() => setAccentColor(e.target.value), 80)
+                        accentDebounceRef.current = setTimeout(() => setAccentColor(next), 80)
                       }}
-                      className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+                      className="w-7 h-7 rounded-full"
                       title="Custom color"
                     />
                   </div>
@@ -2063,16 +2062,15 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                 <h3 className="text-text-primary text-lg font-bold mb-4">Playback</h3>
                 {devices.length > 0 && (
                   <Row icon={Volume2} iconColor="#2563eb" label="Audio output">
-                    <select
+                    <ThemedSelect
                       value={audioOutput}
-                      onChange={(e) => setAudioOutput(e.target.value)}
-                      className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] max-w-[180px] truncate"
-                    >
-                      <option value="">Default</option>
-                      {devices.map((d) => (
-                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Device ${d.deviceId.slice(0, 6)}`}</option>
-                      ))}
-                    </select>
+                      onChange={setAudioOutput}
+                      options={[
+                        { value: '', label: 'Default' },
+                        ...devices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` })),
+                      ]}
+                      className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] min-w-0 max-w-[180px]"
+                    />
                   </Row>
                 )}
                 {/* Playback speed moved to the player bar's Equalizer panel */}
@@ -2153,13 +2151,12 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                         {Math.max(0, Math.ceil((sleepTimerEnd - Date.now()) / 60000))} min left
                       </span>
                     ) : (
-                      <select
-                        value={sleepMinutes}
-                        onChange={(e) => setSleepMinutes(parseInt(e.target.value))}
+                      <ThemedSelect
+                        value={String(sleepMinutes)}
+                        onChange={(v) => setSleepMinutes(parseInt(v))}
+                        options={[15, 30, 45, 60, 90].map((m) => ({ value: String(m), label: `${m} min` }))}
                         className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                      >
-                        {[15, 30, 45, 60, 90].map((m) => <option key={m} value={m}>{m} min</option>)}
-                      </select>
+                      />
                     )}
                     <button
                       onClick={toggleSleepTimer}
@@ -2281,13 +2278,12 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                 </p>
 
                 <Row icon={Clock} iconColor="#4f46e5" label="Skip amount" sub="How far skip-forward / skip-backward jump">
-                  <select
-                    value={hotkeySeekSeconds}
-                    onChange={(e) => setHotkeySeekSeconds(parseInt(e.target.value))}
+                  <ThemedSelect
+                    value={String(hotkeySeekSeconds)}
+                    onChange={(v) => setHotkeySeekSeconds(parseInt(v))}
+                    options={[5, 10, 15, 30, 60].map((s) => ({ value: String(s), label: `${s} seconds` }))}
                     className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                  >
-                    {[5, 10, 15, 30, 60].map((s) => <option key={s} value={s}>{s} seconds</option>)}
-                  </select>
+                  />
                 </Row>
 
                 {isElectron && (
@@ -2527,16 +2523,17 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                   </button>
                 </Row>
                 <Row icon={Monitor} iconColor="#6b7280" label="Start on">
-                  <select
+                  <ThemedSelect
                     value={appSettings.startupView}
-                    onChange={(e) => setSetting('startupView', e.target.value)}
+                    onChange={(v) => setSetting('startupView', v)}
+                    options={[
+                      { value: 'api-tracker', label: 'Tracker' },
+                      { value: 'api-files', label: 'Files' },
+                      { value: 'liked', label: 'Liked Songs' },
+                      { value: 'playlists', label: 'Playlists' },
+                    ]}
                     className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                  >
-                    <option value="api-tracker">Tracker</option>
-                    <option value="api-files">Files</option>
-                    <option value="liked">Liked Songs</option>
-                    <option value="playlists">Playlists</option>
-                  </select>
+                  />
                 </Row>
                 <Row icon={BellOff} iconColor="#16a34a" label="Auto-download updates">
                   <Toggle on={appSettings.autoDownload} onClick={() => setSetting('autoDownload', !appSettings.autoDownload)} />
@@ -2582,14 +2579,12 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     tray: 'Minimize hides the window to the tray icon',
                   }[appSettings.minimizeTo]}
                 >
-                  <select
+                  <ThemedSelect
                     value={appSettings.minimizeTo}
-                    onChange={(e) => setSetting('minimizeTo', e.target.value)}
+                    onChange={(v) => setSetting('minimizeTo', v)}
+                    options={[{ value: 'taskbar', label: 'Taskbar' }, { value: 'tray', label: 'Tray' }]}
                     className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                  >
-                    <option value="taskbar">Taskbar</option>
-                    <option value="tray">Tray</option>
-                  </select>
+                  />
                 </Row>
                 <Row icon={Minus} iconColor="#6b7280" label="Minimize to tray on close">
                   <Toggle on={appSettings.minimizeToTray} onClick={() => setSetting('minimizeToTray', !appSettings.minimizeToTray)} />
@@ -2700,15 +2695,16 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                           : 'Shows "Listening to Juice WRLD"'
                     }
                   >
-                    <select
+                    <ThemedSelect
                       value={appSettings.discordRpcLabel}
-                      onChange={(e) => setSetting('discordRpcLabel', e.target.value)}
+                      onChange={(v) => setSetting('discordRpcLabel', v)}
+                      options={[
+                        { value: 'artist', label: 'Artist' },
+                        { value: 'song', label: 'Song name' },
+                        { value: 'app', label: 'Unreleased' },
+                      ]}
                       className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                    >
-                      <option value="artist">Artist</option>
-                      <option value="song">Song name</option>
-                      <option value="app">Unreleased</option>
-                    </select>
+                    />
                   </Row>
                 )}
                 <Row icon={Wrench} iconColor="#6b7280" label="Developer options" sub="Shows a Developer tab with cache & diagnostics tools">

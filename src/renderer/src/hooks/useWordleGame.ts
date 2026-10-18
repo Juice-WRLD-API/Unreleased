@@ -6,7 +6,7 @@
 import { copyText } from '../lib/clipboard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, useStorePick } from '../store/useStore'
-import { apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { getSongById, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { loadEraFullNames } from '../lib/eras'
 import {
@@ -323,7 +323,7 @@ export function useWordleGame(): {
   const playFullSong = async (): Promise<void> => {
     if (!answer) return
     try {
-      const song = await apiFetch<JWApiSong>(`/songs/${answer.song.id}/`)
+      const song = await getSongById(answer.song.id)
       playTrack(songToTrack(song))
     } catch {
       setPlayError(true)

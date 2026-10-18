@@ -23,10 +23,10 @@ import type { Album } from '../lib/albumsApi'
 import { getAllVersionGroups } from '../lib/versionsApi'
 import { loadEraFullNames, listEras } from '../lib/eras'
 import type { JWApiEra } from '../lib/juicewrldApi'
-import { resolvePrefCoverUrl } from '../lib/juicewrldApi'
-import { peekRotatedCover } from '../lib/coverRotation'
+import { overrideCoverUrl } from '../lib/juicewrldApi'
 import { useStorePick } from '../store/useStore'
 import { errorMessage } from '../lib/format'
+import { useSongFieldSearch } from './useSongFieldSearch'
 
 // Both catalogues are always loaded, whatever the list's filter says: a
 // ranked song has to keep rendering in its tier after the filter that let it
@@ -189,9 +189,7 @@ export function useTierlistData() {
   // those overrides change, so changing a cover elsewhere shows up here live.
   const pool = useMemo(() => rawPool.map((s): HeardleSong => {
     const pref = songPrefs[s.id]
-    const cover = resolvePrefCoverUrl(pref?.cover_url)
-      ?? peekRotatedCover(s.id)
-      ?? (s.category !== 'released' && s.era ? resolvePrefCoverUrl(eraCovers[s.era]) : undefined)
+    const cover = overrideCoverUrl(s.id, pref?.cover_url, s.category, s.era, era => (era ? eraCovers[era] : undefined))
     const name = pref?.name || s.name
     if (!cover && name === s.name) return s
     return {
@@ -390,9 +388,12 @@ export function useTierlistData() {
     return pool.filter((s) => cats.has(s.category as PoolId) && (eras.size === 0 || (!!s.era && eras.has(s.era))))
   }, [pool, filters, album, groupOf, eraList])
 
+  // Plain words keep matchesSearch's alias/era match; field:"value" tokens
+  // (Tracker syntax) are checked against the catalogue by song id.
+  const fieldSearch = useSongFieldSearch(search)
   const visiblePool = useMemo(
-    () => filteredPool.filter((s) => !ranked.has(s.id) && matchesSearch(s, search)),
-    [filteredPool, ranked, search],
+    () => filteredPool.filter((s) => !ranked.has(s.id) && matchesSearch(s, fieldSearch.freeText) && fieldSearch.matchesFields(s.id)),
+    [filteredPool, ranked, fieldSearch],
   )
 
   const songsInTier = (tierId: string): HeardleSong[] =>

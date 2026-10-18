@@ -52,6 +52,7 @@ import TextFileViewer, { TextFileSource } from './TextFileViewer'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
 import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
+import { showAppToast } from '../lib/appToast'
 
 // lucide's `fill` is a prop, not a class, so the filled heart needs to be a
 // component of its own to fit a menu item's `icon` slot.
@@ -149,7 +150,7 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
 }
 
 export default function ApiFilesBrowser(): JSX.Element {
-  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, stagedFileChanges, stageFileChanges, setShowDownloadManager } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'stagedFileChanges', 'stageFileChanges', 'setShowDownloadManager')
+  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds, toggleLike, playlists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, stagedFileChanges, stageFileChanges, setShowDownloadManager } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'stagedFileChanges', 'stageFileChanges', 'setShowDownloadManager')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
@@ -181,7 +182,7 @@ export default function ApiFilesBrowser(): JSX.Element {
   const { lightboxItems, setLightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
-  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist()
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
   // Whether a right-clicked audio file actually has a matching song in the
   // Tracker — resolved lazily per path on menu-open (not for every row up
@@ -668,7 +669,7 @@ export default function ApiFilesBrowser(): JSX.Element {
       e.preventDefault(); e.stopPropagation()
       if (isExternalDrag(e)) {
         setDropTarget(null); setFileDragOver(false)
-        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(entry.path, files)).catch(() => {})
+        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(entry.path, files)).catch(() => showAppToast("Couldn't read the dropped files"))
         return
       }
       if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
@@ -1163,7 +1164,7 @@ export default function ApiFilesBrowser(): JSX.Element {
             e.preventDefault()
             setFileDragOver(false)
             const folder = currentPath
-            collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(folder, files)).catch(() => {})
+            collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(folder, files)).catch(() => showAppToast("Couldn't read the dropped files"))
           }}
           // Entry rows stop propagation and open their own menu, so anything
           // reaching here is genuinely the background.
@@ -1697,7 +1698,8 @@ export default function ApiFilesBrowser(): JSX.Element {
                     const data = await apiFetch<JWApiPaginatedResponse>('/songs/', { search: title, page_size: 1 })
                     const id = data.results[0]?.id
                     if (id) useStore.getState().openSongEditor(id)
-                  } catch {}
+                    else showAppToast(`No song found for "${title}"`)
+                  } catch { showAppToast("Couldn't look up the song") }
                 },
               },
               isAudio && 'divider',

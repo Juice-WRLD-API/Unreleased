@@ -107,7 +107,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
     <div className="flex h-full overflow-hidden">
       {/* Left: list */}
       <div className="w-80 shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
-        <div className="shrink-0 flex gap-1 flex-wrap px-3 py-2.5 border-b border-[var(--border)] bg-surface-raised">
+        <div className="shrink-0 flex gap-1 flex-wrap px-3 py-2.5 bg-surface-raised">
           {REPORT_FILTERS.map(f => (
             <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
               className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
@@ -121,7 +121,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged, comp
           {reports.length === 0 && <Empty label="No reports" />}
           {reports.map(item => (
             <button key={item.id} onClick={() => setSelected(item)}
-              className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors ${
+              className={`w-full text-left px-3 py-3 border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors ${
                 r?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               } ${item.status !== 'pending' ? 'opacity-60' : ''}`}>
               <p className="text-text-primary text-xs font-semibold truncate">{songLabel(item)}</p>

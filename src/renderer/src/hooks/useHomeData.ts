@@ -3,7 +3,7 @@ import { useStorePick } from '../store/useStore'
 import { loadRecentTracks } from '../lib/recentTracks'
 import { filterListeningPlaysByDays } from '../lib/listeningPlays'
 import { allTimePrefs } from '../lib/listeningStats'
-import { playlistCoverUrl, apiFetch, apiPeek, buildImageUrl, loadAllSongs, songToTrack, type JWApiStats, type JWApiSong } from '../lib/juicewrldApi'
+import { playlistCoverUrl, apiFetch, apiPeek, loadAllSongs, songToTrack, type JWApiStats, type JWApiSong } from '../lib/juicewrldApi'
 import { peekPlaylistCover } from '../lib/userApi'
 import { loadRecentPlaylistIds } from '../lib/recentPlaylists'
 import { loadStats as loadHeardleStats, todayKey as heardleToday } from '../lib/heardle'
@@ -130,19 +130,18 @@ export function useHomeData() {
         // the whole download bought nothing.
         if (!list.some((a) => a.songs?.length)) return
         return loadAllSongs()
-          .then((all) => setAlbumSongIndex(new Map(all.filter((s) => s.path).map((s) => [s.path as string, s]))))
+          .then((all) => setAlbumSongIndex(albumsApi.indexSongsByPath(all)))
       })
       .catch(() => undefined)
   }, [])
 
   const albumRow: HomeAlbumCard[] = useMemo(() => albums.slice(0, 10).map((album) => {
-    const tracks = [...album.songs].sort((a, b) => a.order - b.order)
-    const coverSong = tracks[0] ? albumSongIndex.get(tracks[0].path) : undefined
+    const tracks = albumsApi.albumTracks(album)
     return {
       key: `a${album.id}`,
       title: album.title,
       subtitle: album.release_date ? album.release_date.slice(0, 4) : (album.artist?.name ?? ''),
-      cover: buildImageUrl(coverSong?.image_url),
+      cover: albumsApi.albumCoverUrl(album, albumSongIndex, songPrefs),
       open: () => {
         const queue = tracks
           .map((t) => albumSongIndex.get(t.path))
@@ -151,7 +150,7 @@ export function useHomeData() {
         if (queue.length > 0) playTrack(queue[0], queue)
       },
     }
-  }), [albums, albumSongIndex, playTrack])
+  }), [albums, albumSongIndex, songPrefs, playTrack])
 
   const games = useMemo((): GameCard[] => {
     const heardle = loadHeardleStats('daily')

@@ -1,4 +1,5 @@
-import { JWAPI_BASE, apiFetch } from './juicewrldApi'
+import { JWAPI_BASE, apiFetch, buildImageUrl, resolvePrefCoverUrl, type JWApiSong } from './juicewrldApi'
+import type { SongPrefMap } from './songPrefs'
 import { apiRequest } from './apiClient'
 import { getToken } from './userApi'
 
@@ -25,6 +26,24 @@ export interface Album {
   cover_url: string
   play_count: number
   songs: AlbumSongEntry[]
+}
+
+/** An album's entries in play order. */
+export const albumTracks = (album: Album): AlbumSongEntry[] => [...album.songs].sort((a, b) => a.order - b.order)
+
+/** Album entries carry track paths, not full song metadata - this path→song
+ *  lookup, built from the whole catalogue (loadAllSongs), resolves them. */
+export const indexSongsByPath = (songs: JWApiSong[]): Map<string, JWApiSong> =>
+  new Map(songs.filter(s => s.path).map(s => [s.path as string, s]))
+
+/** The lead track's personalized cover wins, then the album's own cover, then
+ *  the lead track's API art. The raw `image_url` alone skipped both of the
+ *  first two - and comes back "null" for most unreleased songs. */
+export function albumCoverUrl(album: Album, songIndex: Map<string, JWApiSong>, songPrefs: SongPrefMap): string | undefined {
+  const lead = songIndex.get(albumTracks(album)[0]?.path ?? '')
+  return (lead ? resolvePrefCoverUrl(songPrefs[lead.id]?.cover_url) : undefined)
+    ?? buildImageUrl(album.cover_url)
+    ?? buildImageUrl(lead?.image_url)
 }
 
 function request<T>(url: string, options: RequestInit = {}): Promise<T> {

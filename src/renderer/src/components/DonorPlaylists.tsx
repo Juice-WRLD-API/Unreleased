@@ -13,6 +13,7 @@ import type { DonorMenuState } from './DonorContextMenu'
 import { fetchDonorFileBlob } from '../lib/donorFilesApi'
 import { PlayShuffleRow, appBarButton } from './mobile/DetailChrome'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
+import { showAppToast } from '../lib/appToast'
 
 // Playlists of donor cloud files. They sit on the Playlists page as a third
 // kind beside synced and on-device ones and use the same card + hero + track
@@ -463,5 +464,6 @@ async function downloadFile(f: DonorFile): Promise<void> {
     setTimeout(() => URL.revokeObjectURL(url), 10_000)
   } catch (err) {
     console.error('Could not download donor file', err)
+    showAppToast(`Couldn't download ${f.filename}`)
   }
 }

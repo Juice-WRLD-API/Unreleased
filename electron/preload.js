@@ -1,5 +1,21 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
+// electron:dev only: mirror the installed app's file:// localStorage into the
+// dev server's origin before the app's scripts run (see main.js
+// readInstalledLocalStorage). Main hands it out once per launch; null means
+// nothing to copy, so dev keeps whatever it already has.
+if (location.origin === 'http://localhost:3018') {
+  const seed = ipcRenderer.sendSync('dev-storage-seed')
+  if (seed) {
+    try {
+      localStorage.clear()
+      for (const [k, v] of seed) localStorage.setItem(k, v)
+    } catch (err) {
+      console.warn('[dev-seed] could not copy installed app storage', err)
+    }
+  }
+}
+
 contextBridge.exposeInMainWorld('electron', {
   // Window controls
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),

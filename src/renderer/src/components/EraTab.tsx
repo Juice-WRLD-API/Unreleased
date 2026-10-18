@@ -37,7 +37,7 @@ function EditPanel({ era, onSaved, onDeleted }: { era: Era; onSaved: (era: Era) 
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="shrink-0 px-4 py-3 border-b border-[var(--border)] bg-surface-raised flex items-center gap-2">
+      <div className="shrink-0 px-4 py-3 bg-surface-raised flex items-center gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-text-primary truncate">{era.name}</p>
           <p className="text-[10px] text-text-muted">Era #{era.id} · {era.play_count} plays</p>
@@ -125,7 +125,7 @@ export default function EraTab(): JSX.Element {
             <button
               key={e.id}
               onClick={() => setSelectedId(e.id)}
-              className={`w-full text-left px-4 py-3 border-b border-[var(--border)] transition-colors ${
+              className={`w-full text-left px-4 py-3 transition-colors ${
                 selectedId === e.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               }`}
             >

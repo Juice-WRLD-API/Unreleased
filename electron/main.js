@@ -847,6 +847,41 @@ function guardNavigation(win) {
   })
 }
 
+// electron:dev serves the renderer from http://localhost:3018, so its
+// localStorage (login token, prefs) is a different origin bucket from the
+// installed app's file:// one, even though both share this userData folder.
+// On each dev launch, read the installed app's file:// localStorage through a
+// hidden scriptless window and hand it to the first dev window's preload
+// ('dev-storage-seed'), which mirrors it in before the app boots. One-way:
+// the installed app's storage is never written. UNRELEASED_DEV_SEED=0 opts out.
+let devStorageSeed = null
+let devStorageSeedReady = Promise.resolve()
+
+function readInstalledLocalStorage() {
+  const probePath = path.join(app.getPath('temp'), 'unreleased-dev-storage-probe.html')
+  const probe = new BrowserWindow({
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+  })
+  const read = (async () => {
+    fs.writeFileSync(probePath, '<!doctype html><title>probe</title>')
+    await probe.loadFile(probePath)
+    const entries = await probe.webContents.executeJavaScript('Object.entries(localStorage)')
+    if (entries.length) devStorageSeed = entries
+    runLog('dev-seed', `copied ${entries.length} localStorage keys from the installed app`)
+  })()
+  // Never hold the dev window hostage to the probe.
+  const timeout = new Promise((resolve) => setTimeout(resolve, 5000))
+  return Promise.race([read, timeout])
+    .catch((err) => runLog('dev-seed', `skipped: ${err.message}`))
+    .finally(() => { if (!probe.isDestroyed()) probe.destroy() })
+}
+
+ipcMain.on('dev-storage-seed', (event) => {
+  event.returnValue = devStorageSeed
+  devStorageSeed = null
+})
+
 // ── Window creation ───────────────────────────────────────────────────────────
 function createWindow() {
   const mainDefaults = { width: 1280, height: 800, minWidth: 960, minHeight: 600 }
@@ -992,7 +1027,8 @@ function createWindow() {
   })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3018')
+    const win = mainWindow
+    devStorageSeedReady.then(() => { if (!win.isDestroyed()) win.loadURL('http://localhost:3018') })
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -3694,6 +3730,7 @@ app.whenReady().then(() => {
     }
   )
 
+  if (isDev && process.env.UNRELEASED_DEV_SEED !== '0') devStorageSeedReady = readInstalledLocalStorage()
   createWindow()
   if (isSmokeTest) return
   createTray()

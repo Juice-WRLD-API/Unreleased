@@ -16,8 +16,9 @@ import ContextMenu from './ContextMenu'
 import { versionsEnabled } from '../lib/versionsApi'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
-import { showAppToast } from '../lib/appToast'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { downloadFileSmart } from '../lib/cdn'
+import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const ShareSongModal = lazyOverlay(() => import('./chat/ShareSongModal'))
@@ -174,13 +175,11 @@ export default function SongContextMenu({
     const name = playlists.find(p => p.id === id)?.name ?? 'playlist'
     setDoneId(id)
     setContained(prev => new Set([...prev, id]))
-    userApi.addToPlaylist(id, songId)
-      .then(() => { autoDownloadIfOffline(id, [songId]); return refreshPlaylists() })
-      .catch(() => {
-        setDoneId(prev => (prev === id ? null : prev))
-        setContained(prev => { const next = new Set(prev); next.delete(id); return next })
-        showAppToast(`Couldn't add to "${name}"`)
-      })
+    void addSongsInBackground(id, [songId]).then(failed => {
+      if (!failed.length) return
+      setDoneId(prev => (prev === id ? null : prev))
+      setContained(prev => { const next = new Set(prev); next.delete(id); return next })
+    })
   }
 
   const createAndAdd = async (): Promise<void> => {
@@ -203,7 +202,7 @@ export default function SongContextMenu({
       await userApi.addToPlaylist(playlist.id, songId)
       await refreshPlaylists()
       onClose()
-    } catch {} finally { setBusyId(null) }
+    } catch { showAppToast("Couldn't create the playlist") } finally { setBusyId(null) }
   }
 
   const loadSessionZips = async (): Promise<void> => {

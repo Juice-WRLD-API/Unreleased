@@ -15,15 +15,17 @@ import {
 import { useStore, useStorePick } from '../store/useStore'
 import { getSkin } from '../lib/skins'
 import * as userApi from '../lib/userApi'
-import { addSongsInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { addSongsInBackground, addPlaylistInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
 import { showAppToast } from '../lib/appToast'
 import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
+import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { buildImageUrl, buildStreamUrl, JWAPI_BASE, apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
+import { buildImageUrl, buildStreamUrl, JWAPI_BASE, getSongById, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import LikedSongsView from './LikedSongsView'
@@ -568,6 +570,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // Sort + search — sort itself comes from the store (see playlistsSort)
   const [search, setSearch] = useState('')
+  const fieldSearch = useSongFieldSearch(search)
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -820,8 +823,12 @@ export default function PlaylistsView(): JSX.Element {
   const displayTracks = useMemo(() => {
     let result = tracks
     if (search.trim()) {
-      const q = search.toLowerCase()
-      result = result.filter(t => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+      // Plain words match title/artist; field:"value" tokens go through the
+      // catalogue (useSongFieldSearch), same syntax as the Tracker.
+      const q = fieldSearch.freeText
+      result = result.filter(t =>
+        (!q || t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q))
+        && fieldSearch.matchesFields(userApi.trackIdToSongId(t.id)))
     }
     if (sort.field !== 'default') {
       // Original playlist position, for the "#" column's own sort (and the
@@ -840,7 +847,7 @@ export default function PlaylistsView(): JSX.Element {
       })
     }
     return result
-  }, [tracks, search, sort])
+  }, [tracks, search, fieldSearch, sort])
 
   // Identity → original index, replacing the per-row tracks.indexOf() that
   // made rendering the detail list O(n²). displayTracks elements are the same
@@ -1053,12 +1060,12 @@ export default function PlaylistsView(): JSX.Element {
 
   const createPlaylist = async () => {
     const name = newName.trim(); if (!name) return
-    try { await userApi.createPlaylist(name); setNewName(''); setCreating(false); await refreshPlaylists() } catch {}
+    try { await userApi.createPlaylist(name); setNewName(''); setCreating(false); await refreshPlaylists() } catch { showAppToast("Couldn't create the playlist") }
   }
 
   const deleteSelected = async () => {
     if (selectedId == null) return
-    try { await userApi.deletePlaylist(selectedId); setSelectedId(null); await refreshPlaylists() } catch {}
+    try { await userApi.deletePlaylist(selectedId); setSelectedId(null); await refreshPlaylists() } catch { showAppToast("Couldn't delete the playlist") }
   }
 
   const renameSelected = async () => {
@@ -1069,7 +1076,7 @@ export default function PlaylistsView(): JSX.Element {
       setDetail(u)
       setRenaming(false)
       await refreshPlaylists()
-    } catch {}
+    } catch { showAppToast("Couldn't rename the playlist") }
   }
 
   // Optimistic remove — no loading flash
@@ -1135,7 +1142,7 @@ export default function PlaylistsView(): JSX.Element {
         for (;;) {
           const i = next++
           if (i >= ids.length) return
-          try { songs.push(await apiFetch<JWApiSong>(`/songs/${ids[i]}/`)) } catch {}
+          try { songs.push(await getSongById(ids[i])) } catch {}
         }
       }))
       if (songs.length) openBulkEditor(songs)
@@ -1242,7 +1249,7 @@ export default function PlaylistsView(): JSX.Element {
       const updated = await userApi.updatePlaylist(selectedId, { description: descValue })
       setDetail(updated)
       await refreshPlaylists()
-    } catch {}
+    } catch { showAppToast("Couldn't save the description") }
   }, [selectedId, descValue, refreshPlaylists])
 
   const isMember = (playlistId: number, songId: number): boolean | null => {
@@ -1497,7 +1504,7 @@ export default function PlaylistsView(): JSX.Element {
             try {
               if (!apiPl.is_public) { await userApi.updatePlaylist(apiPl.id, { is_public: true }); await refreshPlaylists() }
               await copyText(`${shareOrigin()}/playlists?id=${apiPl.id}&view=shared`)
-            } catch {}
+            } catch { showAppToast("Couldn't share the playlist") }
           },
         },
         {
@@ -1513,12 +1520,7 @@ export default function PlaylistsView(): JSX.Element {
           childrenEmpty: 'No other playlists',
           children: playlists.filter(p => p.id !== apiPl.id).map(p => ({
             label: p.name,
-            onSelect: async () => {
-              const srcDetail = await userApi.getPlaylist(apiPl.id)
-              await Promise.all(srcDetail.items.map(item => userApi.addToPlaylist(p.id, item.song.id).catch(() => {})))
-              await refreshPlaylists()
-              useStore.getState().autoDownloadIfOffline(p.id, srcDetail.items.map(item => item.song.id))
-            },
+            onSelect: () => { void addPlaylistInBackground(apiPl.id, p.id) },
           })),
         },
         { icon: Folder, label: 'Move to folder', children: folderChildren([`api:${apiPl.id}`]) },
@@ -2606,25 +2608,31 @@ export default function PlaylistsView(): JSX.Element {
             <div className="sticky top-0 z-20 -mx-2 px-6 pt-2 pb-1 backdrop-blur-md">
               <div className="flex items-center gap-2 mb-2">
                 {searchOpen ? (
-                  <div className="relative w-64">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-                    <input
-                      ref={searchInputRef}
-                      value={search}
-                      onChange={e => setSearch(e.target.value)}
-                      onBlur={() => { if (!search) setSearchOpen(false) }}
-                      onKeyDown={e => { if (e.key === 'Escape') { setSearch(''); (e.target as HTMLInputElement).blur() } }}
-                      placeholder={`Search ${tracks.length} tracks…`}
-                      className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl pl-8 pr-8 py-2 text-text-primary text-sm focus:outline-none focus:border-accent/50 placeholder:text-text-muted"
+                  <>
+                    <div className="relative w-64">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <input
+                        ref={searchInputRef}
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        onBlur={() => { if (!search) setSearchOpen(false) }}
+                        onKeyDown={e => { if (e.key === 'Escape') { setSearch(''); (e.target as HTMLInputElement).blur() } }}
+                        placeholder={`Search ${tracks.length} tracks…`}
+                        className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl pl-8 pr-8 py-2 text-text-primary text-sm focus:outline-none focus:border-accent/50 placeholder:text-text-muted"
+                      />
+                      <button
+                        onClick={() => { setSearch(''); setSearchOpen(false) }}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                        title="Close search"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <SearchHelpButton
+                      size={15}
+                      className={(open) => `flex items-center justify-center w-9 h-9 rounded-xl transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-primary'}`}
                     />
-                    <button
-                      onClick={() => { setSearch(''); setSearchOpen(false) }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
-                      title="Close search"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
+                  </>
                 ) : (
                   <button
                     onClick={() => setSearchOpen(true)}

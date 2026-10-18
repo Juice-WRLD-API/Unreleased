@@ -9,7 +9,7 @@ import { eraLabel } from '../lib/eras'
 import { useStore } from '../store/useStore'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
 import { prefLabel } from '../lib/versionPrefs'
-import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
+import { isPlayableSong } from '../lib/songVersions'
 
 interface VersionEntry { meta: SongVersionMeta; track: Track; inPlaylist: boolean }
 
@@ -48,8 +48,7 @@ export default function CompactVersionRows({
     if (missingIds.length === 0) { setFetched(new Map()); return }
     let cancelled = false
     getSongsByIds(missingIds)
-      .then(songs => Promise.all(songs.map(async s =>
-        s.path || (s.category === 'recording_session' && await hasPlayableSessionEdit(s.id)) ? s : null)))
+      .then(songs => Promise.all(songs.map(async s => (await isPlayableSong(s) ? s : null))))
       .then(songs => {
         if (!cancelled) setFetched(new Map(songs.filter(s => !!s).map(s => [s!.id, songToTrack(s!)])))
       })

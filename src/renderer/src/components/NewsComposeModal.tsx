@@ -9,6 +9,7 @@ import {
   type NewsItem, type NewsChannel, type NewsAttachment,
 } from '../lib/newsApi'
 import { errorMessage } from '../lib/format'
+import ThemedSelect from './ThemedSelect'
 
 // An attachment row in the composer: either one already hosted on the post
 // (kept as-is) or a freshly-picked local file (uploaded on publish).
@@ -226,10 +227,9 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={label}>Channel</span>
-              <select className={field} value={channel} onChange={(e) => setChannel(e.target.value)}>
-                {channels.length === 0 && <option value="">No channels</option>}
-                {channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
+              <ThemedSelect className={`${field} w-full`} value={String(channel)} onChange={setChannel}
+                placeholder="No channels"
+                options={channels.map((c) => ({ value: String(c.id), label: c.label }))} />
             </label>
             <label className="block">
               <span className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></span>

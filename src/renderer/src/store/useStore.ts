@@ -10,7 +10,7 @@ import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
-import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
+import { apiFetch, apiPeek, getSongById, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
 import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
@@ -21,9 +21,8 @@ import { getVersionGroup } from '../lib/versionsApi'
 // AdminPage's own tab set (see its local `Tab` type) — duplicated here rather
 // than imported so the store doesn't depend on a component file; keep in sync.
 export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes' | 'beta'
-import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
-import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
+import { setEraCoverRaw } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
@@ -1103,10 +1102,7 @@ function applyPrefToTrack(track: Track, pref: SongPreference | undefined): Track
   // ever set while the rotate-covers setting is on), then an era cover
   // override (unreleased songs only � track.genre holds the API category for
   // jw- tracks), then the song's own art.
-  const songId = userApi.trackIdToSongId(track.id)
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? (songId != null ? peekRotatedCover(songId) : undefined)
-    ?? (songId != null && track.genre !== 'released' ? resolvePrefCoverUrl(peekEraCover(track.era)) : undefined)
+  const coverUrl = overrideCoverUrl(userApi.trackIdToSongId(track.id), pref?.cover_url, track.genre, track.era)
   return {
     ...track,
     title: pref?.name || track.apiTitle || track.title,
@@ -2081,7 +2077,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // The cached song row is enough to re-derive the personalized title/cover;
     // only hit the network when there isn't one.
     const song = apiPeek<JWApiSong>(`/songs/${songId}/`)
-      ?? await apiFetch<JWApiSong>(`/songs/${songId}/`).catch(() => undefined)
+      ?? await getSongById(songId).catch(() => undefined)
     if (!song) return
     const { title, imageUrl } = offlineMetaFor(song)
     try {
@@ -3314,7 +3310,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
           get().updateDownload(downloadId, updates)
         })
         try {
-          const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+          const song = await getSongById(songId)
           const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
           const meta = offlineMetaFor(song)
           const result = await el.offlineDownloadTrack({ id, url: buildStreamUrl(song.path), ext, path: song.path, meta })
@@ -3401,7 +3397,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     const id = `jw-${songId}`
     await enqueueOfflineWork(key, async () => {
       try {
-        const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+        const song = await getSongById(songId)
         const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
         const meta = offlineMetaFor(song)
         const result = await el.offlineDownloadTrack({ id, url: buildStreamUrl(song.path), ext, path: song.path, meta })
@@ -3487,7 +3483,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     await (_offlineKeyQueues.get(key) ?? Promise.resolve()).catch(() => {})
     const entry = get().offlinePlaylists[key]
     if (!entry) return
-    const existingIds = new Set(entry.songIds.map((id) => Number(id.replace('jw-', ''))))
+    const existingIds = new Set(entry.songIds.map(userApi.trackIdToSongId).filter((id): id is number => id != null))
     const nextSongIds = [...existingIds, ...addedSongIds.filter((id) => !existingIds.has(id))]
     await get().downloadPlaylistOffline(key, entry.name, nextSongIds)
   },

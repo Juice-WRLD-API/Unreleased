@@ -5,7 +5,7 @@
 // readable from juicewrldApi's songToTrack without a cycle; everything here
 // runs at play time, well away from that path, so it can import freely.
 import {
-  apiFetch, buildStreamUrl, searchFiles, cleanTitleForSearch, titleVariants,
+  getSongById, buildStreamUrl, searchFiles, cleanTitleForSearch, titleVariants,
   JWApiSong,
 } from './juicewrldApi'
 import { getMediaType } from './fileTypes'
@@ -24,9 +24,9 @@ const _pending = new Map<number, Promise<string[]>>()
 async function fetchCandidates(songId: number): Promise<string[]> {
   let titles: string[]
   try {
-    // apiFetch caches, and the song is usually already cached from whatever
+    // getSongById caches, and the song is usually already cached from whatever
     // list it was played out of.
-    const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+    const song = await getSongById(songId)
     titles = (song.track_titles?.length ? song.track_titles : [song.name]).filter(Boolean)
   } catch {
     return []

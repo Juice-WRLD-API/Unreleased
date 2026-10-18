@@ -3,6 +3,7 @@ import { EQ_BANDS, EQ_GAIN_LIMIT, EQ_BOOST_MAX, EQ_PRESETS, EFFECTS_SUPPORTED } 
 import { formatDuration } from '../lib/format'
 import { useStore } from '../store/useStore'
 import { bandLabel, useEqualizerPanelData } from '../hooks/useEqualizerPanelData'
+import ThemedSelect from './ThemedSelect'
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
   return (
@@ -78,17 +79,16 @@ export default function EqualizerPanel({ floating = false }: { floating?: boolea
 
       {/* Preset picker */}
       <div className="px-4 pb-3">
-        <select
+        <ThemedSelect
           value={eqPreset}
-          onChange={(e) => setEqPreset(e.target.value)}
+          onChange={setEqPreset}
           disabled={!eqEnabled}
+          options={[
+            ...(eqPreset === 'custom' ? [{ value: 'custom', label: 'Custom' }] : []),
+            ...EQ_PRESETS.map((p) => ({ value: p.id, label: p.name })),
+          ]}
           className="w-full bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] disabled:opacity-50"
-        >
-          {eqPreset === 'custom' && <option value="custom">Custom</option>}
-          {EQ_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+        />
       </div>
 
       {/* Community edits - community-made audio FILES (instrumentals,
@@ -389,13 +389,12 @@ export default function EqualizerPanel({ floating = false }: { floating?: boolea
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {!sleepTimerEnd && (
-            <select
-              value={sleepMinutes}
-              onChange={(e) => setSleepMinutes(parseInt(e.target.value, 10))}
+            <ThemedSelect
+              value={String(sleepMinutes)}
+              onChange={(v) => setSleepMinutes(parseInt(v, 10))}
+              options={[15, 30, 45, 60, 90].map((m) => ({ value: String(m), label: `${m} min` }))}
               className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-            >
-              {[15, 30, 45, 60, 90].map((m) => <option key={m} value={m}>{m} min</option>)}
-            </select>
+            />
           )}
           <button
             onClick={() => setSleepTimer(sleepTimerEnd ? null : Date.now() + sleepMinutes * 60 * 1000)}
@@ -412,16 +411,15 @@ export default function EqualizerPanel({ floating = false }: { floating?: boolea
       {outputDevices.length > 0 && (
         <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-0.5">
           <p className="text-xs text-text-secondary shrink-0">Output</p>
-          <select
+          <ThemedSelect
             value={audioOutput}
-            onChange={(e) => setAudioOutput(e.target.value)}
-            className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] max-w-[200px] truncate"
-          >
-            <option value="">Default</option>
-            {outputDevices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${d.deviceId.slice(0, 8)}`}</option>
-            ))}
-          </select>
+            onChange={setAudioOutput}
+            options={[
+              { value: '', label: 'Default' },
+              ...outputDevices.map((d) => ({ value: d.deviceId, label: d.label || `Output ${d.deviceId.slice(0, 8)}` })),
+            ]}
+            className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] min-w-0 max-w-[200px]"
+          />
         </div>
       )}
     </div>

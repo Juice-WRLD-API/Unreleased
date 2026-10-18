@@ -97,6 +97,13 @@ function normalize(s: string): string {
   return s.replace(/['’‘]/g, '').toLowerCase()
 }
 
+/** The same apostrophe-insensitive substring test field filters use, for
+ *  callers matching against something other than a JWApiSong (999 FM's
+ *  library tracks). */
+export function textMatches(haystack: string, needle: string): boolean {
+  return normalize(haystack).includes(normalize(needle))
+}
+
 /** Optional /songs/ fields the given filters read - see useTrackerOmit. */
 export function filterApiFields(filters: FieldFilter[]): string[] {
   return filters.flatMap(({ field }) => FIELD_LOOKUP.get(field)?.api ?? [])
@@ -106,6 +113,15 @@ export function matchesFieldFilters(song: JWApiSong, filters: FieldFilter[]): bo
   return filters.every(({ field, value }) => {
     const def = FIELD_LOOKUP.get(field)
     if (!def) return true
-    return normalize(def.get(song)).includes(normalize(value))
+    return textMatches(def.get(song), value)
   })
+}
+
+// Id lookup over the /songs/ catalogue (loadAllSongs), rebuilt only when the
+// catalogue itself is refetched - for lists whose rows carry a song id but
+// not the fields filters read (playlists, the queue, the tier list).
+let byIdIndex: { list: JWApiSong[]; byId: Map<number, JWApiSong> } | null = null
+export function songsById(list: JWApiSong[]): Map<number, JWApiSong> {
+  if (byIdIndex?.list !== list) byIdIndex = { list, byId: new Map(list.map((s) => [s.id, s])) }
+  return byIdIndex.byId
 }

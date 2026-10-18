@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AccountUser } from '../lib/userApi'
 import type { Track, FullTrack } from '../types'
 import type { RadioTrack, RadioVote } from '../lib/radioLive'
-import { buildImageUrl, apiFetch, songToTrack, smallCoverUrl } from '../lib/juicewrldApi'
+import { buildImageUrl, getSongById, songToTrack, smallCoverUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
@@ -16,6 +16,7 @@ import type { RadioLibraryTrack } from '../lib/radioLibrary'
 import { isLrcFormat, parseLrc } from '../lib/lyrics'
 import { resumeEffectsContext } from '../lib/audioEffects'
 import { useStore } from '../store/useStore'
+import { showAppToast } from '../lib/appToast'
 
 type RadioFmMatchedSong = {
   songId: number | null
@@ -153,19 +154,18 @@ export function useWrldNowPlaying(
 }
 
 /** Play a sibling version of the current song from the version-notch menu.
- * Byte-identical in both views - fetching songVersions itself is NOT shared,
- * since desktop gates playability via resolveSessionEditSource(song).path
- * while mobile only checks song.path, a genuine behavioral difference. */
+ * The list itself comes from useSongVersions (shared with Change version),
+ * which already fetched each song, so getSongById is normally a cache hit. */
 export function usePlayVersion(): (songId: number) => Promise<void> {
   return async (songId: number): Promise<void> => {
     try {
-      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+      const song = await getSongById(songId)
       const track = songToTrack(song)
       // Swap in place so the rest of the queue survives the version change.
       const { currentTrack, changeVersion, playTrack } = useStore.getState()
       if (currentTrack) changeVersion(currentTrack, track)
       else playTrack(track, [track])
-    } catch {}
+    } catch { showAppToast("Couldn't switch to that version") }
   }
 }
 

@@ -4,8 +4,10 @@
 // the old state and calls showAppToast so the revert doesn't look like a
 // glitch. Rendered by AppToastHost, mounted once in App.tsx. Plain module
 // state rather than the store, so lib code and the store itself can call it.
+// An 'info' toast can carry one action button (e.g. "queue ended - start radio").
 
-export interface AppToast { id: number; text: string }
+export interface AppToastAction { label: string; onClick: () => void }
+export interface AppToast { id: number; text: string; tone: 'error' | 'info'; action?: AppToastAction }
 
 type Listener = (toasts: AppToast[]) => void
 
@@ -22,13 +24,14 @@ export function dismissAppToast(id: number): void {
   emit()
 }
 
-export function showAppToast(text: string): void {
+export function showAppToast(text: string, opts?: { tone?: 'error' | 'info'; action?: AppToastAction }): void {
   const id = nextId++
   // Same text already showing (e.g. a bulk add where every request failed):
   // keep the one toast instead of stacking copies.
-  toasts = [...toasts.filter(t => t.text !== text).slice(-2), { id, text }]
+  toasts = [...toasts.filter(t => t.text !== text).slice(-2), { id, text, tone: opts?.tone ?? 'error', action: opts?.action }]
   emit()
-  setTimeout(() => dismissAppToast(id), 4200)
+  // A toast with a button stays up a bit longer so there's time to reach it.
+  setTimeout(() => dismissAppToast(id), opts?.action ? 6500 : 4200)
 }
 
 export function subscribeAppToasts(listener: Listener): () => void {

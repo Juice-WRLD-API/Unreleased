@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { PlaylistDetail } from '../lib/userApi'
+import { showAppToast } from '../lib/appToast'
 
 export type CoverData = { cover_image?: string | null; cover_image_url?: string | null }
 
@@ -101,7 +102,7 @@ export function usePlaylistCoverEditing(
       setCoverData({ cover_image: result.cover_image, cover_image_url: result.cover_image_url })
       setCovers(prev => ({ ...prev, [selectedId]: result.cover_image_url ?? result.cover_image ?? null }))
       await refreshPlaylists()
-    } catch {}
+    } catch { showAppToast("Couldn't upload the cover") }
     setCoverUploading(false)
   }, [selectedId, coverUploading, refreshPlaylists, setCoverData, setCoverImgError, setCovers])
 

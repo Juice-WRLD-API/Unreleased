@@ -292,6 +292,15 @@ html.wrld-active #root {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Number inputs: drop the OS-drawn spin buttons, which render as light grey
+   arrows on the dark fields. Arrow keys and the wheel still step the value. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+
 /* Range input */
 input[type='range'] {
   -webkit-appearance: none;

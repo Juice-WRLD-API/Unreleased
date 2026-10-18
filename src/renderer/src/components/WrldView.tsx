@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2 } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2, Star, Ban } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
 import CoverEditor from './CoverEditor'
@@ -10,19 +10,25 @@ import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords
 import { formatDuration } from '../lib/format'
 import { setEqAnchor } from '../lib/eqAnchor'
 import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
-import { buildImageUrl, apiFetch, getSongsByIds, songToTrack, playlistCoverUrl, smallCoverUrl, fullCoverUrl, resolveSessionEditSource, loadAllSongs, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { getSongById, songToTrack, playlistCoverUrl, smallCoverUrl, fullCoverUrl, loadAllSongs } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album as WrldAlbum } from '../lib/albumsApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
-import { getVersionGroup } from '../lib/versionsApi'
+import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
+import { useSongVersions } from '../hooks/useSongVersions'
+import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import * as userApi from '../lib/userApi'
-import { showAppToast } from '../lib/appToast'
+// Next goes through Player's handler, like the bottom bar, tray and hotkey:
+// repeat-one restarts, crossfade is cancelled, and an empty queue offers radio.
+import { runHotkeyAction } from '../lib/hotkeys'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
+import { SearchHelpButton } from './SearchHelpPopover'
 import ContextMenu from './ContextMenu'
 import { getSkin } from '../lib/skins'
 import WrldVisualizer from './WrldVisualizer'
@@ -47,7 +53,7 @@ export default function WrldView(): JSX.Element {
     playTrack,
     isPlaying, setIsPlaying, volume, setVolume,
     shuffle, repeat, toggleShuffle, toggleRepeat,
-    nextTrack, prevTrack,
+    prevTrack,
     showQueue, setShowQueue,
     audioOutput, setAudioOutput,
     wrldThemeBackground,
@@ -79,7 +85,6 @@ export default function WrldView(): JSX.Element {
     repeat: s.repeat,
     toggleShuffle: s.toggleShuffle,
     toggleRepeat: s.toggleRepeat,
-    nextTrack: s.nextTrack,
     prevTrack: s.prevTrack,
     showQueue: s.showQueue,
     setShowQueue: s.setShowQueue,
@@ -117,7 +122,7 @@ export default function WrldView(): JSX.Element {
     if (coverSongId == null) return
     setCoverPickerSong(null)
     setShowCoverPicker(true)
-    apiFetch<JWApiSong>(`/songs/${coverSongId}/`)
+    getSongById(coverSongId)
       .then(song => setCoverPickerSong(song))
       .catch(() => setShowCoverPicker(false))
   }
@@ -274,23 +279,13 @@ export default function WrldView(): JSX.Element {
   useEffect(() => {
     albumsApi.fetchAlbums().then(setWrldAlbums).catch(() => {})
     loadAllSongs()
-      .then(list => setAlbumSongIndex(new Map(list.filter(s => s.path).map(s => [s.path as string, s]))))
+      .then(list => setAlbumSongIndex(albumsApi.indexSongsByPath(list)))
       .catch(() => {})
   }, [])
 
   // Subscribed rather than peeked so a cover/name personalized while the
   // notch is open shows up without a reload.
   const songPrefs = useStore(s => s.songPrefs)
-
-  // The lead track's personalized cover wins, then the album's own cover,
-  // then the lead track's API art. The raw `image_url` alone skipped both of
-  // the first two - and comes back "null" for most unreleased songs.
-  const albumCoverUrl = (album: WrldAlbum, leadPath: string | undefined): string | undefined => {
-    const song = albumSongIndex.get(leadPath ?? '')
-    return (song ? resolvePrefCoverUrl(songPrefs[song.id]?.cover_url) : undefined)
-      ?? buildImageUrl(album.cover_url)
-      ?? buildImageUrl(song?.image_url)
-  }
 
   const handlePlayAlbumSong = (path: string) => {
     const song = albumSongIndex.get(path)
@@ -304,8 +299,16 @@ export default function WrldView(): JSX.Element {
 
   // Sibling versions of the currently playing song (v1/v2/TV Mix/etc, linked
   // via juicewrldapi's /versions/ table - see versionsApi.ts), shown as
-  // a single notch menu next to the cover art.
-  const [songVersions, setSongVersions] = useState<{ songId: number; label: string | null }[]>([])
+  // a single notch menu next to the cover art, each with the same prefer
+  // (star) / exclude (ban) toggles as the Change-version menu - and the same
+  // list and cache (useSongVersions). This notch just labels each by its
+  // version alone, since the song itself is already on screen.
+  const versionSongId = !radioFmActive && currentTrack ? userApi.trackIdToSongId(currentTrack.id) : null
+  const { versions: songVersionOptions, members: songVersionMembers } = useSongVersions(versionSongId)
+  const songVersions = useMemo(
+    () => (songVersionOptions ?? []).map(v => ({ songId: v.song.id, label: v.version ?? v.versionTitle, version: v.version })),
+    [songVersionOptions]
+  )
   const [songVersionMenuOpen, setSongVersionMenuOpen] = useState(false)
   // Portaled + measured rather than anchored inline: the menu is anchored to
   // the cover art, which lives inside the (overflow-y-auto) left column, and
@@ -317,31 +320,6 @@ export default function WrldView(): JSX.Element {
   const songVersionBtnRef = useRef<HTMLButtonElement>(null)
   const songVersionMenuRef = useRef<HTMLDivElement>(null)
   const [songVersionMenuPos, setSongVersionMenuPos] = useState({ top: 0, right: 0 })
-  useEffect(() => {
-    if (radioFmActive || !currentTrack?.id) { setSongVersions([]); return }
-    const numericId = parseInt(currentTrack.id.replace('jw-', ''), 10)
-    if (isNaN(numericId)) { setSongVersions([]); return }
-    let cancelled = false
-    getVersionGroup(numericId).then(async metas => {
-      if (cancelled) return
-      // A version linked in the /versions/ table isn't necessarily playable -
-      // recording-session songs (and some unsurfaced ones) have no `path`,
-      // same gate used for bulk queue/playlist adds elsewhere in the app.
-      const songs = await getSongsByIds(metas.map(m => m.songId)).catch(() => [])
-      const byId = new Map(songs.map(s => [s.id, s]))
-      const withPaths = metas.map(m => {
-        const song = byId.get(m.songId)
-        return song && resolveSessionEditSource(song).path ? m : null
-      })
-      if (cancelled) return
-      setSongVersions(
-        withPaths
-          .filter((m): m is NonNullable<typeof m> => !!m)
-          .map(m => ({ songId: m.songId, label: m.version ?? m.versionTitle }))
-      )
-    })
-    return () => { cancelled = true }
-  }, [currentTrack?.id, radioFmActive])
 
   // Keep the portaled version menu pinned beside its button: vertically
   // centred on the notch, then clamped so a long version list can't run off
@@ -365,6 +343,7 @@ export default function WrldView(): JSX.Element {
   }, [songVersionMenuOpen, songVersions])
 
   const handlePlayVersion = usePlayVersion()
+  const songVersionPrefs = useVersionPrefToggles(songVersionMembers)
 
   const { rawLyrics, isSynced, isEditor, syncedLines } = useWrldLyricsSource(
     radioFmActive, radioFmMatchedSong, currentTrackFull, account,
@@ -394,13 +373,9 @@ export default function WrldView(): JSX.Element {
   // same polarity as the text.
   const trackBg  = textIsDark ? 'rgba(0,0,0,0.15)'  : 'rgba(255,255,255,0.18)'
 
-  const handleAddToPlaylist = async (playlistId: number) => {
-    if (!currentTrack?.id) return
-    const numericId = parseInt(currentTrack.id.replace('jw-', ''), 10)
-    if (isNaN(numericId)) return
-    try {
-      await userApi.addToPlaylist(playlistId, numericId)
-    } catch { showAppToast("Couldn't add to playlist") }
+  const handleAddToPlaylist = (playlistId: number): void => {
+    const songId = currentTrack ? userApi.trackIdToSongId(currentTrack.id) : null
+    if (songId != null) void addSongsInBackground(playlistId, [songId])
   }
 
   type NotchCategory = 'albums' | 'mixtapes' | 'unreleased' | 'playlists'
@@ -564,14 +539,20 @@ export default function WrldView(): JSX.Element {
             {proposeError && (
               <p className="text-red-400/80 text-xs pl-1">{proposeError}</p>
             )}
-            <div className="relative">
-              <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
-              <input
-                type="text" value={suggestQuery}
-                onChange={(e) => setSuggestQuery(e.target.value)}
-                placeholder="Search songs…"
-                className="w-full bg-white/5 text-white/80 text-sm rounded-xl py-2 pl-8 pr-3 border border-white/10 focus:outline-none focus:border-white/25 transition-colors"
-                style={{ colorScheme: 'dark' }}
+            {/* Same field:"value" syntax as the Tracker - see searchRadioLibrary. */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1 min-w-0">
+                <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
+                <input
+                  type="text" value={suggestQuery}
+                  onChange={(e) => setSuggestQuery(e.target.value)}
+                  placeholder='Search, or producers:"Nick Mira"…'
+                  className="w-full bg-white/5 text-white/80 text-sm rounded-xl py-2 pl-8 pr-3 border border-white/10 focus:outline-none focus:border-white/25 transition-colors"
+                  style={{ colorScheme: 'dark' }}
+                />
+              </div>
+              <SearchHelpButton
+                className={(open) => `p-2 rounded-xl border transition-colors ${open ? 'bg-white/15 border-white/25 text-white/80' : 'bg-white/5 border-white/10 text-white/35 hover:text-white/70'}`}
               />
             </div>
             {suggestLoading && <p className="text-white/25 text-xs pl-1">Searching…</p>}
@@ -627,8 +608,7 @@ export default function WrldView(): JSX.Element {
   const AlbumsGrid = () => (
     <div className="grid grid-cols-2 gap-2.5 pb-2">
       {wrldAlbums.map(album => {
-        const firstPath = [...album.songs].sort((a, b) => a.order - b.order)[0]?.path
-        const coverUrl = albumCoverUrl(album, firstPath)
+        const coverUrl = albumsApi.albumCoverUrl(album, albumSongIndex, songPrefs)
         return (
           <button
             key={album.id}
@@ -667,8 +647,8 @@ export default function WrldView(): JSX.Element {
   const AlbumDetail = ({ albumId }: { albumId: number }): JSX.Element | null => {
     const album = wrldAlbums.find(a => a.id === albumId)
     if (!album) return null
-    const tracks = [...album.songs].sort((a, b) => a.order - b.order)
-    const coverUrl = albumCoverUrl(album, tracks[0]?.path)
+    const tracks = albumsApi.albumTracks(album)
+    const coverUrl = albumsApi.albumCoverUrl(album, albumSongIndex, songPrefs)
 
     return (
       <div className="flex flex-col gap-3">
@@ -932,7 +912,7 @@ export default function WrldView(): JSX.Element {
                         : <Play  size={20} fill="currentColor" className="ml-0.5" />}
                     </button>
                     <button
-                      onClick={() => nextTrack()}
+                      onClick={() => runHotkeyAction('next')}
                       disabled={noTrack}
                       className="p-2 rounded-full transition-opacity hover:opacity-70"
                       style={{ color: txtPri }}
@@ -1128,7 +1108,7 @@ export default function WrldView(): JSX.Element {
 
                   {/* Next */}
                   <button
-                    onClick={() => nextTrack()}
+                    onClick={() => runHotkeyAction('next')}
                     disabled={noTrack}
                     className="p-2 rounded-full transition-opacity hover:opacity-70"
                     style={{ color: txtPri }}
@@ -1235,15 +1215,40 @@ export default function WrldView(): JSX.Element {
                   }`}
                   style={{ top: songVersionMenuPos.top, right: songVersionMenuPos.right, scrollbarWidth: 'thin' }}
                 >
-                  {songVersions.map((v, i) => (
-                    <button
-                      key={v.songId}
-                      onClick={() => { setSongVersionMenuOpen(false); handlePlayVersion(v.songId) }}
-                      className="w-full px-3 py-1.5 text-left text-[10px] font-medium text-white/70 hover:text-white/95 hover:bg-white/[0.08] transition-colors whitespace-nowrap"
-                    >
-                      {v.label ?? `Version ${i + 1}`}
-                    </button>
-                  ))}
+                  {songVersions.map((v, i) => {
+                    const preferred = songVersionPrefs.isPreferred(v.version)
+                    const excluded = songVersionPrefs.isExcluded(v.version)
+                    return (
+                      <div key={v.songId} className="flex items-center pr-1 hover:bg-white/[0.08] transition-colors">
+                        <button
+                          onClick={() => { setSongVersionMenuOpen(false); handlePlayVersion(v.songId) }}
+                          className={`flex-1 min-w-0 pl-3 pr-2 py-1.5 text-left text-[10px] font-medium text-white/70 hover:text-white/95 transition-colors whitespace-nowrap ${excluded ? 'opacity-50' : ''}`}
+                        >
+                          {v.label ?? `Version ${i + 1}`}
+                        </button>
+                        {v.version && (
+                          <>
+                            <button
+                              onClick={() => songVersionPrefs.togglePreferred({ songId: v.songId, version: v.version })}
+                              title={preferred ? 'Preferred - click to unset' : `Prefer "${v.version}" for this song (several preferred = one picked at random)`}
+                              aria-pressed={preferred}
+                              className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${preferred ? 'text-accent' : 'text-white/40 hover:text-white/90'}`}
+                            >
+                              <Star size={11} fill={preferred ? 'currentColor' : 'none'} />
+                            </button>
+                            <button
+                              onClick={() => songVersionPrefs.toggleExcluded({ songId: v.songId, version: v.version })}
+                              title={excluded ? 'Excluded - click to allow again' : `Never auto-pick "${v.version}" for this song`}
+                              aria-pressed={excluded}
+                              className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${excluded ? 'text-red-400' : 'text-white/40 hover:text-white/90'}`}
+                            >
+                              <Ban size={11} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </>,
               document.body
@@ -1676,8 +1681,14 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
   const [search, setSearch] = useState('')
 
   const query = search.trim().toLowerCase()
-  const matchesQuery = (track: Track): boolean =>
-    !query || track.title.toLowerCase().includes(query) || track.artist.toLowerCase().includes(query)
+  // Plain words match title/artist; field:"value" tokens (Tracker syntax) are
+  // checked against the catalogue by song id - see useSongFieldSearch.
+  const fieldSearch = useSongFieldSearch(search)
+  const matchesQuery = (track: Track): boolean => {
+    const q = fieldSearch.freeText
+    return (!q || track.title.toLowerCase().includes(q) || track.artist.toLowerCase().includes(q))
+      && fieldSearch.matchesFields(userApi.trackIdToSongId(track.id))
+  }
   // Pair each track with its original absolute index so onPlay/onRemove keep
   // working correctly after filtering shrinks the array.
   const upcomingIndexed = upcoming.map((track, i) => ({ track, i }))
@@ -1747,6 +1758,10 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
                 <X size={12} />
               </button>
             )}
+            <SearchHelpButton
+              size={12}
+              className={(open) => `flex transition-colors ${open ? 'text-white/90' : 'text-white/50 hover:text-white/90'}`}
+            />
           </div>
         </div>
       )}

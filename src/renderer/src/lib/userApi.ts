@@ -1,10 +1,8 @@
 import { Track, ViewType, DonorPlaylist } from '../types'
-import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
+import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
 import type { WireSongPreference } from './songPrefs'
-import { peekRotatedCover } from './coverRotation'
-import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
@@ -321,11 +319,8 @@ export function liteSongToTrack(song: ApiSongLite): Track {
   const apiTitle = song.name
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
-  // Same precedence as songToTrack: user cover, then a rotated suggestion,
-  // then an era cover override (unreleased songs only).
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? peekRotatedCover(song.id)
-    ?? (song.category !== 'released' ? resolvePrefCoverUrl(peekEraCover(song.era?.name)) : undefined)
+  // Same precedence as songToTrack (overrideCoverUrl).
+  const coverUrl = overrideCoverUrl(song.id, pref?.cover_url, song.category, song.era?.name)
   return {
     id: `jw-${song.id}`,
     path: song.path,

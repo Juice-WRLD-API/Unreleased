@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { Avatar } from './adminShared'
-import { apiFetch, songToTrack, smallCoverUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { getSongById, songToTrack, smallCoverUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { eraFullName, loadEraFullNames } from '../lib/eras'
 import { ELECTRON_TITLEBAR_CLEARANCE_Y } from '../lib/platform'
@@ -681,7 +681,7 @@ export default function HeardleView(): JSX.Element {
     if (!answer) return
     stopPlayback()
     try {
-      const song = await apiFetch<JWApiSong>(`/songs/${answer.id}/`)
+      const song = await getSongById(answer.id)
       const track = songToTrack(song)
       playTrack(track, [track])
     } catch {

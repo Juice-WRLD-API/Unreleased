@@ -6,7 +6,7 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
-import { setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { setPlaylistPublic, addPlaylistInBackground } from '../lib/optimisticPlaylist'
 import type { PlaylistSummary } from '../lib/userApi'
 import { JWAPI_BASE, buildStreamUrl } from '../lib/juicewrldApi'
 import { shareOrigin } from '../lib/platform'
@@ -15,6 +15,7 @@ import { Track } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
 import ContextMenu from './ContextMenu'
+import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
@@ -156,7 +157,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
       await copyText(`${shareOrigin()}/playlists?id=${playlist.id}&view=shared`)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
-    } catch {}
+    } catch { showAppToast("Couldn't share the playlist") }
   }
 
   const shareToChat = async (): Promise<void> => {
@@ -179,12 +180,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
     if (actual !== next) setPlaylist(p => ({ ...p, is_public: actual }))
   }
 
-  const addAllTo = async (targetId: number): Promise<void> => {
-    const src = await userApi.getPlaylist(playlist.id)
-    await Promise.all(src.items.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
-    await refreshPlaylists()
-    useStore.getState().autoDownloadIfOffline(targetId, src.items.map(item => item.song.id))
-  }
+  const addAllTo = (targetId: number): Promise<void> => addPlaylistInBackground(playlist.id, targetId)
 
   const commitRename = async (): Promise<void> => {
     const val = renameVal.trim() || playlist.name

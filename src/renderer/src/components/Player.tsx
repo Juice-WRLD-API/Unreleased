@@ -45,8 +45,10 @@ import { isSessionEditPlaceholder, peekSessionEditLink, sessionEditSongId } from
 import { peekActiveChannel } from '../lib/activeChannelState'
 import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
+import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
+import { showAppToast } from '../lib/appToast'
 
 // Downloaded-for-offline audio always wins over streaming — same track id,
 // just playing from local disk instead of the API. Donor cloud files can't be
@@ -312,9 +314,9 @@ export default function Player(): JSX.Element {
       return
     }
     if (!currentTrack) return
-    const match = currentTrack.id.match(/^jw-(\d+)$/)
-    if (!match) return
-    useStore.getState().setInfoSongId(Number(match[1]))
+    const songId = trackIdToSongId(currentTrack.id)
+    if (songId == null) return
+    useStore.getState().setInfoSongId(songId)
   }
 
   // Two audio slots — ping-pong between them for crossfade
@@ -562,9 +564,8 @@ export default function Player(): JSX.Element {
       })
     }
     // Fetch lyrics from API if this is a tracker song (id = "jw-{n}")
-    const match = currentTrack.id.match(/^jw-(\d+)$/)
-    if (match) {
-      const songId = Number(match[1])
+    const songId = trackIdToSongId(currentTrack.id)
+    if (songId != null) {
       // Serve from session cache to avoid re-hitting /songs/ when replaying
       // or revisiting a song.
       const cached = lyricsCache.get(songId)
@@ -861,6 +862,7 @@ export default function Player(): JSX.Element {
       // far better than a play button that lies.
       if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
       console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason})`)
+      showAppToast(`Couldn't play "${track.title}"`)
       setIsPlaying(false)
       return
     }
@@ -936,6 +938,7 @@ export default function Player(): JSX.Element {
   const skipUnplayableTrack = (): void => {
     if (consecutiveSkips.current >= MAX_CONSECUTIVE_SKIPS) {
       console.error('Too many unplayable tracks in a row — stopping playback')
+      showAppToast("Stopped: several songs in a row couldn't be played")
       setIsPlaying(false)
       return
     }
@@ -1562,6 +1565,9 @@ export default function Player(): JSX.Element {
     }
     const previousId = currentTrack?.id
     const next = nextTrack()
+    // Nothing left to skip to (radio returns null too, but only while its
+    // next song is still loading - it plays that once it lands).
+    if (!next && !useStore.getState().radioMode) showQueueEndedToast()
     // A single-item repeat-all queue (or a duplicate id) also bypasses the
     // id-keyed load effect and therefore needs an explicit physical restart.
     if (next?.id === previousId) restartCurrentTrack(useStore.getState().isPlaying)

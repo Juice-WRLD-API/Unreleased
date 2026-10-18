@@ -10,6 +10,7 @@ import {
   MEMBER_FLAGS, useChannelList, useToggleChannelActive, useChannelMembers,
   useCreateChannel, useEditChannel,
 } from '../hooks/useChannelsAdmin'
+import ThemedSelect from './ThemedSelect'
 
 function CreatePanel({ onCreated }: { onCreated: () => void }): JSX.Element {
   const { name, setName, description, setDescription, busy, error, submit } = useCreateChannel(onCreated)
@@ -58,21 +59,18 @@ function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[]
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="shrink-0 px-4 py-3 border-b border-[var(--border)] bg-surface-raised">
+      <div className="shrink-0 px-4 py-3 bg-surface-raised">
         <p className="text-sm font-bold text-text-primary flex items-center gap-2">
           <Users size={14} /> Members · {channel.name}
         </p>
         <div className="flex items-center gap-2 mt-2">
-          <select
-            value={addUserId}
-            onChange={(e) => setAddUserId(e.target.value)}
-            className="flex-1 bg-surface-overlay border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/40"
-          >
-            <option value="">Add a user…</option>
-            {addable.map((u) => (
-              <option key={u.user_id} value={u.user_id}>{discordHandle(u)}</option>
-            ))}
-          </select>
+          <ThemedSelect
+            value={String(addUserId)}
+            onChange={setAddUserId}
+            placeholder="Add a user…"
+            options={addable.map((u) => ({ value: String(u.user_id), label: discordHandle(u) }))}
+            className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/40"
+          />
           <button
             onClick={onAdd}
             disabled={!addUserId}
@@ -91,7 +89,7 @@ function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[]
           <Empty label="No members yet" />
         ) : (
           members.map((m) => (
-            <div key={m.user_id} className="px-4 py-3 border-b border-[var(--border)]">
+            <div key={m.user_id} className="px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
                 <p className="text-sm font-medium text-text-primary flex-1 truncate">{m.username}</p>
                 {busyUser === m.user_id && <Loader2 size={13} className="animate-spin text-text-muted" />}
@@ -176,7 +174,7 @@ export default function ChannelsTab(): JSX.Element {
             <button
               key={c.id}
               onClick={() => { setSelected(c); setEditing(false) }}
-              className={`w-full text-left px-4 py-3 border-b border-[var(--border)] transition-colors ${
+              className={`w-full text-left px-4 py-3 transition-colors ${
                 current?.id === c.id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               }`}
             >
@@ -200,7 +198,7 @@ export default function ChannelsTab(): JSX.Element {
           <Empty label="Select a channel" />
         ) : (
           <>
-            <div className="shrink-0 px-4 py-3 border-b border-[var(--border)] bg-surface-raised flex items-center gap-2">
+            <div className="shrink-0 px-4 py-3 bg-surface-raised flex items-center gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-text-primary truncate">{current.name}</p>
                 <p className="text-[10px] text-text-muted">{current.slug}{current.description ? ` · ${current.description}` : ''}</p>

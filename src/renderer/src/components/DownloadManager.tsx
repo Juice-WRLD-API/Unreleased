@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Download, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, FolderOpen, ArrowDownToLine, ArrowUpFromLine, FolderPlus, FolderInput, Send, Trash2, Plus, Pencil, Check } from 'lucide-react'
+import ThemedCheckbox from './ThemedCheckbox'
 import { useStore, useStorePick, DownloadItem, StagedFileChange, StagedSongChange } from '../store/useStore'
 import { formatBytes } from '../lib/format'
 import { cancelCompUpload, cancelAllCompUploads } from '../lib/compUploads'
@@ -325,7 +326,7 @@ function StagedFileRow({ change, disabled }: { change: StagedFileChange; disable
             </label>
             {change.changeType === 'upload' && (
               <label className="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
-                <input type="checkbox" checked={isNewLeak} onChange={e => setIsNewLeak(e.target.checked)} className="accent-[var(--accent)]" />
+                <ThemedCheckbox checked={isNewLeak} onChange={setIsNewLeak} size={12} />
                 New leak
               </label>
             )}

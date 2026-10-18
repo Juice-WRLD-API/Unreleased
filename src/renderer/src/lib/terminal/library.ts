@@ -1,9 +1,10 @@
 import { useStore } from '../../store/useStore'
-import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, type PlaylistSummary } from '../userApi'
+import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, trackIdToSongId, type PlaylistSummary } from '../userApi'
 import { getSongById, getSongsByIds, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { completeSongs, songFromArg } from './player'
 import { PLAYLIST_EDIT_SUBS, runPlaylistEdit } from './playlistEdit'
 import { pageRows } from './more'
+import { parseSearchQuery, matchesFieldFilters } from '../trackerSearch'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -25,13 +26,13 @@ async function playlistFromArg(arg: string): Promise<PlaylistSummary> {
   return pickByName(list, (p) => p.name, arg) ?? fail(`no single playlist matches "${arg.trim()}" (try: playlists)`)
 }
 
-async function playlistTracks(id: number): Promise<{ name: string; tracks: ReturnType<typeof songToTrack>[]; songs: { id: number; name: string }[] }> {
+async function playlistTracks(id: number): Promise<{ name: string; tracks: ReturnType<typeof songToTrack>[]; songs: JWApiSong[] }> {
   const detail = await getPlaylist(id)
   const ordered = [...detail.items].sort((a, b) => a.position - b.position)
   const songs = await getSongsByIds(ordered.map((i) => i.song.id))
   const byId = new Map(songs.map((s) => [s.id, s]))
   const found = ordered.map((i) => byId.get(i.song.id)).filter((s): s is NonNullable<typeof s> => !!s)
-  return { name: detail.name, tracks: found.map(songToTrack), songs: found.map((s) => ({ id: s.id, name: s.name })) }
+  return { name: detail.name, tracks: found.map(songToTrack), songs: found }
 }
 
 const SUBS = ['play', 'shuffle', 'show', 'create', 'delete', 'add', 'remove', 'open', ...PLAYLIST_EDIT_SUBS]
@@ -104,7 +105,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
   },
   {
     name: 'playlist', aliases: ['pl'], group: 'Library',
-    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
+    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  show <name|N> -- <filter>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
     covers: [
       'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
       'userApi.renamePlaylist', 'userApi.updatePlaylist', 'userApi.reorderPlaylist', 'userApi.uploadPlaylistCover', 'userApi.removePlaylistCover',
@@ -126,9 +127,18 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
           return
         }
         case 'show': case 'ls': {
-          const pl = await playlistFromArg(rest)
+          // Optional `-- <filter>`, the playlist search's syntax: plain words
+          // match title/artist, field:"value" tokens any Tracker field.
+          const [plArg, filter = ''] = rest.split(/\s+--\s+/)
+          const pl = await playlistFromArg(plArg)
           const { songs } = await playlistTracks(pl.id)
-          ctx.print(`${pl.name}\n${songs.length ? pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${songs[i].name}`, 80) : '(empty)'}`)
+          const { freeText, filters } = parseSearchQuery(filter)
+          const q = freeText.toLowerCase()
+          const shown = songs
+            .map((song, i) => ({ song, n: i + 1 }))
+            .filter(({ song }) => (!q || song.name.toLowerCase().includes(q) || song.credited_artists.toLowerCase().includes(q)) && matchesFieldFilters(song, filters))
+          const empty = songs.length ? `nothing in ${pl.name} matches "${filter}"` : '(empty)'
+          ctx.print(`${pl.name}\n${shown.length ? pageRows(shown.length, (i) => `${String(shown[i].n).padStart(3)}  ${shown[i].song.name}`, 80) : empty}`)
           return
         }
         case 'open': {
@@ -174,7 +184,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
     complete: (before, partial) => (before.length === 0 ? ['play'].filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
       const ids = st().likedTrackIds
-      const songIds = ids.map((id) => /^jw-(\d+)$/.exec(id)?.[1]).filter((n): n is string => !!n).map(Number)
+      const songIds = ids.map(trackIdToSongId).filter((n): n is number => n != null)
       const other = ids.length - songIds.length
       if (songIds.length === 0) { ctx.print(other ? `${other} liked file${other === 1 ? '' : 's'} (no library songs)` : 'no liked songs yet', 'dim'); return }
       const songs = await getSongsByIds(songIds.slice(0, 200))

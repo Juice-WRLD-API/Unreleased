@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { PlaylistDetail } from '../lib/userApi'
 import { shareOrigin } from '../lib/platform'
+import { showAppToast } from '../lib/appToast'
 
 export function usePlaylistSharing(
   selectedId: number | null,
@@ -24,7 +25,7 @@ export function usePlaylistSharing(
     try {
       const updated = await userApi.updatePlaylist(selectedId, { is_public: !detail.is_public })
       setDetail(updated)
-    } catch (e) { console.error('toggle public failed', e) }
+    } catch (e) { console.error('toggle public failed', e); showAppToast("Couldn't change the playlist's visibility") }
     finally { setTogglingPublic(false) }
   }, [selectedId, detail, setDetail])
 
@@ -39,7 +40,7 @@ export function usePlaylistSharing(
       await copyText(`${shareOrigin()}/playlists?id=${selectedId}&view=shared`)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2500)
-    } catch {}
+    } catch { showAppToast("Couldn't share the playlist") }
   }, [selectedId, detail, setDetail])
 
   return { shareCopied, togglingPublic, handleTogglePublic, handleShare }

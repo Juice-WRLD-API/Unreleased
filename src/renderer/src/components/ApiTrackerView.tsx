@@ -35,7 +35,8 @@ import type { CompactGroup } from '../lib/compactGroups'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration, displayDate, dateSortValue, compareDates } from '../lib/format'
-import { parseSearchQuery, matchesFieldFilters, filterApiFields, SEARCH_FIELD_HELP } from '../lib/trackerSearch'
+import { parseSearchQuery, matchesFieldFilters, filterApiFields } from '../lib/trackerSearch'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
@@ -56,6 +57,7 @@ import type { TrackerFieldKey } from '../lib/trackerFields'
 import { reorderField, apiFieldsFor, useTrackerOmit, OPTIONAL_SONG_FIELDS } from '../lib/trackerFields'
 import { useFieldDrag } from '../hooks/useFieldDrag'
 import { AnchoredContextMenu } from './ContextMenu'
+import ThemedSelect from './ThemedSelect'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel'))
 
@@ -115,50 +117,6 @@ const SortBtn = ({ field, label, className, orderField, orderDir, onClick, onCon
 }
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-// ─── Search syntax help popover ────────────────────────────────────────────────
-// Explains the field:"value" query syntax (trackerSearch.ts) that the search
-// box's info button opens. Closes on outside click/Escape like the other
-// popovers/menus in this file.
-function SearchHelpPopover({ onClose }: { onClose: () => void }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handle = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    const handleKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl z-50 p-3"
-    >
-      <p className="text-text-primary text-xs font-semibold mb-1">Search syntax</p>
-      <p className="text-text-muted text-xs mb-2.5 leading-snug">
-        Search any field directly with <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">field:"value"</code>.
-        Combine with plain words and multiple fields - matches are case-insensitive substrings, all filters must match.
-        An optional <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">&</code> between
-        fields is just for readability, e.g. <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">artists:"Juice WRLD" &amp; category:unreleased</code>.
-      </p>
-      <div className="grid grid-cols-1 gap-1">
-        {SEARCH_FIELD_HELP.map(({ field, example }) => (
-          <div key={field} className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-text-muted shrink-0">{field}</span>
-            <code className="text-text-secondary bg-surface-overlay px-1.5 py-0.5 rounded truncate">{example}</code>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ─── Stats bar ────────────────────────────────────────────────────────────────
 function StatsBar({ stats }: { stats: JWApiStats | null }): JSX.Element {
@@ -2127,7 +2085,6 @@ export default function ApiTrackerView(): JSX.Element {
     ...filterApiFields(parsedSearch.filters),
     ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
   ])
-  const [showSearchHelp, setShowSearchHelp] = useState(false)
   // Sets rather than single values so "Search Settings" can filter by more
   // than one category/era at once (OR'd within each dimension, AND'd across
   // dimensions). Applied client-side over the loaded catalogue - see the
@@ -2863,17 +2820,10 @@ export default function ApiTrackerView(): JSX.Element {
                 />
               )}
             </div>
-            <div className="relative shrink-0">
-              <button
-                onClick={() => setShowSearchHelp((v) => !v)}
-                onMouseDown={(e) => e.stopPropagation()}
-                className={`p-2.5 md:p-2 rounded-lg transition-colors ${showSearchHelp ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
-                title="Search syntax help"
-              >
-                <Info size={15} />
-              </button>
-              {showSearchHelp && <SearchHelpPopover onClose={() => setShowSearchHelp(false)} />}
-            </div>
+            <SearchHelpButton
+              size={15}
+              className={(open) => `p-2.5 md:p-2 rounded-lg transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+            />
 
             <button
               onClick={() => {
@@ -2935,17 +2885,18 @@ export default function ApiTrackerView(): JSX.Element {
 
           {/* Second row - mobile-only category select (desktop uses the filter popover above) */}
           <div className="md:hidden flex items-center gap-2 flex-wrap">
-            <select
+            <ThemedSelect
               value={categoryParam}
-              onChange={(e) => { setCategoryFilter(new Set(e.target.value ? [e.target.value as Category] : [])); resetSongs() }}
-              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 cursor-pointer"
-            >
-              <option value="">{categoryFilter.size > 1 ? `${categoryFilter.size} categories` : 'All categories'}</option>
-              <option value="released">Released</option>
-              <option value="unreleased">Unreleased</option>
-              <option value="unsurfaced">Unsurfaced</option>
-              <option value="recording_session">Sessions</option>
-            </select>
+              onChange={(v) => { setCategoryFilter(new Set(v ? [v as Category] : [])); resetSongs() }}
+              options={[
+                { value: '', label: categoryFilter.size > 1 ? `${categoryFilter.size} categories` : 'All categories' },
+                { value: 'released', label: 'Released' },
+                { value: 'unreleased', label: 'Unreleased' },
+                { value: 'unsurfaced', label: 'Unsurfaced' },
+                { value: 'recording_session', label: 'Sessions' },
+              ]}
+              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40"
+            />
           </div>
 
           {/* Active filter chips - one per selected category/era, each

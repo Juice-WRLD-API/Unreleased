@@ -32,6 +32,14 @@ export const VISUALIZERS: VisualizerOption[] = [
   { id: "corona", name: "Corona", group: "shader", engine: "gl" },
   { id: "ripples", name: "Ripples", group: "shader", engine: "gl" },
   { id: "lightning", name: "Lightning", group: "shader", engine: "gl" },
+  { id: "rain", name: "Rain", group: "shader", engine: "gl" },
+  { id: "fireworks", name: "Fireworks", group: "shader", engine: "gl" },
+  { id: "sonar", name: "Sonar", group: "shader", engine: "gl" },
+  { id: "embers", name: "Embers", group: "shader", engine: "gl" },
+  { id: "warp", name: "Warp", group: "shader", engine: "gl" },
+  { id: "lasers", name: "Lasers", group: "shader", engine: "gl" },
+  { id: "synthwave", name: "Synthwave", group: "shader", engine: "gl" },
+  { id: "blackhole", name: "Black Hole", group: "shader", engine: "gl" },
   { id: "vortex", name: "Vortex", group: "shader", engine: "gl" },
   { id: "gooey", name: "Gooey", group: "shader", engine: "gl" },
 ];
@@ -44,7 +52,7 @@ export function normalizeMode(id: string): string {
 
 const LAYOUT_REFRESH_MS = 100;
 const GL_RESTORE_TIMEOUT_MS = 3000;
-/** Beats remembered for the Ripples and Lightning shaders (matches the u_rip array size). */
+/** Beats remembered for the beat-driven shaders (matches the u_rip array size). */
 const RIPPLE_SLOTS = 8;
 /** Seconds a ripple is kept; the shader has faded it out well before this. */
 const RIPPLE_LIFE = 4;
@@ -63,6 +71,12 @@ export class Visualizer {
   private raf = 0;
   private lastFrame = 0;
   private time = 0;
+  /**
+   * A clock that runs faster when the music is louder. Shaders only see one
+   * frame, so a speed that follows the audio has to be integrated here:
+   * scaling time by the energy instead would jump things back and forth.
+   */
+  private flow = 0;
 
   private accentPal: RGB[] = paletteFromAccent({ r: 224, g: 89, b: 47 });
   private artPal: RGB[] | null = null;
@@ -231,6 +245,7 @@ export class Visualizer {
     const dt = Math.min(0.05, elapsed / 1000); // clamp after stalls
     this.time += dt;
     const frame = this.audio.analyze(dt, this.playing);
+    this.flow += dt * (0.4 + frame.energy * 1.1 + frame.beat * 0.8);
     this.trackRipples(frame);
     this.stepPalette(dt);
 
@@ -260,6 +275,7 @@ export class Visualizer {
         frame,
         pal: this.pal,
         time: this.time,
+        flow: this.flow,
         focus: { x: focus.x, y: H - focus.y, r: focus.r }, // GL origin is bottom-left
         protect: this.rectsPx(box, scale).map((r) => ({
           rect: [r.x, H - (r.y + r.h), r.x + r.w, H - r.y],
@@ -292,7 +308,7 @@ export class Visualizer {
   };
 
   /**
-   * Remembers recent beats for the Ripples and Lightning shaders, which only see
+   * Remembers recent beats for Ripples, Lightning, Fireworks and Sonar, which only see
    * the current frame. Each onset drops a ring at a random spot around the focus; spots are
    * kept relative to it (angle, distance in focus radii) so rings follow the
    * layout if it moves.
