@@ -105,6 +105,14 @@ vec4 finish(vec3 col) {
   float a = clamp(max(max(col.r, col.g), col.b) * 1.15, 0.0, 1.0);
   return vec4(col, a);                            // premultiplied
 }
+
+// finish() for modes with solid parts (silhouettes, a black hole's shadow):
+// where solid is 1 the result is opaque, so the backdrop doesn't show
+// through. Premultiplied colour over black keeps its rgb and gains alpha.
+vec4 finishOver(vec3 col, float solid) {
+  vec4 o = finish(col);
+  return vec4(o.rgb, max(o.a, solid * protect(gl_FragCoord.xy) * u_intensity));
+}
 `;
 
 /** Domain-warped fractal noise: a slow, cinematic colour field. */
@@ -792,26 +800,162 @@ void main() {
 `;
 
 /**
- * Synthwave: a neon grid floor racing toward a striped sun that sets behind
- * the artwork, with a mountain ridge on the horizon that the spectrum pushes
- * up and down. The grid runs faster as the track gets louder; beats pulse the
- * sun and the grid.
+ * Shared by the retro scenes (Synthwave and the ones after it): the striped
+ * sun, stars, a horizon ridge, the perspective grid floor, palms and a
+ * skyline, so they all look like parts of one world. Goes between PRELUDE and
+ * the mode.
  */
-const SYNTHWAVE = `
+const RETRO = `
+// The horizon, drop focus radii below the cover so the sun sets behind it.
+float horizonAt(float R, float drop) {
+  return clamp(u_focus.y - R * drop, u_res.y * 0.15, u_res.y * 0.7);
+}
+
+// The sun centred behind the cover, its lower half cut by bands that widen
+// as they slide down, plus its glow.
+vec3 retroSun(vec2 frag, float R, float px, vec3 c1, vec3 c2) {
+  float Rs = R * (1.3 + 0.05 * u_beat);
+  float sd = length(frag - u_focus.xy);
+  float sv = (u_focus.y - frag.y) / Rs;             // -1 at the top, 1 at the bottom
+  float gapW = clamp((sv + 0.25) * 0.7, 0.0, 0.5);
+  float g = fract(sv * 9.0 - u_flow * 0.5);
+  float aa = 9.0 * px / Rs;
+  float bands = mix(1.0, smoothstep(gapW - aa, gapW + aa, g) * (1.0 - smoothstep(1.0 - aa, 1.0, g)), smoothstep(0.0, aa * 2.0, gapW));
+  float disc = 1.0 - smoothstep(Rs - px, Rs + px, sd);
+  vec3 sunCol = mix(c1, c2, clamp(sv * 0.5 + 0.5, 0.0, 1.0));
+  return mix(sunCol, vec3(1.0), 0.15) * disc * bands * (1.1 + 0.5 * u_beat)
+       + sunCol * exp(-max(sd - Rs, 0.0) / (R * 0.5)) * 0.3 * (0.6 + 0.5 * u_bass + 0.5 * u_beat);
+}
+
+// Twinkling stars, fading out toward the horizon (up = px above it).
+float retroStars(vec2 frag, float R, float px, float up) {
+  vec2 sg = frag / (R * 0.3);
+  vec2 sid = floor(sg);
+  float st = length(fract(sg) - 0.25 - 0.5 * vec2(hash(sid + 1.7), hash(sid + 5.1))) * R * 0.3;
+  return 0.9 * step(0.9, hash(sid)) * exp(-st * st / (px * px)) * smoothstep(R * 0.3, R * 1.5, up)
+       * (0.4 + 0.4 * sin(u_time * (1.0 + 3.0 * hash(sid + 3.3)) + hash(sid) * 40.0));
+}
+
+// The spectrum at screen x (bass in the middle), blurred so neighbouring bins
+// don't stripe whatever it shapes.
+float retroSpec(float x) {
+  float sx = tri(x / u_res.x) * 0.9;
+  return (spec(sx - 0.02) + spec(sx) + spec(sx + 0.02)) / 3.0;
+}
+
 // Ridge height (px) at screen x: ridged noise for peaks, raised by the
 // spectrum s, and kept low around the sun so it still shows.
-float ridgeAt(float x, float R, float s) {
+float retroRidge(float x, float R, float s) {
   float h1 = 1.0 - abs(noise(vec2(x / R * 0.9, 2.0)) * 2.0 - 1.0);
   float h2 = 1.0 - abs(noise(vec2(x / R * 2.3, 7.0)) * 2.0 - 1.0);
   float side = smoothstep(R * 0.5, R * 2.2, abs(x - u_focus.x));
   return R * (0.06 + 0.34 * h1 * h1 + 0.1 * h2) * (0.6 + 0.8 * s) * (0.25 + 0.75 * side);
 }
 
-void main() {
-  vec2 frag = gl_FragCoord.xy;
+// Mountains along the horizon for a pixel up px above it: x = inside them,
+// y = their neon edge, z = height up the slope (0..1) for shading.
+vec3 retroMountains(vec2 frag, float up, float R, float px) {
+  float s = retroSpec(frag.x);
+  float ridge = retroRidge(frag.x, R, s);
+  float slope = retroRidge(frag.x + 1.0, R, s) - ridge;
+  float rimD = (up - ridge) / sqrt(1.0 + slope * slope);  // across the edge, so steep slopes don't thin it
+  return vec3(1.0 - smoothstep(ridge - px, ridge + px, up), exp(-rimD * rimD / (px * px * 2.0)), up / max(ridge, 1.0));
+}
+
+// The floor in perspective for a pixel dx right of the vanishing point and dy
+// below the horizon (px). Depth goes as 1/dy. Returns grid x across, depth z,
+// and how much of each one pixel spans.
+vec4 retroFloor(float dx, float dy, float px) {
+  float F = u_res.y * 0.9;
+  return vec4(dx / dy * 3.0, F / dy, px * 3.0 / dy * sqrt(1.0 + dx * dx / (dy * dy)), px * F / (dy * dy));
+}
+
+// One family of grid lines at coordinate c, where a pixel spans w of it.
+// Lines closer than a few pixels fade to a dim average instead of moire.
+float gridLines(float c, float w) {
+  float l = abs(fract(c + 0.5) - 0.5);
+  return mix(exp(-l * l / (w * w)) + exp(-l / (w * 3.0)) * 0.25, min(w * 3.3, 1.0) * 0.35, smoothstep(0.06, 0.25, w));
+}
+
+// Distance from p to segment a-b, and how far along it (0..1) the nearest point lies.
+vec2 segT(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return vec2(length(pa - ba * t), t);
+}
+
+// A palm's silhouette as a signed distance in camera heights: foot at the
+// origin, crown at y = 2.4 leaning right by lean. Fronds leave the crown
+// fanned from nearly upright to level and sag under their own weight (droop
+// adds to it, reach scales them); notched edges read as leaflets.
+float palm(vec2 p, float lean, float droop, float reach) {
+  vec2 top = vec2(lean, 2.4);
+  vec2 mid = vec2(lean * 0.3, 1.25);
+  vec2 t1 = segT(p, vec2(0.0), mid);
+  vec2 t2 = segT(p, mid, top);
+  float d = min(t1.x - mix(0.075, 0.06, t1.y), t2.x - mix(0.06, 0.045, t2.y));
+  if (length(p - top) > 1.9 * reach) return d;     // nowhere near the crown
+  for (int i = 0; i < 5; i++) {
+    float fi = float(i);
+    float th = 1.35 - fi * 0.33;                    // leaving angle, upright to level
+    float L = (0.75 + 0.12 * fi) * reach;
+    float sag = (0.25 + 0.18 * fi + droop) * L;     // lower fronds hang further
+    for (int j = 0; j < 2; j++) {
+      vec2 v = vec2((float(j) * 2.0 - 1.0) * cos(th), sin(th)) * L;
+      // The curve top + v t - (0, sag t^2), in three straight pieces.
+      vec2 a = top;
+      for (int k = 1; k <= 3; k++) {
+        float t = float(k) / 3.0;
+        vec2 b = top + v * t - vec2(0.0, sag * t * t);
+        vec2 st = segT(p, a, b);
+        float u = (float(k) - 1.0 + st.y) / 3.0;    // 0 at the crown, 1 at the tip
+        float w = (0.02 * (1.0 - u) + 0.075 * sin(PI * pow(u, 0.6))) * (0.78 + 0.22 * abs(sin(u * L * 110.0)));
+        d = min(d, st.x - w);
+        a = b;
+      }
+    }
+  }
+  return d;
+}
+
+// One row of buildings at screen x, up px above the waterline, sliding left
+// by drift px. Returns x = inside a building, y = a lit window, z = the neon
+// roofline, w = the building's random (for colour).
+vec4 skyline(float x, float up, float R, float px, float wB, float tall, float lit, float seed, float drift) {
+  float xx = x + drift;
+  float b = floor(xx / wB);
+  float fx = fract(xx / wB);
+  float h = hash(vec2(b, seed));
+  // Each building is one bar of the spectrum, lower around the sun.
+  float cx = (b + 0.5) * wB - drift;
+  float around = 0.3 + 0.7 * smoothstep(R * 0.4, R * 2.2, abs(cx - u_focus.x));
+  float H = R * tall * (0.35 + 0.65 * h * h) * (0.55 + 0.9 * retroSpec(cx)) * around;
+  float inset = 0.05 + 0.1 * hash(vec2(b, seed + 1.0));  // the gap either side
+  float e = px / wB;
+  float inX = smoothstep(inset - e, inset + e, fx) * (1.0 - smoothstep(1.0 - inset - e, 1.0 - inset + e, fx));
+  float body = inX * (1.0 - smoothstep(H - px, H + px, up));
+  float roof = (up - H) / px;
+  // Windows in a grid on the facade: some lit, a few blinking.
+  float cols = 3.0 + floor(h * 3.0);
+  float floorH = R * 0.075;
+  vec2 w = vec2((fx - inset) / (1.0 - 2.0 * inset) * cols, up / floorH);
+  vec2 wid = floor(w) + vec2(b * 7.0, seed * 3.0);
+  vec2 wf = abs(fract(w) - 0.5);
+  float wh = hash(wid);
+  float on = step(wh, lit) * mix(1.0, step(0.0, sin(u_time * (3.0 + wh * 8.0) + wh * 40.0)), step(0.93, hash(wid + 3.3)));
+  float ex = px * cols / (wB * (1.0 - 2.0 * inset));
+  float ey = px / floorH;
+  float win = (1.0 - smoothstep(0.28 - ex, 0.28 + ex, wf.x)) * (1.0 - smoothstep(0.3 - ey, 0.3 + ey, wf.y))
+            * on * body * step(floorH * 1.5, H - up);
+  return vec4(body, win, exp(-roof * roof) * inX, h);
+}
+
+// The whole Synthwave scene at frag, its lines px wide (8-Bit draws it
+// in blocks, so passes the block size).
+vec3 synthwaveScene(vec2 frag, float px) {
   float R = max(u_focus.z, 20.0);
-  float px = max(u_res.y * 0.0016, 1.0);            // line width
-  float hz = clamp(u_focus.y - R * 0.75, u_res.y * 0.15, u_res.y * 0.7);  // the horizon
+  float hz = horizonAt(R, 0.75);
   float dx = frag.x - u_focus.x;
   float dy = hz - frag.y;                           // px below the horizon
   vec3 cGrid = pal(0.75 + u_time * 0.01);
@@ -820,60 +964,626 @@ void main() {
   vec3 col = vec3(0.0);
 
   if (dy > 0.0) {
-    // The floor in perspective: depth goes as 1/(distance below the horizon).
-    float F = u_res.y * 0.9;
-    float z = F / dy;
-    float gx = dx / dy * 3.0;
-    float gz = z + u_flow * 1.6;                    // lines rush toward the viewer
-    // A pixel's size in grid units. Where lines crowd closer than a few
-    // pixels they fade to a dim average instead of moire.
-    float wz = px * F / (dy * dy);
-    float wx = px * 3.0 / dy * sqrt(1.0 + dx * dx / (dy * dy));
-    float lz = abs(fract(gz + 0.5) - 0.5);
-    float lx = abs(fract(gx + 0.5) - 0.5);
-    float lineZ = mix(exp(-lz * lz / (wz * wz)) + exp(-lz / (wz * 3.0)) * 0.25, min(wz * 3.3, 1.0) * 0.35, smoothstep(0.06, 0.25, wz));
-    float lineX = mix(exp(-lx * lx / (wx * wx)) + exp(-lx / (wx * 3.0)) * 0.25, min(wx * 3.3, 1.0) * 0.35, smoothstep(0.06, 0.25, wx));
-    float fog = exp(-z * 0.09);                     // the far floor fades into haze
-    col += cGrid * max(lineZ, lineX) * fog * (0.9 + 0.7 * u_beat) * 1.2;
-    col += cGrid * exp(-dy / (R * 0.25)) * 0.25 * (0.6 + u_bass);                         // glow along the horizon
+    vec4 f = retroFloor(dx, dy, px);                // x, z, and a pixel in each
+    float grid = max(gridLines(f.y + u_flow * 1.6, f.w), gridLines(f.x, f.z));  // lines rush toward the viewer
+    col += cGrid * grid * exp(-f.y * 0.09) * (0.9 + 0.7 * u_beat) * 1.2;          // the far floor fades into haze
+    col += cGrid * exp(-dy / (R * 0.25)) * 0.25 * (0.6 + u_bass);                 // glow along the horizon
     col += cSun2 * exp(-abs(dx) / (R * 0.8)) * exp(-dy / (R * 0.6)) * 0.15 * (0.7 + u_beat);  // the sun on the floor
   } else {
     float up = -dy;                                 // px above the horizon
-    float sx = tri(frag.x / u_res.x) * 0.9;         // bass in the middle
-    float s = (spec(sx - 0.02) + spec(sx) + spec(sx + 0.02)) / 3.0;
-    float ridge = ridgeAt(frag.x, R, s);
-    float slope = ridgeAt(frag.x + 1.0, R, s) - ridge;
-    float inMtn = 1.0 - smoothstep(ridge - px, ridge + px, up);
-    float rimD = (up - ridge) / sqrt(1.0 + slope * slope);  // across the edge, so steep slopes don't thin it
-    float rim = exp(-rimD * rimD / (px * px * 2.0));
-
-    // The sun, centred behind the cover, its lower half cut by bands that
-    // widen as they slide down.
-    float Rs = R * (1.3 + 0.05 * u_beat);
-    float sd = length(frag - u_focus.xy);
-    float sv = (u_focus.y - frag.y) / Rs;           // -1 at the top, 1 at the bottom
-    float gapW = clamp((sv + 0.25) * 0.7, 0.0, 0.5);
-    float g = fract(sv * 9.0 - u_flow * 0.5);
-    float aa = 9.0 * px / Rs;
-    float bands = mix(1.0, smoothstep(gapW - aa, gapW + aa, g) * (1.0 - smoothstep(1.0 - aa, 1.0, g)), smoothstep(0.0, aa * 2.0, gapW));
-    float disc = 1.0 - smoothstep(Rs - px, Rs + px, sd);
-    vec3 sunCol = mix(cSun1, cSun2, clamp(sv * 0.5 + 0.5, 0.0, 1.0));
-    col += mix(sunCol, vec3(1.0), 0.15) * disc * bands * (1.1 + 0.5 * u_beat);
-    col += sunCol * exp(-max(sd - Rs, 0.0) / (R * 0.5)) * 0.3 * (0.6 + 0.5 * u_bass + 0.5 * u_beat);
+    vec3 m = retroMountains(frag, up, R, px);
+    col += retroSun(frag, R, px, cSun1, cSun2);
     col += cSun2 * exp(-up / (R * 0.7)) * 0.18;     // the sky glowing above the horizon
-
-    vec2 sg = frag / (R * 0.3);
-    vec2 sid = floor(sg);
-    float st = length(fract(sg) - 0.25 - 0.5 * vec2(hash(sid + 1.7), hash(sid + 5.1))) * R * 0.3;
-    col += vec3(0.9) * step(0.9, hash(sid)) * exp(-st * st / (px * px)) * smoothstep(R * 0.3, R * 1.5, up)
-         * (0.4 + 0.4 * sin(u_time * (1.0 + 3.0 * hash(sid + 3.3)) + hash(sid) * 40.0));
-
+    col += retroStars(frag, R, px, up);
     // Mountains stand in front of all of it: a dark body and a neon edge.
-    col *= 1.0 - inMtn;
-    col += cGrid * (rim * (1.0 + 0.4 * u_beat) + inMtn * (0.04 + 0.08 * up / max(ridge, 1.0)));
+    col *= 1.0 - m.x;
+    col += cGrid * (m.y * (1.0 + 0.4 * u_beat) + m.x * (0.04 + 0.08 * m.z));
+  }
+  return col;
+}
+`;
+
+/**
+ * Synthwave: a neon grid floor racing toward a striped sun that sets behind
+ * the artwork, with a mountain ridge on the horizon that the spectrum pushes
+ * up and down. The grid runs faster as the track gets louder; beats pulse the
+ * sun and the grid.
+ */
+const SYNTHWAVE = `
+void main() {
+  vec3 col = synthwaveScene(gl_FragCoord.xy, max(u_res.y * 0.0016, 1.0));
+  gl_FragColor = finish(col * (0.85 + 0.3 * u_energy));
+}
+`;
+
+/**
+ * Outrun: driving down a neon-edged road toward the setting sun, palm trees
+ * sweeping past on both sides as solid black silhouettes. The road bends
+ * gently left and right, the drive speeds up as the track gets louder, and
+ * beats pulse the road and bounce the fronds.
+ */
+const OUTRUN = `
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float F = u_res.y * 0.9;                          // focal length: depth z sits F/z px below the horizon
+  float hz = horizonAt(R, 0.75);
+  float dy = hz - frag.y;
+  float bend = 0.02 * sin(u_time * 0.13);           // the road ahead curves by bend * z^2
+  vec3 cGrid = pal(0.75 + u_time * 0.01);
+  vec3 cSun1 = pal(u_time * 0.01);
+  vec3 cSun2 = pal(0.4 + u_time * 0.01);
+  vec3 col = vec3(0.0);
+
+  if (dy > 0.0) {
+    float z = F / dy;
+    float fog = exp(-z * 0.09);
+    float xc = (frag.x - u_focus.x) / dy - bend * z * z;  // camera heights across, from the road's centre
+    float wxc = px / dy;                            // a pixel across, in camera heights
+    float wz = px * F / (dy * dy);                  // and down the road
+    float ax = abs(xc);
+    float ew = max(0.035, wxc);
+    float edge = exp(-(ax - 0.7) * (ax - 0.7) / (ew * ew)) * min(0.035 / wxc, 1.0);
+    float dz = fract((z + u_flow * 2.2) * 0.4);
+    float aa = wz * 0.4;
+    float dash = exp(-xc * xc / (max(0.02, wxc) * max(0.02, wxc))) * min(0.02 / wxc, 1.0)
+               * mix(1.0 - smoothstep(0.25 - aa, 0.25 + aa, abs(dz - 0.5)), 0.5, smoothstep(0.1, 0.4, aa));
+    // Off the road, the grid floor (with the road's bend, so it runs alongside).
+    float grid = max(gridLines(z + u_flow * 2.2, wz), gridLines(xc * 3.0, wxc * 3.0 * sqrt(1.0 + xc * xc)))
+               * smoothstep(0.72, 0.85, ax);
+    col += cGrid * (edge * (1.2 + 0.6 * u_bass + 0.6 * u_beat) + grid * 0.7 * (0.9 + 0.5 * u_beat)) * fog;
+    col += mix(cSun1, vec3(1.0), 0.5) * dash * 0.8 * fog;
+    col += cGrid * 0.03 * (1.0 - smoothstep(0.65, 0.7, ax)) * fog;                      // the tarmac
+    col += cGrid * exp(-dy / (R * 0.25)) * 0.25 * (0.6 + u_bass);
+    col += cSun2 * exp(-abs(frag.x - u_focus.x) / (R * 0.8)) * exp(-dy / (R * 0.6)) * 0.15 * (0.7 + u_beat);
+  } else {
+    float up = -dy;
+    vec3 m = retroMountains(frag, up, R, px);
+    col += retroSun(frag, R, px, cSun1, cSun2);
+    col += cSun2 * exp(-up / (R * 0.7)) * 0.18;
+    col += retroStars(frag, R, px, up);
+    col *= 1.0 - m.x;
+    col += cGrid * (m.y * (1.0 + 0.4 * u_beat) + m.x * (0.04 + 0.08 * m.z));
+  }
+
+  // Palms in two rows down the roadside, nearest first; only the nearest
+  // edge matters, since they're all the same black.
+  float travel = u_flow * 2.2;                      // camera heights driven
+  float gap = 4.0;                                  // between palms
+  float best = 1e6;
+  float bestFog = 0.0;
+  for (int k = 0; k < 8; k++) {
+    float n = floor(travel / gap) + 1.0 + float(k);
+    float z = n * gap - travel;
+    if (z < 0.9) continue;
+    float s = F / z;                                // px per camera height at that depth
+    for (int j = 0; j < 2; j++) {
+      float side = float(j) * 2.0 - 1.0;
+      vec2 lp = (frag - vec2(u_focus.x + (side * 1.7 + bend * z * z) * s, hz - s)) / s;
+      lp.x *= side;                                 // both rows lean away from the road
+      float h = hash(vec2(n, side));
+      float lean = 0.2 + 0.35 * h + 0.04 * sin(u_time * 0.8 + n);
+      if (abs(lp.x - lean) > 1.7 || lp.y < -0.15 || lp.y > 3.25) continue;
+      float d = palm(lp, lean, 0.12 * u_beat, 0.9 + 0.2 * h) * s;  // px
+      if (d < best) {
+        best = d;
+        bestFog = exp(-z * 0.07);
+      }
+    }
+  }
+  float sil = clamp(0.5 - best / px, 0.0, 1.0);
+  col *= 1.0 - sil;
+  col += mix(cSun1, cGrid, 0.5) * exp(-best * best / (px * px * 1.5)) * bestFog * 0.5;  // a neon edge
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finishOver(col, sil * (0.55 + 0.45 * bestFog));
+}
+`;
+
+/**
+ * Neon City: a skyline against the setting sun, every building a bar of the
+ * spectrum, with lit windows, neon rooftops and the whole scene rippling in
+ * the water below. Two rows drift past at different speeds; the near row is
+ * solid black, and beats light its windows up.
+ */
+const CITY = `
+// The sun, sky and both rows of buildings at a point up px above the
+// waterline. a = how solidly the near row covers it.
+vec4 cityScene(vec2 frag, float up, float R, float px, vec3 cSun1, vec3 cSun2, vec3 cNeon) {
+  vec3 col = retroSun(frag, R, px, cSun1, cSun2) + cSun2 * exp(-up / (R * 0.7)) * 0.18 + retroStars(frag, R, px, up);
+  vec4 far = skyline(frag.x, up, R, px, R * 0.22, 1.9, 0.25 + 0.3 * u_mid, 11.0, u_flow * R * 0.03);
+  col *= 1.0 - far.x;
+  col += pal(far.w * 0.5 + 0.6) * far.x * 0.07 + mix(cSun1, vec3(1.0), 0.3) * far.y * 0.45 + cNeon * far.z * 0.6;
+  vec4 near = skyline(frag.x, up, R, px, R * 0.42, 1.1, 0.2 + 0.35 * u_mid, 23.0, u_flow * R * 0.08);
+  col *= 1.0 - near.x;
+  col += mix(pal(near.w + 0.1), vec3(1.0), 0.4) * near.y * 0.9 * (1.0 + 0.4 * u_beat) + cNeon * near.z * (1.0 + 0.5 * u_beat);
+  return vec4(col, near.x);
+}
+
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float hz = horizonAt(R, 0.9);
+  vec3 cSun1 = pal(u_time * 0.01);
+  vec3 cSun2 = pal(0.4 + u_time * 0.01);
+  vec3 cNeon = pal(0.75 + u_time * 0.01);
+  float up = frag.y - hz;
+  vec3 col;
+  float solid = 0.0;
+  if (up >= 0.0) {
+    vec4 c = cityScene(frag, up, R, px, cSun1, cSun2, cNeon);
+    col = c.rgb;
+    solid = c.a;
+  } else {
+    // The water: the scene mirrored, rippling more the further down it is,
+    // and broken into horizontal streaks.
+    float dw = -up;
+    float wob = sin(dw / (px * 3.0) + u_time * 1.7 + sin(frag.x * 0.01)) * (px + dw * 0.04);
+    vec4 c = cityScene(vec2(frag.x + wob, hz + dw), dw, R, px, cSun1, cSun2, cNeon);
+    float streak = 0.55 + 0.45 * noise(vec2(frag.x / (R * 0.15), dw / (px * 2.5) - u_time * 0.8));
+    col = c.rgb * 0.4 * streak * exp(-dw / (R * 1.8));
+  }
+  float wl = up / px;
+  col += cNeon * exp(-wl * wl * 0.5) * 0.6 * (0.8 + 0.6 * u_bass);  // the waterline
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finishOver(col, solid);
+}
+`;
+
+/**
+ * Terrain: flying low over wireframe mountains toward the setting sun. Each
+ * ridge line is a slice of the landscape, nearer ones hiding those behind;
+ * the peaks rise with the spectrum, a valley down the middle keeps the sun in
+ * view, and the flight speeds up as the track gets louder.
+ */
+const TERRAIN = `
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float F = u_res.y * 0.9;
+  float hz = horizonAt(R, 0.75);
+  float up = frag.y - hz;
+  vec3 cGrid = pal(0.75 + u_time * 0.01);
+  vec3 cSun1 = pal(u_time * 0.01);
+  vec3 cSun2 = pal(0.4 + u_time * 0.01);
+
+  vec3 col = retroSun(frag, R, px, cSun1, cSun2) * step(0.0, up)
+           + cSun2 * exp(-abs(up) / (R * 0.7)) * 0.18 + retroStars(frag, R, px, up);
+
+  float s = retroSpec(frag.x);
+  float spacing = 0.7;                              // camera heights between ridge lines
+  float travel = u_flow * 1.4;
+  float first = floor(travel / spacing) + 1.0;
+  float cover = -1e6;                               // top of the nearer ridges at this x
+  float lines = 0.0;
+  float tint = 0.0;
+  for (int i = 0; i < 36; i++) {
+    float n = first + float(i);
+    float z = n * spacing - travel;                 // nearest first
+    if (z < 0.35) continue;
+    float sc = F / z;                               // px per camera height at that depth
+    float xc = (frag.x - u_focus.x) / sc;
+    // Fixed to the ground (row n, position xc), so the land streams past
+    // rather than boiling in place.
+    float t = noise(vec2(xc * 1.3, n * 0.37)) * 0.65 + noise(vec2(xc * 3.1, n * 0.71 + 5.0)) * 0.35;
+    float h = t * t * (0.25 + 1.1 * s) * smoothstep(0.25, 1.4, abs(xc)) * 0.9;
+    float y = hz - sc + h * sc;
+    float d = (frag.y - y) / (px * 1.2);
+    float fog = exp(-z * 0.08);
+    float seen = smoothstep(cover - px, cover + px, frag.y);  // not behind a nearer ridge
+    float l = exp(-d * d) * fog * seen;
+    lines += l;
+    tint += l * fog;
+    cover = max(cover, y);
+  }
+  float inside = 1.0 - smoothstep(cover - px, cover + px, frag.y);
+  col *= 1.0 - inside;                              // the land hides the sky behind it
+  col += mix(cSun2, cGrid, clamp(tint / max(lines, 1e-3), 0.0, 1.0)) * lines * (1.0 + 0.6 * u_beat);
+  col += cGrid * inside * 0.03;
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * Grid Tunnel: racing down a square neon tunnel toward the artwork. Rings
+ * rush past faster when the track is louder, each lighting up with its band
+ * of the spectrum as it goes (bass nearest), and the tunnel slowly rolls.
+ */
+const TUNNEL = `
+void main() {
+  vec2 q = gl_FragCoord.xy - u_focus.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float ang = u_time * 0.05;
+  vec2 p = vec2(cos(ang) * q.x - sin(ang) * q.y, sin(ang) * q.x + cos(ang) * q.y);
+  float m = max(max(abs(p.x), abs(p.y)), 1.0);     // a square tunnel: depth goes as 1/distance to the axis
+  float W = R * 5.0;
+  float z = W / m;
+  float u = abs(p.x) > abs(p.y) ? p.y / abs(p.x) : p.x / abs(p.y);  // across a wall, -1..1 corner to corner
+  float rings = gridLines(z * 2.0 + u_flow * 3.0, px * W / (m * m) * 2.0);
+  float rails = gridLines(u * 4.0, px * 4.0 / m);
+  // Each ring lights with its band as it passes: bass close up, highs deep in.
+  float band = spec(clamp((z - 1.2) / 5.0, 0.0, 1.0) * 0.9);
+  float fog = exp(-z * 0.12);
+  vec3 c = pal(abs(atan(p.y, p.x)) / PI * 0.5 + u_time * 0.01);
+  vec3 col = c * (rings * (0.4 + 1.4 * band) + rails * 0.6) * fog * (0.9 + 0.6 * u_beat) * 1.2;
+  col += pal(u_time * 0.02 + 0.5) * exp(-max(m - R, 0.0) / (R * 0.8)) * 0.2 * (0.6 + u_bass);  // light at the end
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * Retro Planet: a ringed wireframe planet rising behind the artwork over the
+ * neon grid, slowly turning. Its rings are the spectrum (bass on the inside),
+ * passing in front of the planet below and behind it above; beats flash the
+ * wireframe.
+ */
+const PLANET = `
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float hz = horizonAt(R, 0.75);
+  float dy = hz - frag.y;
+  vec3 c1 = pal(u_time * 0.01);
+  vec3 c2 = pal(0.4 + u_time * 0.01);
+  vec3 cGrid = pal(0.75 + u_time * 0.01);
+  vec3 col = vec3(0.0);
+
+  if (dy > 0.0) {
+    vec4 f = retroFloor(frag.x - u_focus.x, dy, px);
+    float grid = max(gridLines(f.y + u_flow * 1.6, f.w), gridLines(f.x, f.z));
+    col += cGrid * grid * exp(-f.y * 0.09) * (0.9 + 0.7 * u_beat) * 1.2;
+    col += cGrid * exp(-dy / (R * 0.25)) * 0.25 * (0.6 + u_bass);
+    col += c1 * exp(-abs(frag.x - u_focus.x) / (R * 0.9)) * exp(-dy / (R * 0.6)) * 0.12;
+  } else {
+    float up = -dy;
+    col += retroStars(frag, R, px, up) + c2 * exp(-up / (R * 0.7)) * 0.15;
+
+    // The planet's frame: tilted, and seen from a little above its equator.
+    float Rp = R * 1.45;
+    vec2 q = (frag - u_focus.xy) / Rp;
+    vec2 t = vec2(0.95 * q.x + 0.31 * q.y, 0.95 * q.y - 0.31 * q.x);
+    float r = length(t);
+    float se = 0.3;                                 // sine of the view's elevation over the rings
+    float ce = 0.954;
+    float e = px / Rp;                              // a pixel, in planet radii
+    float disc = 1.0 - smoothstep(1.0 - e, 1.0 + e, r);
+
+    vec3 body = vec3(0.0);
+    if (r < 1.0 + e) {
+      // The sphere point under this pixel, turned into the planet's own frame.
+      float nz = sqrt(max(1.0 - r * r, 0.0));
+      float py = t.y * ce + nz * se;
+      float pz = nz * ce - t.y * se;
+      float lat = asin(clamp(py, -1.0, 1.0));
+      float lon = atan(pz, t.x) + u_time * 0.15;
+      // Whole multiples of the angle, so longitude lines meet at the seam.
+      float wl = e / max(nz, 0.12) * 12.0 / PI;
+      float wire = max(gridLines(lat / (PI / 12.0), wl), gridLines(lon / (PI / 12.0), wl / max(sqrt(1.0 - py * py), 0.15)));
+      float bands = 0.5 + 0.5 * sin(lat * 14.0 + fbm(vec2(lon * 1.5, lat * 6.0)) * 3.0);
+      body = mix(c1, c2, bands) * (0.08 + 0.14 * nz)
+           + cGrid * wire * (0.35 + 0.65 * nz) * (0.8 + 0.8 * u_beat)
+           + c1 * exp(-nz / 0.12) * 0.5;            // the atmosphere at the limb
+    }
+    col = col * (1.0 - disc) + body * disc;
+    col += c1 * exp(-max(r - 1.0, 0.0) * Rp / (R * 0.15)) * 0.35 * (1.0 - disc) * (0.6 + 0.6 * u_bass);
+
+    // The rings: the equatorial plane squashed by se, each radius a band of
+    // the spectrum. The near (lower) half crosses the planet; the far half is behind it.
+    float rho = length(vec2(t.x, t.y / se));
+    float rt = rho - 1.3;                           // 0 at the inner edge, 1 at the outer
+    if (rt > 0.0 && rt < 1.0) {
+      float sp = spec(rt * 0.9);
+      float ring = (0.2 + 1.3 * sp) * (0.65 + 0.35 * sin(rho * 40.0))
+                 * smoothstep(0.0, 0.03, rt) * (1.0 - smoothstep(0.96, 1.0, rt));
+      col += mix(pal(rt * 0.5 + u_time * 0.01), vec3(1.0), 0.2) * ring * (t.y < 0.0 ? 1.0 : 1.0 - disc) * 0.8;
+    }
   }
   col *= 0.85 + 0.3 * u_energy;
   gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * Sunset Beach: the striped sun sinking into the sea, its path breaking into
+ * glints on waves that roll in faster as the track gets louder, palms leaning
+ * in from the shore. The waves swell with the spectrum, the glints flare on
+ * beats and the fronds bounce.
+ */
+const BEACH = `
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float F = u_res.y * 0.9;
+  float hz = horizonAt(R, 0.75);
+  float dy = hz - frag.y;
+  float dx = frag.x - u_focus.x;
+  vec3 cGrid = pal(0.75 + u_time * 0.01);
+  vec3 cSun1 = pal(u_time * 0.01);
+  vec3 cSun2 = pal(0.4 + u_time * 0.01);
+  vec3 col = vec3(0.0);
+
+  if (dy > 0.0) {
+    float z = F / dy;
+    float fog = exp(-z * 0.07);
+    // Crests across the water, wobbling sideways and rolling in.
+    float wob = (noise(vec2(dx / dy * 1.5, z * 0.7 - u_time * 0.3)) - 0.5) * (0.5 + 0.8 * retroSpec(frag.x));
+    float crest = gridLines(z * 1.3 + u_flow * 1.2 + wob, px * F / (dy * dy) * 1.3);
+    col += cGrid * crest * fog * (0.7 + 0.5 * u_beat) * 0.9;
+    // The sun's path: glints broken up by the waves, under the sun.
+    float path = exp(-abs(dx) / (R * (0.8 + dy / R * 0.25)));
+    // Thin streaks: long across, a few pixels tall, sliding toward the shore.
+    float glint = smoothstep(0.55, 0.85, noise(vec2(dx / (R * 0.3), dy / (px * 2.5) - u_flow * 3.0)));
+    col += mix(cSun2, vec3(1.0), 0.3) * path * (0.15 + glint * (0.8 + 0.8 * u_beat)) * fog;
+    col += cSun2 * exp(-dy / (R * 0.4)) * 0.15;     // the sky's light on the water
+  } else {
+    float up = -dy;
+    vec3 m = retroMountains(frag, up, R, px);       // islands on the horizon
+    col += retroSun(frag, R, px, cSun1, cSun2) + cSun2 * exp(-up / (R * 0.7)) * 0.18 + retroStars(frag, R, px, up);
+    col *= 1.0 - m.x;
+    col += cGrid * (m.y * 0.7 + m.x * 0.03);
+  }
+
+  // Palms leaning in from either shore, swaying. Fixed to the screen's edges.
+  float best = 1e6;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    float side = i == 2 ? -1.0 : 1.0;               // two on the left leaning right, one on the right leaning left
+    vec2 foot = vec2(i == 2 ? 0.95 : 0.05 + 0.13 * fi, -0.06 - 0.03 * fi) * vec2(u_res.x, u_res.y);
+    float sc = u_res.y * (0.34 - 0.08 * fi + (i == 2 ? 0.05 : 0.0));  // px per unit of palm
+    vec2 lp = (frag - foot) / sc;
+    lp.x *= side;
+    float lean = 0.55 - 0.15 * fi + 0.04 * sin(u_time * 0.7 + fi * 2.0);
+    if (abs(lp.x - lean) > 1.7 || lp.y < -0.15 || lp.y > 3.25) continue;
+    best = min(best, palm(lp, lean, 0.12 * u_beat, 1.0 + 0.1 * fi) * sc);
+  }
+  float sil = clamp(0.5 - best / px, 0.0, 1.0);
+  col *= 1.0 - sil;
+  col += mix(cSun1, cGrid, 0.5) * exp(-best * best / (px * px * 1.5)) * 0.5;
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finishOver(col, sil);
+}
+`;
+
+/**
+ * Vaporwave: a glossy checkerboard floor stretching to the sun, wireframe
+ * solids turning in the air either side of the artwork, all through a worn
+ * VHS tape - scanlines, and a tracking glitch that rolls down the picture.
+ * The solids swell with the bass and the floor slides faster as the track
+ * gets louder.
+ */
+const VAPOR = `
+vec3 spin(vec3 v, float ay, float ax) {
+  v = vec3(cos(ay) * v.x + sin(ay) * v.z, v.y, cos(ay) * v.z - sin(ay) * v.x);
+  return vec3(v.x, cos(ax) * v.y - sin(ax) * v.z, sin(ax) * v.y + cos(ax) * v.z);
+}
+
+vec2 proj(vec3 v, vec2 c, float size, float ay, float ax) {
+  v = spin(v, ay, ax);
+  return c + v.xy * size / (1.0 + v.z * 0.15);
+}
+
+float edgeD(vec2 p, vec2 a, vec2 b) {
+  return segT(p, a, b).x;
+}
+
+// Distance (px) to a turning wireframe cube centred on c.
+float cube(vec2 p, vec2 c, float size, float ay, float ax) {
+  if (length(p - c) > size * 2.2) return 1e6;
+  vec2 v0 = proj(vec3(-1.0, -1.0, -1.0), c, size, ay, ax);
+  vec2 v1 = proj(vec3(1.0, -1.0, -1.0), c, size, ay, ax);
+  vec2 v2 = proj(vec3(1.0, 1.0, -1.0), c, size, ay, ax);
+  vec2 v3 = proj(vec3(-1.0, 1.0, -1.0), c, size, ay, ax);
+  vec2 v4 = proj(vec3(-1.0, -1.0, 1.0), c, size, ay, ax);
+  vec2 v5 = proj(vec3(1.0, -1.0, 1.0), c, size, ay, ax);
+  vec2 v6 = proj(vec3(1.0, 1.0, 1.0), c, size, ay, ax);
+  vec2 v7 = proj(vec3(-1.0, 1.0, 1.0), c, size, ay, ax);
+  float d = min(min(edgeD(p, v0, v1), edgeD(p, v1, v2)), min(edgeD(p, v2, v3), edgeD(p, v3, v0)));
+  d = min(d, min(min(edgeD(p, v4, v5), edgeD(p, v5, v6)), min(edgeD(p, v6, v7), edgeD(p, v7, v4))));
+  return min(d, min(min(edgeD(p, v0, v4), edgeD(p, v1, v5)), min(edgeD(p, v2, v6), edgeD(p, v3, v7))));
+}
+
+// Distance (px) to a turning wireframe pyramid centred on c.
+float pyramid(vec2 p, vec2 c, float size, float ay, float ax) {
+  if (length(p - c) > size * 2.2) return 1e6;
+  vec2 a = proj(vec3(0.0, 1.3, 0.0), c, size, ay, ax);
+  vec2 b0 = proj(vec3(-1.0, -0.7, -1.0), c, size, ay, ax);
+  vec2 b1 = proj(vec3(1.0, -0.7, -1.0), c, size, ay, ax);
+  vec2 b2 = proj(vec3(1.0, -0.7, 1.0), c, size, ay, ax);
+  vec2 b3 = proj(vec3(-1.0, -0.7, 1.0), c, size, ay, ax);
+  float d = min(min(edgeD(p, b0, b1), edgeD(p, b1, b2)), min(edgeD(p, b2, b3), edgeD(p, b3, b0)));
+  return min(d, min(min(edgeD(p, a, b0), edgeD(p, a, b1)), min(edgeD(p, a, b2), edgeD(p, a, b3))));
+}
+
+// iq's box-filtered checkerboard: w is the pixel's footprint, so it greys
+// out smoothly in the distance instead of shimmering.
+float checker(vec2 p, vec2 w) {
+  vec2 i = 2.0 * (abs(fract((p - 0.5 * w) * 0.5) - 0.5) - abs(fract((p + 0.5 * w) * 0.5) - 0.5)) / w;
+  return 0.5 - 0.5 * i.x * i.y;
+}
+
+void main() {
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  // The tracking glitch: a band rolling down the picture that tears it sideways.
+  float by = (1.2 - fract(u_time * 0.06) * 1.4) * u_res.y;
+  float bd = (gl_FragCoord.y - by) / (u_res.y * 0.03);
+  float band = exp(-bd * bd);
+  vec2 frag = gl_FragCoord.xy + vec2((noise(vec2(gl_FragCoord.y * 0.5, u_time * 20.0)) - 0.5) * 14.0 * px * band, 0.0);
+
+  float hz = horizonAt(R, 0.75);
+  float dy = hz - frag.y;
+  float dx = frag.x - u_focus.x;
+  vec3 c1 = pal(u_time * 0.01);
+  vec3 c2 = pal(0.4 + u_time * 0.01);
+  vec3 c3 = pal(0.75 + u_time * 0.01);
+  vec3 col = vec3(0.0);
+
+  if (dy > 0.0) {
+    vec4 f = retroFloor(dx, dy, px);
+    float fog = exp(-f.y * 0.08);
+    float ch = checker(vec2(f.x, f.y + u_flow * 1.4), vec2(f.z, f.w) * 1.5);
+    col += mix(c3 * 0.04, c3 * 0.4, ch) * fog * (0.9 + 0.5 * u_beat);
+    // A glossy floor: the sun mirrored in it.
+    col += retroSun(vec2(frag.x, hz + dy), R, px, c1, c2) * 0.3 * exp(-dy / (R * 1.2));
+    col += c2 * exp(-dy / (R * 0.25)) * 0.2;
+  } else {
+    float up = -dy;
+    col += mix(c2, c1, smoothstep(0.0, u_res.y * 0.6, up)) * 0.1;  // a pastel sky
+    col += retroSun(frag, R, px, c1, c2) + retroStars(frag, R, px, up) * 0.6;
+  }
+
+  // The solids, either side of the cover, bobbing.
+  float size = R * 0.42 * (1.0 + 0.15 * u_bass + 0.1 * u_beat);
+  float dc = cube(frag, u_focus.xy + vec2(-2.5 * R, 0.3 * R + sin(u_time * 0.8) * 0.12 * R), size, u_time * 0.5, 0.4 + 0.2 * sin(u_time * 0.3));
+  float dp = pyramid(frag, u_focus.xy + vec2(2.5 * R, 0.25 * R + sin(u_time * 0.8 + 2.0) * 0.12 * R), size, -u_time * 0.6, 0.25);
+  col += c3 * (exp(-dc * dc / (px * px)) + exp(-dc / (px * 4.0)) * 0.3) * (1.0 + 0.6 * u_beat);
+  col += c1 * (exp(-dp * dp / (px * px)) + exp(-dp / (px * 4.0)) * 0.3) * (1.0 + 0.6 * u_beat);
+
+  col += vec3(hash(gl_FragCoord.xy + u_time)) * band * 0.15;      // snow in the glitch
+  float scan = sin(gl_FragCoord.y * PI / (px * 3.0));
+  col *= 0.82 + 0.18 * scan * scan;                 // scanlines
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * 8-Bit: the Synthwave scene as console pixel art, drawn in chunky blocks and
+ * ordered-dithered down to a few shades per channel.
+ */
+const PIXEL = `
+// The 2x2 Bayer threshold for a cell; nested once more it gives 4x4.
+float bayer2(vec2 a) {
+  a = floor(a);
+  return fract(a.x / 2.0 + a.y * a.y * 0.75);
+}
+
+void main() {
+  float B = max(4.0, floor(u_res.y / 110.0));       // block size, px
+  vec2 cell = floor(gl_FragCoord.xy / B);
+  vec3 col = synthwaveScene((cell + 0.5) * B, B * 0.8) * (0.85 + 0.3 * u_energy);
+  float d = bayer2(cell * 0.5) * 0.25 + bayer2(cell);
+  col = floor(col * 5.0 + d) / 5.0;
+  gl_FragColor = finish(col);
+}
+`;
+
+/**
+ * Night Drive: a highway after dark, street lamps sweeping past on both
+ * sides, the taillights of the cars ahead, a pale moon behind the artwork and
+ * the city along the horizon. The drive speeds up as the track gets louder,
+ * brake lights flare on beats and the lamps swell with the bass.
+ */
+const NIGHTDRIVE = `
+void main() {
+  vec2 frag = gl_FragCoord.xy;
+  float R = max(u_focus.z, 20.0);
+  float px = max(u_res.y * 0.0016, 1.0);
+  float F = u_res.y * 0.9;
+  float hz = horizonAt(R, 0.75);
+  float dy = hz - frag.y;
+  float bend = 0.015 * sin(u_time * 0.11);
+  vec3 cLamp = mix(pal(0.1 + u_time * 0.01), vec3(1.0, 0.75, 0.4), 0.35);
+  vec3 cMoon = mix(pal(0.5 + u_time * 0.01), vec3(1.0), 0.6);
+  vec3 cNeon = pal(0.75 + u_time * 0.01);
+  vec3 cTail = mix(vec3(1.0, 0.08, 0.12), pal(u_time * 0.01), 0.25);
+  float travel = u_flow * 2.6;
+  vec3 col = vec3(0.0);
+  float xc = 0.0;
+  float z = 0.0;
+
+  if (dy > 0.0) {
+    z = F / dy;
+    xc = (frag.x - u_focus.x) / dy - bend * z * z;
+    float wxc = px / dy;
+    float fog = exp(-z * 0.08);
+    float ax = abs(xc);
+    float ew = max(0.03, wxc);
+    float edge = exp(-(ax - 1.1) * (ax - 1.1) / (ew * ew)) * min(0.03 / wxc, 1.0);
+    float dz = fract((z + travel) * 0.35);
+    float aa = px * F / (dy * dy) * 0.35;
+    float lw = max(0.02, wxc);
+    float lane = exp(-(ax - 0.37) * (ax - 0.37) / (lw * lw)) * min(0.02 / wxc, 1.0)
+               * mix(1.0 - smoothstep(0.2 - aa, 0.2 + aa, abs(dz - 0.5)), 0.4, smoothstep(0.1, 0.4, aa));
+    col += cLamp * edge * 0.7 * fog + vec3(0.9) * lane * 0.7 * fog;
+    col += cNeon * 0.02 * (1.0 - smoothstep(1.05, 1.15, ax)) * fog;    // the tarmac
+  } else {
+    float up = -dy;
+    // The moon behind the cover, mottled, and the sky lit around it.
+    float md = length(frag - u_focus.xy);
+    float Rm = R * 1.25;
+    float moon = 1.0 - smoothstep(Rm - px, Rm + px, md);
+    col += cMoon * moon * (0.45 + 0.25 * fbm((frag - u_focus.xy) / R * 2.5)) + cMoon * exp(-max(md - Rm, 0.0) / (R * 0.6)) * 0.15 * (1.0 - moon);
+    col += retroStars(frag, R, px, up) * 0.7 + cNeon * exp(-up / (R * 0.5)) * 0.18;
+    vec4 city = skyline(frag.x, up, R, px, R * 0.2, 1.3, 0.3 + 0.3 * u_mid, 31.0, u_flow * R * 0.02);
+    col *= 1.0 - city.x;
+    col += pal(city.w * 0.5 + 0.6) * city.x * 0.05 + cLamp * city.y * 0.5 + cNeon * city.z * 0.5;
+  }
+
+  // Lamps on both sides, nearest first: a pool of light on the road, the
+  // lamp itself, and the pole (a black silhouette).
+  float pole = 1e6;
+  float gap = 5.0;
+  for (int k = 0; k < 8; k++) {
+    float n = floor(travel / gap) + 1.0 + float(k);
+    float lz = n * gap - travel;
+    if (lz < 0.8) continue;
+    float s = F / lz;
+    float off = bend * lz * lz;
+    float fog = exp(-lz * 0.08);
+    for (int j = 0; j < 2; j++) {
+      float side = float(j) * 2.0 - 1.0;
+      if (dy > 0.0) {
+        vec2 pd = vec2(xc - side * 0.85, (z - lz) * 0.45);
+        col += cLamp * exp(-dot(pd, pd) / 0.35) * 0.55 * fog * (0.8 + 0.5 * u_bass);
+      }
+      vec2 base = vec2(u_focus.x + (side * 1.45 + off) * s, hz - s);
+      vec2 head = vec2(u_focus.x + (side * 0.85 + off) * s, hz + 1.6 * s);
+      float hd = length(frag - head);
+      float hr = max(0.05 * s, px);
+      col += cLamp * (exp(-hd * hd / (hr * hr)) * 1.5 + exp(-hd / (hr * 4.0)) * 0.35) * fog * (0.8 + 0.5 * u_bass);
+      // Its beam: a cone of light widening down to the road.
+      float hh = head.y - frag.y;
+      if (hh > 0.0) {
+        float cw = hh * 0.45 + hr;
+        float cx = (frag.x - head.x) / cw;
+        col += cLamp * exp(-cx * cx) * exp(-hh / (s * 2.6)) * 0.1 * fog * (0.8 + 0.5 * u_bass);
+      }
+      vec2 top = base + vec2(0.0, 2.6 * s);
+      float w = max(0.025 * s, px * 0.6);
+      pole = min(pole, min(segT(frag, base, top).x, segT(frag, top, head + vec2(0.0, 0.03 * s)).x) - w);
+    }
+  }
+
+  // Taillights of the cars ahead, drifting nearer and further in their lanes.
+  for (int i = 0; i < 4; i++) {
+    float fi = float(i);
+    float cz = 5.0 + fi * 4.0 + 2.0 * sin(u_time * (0.15 + 0.05 * fi) + fi * 2.0);
+    float cx = (mod(fi, 3.0) - 1.0) * 0.73 + bend * cz * cz;  // left, middle and right lanes
+    float s = F / cz;
+    float fog = exp(-cz * 0.06);
+    float brake = 0.6 + 1.4 * u_beat;
+    for (int j = 0; j < 2; j++) {
+      vec2 lp = vec2(u_focus.x + (cx + (float(j) - 0.5) * 0.42) * s, hz - 0.62 * s);
+      float d = length(frag - lp);
+      float lr = max(0.04 * s, px);
+      col += cTail * (exp(-d * d / (lr * lr)) * 1.3 + exp(-d / (lr * 3.5)) * 0.3) * brake * fog;
+      // Their glow on the road beneath.
+      if (frag.y < lp.y) col += cTail * exp(-abs(frag.x - lp.x) / (lr * 1.5)) * exp(-(lp.y - frag.y) / (s * 0.5)) * 0.08 * brake * fog;
+    }
+  }
+
+  float sil = clamp(0.5 - pole / px, 0.0, 1.0);
+  col *= 1.0 - sil;
+  col *= 0.85 + 0.3 * u_energy;
+  gl_FragColor = finishOver(col, sil);
 }
 `;
 
@@ -956,9 +1666,7 @@ void main() {
   col += cOut * jet * (0.04 + 0.6 * u_bass * u_bass * u_bass);
 
   col *= 0.85 + 0.3 * u_energy;
-  vec4 o = finish(col);
-  // An opaque shadow: premultiplied colour over black keeps its rgb and takes alpha 1.
-  gl_FragColor = vec4(o.rgb, max(o.a, shadow * protect(gl_FragCoord.xy) * u_intensity));
+  gl_FragColor = finishOver(col, shadow);         // the shadow is opaque
 }
 `;
 
@@ -975,7 +1683,16 @@ export const FRAGMENTS: Record<string, string> = {
   embers: PRELUDE + EMBERS,
   warp: PRELUDE + WARP,
   lasers: PRELUDE + LASERS,
-  synthwave: PRELUDE + SYNTHWAVE,
+  synthwave: PRELUDE + RETRO + SYNTHWAVE,
+  outrun: PRELUDE + RETRO + OUTRUN,
+  city: PRELUDE + RETRO + CITY,
+  terrain: PRELUDE + RETRO + TERRAIN,
+  tunnel: PRELUDE + RETRO + TUNNEL,
+  planet: PRELUDE + RETRO + PLANET,
+  beach: PRELUDE + RETRO + BEACH,
+  vapor: PRELUDE + RETRO + VAPOR,
+  pixel: PRELUDE + RETRO + PIXEL,
+  nightdrive: PRELUDE + RETRO + NIGHTDRIVE,
   blackhole: PRELUDE + BLACKHOLE,
   vortex: PRELUDE + VORTEX,
   gooey: PRELUDE + GOOEY,

@@ -15,6 +15,7 @@ import { useVizStore, type CaptionPos, type VizCycle } from '../../store/vizStor
 import { VISUALIZERS, type Boost, type Quality } from '../viz'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
+import type { AudioFx } from '../audioEffects'
 import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, isDebugRecording, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
 import { fail, parseBool, pickByName, type TermCommand } from './types'
 
@@ -49,6 +50,8 @@ const color = (key: string, desc: string, get: () => string | null, set: (v: str
 // values go through the same store setters the Settings screen uses, so they
 // persist and sync to the account exactly the same way.
 const vz = (): ReturnType<typeof useVizStore.getState> => useVizStore.getState()
+const fx = (): AudioFx => st().audioFx
+const setFx = (patch: Partial<AudioFx>): void => st().setAudioFx(patch)
 const pills = (...values: string[]): Setting['options'] => () => values.map((v) => ({ value: v, label: v }))
 
 // The Settings screen lists output devices from enumerateDevices(), which is
@@ -108,6 +111,25 @@ const SETTINGS: Setting[] = [
   num('reverb-mix', 'Reverb amount', 0, 100, () => Math.round(st().reverbMix * 100), (v) => st().setReverbMix(v / 100), '%'),
   num('reverb-decay', 'Reverb tail length', 1, 8, () => st().reverbDecay, (v) => st().setReverbDecay(v), 's'),
   bool('pitch-shift', 'Let pitch follow the speed', () => st().pitchShift, (v) => st().setPitchShift(v)),
+  num('preamp', 'Equalizer preamp (level into the bands)', -12, 12, () => fx().preamp, (v) => setFx({ preamp: v }), 'dB'),
+  num('width', 'Stereo width (0 = mono, 100 = as mixed)', 0, 200, () => Math.round(fx().width * 100), (v) => setFx({ width: v / 100 }), '%'),
+  num('saturation', 'Saturation drive', 0, 100, () => Math.round(fx().drive * 100), (v) => setFx({ drive: v / 100 }), '%'),
+  bool('echo', 'Echo on', () => fx().echo, (v) => setFx({ echo: v })),
+  num('echo-time', 'Gap between echo repeats', 50, 1500, () => Math.round(fx().echoTime * 1000), (v) => setFx({ echoTime: v / 1000 }), 'ms'),
+  num('echo-feedback', 'Echo feedback (how many repeats)', 0, 90, () => Math.round(fx().echoFeedback * 100), (v) => setFx({ echoFeedback: v / 100 }), '%'),
+  num('echo-level', 'Echo level', 0, 100, () => Math.round(fx().echoMix * 100), (v) => setFx({ echoMix: v / 100 }), '%'),
+  bool('8d', '8D audio (sound circles around your head)', () => fx().autoPan, (v) => setFx({ autoPan: v })),
+  num('8d-rotation', 'Seconds per 8D sweep', 1, 20, () => fx().autoPanPeriod, (v) => setFx({ autoPanPeriod: v }), 's'),
+  num('8d-depth', 'How far the 8D sweep swings', 0, 100, () => Math.round(fx().autoPanDepth * 100), (v) => setFx({ autoPanDepth: v / 100 }), '%'),
+  bool('compressor', 'Compressor on', () => fx().compressor, (v) => setFx({ compressor: v })),
+  num('comp-threshold', 'Compressor threshold', -60, 0, () => fx().compThreshold, (v) => setFx({ compThreshold: v }), 'dB'),
+  num('comp-ratio', 'Compressor ratio', 1, 20, () => fx().compRatio, (v) => setFx({ compRatio: v }), ':1'),
+  num('comp-attack', 'Compressor attack', 1, 200, () => Math.round(fx().compAttack * 1000), (v) => setFx({ compAttack: v / 1000 }), 'ms'),
+  num('comp-release', 'Compressor release', 50, 1000, () => Math.round(fx().compRelease * 1000), (v) => setFx({ compRelease: v / 1000 }), 'ms'),
+  bool('filter', 'Low/high cut filter on', () => fx().filter, (v) => setFx({ filter: v })),
+  num('low-cut', 'Filter: cut everything below', 20, 2000, () => fx().lowCut, (v) => setFx({ lowCut: v }), 'Hz'),
+  num('high-cut', 'Filter: cut everything above', 1000, 20000, () => fx().highCut, (v) => setFx({ highCut: v }), 'Hz'),
+  num('filter-resonance', 'Filter emphasis at the cut points', 0, 15, () => fx().filterResonance, (v) => setFx({ filterResonance: v }), 'dB'),
   num('hotkey-seek', 'Seconds the skip shortcuts jump', 1, 120, () => st().hotkeySeekSeconds, (v) => st().setHotkeySeekSeconds(v), 's'),
   bool('global-hotkeys', 'OS-wide keyboard shortcuts (desktop app)', () => st().globalHotkeysEnabled, (v) => st().setGlobalHotkeysEnabled(v)),
   bool('media-overlay', 'Windows media overlay (desktop app)', () => st().mediaOverlayEnabled, (v) => st().setMediaOverlayEnabled(v)),
@@ -128,7 +150,7 @@ const SETTINGS: Setting[] = [
   bool('chat-presence', 'Request and show who is online', () => useChatStore.getState().presenceEnabled, (v) => useChatStore.getState().setPresenceEnabled(v)),
   bool('chat-read-receipts', 'Send read receipts', () => useChatStore.getState().readEnabled, (v) => useChatStore.getState().setReadEnabled(v)),
   bool('cdn', 'Distributed CDN downloads (off always uses the origin server)', () => cdnService.enabled, (v) => cdnService.setEnabled(v)),
-  bool('embed-lyrics', 'Embed lyrics and your cover in downloaded MP3s', () => st().embedLyricsOnDownload, (v) => st().setEmbedLyricsOnDownload(v)),
+  bool('download-song-info', 'Write name, artist, album, cover and lyrics into downloaded MP3s', () => st().embedSongInfoOnDownload, (v) => st().setEmbedSongInfoOnDownload(v)),
   bool('developer-mode', 'Developer tab in Settings', () => st().developerMode, (v) => st().setDeveloperMode(v)),
 ]
 
@@ -322,7 +344,7 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
   },
   {
     name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start|stop|discard]',
-    description: 'Record console messages and network requests, then save them to a file to send us (same as Settings > Preferences > Record debug log)',
+    description: 'Record console messages and network requests, then save them to a file to send us (same as Settings > About > Record debug log)',
     complete: (before, partial) => before.length === 0 ? ['start', 'stop', 'discard'].filter((v) => v.startsWith(partial.toLowerCase())) : [],
     run: (args, ctx) => {
       const verb = args.trim().toLowerCase()

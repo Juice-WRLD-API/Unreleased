@@ -7,6 +7,7 @@ import { applySeo } from './lib/seo'
 import { lazyView } from './lib/lazyView'
 import { preloadAllViews } from './lib/lazyViews'
 import { ViewType } from './types'
+import ViewFade from './components/ViewFade'
 
 // Views that stay mounted (hidden) underneath the terminal so their local
 // state survives opening and closing it. Only form-like views with no
@@ -335,17 +336,19 @@ export default function App(): JSX.Element {
             {/* Holdable views live in their own keyed slots so toggling between
                 "shown" and "hidden under the terminal" never remounts them.
                 `contents` keeps the wrapper out of the flex layout. */}
+            {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (activeView === v || heldView === v) && (
-              <div key={v} className={activeView === v ? 'contents' : 'hidden'}>
+              <ViewFade key={v} active={activeView === v}>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
                   : v === 'playlists' ? <PlaylistsView />
                   : <ChatView />}
-              </div>
+              </ViewFade>
             ))}
-            {HOLD_UNDER_TERMINAL.includes(activeView) ? null
-              : activeView === 'home' ? <HomeView />
+            {!HOLD_UNDER_TERMINAL.includes(activeView) && (
+            <ViewFade key={activeView} active>
+              {activeView === 'home' ? <HomeView />
               : activeView === 'api-tracker' ? <ApiTrackerView />
               : activeView === 'api-files' ? <ApiFilesView />
               : activeView === 'contributor-profile' ? <ContributorProfileView />
@@ -369,6 +372,8 @@ export default function App(): JSX.Element {
               : activeView === 'local-editor' ? <LocalEditorPage />
               : activeView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
+            </ViewFade>
+            )}
             </Suspense>
           </ErrorBoundary>
             {showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}

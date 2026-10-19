@@ -27,7 +27,7 @@ const SYNC_KEYS = [
   'playbackSpeed', 'lyricsOffset', 'audioOutput', 'sleepTimerEnd',
   // Full equalizer/effects state, so the EQ pop-out window's controls drive
   // the main window's audio chain (only the main window owns audio elements).
-  'eqEnabled', 'eqGains', 'eqPreset', 'eqBalance', 'eqMono', 'eqBoost', 'skipSilence',
+  'eqEnabled', 'eqGains', 'eqPreset', 'eqBalance', 'eqMono', 'eqBoost', 'audioFx', 'eqUserPresets', 'skipSilence',
   'reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift', 'communityEdits',
   // A-B loop points — set from either window, enforced only by the main
   // window's audio (it owns the elements), same reasoning as the effects row

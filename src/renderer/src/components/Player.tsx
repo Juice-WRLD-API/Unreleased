@@ -37,13 +37,12 @@ import ContextMenu from './ContextMenu'
 import EqualizerPanel from './EqualizerPanel'
 import {
   attachAudioElement, applyAudioEffects, resumeEffectsContext,
-  setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted,
+  setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted, fxInUse,
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
-import { isSessionEditPlaceholder, peekSessionEditLink, sessionEditSongId } from '../lib/sessionEditLinksMirror'
-import { peekActiveChannel } from '../lib/activeChannelState'
-import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
+import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { SessionEditNotFoundError, peekSessionEditFile } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
 import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
@@ -66,7 +65,7 @@ function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: strin
 // name as its artist line once the lookup finds it, like songToTrack does.
 function fillSessionArtist(trackId: string, streamUrl: string | undefined): void {
   if (!isSessionEditPlaceholder(streamUrl)) return
-  const link = peekSessionEditLink(sessionEditSongId(streamUrl), peekActiveChannel())
+  const link = peekSessionEditFile(streamUrl)
   if (!link) return
   const artist = fileStem(link.path)
   const { currentTrack, currentTrackFull, queue } = useStore.getState()
@@ -251,7 +250,7 @@ export default function Player(): JSX.Element {
   const { globalHotkeysEnabled, globalHotkeyBindings } = useStorePick('globalHotkeysEnabled', 'globalHotkeyBindings')
   const { mediaOverlayEnabled } = useStorePick('mediaOverlayEnabled')
   const { eqEnabled, eqGains, eqBalance, eqMono, eqBoost, skipSilence } = useStorePick('eqEnabled', 'eqGains', 'eqBalance', 'eqMono', 'eqBoost', 'skipSilence')
-  const { reverbEnabled, reverbMix, reverbDecay, pitchShift } = useStorePick('reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift')
+  const { reverbEnabled, reverbMix, reverbDecay, pitchShift, audioFx } = useStorePick('reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift', 'audioFx')
   const { abLoopStart, abLoopEnd, setAbLoopPoint, clearAbLoop } = useStorePick('abLoopStart', 'abLoopEnd', 'setAbLoopPoint', 'clearAbLoop')
 
   // Applies the playback rate to an element, letting the pitch follow the
@@ -487,7 +486,7 @@ export default function Player(): JSX.Element {
   // what makes background playback fragile there, and the overwhelming
   // majority of listeners never touch the EQ — no reason to make them pay for
   // it. Desktop attaches on mount as it always has.
-  const effectsInUse = eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || reverbEnabled || skipSilence
+  const effectsInUse = eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || reverbEnabled || skipSilence || fxInUse(audioFx, eqEnabled)
   useEffect(() => {
     if (effectsInUse) setEffectsChainWanted(true)
     attachAudioElement(slotA.current)
@@ -504,8 +503,9 @@ export default function Player(): JSX.Element {
       reverbMix: reverbEnabled ? reverbMix : 0,
       reverbDecay,
       boost: eqBoost,
+      fx: audioFx,
     })
-  }, [eqEnabled, eqGains, eqBalance, eqMono, eqBoost, reverbEnabled, reverbMix, reverbDecay])
+  }, [eqEnabled, eqGains, eqBalance, eqMono, eqBoost, reverbEnabled, reverbMix, reverbDecay, audioFx])
 
   // Expose seek and duration to other components
   useEffect(() => {
@@ -1902,7 +1902,7 @@ export default function Player(): JSX.Element {
     }
   }, [showEqPanel])
   // Accent the button when anything in the panel deviates from neutral.
-  const eqActive = eqEnabled || playbackSpeed !== 1 || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled
+  const eqActive = eqEnabled || playbackSpeed !== 1 || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled || fxInUse(audioFx, eqEnabled)
 
 
   // (Play/pause on Space is handled by the unified hotkey system above — the

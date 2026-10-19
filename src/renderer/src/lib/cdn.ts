@@ -15,7 +15,7 @@ import { getToken } from './userApi'
 import { downloadViaNode, CdnNodeError, NO_ICE_CANDIDATES, type CdnDownloadProgress, type CdnNodeDownloadResult } from './cdnWebrtc'
 import { downloadViaTunnel } from './cdnTunnel'
 import { blake2bHexFromBlob } from './cdnBlake2b'
-import { embedForDownload, embedSafe } from './lyricsEmbed'
+import { embedForDownload, embedSafe } from './downloadEmbed'
 
 const CDN_BASE = `${JWAPI_BASE}/cdn`
 const ENABLED_KEY = 'cdnEnabled'
@@ -235,7 +235,7 @@ export async function downloadFileSmart(
   filename: string,
   streamUrl: string,
   onProgress?: (p: CdnDownloadProgress) => void,
-  /** The song this file is, for the "embed lyrics on download" setting. */
+  /** The song this file is, for the "Add song info to downloads" setting. */
   songId?: number | null
 ): Promise<boolean> {
   const embedPromise = embedForDownload(songId, path)

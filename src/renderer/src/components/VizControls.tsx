@@ -59,8 +59,12 @@ export function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): J
   )
 }
 
-/** Every visualizer control, shared by Settings and the WRLD toolbar's popup. */
-export default function VizControls(): JSX.Element {
+/**
+ * Every visualizer control, shared by Settings and the WRLD toolbar's popup.
+ * The popup leaves out the mode picker: the toolbar's mode name, right beside
+ * it, opens the same list.
+ */
+export default function VizControls({ modes = true }: { modes?: boolean }): JSX.Element {
   const s = useVizStore()
   const gl = webglAvailable()
   const line = (label: string, control: ReactNode): JSX.Element => (
@@ -71,7 +75,7 @@ export default function VizControls(): JSX.Element {
   )
   return (
     <div className="flex flex-col gap-2.5">
-      {line('Visualizer', (
+      {modes && line('Visualizer', (
         <Pills
           // A saved shader mode plays as Aurora without WebGL; highlight that.
           value={!gl && VISUALIZERS.find((v) => v.id === s.vizMode)?.engine === 'gl' ? 'aurora' : s.vizMode}

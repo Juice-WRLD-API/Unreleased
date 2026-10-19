@@ -267,8 +267,19 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
 
   // Plain toggle: click an unselected line to add it (up to MAX_LINES), click
   // a selected one to drop it - so a selection can skip lines in between
-  // instead of always being one contiguous block.
+  // instead of always being one contiguous block. A second click on the same
+  // line in quick succession keeps just that line - timed here rather than
+  // onDoubleClick so a double-tap works on touch screens too.
+  const lastLineClickRef = useRef<{ i: number; at: number } | null>(null)
   const handleLineClick = (i: number): void => {
+    const now = performance.now()
+    const last = lastLineClickRef.current
+    if (last && last.i === i && now - last.at < 350) {
+      lastLineClickRef.current = null
+      setSelected([i])
+      return
+    }
+    lastLineClickRef.current = { i, at: now }
     setSelected(prev => {
       if (prev.includes(i)) return prev.filter(x => x !== i)
       if (prev.length >= MAX_LINES) return prev

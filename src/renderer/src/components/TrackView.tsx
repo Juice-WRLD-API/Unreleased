@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { Play, Loader2, Music2, ChevronLeft, Share2, Download, Check } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { getSongById, songToTrack, buildStreamUrl, CATEGORY_LABELS, JWApiSong } from '../lib/juicewrldApi'
+import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { resolveTrackFile } from '../lib/sessionEditsApi'
 import { trackShareUrl } from '../lib/platform'
 import { formatDuration } from '../lib/format'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -129,6 +131,14 @@ export default function TrackView(): JSX.Element {
                   target="_blank"
                   rel="noopener noreferrer"
                   className={btnSecondary}
+                  onClick={(e) => {
+                    // A session not yet looked up only has its marker as an
+                    // href - find its file first, then follow that.
+                    const a = e.currentTarget
+                    if (!isSessionEditPlaceholder(a.getAttribute('href') ?? undefined)) return
+                    e.preventDefault()
+                    resolveTrackFile(track).then(({ url }) => { a.href = url; a.click() }, console.error)
+                  }}
                 >
                   <Download size={15} /> Download
                 </a>

@@ -12,15 +12,13 @@ import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, getSongById, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
+import { resolveSongFile } from '../lib/sessionEditsApi'
 import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { getVersionGroup } from '../lib/versionsApi'
-
-// AdminPage's own tab set (see its local `Tab` type) — duplicated here rather
-// than imported so the store doesn't depend on a component file; keep in sync.
-export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'eras' | 'security' | 'channels' | 'cdn-nodes' | 'beta'
+import type { AdminTab } from '../hooks/useAdminQueue'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
 import { setEraCoverRaw } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
@@ -53,8 +51,8 @@ import {
   MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS, OPTIONAL_SONG_FIELDS,
 } from '../lib/trackerFields'
 import type { TrackerFieldKey } from '../lib/trackerFields'
-import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
-import type { CommunityEdit } from '../lib/audioEffects'
+import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS, DEFAULT_FX, USER_PRESET_PREFIX, USER_PRESET_NAME_MAX, sanitizeFx, sanitizeUserPresets } from '../lib/audioEffects'
+import type { AudioFx, CommunityEdit, EqPreset } from '../lib/audioEffects'
 import { HOTKEY_ACTIONS, effectiveBinding, effectiveGlobalBinding, defaultGlobalBinding } from '../lib/hotkeys'
 import { DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
@@ -89,7 +87,7 @@ function offlineMetaFor(song: JWApiSong) {
     imageUrl: track.imageUrl ?? null,
     lyrics: song.lyrics || null,
     syncedLyrics: song.synced_lyrics || null,
-    duration: parseDuration(song.length),
+    duration: track.duration,
   }
 }
 
@@ -236,6 +234,11 @@ interface AppState {
   eqMono: boolean
   // 1 = 100% (unity, off) .. EQ_BOOST_MAX = 200%.
   eqBoost: number
+  // Width, saturation, compressor, cut filter, echo, 8D and the EQ preamp -
+  // one object (see AudioFx) rather than a store key per knob.
+  audioFx: AudioFx
+  // Band curves the user saved by name; ids carry USER_PRESET_PREFIX.
+  eqUserPresets: EqPreset[]
   skipSilence: boolean
   // Reverb (convolution tail; see lib/audioEffects.ts) � independently
   // toggleable; mix/decay keep their values while off.
@@ -631,9 +634,10 @@ interface AppState {
   // "Report this error" button uses. On by default; Settings can turn it off
   // for anyone who'd rather report manually (or not at all).
   autoReportErrors: boolean
-  // When on, downloading an MP3 song writes its lyrics and the user's own cover into the
-  // file's ID3 tag (see lib/lyricsEmbed). Per-device: not synced.
-  embedLyricsOnDownload: boolean
+  // When on (the default), downloading an MP3 song writes its name, artist,
+  // album, cover and lyrics into the file's ID3 tag (see lib/downloadEmbed).
+  // Per-device: not synced.
+  embedSongInfoOnDownload: boolean
   // Playlists for signed-out users - see GuestPlaylist. Persisted to
   // localStorage, so unlike localPlaylists these aren't tied to scanned
   // library tracks and work identically on every platform.
@@ -656,6 +660,15 @@ interface AppActions {
   setEqBalance: (balance: number) => void
   setEqMono: (mono: boolean) => void
   setEqBoost: (boost: number) => void
+  setAudioFx: (patch: Partial<AudioFx>) => void
+  /** Saves the current band gains under `name` (replacing a saved preset of
+   *  the same name) and selects it. Returns the preset id. */
+  saveEqUserPreset: (name: string) => string
+  deleteEqUserPreset: (id: string) => void
+  /** Every sound-shaping control back to its default: flat bands, preamp,
+   *  balance, mono, boost, reverb, the AudioFx effects and speed. Leaves the
+   *  EQ's on/off, skip-silence, pitch-follows-speed and saved presets alone. */
+  resetSoundEffects: () => void
   setSkipSilence: (enabled: boolean) => void
   setReverbEnabled: (enabled: boolean) => void
   setReverbMix: (mix: number) => void
@@ -1014,7 +1027,7 @@ interface AppActions {
   setPlaylistHeroEnabled: (enabled: boolean) => void
   syncUserSettings: (serverSettings?: UserSettings) => Promise<void>
   setAutoReportErrors: (enabled: boolean) => void
-  setEmbedLyricsOnDownload: (enabled: boolean) => void
+  setEmbedSongInfoOnDownload: (enabled: boolean) => void
   // Guest playlists (see GuestPlaylist) - createGuestPlaylist returns the new
   // playlist's id so the caller can navigate straight to it.
   createGuestPlaylist: (name: string) => string
@@ -1236,6 +1249,8 @@ function buildUserSettings(s: AppStore): UserSettings {
     eq_balance: s.eqBalance,
     eq_mono: s.eqMono,
     eq_boost: s.eqBoost,
+    audio_fx: s.audioFx,
+    eq_user_presets: s.eqUserPresets,
     skip_silence: s.skipSilence,
     reverb_enabled: s.reverbEnabled,
     reverb_mix: s.reverbMix,
@@ -1379,7 +1394,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setEqPreset: (id) => {
-    const preset = EQ_PRESETS.find((p) => p.id === id)
+    const preset = EQ_PRESETS.find((p) => p.id === id) ?? get().eqUserPresets.find((p) => p.id === id)
     if (!preset) return
     const eqGains = [...preset.gains]
     set({ eqGains, eqPreset: id })
@@ -1389,6 +1404,44 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance); get()._scheduleProfilePush(['userSettings']) },
   setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono); get()._scheduleProfilePush(['userSettings']) },
   setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost); get()._scheduleProfilePush(['userSettings']) },
+  audioFx: sanitizeFx(ls.get<Partial<AudioFx>>('audioFx')),
+  eqUserPresets: sanitizeUserPresets(ls.get<EqPreset[]>('eqUserPresets')),
+  setAudioFx: (patch) => {
+    const audioFx = sanitizeFx({ ...get().audioFx, ...patch })
+    set({ audioFx }); ls.set('audioFx', audioFx); get()._scheduleProfilePush(['userSettings'])
+  },
+  saveEqUserPreset: (rawName) => {
+    const name = rawName.trim().slice(0, USER_PRESET_NAME_MAX)
+    const { eqUserPresets, eqGains } = get()
+    const existing = eqUserPresets.find((p) => p.name.toLowerCase() === name.toLowerCase())
+    const id = existing?.id ?? `${USER_PRESET_PREFIX}${Date.now().toString(36)}`
+    const preset: EqPreset = { id, name, gains: [...eqGains] }
+    const next = existing ? eqUserPresets.map((p) => (p.id === id ? preset : p)) : [...eqUserPresets, preset]
+    set({ eqUserPresets: next, eqPreset: id })
+    ls.set('eqUserPresets', next); ls.set('eqPreset', id)
+    get()._scheduleProfilePush(['userSettings'])
+    return id
+  },
+  deleteEqUserPreset: (id) => {
+    const next = get().eqUserPresets.filter((p) => p.id !== id)
+    // The curve stays on the bands - it just stops having a name.
+    const eqPreset = get().eqPreset === id ? 'custom' : get().eqPreset
+    set({ eqUserPresets: next, eqPreset })
+    ls.set('eqUserPresets', next); ls.set('eqPreset', eqPreset)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  resetSoundEffects: () => {
+    const s = get()
+    s.setEqPreset('flat')
+    s.setEqBalance(0)
+    s.setEqMono(false)
+    s.setEqBoost(1)
+    s.setReverbEnabled(false)
+    s.setReverbMix(0.4)
+    s.setReverbDecay(3)
+    s.setAudioFx(DEFAULT_FX)
+    s.setPlaybackSpeed(1)
+  },
   setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence); get()._scheduleProfilePush(['userSettings']) },
   // 'slowedReverb' is the feature's short-lived bundled-toggle predecessor -
   // carry an existing on-state over so it doesn't silently switch off.
@@ -3311,9 +3364,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
         })
         try {
           const song = await getSongById(songId)
-          const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
+          // A session saves the file it plays (linked or looked up), not its own path.
+          const file = await resolveSongFile(song)
+          const ext = (file.path.split('.').pop() || 'mp3').toLowerCase()
           const meta = offlineMetaFor(song)
-          const result = await el.offlineDownloadTrack({ id, url: buildStreamUrl(song.path), ext, path: song.path, meta })
+          const result = await el.offlineDownloadTrack({ id, url: file.url, ext, path: file.path, meta })
           if (result?.error) throw new Error(result.error)
           if (!result?.skipped) {
             announce()
@@ -3323,7 +3378,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
           set((s) => ({
             offlineTracks: {
               ...s.offlineTracks,
-              [id]: { ...meta, path: song.path, localPath: result.localPath, localImagePath: result.localImagePath ?? null, coverSourceUrl: result.coverSourceUrl ?? null, ext, downloadedAt: Date.now() },
+              [id]: { ...meta, path: file.path, localPath: result.localPath, localImagePath: result.localImagePath ?? null, coverSourceUrl: result.coverSourceUrl ?? null, ext, downloadedAt: Date.now() },
             },
           }))
         } catch (e) {
@@ -3398,14 +3453,15 @@ export const useStore = create<AppStore>((set, get, store) => ({
     await enqueueOfflineWork(key, async () => {
       try {
         const song = await getSongById(songId)
-        const ext = (song.path.split('.').pop() || 'mp3').toLowerCase()
+        const file = await resolveSongFile(song)
+        const ext = (file.path.split('.').pop() || 'mp3').toLowerCase()
         const meta = offlineMetaFor(song)
-        const result = await el.offlineDownloadTrack({ id, url: buildStreamUrl(song.path), ext, path: song.path, meta })
+        const result = await el.offlineDownloadTrack({ id, url: file.url, ext, path: file.path, meta })
         if (result?.error) throw new Error(result.error)
         set((s) => ({
           offlineTracks: {
             ...s.offlineTracks,
-            [id]: { ...meta, path: song.path, localPath: result.localPath, localImagePath: result.localImagePath ?? null, coverSourceUrl: result.coverSourceUrl ?? null, ext, downloadedAt: Date.now() },
+            [id]: { ...meta, path: file.path, localPath: result.localPath, localImagePath: result.localImagePath ?? null, coverSourceUrl: result.coverSourceUrl ?? null, ext, downloadedAt: Date.now() },
           },
         }))
         const existingIds = get().offlinePlaylists[key]?.songIds ?? []
@@ -3603,6 +3659,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (serverSettings.eq_balance != null && serverSettings.eq_balance !== s.eqBalance) s.setEqBalance(serverSettings.eq_balance)
     if (serverSettings.eq_mono !== undefined && serverSettings.eq_mono !== s.eqMono) s.setEqMono(serverSettings.eq_mono)
     if (serverSettings.eq_boost != null && serverSettings.eq_boost !== s.eqBoost) s.setEqBoost(serverSettings.eq_boost)
+    if (serverSettings.audio_fx) {
+      const audioFx = sanitizeFx(serverSettings.audio_fx)
+      if (stableJson(audioFx) !== stableJson(s.audioFx)) { set({ audioFx }); ls.set('audioFx', audioFx) }
+    }
+    if (Array.isArray(serverSettings.eq_user_presets)) {
+      const eqUserPresets = sanitizeUserPresets(serverSettings.eq_user_presets)
+      if (stableJson(eqUserPresets) !== stableJson(s.eqUserPresets)) { set({ eqUserPresets }); ls.set('eqUserPresets', eqUserPresets) }
+    }
     if (serverSettings.skip_silence !== undefined && serverSettings.skip_silence !== s.skipSilence) s.setSkipSilence(serverSettings.skip_silence)
     if (serverSettings.reverb_enabled !== undefined && serverSettings.reverb_enabled !== s.reverbEnabled) s.setReverbEnabled(serverSettings.reverb_enabled)
     if (serverSettings.reverb_mix !== undefined && serverSettings.reverb_mix !== s.reverbMix) s.setReverbMix(serverSettings.reverb_mix)
@@ -3631,8 +3695,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // ── Song preferences ──────────────────────────────────────────────────────,
   autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
   setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
-  embedLyricsOnDownload: ls.get<boolean>('embedLyricsOnDownload') ?? false,
-  setEmbedLyricsOnDownload: (embedLyricsOnDownload) => { set({ embedLyricsOnDownload }); ls.set('embedLyricsOnDownload', embedLyricsOnDownload) },
+  embedSongInfoOnDownload: ls.get<boolean>('embedSongInfoOnDownload') ?? true,
+  setEmbedSongInfoOnDownload: (embedSongInfoOnDownload) => { set({ embedSongInfoOnDownload }); ls.set('embedSongInfoOnDownload', embedSongInfoOnDownload) },
   guestPlaylists: ls.get<GuestPlaylist[]>('guestPlaylists') ?? [],
   createGuestPlaylist: (name) => {
     const id = `gp-${Date.now()}`

@@ -5,6 +5,7 @@ import { completeSongs, songFromArg } from './player'
 import { PLAYLIST_EDIT_SUBS, runPlaylistEdit } from './playlistEdit'
 import { pageRows } from './more'
 import { parseSearchQuery, matchesFieldFilters } from '../trackerSearch'
+import { displaySongName } from '../songPrefs'
 import { fail, pickByName, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
@@ -65,6 +66,7 @@ function describeSong(song: JWApiSong): string {
   const aliases = (song.track_titles ?? []).filter((t) => t.toLowerCase() !== song.name.toLowerCase())
   return [
     `${song.name}   #${song.id}`,
+    ...field('renamed', displaySongName(song) !== song.name ? displaySongName(song) : ''),
     ...field('era', song.era ? `${song.era.name}${song.era.time_frame ? ` (${song.era.time_frame})` : ''}` : ''),
     ...field('category', `${song.category.replace('_', ' ')}${song.length ? ` · ${song.length}` : ''}`),
     ...field('also', aliases.join(', ')),
@@ -136,9 +138,9 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
           const q = freeText.toLowerCase()
           const shown = songs
             .map((song, i) => ({ song, n: i + 1 }))
-            .filter(({ song }) => (!q || song.name.toLowerCase().includes(q) || song.credited_artists.toLowerCase().includes(q)) && matchesFieldFilters(song, filters))
+            .filter(({ song }) => (!q || displaySongName(song).toLowerCase().includes(q) || song.credited_artists.toLowerCase().includes(q)) && matchesFieldFilters(song, filters))
           const empty = songs.length ? `nothing in ${pl.name} matches "${filter}"` : '(empty)'
-          ctx.print(`${pl.name}\n${shown.length ? pageRows(shown.length, (i) => `${String(shown[i].n).padStart(3)}  ${shown[i].song.name}`, 80) : empty}`)
+          ctx.print(`${pl.name}\n${shown.length ? pageRows(shown.length, (i) => `${String(shown[i].n).padStart(3)}  ${displaySongName(shown[i].song)}`, 80) : empty}`)
           return
         }
         case 'open': {
@@ -171,7 +173,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
           if (sub.toLowerCase() === 'add') await addToPlaylist(pl.id, song.id)
           else await removeFromPlaylist(pl.id, song.id)
           await st().refreshPlaylists()
-          ctx.print(`${sub.toLowerCase() === 'add' ? 'added' : 'removed'} ${song.name} ${sub.toLowerCase() === 'add' ? 'to' : 'from'} "${pl.name}"`, 'ok')
+          ctx.print(`${sub.toLowerCase() === 'add' ? 'added' : 'removed'} ${displaySongName(song)} ${sub.toLowerCase() === 'add' ? 'to' : 'from'} "${pl.name}"`, 'ok')
           return
         }
         default:
@@ -193,7 +195,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
         ctx.print(`▶ ${songs.length} liked song${songs.length === 1 ? '' : 's'}`, 'ok')
         return
       }
-      ctx.print(`${pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${songs[i].name}`, 80)}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)
+      ctx.print(`${pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${displaySongName(songs[i])}`, 80)}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)
     },
   },
 ]

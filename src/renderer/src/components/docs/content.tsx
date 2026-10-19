@@ -1342,6 +1342,8 @@ Authorization: Token <token>`}</Pre>
   "eq_balance": 0,
   "eq_mono": false,
   "eq_boost": 1,
+  "audio_fx": { "preamp": 0, "width": 1, "drive": 0, "echo": false, "echoTime": 0.35, "autoPan": false, "compressor": false, "filter": false, "...": "..." },
+  "eq_user_presets": [{ "id": "user:m4x9k2", "name": "Late night", "gains": [3, 2, 1, 0, 0, 0, 0, -1, -2, -3] }],
   "skip_silence": false,
   "reverb_enabled": false,
   "reverb_mix": 0.4,
@@ -1362,6 +1364,8 @@ Authorization: Token <token>`}</Pre>
             [<Code>theme</Code>, 'string', 'Active skin/theme id.'],
             [<Code>custom_skins</Code>, 'object[]', 'User-created skins from the in-app skin editor.'],
             [<><Code>muted_servers</Code> / <Code>muted_conversations</Code></>, 'number[]', 'Chat server/conversation ids with notifications muted - distinct from muted_user_ids, which hides message content.'],
+            [<Code>audio_fx</Code>, 'object', 'Equalizer panel effects beyond the bands: preamp, stereo width, saturation, compressor, cut filter, echo and 8D. Missing keys fall back to defaults and out-of-range numbers are clamped.'],
+            [<Code>eq_user_presets</Code>, 'object[]', 'Band curves saved by name: { id ("user:…"), name, gains (one dB value per band) }.'],
             ['everything else', 'varies', 'Appearance, navigation layout, playback/EQ, and hotkey preferences - one field per Settings page toggle, named to match.'],
           ]}
         />

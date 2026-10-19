@@ -64,7 +64,7 @@ async function requestImageBlob(url: string, signal?: AbortSignal): Promise<Blob
   return blob
 }
 
-async function fetchImageBlob(url: string): Promise<Blob> {
+export async function fetchImageBlob(url: string): Promise<Blob> {
   try {
     return await requestImageBlob(url)
   } catch (err) {

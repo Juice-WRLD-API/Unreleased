@@ -8,7 +8,8 @@ import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { setPlaylistPublic, addPlaylistInBackground } from '../lib/optimisticPlaylist'
 import type { PlaylistSummary } from '../lib/userApi'
-import { JWAPI_BASE, buildStreamUrl } from '../lib/juicewrldApi'
+import { JWAPI_BASE } from '../lib/juicewrldApi'
+import { resolveTrackFile } from '../lib/sessionEditsApi'
 import { shareOrigin } from '../lib/platform'
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
@@ -84,10 +85,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
       const d = await userApi.getPlaylist(playlist.id)
       const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
       if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      const { saved, cancelled } = await saveItems(target, tracks.map(t => ({
-        name: t.path.split('/').pop() || t.title,
-        url: t.streamUrl ?? buildStreamUrl(t.path),
-      })))
+      // A session not yet looked up has no file of its own until it is.
+      const items = (await Promise.all(tracks.map(t =>
+        resolveTrackFile(t).then(f => ({ name: f.path.split('/').pop() || t.title, url: f.url, songId: userApi.trackIdToSongId(t.id) }), () => null))))
+        .filter(<T,>(f: T | null): f is T => f != null)
+      const { saved, cancelled } = await saveItems(target, items)
       if (cancelled) { setZipState('idle'); return }
       setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }

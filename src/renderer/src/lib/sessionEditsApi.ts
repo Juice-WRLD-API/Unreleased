@@ -1,8 +1,8 @@
-import { apiFetch, apiUrl, titleVariants, OMIT_BULK, parseBrowseEntries, normalizeSongTitle, loadAllSongs, getSongById, searchFiles, buildStreamUrl, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
+import { apiFetch, apiUrl, titleVariants, resolveSessionEditSource, OMIT_BULK, parseBrowseEntries, normalizeSongTitle, loadAllSongs, getSongById, searchFiles, buildStreamUrl, JWApiSong, JWApiBrowseResponse, JWApiFileEntry } from './juicewrldApi'
 import { apiRequest } from './apiClient'
 import { createTtlCache } from './ttlCache'
 import { peekActiveChannel } from './activeChannelState'
-import { peekSessionEditLink, setSessionEditLink, setSessionEditLinksCache, sessionEditSongId, sessionEditPlaceholder } from './sessionEditLinksMirror'
+import { peekSessionEditLink, setSessionEditLink, setSessionEditLinksCache, sessionEditSongId, sessionEditPlaceholder, isSessionEditPlaceholder } from './sessionEditLinksMirror'
 import { peekSessionEditOverride } from './sessionEditOverrides'
 
 export interface SessionEditFile {
@@ -179,6 +179,9 @@ async function lookupSessionEdit(songId: number, channel: string): Promise<Sessi
 /** The stream URL for a `sessionedit://<id>` marker, or null if it hasn't been looked up yet. */
 export function cachedSessionEditUrl(placeholder: string): string | null {
   const channel = peekActiveChannel()
+  // A file the user linked by hand wins over the search, like resolveSessionEditSource.
+  const override = peekSessionEditOverride(sessionEditSongId(placeholder), channel)
+  if (override) return buildStreamUrl(override.path, (override.channel ?? channel) || undefined)
   const link = peekSessionEditLink(sessionEditSongId(placeholder), channel)
   return link ? buildStreamUrl(link.path, channel || undefined) : null
 }
@@ -203,6 +206,35 @@ export function ensureSessionEditUrl(placeholder: string): Promise<string> {
     setSessionEditLink(songId, channel, link)
     return buildStreamUrl(link.path, channel || undefined)
   })
+}
+
+/** The file a `sessionedit://<id>` marker plays, once known - the user's
+ *  linked file first, then the looked-up one. */
+export function peekSessionEditFile(placeholder: string): { path: string } | undefined {
+  const songId = sessionEditSongId(placeholder)
+  const channel = peekActiveChannel()
+  return peekSessionEditOverride(songId, channel) ?? peekSessionEditLink(songId, channel)
+}
+
+/** A track's real file for downloading/exporting. A session still carrying
+ *  its `sessionedit://` marker is looked up first, as a play would, since the
+ *  marker itself isn't a URL anything can fetch. Rejects when it has none. */
+export async function resolveTrackFile(track: { path: string; streamUrl?: string }): Promise<{ path: string; url: string }> {
+  const marker = isSessionEditPlaceholder(track.streamUrl) ? track.streamUrl : isSessionEditPlaceholder(track.path) ? track.path : null
+  if (!marker) return { path: track.path, url: track.streamUrl ?? buildStreamUrl(track.path) }
+  const url = await ensureSessionEditUrl(marker)
+  return { path: peekSessionEditFile(marker)?.path ?? track.path, url }
+}
+
+/** A song's real file and the comp it lives in - for a session, its linked
+ *  file, or the looked-up one (searched now if it hasn't been). Rejects when
+ *  a session has none. */
+export async function resolveSongFile(song: { id: number; category: string; path: string; length: string }): Promise<{ path: string; url: string; channel: string | undefined }> {
+  const src = resolveSessionEditSource(song)
+  if (!isSessionEditPlaceholder(src.path)) return { path: src.path, url: buildStreamUrl(src.path, src.channel), channel: src.channel }
+  // A marker means no link of the user's, so the search runs in the active comp.
+  const url = await ensureSessionEditUrl(src.path)
+  return { path: peekSessionEditFile(src.path)?.path ?? src.path, url, channel: peekActiveChannel() || undefined }
 }
 
 /** Whether a session song has a session edit to play - a user override, an

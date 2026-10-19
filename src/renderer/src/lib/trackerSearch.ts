@@ -8,6 +8,7 @@
 // ApiTrackerView's fetchAllMode, which this pushes field-filtered queries
 // into (same as sort/multi-category search already does).
 import { JWApiSong } from './juicewrldApi'
+import { displaySongName } from './songPrefs'
 
 export interface FieldFilter { field: string; label: string; value: string }
 
@@ -22,7 +23,7 @@ interface FieldDef {
 }
 
 const FIELD_DEFS: FieldDef[] = [
-  { keys: ['title', 'name', 'song'],                       label: 'title',      get: (s) => [s.name, ...(s.track_titles ?? [])].join(' ') },
+  { keys: ['title', 'name', 'song'],                       label: 'title',      get: (s) => [displaySongName(s), s.name, ...(s.track_titles ?? [])].join(' ') },
   { keys: ['artist', 'artists'],                            label: 'artists',    get: (s) => s.credited_artists },
   { keys: ['producer', 'producers'],                        label: 'producers',  get: (s) => s.producers, api: ['producers'] },
   { keys: ['engineer', 'engineers'],                        label: 'engineers',  get: (s) => s.engineers ?? '', api: ['engineers'] },

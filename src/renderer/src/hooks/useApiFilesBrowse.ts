@@ -6,6 +6,7 @@ import {
   apiFetch, apiPeek, searchFiles, JWApiBrowseResponse, JWApiFileEntry, parseBrowseEntries as parseEntries,
 } from '../lib/juicewrldApi'
 import { parentFolder, pathToUrl, urlToPath } from '../lib/apiFilesShared'
+import { hasQuery, loadFileIndex, parseFileQuery, searchFileIndex, type FileSearchResult } from '../lib/fileSearch'
 import type { JWApiChannel } from '../lib/juicewrldApi'
 import { errorMessage } from '../lib/format'
 
@@ -37,6 +38,11 @@ export function useApiFilesBrowse(opts: {
   debouncedSearch: string
   setDebouncedSearch: (v: string) => void
   searchResults: JWApiFileEntry[]
+  /** Matches before the display cap (MAX_FILE_RESULTS). */
+  searchTotal: number
+  /** No exact matches; the results are typo-tolerant ones. */
+  searchFuzzy: boolean
+  prefetchSearchIndex: () => void
   searchLoading: boolean
   isSearching: boolean
   /** Limit search to the folder being browsed (and its subfolders). */
@@ -54,6 +60,8 @@ export function useApiFilesBrowse(opts: {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [searchResults, setSearchResults] = useState<JWApiFileEntry[]>([])
+  const [searchTotal, setSearchTotal] = useState(0)
+  const [searchFuzzy, setSearchFuzzy] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const isSearching = debouncedSearch.trim().length > 0
   const [searchInFolder, setSearchInFolder] = useState(false)
@@ -119,21 +127,43 @@ export function useApiFilesBrowse(opts: {
     return () => clearTimeout(t)
   }, [search])
 
+  // Search runs against the channel's whole file index (fileSearch.ts) for
+  // any-order words, filters and typo tolerance. The first search on a channel
+  // has to download that index, so a plain server search on the query's
+  // longest word fills in meanwhile, filtered through the same syntax.
   useEffect(() => {
-    if (!isSearching) { setSearchResults([]); return }
+    const show = (r: FileSearchResult): void => { setSearchResults(r.entries); setSearchTotal(r.total); setSearchFuzzy(r.fuzzy) }
+    const q = parseFileQuery(debouncedSearch)
+    if (!isSearching || !hasQuery(q)) { show({ entries: [], total: 0, fuzzy: false }); setSearchLoading(false); return }
     let cancelled = false
+    let fromIndex = false
     setSearchLoading(true)
+    // Search doesn't navigate, so currentPath is still the folder searched from.
+    const within = searchInFolder && currentPath ? currentPath : undefined
     const extra: Record<string, string> = {}
     if (activeChannel) extra.channel = activeChannel
-    // Search doesn't navigate, so currentPath is still the folder searched from.
-    if (searchInFolder && currentPath) extra.path = currentPath
-    searchFiles(debouncedSearch, extra)
-      .then(entries => { if (!cancelled) setSearchResults(entries) })
-      .catch(() => { if (!cancelled) setSearchResults([]) })
+    if (within) extra.path = within
+    const server = q.serverTerm ? searchFiles(q.serverTerm, extra).catch(() => [] as JWApiFileEntry[]) : Promise.resolve(null)
+    server.then((entries) => {
+      if (cancelled || fromIndex || !entries) return
+      const r = searchFileIndex(entries, q)
+      // An empty early pass keeps the spinner up - the index may still find typos.
+      if (r.total > 0) { show(r); setSearchLoading(false) }
+    })
+    loadFileIndex(activeChannel)
+      .then(async (index) => {
+        if (cancelled) return
+        if (index) { fromIndex = true; show(searchFileIndex(index.items, q, { within, vocab: index.vocab })); return }
+        const entries = await server
+        if (!cancelled) show(entries ? searchFileIndex(entries, q) : { entries: [], total: 0, fuzzy: false })
+      })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, isSearching, activeChannel, searchInFolder])
+
+  /** Start downloading the search index before the first keystroke lands. */
+  const prefetchSearchIndex = useCallback(() => { void loadFileIndex(activeChannel) }, [activeChannel])
 
   // Remember the browsed folder in the store so switching to another tab and
   // back restores it - the component unmounts on tab switch, so local state
@@ -193,7 +223,7 @@ export function useApiFilesBrowse(opts: {
 
   return {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
-    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
-    searchInFolder, setSearchInFolder,
+    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
+    searchLoading, isSearching, searchInFolder, setSearchInFolder,
   }
 }

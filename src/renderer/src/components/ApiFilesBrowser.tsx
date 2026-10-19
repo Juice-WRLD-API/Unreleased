@@ -8,6 +8,7 @@ import {
   FolderPlus, FilePlus, ExternalLink, FileText, RefreshCw, Upload,
   FolderInput, CornerLeftUp,
 } from 'lucide-react'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { useStore, useStorePick, StagedFileChange } from '../store/useStore'
 import {
   breadcrumbs, parentFolder, fileToTrack, sortEntries, pathToUrl, fileEntryLinkUrl, findSongByFilename, triggerDownload,
@@ -39,7 +40,7 @@ import {
   JWAPI_BASE,
 } from '../lib/juicewrldApi'
 import { getFileExt, getMediaType, toFileUrl } from '../lib/fileTypes'
-import { basename } from '../lib/compStagedChanges'
+import { basename, planDroppedUploads } from '../lib/compStagedChanges'
 import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import { CdnDownloadToast } from './CdnDownloadToast'
 import { useMultiSelect } from '../hooks/useMultiSelect'
@@ -170,8 +171,8 @@ export default function ApiFilesBrowser(): JSX.Element {
 
   const {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
-    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
-    searchInFolder, setSearchInFolder,
+    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
+    searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
@@ -196,9 +197,8 @@ export default function ApiFilesBrowser(): JSX.Element {
     resetPlaylistDone()
   }, [ctxMenu])
 
-  // Search — recursive across the whole file tree via /files/browse/'s
-  // `search` param (same endpoint findSessionZips uses), not scoped to the
-  // current folder. Results replace the browsed folder's entries while
+  // Search — recursive across the whole file tree (useApiFilesBrowse +
+  // fileSearch.ts), or the current folder with the folder toggle on. Results replace the browsed folder's entries while
   // active rather than living in a separate list, so sorting/select-mode/
   // context menus all keep working on it unchanged.
 
@@ -616,23 +616,42 @@ export default function ApiFilesBrowser(): JSX.Element {
   // Files or whole folders dragged in from the OS, or picked from the context
   // menu, are staged like any other change - one upload per file - and only
   // go to the background upload queue when Propose is hit in the Downloads
-  // panel. A dropped folder keeps its nesting under the target folder.
+  // panel. A dropped folder keeps its nesting under the target folder, and
+  // files whose path is already taken in the comp are skipped.
   const [fileDragOver, setFileDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
   // Folder the next picker selection uploads into.
   const uploadTargetRef = useRef('')
 
-  const uploadDroppedFiles = (folder: string, files: LocalUpload[]): void => {
+  const uploadDroppedFiles = async (folder: string, files: LocalUpload[]): Promise<void> => {
     if (files.length === 0) return
+    const channel = activeChannel
+    const fileCount = (n: number): string => `${n.toLocaleString()} file${n === 1 ? '' : 's'}`
+    // Files already at their path in the comp are left out, so dropping a whole
+    // comp only sends what's new instead of re-uploading everything for the
+    // server to refuse. A comp's own top folder dropped in is merged rather
+    // than nested under its name (see planDroppedUploads).
+    if (files.length >= 50) showAppToast(`Checking ${fileCount(files.length)} against the comp…`, { tone: 'info' })
+    const { paths, existing, mergedFolder } = await planDroppedUploads(folder, files.map(f => f.relPath), channel)
+    const fresh = files
+      .map(({ file }, i) => ({ file, path: paths[i] }))
+      .filter(({ path }) => !existing.has(path))
+    const skipped = files.length - fresh.length
+    const where = folder ? `"${basename(folder)}"` : 'the comp root'
+    if (fresh.length === 0) {
+      showAppToast(
+        mergedFolder ? `"${mergedFolder}" matches ${where} - all ${fileCount(skipped)} are already in the comp`
+          : skipped === 1 ? 'That file is already in the comp' : `All ${fileCount(skipped)} are already in the comp`,
+        { tone: 'info' },
+      )
+      return
+    }
     // Read fresh: drops resolve asynchronously, after this render's closure.
     const wasEmpty = useStore.getState().stagedFileChanges.length === 0
-    stageFileChanges(files.map(({ file, relPath }) => ({
-      changeType: 'upload' as const,
-      path: folder ? `${folder}/${relPath}` : relPath,
-      file,
-      channel: activeChannel,
-    })))
+    stageFileChanges(fresh.map(({ file, path }) => ({ changeType: 'upload' as const, path, file, channel })))
+    if (mergedFolder) showAppToast(`Merged "${mergedFolder}" into ${where} - skipped ${fileCount(skipped)} already in the comp`, { tone: 'info' })
+    else if (skipped > 0) showAppToast(`Skipped ${fileCount(skipped)} already in the comp`, { tone: 'info' })
     if (wasEmpty) setShowDownloadManager(true)
   }
 
@@ -847,8 +866,8 @@ export default function ApiFilesBrowser(): JSX.Element {
             </div>
           </div>
 
-          {/* Search — API mode. Recursive across the whole file tree (same
-              /files/browse/ `search` param the session-ZIP lookup uses),
+          {/* Search — API mode. Across the whole file tree with the
+              fileSearch.ts syntax (any-order words, filters, typo fallback),
               or with the folder toggle on, just the current folder and its
               subfolders. */}
           {!localMode && (
@@ -858,8 +877,9 @@ export default function ApiFilesBrowser(): JSX.Element {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onFocus={prefetchSearchIndex}
                 placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}…` : 'Search files…'}
-                className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${currentPath ? 'pr-14' : 'pr-8'} py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
+                className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${currentPath ? (search ? 'pr-20' : 'pr-14') : (search ? 'pr-14' : 'pr-8')} py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                 {search && (
@@ -881,6 +901,10 @@ export default function ApiFilesBrowser(): JSX.Element {
                     <Folder size={14} />
                   </button>
                 )}
+                <SearchHelpButton
+                  kind="files"
+                  className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+                />
               </div>
             </div>
           )}
@@ -891,7 +915,12 @@ export default function ApiFilesBrowser(): JSX.Element {
               <div className="flex items-center gap-1.5 text-xs text-text-muted">
                 {searchLoading
                   ? <><Loader2 size={12} className="animate-spin" /> Searching…</>
-                  : <>{searchResults.length} result{searchResults.length === 1 ? '' : 's'} for "{debouncedSearch.trim()}"</>}
+                  : <>
+                      {searchTotal > searchResults.length
+                        ? `First ${searchResults.length.toLocaleString()} of ${searchTotal.toLocaleString()} results`
+                        : `${searchTotal} ${searchFuzzy ? (searchTotal === 1 ? 'close match' : 'close matches') : (searchTotal === 1 ? 'result' : 'results')}`}
+                      {' '}for "{debouncedSearch.trim()}"{searchFuzzy && ' - nothing matched exactly'}
+                    </>}
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
@@ -1627,11 +1656,11 @@ export default function ApiFilesBrowser(): JSX.Element {
 
       {/* Hidden pickers behind the context menu's upload items. */}
       <input ref={fileInputRef} type="file" multiple className="hidden"
-        onChange={e => uploadDroppedFiles(uploadTargetRef.current, filesFromInput(e.target.files))} />
+        onChange={e => void uploadDroppedFiles(uploadTargetRef.current, filesFromInput(e.target.files))} />
       <input
         ref={el => { folderInputRef.current = el; el?.setAttribute('webkitdirectory', '') }}
         type="file" multiple className="hidden"
-        onChange={e => uploadDroppedFiles(uploadTargetRef.current, filesFromInput(e.target.files))}
+        onChange={e => void uploadDroppedFiles(uploadTargetRef.current, filesFromInput(e.target.files))}
       />
 
       {textFile && <TextFileViewer source={textFile} onClose={() => setTextFile(null)} />}

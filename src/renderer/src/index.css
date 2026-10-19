@@ -563,6 +563,142 @@ input[type='range']:active::-moz-range-thumb {
   animation: wrld-queue-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ─── WRLD side panel (lyrics / queue / FM radio) ───────────────────────────────
+   The toolbar's panel toggle. The player column glides between centred and the
+   left half (a transform, run from WrldView - SPLIT_GLIDE_MS), while the panel
+   slides in from the right behind it. Closing keeps the panel mounted just long
+   enough for wrld-panel-out (PANEL_EXIT_MS) while the player glides back.
+   Curves here start gently and settle long rather than the expo-out used
+   elsewhere, which put most of the motion in the first ~100ms and read as a
+   snap. Only transform and opacity animate, and no text is scaled - scaled
+   text re-rasterises and shimmers. */
+@keyframes wrld-panel-in {
+  0%   { opacity: 0; transform: translateX(40px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: translateX(0); }
+}
+@keyframes wrld-panel-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(32px); }
+}
+.animate-wrld-panel-in  { animation: wrld-panel-in 0.6s cubic-bezier(0.33, 0, 0.15, 1) 0.1s both; }
+.animate-wrld-panel-out { animation: wrld-panel-out 0.36s cubic-bezier(0.4, 0, 0.6, 1) both; pointer-events: none; }
+
+/* Swapping views inside the open panel (lyrics <-> queue, radio <-> lyrics) is
+   a crossfade: the old view lifts away, and the new one rises in once it has
+   mostly gone. Only on a swap - a view arriving with the panel itself doesn't
+   animate on its own (WrldPanelLayer). VIEW_EXIT_MS in WrldView matches
+   wrld-view-out. */
+@keyframes wrld-view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wrld-view-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+.animate-wrld-view-in  { animation: wrld-view-in 0.46s cubic-bezier(0.33, 0, 0.15, 1) 0.14s both; }
+.animate-wrld-view-out { animation: wrld-view-out 0.22s cubic-bezier(0.4, 0, 0.6, 1) both; pointer-events: none; }
+
+/* The toggle's own icon (lyrics / queue / radio) turns in when it changes. */
+@keyframes wrld-icon-swap {
+  from { opacity: 0; transform: scale(0.7) rotate(-30deg); }
+  to   { opacity: 1; transform: scale(1)   rotate(0); }
+}
+.animate-wrld-icon-swap { display: inline-flex; animation: wrld-icon-swap 0.38s cubic-bezier(0.3, 1.25, 0.5, 1) both; }
+
+/* ─── Sliding nav highlight ────────────────────────────────────────────────────
+   hooks/useSlidingIndicator: one highlight behind the nav items, moved onto the
+   active one. z-index -1 inside the nav's own stacking context (it's `isolate`)
+   sits it behind the items but over the nav's background. margin: 0 because a
+   space-y sibling rule would otherwise push it off by a gap. Size and position
+   are written inline; this is how they move. */
+.nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0 !important;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+  transition:
+    transform 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s ease;
+}
+
+/* ─── Playlist grid quick view ─────────────────────────────────────────────────
+   PlaylistsView's card grids. Row spacing is each item's bottom margin instead
+   of row-gap: the quick-view panel sits in a full-width row of its own, and a
+   row-gap would surround even an empty row - so opening one jumped everything
+   below by a gap before the panel had grown at all. The grid's negative margin
+   takes back the last row's, leaving the spacing after the grid as it was. */
+.pl-grid {
+  --pl-col-gap: 1rem;
+  --pl-row-gap: 1.5rem;
+  column-gap: var(--pl-col-gap);
+  row-gap: 0;
+  margin-bottom: calc(-1 * var(--pl-row-gap));
+}
+.pl-grid > * { margin-bottom: var(--pl-row-gap); }
+
+/* GridPanelSlot: height and bottom margin are set inline (0 while shut, the
+   measured content height and the row spacing while open) and transition
+   here. The negative top margin tucks the caret up into the spacing under the
+   card row; it stays inside the slot, so nothing is clipped. SLOT_CLOSE_MS in
+   PlaylistsView covers the closing duration. */
+.pl-grid-panel {
+  overflow: hidden;
+  margin-top: calc(var(--pl-row-gap) * -0.5);
+  transition: height 0.42s cubic-bezier(0.32, 0.72, 0, 1), margin-bottom 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.pl-grid-panel.is-closing {
+  transition-duration: 0.3s;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pl-grid-panel-inner {
+  position: relative;
+  padding-top: 0.625rem;
+  opacity: 0;
+  transform: translateY(-10px) scale(0.985);
+  transform-origin: top center;
+  transition: opacity 0.26s ease, transform 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.pl-grid-panel-inner.is-open { opacity: 1; transform: none; }
+/* A rotated square on top of the panel's top border: its own top/left borders
+   draw the notch and its fill hides the border line underneath. */
+.pl-grid-caret {
+  position: absolute;
+  top: calc(0.625rem - 7px);
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  z-index: 1;
+  transform: rotate(45deg);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 3px;
+  transition: left 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* A panel's content arriving: on open (under the slot's own fade) and when a
+   same-row switch swaps it in place. */
+@keyframes pl-panel-swap {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-pl-panel-swap { animation: pl-panel-swap 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Track rows cascade in (delays inline). `backwards` so nothing lingers once
+   it's done. */
+@keyframes pl-track-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.pl-track-in { animation: pl-track-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+
 /* Per-row reveal, staggered - layered on top of the panel entrance so the
    list cascades in. `backwards` (not `both`) so the fill state is dropped
    once the animation ends, leaving the drag-reorder transforms free to apply. */
@@ -613,6 +749,13 @@ input[type='range']:active::-moz-range-thumb {
      animation entirely would leave it stuck at `from` (invisible, offset, or
      translated off-screen). A near-zero duration lands on `to` immediately. */
   .animate-wrld-queue-in,
+  .animate-wrld-panel-in,
+  .animate-wrld-panel-out,
+  .animate-wrld-view-in,
+  .animate-wrld-view-out,
+  .animate-wrld-icon-swap,
+  .animate-pl-panel-swap,
+  .pl-track-in,
   .wrld-q-row,
   .animate-wordle-shake,
   .animate-menu-pop,
@@ -639,6 +782,10 @@ input[type='range']:active::-moz-range-thumb {
      an animation, so it needs its own opt-out - a skin swap should land on the
      new colours at once rather than sweeping every surface through 700ms. */
   html.theme-animate { transition: none; }
+  .pl-grid-panel,
+  .pl-grid-panel-inner,
+  .pl-grid-caret,
+  .nav-indicator { transition: none !important; }
 }
 
 /* Suspense fallback for a lazily-loaded view (components/ViewSkeleton).

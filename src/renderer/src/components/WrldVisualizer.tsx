@@ -365,6 +365,12 @@ export default function WrldVisualizer({
     else { s.setShowQueue(false); s.setLyricsOverride(hasLyrics) }
   }
 
+  // The toggle's icon only spins in once it has actually changed, not on mount.
+  const panelIcon = panel === 'queue' || panel === 'radio' ? panel : 'lyrics'
+  const firstIcon = useRef(panelIcon)
+  const iconSwapped = useRef(false)
+  if (panelIcon !== firstIcon.current) iconSwapped.current = true
+
   const seenPanel = useRef(panel)
   useEffect(() => {
     if (seenPanel.current === panel) return
@@ -525,7 +531,11 @@ export default function WrldVisualizer({
           aria-pressed={panel !== 'off'}
           disabled={minimal}
         >
-          {panel === 'queue' ? <ListMusic size={18} /> : panel === 'radio' ? <Radio size={18} /> : <TextQuote size={18} />}
+          {/* Keyed on the icon (not `panel`), so lyrics <-> off - same icon -
+              doesn't replay it. */}
+          <span key={panelIcon} className={iconSwapped.current ? 'animate-wrld-icon-swap' : 'inline-flex'}>
+            {panel === 'queue' ? <ListMusic size={18} /> : panel === 'radio' ? <Radio size={18} /> : <TextQuote size={18} />}
+          </span>
         </button>
         <button
           className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
@@ -570,7 +580,7 @@ export default function WrldVisualizer({
           <div
             className="absolute top-full right-0 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl"
           >
-            <VizControls />
+            <VizControls modes={false} />
             <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
             <LyricsControls />
           </div>

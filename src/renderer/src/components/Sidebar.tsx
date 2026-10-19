@@ -14,6 +14,7 @@ import { accountDisplayName, initial } from '../lib/format'
 import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 import ContextMenu from './ContextMenu'
 import NavPillGrip from './NavPillGrip'
+import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 
 // Right-click only - fetched on first open rather than with the app shell.
 const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
@@ -128,6 +129,10 @@ export default function Sidebar(): JSX.Element {
   // Which tab reads as current - not always activeView, since some views are
   // sub-views of a tab (the games inside Games). See navTabFor.
   const activeTab = navTabFor(activeView)
+  // The active tab's highlight slides from tab to tab rather than jumping -
+  // one indicator behind the items, in whichever layout below is rendered.
+  const navLayout = navStyle === 'pill' ? 'pill' : sidebarPosition === 'top' || sidebarPosition === 'bottom' ? 'bar' : 'side'
+  const { containerRef: navRef, indicatorRef: navIndicatorRef } = useSlidingIndicator<HTMLElement>(activeTab, navLayout)
 
   // Start the view's chunk on hover/focus rather than on click. Pointing at a
   // menu item precedes clicking it by ~100ms, which is usually the whole
@@ -265,8 +270,9 @@ export default function Sidebar(): JSX.Element {
       // no-drag: on the top edge the pill floats over the window's drag strip
       // (App.tsx), which would otherwise swallow its clicks.
       <aside
+        ref={navRef}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        className={`app-sidebar pointer-events-auto flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+        className={`app-sidebar pointer-events-auto relative isolate flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
       >
         <NavPillGrip horizontal={horizontal} />
         {isElectron && appMenuPosition === 'sidebar' && (
@@ -288,13 +294,14 @@ export default function Sidebar(): JSX.Element {
             onContextMenu={openNavMenu(view, label)}
             title={label}
             aria-label={label}
+            data-indicator-key={view}
             className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-full transition-colors cursor-grab active:cursor-grabbing ${
               navDragIdx === idx ? 'opacity-40' : ''
             } ${
               navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-inset ring-accent' : ''
             } ${
               activeTab === view
-                ? 'bg-accent/20 text-accent'
+                ? 'text-accent'
                 : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
             }`}
           >
@@ -308,6 +315,7 @@ export default function Sidebar(): JSX.Element {
           </button>
         )}
         {controls.map((c) => renderControlIcon(c.id))}
+        <div ref={navIndicatorRef} className="nav-indicator rounded-full bg-accent/20" aria-hidden />
         {navContextMenu}
       </aside>
     )
@@ -334,7 +342,7 @@ export default function Sidebar(): JSX.Element {
           {isElectron && appMenuPosition === 'sidebar' && (
             <div className="shrink-0 mr-0.5"><AppMenu variant="sidebar-icon" /></div>
           )}
-          <nav className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
+          <nav ref={navRef} className="relative isolate flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
             {items.map(({ icon, label, view }, idx) => (
               <button
                 key={view}
@@ -346,13 +354,14 @@ export default function Sidebar(): JSX.Element {
                 onClick={() => navClick(view)}
                 {...warmOnIntent(view)}
                 onContextMenu={openNavMenu(view, label)}
+                data-indicator-key={view}
                 className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded text-sm font-medium whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
                   navDragIdx === idx ? 'opacity-40' : ''
                 } ${
                   navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-accent' : ''
                 } ${
                   activeTab === view
-                    ? 'bg-surface-raised text-text-primary'
+                    ? 'text-text-primary'
                     : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
                 }`}
               >
@@ -360,6 +369,7 @@ export default function Sidebar(): JSX.Element {
                 <span>{label}</span>
               </button>
             ))}
+            <div ref={navIndicatorRef} className="nav-indicator rounded bg-surface-raised" aria-hidden />
           </nav>
           <div className="flex items-center gap-1 shrink-0">
             {/* Log in stays pinned (never hideable) so signing in is always
@@ -424,7 +434,7 @@ export default function Sidebar(): JSX.Element {
       )}
 
       {/* Nav items */}
-      <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto px-3">
+      <nav ref={navRef} className="relative isolate space-y-1 flex-1 min-h-0 overflow-y-auto px-3">
         {items.map(({ icon, label, view }, idx) => (
           <div
             key={view}
@@ -437,11 +447,12 @@ export default function Sidebar(): JSX.Element {
             className={`cursor-grab active:cursor-grabbing ${navDragIdx === idx ? 'opacity-40' : ''}`}
           >
             <div
+              data-indicator-key={view}
               className={`flex items-center w-full rounded text-sm font-medium transition-colors ${
                 navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-accent' : ''
               } ${
                 activeTab === view
-                  ? 'bg-surface-raised text-text-primary'
+                  ? 'text-text-primary'
                   : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
               }`}
             >
@@ -490,6 +501,7 @@ export default function Sidebar(): JSX.Element {
             )}
           </div>
         ))}
+        <div ref={navIndicatorRef} className="nav-indicator rounded bg-surface-raised" aria-hidden />
       </nav>
 
       {/* Bottom section - Log in stays pinned (never hideable); the rest are

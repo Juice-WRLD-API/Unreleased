@@ -2,6 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import { Info } from 'lucide-react'
 import { SEARCH_FIELD_HELP } from '../lib/trackerSearch'
+import { FILE_SEARCH_HELP } from '../lib/fileSearch'
+
+const CODE = 'text-text-secondary bg-surface-overlay px-1 py-0.5 rounded'
+
+/** Which syntax the popover explains: the song field filters (default) or
+ *  the Files search's (fileSearch.ts). */
+export type SearchHelpKind = 'songs' | 'files'
 
 const WIDTH = 288
 const MAX_HEIGHT = 320
@@ -13,7 +20,7 @@ const GAP = 8
 // `relative` wrapper is, but portalled and fixed-positioned against that
 // wrapper so panels with overflow-hidden (the queues) don't clip it. Closes on
 // outside click/Escape like the other popovers/menus.
-export default function SearchHelpPopover({ onClose }: { onClose: () => void }): JSX.Element {
+export default function SearchHelpPopover({ onClose, kind = 'songs' }: { onClose: () => void; kind?: SearchHelpKind }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const markerRef = useRef<HTMLSpanElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null)
@@ -66,14 +73,23 @@ export default function SearchHelpPopover({ onClose }: { onClose: () => void }):
           className="fixed overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl z-[200] p-3"
         >
           <p className="text-text-primary text-xs font-semibold mb-1">Search syntax</p>
-          <p className="text-text-muted text-xs mb-2.5 leading-snug">
-            Search any field directly with <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">field:"value"</code>.
-            Combine with plain words and multiple fields - matches are case-insensitive substrings, all filters must match.
-            An optional <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">&</code> between
-            fields is just for readability, e.g. <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">artists:"Juice WRLD" &amp; category:unreleased</code>.
-          </p>
+          {kind === 'files' ? (
+            <p className="text-text-muted text-xs mb-2.5 leading-snug">
+              Every word must match, in any order - the name or a folder it's in. Case, accents and
+              punctuation don't matter, and if nothing matches exactly, small typos are forgiven.
+              Put <code className={CODE}>-</code> before anything to leave it out; commas mean "any of",
+              e.g. <code className={CODE}>ext:wav,flac</code>.
+            </p>
+          ) : (
+            <p className="text-text-muted text-xs mb-2.5 leading-snug">
+              Search any field directly with <code className={CODE}>field:"value"</code>.
+              Combine with plain words and multiple fields - matches are case-insensitive substrings, all filters must match.
+              An optional <code className={CODE}>&</code> between
+              fields is just for readability, e.g. <code className={CODE}>artists:"Juice WRLD" &amp; category:unreleased</code>.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-1">
-            {SEARCH_FIELD_HELP.map(({ field, example }) => (
+            {(kind === 'files' ? FILE_SEARCH_HELP : SEARCH_FIELD_HELP).map(({ field, example }) => (
               <div key={field} className="flex items-center justify-between gap-2 text-xs">
                 <span className="text-text-muted shrink-0">{field}</span>
                 <code className="text-text-secondary bg-surface-overlay px-1.5 py-0.5 rounded truncate">{example}</code>
@@ -89,9 +105,10 @@ export default function SearchHelpPopover({ onClose }: { onClose: () => void }):
 
 /** The info button that opens the popover, styled per search box. Its
  *  mousedown is swallowed so clicking it leaves focus in the search input. */
-export function SearchHelpButton({ className, size = 14 }: {
+export function SearchHelpButton({ className, size = 14, kind }: {
   className: (open: boolean) => string
   size?: number
+  kind?: SearchHelpKind
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
@@ -106,7 +123,7 @@ export function SearchHelpButton({ className, size = 14 }: {
       >
         <Info size={size} />
       </button>
-      {open && <SearchHelpPopover onClose={close} />}
+      {open && <SearchHelpPopover onClose={close} kind={kind} />}
     </div>
   )
 }

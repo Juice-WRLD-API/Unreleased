@@ -15,10 +15,11 @@ import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album as WrldAlbum } from '../lib/albumsApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
-import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
+import { EFFECTS_SUPPORTED, fxInUse } from '../lib/audioEffects'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
 import { useSongVersions } from '../hooks/useSongVersions'
 import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
+import { usePresence } from '../hooks/usePresence'
 import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import * as userApi from '../lib/userApi'
 // Next goes through Player's handler, like the bottom bar, tray and hotkey:
@@ -41,6 +42,41 @@ import {
 
 // Pulls in html-to-image for the export - only worth downloading once opened.
 const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
+
+// What the desktop side panel is showing. The exit times are kept in sync with
+// the wrld-panel-out and wrld-view-out durations in index.css.
+type PanelView = 'queue' | 'lyrics' | 'radio'
+const PANEL_EXIT_MS = 360
+const VIEW_EXIT_MS = 220
+const SPLIT_GLIDE_MS = 650
+
+// One view in the desktop side panel (lyrics, queue, FM radio). Its entrance
+// plays only when it replaces another view in an already-open panel - when the
+// whole panel is sliding in, a second motion stacked inside it is just more to
+// composite, and reads busier. Decided each time it's shown, since the queue
+// stays mounted and is only hidden in between.
+function WrldPanelLayer({ visible = true, exiting, animateIn, className, children }: {
+  visible?: boolean
+  exiting: boolean
+  animateIn: boolean
+  className: string
+  children: React.ReactNode
+}): JSX.Element {
+  const [enter, setEnter] = useState(animateIn)
+  const [wasVisible, setWasVisible] = useState(visible)
+  if (visible !== wasVisible) {
+    setWasVisible(visible)
+    if (visible) setEnter(animateIn)
+  }
+  return (
+    <div
+      className={`${className} ${exiting ? 'animate-wrld-view-out' : enter ? 'animate-wrld-view-in' : ''}`}
+      style={visible ? undefined : { display: 'none' }}
+    >
+      {children}
+    </div>
+  )
+}
 
 export default function WrldView(): JSX.Element {
   const {
@@ -94,7 +130,7 @@ export default function WrldView(): JSX.Element {
     gradientsEnabled: s.gradientsEnabled,
     toggleEqPanel: s.toggleEqPanel,
     // Same "anything non-neutral" indicator as the player bar's EQ button.
-    eqFxActive: s.eqEnabled || s.playbackSpeed !== 1 || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled,
+    eqFxActive: s.eqEnabled || s.playbackSpeed !== 1 || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled || fxInUse(s.audioFx, s.eqEnabled),
     lyricsOverride: s.lyricsOverride,
   })))
 
@@ -358,6 +394,59 @@ export default function WrldView(): JSX.Element {
   // FM's column is on by default and the override turns it off; otherwise the
   // override is XORed against whether lyrics exist.
   const showLyricsColumn = radioFmActive ? !lyricsOverride : showQueue || lyricsVisible
+
+  // Desktop panel animation. The column outlives showLyricsColumn by its exit
+  // animation, still showing whatever view it had (the stores have already
+  // moved on - closing from the queue flips showQueue off, which would swap
+  // lyrics in on the way out). Views inside crossfade the same way. While the
+  // column is fully closed no view counts as shown, so reopening straight to
+  // the queue doesn't play the lyrics' exit on the way in.
+  const panelView: PanelView | null = !showLyricsColumn ? null
+    : radioFmActive ? (fmTab === 'radio' ? 'radio' : 'lyrics')
+    : showQueue ? 'queue' : 'lyrics'
+  const panelPresence = usePresence(showLyricsColumn, PANEL_EXIT_MS)
+  const lastPanelView = useRef<PanelView>('lyrics')
+  if (panelView) lastPanelView.current = panelView
+  const shownView = panelView ?? (panelPresence.exiting ? lastPanelView.current : null)
+  const queuePresence = usePresence(shownView === 'queue', VIEW_EXIT_MS)
+  const lyricsPresence = usePresence(shownView === 'lyrics', VIEW_EXIT_MS)
+  const radioPresence = usePresence(shownView === 'radio', VIEW_EXIT_MS)
+  // Whether a view arriving now is replacing another in an already-open panel
+  // (it crossfades in) or arriving with the panel itself (the panel's slide is
+  // the whole entrance) - see WrldPanelLayer.
+  const panelWasOpen = useRef(showLyricsColumn)
+  const viewCrossfade = panelWasOpen.current && showLyricsColumn
+  useEffect(() => { panelWasOpen.current = showLyricsColumn })
+
+  // The cover and controls glide between centred and the left half as the
+  // panel opens or closes. The column's width snaps to its new size and a
+  // transform carries its content over from where it was. This used to be a
+  // width transition, which re-laid out and repainted the column - and the
+  // 60px-blurred backdrop behind it - on every frame; a transform stays on
+  // the compositor. Starts from wherever a still-running glide has it, so a
+  // quick double toggle doesn't jump.
+  const splitColRef = useRef<HTMLDivElement>(null)
+  const splitWasOpen = useRef(showLyricsColumn)
+  useLayoutEffect(() => {
+    if (splitWasOpen.current === showLyricsColumn) return
+    splitWasOpen.current = showLyricsColumn
+    const col = splitColRef.current
+    const width = col?.parentElement?.clientWidth ?? 0
+    if (!col || !width || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    // The column is max(50%, 320px) wide with the panel open, the full width
+    // without, and centres its content - so the content moves by half the
+    // difference.
+    const half = Math.max(width / 2, 320)
+    const full = Math.max(width, 320)
+    const t = getComputedStyle(col).transform
+    const inFlight = t && t !== 'none' ? new DOMMatrixReadOnly(t).m41 : 0
+    col.getAnimations().forEach(a => a.cancel())
+    const from = (showLyricsColumn ? full - half : half - full) / 2 + inFlight
+    col.animate(
+      [{ transform: `translateX(${from}px)` }, { transform: 'translateX(0)' }],
+      { duration: SPLIT_GLIDE_MS, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
+    )
+  }, [showLyricsColumn])
 
   // On the theme background these come from the skin's own text vars, so the
   // tab matches the rest of the app (and follows a skin change live) instead
@@ -867,10 +956,13 @@ export default function WrldView(): JSX.Element {
               <div className="mx-4 h-px bg-white/10 shrink-0" />
             ))}
 
-            {/* Content */}
-            {showLyricsColumn && (radioFmActive
-              ? (fmTab === 'radio' ? FmRadioPanel() : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />)
-              : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />
+            {/* Content - keyed by view so it rises in again on each switch */}
+            {showLyricsColumn && (
+              <div key={radioFmActive ? fmTab : 'lyrics'} className="flex-1 min-h-0 flex flex-col animate-wrld-view-in">
+                {radioFmActive && fmTab === 'radio'
+                  ? FmRadioPanel()
+                  : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />}
+              </div>
             )}
 
             {/* Mobile playback bar - the bottom Player bar is hidden on this
@@ -1009,7 +1101,10 @@ export default function WrldView(): JSX.Element {
                 this, the version menu popping out past this column's edge
                 was making the browser grow a horizontal scrollbar, which
                 shifted the whole column up by its height. */}
-            <div className="relative flex flex-col items-center justify-center shrink-0 px-8 xl:px-12 gap-5 overflow-y-auto overflow-x-hidden"
+            {/* splitColRef: the glide between centred and the left half (see
+                its layout effect). z-[1] so mid-glide the cover passes over
+                the panel fading out beside it rather than under its lyrics. */}
+            <div ref={splitColRef} className="relative z-[1] flex flex-col items-center justify-center shrink-0 px-8 xl:px-12 gap-5 overflow-y-auto overflow-x-hidden"
               style={{ width: showLyricsColumn ? '50%' : '100%', minWidth: 320 }}>
 
               {/* Album art */}
@@ -1277,15 +1372,24 @@ export default function WrldView(): JSX.Element {
           />
         )}
 
-            {/* Divider - FM only */}
-            {radioFmActive && <div className="w-px bg-white/10 shrink-0 my-10" />}
-
             {/* Right column - swaps to the queue when toggled (replacing
                 lyrics entirely, rather than floating a queue popup over the
                 left column) so it gets the full column's height instead of
                 a cramped 300px-capped overlay. */}
-            {showLyricsColumn && (
-            <div className="flex-1 min-w-0 overflow-hidden flex flex-col" data-viz="panel">
+            {/* Pinned to its final spot (the half the left column gives up)
+                rather than a flex-1 sibling: as a sibling it would be squeezed
+                along with the left column's width transition, rewrapping every
+                lyric line each frame, and would have no room left to animate
+                out in. Stays mounted (display:none) once opened so the queue
+                inside keeps its covers - see below. */}
+            {(panelPresence.mounted || queueEverOpened) && (
+            <div
+              className={`absolute inset-y-0 right-0 overflow-hidden ${panelPresence.exiting ? 'animate-wrld-panel-out' : 'animate-wrld-panel-in'}`}
+              style={{ left: 'max(50%, 320px)', ...(panelPresence.mounted ? null : { display: 'none' }) }}
+              data-viz="panel"
+            >
+              {/* Divider - FM only */}
+              {radioFmActive && <div className="absolute left-0 top-10 bottom-10 w-px bg-white/10" />}
               {/* Kept mounted (hidden via CSS) once opened rather than
                   unmounted on close - same reasoning as the app-wide
                   QueuePanel: unmounting destroyed every cover <img>, forcing
@@ -1295,21 +1399,31 @@ export default function WrldView(): JSX.Element {
                   header (and its Clear/close buttons) slid underneath it and
                   its settings popup. */}
               {queueEverOpened && (
-                <div
-                  className="h-full flex items-stretch justify-center px-6 xl:px-10 pt-24 pb-7 animate-wrld-queue-in"
-                  style={showQueue && !radioFmActive ? undefined : { display: 'none' }}
+                <WrldPanelLayer
+                  visible={queuePresence.mounted && !radioFmActive}
+                  exiting={queuePresence.exiting}
+                  animateIn={viewCrossfade}
+                  className="absolute inset-0 flex items-stretch justify-center px-6 xl:px-10 pt-24 pb-7"
                 >
                   <div className="w-full max-w-[440px] h-full">
                     <WrldQueuePanel variant="panel" onClose={() => setShowQueue(false)} />
                   </div>
-                </div>
+                </WrldPanelLayer>
               )}
-              {showQueue && !radioFmActive ? null : radioFmActive ? (
-                <>
-                  {fmTab === 'radio' ? FmRadioPanel() : <LyricsPanel padded rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />}
-                </>
-              ) : (
-                <LyricsPanel padded rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />
+              {radioPresence.mounted && (
+                // Same frame as the queue above: pt-24 clears the visualizer
+                // toolbar, and a narrow centered column keeps the search box's
+                // help button off the window edge.
+                <WrldPanelLayer exiting={radioPresence.exiting} animateIn={viewCrossfade} className="absolute inset-0 flex justify-center px-6 xl:px-10 pt-24 pb-7">
+                  <div className="w-full max-w-[360px] h-full flex flex-col">
+                    {FmRadioPanel()}
+                  </div>
+                </WrldPanelLayer>
+              )}
+              {lyricsPresence.mounted && (
+                <WrldPanelLayer exiting={lyricsPresence.exiting} animateIn={viewCrossfade} className="absolute inset-0 flex flex-col">
+                  <LyricsPanel padded rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />
+                </WrldPanelLayer>
               )}
             </div>
             )}
@@ -2184,6 +2298,19 @@ const LyricsPanel = memo(function LyricsPanel({
     setTranslateY(active.offsetTop + active.offsetHeight / 2 - vpHalf)
   }, [currentLineIdx, vpHalf, lyricsScale])
 
+  // No glide until the first centring has landed. translateY starts at 0, so
+  // every mount - opening the WRLD panel, switching back from the queue -
+  // scrolled the whole song past from the top down to the current line,
+  // repainting every (blurred) line on the way while the panel slid in.
+  // Waits for a measured viewport: a panel mounted hidden has none yet, and
+  // snaps into place once it's shown.
+  const [placed, setPlaced] = useState(false)
+  useEffect(() => {
+    if (placed || vpHalf === 0) return
+    const raf = requestAnimationFrame(() => setPlaced(true))
+    return () => cancelAnimationFrame(raf)
+  }, [placed, vpHalf])
+
   // Right-click → "Download synced lyrics" - only offered for LRC-format
   // lyrics (the .lrc file needs the timestamps; plain unsynced text has
   // nothing worth exporting in that format).
@@ -2247,7 +2374,7 @@ const LyricsPanel = memo(function LyricsPanel({
           className={`relative flex flex-col ${padded ? 'gap-5 px-10' : 'gap-4 px-5 md:px-8'}`}
           style={{
             transform: `translateY(${-displayTranslateY}px)`,
-            transition: autoFollow ? 'transform 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none',
+            transition: autoFollow && placed ? 'transform 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none',
             willChange: 'transform',
             WebkitMaskImage: edgeMask,
             maskImage: edgeMask,

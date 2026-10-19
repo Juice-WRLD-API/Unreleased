@@ -496,7 +496,9 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       queueOriginal: null,
       queueIndex: 0,
       currentTrack: track,
-      currentTrackFull: null,
+      // Radio from the song already playing (keepPlayState, the queue-ended
+      // toast) keeps its FullTrack, or the cover/lyrics flash out.
+      currentTrackFull: fullFor(track),
       isPlaying: opts?.keepPlayState ? get().isPlaying : true,
       queueFilter: null,
       queueLoadingMore: false,

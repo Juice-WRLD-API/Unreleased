@@ -1,7 +1,7 @@
 // UI for lib/debugRecorder: the Settings button that starts/stops a recording,
 // and a floating pill shown everywhere while one is running - the user leaves
 // Settings to reproduce the bug, so the way to stop has to follow them.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Circle, Square } from 'lucide-react'
 import {
@@ -64,7 +64,9 @@ export default function DebugRecordingPill(): JSX.Element | null {
       onClick={toggleDebugRecording}
       title="Stop recording and save the debug log"
       className="fixed left-1/2 -translate-x-1/2 z-[190] flex items-center gap-2 pl-2.5 pr-3 py-1.5 rounded-full border border-red-500/40 bg-surface shadow-2xl text-xs text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
-      style={{ top: 'calc(env(safe-area-inset-top, 0px) + 8px)' }}
+      // Sits over the titlebar drag strip, and an app-region rect swallows
+      // clicks regardless of stacking - so the whole pill opts out.
+      style={{ top: 'calc(env(safe-area-inset-top, 0px) + 8px)', WebkitAppRegion: 'no-drag' } as CSSProperties}
     >
       <span className="relative flex w-2.5 h-2.5">
         <span className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-60" />

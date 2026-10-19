@@ -4,6 +4,7 @@ import { usePlaylistDetailData, usePlaylistCoverEditing } from '../hooks/usePlay
 import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
 import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
+import { useClosingValue } from '../hooks/usePresence'
 import { createPortal } from 'react-dom'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft,
@@ -47,6 +48,7 @@ import type { PlaylistFolder } from '../lib/playlistFolders'
 import { Folder, FolderPlus, FolderOpen, FolderMinus } from 'lucide-react'
 import { loadEraFullNames, eraLabel } from '../lib/eras'
 import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
+import { resolveTrackFile } from '../lib/sessionEditsApi'
 
 // One parsed line of an .m3u: a file path, plus the #EXTINF title/duration
 // when the exporter wrote them. Import can either match the path to a local
@@ -254,9 +256,10 @@ function LocalPlaylistMosaic({ trackIds, className = '' }: {
 
 // ── PlaylistExpandPanel ───────────────────────────────────────────────────────
 // The inline "quick view" that opens below a clicked card's row, spanning the
-// full grid width (col-span-full breaks the CSS grid's auto-flow onto its own
-// row right there, pushing later cards down onto the row after it — no need
-// to know how many columns are actually rendered).
+// full grid width - layoutGridEntries puts it in a GridPanelSlot, which does
+// the row placement and the open/close animation. The panel's own entrance
+// (animate-pl-panel-swap) is for switching cards within an open row, where
+// the slot stays put and only this content changes.
 function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, onPlayTrack, onOpenFull, onTrackContextMenu }: {
   name: string
   subtitle: string
@@ -277,7 +280,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
 
   return (
     <div
-      className="col-span-full rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6 animate-in fade-in slide-in-from-top-1 duration-150"
+      className="rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6 animate-pl-panel-swap"
       onClick={e => e.stopPropagation()}
     >
       <button
@@ -325,7 +328,12 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
                     key={t.id}
                     onClick={() => onPlayTrack(t)}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onTrackContextMenu(t, e) }}
-                    className="flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-surface-overlay text-left group/track transition-colors cursor-pointer"
+                    className={`${i < 24 ? 'pl-track-in ' : ''}flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-surface-overlay text-left group/track transition-colors cursor-pointer`}
+                    // Both columns cascade down together, the delay capped so a
+                    // long list's tail doesn't trail in after the panel has
+                    // settled. Rows past the first couple dozen are well below
+                    // the fold - not worth hundreds of simultaneous animations.
+                    style={i < 24 ? { animationDelay: `${60 + Math.min(i, 14) * 22}ms` } : undefined}
                   >
                     <span className={`w-5 text-xs tabular-nums text-right shrink-0 ${isActive ? 'text-accent' : 'text-text-muted'}`}>
                       {isActive ? '▶' : colIdx * mid + i + 1}
@@ -363,7 +371,15 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
 // the panel after the LAST card of the clicked card's row instead — nothing
 // in that row moves, and the panel still lands directly beneath it.
 
-type GridEntry = { key: string; tile: JSX.Element; panel: JSX.Element | null }
+type GridEntry = {
+  key: string
+  tile: JSX.Element
+  panel: JSX.Element | null
+  /** The panel is animating shut (useClosingValue) rather than open. */
+  closing?: boolean
+  /** The caret's fill - matches the panel's own background. */
+  caretClass?: string
+}
 
 // Takes the element itself (state, not a mutable ref object) so the
 // measuring effect re-runs when a conditionally-rendered grid — like a
@@ -388,23 +404,96 @@ function useGridColumnCount(el: HTMLDivElement | null): number {
   return cols
 }
 
+// Each row's panel goes in a GridPanelSlot keyed by the row, not the card. A
+// row can briefly hold two - the one closing and the one just opened from
+// another card in the same row - and then the open one takes the slot over,
+// so the switch happens inside one panel instead of a collapse-and-reopen.
 function layoutGridEntries(entries: GridEntry[], columns: number): JSX.Element[] {
-  const panelsAtRowEnd = new Map<number, JSX.Element[]>()
+  const slotAtRowEnd = new Map<number, { entry: GridEntry; col: number }>()
   entries.forEach((e, i) => {
     if (!e.panel) return
     const row = Math.floor(i / columns)
     const rowEnd = Math.min(entries.length - 1, row * columns + columns - 1)
-    const arr = panelsAtRowEnd.get(rowEnd) ?? []
-    arr.push(e.panel)
-    panelsAtRowEnd.set(rowEnd, arr)
+    const cur = slotAtRowEnd.get(rowEnd)
+    if (!cur || (cur.entry.closing && !e.closing)) slotAtRowEnd.set(rowEnd, { entry: e, col: i % columns })
   })
   const out: JSX.Element[] = []
   entries.forEach((e, i) => {
     out.push(e.tile)
-    const panels = panelsAtRowEnd.get(i)
-    if (panels) out.push(...panels)
+    const slot = slotAtRowEnd.get(i)
+    if (slot) out.push(
+      <GridPanelSlot key={`panel-row-${i}`} closing={!!slot.entry.closing} col={slot.col} columns={columns} caretClass={slot.entry.caretClass}>
+        {slot.entry.panel}
+      </GridPanelSlot>
+    )
   })
   return out
+}
+
+// ── GridPanelSlot ──────────────────────────────────────────────────────────────
+// Animates a quick-view panel's grid row. It grows open from nothing, easing
+// the rows below down instead of snapping them, follows the panel's height as
+// it changes (tracks loading in, a switch to a longer playlist), and shrinks
+// shut when `closing`. The caret points up at the card the panel belongs to and
+// glides to the new one on a same-row switch. Row spacing in a .pl-grid is
+// each item's own bottom margin rather than row-gap (see index.css) - a gap
+// would still sit on both sides of the empty row, so opening jumped the rows
+// below by a gap before the panel had grown at all.
+const SLOT_CLOSE_MS = 340 // .pl-grid-panel.is-closing's transition, plus a frame
+
+function GridPanelSlot({ closing, col, columns, caretClass = 'bg-surface-raised', children }: {
+  closing: boolean
+  col: number
+  columns: number
+  caretClass?: string
+  children: React.ReactNode
+}): JSX.Element {
+  const innerRef = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(0)
+  const [entered, setEntered] = useState(false)
+  // A height change from the grid itself resizing (the window, the sidebar)
+  // snaps rather than easing, or the panel visibly lags behind the drag.
+  const [snap, setSnap] = useState(false)
+  useLayoutEffect(() => {
+    const inner = innerRef.current
+    if (!inner) return
+    let lastWidth = inner.offsetWidth
+    const measure = (): void => {
+      const w = inner.offsetWidth
+      if (w !== lastWidth) setSnap(true)
+      lastWidth = w
+      setHeight(inner.offsetHeight)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [])
+  useEffect(() => {
+    if (!snap) return
+    const raf = requestAnimationFrame(() => setSnap(false))
+    return () => cancelAnimationFrame(raf)
+  }, [snap])
+  // Mounted at zero height (the measure above lays that out), then opened a
+  // frame later so there's a starting point to transition from.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
+  const open = entered && !closing
+  // Centre of column `col`: n columns share the width less (n - 1) gaps.
+  const caretLeft = `calc((100% - ${columns - 1} * var(--pl-col-gap)) / ${columns} * ${col + 0.5} + ${col} * var(--pl-col-gap))`
+  return (
+    <div
+      className={`pl-grid-panel col-span-full ${closing ? 'is-closing' : ''}`}
+      style={{ height: open ? height : 0, marginBottom: open ? 'var(--pl-row-gap)' : 0, ...(snap ? { transition: 'none' } : null) }}
+    >
+      <div ref={innerRef} className={`pl-grid-panel-inner ${open ? 'is-open' : ''}`}>
+        <span className={`pl-grid-caret ${caretClass}`} style={{ left: caretLeft }} />
+        {children}
+      </div>
+    </div>
+  )
 }
 
 export default function PlaylistsView(): JSX.Element {
@@ -451,6 +540,16 @@ export default function PlaylistsView(): JSX.Element {
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [expandedTracks, setExpandedTracks] = useState<Track[]>([])
   const [expandedLoading, setExpandedLoading] = useState(false)
+  // The quick view / folder panel just closed (or switched away from), kept
+  // around while its grid slot animates shut - see GridPanelSlot.
+  const closingQuickView = useClosingValue(expandedKey, expandedTracks, SLOT_CLOSE_MS)
+  const closingFolder = useClosingValue(playlistsOpenFolderId, null, SLOT_CLOSE_MS)
+  // What a card's quick-view panel shows: the open one's live tracks, or the
+  // closing one's tracks as they were.
+  const quickViewFor = (key: string): { tracks: Track[]; loading: boolean; closing: boolean } | null =>
+    expandedKey === key ? { tracks: expandedTracks, loading: expandedLoading, closing: false }
+    : closingQuickView?.key === key ? { tracks: closingQuickView.snapshot, loading: false, closing: true }
+    : null
   // Toggles a card's quick-view panel, closing any open folder first — see
   // the note on openFolder for why the two can't both be open at once.
   // closeFolder defaults to true (a top-level card's expand should close any
@@ -463,31 +562,15 @@ export default function PlaylistsView(): JSX.Element {
     if (closeFolder) setPlaylistsOpenFolderId(null)
     setExpandedKey(k => k === key ? null : key)
   }, [setPlaylistsOpenFolderId])
-  const pendingExpandClick = useRef<{ key: string; closeFolder: boolean; timer: ReturnType<typeof setTimeout> } | null>(null)
-  const handleCardClick = useCallback((key: string, closeFolder: boolean) => {
-    if (pendingExpandClick.current) {
-      const pending = pendingExpandClick.current
-      clearTimeout(pending.timer)
-      pendingExpandClick.current = null
-      if (pending.key === key) return
-      toggleExpanded(pending.key, pending.closeFolder)
-    }
-    pendingExpandClick.current = {
-      key, closeFolder,
-      timer: setTimeout(() => { pendingExpandClick.current = null; toggleExpanded(key, closeFolder) }, 400),
-    }
+  // The quick view opens on the first click, right away. It used to wait out a
+  // 400ms double-click window first so a double-click wouldn't flash it open,
+  // which made every single click feel laggy. Now only the double-click's
+  // second click (detail 2) is skipped, and onDoubleClick opens the full page,
+  // which collapses the panel anyway.
+  const handleCardClick = useCallback((key: string, closeFolder: boolean, clickCount: number) => {
+    if (clickCount > 1) return
+    toggleExpanded(key, closeFolder)
   }, [toggleExpanded])
-  const cancelPendingExpandClick = useCallback((key: string) => {
-    if (pendingExpandClick.current?.key === key) {
-      clearTimeout(pendingExpandClick.current.timer)
-      pendingExpandClick.current = null
-    }
-  }, [])
-  useEffect(() => {
-    return () => {
-      if (pendingExpandClick.current) clearTimeout(pendingExpandClick.current.timer)
-    }
-  }, [])
   // One column-count measurement per distinct grid container that can host a
   // quick-view panel — see useGridColumnCount above. State (not useRef) so
   // the measuring effect re-fires when the element actually mounts — needed
@@ -945,7 +1028,10 @@ export default function PlaylistsView(): JSX.Element {
   // Load the quick-view panel's tracklist whenever it opens. API playlists
   // render instantly from cache (see loadDetail's same pattern) then refresh
   // in the background; local playlists resolve synchronously from the store.
-  useEffect(() => {
+  // A layout effect so whatever's ready now (cache, local) lands before the
+  // first paint - otherwise a panel switched to another card painted the
+  // previous card's tracks for a frame.
+  useLayoutEffect(() => {
     if (!expandedKey) { setExpandedTracks([]); return }
     if (expandedKey === 'liked') {
       // Same three sources LikedSongsView combines: API favorites (fetched
@@ -957,6 +1043,9 @@ export default function PlaylistsView(): JSX.Element {
         .map(id => { const path = apiFileIdToPath(id); return path ? apiFilePathToTrack(path) : null })
         .filter((t): t is Track => t != null)
       if (!account) { setExpandedTracks([...localTracks, ...fileTracks]); setExpandedLoading(false); return undefined }
+      // Cached favorites first (refreshed below), never the previous panel's tracks.
+      const cachedFavs = userApi.peekFavorites()
+      setExpandedTracks(cachedFavs ? [...cachedFavs.map(f => userApi.liteSongToTrack(f.song)), ...localTracks, ...fileTracks] : [])
       setExpandedLoading(true)
       let cancelled = false
       userApi.getFavorites().then(favs => {
@@ -982,7 +1071,12 @@ export default function PlaylistsView(): JSX.Element {
       return () => { cancelled = true }
     }
     const lp = localPlaylists.find(p => p.id === idStr)
-    setExpandedTracks(lp ? lp.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack) : [])
+    if (lp) {
+      // A map rather than a find() per track - big playlist x big library
+      // was a noticeable stall on the click.
+      const byId = new Map(libraryTracks.map(t => [t.id, t]))
+      setExpandedTracks(lp.trackIds.map(id => byId.get(id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack))
+    } else setExpandedTracks([])
     setExpandedLoading(false)
     return undefined
   }, [expandedKey, localPlaylists, libraryTracks, likedTrackIds, account])
@@ -1182,12 +1276,6 @@ export default function PlaylistsView(): JSX.Element {
     toggle: togglePlKeyRaw, exitSelectMode: exitPlaylistSelectMode,
   } = useMultiSelect<string>({ onExit: () => setShowPlBulkAddMenu(false) })
   const togglePlaylistSelect = useCallback((key: string) => togglePlKeyRaw(key, key), [togglePlKeyRaw])
-  useEffect(() => {
-    if (plSelectMode && pendingExpandClick.current) {
-      clearTimeout(pendingExpandClick.current.timer)
-      pendingExpandClick.current = null
-    }
-  }, [plSelectMode])
   const keyMap = (keys: string[]): Map<string, string> => new Map(keys.map(k => [k, k]))
 
   const { busy: bulkDeletingPlaylists, run: runBulkDeletePlaylists } = usePlaylistBulkDeletePlaylists(
@@ -1278,10 +1366,13 @@ export default function PlaylistsView(): JSX.Element {
     downloadBlob(JSON.stringify(playlistJsonPayload(detail), null, 2), 'application/json', `${name}.json`)
   }, [detail, summary])
 
-  const handleExportM3u = useCallback(() => {
+  const handleExportM3u = useCallback(async () => {
     if (!detail) return
     const name = detail.name ?? summary?.name ?? 'playlist'
-    downloadBlob(playlistM3uContent(tracks), 'audio/x-mpegurl', `${name}.m3u`)
+    // A session not yet looked up only has its marker, which no player can open.
+    const resolved = await Promise.all(tracks.map(t =>
+      resolveTrackFile(t).then((f): Track => ({ ...t, path: f.path, streamUrl: f.url }), () => null)))
+    downloadBlob(playlistM3uContent(resolved.filter((t): t is Track => t != null)), 'audio/x-mpegurl', `${name}.m3u`)
   }, [detail, summary, tracks])
 
   // Optimistic like bulkAddToPlaylist: membership is marked up front and
@@ -1658,17 +1749,16 @@ export default function PlaylistsView(): JSX.Element {
               <Download size={9} /> Offline
             </span>
           ) : undefined}
-          selected={plSelected}
+          selected={plSelected || (!plSelectMode && expandedKey === plKey)}
           selectMode={plSelectMode}
           onClick={e => {
             if (e.ctrlKey || e.metaKey) { togglePlaylistSelect(plKey); return }
             if (plSelectMode) { togglePlaylistSelect(plKey); return }
-            handleCardClick(plKey, !inFolder)
+            handleCardClick(plKey, !inFolder, e.detail)
           }}
-          onDoubleClick={() => { if (!plSelectMode) { cancelPendingExpandClick(plKey); setSelectedId(p.id) } }}
+          onDoubleClick={() => { if (!plSelectMode) setSelectedId(p.id) }}
           onContextMenu={e => {
             e.preventDefault(); e.stopPropagation()
-            cancelPendingExpandClick(plKey)
             if (plSelectMode) {
               if (!plSelected) setSelectedPlaylistKeys(prev => prev.has(plKey) ? prev : new Map(prev).set(plKey, plKey))
               setPlBulkMenu({ x: e.clientX, y: e.clientY })
@@ -1676,7 +1766,7 @@ export default function PlaylistsView(): JSX.Element {
               setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY })
             }
           }}
-          onMenuButton={e => { cancelPendingExpandClick(plKey); setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY }) }}
+          onMenuButton={e => setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY })}
           onPlay={async () => {
             const d = await userApi.getPlaylist(p.id).catch(() => null)
             const trks = d ? d.items.map(i => userApi.liteSongToTrack(i.song)) : []
@@ -1687,21 +1777,22 @@ export default function PlaylistsView(): JSX.Element {
           {...(inFolder ? {} : dropOntoPlaylistProps(plKey))}
         />
     )
-    const panel = expandedKey === plKey ? (
+    const pv = quickViewFor(plKey)
+    const panel = pv ? (
         <PlaylistExpandPanel
           key={`panel-${plKey}`}
           name={p.name}
           subtitle={`${p.track_count} ${p.track_count === 1 ? 'track' : 'tracks'}`}
           cover={apiCoverNode(p)}
-          tracks={expandedTracks}
-          loading={expandedLoading}
+          tracks={pv.tracks}
+          loading={pv.loading}
           onClose={() => setExpandedKey(null)}
-          onPlayTrack={t => playTrack(t, expandedTracks)}
+          onPlayTrack={t => playTrack(t, pv.tracks)}
           onTrackContextMenu={openTrackMenu}
           onOpenFull={() => setSelectedId(p.id)}
         />
     ) : null
-    return { key: plKey, tile, panel }
+    return { key: plKey, tile, panel, closing: pv?.closing }
   }
 
   const localEntry = (lp: LocalPlaylist, inFolder = false): GridEntry => {
@@ -1717,17 +1808,16 @@ export default function PlaylistsView(): JSX.Element {
           subtitle={`${lp.trackIds.length} ${lp.trackIds.length === 1 ? 'track' : 'tracks'}`}
           cover={localCover}
           badge={<span className="flex items-center gap-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-md"><HardDrive size={9} /> Local</span>}
-          selected={plSelected}
+          selected={plSelected || (!plSelectMode && expandedKey === plKey)}
           selectMode={plSelectMode}
           onClick={e => {
             if (e.ctrlKey || e.metaKey) { togglePlaylistSelect(plKey); return }
             if (plSelectMode) { togglePlaylistSelect(plKey); return }
-            handleCardClick(plKey, !inFolder)
+            handleCardClick(plKey, !inFolder, e.detail)
           }}
-          onDoubleClick={() => { if (!plSelectMode) { cancelPendingExpandClick(plKey); setLocalSelectedId(lp.id) } }}
+          onDoubleClick={() => { if (!plSelectMode) setLocalSelectedId(lp.id) }}
           onContextMenu={e => {
             e.preventDefault(); e.stopPropagation()
-            cancelPendingExpandClick(plKey)
             if (plSelectMode) {
               if (!plSelected) setSelectedPlaylistKeys(prev => prev.has(plKey) ? prev : new Map(prev).set(plKey, plKey))
               setPlBulkMenu({ x: e.clientX, y: e.clientY })
@@ -1735,7 +1825,7 @@ export default function PlaylistsView(): JSX.Element {
               setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY })
             }
           }}
-          onMenuButton={e => { cancelPendingExpandClick(plKey); setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY }) }}
+          onMenuButton={e => setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY })}
           onPlay={() => {
             const qt = lp.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
             if (qt.length) playCollection(qt)
@@ -1745,21 +1835,22 @@ export default function PlaylistsView(): JSX.Element {
           {...(inFolder ? {} : dropOntoPlaylistProps(plKey))}
         />
     )
-    const panel = expandedKey === plKey ? (
+    const pv = quickViewFor(plKey)
+    const panel = pv ? (
         <PlaylistExpandPanel
           key={`panel-${plKey}`}
           name={lp.name}
           subtitle={`${lp.trackIds.length} ${lp.trackIds.length === 1 ? 'track' : 'tracks'}`}
           cover={localCover}
-          tracks={expandedTracks}
-          loading={expandedLoading}
+          tracks={pv.tracks}
+          loading={pv.loading}
           onClose={() => setExpandedKey(null)}
-          onPlayTrack={t => playTrack(t, expandedTracks)}
+          onPlayTrack={t => playTrack(t, pv.tracks)}
           onTrackContextMenu={openTrackMenu}
           onOpenFull={() => setLocalSelectedId(lp.id)}
         />
     ) : null
-    return { key: plKey, tile, panel }
+    return { key: plKey, tile, panel, closing: pv?.closing }
   }
 
   const openFollowedPlaylist = (id: number): void => { setSelectedId(id); setIsSharedView(true) }
@@ -1930,18 +2021,21 @@ export default function PlaylistsView(): JSX.Element {
           }}
         />
       )
-      const panel = isOpen ? (
-        <div key={`panel-folder-${f.id}`} className="col-span-full rounded-2xl bg-surface-overlay border border-[var(--border)] p-4" onClick={e => e.stopPropagation()}>
+      // A closing folder keeps its panel for the collapse animation, but not
+      // the grid ref: its unmount would null the open folder's measurement.
+      const isClosing = !isOpen && closingFolder?.key === f.id
+      const panel = isOpen || isClosing ? (
+        <div key={`panel-folder-${f.id}`} className="relative rounded-2xl bg-surface-overlay border border-[var(--border)] p-4 animate-pl-panel-swap" onClick={e => e.stopPropagation()}>
           {memberEntries.length === 0 ? (
             <p className="text-text-muted text-sm py-1">This folder is empty. Drag a playlist onto it, or right-click one and choose “Move to folder”.</p>
           ) : (
-            <div ref={setFolderGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+            <div ref={isOpen ? setFolderGridEl : undefined} className="grid pl-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
               {layoutGridEntries(memberEntries, folderGridCols)}
             </div>
           )}
         </div>
       ) : null
-      return { key: f.id, tile, panel }
+      return { key: f.id, tile, panel, closing: isClosing, caretClass: 'bg-surface-overlay' }
     })
   }
 
@@ -2082,7 +2176,10 @@ export default function PlaylistsView(): JSX.Element {
                   synced-playlist ids) — folders holding only synced
                   playlists are hidden here since their members can't render
                   without an account. */}
-              <div ref={setAuthGridEl} className="grid gap-4 mb-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
+              {/* Inline margin: .pl-grid's own negative one would otherwise
+                  fight a utility class for margin-bottom. 1rem here + the last
+                  row's own 1rem = the 2rem (mb-8) this grid always had. */}
+              <div ref={setAuthGridEl} className="grid pl-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', '--pl-row-gap': '1rem', marginBottom: '1rem' } as React.CSSProperties} {...gridBackgroundDropProps}>
                 {layoutGridEntries([...folderTileEntries(true), ...ungroupedLocal.map(lp => localEntry(lp))], authGridCols)}
               </div>
             </>
@@ -3212,33 +3309,39 @@ export default function PlaylistsView(): JSX.Element {
         {/* ── Playlists section — folders sit right in the same grid as the
             playlists they group, rather than a separate section above it. ── */}
         <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3">Playlists</h2>
-        <div ref={setMainGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
+        <div ref={setMainGridEl} className="grid pl-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
           {layoutGridEntries([
             {
               key: 'liked',
               tile: (
-                <button key="liked" onClick={() => handleCardClick('liked', true)} onDoubleClick={() => { cancelPendingExpandClick('liked'); setShowLiked(true) }} className="group text-left cursor-pointer">
-                  <div className="aspect-square rounded-2xl bg-gradient-to-br from-accent/50 to-accent/10 flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200">
+                <button key="liked" onClick={e => handleCardClick('liked', true, e.detail)} onDoubleClick={() => setShowLiked(true)} className="group text-left cursor-pointer">
+                  <div className={`aspect-square rounded-2xl bg-gradient-to-br from-accent/50 to-accent/10 flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200 ${expandedKey === 'liked' ? 'ring-2 ring-accent' : ''}`}>
                     <Heart size={44} className="text-accent" fill="currentColor" />
                   </div>
                   <p className="text-text-primary text-sm font-semibold truncate">Liked Songs</p>
                   <p className="text-text-muted text-xs mt-0.5">{likedTrackIds.length} {likedTrackIds.length === 1 ? 'track' : 'tracks'}</p>
                 </button>
               ),
-              panel: expandedKey === 'liked' ? (
-                <PlaylistExpandPanel
-                  key="panel-liked"
-                  name="Liked Songs"
-                  subtitle={`${expandedTracks.length} ${expandedTracks.length === 1 ? 'track' : 'tracks'}`}
-                  cover={<div className="w-full h-full bg-gradient-to-br from-accent/50 to-accent/10 flex items-center justify-center"><Heart size={28} className="text-accent" fill="currentColor" /></div>}
-                  tracks={expandedTracks}
-                  loading={expandedLoading}
-                  onClose={() => setExpandedKey(null)}
-                  onPlayTrack={t => playTrack(t, expandedTracks)}
-                  onTrackContextMenu={openTrackMenu}
-                  onOpenFull={() => { setExpandedKey(null); setShowLiked(true) }}
-                />
-              ) : null,
+              ...(() => {
+                const pv = quickViewFor('liked')
+                return {
+                  closing: pv?.closing,
+                  panel: pv ? (
+                    <PlaylistExpandPanel
+                      key="panel-liked"
+                      name="Liked Songs"
+                      subtitle={`${pv.tracks.length} ${pv.tracks.length === 1 ? 'track' : 'tracks'}`}
+                      cover={<div className="w-full h-full bg-gradient-to-br from-accent/50 to-accent/10 flex items-center justify-center"><Heart size={28} className="text-accent" fill="currentColor" /></div>}
+                      tracks={pv.tracks}
+                      loading={pv.loading}
+                      onClose={() => setExpandedKey(null)}
+                      onPlayTrack={t => playTrack(t, pv.tracks)}
+                      onTrackContextMenu={openTrackMenu}
+                      onOpenFull={() => { setExpandedKey(null); setShowLiked(true) }}
+                    />
+                  ) : null,
+                }
+              })(),
             },
             ...folderTileEntries(false),
             ...ungroupedApi.map(p => apiEntry(p)),
@@ -3270,7 +3373,7 @@ export default function PlaylistsView(): JSX.Element {
         {ungroupedLocal.length > 0 && (
           <>
             <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3 mt-9">On This Device</h2>
-            <div ref={setDeviceGridEl} className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
+            <div ref={setDeviceGridEl} className="grid pl-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
               {layoutGridEntries(ungroupedLocal.map(lp => localEntry(lp)), deviceGridCols)}
             </div>
           </>

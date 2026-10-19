@@ -1,10 +1,11 @@
 import { getAudioCurrentTime, getAudioDuration, seekAudio } from '../../components/Player'
 import { useStore } from '../../store/useStore'
 import { fisherYates } from '../../store/queueSlice'
-import { EQ_PRESETS } from '../audioEffects'
+import { EQ_PRESETS, type AudioFx } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
-import { loadAllSongs, loadAllSongsWithLyricsAbortable, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
-import { parseSearchQuery, matchesFieldFilters, songsById } from '../trackerSearch'
+import { getSongById, getSongsByIds, loadAllSongs, loadAllSongsWithLyricsAbortable, normalizeSongTitle, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { displaySongName, renamedSongs } from '../songPrefs'
+import { parseSearchQuery, matchesFieldFilters, songsById, textMatches } from '../trackerSearch'
 import { trackIdToSongId } from '../userApi'
 import { loadCatalog, statsSongToTrack } from '../statsCatalog'
 import { bestLyricLine, searchLyrics } from '../lyricSearch'
@@ -24,7 +25,18 @@ let lastFind: JWApiSong[] = []
 export async function songFromArg(arg: string): Promise<JWApiSong> {
   const n = /^\d+$/.test(arg) ? Number(arg) : 0
   if (n && lastFind.length > 0) return lastFind[n - 1] ?? fail(`pick a number from 1 to ${lastFind.length}`)
+  // The API only knows its own names, so a song's rename is checked first.
+  const wanted = normalizeSongTitle(arg)
+  const renamed = renamedSongs().find(([, name]) => normalizeSongTitle(name) === wanted)
+  if (renamed) return getSongById(renamed[0])
   return (await resolveTitleToSong(arg)) ?? fail(`no song found for "${arg}"`)
+}
+
+/** Songs whose rename contains `q` - the API's search can't find them by it. */
+async function renamedSongsMatching(q: string, exclude: JWApiSong[]): Promise<JWApiSong[]> {
+  const have = new Set(exclude.map((s) => s.id))
+  const ids = renamedSongs().filter(([id, name]) => !have.has(id) && textMatches(name, q)).map(([id]) => id)
+  return ids.length ? getSongsByIds(ids).catch(() => []) : []
 }
 
 /** Tab candidates for a song title typed over several words. `before` is the
@@ -37,7 +49,8 @@ export async function completeSongs(before: string[], partial: string): Promise<
   if (typed.length < 2 || /^\d+$/.test(typed)) return []
   const skip = before.length > 0 ? before.join(' ').length + 1 : 0
   const results = await searchSongs(typed, 15)
-  return results.map((s) => s.name).filter((n) => n.toLowerCase().startsWith(typed)).map((n) => n.slice(skip))
+  const names = [...results.map(displaySongName), ...renamedSongs().map(([, name]) => name)]
+  return [...new Set(names)].filter((n) => n.toLowerCase().startsWith(typed)).map((n) => n.slice(skip))
 }
 
 /** The queue position a `jump` argument means: a number, or a title (exact, then
@@ -90,7 +103,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       if (!arg) { currentTrack(); runHotkeyAction('play'); ctx.print('▶ playing', 'ok'); return }
       const song = await songFromArg(arg)
       st().playTrack(songToTrack(song))
-      ctx.print(`▶ ${song.name}`, 'ok')
+      ctx.print(`▶ ${displaySongName(song)}`, 'ok')
     },
   },
   {
@@ -255,10 +268,11 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     run: async (args, ctx) => {
       const q = args.trim()
       if (!q) fail('usage: find <title>')
-      const results = await searchSongs(q, 15)
+      const found = await searchSongs(q, 15)
+      const results = [...await renamedSongsMatching(q, found), ...found]
       lastFind = results
       if (results.length === 0) { ctx.print(`no songs found for "${q}"`, 'dim'); return }
-      ctx.print(`${results.map((r, i) => `${String(i + 1).padStart(3)}  ${r.name}  (${r.era?.name ?? r.category})`).join('\n')}\nplay N · queue add N · queue next N`, 'plain')
+      ctx.print(`${results.map((r, i) => `${String(i + 1).padStart(3)}  ${displaySongName(r)}  (${r.era?.name ?? r.category})`).join('\n')}\nplay N · queue add N · queue next N`, 'plain')
     },
   },
   {
@@ -273,7 +287,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       if (hits.length === 0) { ctx.print(`no lyrics match "${q}"${fuzzy ? ' (even loosely)' : ' - drop --exact to loosen it'}`, 'dim'); return }
       lastFind = hits
       const line = (s: JWApiSong): string => { const l = bestLyricLine(s.lyrics, q, fuzzy); return l ? `\n       “${l.length > 100 ? `${l.slice(0, 100)}…` : l}”` : '' }
-      ctx.print(`${pageRows(hits.length, (i) => `${String(i + 1).padStart(3)}  ${hits[i].name}  (${hits[i].era?.name ?? hits[i].category})${line(hits[i])}`, 15)}\nplay N · queue add N · queue next N`, 'plain')
+      ctx.print(`${pageRows(hits.length, (i) => `${String(i + 1).padStart(3)}  ${displaySongName(hits[i])}  (${hits[i].era?.name ?? hits[i].category})${line(hits[i])}`, 15)}\nplay N · queue add N · queue next N`, 'plain')
     },
   },
   {
@@ -316,8 +330,8 @@ export const PLAYER_COMMANDS: TermCommand[] = [
           return
         }
         case 'clear': s.clearQueue(); ctx.print('queue cleared', 'ok'); return
-        case 'add': { const song = await songFromArg(rest); st().addToQueue(songToTrack(song)); ctx.print(`queued ${song.name}`, 'ok'); return }
-        case 'next': { const song = await songFromArg(rest); st().playNext(songToTrack(song)); ctx.print(`playing ${song.name} next`, 'ok'); return }
+        case 'add': { const song = await songFromArg(rest); st().addToQueue(songToTrack(song)); ctx.print(`queued ${displaySongName(song)}`, 'ok'); return }
+        case 'next': { const song = await songFromArg(rest); st().playNext(songToTrack(song)); ctx.print(`playing ${displaySongName(song)} next`, 'ok'); return }
         case 'remove': case 'rm': {
           const n = Number(rest)
           if (!Number.isInteger(n) || n < 1 || n > s.queue.length) fail(`remove which? 1-${s.queue.length}`)
@@ -356,15 +370,32 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'eq', group: 'Player', usage: 'eq [on | off | list | reset | <preset> | reverb [on|off|<0-100>] [decay 1-8] | boost <100-200> | balance <-100..100> | speed <0.5-2> | mono [on|off] | pitch [on|off]]', description: 'Show or change the equalizer, reverb and sound effects; a preset name turns it on with that preset',
-    complete: (before, partial) => (before.length === 0 ? ['on', 'off', 'list', 'reset', 'reverb', 'boost', 'balance', 'speed', 'mono', 'pitch', ...EQ_PRESETS.map((p) => p.id)].filter((w) => w.startsWith(partial.toLowerCase())) : []),
+    name: 'eq', group: 'Player', usage: 'eq [on | off | list | reset [all] | <preset> | save <name> | delete <name> | preamp <-12..12> | reverb [on|off|<0-100>] [decay 1-8] | echo [on|off|<0-100>] | 8d [on|off|<seconds 1-20>] | comp [on|off|<threshold -60..0>] | filter [on|off] | width <0-200> | saturation <0-100> | boost <100-200> | balance <-100..100> | speed <0.5-2> | mono [on|off] | pitch [on|off]]', description: 'Show or change the equalizer, reverb and sound effects; a preset name turns it on with that preset (fine-tune effects with: set echo-time, set comp-ratio, set low-cut, …)',
+    complete: (before, partial) => {
+      const presets = (): string[] => [...EQ_PRESETS.map((p) => p.id), ...st().eqUserPresets.map((p) => p.name)]
+      const words = before.length === 0
+        ? ['on', 'off', 'list', 'reset', 'save', 'delete', 'preamp', 'reverb', 'echo', '8d', 'comp', 'filter', 'width', 'saturation', 'boost', 'balance', 'speed', 'mono', 'pitch', ...presets()]
+        : before.length === 1 && before[0].toLowerCase() === 'delete' ? st().eqUserPresets.map((p) => p.name)
+        : before.length === 1 && before[0].toLowerCase() === 'reset' ? ['all']
+        : []
+      return words.filter((w) => w.toLowerCase().startsWith(partial.toLowerCase()))
+    },
     run: (args, ctx) => {
       const arg = args.trim().toLowerCase()
       const s = st()
-      const describe = (): string => `equalizer ${st().eqEnabled ? 'on' : 'off'} · preset ${st().eqPreset} · boost ${Math.round(st().eqBoost * 100)}% · balance ${Math.round(st().eqBalance * 100)}`
+      const describe = (): string => `equalizer ${st().eqEnabled ? 'on' : 'off'} · preset ${presetLabel()} · preamp ${st().audioFx.preamp} dB · boost ${Math.round(st().eqBoost * 100)}% · balance ${Math.round(st().eqBalance * 100)}`
+      const presetLabel = (): string => st().eqUserPresets.find((p) => p.id === st().eqPreset)?.name ?? st().eqPreset
+      const describeFx = (): string => {
+        const f = st().audioFx
+        return `echo ${f.echo ? `on (${Math.round(f.echoTime * 1000)} ms, ${Math.round(f.echoMix * 100)}%)` : 'off'} · 8d ${f.autoPan ? `on (${f.autoPanPeriod}s sweep)` : 'off'} · compressor ${f.compressor ? `on (${f.compThreshold} dB, ${f.compRatio}:1)` : 'off'} · filter ${f.filter ? `on (${f.lowCut}-${f.highCut} Hz)` : 'off'}
+width ${Math.round(f.width * 100)}% · saturation ${Math.round(f.drive * 100)}%`
+      }
       if (!arg) { ctx.print(`${describe()}
-reverb ${st().reverbEnabled ? 'on' : 'off'} · mix ${Math.round(st().reverbMix * 100)}% · decay ${st().reverbDecay}s · speed ${st().playbackSpeed}x · mono ${st().eqMono ? 'on' : 'off'} · pitch follows speed ${st().pitchShift ? 'on' : 'off'}`); return }
+reverb ${st().reverbEnabled ? 'on' : 'off'} · mix ${Math.round(st().reverbMix * 100)}% · decay ${st().reverbDecay}s · speed ${st().playbackSpeed}x · mono ${st().eqMono ? 'on' : 'off'} · pitch follows speed ${st().pitchShift ? 'on' : 'off'}
+${describeFx()}`); return }
       const [sub, ...rest] = arg.split(/\s+/)
+      // Preset names keep the case they were typed in.
+      const rawName = args.trim().split(/\s+/).slice(1).join(' ')
       const onOff = (v: string | undefined, cur: boolean): boolean => (v === 'on' ? true : v === 'off' ? false : v === undefined ? !cur : fail('expected on or off'))
       const numIn = (v: string | undefined, lo: number, hi: number, what: string): number => {
         const n = Number(v)
@@ -380,14 +411,46 @@ reverb ${st().reverbEnabled ? 'on' : 'off'} · mix ${Math.round(st().reverbMix *
         const r = st()
         ctx.print(`reverb ${r.reverbEnabled ? 'on' : 'off'} · mix ${Math.round(r.reverbMix * 100)}% · decay ${r.reverbDecay}s`, 'ok'); return
       }
+      // Shared shape for the switchable effects: bare toggles, on/off sets,
+      // a number sets that effect's main knob and switches it on.
+      const fxToggle = (key: 'echo' | 'autoPan' | 'compressor' | 'filter', v: string | undefined, knob?: (n: string) => Partial<AudioFx>): void => {
+        if (v === undefined || v === 'on' || v === 'off') s.setAudioFx({ [key]: onOff(v, s.audioFx[key]) })
+        else if (knob) s.setAudioFx({ ...knob(v), [key]: true })
+        else fail('expected on or off')
+        ctx.print(describeFx(), 'ok')
+      }
+      if (sub === 'echo') { fxToggle('echo', rest[0], (v) => ({ echoMix: numIn(v, 0, 100, 'echo level') / 100 })); return }
+      if (sub === '8d') { fxToggle('autoPan', rest[0], (v) => ({ autoPanPeriod: numIn(v, 1, 20, '8d sweep seconds') })); return }
+      if (sub === 'comp' || sub === 'compressor') { fxToggle('compressor', rest[0], (v) => ({ compThreshold: numIn(v, -60, 0, 'compressor threshold') })); return }
+      if (sub === 'filter') { fxToggle('filter', rest[0]); return }
+      if (sub === 'width') { s.setAudioFx({ width: numIn(rest[0], 0, 200, 'width') / 100 }); ctx.print(describeFx(), 'ok'); return }
+      if (sub === 'saturation' || sub === 'drive') { s.setAudioFx({ drive: numIn(rest[0], 0, 100, 'saturation') / 100 }); ctx.print(describeFx(), 'ok'); return }
+      if (sub === 'preamp') { s.setAudioFx({ preamp: numIn(rest[0], -12, 12, 'preamp') }); ctx.print(describe(), 'ok'); return }
+      if (sub === 'save') {
+        if (!rawName) fail('usage: eq save <name>')
+        s.saveEqUserPreset(rawName)
+        s.setEqEnabled(true)
+        ctx.print(`saved preset "${presetLabel()}"`, 'ok'); return
+      }
+      if (sub === 'delete') {
+        if (!rawName) fail('usage: eq delete <name>')
+        const preset = pickByName(s.eqUserPresets, (p) => p.name, rawName) ?? fail(`no saved preset "${rawName}" (try: eq list)`)
+        s.deleteEqUserPreset(preset.id)
+        ctx.print(`deleted preset "${preset.name}"`, 'ok'); return
+      }
+      if (arg === 'reset all') { s.resetSoundEffects(); ctx.print(`${describe()}\n${describeFx()}`, 'ok'); return }
       if (sub === 'boost') { s.setEqBoost(numIn(rest[0], 100, 200, 'boost') / 100); ctx.print(describe(), 'ok'); return }
       if (sub === 'balance') { s.setEqBalance(numIn(rest[0], -100, 100, 'balance') / 100); ctx.print(describe(), 'ok'); return }
       if (sub === 'speed') { s.setPlaybackSpeed(numIn(rest[0], 0.5, 2, 'speed')); ctx.print(`speed ${st().playbackSpeed}x`, 'ok'); return }
       if (sub === 'mono') { s.setEqMono(onOff(rest[0], s.eqMono)); ctx.print(`mono ${st().eqMono ? 'on' : 'off'}`, 'ok'); return }
       if (sub === 'pitch') { s.setPitchShift(onOff(rest[0], s.pitchShift)); ctx.print(`pitch follows speed: ${st().pitchShift ? 'on' : 'off'}`, 'ok'); return }
-      if (arg === 'list') { ctx.print(EQ_PRESETS.map((p) => `${p.id.padEnd(16)}${p.name}`).join('\n')); return }
+      if (arg === 'list') {
+        const mine = s.eqUserPresets.length ? `\n\nyour presets:\n${s.eqUserPresets.map((p) => p.name).join('\n')}` : ''
+        ctx.print(EQ_PRESETS.map((p) => `${p.id.padEnd(16)}${p.name}`).join('\n') + mine); return
+      }
       if (arg === 'on' || arg === 'off') { s.setEqEnabled(arg === 'on'); ctx.print(describe(), 'ok'); return }
-      const preset = arg === 'reset' ? EQ_PRESETS.find((p) => p.id === 'flat') : pickByName(EQ_PRESETS, (p) => p.id, arg) ?? pickByName(EQ_PRESETS, (p) => p.name, arg)
+      const preset = arg === 'reset' ? EQ_PRESETS.find((p) => p.id === 'flat')
+        : pickByName(EQ_PRESETS, (p) => p.id, arg) ?? pickByName(EQ_PRESETS, (p) => p.name, arg) ?? pickByName(s.eqUserPresets, (p) => p.name, arg)
       if (!preset) fail(`no preset "${args.trim()}" (try: eq list)`)
       s.setEqPreset(preset!.id)
       s.setEqEnabled(true)
