@@ -29,6 +29,7 @@ import {
 } from '../lib/apiFilesShared'
 import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import { CdnDownloadToastMobile } from './CdnDownloadToast'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { useTrackerMatches } from '../hooks/useTrackerMatches'
@@ -225,8 +226,8 @@ export default function ApiFilesView(): JSX.Element {
   const onNavigateStart = useCallback(() => { scrollRef.current?.scrollTo({ top: 0 }) }, [])
   const {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
-    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
-    searchInFolder, setSearchInFolder,
+    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
+    searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
@@ -413,7 +414,9 @@ export default function ApiFilesView(): JSX.Element {
 
   const channelDescription = channels.find((c) => c.slug === activeChannel)?.description?.trim() || ''
   const subtitle = isSearching
-    ? searchLoading ? 'Searching…' : `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}`
+    ? searchLoading ? 'Searching…' : (searchTotal > searchResults.length
+        ? `First ${searchResults.length.toLocaleString()} of ${searchTotal.toLocaleString()}`
+        : `${searchTotal} ${searchFuzzy ? (searchTotal === 1 ? 'close match' : 'close matches') : (searchTotal === 1 ? 'result' : 'results')}`)
     : busy ? 'Loading…'
     : `${filteredEntries.length} item${filteredEntries.length === 1 ? '' : 's'}`
 
@@ -641,12 +644,13 @@ export default function ApiFilesView(): JSX.Element {
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  onFocus={prefetchSearchIndex}
                   placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}` : 'Search all files'}
                   enterKeyHint="search"
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${currentPath ? 'pr-20' : 'pr-10'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
+                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${currentPath ? 'pr-28' : 'pr-20'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
                 />
                 <div className="absolute right-1 flex items-center">
                   {search && (
@@ -664,6 +668,13 @@ export default function ApiFilesView(): JSX.Element {
                       aria-pressed={searchInFolder}
                     ><Folder size={16} /></button>
                   )}
+                  <span className="w-9 h-9 flex items-center justify-center">
+                    <SearchHelpButton
+                      kind="files"
+                      size={16}
+                      className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
+                    />
+                  </span>
                 </div>
               </div>
             </div>
