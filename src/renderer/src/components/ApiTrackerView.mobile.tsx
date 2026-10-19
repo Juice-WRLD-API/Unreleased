@@ -32,6 +32,7 @@ import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCach
 import type { CompactGroup } from '../lib/compactGroups'
 import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
 import { displaySongName } from '../lib/songPrefs'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration, dateSortValue, compareDates } from '../lib/format'
@@ -1133,8 +1134,11 @@ export default function ApiTrackerView(): JSX.Element {
   }, [catalog, parsedSearch.freeText, searchPrefs])
 
   const songs = useMemo(
-    () => catalog.filter((s) => matchesFilters(s) && matchesSearch(s)),
-    [catalog, matchesFilters, matchesSearch],
+    () => (renamedHits.length ? [...catalog, ...renamedHits] : catalog)
+      .filter((s) => matchesFilters(s) && matchesSearch(s)),
+    // searchPrefs: a title:"..." filter matches renames too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, renamedHits, matchesFilters, matchesSearch, searchPrefs],
   )
   const count = songs.length
 
@@ -1210,7 +1214,9 @@ export default function ApiTrackerView(): JSX.Element {
       sorted.sort((a, b) => a.title.localeCompare(b.title) * dir)
     }
     return sorted
-  }, [compactGroups, parsedSearch, orderField, orderDir, categoryFilter, eraFilter, matchesFilters])
+    // searchPrefs: the haystack's displaySongName reads renames.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compactGroups, parsedSearch, orderField, orderDir, categoryFilter, eraFilter, matchesFilters, searchPrefs])
 
   const handlePlay = useCallback((song: JWApiSong) => {
     const track = songToTrack(song)
@@ -1547,14 +1553,22 @@ export default function ApiTrackerView(): JSX.Element {
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  className="w-full h-11 bg-surface-overlay rounded-full pl-10 pr-10 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden"
+                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${trackerTab === 'songs' ? (search ? 'pr-20' : 'pr-10') : 'pr-10'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
                 />
                 {(trackerTab === 'songs' ? search : lyricsQuery) && (
                   <button
                     onClick={() => trackerTab === 'songs' ? setSearch('') : setLyricsQuery('')}
-                    className="absolute right-1 w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
+                    className={`absolute ${trackerTab === 'songs' ? 'right-10' : 'right-1'} w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary`}
                     aria-label="Clear search"
                   ><X size={16} /></button>
+                )}
+                {trackerTab === 'songs' && (
+                  <span className="absolute right-1 w-9 h-9 flex items-center justify-center">
+                    <SearchHelpButton
+                      size={16}
+                      className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
+                    />
+                  </span>
                 )}
               </div>
             </div>
