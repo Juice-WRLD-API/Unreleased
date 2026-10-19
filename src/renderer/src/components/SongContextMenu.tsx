@@ -8,7 +8,7 @@ import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
 import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
-import { downloadWithEmbed } from '../lib/lyricsEmbed'
+import { downloadWithEmbed } from '../lib/downloadEmbed'
 import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
 import ChangeVersionPanel from './ChangeVersionPanel'
@@ -16,6 +16,7 @@ import ContextMenu from './ContextMenu'
 import { versionsEnabled } from '../lib/versionsApi'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
@@ -98,7 +99,7 @@ function downloadTrack(track: Track, songId: number | null): void {
   }
   // Lyrics embedding needs the file bytes, so it takes the fetch path; with the
   // setting off (or nothing to embed) this stays a plain anchor download.
-  if (songId != null && useStore.getState().embedLyricsOnDownload) {
+  if (songId != null && useStore.getState().embedSongInfoOnDownload) {
     void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
     return
   }
@@ -171,13 +172,11 @@ export default function SongContextMenu({
     const name = playlists.find(p => p.id === id)?.name ?? 'playlist'
     setDoneId(id)
     setContained(prev => new Set([...prev, id]))
-    userApi.addToPlaylist(id, songId)
-      .then(() => refreshPlaylists())
-      .catch(() => {
-        setDoneId(prev => (prev === id ? null : prev))
-        setContained(prev => { const next = new Set(prev); next.delete(id); return next })
-        showAppToast(`Couldn't add to "${name}"`)
-      })
+    void addSongsInBackground(id, [songId]).then(failed => {
+      if (!failed.length) return
+      setDoneId(prev => (prev === id ? null : prev))
+      setContained(prev => { const next = new Set(prev); next.delete(id); return next })
+    })
   }
 
   const createAndAdd = async (): Promise<void> => {
@@ -200,7 +199,7 @@ export default function SongContextMenu({
       await userApi.addToPlaylist(playlist.id, songId)
       await refreshPlaylists()
       onClose()
-    } catch {} finally { setBusyId(null) }
+    } catch { showAppToast("Couldn't create the playlist") } finally { setBusyId(null) }
   }
 
   const loadSessionZips = async (): Promise<void> => {

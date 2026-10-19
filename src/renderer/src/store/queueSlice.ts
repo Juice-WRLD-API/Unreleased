@@ -20,7 +20,7 @@
 
 import type { StateCreator } from 'zustand'
 import type { Track } from '../types'
-import { apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { apiFetch, getSongById, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiPaginatedResponse, JWApiSong } from '../lib/juicewrldApi'
 import { getOwnVersionMeta, getVersionGroup } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
@@ -30,6 +30,7 @@ import { groupPlaylistBySong, pickSongVersions } from '../lib/compactGroups'
 import type { SongUnit } from '../lib/compactGroups'
 import { ls } from '../lib/persist'
 import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
+import { trackIdToSongId } from '../lib/userApi'
 import { resolveQueueContext } from './queueContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -139,6 +140,12 @@ export interface QueueSlice {
   startRadio: (track: Track, filter?: { category: string; era: string; search: string; total: number } | null, opts?: { keepPlayState?: boolean }) => void
   /** Exit radio mode, keep current track playing. */
   stopRadio: () => void
+  /**
+   * The empty-queue toast's "Play radio": turn on the tracker's random radio
+   * (unfiltered /radio/random/) from the current song and move straight on to
+   * a random one. The current song stays behind it as history.
+   */
+  startRandomRadio: () => void
 
   /** Advance to the next track. Returns the track, or null if playback stops. */
   nextTrack: () => Track | null
@@ -263,11 +270,7 @@ let _radioSession = 0
 const isOgVersion = (meta: SongVersionMeta | null | undefined): boolean =>
   !!meta && /\bog\b/i.test(`${meta.version ?? ''} ${meta.versionTitle ?? ''}`)
 
-const apiSongId = (track: Track): number | null => {
-  if (!track.id.startsWith('jw-')) return null
-  const songId = Number(track.id.slice(3))
-  return Number.isFinite(songId) ? songId : null
-}
+const apiSongId = (track: Track): number | null => trackIdToSongId(track.id)
 
 /** Drops session members with no session edit - nothing to swap to there.
  *  Only checked for the members actually in the running, since a miss isn't
@@ -300,7 +303,7 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
     const targets = await playableMembers(group.filter(m => hasVersionLabelIn(m, preferred)))
     if (targets.length === 0) return null
     const target = targets[Math.floor(Math.random() * targets.length)]
-    return songToTrack(await apiFetch<JWApiSong>(`/songs/${target.songId}/`))
+    return songToTrack(await getSongById(target.songId))
   }
 
   // The picked version itself is off-limits (e.g. radio landed on a
@@ -313,13 +316,13 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
     const preferredOg = preferOg ? group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded)) : undefined
     const fallback = preferredOg ?? (await playableMembers(group.filter(m => m.songId !== songId && !isExcludedVersion(m, excluded))))[0]
     if (!fallback) return null
-    return songToTrack(await apiFetch<JWApiSong>(`/songs/${fallback.songId}/`))
+    return songToTrack(await getSongById(fallback.songId))
   }
 
   if (!preferOg || isOgVersion(own)) return null
   const ogSibling = group.find(m => isOgVersion(m) && !isExcludedVersion(m, excluded))
   if (!ogSibling) return null
-  return songToTrack(await apiFetch<JWApiSong>(`/songs/${ogSibling.songId}/`))
+  return songToTrack(await getSongById(ogSibling.songId))
 }
 
 /** resolveVersionSwap, skipped outright when nothing could possibly swap - no
@@ -334,6 +337,12 @@ function preferredVersionOf(track: Track, preferOg: boolean): Promise<Track | nu
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get, api) => {
+  // Moving within the queue can land back on the song that's already playing
+  // (a one-song repeat-all queue, skipping back at index 0). Clearing its
+  // FullTrack there made the cover/backdrop drop to the bare imageUrl and the
+  // lyrics vanish for a frame until Player rebuilt it - a visible flash.
+  const fullFor = (track: Track): unknown => (get().currentTrack?.id === track.id ? get().currentTrackFull : null)
+
   // Every path that changes the playing song (queue actions, Player's
   // crossfade advance, terminal `stop`...) goes through set(), so one
   // subscriber catches them all instead of each call site remembering to.
@@ -462,7 +471,9 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       queue: [track],
       queueIndex: 0,
       currentTrack: track,
-      currentTrackFull: null,
+      // Radio from the song already playing (keepPlayState, the queue-ended
+      // toast) keeps its FullTrack, or the cover/lyrics flash out.
+      currentTrackFull: fullFor(track),
       isPlaying: opts?.keepPlayState ? get().isPlaying : true,
       queueFilter: null,
       queueLoadingMore: false,
@@ -485,6 +496,20 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     get()._maybeSwapToPreferredVersion(track)
   },
 
+  // ── startRandomRadio ───────────────────────────────────────────────────────
+  startRandomRadio: () => {
+    const { currentTrack } = get()
+    if (!currentTrack) return
+    // Radio is what shuffle-on means for tracker playback (toggleShuffle's
+    // tracker branch), so the shuffle button reads as on and turns it back off.
+    ls.set('shuffle', true)
+    set({ shuffle: true })
+    get().startRadio(currentTrack, null, { keepPlayState: true })
+    // The prefetch was only just started, so this marks radio as waiting and
+    // _prefetchRadioTrack plays the random song as soon as it arrives.
+    get().nextTrack()
+  },
+
   // ── nextTrack ──────────────────────────────────────────────────────────────
   nextTrack: () => {
     const { queue, queueIndex, shuffle, repeat, radioMode, radioNext } = get()
@@ -495,7 +520,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       // consuming the pre-fetched radio track.
       if (queueIndex < queue.length - 1) {
         const track = queue[queueIndex + 1]
-        set({ queueIndex: queueIndex + 1, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+        set({ queueIndex: queueIndex + 1, currentTrack: track, currentTrackFull: fullFor(track), isPlaying: true, progress: 0, currentTime: 0 })
         get()._maybeSwapToPreferredVersion(track)
         return track
       }
@@ -536,7 +561,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
         if (repeat === 'all') {
           const reshuffled = shuffleUpcoming(queue, -1)
           const first = reshuffled[0]
-          set({ queue: reshuffled, queueIndex: 0, currentTrack: first, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+          set({ queue: reshuffled, queueIndex: 0, currentTrack: first, currentTrackFull: fullFor(first), isPlaying: true, progress: 0, currentTime: 0 })
           get()._loadMore()
           get()._maybeSwapToPreferredVersion(first)
           void get()._repickBySong()
@@ -554,7 +579,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     }
 
     const track = queue[nextIdx]
-    set({ queueIndex: nextIdx, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+    set({ queueIndex: nextIdx, currentTrack: track, currentTrackFull: fullFor(track), isPlaying: true, progress: 0, currentTime: 0 })
     get()._loadMore()
     get()._maybeSwapToPreferredVersion(track)
     return track
@@ -567,7 +592,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
     const prevIdx = Math.max(0, queueIndex - 1)
     const track = queue[prevIdx]
-    set({ queueIndex: prevIdx, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+    set({ queueIndex: prevIdx, currentTrack: track, currentTrackFull: fullFor(track), isPlaying: true, progress: 0, currentTime: 0 })
     get()._maybeSwapToPreferredVersion(track)
     return track
   },
@@ -580,7 +605,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       : queue.findIndex((t: Track) => t.id === track.id)
     if (idx < 0) return
     // A row the user clicked - plays as that exact version, no preferred swap.
-    set({ queueIndex: idx, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+    set({ queueIndex: idx, currentTrack: track, currentTrackFull: fullFor(track), isPlaying: true, progress: 0, currentTime: 0 })
     get()._loadMore()
   },
 

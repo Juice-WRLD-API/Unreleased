@@ -18,6 +18,7 @@
 // list is known.
 import { downloadZip } from 'client-zip'
 import cdnService from './cdn'
+import { embedForDownload, embedSafe } from './downloadEmbed'
 import { triggerDownload } from './apiFilesShared'
 import { errorMessage } from './format'
 import { useStore } from '../store/useStore'
@@ -30,6 +31,8 @@ export interface ZipItem {
   /** Library path to try the distributed CDN with first (primary channel only). */
   cdnPath?: string
   size?: number | null
+  /** The song this file is, for the "Add song info to downloads" setting. */
+  songId?: number | null
 }
 
 /** `bytes`/`totalBytes` are set by saveItems so views can show a real
@@ -336,6 +339,19 @@ async function* zipEntries(
 }
 
 async function fetchItem(item: ZipItem, signal?: AbortSignal): Promise<Response | Blob | null> {
+  const embedPromise = embedForDownload(item.songId, item.name)
+  const input = await fetchItemRaw(item, signal)
+  const embed = await embedPromise
+  if (!input || !embed) return input
+  try {
+    const blob = input instanceof Blob ? input : await input.blob()
+    return await embedSafe(blob, embed)
+  } catch {
+    return null
+  }
+}
+
+async function fetchItemRaw(item: ZipItem, signal?: AbortSignal): Promise<Response | Blob | null> {
   if (item.cdnPath) {
     const cdn = await cdnService.tryDownload(item.cdnPath).catch(() => null)
     if (cdn) return cdn.blob

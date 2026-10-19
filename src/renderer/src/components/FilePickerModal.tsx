@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Folder, FolderOpen, ArrowLeft, Home, ChevronRight, Loader2, ImageIcon, Search, Check, Music2, File, FolderCheck, FolderPlus } from 'lucide-react'
 import {
@@ -6,6 +6,8 @@ import {
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
+import { loadFileIndex, runFileSearch } from '../lib/fileSearch'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { breadcrumbs, parentFolder } from '../lib/apiFilesShared'
 import { useStore } from '../store/useStore'
 import { errorMessage } from '../lib/format'
@@ -127,7 +129,10 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
   // that still happens quietly alongside it.
   const [search, setSearch] = useState(initialQuery)
   const [debouncedSearch, setDebouncedSearch] = useState(initialQuery)
-  const [searchResults, setSearchResults] = useState<JWApiFileEntry[]>([])
+  const [primaryResults, setSearchResults] = useState<JWApiFileEntry[]>([])
+  // Alt-title results live apart from the primary search's, so whichever of
+  // the two lands last can't wipe the other out.
+  const [altResults, setAltResults] = useState<JWApiFileEntry[]>([])
   const [searchLoading, setSearchLoading] = useState(!!initialQuery)
   const isSearching = debouncedSearch.trim().length > 0
 
@@ -184,20 +189,28 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     let cancelled = false
     setSearchLoading(true)
     const term = debouncedSearch.trim()
-    searchFiles(term, searchParams(term))
-      .then((entries) => { if (!cancelled) setSearchResults(filterSearchResults(entries, term)) })
+    // The seeded title lookup stays a strict whole-word match (a short title
+    // like "Rental" mustn't pull in "Parental Advisory"); anything typed gets
+    // the Files search syntax, narrowed to what this picker can pick.
+    const run = term === initialQuery
+      ? searchFiles(term, searchParams(term)).then((entries) => filterSearchResults(entries, term))
+      : runFileSearch(kind === 'any' ? term : `${term} type:${kind},folder`, activeChannel).then((r) => r.entries)
+    run
+      .then((entries) => { if (!cancelled) setSearchResults(entries) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, isSearching, searchParams])
 
   // Merge in results for the song's alt titles alongside the primary-title
   // search seeded above - a cover is often filed under a feature's alias or
-  // an alternate spelling rather than the main title. Runs once on mount only:
-  // once the user edits the search box, the effect above replaces
-  // searchResults wholesale with a plain single-term search as normal.
+  // an alternate spelling rather than the main title. Runs on mount (and on a
+  // comp switch); once the user edits the search box, only the plain
+  // single-term search above shows (see searchResults below).
   useEffect(() => {
     // Re-run on a comp switch too, as long as the seeded search is still up.
+    setAltResults([])
     if (!initialQuery || altQueries.length === 0 || search !== initialQuery) return
     let cancelled = false
     Promise.all(altQueries.map((q) =>
@@ -205,13 +218,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
         .then((entries) => filterSearchResults(entries, q))
         .catch(() => [] as JWApiFileEntry[])
     )).then((lists) => {
-      if (cancelled) return
-      setSearchResults((prev) => {
-        const seen = new Set(prev.map((e) => e.path))
-        const merged = [...prev]
-        for (const list of lists) for (const e of list) if (!seen.has(e.path)) { seen.add(e.path); merged.push(e) }
-        return merged
-      })
+      if (!cancelled) setAltResults(lists.flat())
     })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -230,6 +237,14 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
 
   const goHome = (): void => { setHistory([]); navigate('', false) }
 
+  // Alt-title hits only while the seeded search is still the one showing.
+  const searchResults = useMemo(() => {
+    if (altResults.length === 0 || debouncedSearch !== initialQuery) return primaryResults
+    const seen = new Set(primaryResults.map((e) => e.path))
+    const merged = [...primaryResults]
+    for (const e of altResults) if (!seen.has(e.path)) { seen.add(e.path); merged.push(e) }
+    return merged
+  }, [primaryResults, altResults, debouncedSearch, initialQuery])
   const shown = sortForPicker(isSearching ? searchResults : entries, kind)
   const crumbs = breadcrumbs(currentPath)
 
@@ -281,18 +296,26 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => { void loadFileIndex(activeChannel) }}
               placeholder={`Search ${noun}…`}
-              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 pr-8 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+              className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${search ? 'pr-14' : 'pr-8'} py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
             />
-            {search && (
-              <button
-                onClick={() => { setSearch(''); setDebouncedSearch('') }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
-                title="Clear search"
-              >
-                <X size={13} />
-              </button>
-            )}
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+              {search && (
+                <button
+                  onClick={() => { setSearch(''); setDebouncedSearch('') }}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                  title="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+              <SearchHelpButton
+                kind="files"
+                size={13}
+                className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+              />
+            </div>
           </div>
 
           {isSearching ? (

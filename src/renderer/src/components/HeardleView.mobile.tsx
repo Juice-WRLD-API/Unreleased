@@ -8,7 +8,7 @@ import { useStorePick } from '../store/useStore'
 import { Sheet } from './mobile/Sheet'
 import { Avatar } from './adminShared'
 import { GameSwitcher, GameBackdrop, Field, Segmented, numberInput } from './gameShell'
-import { apiFetch, songToTrack, smallCoverUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { getSongById, songToTrack, smallCoverUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { eraFullName, loadEraFullNames } from '../lib/eras'
 import {
@@ -632,7 +632,7 @@ export default function HeardleView(): JSX.Element {
     if (!answer) return
     stopPlayback()
     try {
-      const song = await apiFetch<JWApiSong>(`/songs/${answer.id}/`)
+      const song = await getSongById(answer.id)
       const track = songToTrack(song)
       playTrack(track, [track])
     } catch {

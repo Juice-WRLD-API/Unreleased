@@ -52,6 +52,24 @@ export function peekSongPref(songId: number): SongPreference | undefined {
   return _prefs[songId]
 }
 
+/** The title a song shows under: the user's rename if there is one, else the
+ *  API's own name. Sort and search on this, not `song.name`, or a renamed
+ *  song sorts and matches as if it still had its old name. */
+export function displaySongName(song: { id: number; name: string }): string {
+  return _prefs[song.id]?.name || song.name
+}
+
+/** Every song the user has renamed, as [songId, name] pairs - lets a search
+ *  that runs against the API's names also find songs by their new ones. */
+export function renamedSongs(): [number, string][] {
+  const out: [number, string][] = []
+  for (const id in _prefs) {
+    const name = _prefs[id].name
+    if (name) out.push([Number(id), name])
+  }
+  return out
+}
+
 /** Mirrors the store's map into this module. Called on every write, on
  *  hydrate, after a login merge, and when a pop-out window receives a synced
  *  patch (which goes through setState and so bypasses the store's actions). */

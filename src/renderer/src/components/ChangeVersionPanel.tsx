@@ -1,12 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Star, Ban } from 'lucide-react'
-import { getVersionGroup } from '../lib/versionsApi'
-import { getSongsByIds, JWApiSong } from '../lib/juicewrldApi'
+import type { JWApiSong } from '../lib/juicewrldApi'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
-import { prefLabel } from '../lib/versionPrefs'
-import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
-
-interface VersionOption { song: JWApiSong; label: string | null; version: string | null }
+import { useSongVersions } from '../hooks/useSongVersions'
 
 /** The "Change version" second level of SongContextMenu - a flyout on desktop,
  *  a sheet page on touch (`mobile`), one implementation for both.
@@ -14,7 +9,8 @@ interface VersionOption { song: JWApiSong; label: string | null; version: string
  *  Siblings are fetched when the panel mounts, which ContextMenu only does once
  *  the row is opened - not eagerly whenever the menu opens. Doing that for
  *  every song regardless of whether the user ever clicks the item is exactly
- *  the needless-fetch pattern that made compact view laggy before.
+ *  the needless-fetch pattern that made compact view laggy before. The list
+ *  itself comes from useSongVersions, shared with WRLD's version notch.
  *
  *  Clicking a sibling's name plays it now (a one-off). The star marks it as a
  *  *preferred* version (lib/versionPrefs) so any version of this song the app
@@ -27,50 +23,8 @@ export default function ChangeVersionPanel({ songId, onChangeVersion, mobile }: 
   onChangeVersion: (song: JWApiSong) => void
   mobile: boolean
 }): JSX.Element {
-  const [loading, setLoading] = useState(true)
-  const [versions, setVersions] = useState<VersionOption[] | null>(null)
-  // The panel only lists siblings, so this song's own row joins them for the
-  // group-wide preferred/excluded union (its label isn't needed for that).
-  const members = useMemo(
-    () => [{ songId, version: null }, ...(versions ?? []).map(v => ({ songId: v.song.id, version: v.version }))],
-    [songId, versions]
-  )
+  const { versions, loading, members } = useSongVersions(songId)
   const { isPreferred, isExcluded, togglePreferred, toggleExcluded } = useVersionPrefToggles(members)
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const metas = await getVersionGroup(songId)
-        const songs = await getSongsByIds(metas.map(m => m.songId))
-        const byId = new Map(songs.map(s => [s.id, s]))
-        // Songs with nothing to actually play are hidden, since both switching
-        // to one and starring it would break playback: no `path` (some
-        // unsurfaced entries), unless it's a recording session that has a
-        // session edit - those play the edit, starred under "Session".
-        const fetched = (await Promise.all(metas.map(async (m): Promise<VersionOption | null> => {
-            const song = byId.get(m.songId)
-            if (!song) return null
-            if (!song.path && !(song.category === 'recording_session' && await hasPlayableSessionEdit(song.id))) return null
-            const version = prefLabel(m)
-            return {
-              song,
-              version,
-              label: version
-                ? (m.versionTitle ? `${version} - ${m.versionTitle}` : version)
-                : m.versionTitle,
-            }
-          })))
-          .filter((v): v is VersionOption => !!v)
-        if (!cancelled) setVersions(fetched)
-      } catch {
-        if (!cancelled) setVersions([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [songId])
 
   const msg = mobile ? 'px-5 py-3 text-sm text-text-muted' : 'px-3.5 py-2 text-xs text-text-muted'
   if (loading) {

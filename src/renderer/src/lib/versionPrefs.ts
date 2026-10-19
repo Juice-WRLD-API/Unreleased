@@ -14,7 +14,7 @@
 //
 // Kept free of store imports so both the queue slice and lib-level helpers
 // (compactGroups' shuffle) can use it without a cycle.
-import { peekSongPref } from './songPrefs'
+import { peekSongPref, type SongPrefMap } from './songPrefs'
 import type { SongVersionMeta } from './versionsApi'
 
 const norm = (label: string): string => label.trim().toLowerCase()
@@ -89,4 +89,90 @@ export function pickGroupVersion(group: SongVersionMeta[], candidates: SongVersi
   const excluded = groupExcludedVersions(anchor, group)
   const allowed = candidates.filter(m => !hasVersionLabelIn(m, excluded))
   return random(allowed.length > 0 ? allowed : candidates)
+}
+
+/** One member of a version group, as far as preferences care: its song and
+ *  its prefLabel (null = can't be preferred or excluded). */
+export interface VersionPrefMember {
+  songId: number
+  version: string | null
+}
+
+/** Where the toggles below write - the store's setSongDefaultVersion /
+ *  setSongExcludedVersions, passed in to keep this file store-free. */
+export interface VersionPrefWriters {
+  setDefault: (songId: number, version: string | null) => void
+  setExcluded: (songId: number, versions: string[]) => void
+}
+
+/** The group's preferred and excluded labels (normalized) as `prefs` has them
+ *  for `members` - the same union groupPreferredVersions takes, over an
+ *  explicit prefs map so a React caller can re-derive it on change. */
+export function memberVersionPrefs(members: VersionPrefMember[], prefs: SongPrefMap): { preferred: Set<string>; excluded: Set<string> } {
+  const excluded = new Set<string>()
+  for (const m of members) for (const label of prefs[m.songId]?.excluded_versions ?? []) excluded.add(norm(label))
+  const preferred = new Set<string>()
+  for (const m of members) {
+    const label = prefs[m.songId]?.default_version
+    if (label && !excluded.has(norm(label))) preferred.add(norm(label))
+  }
+  return { preferred, excluded }
+}
+
+/** The star/ban toggles over a group, shared by useVersionPrefToggles (the
+ *  Change-version menu, the song-prefs panel, compact view, WRLD's version
+ *  notch) and the terminal's `vprefs`, so both change the same rows. */
+export function versionPrefToggles(members: VersionPrefMember[], prefs: SongPrefMap, write: VersionPrefWriters): {
+  togglePreferred: (member: VersionPrefMember) => void
+  toggleExcluded: (member: VersionPrefMember) => void
+  clearPreferred: () => void
+} {
+  const { preferred, excluded } = memberVersionPrefs(members, prefs)
+
+  const clearLabel = (label: string): void => {
+    for (const m of members) {
+      const d = prefs[m.songId]?.default_version
+      if (d && norm(d) === label) write.setDefault(m.songId, null)
+    }
+  }
+
+  const unexclude = (label: string): void => {
+    for (const m of members) {
+      const list = prefs[m.songId]?.excluded_versions ?? []
+      if (list.some(v => norm(v) === label)) write.setExcluded(m.songId, list.filter(v => norm(v) !== label))
+    }
+  }
+
+  const togglePreferred = (member: VersionPrefMember): void => {
+    if (!member.version) return
+    const label = norm(member.version)
+    // Clearing has to reach wherever the label actually lives (its own row or
+    // a sibling's) or the star would stay lit.
+    if (preferred.has(label)) { clearLabel(label); return }
+    // Preferring an excluded version un-excludes it - the two can't both hold.
+    if (excluded.has(label)) unexclude(label)
+    // A row holds one label; an older default can sit on a sibling's row
+    // instead of its own. Move it home before overwriting so it stays preferred.
+    const displaced = prefs[member.songId]?.default_version
+    if (displaced && norm(displaced) !== label) {
+      const home = members.find(m => m.songId !== member.songId && m.version && norm(m.version) === norm(displaced) && !prefs[m.songId]?.default_version)
+      if (home) write.setDefault(home.songId, displaced)
+    }
+    write.setDefault(member.songId, member.version)
+  }
+
+  const toggleExcluded = (member: VersionPrefMember): void => {
+    if (!member.version) return
+    const label = norm(member.version)
+    if (excluded.has(label)) { unexclude(label); return }
+    // Excluding a preferred version drops the star - same reasoning as above.
+    clearLabel(label)
+    write.setExcluded(member.songId, [...(prefs[member.songId]?.excluded_versions ?? []), member.version])
+  }
+
+  const clearPreferred = (): void => {
+    for (const m of members) if (prefs[m.songId]?.default_version) write.setDefault(m.songId, null)
+  }
+
+  return { togglePreferred, toggleExcluded, clearPreferred }
 }

@@ -12,6 +12,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { lazyView } from '../lib/lazyView'
 import SongContextMenu from './SongContextMenu'
 import { AnchoredContextMenu } from './ContextMenu'
+import ThemedSelect from './ThemedSelect'
 import FilePickerModal from './FilePickerModal'
 import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
 import {
@@ -29,6 +30,8 @@ import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { useCanEdit, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { loadRecentlyAddedMap } from '../lib/changesApi'
 import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
+import { resolveSongFile } from '../lib/sessionEditsApi'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
@@ -36,7 +39,9 @@ import type { CompactGroup } from '../lib/compactGroups'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration, displayDate, dateSortValue, compareDates } from '../lib/format'
-import { parseSearchQuery, matchesFieldFilters, filterApiFields, SEARCH_FIELD_HELP } from '../lib/trackerSearch'
+import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
+import { displaySongName } from '../lib/songPrefs'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
@@ -115,50 +120,6 @@ const SortBtn = ({ field, label, className, orderField, orderDir, onClick, onCon
 }
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-// ─── Search syntax help popover ────────────────────────────────────────────────
-// Explains the field:"value" query syntax (trackerSearch.ts) that the search
-// box's info button opens. Closes on outside click/Escape like the other
-// popovers/menus in this file.
-function SearchHelpPopover({ onClose }: { onClose: () => void }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handle = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    const handleKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl z-50 p-3"
-    >
-      <p className="text-text-primary text-xs font-semibold mb-1">Search syntax</p>
-      <p className="text-text-muted text-xs mb-2.5 leading-snug">
-        Search any field directly with <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">field:"value"</code>.
-        Combine with plain words and multiple fields - matches are case-insensitive substrings, all filters must match.
-        An optional <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">&</code> between
-        fields is just for readability, e.g. <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">artists:"Juice WRLD" &amp; category:unreleased</code>.
-      </p>
-      <div className="grid grid-cols-1 gap-1">
-        {SEARCH_FIELD_HELP.map(({ field, example }) => (
-          <div key={field} className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-text-muted shrink-0">{field}</span>
-            <code className="text-text-secondary bg-surface-overlay px-1.5 py-0.5 rounded truncate">{example}</code>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ─── Stats bar ────────────────────────────────────────────────────────────────
 function StatsBar({ stats }: { stats: JWApiStats | null }): JSX.Element {
@@ -1469,9 +1430,12 @@ const SongCard = memo(function SongCard({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              // Always the primary channel here (no channel arg), so the
-              // P2P CDN is safe to try before falling back to the stream URL.
-              startCdnFileDownload(song.path, `${title}.mp3`, buildStreamUrl(song.path), undefined, song.id)
+              // The primary channel unless it's a session whose file lives
+              // in another comp - only the primary one is safe for the P2P CDN.
+              void resolveSongFile(song).then((f) => {
+                if (isPrimaryChannelSlug(useStore.getState().channels, f.channel)) void startCdnFileDownload(f.path, `${title}.mp3`, f.url, undefined, song.id)
+                else triggerDownload(f.url, `${title}.mp3`)
+              }, console.error)
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"
@@ -1875,7 +1839,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerTab, setApiTrackerTab,
     setActiveView, setApiFilesPath,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
-    openBulkEditor, fullEraNames, activeChannel, channels,
+    openBulkEditor, fullEraNames, activeChannel, channels, setActiveChannel,
   } = useStore(useShallow(s => ({
     playTrack: s.playTrack, startRadio: s.startRadio, addToQueue: s.addToQueue,
     account: s.account, shuffle: s.shuffle,
@@ -1887,7 +1851,7 @@ export default function ApiTrackerView(): JSX.Element {
     likedTrackIds: s.likedTrackIds, toggleLike: s.toggleLike,
     openBulkEditor: s.openBulkEditor,
     fullEraNames: s.fullEraNames,
-    activeChannel: s.activeChannel, channels: s.channels,
+    activeChannel: s.activeChannel, channels: s.channels, setActiveChannel: s.setActiveChannel,
   })))
 
   const canEdit = useCanEdit()
@@ -1922,6 +1886,9 @@ export default function ApiTrackerView(): JSX.Element {
     setTrackerDetailFields: s.setTrackerDetailFields,
     setTrackerListColumns: s.setTrackerListColumns,
   })))
+  // Title sort goes by the name the row shows - a personal rename included -
+  // so a renamed song moves to where its new name belongs.
+  const songPrefs = useStore((s) => s.songPrefs)
   const [bulkContextMenu, setBulkContextMenu] = useState<BulkContextMenuState | null>(null)
 
   // Multi-select - see the useMultiSelect() call further down (needs
@@ -2112,7 +2079,6 @@ export default function ApiTrackerView(): JSX.Element {
     ...filterApiFields(parsedSearch.filters),
     ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
   ])
-  const [showSearchHelp, setShowSearchHelp] = useState(false)
   // Sets rather than single values so "Search Settings" can filter by more
   // than one category/era at once (OR'd within each dimension, AND'd across
   // dimensions). Applied client-side over the loaded catalogue - see the
@@ -2399,12 +2365,33 @@ export default function ApiTrackerView(): JSX.Element {
     return () => ctl.abort()
   }, [parsedSearch.freeText, bulkOmit, reloadToken])
 
+  // Renames only change what a search matches, so the search memos re-run on
+  // a rename only while there's a query - not on every playcount bump.
+  const searchPrefs = parsedSearch.freeText || parsedSearch.filters.length ? songPrefs : null
+  // The server searches the API's own names, so a song renamed to something
+  // the query matches is pulled in from the unfiltered catalogue instead.
+  const renamedHits = useMemo(() => {
+    const q = parsedSearch.freeText
+    if (!q || !searchPrefs) return []
+    const have = new Set(catalog.map((s) => s.id))
+    const ids = new Set(Object.values(searchPrefs)
+      .filter((p) => p.name && !have.has(p.song) && textMatches(p.name, q))
+      .map((p) => p.song))
+    return ids.size ? (peekTrackerCatalog('') ?? []).filter((s) => ids.has(s.id)) : []
+  }, [catalog, parsedSearch.freeText, searchPrefs])
+
   const songs = useMemo(
-    () => catalog.filter((s) => matchesFilters(s) && matchesFieldFilters(s, parsedSearch.filters)),
-    [catalog, matchesFilters, parsedSearch.filters],
+    () => (renamedHits.length ? [...catalog, ...renamedHits] : catalog)
+      .filter((s) => matchesFilters(s) && matchesFieldFilters(s, parsedSearch.filters)),
+    // searchPrefs: a title:"..." filter matches renames too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, renamedHits, matchesFilters, parsedSearch.filters, searchPrefs],
   )
   const count = songs.length
 
+  // Only the title sort reads the prefs, so other sorts don't re-run on every
+  // playcount bump.
+  const namePrefs = orderField === 'name' ? songPrefs : null
   // Client-side sort applied over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
     const linked = songs.map(linkSessionEdit)
@@ -2420,8 +2407,8 @@ export default function ApiTrackerView(): JSX.Element {
       let av: string | number, bv: string | number
       switch (orderField) {
         case 'name':
-          av = a.name.toLowerCase()
-          bv = b.name.toLowerCase()
+          av = (namePrefs?.[a.id]?.name || a.name).toLowerCase()
+          bv = (namePrefs?.[b.id]?.name || b.name).toLowerCase()
           break
         case 'credited_artists':
           av = (a.credited_artists || '').toLowerCase()
@@ -2446,7 +2433,7 @@ export default function ApiTrackerView(): JSX.Element {
       const cmp = typeof av === 'number' ? av - (bv as number) : (av as string).localeCompare(bv as string)
       return orderDir === 'desc' ? -cmp : cmp
     })
-  }, [songs, orderField, orderDir, recentlyAddedMap, linkSessionEdit])
+  }, [songs, orderField, orderDir, recentlyAddedMap, linkSessionEdit, namePrefs])
 
   // fetchAllCompactGroups is independent of the search box (it has to fetch
   // every group app-wide regardless), so the search query has to be applied
@@ -2458,7 +2445,7 @@ export default function ApiTrackerView(): JSX.Element {
   // empty even though the normal (non-compact) list found them fine.
   const filteredCompactGroups = useMemo(() => {
     let filtered = filterCompactGroups(compactGroups, parsedSearch.freeText, s => [
-      s.track_titles?.join(' '), s.name, s.credited_artists, s.producers, s.engineers,
+      s.track_titles?.join(' '), displaySongName(s), s.name, s.credited_artists, s.producers, s.engineers,
       s.era?.name, s.notes, s.additional_information, s.session_titles, s.original_key,
     ].filter(Boolean).join(' '))
     filtered = filtered.map((g) => {
@@ -2492,7 +2479,9 @@ export default function ApiTrackerView(): JSX.Element {
       sorted.sort((a, b) => (a.members.length - b.members.length) * dir || a.title.localeCompare(b.title))
     }
     return sorted
-  }, [compactGroups, parsedSearch, compactSort, categoryFilter, eraFilter, matchesFilters, linkSessionEdit])
+    // searchPrefs: the haystack's displaySongName reads renames.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compactGroups, parsedSearch, compactSort, categoryFilter, eraFilter, matchesFilters, linkSessionEdit, searchPrefs])
 
   useEffect(() => {
     const el = listScrollRef.current
@@ -2636,7 +2625,15 @@ export default function ApiTrackerView(): JSX.Element {
   // built client-side instead (lib/clientZip). Songs whose file fails to
   // fetch are counted with the ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
-    const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
+    // Sessions download the file they play, which may be in another comp.
+    const files = (await Promise.all(selectedSongs.map(async s => {
+      const f = s.category === 'recording_session'
+        ? await resolveSongFile(s).catch(() => null)
+        : s.path ? { path: s.path, url: buildStreamUrl(s.path, activeChannel || undefined), channel: activeChannel || undefined } : null
+      return f && { ...f, songId: s.id }
+    })))
+      .filter(<T,>(f: T | null): f is T => f != null)
+    const paths = files.map(f => f.path)
     let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
@@ -2650,10 +2647,11 @@ export default function ApiTrackerView(): JSX.Element {
     try {
       // CDN only for the primary channel - see handleDownload's comment above.
       const useCdn = isPrimaryChannelSlug(channels, activeChannel)
-      const { failed, cancelled } = await saveItems(target, paths.map(path => ({
-        name: path.split('/').pop() || path,
-        url: buildStreamUrl(path, activeChannel || undefined),
-        cdnPath: useCdn ? path : undefined,
+      const { failed, cancelled } = await saveItems(target, files.map(f => ({
+        name: f.path.split('/').pop() || f.path,
+        url: f.url,
+        cdnPath: useCdn && (f.channel ?? '') === (activeChannel ?? '') ? f.path : undefined,
+        songId: f.songId,
       })))
       if (cancelled) { setBulkZipStatus('idle'); return }
       skipped += failed
@@ -2688,13 +2686,22 @@ export default function ApiTrackerView(): JSX.Element {
     setTimeout(() => setBulkLinkStatus('idle'), 3000)
   }
 
-  const handleShowInFiles = useCallback((song: JWApiSong): void => {
+  const handleShowInFiles = useCallback(async (song: JWApiSong): Promise<void> => {
     if (!song.path) return
-    const parts = song.path.split('/')
+    // A session's file may not be looked up yet, or may live in another comp.
+    let path = song.path
+    if (song.category === 'recording_session') {
+      try {
+        const f = await resolveSongFile(song)
+        path = f.path
+        if (f.channel && f.channel !== activeChannel) setActiveChannel(f.channel)
+      } catch { return }
+    }
+    const parts = path.split('/')
     const folderPath = parts.slice(0, -1).join('/')
     setApiFilesPath(folderPath)
     setActiveView('api-files')
-  }, [setApiFilesPath, setActiveView])
+  }, [setApiFilesPath, setActiveView, activeChannel, setActiveChannel])
 
   const handleSessionFilePicked = useCallback(async (path: string, fileChannel: string): Promise<void> => {
     const song = linkingSessionSong
@@ -2837,17 +2844,10 @@ export default function ApiTrackerView(): JSX.Element {
                 />
               )}
             </div>
-            <div className="relative shrink-0">
-              <button
-                onClick={() => setShowSearchHelp((v) => !v)}
-                onMouseDown={(e) => e.stopPropagation()}
-                className={`p-2.5 md:p-2 rounded-lg transition-colors ${showSearchHelp ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
-                title="Search syntax help"
-              >
-                <Info size={15} />
-              </button>
-              {showSearchHelp && <SearchHelpPopover onClose={() => setShowSearchHelp(false)} />}
-            </div>
+            <SearchHelpButton
+              size={15}
+              className={(open) => `p-2.5 md:p-2 rounded-lg transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+            />
 
             <button
               onClick={() => {
@@ -2909,17 +2909,18 @@ export default function ApiTrackerView(): JSX.Element {
 
           {/* Second row - mobile-only category select (desktop uses the filter popover above) */}
           <div className="md:hidden flex items-center gap-2 flex-wrap">
-            <select
+            <ThemedSelect
               value={categoryParam}
-              onChange={(e) => { setCategoryFilter(new Set(e.target.value ? [e.target.value as Category] : [])); resetSongs() }}
-              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 cursor-pointer"
-            >
-              <option value="">{categoryFilter.size > 1 ? `${categoryFilter.size} categories` : 'All categories'}</option>
-              <option value="released">Released</option>
-              <option value="unreleased">Unreleased</option>
-              <option value="unsurfaced">Unsurfaced</option>
-              <option value="recording_session">Sessions</option>
-            </select>
+              onChange={(v) => { setCategoryFilter(new Set(v ? [v as Category] : [])); resetSongs() }}
+              options={[
+                { value: '', label: categoryFilter.size > 1 ? `${categoryFilter.size} categories` : 'All categories' },
+                { value: 'released', label: 'Released' },
+                { value: 'unreleased', label: 'Unreleased' },
+                { value: 'unsurfaced', label: 'Unsurfaced' },
+                { value: 'recording_session', label: 'Sessions' },
+              ]}
+              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40"
+            />
           </div>
 
           {/* Active filter chips - one per selected category/era, each

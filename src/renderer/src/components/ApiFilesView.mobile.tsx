@@ -238,7 +238,7 @@ export default function ApiFilesView(): JSX.Element {
   // actions can be hidden for files with no match instead of doing nothing.
   // undefined = not looked up yet, null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
-  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist()
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({

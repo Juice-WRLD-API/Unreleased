@@ -5,6 +5,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import LyricsDisplay from './LyricsDisplay'
 import { lazyOverlay } from '../lib/lazyView'
 import { smallCoverUrl } from '../lib/juicewrldApi'
+import { trackIdToSongId } from '../lib/userApi'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { useLyricsVisible, lyricsLoading } from '../lib/lyrics'
@@ -35,13 +36,11 @@ export default function NowPlaying(): JSX.Element {
   // to another tab (this component itself unmounts when the Wrld tab is
   // active - see App.tsx). The id is already right there in currentTrack.id
   // (format 'jw-<id>'), so no fetch is needed just to open it.
+  const songId = currentTrack ? trackIdToSongId(currentTrack.id) : null
   const handleInfo = (): void => {
-    const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
-    if (!jwMatch) return
-    useStore.getState().setInfoSongId(Number(jwMatch[1]))
+    if (songId != null) useStore.getState().setInfoSongId(songId)
   }
 
-  const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
   const canEdit = useCanEdit()
   const hasLyricsNatural = !!(currentTrackFull?.lyrics || currentTrackFull?.syncedLyrics)
   const hasLyrics = useLyricsVisible(hasLyricsNatural, lyricsOverride, lyricsLoading(currentTrack, currentTrackFull))
@@ -86,7 +85,7 @@ export default function NowPlaying(): JSX.Element {
                 <MicVocal size={16} />
               </button>
             )}
-            {jwMatch && (
+            {songId != null && (
               <button
                 onClick={handleInfo}
                 className="text-text-muted hover:text-text-primary transition-colors"
@@ -95,9 +94,9 @@ export default function NowPlaying(): JSX.Element {
                 <Info size={16} />
               </button>
             )}
-            {jwMatch && canEdit && (
+            {songId != null && canEdit && (
               <button
-                onClick={() => useStore.getState().openSongEditor(parseInt(jwMatch[1]))}
+                onClick={() => useStore.getState().openSongEditor(songId)}
                 className="text-text-muted hover:text-text-primary transition-colors"
                 title="Edit this song"
               >

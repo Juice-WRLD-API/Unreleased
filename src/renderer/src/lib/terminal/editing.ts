@@ -1,6 +1,7 @@
 import { relativeTime } from '../../components/adminShared'
 import { fetchCompChanges, fetchTrackerChanges } from '../changesApi'
 import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from '../compChunkedUpload'
+import { existingCompPaths } from '../compStagedChanges'
 import { loadSessionEditFiles, loadSessionEditLinks } from '../sessionEditsApi'
 import { useStore } from '../../store/useStore'
 import {
@@ -134,6 +135,12 @@ const compCommand: TermCommand = {
       const dest = value.get('to')
       if (NEEDS_DESTINATION.has(type) && !dest) fail(`${type} needs a destination: --to <path>`)
       const metadata = { change_type: type, file_path: path, destination_path: NEEDS_DESTINATION.has(type) ? dest : undefined, contributor_notes: value.get('note') ?? '', is_new_leak: NEEDS_FILE.has(type) && bool.has('new-leak'), channel }
+      if (type === 'upload') {
+        // The server refuses an upload onto a taken path only after the body has gone up.
+        const slash = path.lastIndexOf('/')
+        const taken = await existingCompPaths(slash < 0 ? '' : path.slice(0, slash), [path.slice(slash + 1)], channel)
+        if (taken.has(path)) fail(`${path} is already in the comp - use comp new replace to change it`)
+      }
       if (NEEDS_FILE.has(type)) {
         const file = await pickLocalFile('*/*')
         ctx.print(`uploading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)…`, 'dim')

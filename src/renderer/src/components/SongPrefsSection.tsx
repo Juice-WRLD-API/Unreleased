@@ -2,12 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { X, ImageIcon, RotateCcw, Star, Music2, Play, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { JWApiSong, resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
+import { resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { getOwnVersionMeta, SongVersionMeta } from '../lib/versionsApi'
 import CoverEditor from './CoverEditor'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
 import { prefLabel } from '../lib/versionPrefs'
-import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
+import type { SongVersionEntry } from '../lib/songVersions'
 
 // The "Personalize" editor shown inside SongInfoModal - the one place a user
 // sets the per-song overrides in lib/songPrefs (custom name, custom cover,
@@ -16,7 +16,6 @@ import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
 // logged out; the changes propagate to every surface that builds a Track from
 // this song (player, queue, lists) on the next render.
 
-interface VersionEntry { song: JWApiSong; meta: SongVersionMeta }
 
 function GroupLabel({ children }: { children: string }): JSX.Element {
   return (
@@ -43,7 +42,7 @@ export default function SongPrefsSection({
    *  version picker below since defaulting to one would leave nothing to play. */
   ownHasFile: boolean
   /** Linked version siblings, already fetched by the modal. */
-  versions: VersionEntry[]
+  versions: SongVersionEntry[]
   /** This song's other known titles - widens the cover picker's search so
    *  covers filed under an alt name still surface. */
   altTitles?: string[]
@@ -79,17 +78,6 @@ export default function SongPrefsSection({
     return () => { alive = false }
   }, [songId])
 
-  // Sibling sessions have no `path` but count as playable when they have a
-  // session edit - looked up here, since the modal doesn't know.
-  const [playableSessions, setPlayableSessions] = useState<Set<number>>(new Set())
-  useEffect(() => {
-    let alive = true
-    const sessions = versions.filter(v => !v.song.path && v.song.category === 'recording_session').map(v => v.song.id)
-    Promise.all(sessions.map(id => hasPlayableSessionEdit(id).then(ok => (ok ? id : null))))
-      .then(ids => { if (alive) setPlayableSessions(new Set(ids.filter((id): id is number => id != null))) })
-    return () => { alive = false }
-  }, [versions])
-
   // ── Default-version choices ───────────────────────────────────────────────
   // One entry per distinct version label across the whole group (this song +
   // siblings). Storing the label (not a song id) is what lets a default set
@@ -105,9 +93,9 @@ export default function SongPrefsSection({
       out.push({ label, title })
     }
     push(prefLabel(ownMeta), apiTitle, ownHasFile)
-    for (const v of versions) push(prefLabel(v.meta), v.song.name, !!v.song.path || playableSessions.has(v.song.id))
+    for (const v of versions) push(prefLabel(v.meta), v.song.name, v.playable)
     return out
-  }, [ownMeta, versions, apiTitle, ownHasFile, playableSessions])
+  }, [ownMeta, versions, apiTitle, ownHasFile])
 
   // Preferred versions are a group-wide union (see lib/versionPrefs), so the
   // toggles need every member - this song plus its siblings.

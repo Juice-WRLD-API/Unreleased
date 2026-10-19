@@ -47,6 +47,8 @@ const NOT_APPLICABLE = {
   'juicewrldApi.listSubtree': 'wrapper over /files/browse (ls, tree, find)',
   'juicewrldApi.searchFiles': 'wrapper over /files/browse (ls, tree, find)',
   'juicewrldApi.findSessionZips': 'wrapper over /files/browse (ls, tree, find)',
+  'fileSearch.loadFileIndex': '/files/list-all index behind the Files search (shell `search`)',
+  'fileSearch.runFileSearch': 'the Files search itself (shell `search`)',
   'juicewrldApi.loadAllSongs': 'bulk /songs/ load behind song, find and lookup',
   'juicewrldApi.matchLocalSongCover': 'client-side cover matching',
   'appVersion.useCommitStatus': 'React hook over the /changelog data',

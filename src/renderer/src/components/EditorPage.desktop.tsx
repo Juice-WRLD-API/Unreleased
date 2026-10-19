@@ -5,12 +5,13 @@ import {
   FolderOpen,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
+import ThemedSelect from './ThemedSelect'
 import { buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication } from '../lib/userApi'
 import { versionsEnabled } from '../lib/versionsApi'
 import type { SuggestField } from '../lib/fieldSuggestions'
-import { accountDisplayName, errorMessage } from '../lib/format'
+import { errorMessage } from '../lib/format'
 import {
   CATEGORIES, CAT_PILL, CAT_BADGE,
   parseSynced, serializeSynced, type SyncedLine,
@@ -143,16 +144,14 @@ function SelectRow({ label, value, original, onChange, options, placeholder }: {
 }): JSX.Element {
   const changed = value !== original
   return (
-    <label className="flex flex-col min-w-0">
+    <div className="flex flex-col min-w-0">
       <FieldLabel label={label} changed={changed} />
-      <select
-        value={value} onChange={e => onChange(e.target.value)}
-        className={`${fieldInputClass(changed, false)} appearance-none cursor-pointer`}
-      >
-        <option value="" style={{ color: '#111', backgroundColor: '#fff' }}>{placeholder || '—'}</option>
-        {options.map(o => <option key={o.value} value={o.value} style={{ color: '#111', backgroundColor: '#fff' }}>{o.label}</option>)}
-      </select>
-    </label>
+      <ThemedSelect
+        value={value} onChange={onChange}
+        options={[{ value: '', label: placeholder || '—' }, ...options]}
+        className={fieldInputClass(changed, false)}
+      />
+    </div>
   )
 }
 
@@ -388,7 +387,7 @@ export default function EditorPage({ initialSongId = null }: {
 } = {}): JSX.Element {
   const {
     account, isAdmin, canEdit, backView, setActiveView, activeChannel, channels,
-    application, appLoading, onSubmitted, onSignOut, setShowUserAuth, logoutAccount,
+    application, appLoading, onSubmitted, onSignOut, setShowUserAuth,
     song, loading, loadError, lastLoadIdRef, loadSong, eras,
     isNewSongDraft, editingPropId, cancelEditProposal, closeSong,
     name, setName, artists, setArtists, album, setAlbum, cat, setCat, eraId, setEraId,
@@ -446,7 +445,7 @@ export default function EditorPage({ initialSongId = null }: {
     <div className="flex-1 flex flex-col min-h-0">
 
       {/* Top bar */}
-      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-3 px-5 py-3">
         <button
           onClick={() => setActiveView(backView)}
           title="Back"
@@ -476,8 +475,6 @@ export default function EditorPage({ initialSongId = null }: {
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${isAdmin ? 'bg-accent/20 text-accent' : 'bg-emerald-500/20 text-emerald-400'}`}>
           {isAdmin ? 'admin' : 'editor'}
         </span>
-        <span className="text-text-muted opacity-75 text-xs truncate max-w-[140px]">{accountDisplayName(account)}</span>
-        <button onClick={() => logoutAccount()} className="text-text-muted opacity-65 hover:opacity-100 text-xs transition-colors">Sign out</button>
       </div>
 
       {/* Scrollable body */}

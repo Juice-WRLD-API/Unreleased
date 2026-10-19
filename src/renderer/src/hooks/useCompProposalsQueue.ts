@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { CompFileProposal, ProposalStatus } from '../lib/userApi'
 import { errorMessage } from '../lib/format'
+import { showAppToast } from '../lib/appToast'
 
 /** Loads a comp-admin route's bytes into an object URL - the staging file
  *  isn't public like a live comp/ path, so it needs the same authed fetch
@@ -137,19 +138,21 @@ export function useCompProposalsQueue(
   // sequence rather than in parallel - folder moves/renames can depend on
   // each other landing in order. review_notes is left blank: the notes box
   // reflects whatever's currently selected, which has no bearing on the
-  // rest of the batch. A per-item failure is swallowed so one bad row
-  // doesn't stop the rest.
+  // rest of the batch. A per-item failure is counted rather than thrown so one
+  // bad row doesn't stop the rest; the count is reported once at the end.
   const doAcceptAll = useCallback(async (ids: number[]): Promise<void> => {
     if (ids.length === 0) return
     setBulkApproving(true)
     setError(null)
+    let failed = 0
     try {
       for (const id of ids) {
         try {
           const updated = await userApi.adminReviewCompProposal(id, { action: 'approve', review_notes: '', channel: activeChannel })
           if (applyOptimistic) applyReviewResult(updated)
-        } catch {}
+        } catch { failed++ }
       }
+      if (failed > 0) showAppToast(`Couldn't approve ${failed} of ${ids.length} proposals`)
       reload()
     } finally {
       setBulkApproving(false)

@@ -1,7 +1,12 @@
-import { RotateCcw, X } from 'lucide-react'
-import { EQ_BANDS, EQ_GAIN_LIMIT, EQ_BOOST_MAX, EQ_PRESETS, EFFECTS_SUPPORTED } from '../lib/audioEffects'
+import { useEffect, useState, type ReactNode } from 'react'
+import { RotateCcw, PictureInPicture2, X, Save, Trash2 } from 'lucide-react'
+import {
+  EQ_BANDS, EQ_GAIN_LIMIT, EQ_BOOST_MAX, EQ_PRESETS, EFFECTS_SUPPORTED,
+  DEFAULT_FX, FX_RANGES, USER_PRESET_PREFIX, USER_PRESET_NAME_MAX, type AudioFx,
+} from '../lib/audioEffects'
 import { formatDuration } from '../lib/format'
 import { bandLabel, useEqualizerPanelData } from '../hooks/useEqualizerPanelData'
+import ThemedSelect from './ThemedSelect'
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
   return (
@@ -14,6 +19,87 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Elem
   )
 }
 
+const ms = (s: number): string => `${Math.round(s * 1000)} ms`
+const percent = (v: number): string => `${Math.round(v * 100)}%`
+const hz = (v: number): string => (v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)} kHz` : `${Math.round(v)} Hz`)
+const db = (v: number): string => `${v > 0 ? '+' : ''}${v} dB`
+
+// One labelled horizontal slider. `log` maps the track logarithmically - for
+// frequencies, where a linear 1k–20k track would spend most of its length
+// on the top octave.
+function SliderRow({ label, value, min, max, step, onChange, reset, format, title, log = false }: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  onChange: (v: number) => void
+  reset: number
+  format: (v: number) => string
+  title: string
+  log?: boolean
+}): JSX.Element {
+  const LOG_STEPS = 1000
+  const toPos = (v: number): number => (log ? Math.round((Math.log(v / min) / Math.log(max / min)) * LOG_STEPS) : v)
+  const fromPos = (p: number): number => {
+    if (!log) return p
+    const v = min * Math.pow(max / min, p / LOG_STEPS)
+    return Math.max(min, Math.min(max, Math.round(v / step) * step))
+  }
+  return (
+    <div className="flex items-center gap-3 px-4 py-1.5">
+      <span className="text-xs text-text-secondary w-24 shrink-0">{label}</span>
+      <input
+        type="range"
+        min={log ? 0 : min} max={log ? LOG_STEPS : max} step={log ? 1 : step}
+        value={toPos(value)}
+        onChange={(e) => onChange(fromPos(parseFloat(e.target.value)))}
+        onDoubleClick={() => onChange(reset)}
+        className="flex-1 min-w-0 accent-[var(--accent)]"
+        title={`${title} - double-click to reset`}
+      />
+      <span className="text-xs text-text-muted tabular-nums w-14 text-right shrink-0">{format(value)}</span>
+    </div>
+  )
+}
+
+// A switchable effect: title row with its toggle, and its knobs below only
+// while it's on - with this many effects, greyed-out knobs for every one
+// that's off would make the panel several screens tall.
+function FxSection({ title, sub, on, onToggle, children }: {
+  title: string
+  sub: string
+  on: boolean
+  onToggle: () => void
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <>
+      <div className="border-t border-[var(--border)] mx-4" />
+      <div className="flex items-center justify-between px-4 pt-2.5 pb-2.5">
+        <div>
+          <p className="text-xs text-text-secondary">{title}</p>
+          <p className="text-[10px] text-text-muted">{sub}</p>
+        </div>
+        <Toggle on={on} onClick={onToggle} />
+      </div>
+      {on && <div className="-mt-1 pb-1.5">{children}</div>}
+    </>
+  )
+}
+
+// Click once to arm, again within 3s to run - for the actions that throw
+// work away (resetting every knob, deleting a saved preset).
+function useConfirmClick(): [boolean, (run: () => void) => void, () => void] {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const id = setTimeout(() => setArmed(false), 3000)
+    return () => clearTimeout(id)
+  }, [armed])
+  return [armed, (run) => { if (armed) { setArmed(false); run() } else setArmed(true) }, () => setArmed(false)]
+}
+
 // The equalizer popover's contents. Positioning (portal + backdrop) is owned
 // by the caller (Player), matching how the output-device picker works.
 export default function EqualizerPanel(): JSX.Element {
@@ -24,6 +110,8 @@ export default function EqualizerPanel(): JSX.Element {
     eqBalance, setEqBalance,
     eqMono, setEqMono,
     eqBoost, setEqBoost,
+    audioFx, setAudioFx,
+    eqUserPresets, saveEqUserPreset, deleteEqUserPreset, resetSoundEffects,
     skipSilence, setSkipSilence,
     playbackSpeed, setPlaybackSpeed,
     pitchShift, setPitchShift,
@@ -40,12 +128,45 @@ export default function EqualizerPanel(): JSX.Element {
     instrumentalsSong, instrumentals, playInstrumental,
   } = useEqualizerPanelData()
 
+  // Shorthand for the AudioFx knobs: range + reset value straight from the
+  // shared tables, so the panel can't drift from what the terminal accepts.
+  const fxSlider = (key: keyof typeof FX_RANGES, label: string, format: (v: number) => string, title: string, log = false): JSX.Element => (
+    <SliderRow
+      label={label} title={title} format={format} log={log}
+      value={audioFx[key]} reset={DEFAULT_FX[key]}
+      min={FX_RANGES[key].min} max={FX_RANGES[key].max} step={FX_RANGES[key].step}
+      onChange={(v) => setAudioFx({ [key]: v } as Partial<AudioFx>)}
+    />
+  )
+
+  const userPreset = eqUserPresets.find((p) => p.id === eqPreset)
+  // Non-null while the save-preset name field is open.
+  const [presetName, setPresetName] = useState<string | null>(null)
+  const savePreset = (): void => {
+    if (!presetName?.trim()) return
+    saveEqUserPreset(presetName)
+    setPresetName(null)
+  }
+  const [deleteArmed, confirmDelete, disarmDelete] = useConfirmClick()
+  const [resetArmed, confirmReset] = useConfirmClick()
+  // A different preset selected = a different delete target; don't carry
+  // the armed state over to it.
+  useEffect(() => { disarmDelete() }, [eqPreset]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="w-[340px] select-none">
-      {/* Header: title + enable toggle */}
+      {/* Header: title + reset + pop-out + enable toggle */}
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted">Equalizer</p>
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => confirmReset(resetSoundEffects)}
+            title={resetArmed ? 'Click again to reset every effect' : 'Reset all effects to their defaults'}
+            className={`flex items-center gap-1 text-[10px] font-medium transition-colors ${resetArmed ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
+          >
+            <RotateCcw size={12} />
+            {resetArmed && 'Reset all?'}
+          </button>
           <Toggle on={eqEnabled && EFFECTS_SUPPORTED} onClick={() => { if (EFFECTS_SUPPORTED) setEqEnabled(!eqEnabled) }} />
         </div>
       </div>
@@ -60,19 +181,71 @@ export default function EqualizerPanel(): JSX.Element {
         </p>
       )}
 
-      {/* Preset picker */}
+      {/* Preset picker, plus saving the current bands as a named preset of
+          your own (listed under the built-ins) and deleting one. */}
       <div className="px-4 pb-3">
-        <select
-          value={eqPreset}
-          onChange={(e) => setEqPreset(e.target.value)}
-          disabled={!eqEnabled}
-          className="w-full bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] disabled:opacity-50"
-        >
-          {eqPreset === 'custom' && <option value="custom">Custom</option>}
-          {EQ_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+        {presetName != null ? (
+          <form
+            onSubmit={(e) => { e.preventDefault(); savePreset() }}
+            className="flex items-center gap-2"
+          >
+            <input
+              autoFocus
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setPresetName(null) } }}
+              maxLength={USER_PRESET_NAME_MAX}
+              placeholder="Preset name"
+              className="flex-1 min-w-0 bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] outline-none focus:border-[var(--accent)] select-text"
+            />
+            <button
+              type="submit"
+              disabled={!presetName.trim()}
+              title={eqUserPresets.some((p) => p.name.toLowerCase() === presetName.trim().toLowerCase()) ? 'Replace the saved preset with this name' : 'Save these bands as a preset'}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40 transition-colors"
+            >
+              Save
+            </button>
+            <button type="button" onClick={() => setPresetName(null)} title="Cancel" className="text-text-muted hover:text-text-primary transition-colors">
+              <X size={14} />
+            </button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-2">
+            <ThemedSelect
+              value={eqPreset}
+              onChange={setEqPreset}
+              disabled={!eqEnabled}
+              options={[
+                ...(eqPreset === 'custom' ? [{ value: 'custom', label: 'Custom' }] : []),
+                ...EQ_PRESETS.map((p) => ({ value: p.id, label: p.name })),
+                ...(eqUserPresets.length > 0
+                  ? [{ value: `${USER_PRESET_PREFIX}__heading`, label: 'Your presets', disabled: true }, ...eqUserPresets.map((p) => ({ value: p.id, label: p.name }))]
+                  : []),
+              ]}
+              className="flex-1 min-w-0 bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] disabled:opacity-50"
+            />
+            <button
+              onClick={() => setPresetName(userPreset?.name ?? '')}
+              disabled={!eqEnabled}
+              title="Save these bands as a preset"
+              className="text-text-muted hover:text-text-primary disabled:opacity-40 disabled:hover:text-text-muted transition-colors"
+            >
+              <Save size={14} />
+            </button>
+            {userPreset && (
+              <button
+                onClick={() => confirmDelete(() => deleteEqUserPreset(userPreset.id))}
+                disabled={!eqEnabled}
+                title={deleteArmed ? `Click again to delete "${userPreset.name}"` : `Delete "${userPreset.name}"`}
+                className={`flex items-center gap-1 text-[10px] font-medium disabled:opacity-40 transition-colors ${deleteArmed ? 'text-red-400' : 'text-text-muted hover:text-text-primary'}`}
+              >
+                <Trash2 size={14} />
+                {deleteArmed && 'Delete?'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Community edits - community-made audio FILES (instrumentals,
@@ -148,9 +321,9 @@ export default function EqualizerPanel(): JSX.Element {
                 <div className="eq-band relative h-24 w-6 flex items-center justify-center">
                   <input
                     type="range"
-                    min={-EQ_GAIN_LIMIT} max={EQ_GAIN_LIMIT} step={1}
+                    min={-EQ_GAIN_LIMIT} max={EQ_GAIN_LIMIT} step={0.5}
                     value={gain}
-                    onChange={(e) => setEqBand(i, parseInt(e.target.value, 10))}
+                    onChange={(e) => setEqBand(i, parseFloat(e.target.value))}
                     onDoubleClick={() => setEqBand(i, 0)}
                     disabled={!eqEnabled}
                     className="absolute w-24 accent-[var(--accent)]"
@@ -166,6 +339,12 @@ export default function EqualizerPanel(): JSX.Element {
               </div>
             )
           })}
+        </div>
+        {/* Preamp: level into the bands - pull it down when a curve boosts a
+            lot (so the limiter isn't working all the time), or up when it
+            mostly cuts. */}
+        <div className="-mx-4 pt-1">
+          {fxSlider('preamp', 'Preamp', db, 'Level going into the bands')}
         </div>
       </div>
 
@@ -187,6 +366,12 @@ export default function EqualizerPanel(): JSX.Element {
         <span className="text-xs text-text-muted tabular-nums w-8 text-right">{balanceLabel}</span>
       </div>
 
+      {/* Stereo width - 0% folds to mono, 100% is the mix as released, above
+          that pushes what's panned out further to the sides. */}
+      <div className={`-mt-1 transition-opacity ${eqMono ? 'opacity-40 pointer-events-none' : ''}`}>
+        {fxSlider('width', 'Stereo width', percent, eqMono ? 'No effect while mono audio is on' : 'Narrow toward mono or widen past the original mix')}
+      </div>
+
       {/* Mono */}
       <div className="flex items-center justify-between px-4 py-2.5">
         <div>
@@ -200,17 +385,14 @@ export default function EqualizerPanel(): JSX.Element {
           for tracks that are just quiet. Runs through the same limiter as
           everything else in the chain so it clamps loud peaks instead of
           clipping them. */}
-      <div className="flex items-center gap-3 px-4 py-2.5">
-        <span className="text-xs text-text-secondary w-24 shrink-0">Volume boost</span>
-        <input
-          type="range" min={1} max={EQ_BOOST_MAX} step={0.05}
-          value={eqBoost}
-          onChange={(e) => setEqBoost(parseFloat(e.target.value))}
-          onDoubleClick={() => setEqBoost(1)}
-          className="flex-1 accent-[var(--accent)]"
-          title="Boost volume up to 200% - double-click to reset"
+      <div className="py-1">
+        <SliderRow
+          label="Volume boost" title="Boost volume up to 200%" format={percent}
+          value={eqBoost} reset={1} min={1} max={EQ_BOOST_MAX} step={0.05}
+          onChange={setEqBoost}
         />
-        <span className="text-xs text-text-muted tabular-nums w-10 text-right">{Math.round(eqBoost * 100)}%</span>
+        {/* Saturation - soft clipping for warmth/grit; 0% is off. */}
+        {fxSlider('drive', 'Saturation', percent, 'Warm, gritty drive - rounds off peaks and thickens the sound')}
       </div>
 
       {/* Skip silence */}
@@ -222,43 +404,42 @@ export default function EqualizerPanel(): JSX.Element {
         <Toggle on={skipSilence} onClick={() => setSkipSilence(!skipSilence)} />
       </div>
 
-      {/* Reverb */}
-      <div className="border-t border-[var(--border)] mx-4" />
-      <div className="flex items-center justify-between px-4 pt-2.5 pb-1">
-        <div>
-          <p className="text-xs text-text-secondary">Reverb</p>
-          <p className="text-[10px] text-text-muted">Add space and echo</p>
-        </div>
-        <Toggle on={reverbEnabled} onClick={() => setReverbEnabled(!reverbEnabled)} />
-      </div>
-      <div className={`pb-1 transition-opacity ${reverbEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
-        <div className="flex items-center gap-3 px-4 py-1.5">
-          <span className="text-xs text-text-secondary w-24 shrink-0">Amount</span>
-          <input
-            type="range" min={0} max={1} step={0.05}
-            value={reverbMix}
-            onChange={(e) => setReverbMix(parseFloat(e.target.value))}
-            onDoubleClick={() => setReverbMix(0.4)}
-            disabled={!reverbEnabled}
-            className="flex-1 accent-[var(--accent)]"
-            title="Reverb amount (dry/wet mix) - double-click to reset"
-          />
-          <span className="text-xs text-text-muted tabular-nums w-12 text-right">{Math.round(reverbMix * 100)}%</span>
-        </div>
-        <div className="flex items-center gap-3 px-4 py-1.5">
-          <span className="text-xs text-text-secondary w-24 shrink-0">Decay</span>
-          <input
-            type="range" min={1} max={8} step={0.5}
-            value={reverbDecay}
-            onChange={(e) => setReverbDecay(parseFloat(e.target.value))}
-            onDoubleClick={() => setReverbDecay(3)}
-            disabled={!reverbEnabled}
-            className="flex-1 accent-[var(--accent)]"
-            title="Reverb tail length - double-click to reset"
-          />
-          <span className="text-xs text-text-muted tabular-nums w-12 text-right">{reverbDecay.toFixed(1)}s</span>
-        </div>
-      </div>
+      <FxSection title="Reverb" sub="Add space around the sound" on={reverbEnabled} onToggle={() => setReverbEnabled(!reverbEnabled)}>
+        <SliderRow
+          label="Amount" title="Reverb amount (dry/wet mix)" format={percent}
+          value={reverbMix} reset={0.4} min={0} max={1} step={0.05}
+          onChange={setReverbMix}
+        />
+        <SliderRow
+          label="Decay" title="Reverb tail length" format={(v) => `${v.toFixed(1)} s`}
+          value={reverbDecay} reset={3} min={1} max={8} step={0.5}
+          onChange={setReverbDecay}
+        />
+      </FxSection>
+
+      <FxSection title="Echo" sub="Repeats that trail off behind the music" on={audioFx.echo} onToggle={() => setAudioFx({ echo: !audioFx.echo })}>
+        {fxSlider('echoTime', 'Time', (v) => (v >= 1 ? `${v.toFixed(2)} s` : ms(v)), 'Gap between repeats')}
+        {fxSlider('echoFeedback', 'Feedback', percent, 'How many repeats - higher trails on longer')}
+        {fxSlider('echoMix', 'Level', percent, 'How loud the repeats are')}
+      </FxSection>
+
+      <FxSection title="8D audio" sub="Sound circles around your head" on={audioFx.autoPan} onToggle={() => setAudioFx({ autoPan: !audioFx.autoPan })}>
+        {fxSlider('autoPanPeriod', 'Rotation', (v) => `${v.toFixed(1)} s`, 'Seconds per full sweep - lower is faster')}
+        {fxSlider('autoPanDepth', 'Depth', percent, 'How far to each side it swings')}
+      </FxSection>
+
+      <FxSection title="Compressor" sub="Even out loud and quiet parts" on={audioFx.compressor} onToggle={() => setAudioFx({ compressor: !audioFx.compressor })}>
+        {fxSlider('compThreshold', 'Threshold', db, 'Level above which compression starts - lower squeezes more')}
+        {fxSlider('compRatio', 'Ratio', (v) => `${v}:1`, 'How hard levels above the threshold are pulled down')}
+        {fxSlider('compAttack', 'Attack', ms, 'How fast it reacts to a loud hit')}
+        {fxSlider('compRelease', 'Release', ms, 'How fast it lets go afterwards')}
+      </FxSection>
+
+      <FxSection title="Filter" sub="Cut lows and highs - lo-fi, muffled, radio" on={audioFx.filter} onToggle={() => setAudioFx({ filter: !audioFx.filter })}>
+        {fxSlider('lowCut', 'Low cut', hz, 'Removes everything below this frequency', true)}
+        {fxSlider('highCut', 'High cut', hz, 'Removes everything above this frequency', true)}
+        {fxSlider('filterResonance', 'Resonance', (v) => `${v} dB`, 'Emphasis right at the cut points')}
+      </FxSection>
 
       </div>{/* end graph-dependent effects block */}
 
@@ -373,13 +554,12 @@ export default function EqualizerPanel(): JSX.Element {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {!sleepTimerEnd && (
-            <select
-              value={sleepMinutes}
-              onChange={(e) => setSleepMinutes(parseInt(e.target.value, 10))}
+            <ThemedSelect
+              value={String(sleepMinutes)}
+              onChange={(v) => setSleepMinutes(parseInt(v, 10))}
+              options={[15, 30, 45, 60, 90].map((m) => ({ value: String(m), label: `${m} min` }))}
               className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-            >
-              {[15, 30, 45, 60, 90].map((m) => <option key={m} value={m}>{m} min</option>)}
-            </select>
+            />
           )}
           <button
             onClick={() => setSleepTimer(sleepTimerEnd ? null : Date.now() + sleepMinutes * 60 * 1000)}
@@ -396,16 +576,15 @@ export default function EqualizerPanel(): JSX.Element {
       {outputDevices.length > 0 && (
         <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-0.5">
           <p className="text-xs text-text-secondary shrink-0">Output</p>
-          <select
+          <ThemedSelect
             value={audioOutput}
-            onChange={(e) => setAudioOutput(e.target.value)}
-            className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] max-w-[200px] truncate"
-          >
-            <option value="">Default</option>
-            {outputDevices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${d.deviceId.slice(0, 8)}`}</option>
-            ))}
-          </select>
+            onChange={setAudioOutput}
+            options={[
+              { value: '', label: 'Default' },
+              ...outputDevices.map((d) => ({ value: d.deviceId, label: d.label || `Output ${d.deviceId.slice(0, 8)}` })),
+            ]}
+            className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] min-w-0 max-w-[200px]"
+          />
         </div>
       )}
     </div>

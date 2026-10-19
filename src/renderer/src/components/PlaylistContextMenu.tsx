@@ -5,15 +5,17 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
-import { setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { setPlaylistPublic, addPlaylistInBackground } from '../lib/optimisticPlaylist'
 import type { PlaylistSummary } from '../lib/userApi'
-import { buildStreamUrl } from '../lib/juicewrldApi'
+import { buildStreamUrl, JWAPI_BASE } from '../lib/juicewrldApi'
+import { resolveTrackFile } from '../lib/sessionEditsApi'
 import { shareOrigin } from '../lib/platform'
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
 import ContextMenu from './ContextMenu'
+import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
@@ -80,10 +82,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
       const d = await userApi.getPlaylist(playlist.id)
       const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
       if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      const { saved, cancelled } = await saveItems(target, tracks.map(t => ({
-        name: t.path.split('/').pop() || t.title,
-        url: t.streamUrl ?? buildStreamUrl(t.path),
-      })))
+      // A session not yet looked up has no file of its own until it is.
+      const items = (await Promise.all(tracks.map(t =>
+        resolveTrackFile(t).then(f => ({ name: f.path.split('/').pop() || t.title, url: f.url, songId: userApi.trackIdToSongId(t.id) }), () => null))))
+        .filter(<T,>(f: T | null): f is T => f != null)
+      const { saved, cancelled } = await saveItems(target, items)
       if (cancelled) { setZipState('idle'); return }
       setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
@@ -139,7 +142,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
       await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${playlist.id}&view=shared`)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
-    } catch {}
+    } catch { showAppToast("Couldn't share the playlist") }
   }
 
   const shareToChat = async (): Promise<void> => {
@@ -162,11 +165,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
     if (actual !== next) setPlaylist(p => ({ ...p, is_public: actual }))
   }
 
-  const addAllTo = async (targetId: number): Promise<void> => {
-    const src = await userApi.getPlaylist(playlist.id)
-    await Promise.all(src.items.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
-    await refreshPlaylists()
-  }
+  const addAllTo = (targetId: number): Promise<void> => addPlaylistInBackground(playlist.id, targetId)
 
   const commitRename = async (): Promise<void> => {
     const val = renameVal.trim() || playlist.name

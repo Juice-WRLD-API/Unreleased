@@ -5,10 +5,12 @@ import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
 import { installDebugRecorder } from './lib/debugRecorder'
+import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
 
 installDebugRecorder()
 installGlobalErrorLogging()
 installTranslateDomGuard()
+installHoverScrollTruncated()
 
 // iOS home-screen apps have shipped several WebKit versions that size the
 // viewport as if Safari's bottom toolbar could still appear - chrome that

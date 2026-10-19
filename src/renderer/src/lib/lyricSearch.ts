@@ -11,11 +11,12 @@ import type { JWApiSong } from './juicewrldApi'
 
 const normalize = (s: string): string => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/['’`]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 
-const maxEdits = (len: number): number => (len <= 3 ? 0 : len <= 6 ? 1 : 2)
+/** Typos a query word of this length may carry (fileSearch.ts uses the same budget). */
+export const maxEdits = (len: number): number => (len <= 3 ? 0 : len <= 6 ? 1 : 2)
 
 // Optimal string alignment distance (a swapped pair counts as one edit), giving up
 // once it is certain to exceed `max`.
-function withinEdits(a: string, b: string, max: number): boolean {
+export function withinEdits(a: string, b: string, max: number): boolean {
   if (Math.abs(a.length - b.length) > max) return false
   let prev2: number[] = []
   let prev = Array.from({ length: b.length + 1 }, (_, j) => j)

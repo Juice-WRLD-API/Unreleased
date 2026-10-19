@@ -130,7 +130,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
-  { tab: 'preferences', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
+  { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
@@ -460,9 +460,9 @@ export default function Settings(): JSX.Element {
     playlistHeroEnabledDark, playlistHeroEnabledLight, setPlaylistHeroEnabled,
     refreshPlaylists, fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
-    embedLyricsOnDownload, setEmbedLyricsOnDownload,
+    embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
     uploads, stagedFileChanges, stagedSongChanges,
-  } = useStorePick('navStyle', 'setNavStyle', 'setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedLyricsOnDownload', 'setEmbedLyricsOnDownload', 'uploads', 'stagedFileChanges', 'stagedSongChanges')
+  } = useStorePick('navStyle', 'setNavStyle', 'setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload', 'uploads', 'stagedFileChanges', 'stagedSongChanges')
 
   function startEditName(): void {
     setNameInput(accountDisplayName(account))
@@ -1321,10 +1321,10 @@ export default function Settings(): JSX.Element {
                 <Row
                   icon={FileText}
                   iconColor="#8b5cf6"
-                  label="Embed lyrics and cover in downloads"
-                  sub="When you download an MP3, write the song's lyrics (synced too, if it has them) and your own cover for it, if you set one, into the file's tags - your cover replaces the one in the file"
+                  label="Add song info to downloads"
+                  sub="When you download an MP3, write the song's name, artist, album, cover and lyrics (synced too, if it has them) into the file's tags - a cover you set for the song replaces the one in the file"
                 >
-                  <Toggle on={embedLyricsOnDownload} onClick={() => setEmbedLyricsOnDownload(!embedLyricsOnDownload)} />
+                  <Toggle on={embedSongInfoOnDownload} onClick={() => setEmbedSongInfoOnDownload(!embedSongInfoOnDownload)} />
                 </Row>
                 <Row
                   icon={Bug}
@@ -1333,14 +1333,6 @@ export default function Settings(): JSX.Element {
                   sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
                 >
                   <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
-                </Row>
-                <Row
-                  icon={Activity}
-                  iconColor="#dc2626"
-                  label="Record debug log"
-                  sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
-                >
-                  <DebugRecordButton />
                 </Row>
                 <Row
                   icon={Wrench}
@@ -1995,6 +1987,17 @@ export default function Settings(): JSX.Element {
                   <MessageCircle size={15} />
                   Send Feedback
                 </button>
+
+                <div className="mt-2 px-3 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
+                  <Row
+                    icon={Activity}
+                    iconColor="#dc2626"
+                    label="Record debug log"
+                    sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
+                  >
+                    <DebugRecordButton />
+                  </Row>
+                </div>
 
                 <button
                   onClick={() => openMainView('thanks')}

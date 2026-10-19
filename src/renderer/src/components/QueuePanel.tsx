@@ -6,6 +6,9 @@ import { formatDuration } from '../lib/format'
 import { Track } from '../types'
 import { useResizablePanel } from '../hooks/useResizablePanel'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
+import { trackIdToSongId } from '../lib/userApi'
+import { SearchHelpButton } from './SearchHelpPopover'
 
 const MAX_HISTORY_SHOWN = 10
 const MAX_UPCOMING_SHOWN = 60
@@ -31,8 +34,14 @@ export default function QueuePanel(): JSX.Element {
   const upcoming = queue.slice(queueIndex + 1)          // unplayed tracks
 
   const query = search.trim().toLowerCase()
-  const matchesQuery = (track: Track): boolean =>
-    !query || track.title.toLowerCase().includes(query) || track.artist.toLowerCase().includes(query)
+  // Plain words match title/artist; field:"value" tokens (Tracker syntax) are
+  // checked against the catalogue by song id - see useSongFieldSearch.
+  const fieldSearch = useSongFieldSearch(search)
+  const matchesQuery = (track: Track): boolean => {
+    const q = fieldSearch.freeText
+    return (!q || track.title.toLowerCase().includes(q) || track.artist.toLowerCase().includes(q))
+      && fieldSearch.matchesFields(trackIdToSongId(track.id))
+  }
   // Pair each track with its original absolute index so onPlay/onRemove keep
   // working correctly after filtering shrinks the array.
   const upcomingIndexed = upcoming.map((track, i) => ({ track, i }))
@@ -140,6 +149,10 @@ export default function QueuePanel(): JSX.Element {
                   <X size={12} />
                 </button>
               )}
+              <SearchHelpButton
+                size={12}
+                className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+              />
             </div>
           </div>
         )}

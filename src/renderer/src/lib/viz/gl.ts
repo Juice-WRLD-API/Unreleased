@@ -3,7 +3,7 @@ import { BINS } from "./audio";
 import type { AudioFrame, RGB } from "./types";
 
 const UNIFORMS = [
-  "u_res", "u_time", "u_bass", "u_mid", "u_treble", "u_energy", "u_beat",
+  "u_res", "u_time", "u_flow", "u_bass", "u_mid", "u_treble", "u_energy", "u_beat",
   "u_p0", "u_p1", "u_p2", "u_p3", "u_focus", "u_prot", "u_protS",
   "u_feather", "u_intensity", "u_oct", "u_spec", "u_rip",
 ] as const;
@@ -19,6 +19,8 @@ export interface GLInput {
   frame: AudioFrame;
   pal: RGB[];
   time: number;
+  /** Like time, but runs faster when the music is louder (see Visualizer.flow). */
+  flow: number;
   /** Canvas-pixel focus, already flipped to GL's bottom-left origin. */
   focus: { x: number; y: number; r: number };
   /** Canvas-pixel rects [x0, y0, x1, y1], GL origin, plus strength. */
@@ -196,6 +198,7 @@ export class GLRenderer {
     const L = p.loc;
     gl.uniform2f(L.u_res, this.canvas.width, this.canvas.height);
     gl.uniform1f(L.u_time, input.time);
+    gl.uniform1f(L.u_flow, input.flow);
     gl.uniform1f(L.u_bass, f.bass);
     gl.uniform1f(L.u_mid, f.mid);
     gl.uniform1f(L.u_treble, f.treble);

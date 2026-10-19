@@ -13,16 +13,16 @@ import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import type { GifResult } from '../lib/gifApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
-import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
+import { apiFetch, apiPeek, getSongById, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
+import { resolveSongFile } from '../lib/sessionEditsApi'
 import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { getVersionGroup } from '../lib/versionsApi'
-import { peekRotatedCover } from '../lib/coverRotation'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
-import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
+import { setEraCoverRaw } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
@@ -51,8 +51,8 @@ import {
   MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS, OPTIONAL_SONG_FIELDS,
 } from '../lib/trackerFields'
 import type { TrackerFieldKey } from '../lib/trackerFields'
-import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
-import type { CommunityEdit } from '../lib/audioEffects'
+import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS, DEFAULT_FX, USER_PRESET_PREFIX, USER_PRESET_NAME_MAX, sanitizeFx, sanitizeUserPresets } from '../lib/audioEffects'
+import type { AudioFx, CommunityEdit, EqPreset } from '../lib/audioEffects'
 import { HOTKEY_ACTIONS, effectiveBinding, effectiveGlobalBinding, defaultGlobalBinding } from '../lib/hotkeys'
 import { DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
@@ -175,6 +175,11 @@ interface AppState {
   eqMono: boolean
   // 1 = 100% (unity, off) .. EQ_BOOST_MAX = 200%.
   eqBoost: number
+  // Width, saturation, compressor, cut filter, echo, 8D and the EQ preamp -
+  // one object (see AudioFx) rather than a store key per knob.
+  audioFx: AudioFx
+  // Band curves the user saved by name; ids carry USER_PRESET_PREFIX.
+  eqUserPresets: EqPreset[]
   skipSilence: boolean
   // Reverb (convolution tail; see lib/audioEffects.ts) - independently
   // toggleable; mix/decay keep their values while off.
@@ -450,8 +455,8 @@ interface AppState {
   // for anyone who'd rather report manually (or not at all).
   autoReportErrors: boolean
   // When on, downloading an MP3 song writes its lyrics and the user's own cover into the
-  // file's ID3 tag (see lib/lyricsEmbed). Per-device: not synced.
-  embedLyricsOnDownload: boolean
+  // file's ID3 tag (see lib/downloadEmbed). Per-device: not synced.
+  embedSongInfoOnDownload: boolean
 
   // Playlist folders - a local-first grouping over both synced and local
   // playlists (keyed by "api:<id>"/"local:<id>"). Persisted to localStorage and
@@ -587,6 +592,15 @@ interface AppActions {
   setEqBalance: (balance: number) => void
   setEqMono: (mono: boolean) => void
   setEqBoost: (boost: number) => void
+  setAudioFx: (patch: Partial<AudioFx>) => void
+  /** Saves the current band gains under `name` (replacing a saved preset of
+   *  the same name) and selects it. Returns the preset id. */
+  saveEqUserPreset: (name: string) => string
+  deleteEqUserPreset: (id: string) => void
+  /** Every sound-shaping control back to its default: flat bands, preamp,
+   *  balance, mono, boost, reverb, the AudioFx effects and speed. Leaves the
+   *  EQ's on/off, skip-silence, pitch-follows-speed and saved presets alone. */
+  resetSoundEffects: () => void
   setSkipSilence: (enabled: boolean) => void
   setReverbEnabled: (enabled: boolean) => void
   setReverbMix: (mix: number) => void
@@ -773,7 +787,7 @@ interface AppActions {
   openReport: (target: ReportTarget) => void
   closeReport: () => void
   setAutoReportErrors: (enabled: boolean) => void
-  setEmbedLyricsOnDownload: (enabled: boolean) => void
+  setEmbedSongInfoOnDownload: (enabled: boolean) => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. `automated` flags a
    *  crash report ErrorBoundary sent on its own rather than one the user
@@ -985,10 +999,7 @@ function applyPrefToTrack(track: Track, pref: SongPreference | undefined): Track
   // ever set while the rotate-covers setting is on), then an era cover
   // override (unreleased songs only - track.genre holds the API category for
   // jw- tracks), then the song's own art.
-  const songId = userApi.trackIdToSongId(track.id)
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? (songId != null ? peekRotatedCover(songId) : undefined)
-    ?? (songId != null && track.genre !== 'released' ? resolvePrefCoverUrl(peekEraCover(track.era)) : undefined)
+  const coverUrl = overrideCoverUrl(userApi.trackIdToSongId(track.id), pref?.cover_url, track.genre, track.era)
   return {
     ...track,
     title: pref?.name || track.apiTitle || track.title,
@@ -1130,6 +1141,8 @@ function buildUserSettings(s: AppStore): UserSettings {
     eq_balance: s.eqBalance,
     eq_mono: s.eqMono,
     eq_boost: s.eqBoost,
+    audio_fx: s.audioFx,
+    eq_user_presets: s.eqUserPresets,
     skip_silence: s.skipSilence,
     reverb_enabled: s.reverbEnabled,
     reverb_mix: s.reverbMix,
@@ -1237,7 +1250,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setEqPreset: (id) => {
-    const preset = EQ_PRESETS.find((p) => p.id === id)
+    const preset = EQ_PRESETS.find((p) => p.id === id) ?? get().eqUserPresets.find((p) => p.id === id)
     if (!preset) return
     const eqGains = [...preset.gains]
     set({ eqGains, eqPreset: id })
@@ -1247,6 +1260,44 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance); get()._scheduleProfilePush(['userSettings']) },
   setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono); get()._scheduleProfilePush(['userSettings']) },
   setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost); get()._scheduleProfilePush(['userSettings']) },
+  audioFx: sanitizeFx(ls.get<Partial<AudioFx>>('audioFx')),
+  eqUserPresets: sanitizeUserPresets(ls.get<EqPreset[]>('eqUserPresets')),
+  setAudioFx: (patch) => {
+    const audioFx = sanitizeFx({ ...get().audioFx, ...patch })
+    set({ audioFx }); ls.set('audioFx', audioFx); get()._scheduleProfilePush(['userSettings'])
+  },
+  saveEqUserPreset: (rawName) => {
+    const name = rawName.trim().slice(0, USER_PRESET_NAME_MAX)
+    const { eqUserPresets, eqGains } = get()
+    const existing = eqUserPresets.find((p) => p.name.toLowerCase() === name.toLowerCase())
+    const id = existing?.id ?? `${USER_PRESET_PREFIX}${Date.now().toString(36)}`
+    const preset: EqPreset = { id, name, gains: [...eqGains] }
+    const next = existing ? eqUserPresets.map((p) => (p.id === id ? preset : p)) : [...eqUserPresets, preset]
+    set({ eqUserPresets: next, eqPreset: id })
+    ls.set('eqUserPresets', next); ls.set('eqPreset', id)
+    get()._scheduleProfilePush(['userSettings'])
+    return id
+  },
+  deleteEqUserPreset: (id) => {
+    const next = get().eqUserPresets.filter((p) => p.id !== id)
+    // The curve stays on the bands - it just stops having a name.
+    const eqPreset = get().eqPreset === id ? 'custom' : get().eqPreset
+    set({ eqUserPresets: next, eqPreset })
+    ls.set('eqUserPresets', next); ls.set('eqPreset', eqPreset)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  resetSoundEffects: () => {
+    const s = get()
+    s.setEqPreset('flat')
+    s.setEqBalance(0)
+    s.setEqMono(false)
+    s.setEqBoost(1)
+    s.setReverbEnabled(false)
+    s.setReverbMix(0.4)
+    s.setReverbDecay(3)
+    s.setAudioFx(DEFAULT_FX)
+    s.setPlaybackSpeed(1)
+  },
   setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence); get()._scheduleProfilePush(['userSettings']) },
   // 'slowedReverb' is the feature's short-lived bundled-toggle predecessor -
   // carry an existing on-state over so it doesn't silently switch off.
@@ -2132,8 +2183,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   reportModal: null,
   autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
   setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
-  embedLyricsOnDownload: ls.get<boolean>('embedLyricsOnDownload') ?? false,
-  setEmbedLyricsOnDownload: (embedLyricsOnDownload) => { set({ embedLyricsOnDownload }); ls.set('embedLyricsOnDownload', embedLyricsOnDownload) },
+  embedSongInfoOnDownload: ls.get<boolean>('embedSongInfoOnDownload') ?? true,
+  setEmbedSongInfoOnDownload: (embedSongInfoOnDownload) => { set({ embedSongInfoOnDownload }); ls.set('embedSongInfoOnDownload', embedSongInfoOnDownload) },
 
   openReport: (target) => set({ reportModal: target }),
   closeReport: () => set({ reportModal: null }),

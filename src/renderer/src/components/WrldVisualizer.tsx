@@ -306,6 +306,33 @@ export default function WrldVisualizer({
     announce(vizName(next))
   }, [announce])
 
+  // ── Mode list: the toolbar's name opens every mode at once ─────────────────
+  const [showModes, setShowModes] = useState(false)
+  useEscapeToClose(() => setShowModes(false), showModes)
+  const modesRef = useRef<HTMLDivElement>(null)
+  // Opened from the keyboard, focus moves into the list; a click leaves it be.
+  const focusModes = useRef(false)
+  useEffect(() => {
+    if (!showModes) return
+    if (focusModes.current) {
+      const list = modesRef.current
+      const el = list?.querySelector<HTMLButtonElement>('[aria-checked="true"]:not(:disabled)')
+        ?? list?.querySelector<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)')
+      el?.focus()
+    }
+    const onDown = (e: MouseEvent): void => {
+      if (!modesRef.current?.contains(e.target as Node)) setShowModes(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [showModes])
+
+  const pickMode = (id: string): void => {
+    setShowModes(false)
+    useVizStore.getState().selectMode(id, true)
+    announce(vizName(id))
+  }
+
   const toggleMinimal = useCallback((): void => {
     const { immMinimal: cur, setImmMinimal } = useVizStore.getState()
     setImmMinimal(!cur)
@@ -335,6 +362,12 @@ export default function WrldVisualizer({
     else if (panel === 'lyrics') s.setShowQueue(true)
     else { s.setShowQueue(false); s.setLyricsOverride(hasLyrics) }
   }
+
+  // The toggle's icon only spins in once it has actually changed, not on mount.
+  const panelIcon = panel === 'queue' || panel === 'radio' ? panel : 'lyrics'
+  const firstIcon = useRef(panelIcon)
+  const iconSwapped = useRef(false)
+  if (panelIcon !== firstIcon.current) iconSwapped.current = true
 
   const seenPanel = useRef(panel)
   useEffect(() => {
@@ -406,7 +439,7 @@ export default function WrldVisualizer({
         // Below a top-docked floating nav pill only when they'd overlap.
         style={underPill ? { top: 'calc(var(--nav-pill-top, 0px) + 1rem)' } : { top: '1rem' }}
         className={`absolute right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
-          idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
+          idle && !showSettings && !showModes ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
         onMouseLeave={() => { overToolbar.current = false; wake() }}
@@ -426,9 +459,63 @@ export default function WrldVisualizer({
         <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
           <ChevronLeft size={19} />
         </button>
-        <span className="min-w-[74px] text-center text-[11px] font-bold tracking-[0.1em] uppercase text-white/90 select-none" aria-live="polite">
-          {vizName(activeMode)}
-        </span>
+        <div ref={modesRef} className="relative">
+          <button
+            className={`h-9 min-w-[74px] px-1.5 rounded-[10px] text-center text-[11px] font-bold tracking-[0.1em] uppercase select-none transition-colors ${
+              showModes ? 'text-white bg-white/10' : 'text-white/90 hover:text-white hover:bg-white/10'
+            }`}
+            onClick={(e) => {
+              focusModes.current = e.detail === 0 // 0 = Enter/Space rather than a pointer
+              setShowSettings(false)
+              setShowModes((v) => !v)
+            }}
+            title="Choose a visualizer"
+            aria-haspopup="menu"
+            aria-expanded={showModes}
+          >
+            <span aria-live="polite">{vizName(activeMode)}</span>
+          </button>
+          {showModes && (
+            <div
+              role="menu"
+              aria-label="Visualizers"
+              className="absolute top-full left-1/2 -translate-x-1/2 mt-[11px] w-[272px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-1.5 rounded-[14px] bg-black/70 backdrop-blur-xl border border-white/10 shadow-2xl"
+            >
+              {[
+                { label: null, modes: VISUALIZERS.filter((v) => v.id === 'none') },
+                { label: 'Classic', modes: VISUALIZERS.filter((v) => v.id !== 'none' && v.engine === '2d') },
+                { label: 'Shaders', modes: VISUALIZERS.filter((v) => v.engine === 'gl') },
+              ].map((sec) => (
+                <div key={sec.label ?? 'off'}>
+                  {sec.label && (
+                    <p className="px-2.5 pt-2.5 pb-1 text-[10px] font-bold tracking-[0.12em] uppercase text-white/40 select-none">{sec.label}</p>
+                  )}
+                  <div className={`grid gap-0.5 ${sec.label ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    {sec.modes.map((v) => {
+                      const on = v.id === activeMode
+                      const blocked = v.engine === 'gl' && !glSupported
+                      return (
+                        <button
+                          key={v.id}
+                          role="menuitemradio"
+                          aria-checked={on}
+                          disabled={blocked}
+                          title={blocked ? 'Needs WebGL, which this browser has turned off' : undefined}
+                          onClick={() => pickMode(v.id)}
+                          className={`h-8 px-2.5 rounded-[9px] text-left text-[12px] font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                            on ? toolOn : 'text-white/75 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          {v.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <button className={`${tool} ${toolIdle}`} onClick={() => cycle(1)} title="Next visualizer (→)" aria-label="Next visualizer">
           <ChevronRight size={19} />
         </button>
@@ -441,7 +528,11 @@ export default function WrldVisualizer({
           aria-pressed={panel !== 'off'}
           disabled={minimal}
         >
-          {panel === 'queue' ? <ListMusic size={18} /> : panel === 'radio' ? <Radio size={18} /> : <TextQuote size={18} />}
+          {/* Keyed on the icon (not `panel`), so lyrics <-> off - same icon -
+              doesn't replay it. */}
+          <span key={panelIcon} className={iconSwapped.current ? 'animate-wrld-icon-swap' : 'inline-flex'}>
+            {panel === 'queue' ? <ListMusic size={18} /> : panel === 'radio' ? <Radio size={18} /> : <TextQuote size={18} />}
+          </span>
         </button>
         <button
           className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
@@ -481,7 +572,7 @@ export default function WrldVisualizer({
           <div
             className="absolute top-full right-0 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl"
           >
-            <VizControls />
+            <VizControls modes={false} />
             <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
             <LyricsControls />
           </div>

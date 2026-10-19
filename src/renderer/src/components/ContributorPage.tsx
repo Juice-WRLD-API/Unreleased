@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState, useRef, useId } from 'react'
+import ThemedCheckbox from './ThemedCheckbox'
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, XCircle, Upload, Replace, Trash2,
   FolderOpen, ChevronLeft, RefreshCw, FileUp, ArrowRight, FolderSearch, ArrowUpFromLine, X, FolderPlus,
@@ -464,7 +465,7 @@ export default function ContributorPage(): JSX.Element {
 
   return (
     <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 flex items-center gap-3 px-5 py-4 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-3 px-5 py-4">
         <button onClick={() => setActiveView(backView)} title="Back to your profile"
           className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors">
           <ChevronLeft size={18} />
@@ -647,8 +648,7 @@ export default function ContributorPage(): JSX.Element {
                   </p>
                 )}
                 <label className="mt-3 flex items-center gap-2 text-xs text-text-secondary cursor-pointer select-none">
-                  <input type="checkbox" checked={isNewLeak} onChange={e => setIsNewLeak(e.target.checked)}
-                    className="accent-[var(--accent)]" />
+                  <ThemedCheckbox checked={isNewLeak} onChange={setIsNewLeak} />
                   New leak
                   {isBatch && <span className="text-text-muted">- applies to every file in this batch</span>}
                 </label>

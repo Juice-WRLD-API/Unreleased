@@ -5,7 +5,7 @@ import { hasChatAccess } from '../../lib/chatAccess'
 import { canRun, chatCommandsFor, moderationChatCommandsFor, plainChatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
 import { termThemeVars, useTermTheme } from '../../lib/terminal/themeStore'
 import { plainOutput, PROFILE_LINK_RE } from '../../lib/terminal/types'
-import { catFile, diskUsage, grepFiles, headTailFile, locateName, treeView, wcFile } from '../../lib/terminalFileTools'
+import { catFile, diskUsage, grepFiles, headTailFile, locateName, searchTree, treeView, wcFile } from '../../lib/terminalFileTools'
 import { commandCardText } from '../../lib/commandCardText'
 import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { defaultFilesCwd, downloadPath, FILES_ROOT, filesPathString, formatListing, listDir, openTextFile, resolveDir, splitTyped, unquote, type FilesCwd } from '../../lib/terminalFiles'
@@ -44,7 +44,7 @@ function sessionFor(key: string): Session {
 // level so the position survives closing the terminal.
 const shell: { mode: 'chat' | 'files'; cwd: FilesCwd; prevRoom: RoomRef | null } = { mode: 'files', cwd: FILES_ROOT, prevRoom: null }
 
-const BUILTINS = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
+const BUILTINS = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'search', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 // The ones that take a path in the file tree (Tab walks the folders); the
 // directory-only ones skip files.
 const PATH_WORDS = new Set(['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'tree', 'du', 'source'])
@@ -199,7 +199,7 @@ function stripMarkdown(text: string): string {
     .replace(/^- /gm, '  ')
 }
 
-const SHELL_NAMES = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
+const SHELL_NAMES = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'search', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 
 // The chat commands' own usage/description mention `-s` (post the answer to the
 // room). It still works here, but it is chat noise in the terminal's help, so
@@ -265,6 +265,7 @@ const BUILTIN_HELP: Record<string, string> = {
   wc: 'wc <file>\n      File tree: lines, words and bytes of a text file. (After a pipe, wc counts lines.)',
   grep: 'grep [-s] [-r] [-l] <text> [folder | file]\n      File tree: search inside text files (current folder; -r goes into subfolders, -s is case-sensitive, -l lists names). After a pipe it filters output instead.',
   locate: 'locate <name> [folder]\n      File tree: find files and folders by name under here. * and ? are wildcards.',
+  search: 'search <query>\n      File tree: the Files tab\'s search under here - words in any order, "phrases", -exclude, ext:mp3,wav type:audio|image|video|archive|folder in:<folder> size:>10mb. Forgives typos when nothing matches exactly.',
   tree: 'tree [-L depth] [folder]\n      File tree: an indented tree of a folder (two levels by default).',
   du: 'du [folder]\n      File tree: how much is in each subfolder, and in total.',
   source: 'source [-y] [-k] <file>\n      File tree: run the commands in a text file, one per line (# comments and blank lines are skipped). Without -y it only lists what would run; -k keeps going after an error.',
@@ -690,10 +691,10 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         if (name === 'grep') return printed(grepFiles(shell.cwd, arg))
         return printed(headTailFile(name as 'head' | 'tail', shell.cwd, arg))
       }
-      case 'locate': case 'tree': case 'du': {
+      case 'locate': case 'search': case 'tree': case 'du': {
         const name = word.toLowerCase()
         if (shell.mode !== 'files') { print(`${name}: only works in the file tree (try: cd files)`, 'error'); return true }
-        return printed(name === 'locate' ? locateName(shell.cwd, arg) : name === 'tree' ? treeView(shell.cwd, arg) : diskUsage(shell.cwd, arg))
+        return printed(name === 'locate' ? locateName(shell.cwd, arg) : name === 'search' ? searchTree(shell.cwd, arg) : name === 'tree' ? treeView(shell.cwd, arg) : diskUsage(shell.cwd, arg))
       }
       case 'source': case '.': return runSource(arg)
       case 'nano': case 'pico': {

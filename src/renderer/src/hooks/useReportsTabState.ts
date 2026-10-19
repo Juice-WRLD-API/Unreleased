@@ -5,6 +5,7 @@ import * as reportsApi from '../lib/reportsApi'
 import type { SongReportRow, SongReportStatus } from '../lib/reportsApi'
 import { loadAllSongs } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
+import { showAppToast } from '../lib/appToast'
 
 export const REPORT_FILTERS: { id: SongReportStatus | ''; label: string }[] = [
   { id: 'pending',  label: 'Pending'  },
@@ -59,7 +60,7 @@ export function useReportsTabState(reports: SongReportRow[], onChanged: () => vo
     try {
       await reportsApi.reviewSongReport(r.id, { status: newStatus, review_notes: notes[r.id] ?? r.review_notes ?? '' })
       onChanged()
-    } catch {} finally { setActionId(null) }
+    } catch { showAppToast("Couldn't update the report") } finally { setActionId(null) }
   }
 
   const r = selected

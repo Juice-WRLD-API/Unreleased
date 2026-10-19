@@ -38,17 +38,18 @@ import { Sheet } from './mobile/Sheet'
 import { useIsMobile } from '../hooks/useIsMobile'
 import {
   attachAudioElement, applyAudioEffects, resumeEffectsContext,
-  setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted, EFFECTS_SUPPORTED,
+  setEffectsOutputDevice, getCurrentPeak, setEffectsChainWanted, EFFECTS_SUPPORTED, fxInUse,
 } from '../lib/audioEffects'
 import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
-import { isSessionEditPlaceholder, peekSessionEditLink, sessionEditSongId } from '../lib/sessionEditLinksMirror'
-import { peekActiveChannel } from '../lib/activeChannelState'
-import { SessionEditNotFoundError } from '../lib/sessionEditsApi'
+import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
+import { SessionEditNotFoundError, peekSessionEditFile } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
+import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
+import { showAppToast } from '../lib/appToast'
 
 // Only opened from the "more" button / right-click, so it loads on first use
 // instead of riding in the startup bundle with the player itself.
@@ -66,7 +67,7 @@ function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: strin
 // name as its artist line once the lookup finds it, like songToTrack does.
 function fillSessionArtist(trackId: string, streamUrl: string | undefined): void {
   if (!isSessionEditPlaceholder(streamUrl)) return
-  const link = peekSessionEditLink(sessionEditSongId(streamUrl), peekActiveChannel())
+  const link = peekSessionEditFile(streamUrl)
   if (!link) return
   const artist = fileStem(link.path)
   const { currentTrack, currentTrackFull, queue } = useStore.getState()
@@ -258,7 +259,7 @@ export default function Player(): JSX.Element {
   const { radioMode, radioNext } = useStorePick('radioMode', 'radioNext')
   const { radioFmActive, radioFmNowPlaying, radioFmMatchedSong } = useStorePick('radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong')
   const { eqEnabled, eqGains, eqBalance, eqMono, eqBoost, skipSilence } = useStorePick('eqEnabled', 'eqGains', 'eqBalance', 'eqMono', 'eqBoost', 'skipSilence')
-  const { reverbEnabled, reverbMix, reverbDecay, pitchShift } = useStorePick('reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift')
+  const { reverbEnabled, reverbMix, reverbDecay, pitchShift, audioFx } = useStorePick('reverbEnabled', 'reverbMix', 'reverbDecay', 'pitchShift', 'audioFx')
   const { abLoopStart, abLoopEnd, setAbLoopPoint, clearAbLoop } = useStorePick('abLoopStart', 'abLoopEnd', 'setAbLoopPoint', 'clearAbLoop')
 
   // Tooltips for the two transport toggles. They state the mode the control is
@@ -329,9 +330,9 @@ export default function Player(): JSX.Element {
       return
     }
     if (!currentTrack) return
-    const match = currentTrack.id.match(/^jw-(\d+)$/)
-    if (!match) return
-    useStore.getState().setInfoSongId(Number(match[1]))
+    const songId = trackIdToSongId(currentTrack.id)
+    if (songId == null) return
+    useStore.getState().setInfoSongId(songId)
   }
 
   // Two audio slots - ping-pong between them for crossfade
@@ -506,7 +507,7 @@ export default function Player(): JSX.Element {
   // what makes background playback fragile there, and the overwhelming
   // majority of listeners never touch the EQ - no reason to make them pay for
   // it. Desktop attaches on mount as it always has.
-  const effectsInUse = eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || reverbEnabled || skipSilence
+  const effectsInUse = eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || reverbEnabled || skipSilence || fxInUse(audioFx, eqEnabled)
   useEffect(() => {
     if (effectsInUse) setEffectsChainWanted(true)
     attachAudioElement(slotA.current)
@@ -523,8 +524,9 @@ export default function Player(): JSX.Element {
       reverbMix: reverbEnabled ? reverbMix : 0,
       reverbDecay,
       boost: eqBoost,
+      fx: audioFx,
     })
-  }, [eqEnabled, eqGains, eqBalance, eqMono, eqBoost, reverbEnabled, reverbMix, reverbDecay])
+  }, [eqEnabled, eqGains, eqBalance, eqMono, eqBoost, reverbEnabled, reverbMix, reverbDecay, audioFx])
 
   // Expose seek and duration to other components
   useEffect(() => {
@@ -576,9 +578,8 @@ export default function Player(): JSX.Element {
       })
     }
     // Fetch lyrics from API if this is a tracker song (id = "jw-{n}")
-    const match = currentTrack.id.match(/^jw-(\d+)$/)
-    if (match) {
-      const songId = Number(match[1])
+    const songId = trackIdToSongId(currentTrack.id)
+    if (songId != null) {
       // Serve from session cache to avoid re-hitting /songs/ when replaying
       // or revisiting a song.
       const cached = lyricsCache.get(songId)
@@ -856,6 +857,7 @@ export default function Player(): JSX.Element {
       // far better than a play button that lies.
       if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
       console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason})`)
+      showAppToast(`Couldn't play "${track.title}"`)
       setIsPlaying(false)
       return
     }
@@ -931,6 +933,7 @@ export default function Player(): JSX.Element {
   const skipUnplayableTrack = (): void => {
     if (consecutiveSkips.current >= MAX_CONSECUTIVE_SKIPS) {
       console.error('Too many unplayable tracks in a row - stopping playback')
+      showAppToast("Stopped: several songs in a row couldn't be played")
       setIsPlaying(false)
       return
     }
@@ -1559,6 +1562,9 @@ export default function Player(): JSX.Element {
     }
     const previousId = currentTrack?.id
     const next = nextTrack()
+    // Nothing left to skip to (radio returns null too, but only while its
+    // next song is still loading - it plays that once it lands).
+    if (!next && !useStore.getState().radioMode) showQueueEndedToast()
     // A single-item repeat-all queue (or a duplicate id) also bypasses the
     // id-keyed load effect and therefore needs an explicit physical restart.
     if (next?.id === previousId) restartCurrentTrack(useStore.getState().isPlaying)
@@ -1762,7 +1768,7 @@ export default function Player(): JSX.Element {
   // Accent the button when anything in the panel deviates from neutral.
   // On iOS only speed applies (the effects chain never runs there), so synced
   // EQ settings from another device don't light the button up.
-  const eqActive = playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled))
+  const eqActive = playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled || fxInUse(audioFx, eqEnabled)))
 
 
   // (Play/pause on Space is handled by the unified hotkey system above - the

@@ -3,12 +3,11 @@
 // numeric Tracker song id, so this only ever runs for audio files that
 // resolved to a Tracker match (see useTrackerMatches) - the action stays
 // hidden otherwise. Optimistic: the row ticks immediately and unticks (with
-// a toast) if the request fails.
+// a toast, via addSongsInBackground) if the request fails.
 import { useState } from 'react'
-import * as userApi from '../lib/userApi'
-import { showAppToast } from '../lib/appToast'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 
-export function useAddFileToPlaylist(refreshPlaylists: () => Promise<void>): {
+export function useAddFileToPlaylist(): {
   playlistDoneId: number | null
   addToPlaylist: (playlistId: number, songId: number) => void
   resetPlaylistDone: () => void
@@ -17,12 +16,9 @@ export function useAddFileToPlaylist(refreshPlaylists: () => Promise<void>): {
 
   const addToPlaylist = (playlistId: number, songId: number): void => {
     setPlaylistDoneId(playlistId)
-    userApi.addToPlaylist(playlistId, songId)
-      .then(() => refreshPlaylists())
-      .catch(() => {
-        setPlaylistDoneId(prev => (prev === playlistId ? null : prev))
-        showAppToast("Couldn't add to playlist")
-      })
+    void addSongsInBackground(playlistId, [songId]).then(failed => {
+      if (failed.length) setPlaylistDoneId(prev => (prev === playlistId ? null : prev))
+    })
   }
 
   return { playlistDoneId, addToPlaylist, resetPlaylistDone: () => setPlaylistDoneId(null) }

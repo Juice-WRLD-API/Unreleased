@@ -34,6 +34,9 @@ import { useAdminUsersList } from '../hooks/useAdminUsersList'
 import { useAdminStats } from '../hooks/useAdminStats'
 import { TEXTAREA_FIELDS, ALL_SONG_FIELDS, PROPOSAL_FILTERS, PROPOSAL_SORTS, PROPOSAL_PAGE } from '../lib/proposalRevise'
 import RoleBadges from './RoleBadges'
+import { showAppToast } from '../lib/appToast'
+import ThemedSelect from './ThemedSelect'
+import ThemedCheckbox from './ThemedCheckbox'
 
 type Tab = AdminTab
 
@@ -315,25 +318,22 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
         {/* Add field */}
         <div className="rounded-xl border border-dashed border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <Plus size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Add field</span>
           </div>
           <div className="flex gap-2 p-2">
-            <select
+            <ThemedSelect
               value={addKey}
-              onChange={e => setAddKey(e.target.value)}
-              className="flex-1 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
-            >
-              <option value="">Choose a field…</option>
-              {available.map(k => (
-                <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-              ))}
-              {/* Also allow snapshot fields not in the predefined list */}
-              {Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)).map(k => (
-                <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-              ))}
-            </select>
+              onChange={setAddKey}
+              placeholder="Choose a field…"
+              options={[
+                ...available,
+                // Also allow snapshot fields not in the predefined list
+                ...Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)),
+              ].map(k => ({ value: k, label: k.replace(/_/g, ' ') }))}
+              className="flex-1 min-w-0 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
+            />
             <button
               onClick={() => addField(addKey)}
               disabled={!addKey}
@@ -346,7 +346,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
         {/* Review note */}
         <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <MessageSquare size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Review note (optional)</span>
           </div>
@@ -406,7 +406,7 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
   return (
     <div>
       {showUserHeader && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay border-b border-[var(--border)] sticky top-0 z-[1]">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay sticky top-0 z-[1]">
           <span className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-text-muted">
             {item.editor_username}
           </span>
@@ -474,14 +474,14 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try { await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel }); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
     if (!confirm('Reverse this approval?')) return
     setActionId(id)
     try { await userApi.adminReverseProposal(id, channel); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
   }
 
   // Keyed off the full list so the group header's count and "Accept all"
@@ -781,7 +781,7 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try { await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' }); onChanged(); setSelected(null) }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')
@@ -980,17 +980,15 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                           {u.role === 'editor' && (
                             <label className="flex items-center justify-between gap-2 text-sm text-text-secondary">
                               Song edit proposals
-                              <input type="checkbox" checked={u.auto_approve_proposals}
-                                onChange={e => doUpdate(u.user_id, { auto_approve_proposals: e.target.checked })}
-                                className="w-4 h-4 accent-[var(--accent)]" />
+                              <ThemedCheckbox variant="switch" checked={u.auto_approve_proposals}
+                                onChange={v => doUpdate(u.user_id, { auto_approve_proposals: v })} />
                             </label>
                           )}
                           {u.contributor_enabled && (
                             <label className="flex items-center justify-between gap-2 text-sm text-text-secondary">
                               Comp file proposals
-                              <input type="checkbox" checked={u.auto_approve_comp_proposals}
-                                onChange={e => doUpdate(u.user_id, { auto_approve_comp_proposals: e.target.checked })}
-                                className="w-4 h-4 accent-[var(--accent)]" />
+                              <ThemedCheckbox variant="switch" checked={u.auto_approve_comp_proposals}
+                                onChange={v => doUpdate(u.user_id, { auto_approve_comp_proposals: v })} />
                             </label>
                           )}
                         </div>
@@ -1006,9 +1004,8 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                         ] as const).map(([label, checked, payload]) => (
                           <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                             {label}
-                            <input type="checkbox" checked={checked}
-                              onChange={e => doUpdate(u.user_id, payload(e.target.checked))}
-                              className="w-4 h-4 accent-[var(--accent)]" />
+                            <ThemedCheckbox variant="switch" checked={checked}
+                              onChange={v => doUpdate(u.user_id, payload(v))} />
                           </label>
                         ))}
                       </div>

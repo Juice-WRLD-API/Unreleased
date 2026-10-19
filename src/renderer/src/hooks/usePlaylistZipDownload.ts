@@ -6,7 +6,8 @@
 // click, before the playlist fetch eats the user activation it needs.
 import { useCallback, useState } from 'react'
 import { openZipTarget, saveItems } from '../lib/clientZip'
-import { buildStreamUrl } from '../lib/juicewrldApi'
+import { resolveTrackFile } from '../lib/sessionEditsApi'
+import { trackIdToSongId } from '../lib/userApi'
 import { isPrimaryChannelSlug } from './useChannelRoles'
 import { useStore } from '../store/useStore'
 import type { Track } from '../types'
@@ -29,11 +30,15 @@ export function usePlaylistZipDownload(): {
       const all = Array.isArray(trackList) ? trackList : await trackList()
       const { channels, activeChannel } = useStore.getState()
       const useCdn = isPrimaryChannelSlug(channels, activeChannel)
-      const items = all.filter(t => t.path).map(t => ({
-        name: t.path.split('/').pop() || t.title,
-        url: t.streamUrl ?? buildStreamUrl(t.path),
-        cdnPath: useCdn ? t.path : undefined,
-      }))
+      // A session not yet looked up has no file of its own until it is.
+      const files = await Promise.all(all.filter(t => t.path).map(t =>
+        resolveTrackFile(t).then(f => ({
+          name: f.path.split('/').pop() || t.title,
+          url: f.url,
+          cdnPath: useCdn ? f.path : undefined,
+          songId: trackIdToSongId(t.id),
+        }), () => null)))
+      const items = files.filter(<T,>(f: T | null): f is T => f != null)
       const { saved, cancelled } = items.length ? await saveItems(target, items, setZipProgress) : { saved: 0, cancelled: false }
       if (cancelled) { setZipState('idle'); setZipProgress(null); return }
       setZipState(saved > 0 ? 'done' : 'error')

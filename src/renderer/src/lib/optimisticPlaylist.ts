@@ -23,6 +23,20 @@ export async function addSongsInBackground(playlistId: number, songIds: number[]
   return failed
 }
 
+// "Add all to playlist": copies every song in playlist `srcId` into
+// `targetId` through addSongsInBackground, so failures toast (and offline
+// playlists auto-download) the same as any other add. Shared by the playlist
+// context menus and the multi-select bulk action.
+export async function addPlaylistInBackground(srcId: number, targetId: number): Promise<void> {
+  let src: Awaited<ReturnType<typeof userApi.getPlaylist>>
+  try { src = await userApi.getPlaylist(srcId) } catch {
+    showAppToast("Couldn't read that playlist")
+    return
+  }
+  const ids = src.items.map(item => item.song.id)
+  if (ids.length) await addSongsInBackground(targetId, ids)
+}
+
 // Flip a playlist's public flag in the store's summaries right away, then
 // PATCH it; on failure flip it back and toast. Resolves to the flag the
 // playlist ended up with.

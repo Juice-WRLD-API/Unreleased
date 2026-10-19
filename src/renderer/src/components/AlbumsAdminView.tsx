@@ -9,6 +9,8 @@ import * as albumsApi from '../lib/albumsApi'
 import type { Album, Artist, AlbumSongEntry } from '../lib/albumsApi'
 import { useStorePick } from '../store/useStore'
 import { errorMessage } from '../lib/format'
+import ThemedSelect from './ThemedSelect'
+import ThemedDatePicker from './ThemedDatePicker'
 
 // Admin UI for the real Album catalog (GET/POST/PATCH/DELETE
 // /accounts/admin/albums/), replacing the old client-side wrlddata.json
@@ -84,7 +86,7 @@ function SongSearch({ onPick, onClose }: { onPick: (s: JWApiSong) => void; onClo
             <button
               key={s.id}
               onClick={() => { onPick(s); onClose() }}
-              className={`w-full text-left px-4 py-2.5 hover:bg-[var(--surface-overlay)] transition-colors flex items-center gap-3 ${i > 0 ? 'border-t border-[var(--border)]' : ''}`}
+              className={`w-full text-left px-4 py-2.5 hover:bg-[var(--surface-overlay)] transition-colors flex items-center gap-3`}
             >
               <div className="w-7 h-7 rounded-md bg-[var(--surface-overlay)] flex items-center justify-center shrink-0 overflow-hidden">
                 {buildImageUrl(s.image_url)
@@ -190,18 +192,17 @@ function CreatePanel({ artists, onCreated }: { artists: Artist[]; onCreated: (a:
         placeholder="Title"
         className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40"
       />
-      <select
-        value={artistId}
-        onChange={e => setArtistId(e.target.value)}
+      <ThemedSelect
+        value={String(artistId)}
+        onChange={setArtistId}
+        placeholder="Artist…"
+        options={artists.map(a => ({ value: String(a.id), label: a.name }))}
         className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40"
-      >
-        <option value="" disabled>Artist…</option>
-        {artists.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </select>
-      <input
-        type="date"
+      />
+      <ThemedDatePicker
         value={releaseDate}
-        onChange={e => setReleaseDate(e.target.value)}
+        onChange={setReleaseDate}
+        placeholder="Release date"
         className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40"
       />
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
@@ -311,7 +312,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border)] shrink-0">
+      <div className="flex items-center gap-3 px-6 py-4 shrink-0">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
           <ChevronLeft size={16} /> Albums
         </button>
@@ -357,10 +358,9 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Artist</span>
-                <select value={artistId} onChange={e => setArtistId(e.target.value)}
-                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40">
-                  {artists.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <ThemedSelect value={String(artistId)} onChange={setArtistId}
+                  options={artists.map(a => ({ value: String(a.id), label: a.name }))}
+                  className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40" />
               </label>
               <label className="block">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Type</span>
@@ -369,7 +369,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
               </label>
               <label className="block">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Release date</span>
-                <input type="date" value={releaseDate} onChange={e => setReleaseDate(e.target.value)}
+                <ThemedDatePicker value={releaseDate} onChange={setReleaseDate}
                   className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40" />
               </label>
               <label className="block">
@@ -496,7 +496,7 @@ export default function AlbumsAdminView(): JSX.Element {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-6 md:px-8 py-5 border-b border-[var(--border)] shrink-0">
+      <div className="flex items-center justify-between px-6 md:px-8 py-5 shrink-0">
         <div>
           <h1 className="text-xl font-bold text-[var(--text-primary)]">Albums</h1>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">{albums.length} albums</p>

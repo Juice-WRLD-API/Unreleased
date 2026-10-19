@@ -3,6 +3,7 @@ import { getMyCompProposals, withdrawCompProposal, adminReviewCompProposal } fro
 import type { CompFileProposal } from '../lib/userApi'
 import type { CompFilterTab } from '../components/CompProposalList'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
+import { showAppToast } from '../lib/appToast'
 
 // Owns the contributor's own comp-proposal list + filter + withdraw, shared
 // by EditorProfileView.desktop.tsx/.mobile.tsx (and, per the rewrite plan,
@@ -55,7 +56,7 @@ export function useMyCompProposals(
     try {
       const updated = await adminReviewCompProposal(p.id, { action, channel: activeChannel })
       setCompProposals(prev => prev.map(x => x.id === p.id ? updated : x))
-    } catch (e) { console.error('comp review failed:', e) }
+    } catch (e) { console.error('comp review failed:', e); showAppToast(`Couldn't ${action} the proposal`) }
     finally { setReviewingId(null) }
   }
 

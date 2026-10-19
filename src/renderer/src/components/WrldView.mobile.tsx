@@ -14,7 +14,7 @@ import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand } from './Player'
 import { apiFetch, getSongsByIds, fullCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
-import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
+import { EFFECTS_SUPPORTED, fxInUse } from '../lib/audioEffects'
 import { getVersionGroup } from '../lib/versionsApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import type { SyncedLyricLine, Track } from '../types'
@@ -98,7 +98,7 @@ export default function WrldView(): JSX.Element {
     setShowQueue: s.setShowQueue,
     toggleEqPanel: s.toggleEqPanel,
     // Same "anything non-neutral" indicator as the player bar's EQ button.
-    eqFxActive: s.playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (s.eqEnabled || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled)),
+    eqFxActive: s.playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (s.eqEnabled || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled || fxInUse(s.audioFx, s.eqEnabled))),
   })))
 
   // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
@@ -1982,6 +1982,17 @@ const LyricsPanel = memo(function LyricsPanel({
     setTranslateY(active.offsetTop + active.offsetHeight / 2 - vpHalf)
   }, [currentLineIdx, vpHalf, lyricsScale])
 
+  // No glide until the first centring has landed. translateY starts at 0, so
+  // every mount scrolled the whole song past from the top down to the current
+  // line. Waits for a measured viewport: a panel mounted hidden has none yet.
+  const [placed, setPlaced] = useState(false)
+  useEffect(() => {
+    if (placed || vpHalf === 0) return
+    const raf = requestAnimationFrame(() => setPlaced(true))
+    return () => cancelAnimationFrame(raf)
+  }, [placed, vpHalf])
+
+
   if (!rawLyrics) {
     return (
       <div className="relative flex-1 flex flex-col items-center justify-center gap-3 px-8">
@@ -2026,7 +2037,7 @@ const LyricsPanel = memo(function LyricsPanel({
           className={`relative flex flex-col ${padded ? 'gap-5 px-7' : 'gap-4 px-5'}`}
           style={{
             transform: `translateY(${-displayTranslateY}px)`,
-            transition: autoFollow ? 'transform 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none',
+            transition: autoFollow && placed ? 'transform 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none',
             willChange: 'transform',
           }}
         >

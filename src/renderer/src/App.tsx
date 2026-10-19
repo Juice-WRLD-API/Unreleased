@@ -10,6 +10,7 @@ import { useIsMobile, isMobileViewport } from './hooks/useIsMobile'
 import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
 import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
+import ViewFade from './components/ViewFade'
 
 // Minimum gap between window-focus-triggered refetches (playlists, news) -
 // alt-tabbing back and forth shouldn't refire a request on every focus event.
@@ -316,18 +317,20 @@ export default function App(): JSX.Element {
             {/* Holdable views live in their own keyed slots so toggling between
                 "shown" and "hidden under the terminal" never remounts them.
                 `contents` keeps the wrapper out of the flex layout. */}
+            {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (bgView === v || heldView === v) && (
-              <div key={v} className={bgView === v ? 'contents' : 'hidden'}>
+              <ViewFade key={v} active={bgView === v}>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
                   : v === 'playlists' ? <PlaylistsView />
                   : v === 'settings' ? <Settings />
                   : <ChatView />}
-              </div>
+              </ViewFade>
             ))}
-            {HOLD_UNDER_TERMINAL.includes(bgView) ? null
-              : bgView === 'home' ? <HomeView />
+            {!HOLD_UNDER_TERMINAL.includes(bgView) && (
+            <ViewFade key={bgView} active>
+              {bgView === 'home' ? <HomeView />
               : bgView === 'api-tracker' ? <ApiTrackerView />
               : bgView === 'api-files' ? <ApiFilesView />
               : bgView === 'contributor-profile' ? <ContributorProfileView />
@@ -349,6 +352,8 @@ export default function App(): JSX.Element {
               : bgView === 'terminal' ? <TerminalPage />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
+            </ViewFade>
+            )}
             </Suspense>
           </ErrorBoundary>
             {/* WRLD is a full-screen overlay on top of bgView above, not a

@@ -24,11 +24,14 @@ import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
 import { addSongsInBackground } from '../lib/optimisticPlaylist'
-import { useCanEdit } from '../hooks/useChannelRoles'
+import { useCanEdit, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { resolveSongFile } from '../lib/sessionEditsApi'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { CompactGroup } from '../lib/compactGroups'
-import { parseSearchQuery, matchesFieldFilters, filterApiFields } from '../lib/trackerSearch'
+import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
+import { displaySongName } from '../lib/songPrefs'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration, dateSortValue, compareDates } from '../lib/format'
@@ -685,7 +688,7 @@ export default function ApiTrackerView(): JSX.Element {
     focusApiTrackerSearch, setFocusApiTrackerSearch,
     setActiveView, setApiFilesPath, setPendingEditorSongId,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
-    openBulkEditor, currentTrack, isPlaying, fullEraNames,
+    openBulkEditor, currentTrack, isPlaying, fullEraNames, activeChannel, channels, setActiveChannel,
   } = useStore(useShallow(s => ({
     playTrack: s.playTrack, startRadio: s.startRadio, addToQueue: s.addToQueue,
     account: s.account, shuffle: s.shuffle,
@@ -700,6 +703,7 @@ export default function ApiTrackerView(): JSX.Element {
     openBulkEditor: s.openBulkEditor,
     currentTrack: s.currentTrack, isPlaying: s.isPlaying,
     fullEraNames: s.fullEraNames,
+    activeChannel: s.activeChannel, channels: s.channels, setActiveChannel: s.setActiveChannel,
   })))
 
   const canEdit = useCanEdit()
@@ -723,6 +727,9 @@ export default function ApiTrackerView(): JSX.Element {
 
   const [selectedSong, setSelectedSong] = useState<JWApiSong | null>(null)
   const [contextMenu, setContextMenu] = useState<{ song: JWApiSong; x: number; y: number } | null>(null)
+  // Title sort goes by the name the row shows - a personal rename included -
+  // so a renamed song moves to where its new name belongs.
+  const songPrefs = useStore((s) => s.songPrefs)
 
   // Multi-select
   const [selectMode, setSelectMode] = useState(false)
@@ -1110,12 +1117,30 @@ export default function ApiTrackerView(): JSX.Element {
     return () => ctl.abort()
   }, [parsedSearch.freeText, bulkOmit, reloadToken])
 
+  // Renames only change what a search matches, so the search memos re-run on
+  // a rename only while there's a query - not on every playcount bump.
+  const searchPrefs = parsedSearch.freeText || parsedSearch.filters.length ? songPrefs : null
+  // The server searches the API's own names, so a song renamed to something
+  // the query matches is pulled in from the unfiltered catalogue instead.
+  const renamedHits = useMemo(() => {
+    const q = parsedSearch.freeText
+    if (!q || !searchPrefs) return []
+    const have = new Set(catalog.map((s) => s.id))
+    const ids = new Set(Object.values(searchPrefs)
+      .filter((p) => p.name && !have.has(p.song) && textMatches(p.name, q))
+      .map((p) => p.song))
+    return ids.size ? (peekTrackerCatalog('') ?? []).filter((s) => ids.has(s.id)) : []
+  }, [catalog, parsedSearch.freeText, searchPrefs])
+
   const songs = useMemo(
     () => catalog.filter((s) => matchesFilters(s) && matchesSearch(s)),
     [catalog, matchesFilters, matchesSearch],
   )
   const count = songs.length
 
+  // Only the title sort reads the prefs, so other sorts don't re-run on every
+  // playcount bump.
+  const namePrefs = orderField === 'name' ? songPrefs : null
   // Client-side sort over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
     if (!orderField) return songs
@@ -1127,8 +1152,8 @@ export default function ApiTrackerView(): JSX.Element {
       let av: string | number, bv: string | number
       switch (orderField) {
         case 'name':
-          av = a.name.toLowerCase()
-          bv = b.name.toLowerCase()
+          av = (namePrefs?.[a.id]?.name || a.name).toLowerCase()
+          bv = (namePrefs?.[b.id]?.name || b.name).toLowerCase()
           break
         case 'credited_artists':
           av = (a.credited_artists || '').toLowerCase()
@@ -1149,7 +1174,7 @@ export default function ApiTrackerView(): JSX.Element {
       const cmp = typeof av === 'number' ? av - (bv as number) : (av as string).localeCompare(bv as string)
       return orderDir === 'desc' ? -cmp : cmp
     })
-  }, [songs, orderField, orderDir])
+  }, [songs, orderField, orderDir, namePrefs])
 
   // fetchAllCompactGroups is independent of the search box (it fetches every
   // group app-wide), so the query has to be applied client-side or typing while
@@ -1157,7 +1182,7 @@ export default function ApiTrackerView(): JSX.Element {
   // list's server-side `searchall` field coverage as it reasonably can.
   const filteredCompactGroups = useMemo(() => {
     let filtered = filterCompactGroups(compactGroups, parsedSearch.freeText, s => [
-      s.track_titles?.join(' '), s.name, s.credited_artists, s.producers, s.engineers,
+      s.track_titles?.join(' '), displaySongName(s), s.name, s.credited_artists, s.producers, s.engineers,
       s.era?.name, s.notes, s.additional_information, s.session_titles, s.original_key,
     ].filter(Boolean).join(' '))
     // Field-qualified tokens (artists:"...", etc.) aren't handled by
@@ -1276,7 +1301,15 @@ export default function ApiTrackerView(): JSX.Element {
   // (lib/clientZip). Songs whose file fails to fetch are counted with the
   // ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
-    const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
+    // Sessions download the file they play, which may be in another comp.
+    const files = (await Promise.all(selectedSongs.map(async s => {
+      const f = s.category === 'recording_session'
+        ? await resolveSongFile(s).catch(() => null)
+        : s.path ? { path: s.path, url: buildStreamUrl(s.path, activeChannel || undefined), channel: activeChannel || undefined } : null
+      return f && { ...f, songId: s.id }
+    })))
+      .filter(<T,>(f: T | null): f is T => f != null)
+    const paths = files.map(f => f.path)
     let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
@@ -1288,10 +1321,11 @@ export default function ApiTrackerView(): JSX.Element {
     if (!target) return
     setBulkZipStatus('zipping')
     try {
-      const { failed, cancelled } = await saveItems(target, paths.map(path => ({
-        name: path.split('/').pop() || path,
-        url: buildStreamUrl(path),
-        cdnPath: path,
+      const { failed, cancelled } = await saveItems(target, files.map(f => ({
+        name: f.path.split('/').pop() || f.path,
+        url: f.url,
+        cdnPath: (f.channel ?? '') === (activeChannel ?? '') ? f.path : undefined,
+        songId: f.songId,
       })), setBulkZipProgress)
       setBulkZipProgress(null)
       if (cancelled) { setBulkZipStatus('idle'); return }
@@ -1326,12 +1360,22 @@ export default function ApiTrackerView(): JSX.Element {
     setTimeout(() => setBulkLinkStatus('idle'), 3000)
   }
 
-  const handleShowInFiles = useCallback((song: JWApiSong): void => {
+  const handleShowInFiles = useCallback(async (song: JWApiSong): Promise<void> => {
     if (!song.path) return
-    const parts = song.path.split('/')
-    setApiFilesPath(parts.slice(0, -1).join('/'))
+    // A session's file may not be looked up yet, or may live in another comp.
+    let path = song.path
+    if (song.category === 'recording_session') {
+      try {
+        const f = await resolveSongFile(song)
+        path = f.path
+        if (f.channel && f.channel !== activeChannel) setActiveChannel(f.channel)
+      } catch { return }
+    }
+    const parts = path.split('/')
+    const folderPath = parts.slice(0, -1).join('/')
+    setApiFilesPath(folderPath)
     setActiveView('api-files')
-  }, [setApiFilesPath, setActiveView])
+  }, [setApiFilesPath, setActiveView, activeChannel, setActiveChannel])
 
   // Hardware back, innermost first. Registered once through a ref: handlers run
   // last-registered-first, so re-registering on state changes would keep moving

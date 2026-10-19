@@ -1,4 +1,5 @@
 import { AlignLeft, AlignCenter } from 'lucide-react'
+import ThemedColorPicker from './ThemedColorPicker'
 import { useStorePick } from '../store/useStore'
 
 // Lyric display controls (size, alignment, blur, colors). Shared by the WRLD
@@ -42,11 +43,10 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
           title={c}
         />
       ))}
-      <input
-        type="color"
+      <ThemedColorPicker
         value={value ?? fallback}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-6 h-6 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+        onChange={onChange}
+        className="w-6 h-6 rounded-full"
         title="Custom color"
       />
     </div>

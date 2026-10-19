@@ -14,6 +14,7 @@ export function bandLabel(freq: number): string {
 const EQ_STORE_KEYS = [
   'eqEnabled', 'setEqEnabled', 'eqGains', 'setEqBand', 'eqPreset', 'setEqPreset',
   'eqBalance', 'setEqBalance', 'eqMono', 'setEqMono', 'eqBoost', 'setEqBoost',
+  'audioFx', 'setAudioFx', 'eqUserPresets', 'saveEqUserPreset', 'deleteEqUserPreset', 'resetSoundEffects',
   'skipSilence', 'setSkipSilence', 'playbackSpeed', 'setPlaybackSpeed',
   'pitchShift', 'setPitchShift', 'reverbEnabled', 'setReverbEnabled',
   'reverbMix', 'setReverbMix', 'reverbDecay', 'setReverbDecay',

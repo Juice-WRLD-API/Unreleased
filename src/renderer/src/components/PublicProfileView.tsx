@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import ThemedCheckbox from './ThemedCheckbox'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
   BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3, Check, X,
@@ -28,6 +29,7 @@ import { clickable } from '../lib/a11y'
 import { initial } from '../lib/format'
 import { relativeTime } from './adminShared'
 import ContextMenu from './ContextMenu'
+import { showAppToast } from '../lib/appToast'
 
 // approveBlocked: comp-only gate (delete_folder) - see compApproveBlockedReason.
 type ProposalRow = { key: string; id: number; kind: 'edit' | 'comp'; title: string; status: string; created_at: string; approveBlocked: string | null }
@@ -77,7 +79,7 @@ function AdminProposalHistory({ userId, account }: { userId: number; account: Ac
         ? await adminReviewProposal(r.id, { action })
         : await adminReviewCompProposal(r.id, { action })
       setRows((prev) => prev?.map((x) => x.key === r.key ? { ...x, status: updated.status } : x) ?? prev)
-    } catch (e) { console.error('review failed:', e) }
+    } catch (e) { console.error('review failed:', e); showAppToast(`Couldn't ${action} the proposal`) }
     finally { setReviewingKey(null) }
   }
 
@@ -288,7 +290,7 @@ export default function PublicProfileView(): JSX.Element {
     try {
       const updated = await adminUpdateUser(adminUser.user_id, payload)
       setAdminUser(updated)
-    } catch {} finally {
+    } catch { showAppToast("Couldn't update the user") } finally {
       setAdminActionLoading(false)
     }
   }
@@ -634,17 +636,15 @@ export default function PublicProfileView(): JSX.Element {
                 {adminUser.role === 'editor' && (
                   <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                     Song edit proposals
-                    <input type="checkbox" checked={adminUser.auto_approve_proposals}
-                      onChange={(e) => void doAdminUpdate({ auto_approve_proposals: e.target.checked })}
-                      className="w-4 h-4 accent-[var(--accent)]" />
+                    <ThemedCheckbox variant="switch" checked={adminUser.auto_approve_proposals}
+                      onChange={(on) => void doAdminUpdate({ auto_approve_proposals: on })} />
                   </label>
                 )}
                 {adminUser.contributor_enabled && (
                   <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                     Comp file proposals
-                    <input type="checkbox" checked={adminUser.auto_approve_comp_proposals}
-                      onChange={(e) => void doAdminUpdate({ auto_approve_comp_proposals: e.target.checked })}
-                      className="w-4 h-4 accent-[var(--accent)]" />
+                    <ThemedCheckbox variant="switch" checked={adminUser.auto_approve_comp_proposals}
+                      onChange={(on) => void doAdminUpdate({ auto_approve_comp_proposals: on })} />
                   </label>
                 )}
               </div>
@@ -659,9 +659,8 @@ export default function PublicProfileView(): JSX.Element {
               ] as const).map(([label, checked, payload]) => (
                 <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                   {label}
-                  <input type="checkbox" checked={checked}
-                    onChange={(e) => void doAdminUpdate(payload(e.target.checked))}
-                    className="w-4 h-4 accent-[var(--accent)]" />
+                  <ThemedCheckbox variant="switch" checked={checked}
+                    onChange={(on) => void doAdminUpdate(payload(on))} />
                 </label>
               ))}
             </div>

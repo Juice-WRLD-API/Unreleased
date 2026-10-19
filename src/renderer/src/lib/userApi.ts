@@ -1,10 +1,9 @@
 import { Track, ViewType, DonorPlaylist } from '../types'
-import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
+import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl, resolveSessionEditSource, fileStem } from './juicewrldApi'
+import { isSessionEditPlaceholder } from './sessionEditLinksMirror'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
 import type { WireSongPreference } from './songPrefs'
-import { peekRotatedCover } from './coverRotation'
-import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
@@ -12,6 +11,7 @@ import { cacheGet, cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
 import type { TierlistSummary } from './tierlistApi'
+import type { AudioFx, EqPreset } from './audioEffects'
 
 const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
@@ -126,6 +126,10 @@ export interface UserSettings {
   eq_balance?: number
   eq_mono?: boolean
   eq_boost?: number
+  // Width, saturation, compressor, cut filter, echo, 8D and the EQ preamp
+  // (see AudioFx); partial blobs from other builds are filled from defaults.
+  audio_fx?: Partial<AudioFx>
+  eq_user_presets?: EqPreset[]
   skip_silence?: boolean
   reverb_enabled?: boolean
   reverb_mix?: number
@@ -321,26 +325,27 @@ export function liteSongToTrack(song: ApiSongLite): Track {
   const apiTitle = song.name
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
-  // Same precedence as songToTrack: user cover, then a rotated suggestion,
-  // then an era cover override (unreleased songs only).
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? peekRotatedCover(song.id)
-    ?? (song.category !== 'released' ? resolvePrefCoverUrl(peekEraCover(song.era?.name)) : undefined)
+  // Same precedence as songToTrack (overrideCoverUrl).
+  const coverUrl = overrideCoverUrl(song.id, pref?.cover_url, song.category, song.era?.name)
+  // Sessions play their linked/looked-up session edit file, as in songToTrack.
+  const { path: resolvedPath, length: resolvedLength, channel: streamChannel } = resolveSessionEditSource(song)
   return {
     id: `jw-${song.id}`,
-    path: song.path,
-    streamUrl: buildStreamUrl(song.path),
+    path: resolvedPath,
+    streamUrl: isSessionEditPlaceholder(resolvedPath) ? resolvedPath : buildStreamUrl(resolvedPath, streamChannel),
     imageUrl: coverUrl ?? apiImageUrl,
     title: pref?.name || apiTitle,
     apiTitle,
     apiImageUrl,
-    artist: song.credited_artists || 'Juice WRLD',
+    artist: song.category === 'recording_session' && resolvedPath && !isSessionEditPlaceholder(resolvedPath)
+      ? fileStem(resolvedPath)
+      : song.credited_artists || 'Juice WRLD',
     album: song.album || song.era?.name || '',
     era: song.era?.name || undefined,
     albumArtist: 'Juice WRLD',
     year: null,
     trackNumber: null,
-    duration: parseDuration(song.length),
+    duration: parseDuration(resolvedLength),
     genre: song.category,
     hasAlbumArt: !!song.image_url || !!coverUrl,
   }
@@ -559,6 +564,11 @@ export async function getNowPlaying(userId: number): Promise<NowPlayingResponse>
 export async function getFavorites(): Promise<FavoriteEntry[]> {
   const url = `${LIBRARY_BASE}/favorites/`
   return request(url, { method: 'GET' }, true, url)
+}
+
+/** The last favorites response getFavorites cached, for an instant first paint. */
+export function peekFavorites(): FavoriteEntry[] | undefined {
+  return cacheGet<FavoriteEntry[]>(`${LIBRARY_BASE}/favorites/`)
 }
 
 export async function addFavorite(songId: number): Promise<FavoriteEntry> {
