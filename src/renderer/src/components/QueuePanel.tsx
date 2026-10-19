@@ -5,6 +5,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { formatDuration } from '../lib/format'
 import { Track } from '../types'
 import { useResizablePanel } from '../hooks/useResizablePanel'
+import { useListMotion } from '../hooks/useListMotion'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
 import { trackIdToSongId } from '../lib/userApi'
@@ -26,6 +27,8 @@ export default function QueuePanel(): JSX.Element {
   // How many upcoming rows to render - grows when the user clicks "+N more".
   const [visibleCount, setVisibleCount] = useState(MAX_UPCOMING_SHOWN)
   const [search, setSearch] = useState('')
+  const upcomingListRef = useRef<HTMLDivElement>(null)
+  useListMotion(upcomingListRef)
 
   // Derived sections
   // What was actually played before this song, newest first - not the queue's
@@ -43,8 +46,16 @@ export default function QueuePanel(): JSX.Element {
       && fieldSearch.matchesFields(trackIdToSongId(track.id))
   }
   // Pair each track with its original absolute index so onPlay/onRemove keep
-  // working correctly after filtering shrinks the array.
-  const upcomingIndexed = upcoming.map((track, i) => ({ track, i }))
+  // working correctly after filtering shrinks the array - and with a key that
+  // survives edits: the song plus which of its copies this is, not its
+  // position, so removing, reordering or advancing moves the rows below
+  // (useListMotion) instead of remounting every one of them.
+  const copies = new Map<string, number>()
+  const upcomingIndexed = upcoming.map((track, i) => {
+    const n = copies.get(track.id) ?? 0
+    copies.set(track.id, n + 1)
+    return { track, i, key: `${track.id}#${n}` }
+  })
   const filteredUpcoming = query ? upcomingIndexed.filter(({ track }) => matchesQuery(track)) : upcomingIndexed
 
   // Drag state (upcoming indices only)
@@ -83,7 +94,7 @@ export default function QueuePanel(): JSX.Element {
       // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
       // element's background directly - bg-surface-raised made the status bar
       // read visibly darker than the rest of the app while this panel is open.
-      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden animate-slide-in-right`}
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden`}
       style={isMobile
         // Full-screen on a phone, so it sits outside the app shell's
         // safe-area padding and owns the gesture-bar inset itself.
@@ -256,7 +267,7 @@ export default function QueuePanel(): JSX.Element {
 
           {/* ── Upcoming (non-radio) ── */}
           {!radioMode && filteredUpcoming.length > 0 ? (
-            <div className="px-4 pt-3 pb-6">
+            <div ref={upcomingListRef} className="relative px-4 pt-3 pb-6">
               <p className="text-text-muted text-[10px] uppercase tracking-widest px-1 mb-2 font-semibold flex items-center gap-1.5">
                 {query ? 'Results' : upcomingLabel}
                 <span className="opacity-60">
@@ -278,9 +289,10 @@ export default function QueuePanel(): JSX.Element {
                 </span>
               </p>
 
-              {(query ? filteredUpcoming : filteredUpcoming.slice(0, visibleCount)).map(({ track, i }) => (
+              {(query ? filteredUpcoming : filteredUpcoming.slice(0, visibleCount)).map(({ track, i, key }) => (
                 <SwipeableUpcomingRow
-                  key={`up-${track.id}-${queueIndex + 1 + i}`}
+                  key={`up-${key}`}
+                  flipKey={key}
                   query={!!query}
                   isDragOver={dragOverIdx === i && dragIdx !== i}
                   isDragging={dragIdx === i}
@@ -334,9 +346,10 @@ export default function QueuePanel(): JSX.Element {
 // leftward swipe uncovers a red delete backdrop instead, mirroring the
 // swipe-to-delete pattern most mail/message apps already teach.
 function SwipeableUpcomingRow({
-  children, query, isDragOver, isDragging, onDragStart, onDragOver, onDrop, onDragEnd, onRemove,
+  children, flipKey, query, isDragOver, isDragging, onDragStart, onDragOver, onDrop, onDragEnd, onRemove,
 }: {
   children: ReactNode
+  flipKey: string
   query: boolean
   isDragOver: boolean
   isDragging: boolean
@@ -398,6 +411,7 @@ function SwipeableUpcomingRow({
 
   return (
     <div
+      data-flip-key={flipKey}
       draggable={!query}
       onDragStart={onDragStart}
       onDragOver={onDragOver}

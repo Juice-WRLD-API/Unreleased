@@ -81,8 +81,7 @@ import InstallPrompt from './components/InstallPrompt'
 import CookieNotice from './components/CookieNotice'
 import DonationNotice from './components/DonationNotice'
 import Player from './components/Player'
-import NowPlaying from './components/NowPlaying'
-import QueuePanel from './components/QueuePanel'
+import SidePanels from './components/SidePanels'
 import ErrorBoundary from './components/ErrorBoundary'
 import { lazyOverlay, lazyView } from './lib/lazyView'
 import SandboxNotch from './components/SandboxNotch'
@@ -134,11 +133,6 @@ export default function App(): JSX.Element {
   }
   const heldView = heldViewRef.current
   const isMobile = useIsMobile()
-  // Keep the panel mounted after its first open instead of unmounting on
-  // close - unmounting destroyed every cover <img>, so reopening the queue
-  // made them all reload/re-decode from scratch instead of just reappearing.
-  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
-  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -379,22 +373,7 @@ export default function App(): JSX.Element {
                 </Suspense>
               </ErrorBoundary>
             )}
-            {/* Desktop only - on mobile the WRLD tab is the only "now playing"
-                screen (the mini player expands straight into it), so this
-                would only ever be a redundant second one. Nothing on mobile
-                can actually open it (its trigger button lives in the
-                desktop-only bottom bar), but excluding it here is the real
-                guarantee rather than relying on that. */}
-            {!isMobile && showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
-            {queueEverOpened && (
-              <ErrorBoundary>
-                {/* flex so QueuePanel stretches to the full height; a plain
-                    block wrapper let it collapse to its content height. */}
-                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
-                  <QueuePanel />
-                </div>
-              </ErrorBoundary>
-            )}
+            <SidePanels nowPlaying={!isMobile && showNowPlaying && activeView !== 'wrld'} queue={showQueue && activeView !== 'wrld'} />
           </div>
         </main>
       </div>

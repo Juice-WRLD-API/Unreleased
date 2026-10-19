@@ -1,3 +1,4 @@
+import { PopLayer } from './PopLayer'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -248,7 +249,7 @@ export default function ThemedDatePicker({
       </button>
 
       {pop.open && pop.pos && createPortal(
-        <div
+        <PopLayer
           ref={popRef}
           role="dialog"
           aria-label="Choose a date"
@@ -256,7 +257,7 @@ export default function ThemedDatePicker({
           style={{ ...pop.pos, WebkitAppRegion: 'no-drag' } as CSSProperties}
         >
           <Calendar value={value} onPick={pick} onClose={close} clearable={clearable} />
-        </div>,
+        </PopLayer>,
         document.body,
       )}
     </>

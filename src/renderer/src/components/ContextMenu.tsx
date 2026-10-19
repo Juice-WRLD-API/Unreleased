@@ -4,6 +4,7 @@ import type { ElementType, ReactNode, RefObject } from 'react'
 import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import { popOut, useExitGhost } from '../hooks/useExitGhost'
 import { placeFlyout } from '../lib/menuFlyout'
 import { ClampedMenu } from './ClampedMenu'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
@@ -94,7 +95,7 @@ export interface ContextMenuProps {
   zIndex?: number
   /** Classes for flyouts (width, mostly). */
   flyoutClassName?: string
-  /** Entry animation on the menu and its flyouts. */
+  /** Entry animation on the menu and its flyouts - on unless turned off. */
   popAnimation?: boolean
   /** Reserve a left column for check marks instead of showing them on the right:
    *  `true` in every flyout, `'auto'` in any level (the root too) that has a
@@ -155,7 +156,7 @@ const NO_DRAG = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
 export default function ContextMenu({
   x, y, onClose, items: rawItems, title, subtitle, className = '', header, body, page, footer,
-  anchor, ignoreRef, zIndex = 50, flyoutClassName = 'min-w-[160px] max-w-[260px]', popAnimation = false, checkColumn = false, compact = false,
+  anchor, ignoreRef, zIndex = 50, flyoutClassName = 'min-w-[160px] max-w-[260px]', popAnimation = true, checkColumn = false, compact = false,
 }: ContextMenuProps): JSX.Element {
   const isMobile = useIsMobile()
   const items = normalize(rawItems)
@@ -168,6 +169,8 @@ export default function ContextMenu({
   const [, setMenuPos] = useState({ left: x, top: y })
 
   useEscapeToClose(onClose, !isMobile)
+  // Touch menus are a Sheet, which animates its own way out.
+  useExitGhost(menuRef, isMobile ? null : popOut)
 
   useEffect(() => {
     if (isMobile) return
@@ -507,6 +510,7 @@ function Flyout({ rowEl, parentRef, innerRef, z, menuId, className, onEnter, chi
   }
   const placeRef = useRef(place)
   placeRef.current = place
+  useExitGhost(innerRef, popOut)
 
   // After every render (the parent may have moved) and whenever the flyout's
   // own size changes (a list that finishes loading, a row that appears).

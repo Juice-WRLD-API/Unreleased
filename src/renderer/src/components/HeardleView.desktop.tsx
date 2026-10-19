@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { useOpenUserCard } from './chat/UserCard'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -57,7 +58,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
   const { ladder, set, toggleEra, toggleCategory } = useHeardleSettingsPanel(settings, onChange)
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5"
         onClick={(e) => e.stopPropagation()}
@@ -199,7 +200,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
           </div>
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
@@ -210,7 +211,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
 function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose: () => void }) {
   const { tab, setTab, stats, max, winRate } = useHeardleStats(initialMode)
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5"
         onClick={(e) => e.stopPropagation()}
@@ -267,7 +268,7 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
           ))}
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
@@ -307,7 +308,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
   )
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5"
         onClick={(e) => e.stopPropagation()}
@@ -377,7 +378,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
           </>
         )}
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 

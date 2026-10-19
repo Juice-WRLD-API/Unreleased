@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Info } from 'lucide-react'
@@ -66,7 +67,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function ValuePopup({ label, value, onClose }: { label: string; value: string; onClose: () => void }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   return (
-    <div
+    <MotionOverlay
       ref={ref}
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
       onClick={(e) => { if (e.target === ref.current) onClose() }}
@@ -82,7 +83,7 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
           <p className="text-text-primary text-xs font-mono break-all whitespace-pre-wrap select-text">{value}</p>
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 

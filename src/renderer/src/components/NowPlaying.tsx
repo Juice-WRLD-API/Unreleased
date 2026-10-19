@@ -51,7 +51,7 @@ export default function NowPlaying(): JSX.Element {
       // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
       // element's background directly - bg-surface-raised made the status bar
       // read visibly darker than the rest of the app while this panel is open.
-      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden animate-slide-in-right`}
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden`}
       style={isMobile
         ? { position: 'fixed', inset: 0, zIndex: 50 }
         : { width: panelWidth, borderLeft: '1px solid var(--border)' }

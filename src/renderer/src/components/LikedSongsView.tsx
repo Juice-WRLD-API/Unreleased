@@ -1,3 +1,4 @@
+import { useCascade } from '../hooks/useCascade'
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Heart, Play, Loader2, MoreHorizontal, ChevronLeft } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -68,6 +69,7 @@ export default function LikedSongsView(): JSX.Element {
     .filter((t): t is Track => t != null), [likedTrackIds])
 
   const visible = [...apiTracks, ...localLikedTracks, ...likedApiFileTracks]
+  const cascade = useCascade(!loading && visible.length > 0)
 
   if (!account && localLikedTracks.length === 0 && likedApiFileTracks.length === 0) {
     return (
@@ -122,7 +124,7 @@ export default function LikedSongsView(): JSX.Element {
         ) : visible.length === 0 ? (
           <p className="text-text-muted text-sm">No liked songs yet. Tap the heart on any track to save it here.</p>
         ) : (
-          <div className="space-y-0.5">
+          <div className={`space-y-0.5 ${cascade ? 'rows-cascade' : ''}`}>
             {visible.map((track, i) => {
               const songId = userApi.trackIdToSongId(track.id)
               return (

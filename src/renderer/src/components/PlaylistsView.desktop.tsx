@@ -4,6 +4,7 @@ import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
 import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
 import { useClosingValue } from '../hooks/usePresence'
+import { useCascade } from '../hooks/useCascade'
 import { createPortal } from 'react-dom'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft,
@@ -768,6 +769,9 @@ export default function PlaylistsView(): JSX.Element {
   const TRACK_ROW_H = Math.round(56 * appTextScale)
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
     useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, TRACK_ROW_H)
+  // Rows cascade in on opening a playlist - each list/grid/compact container
+  // below carries the flag.
+  const rowsCascade = useCascade(displayTracks.length > 0, `${selectedId}|${localSelectedId}|${donorSelectedId}|${showLiked}`)
 
   // Compact view's rows: one per song, in whatever order (search + sort)
   // displayTracks has, led by the song's first visible entry. A track the
@@ -2579,7 +2583,7 @@ export default function PlaylistsView(): JSX.Element {
               ) : compactRows.length === 0 ? (
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div>
+                <div className={rowsCascade ? 'rows-cascade' : undefined}>
                   {compactRows.map(({ lead, unit }, idx) => {
                     const key = unit.groupId ?? lead.id
                     const hasVersions = unit.versions.length > 1
@@ -2615,7 +2619,7 @@ export default function PlaylistsView(): JSX.Element {
               displayTracks.length === 0 ? (
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div className="grid gap-4 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))' }}>
+                <div className={`grid gap-4 pt-1 ${rowsCascade ? 'rows-cascade' : ''}`} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))' }}>
                   {/* Drag-to-reorder mirrors the list view: idx doubles as both
                       the original playlist index and the displayTracks index
                       because dragEnabled only allows dragging when there's no
@@ -2661,7 +2665,7 @@ export default function PlaylistsView(): JSX.Element {
             {/* Windowed rows - absolutely positioned at displayIdx * TRACK_ROW_H
                 inside a container sized to the full list, so only the visible
                 slice is mounted (see useVirtualWindowEl). */}
-            <div ref={setListContentEl} style={{ height: rowsTotalHeight, position: 'relative' }}>
+            <div ref={setListContentEl} className={rowsCascade ? 'rows-cascade' : undefined} style={{ height: rowsTotalHeight, position: 'relative' }}>
             {displayTracks.slice(rowStart, rowEnd).map((track, sliceIdx) => {
               const displayIdx = rowStart + sliceIdx
               return renderTrackRow(track, displayIdx, {

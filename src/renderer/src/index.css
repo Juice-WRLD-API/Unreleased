@@ -522,19 +522,29 @@ input[type='range']:active::-moz-range-thumb {
   animation: slide-in-right 0.28s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
-/* Track row stagger - cap delay at first 30 rows */
-.track-row { animation: fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.track-row:nth-child(1)  { animation-delay:   0ms; }
-.track-row:nth-child(2)  { animation-delay:  20ms; }
-.track-row:nth-child(3)  { animation-delay:  35ms; }
-.track-row:nth-child(4)  { animation-delay:  50ms; }
-.track-row:nth-child(5)  { animation-delay:  65ms; }
-.track-row:nth-child(6)  { animation-delay:  80ms; }
-.track-row:nth-child(7)  { animation-delay:  92ms; }
-.track-row:nth-child(8)  { animation-delay: 104ms; }
-.track-row:nth-child(9)  { animation-delay: 114ms; }
-.track-row:nth-child(10) { animation-delay: 124ms; }
-.track-row:nth-child(n+11) { animation-delay: 130ms; }
+/* Track lists cascading in on arrival (hooks/useCascade puts .rows-cascade on
+   the rows' parent for a moment). Only the first couple of dozen rows - the
+   ones on screen - stagger; animating hundreds at once would just cost. */
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rows-cascade > :nth-child(-n+24) { animation: row-in 0.36s cubic-bezier(0.33, 0, 0.15, 1) both; }
+.rows-cascade > :nth-child(2)  { animation-delay:  16ms; }
+.rows-cascade > :nth-child(3)  { animation-delay:  32ms; }
+.rows-cascade > :nth-child(4)  { animation-delay:  48ms; }
+.rows-cascade > :nth-child(5)  { animation-delay:  64ms; }
+.rows-cascade > :nth-child(6)  { animation-delay:  80ms; }
+.rows-cascade > :nth-child(7)  { animation-delay:  96ms; }
+.rows-cascade > :nth-child(8)  { animation-delay: 112ms; }
+.rows-cascade > :nth-child(9)  { animation-delay: 128ms; }
+.rows-cascade > :nth-child(10) { animation-delay: 144ms; }
+.rows-cascade > :nth-child(11) { animation-delay: 158ms; }
+.rows-cascade > :nth-child(12) { animation-delay: 172ms; }
+.rows-cascade > :nth-child(13) { animation-delay: 186ms; }
+.rows-cascade > :nth-child(14) { animation-delay: 198ms; }
+.rows-cascade > :nth-child(15) { animation-delay: 210ms; }
+.rows-cascade > :nth-child(n+16):nth-child(-n+24) { animation-delay: 220ms; }
 
 /* Art loading shimmer */
 .art-shimmer {
@@ -715,16 +725,38 @@ input[type='range']:active::-moz-range-thumb {
 .wrld-q-row:nth-child(10)  { animation-delay: 166ms; }
 .wrld-q-row:nth-child(n+11) { animation-delay: 172ms; }
 
-/* App-menu dropdown / submenu entrance - a quick, subtle scale-fade. The panel
-   sets transform-origin inline (top vs bottom) so it grows out of the trigger
+/* Menu / flyout entrance - a quick, subtle scale-fade. The panel sets
+   transform-origin inline (top vs bottom) so it grows out of the trigger
    whether it opens downward or flips above it (bottom nav bar). */
 @keyframes menu-pop {
   from { opacity: 0; transform: scale(0.96); }
   to   { opacity: 1; transform: scale(1); }
 }
 .animate-menu-pop {
-  animation: menu-pop 0.13s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: menu-pop 0.17s cubic-bezier(0.33, 0, 0.15, 1) both;
 }
+
+/* The copy a closing modal or menu leaves behind to animate out on
+   (hooks/useExitGhost). Inert, and frozen in the state it closed in: as a
+   fresh element its own CSS entrances and transitions would start over - a
+   menu-pop restarting under the exit fade, say. Visible even inside a sandbox
+   slot that hid itself when its last panel left. */
+.exit-ghost { visibility: visible !important; }
+.exit-ghost, .exit-ghost * {
+  pointer-events: none !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Images that were still loading when they appeared: held invisible, then
+   faded in once loaded (lib/imageFade sets the attribute). The keyframe has no
+   `to`, so it lands on the image's own opacity, whatever that is. */
+@keyframes img-fade-in { from { opacity: 0; } }
+img[data-img-fade="pending"] { opacity: 0; }
+img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.15, 1); }
+
+/* Player cover art crossfading between songs (PlayerMotion's CoverFade). */
+.cover-fade { transition: opacity 0.34s cubic-bezier(0.33, 0, 0.15, 1); }
 
 /* Wordle: the row a rejected guess was typed into. The message under the board
    says what's wrong; this is what makes it land without being read. */
@@ -764,7 +796,6 @@ input[type='range']:active::-moz-range-thumb {
   .animate-scrim-in,
   .animate-scrim-out,
   .animate-lyric-line-in,
-  .track-row,
   .view-enter { animation-duration: 0.01ms; animation-delay: 0ms; }
 
   /* Decorative loops with nothing to land on - just stop them. eq-bar keeps a
@@ -772,6 +803,8 @@ input[type='range']:active::-moz-range-thumb {
      The chat.* classes get the same treatment next to their own definitions
      in components/chat/chat.css, which loads after this file. */
   .eq-bar { animation: none; transform: scaleY(0.7); }
+  /* Outranks the per-row delays above; a row's resting state is just shown. */
+  .rows-cascade > * { animation: none !important; }
   .art-shimmer { animation: none; }
 
   /* The palette cross-fade (see html.theme-animate above) is a transition, not
@@ -781,7 +814,8 @@ input[type='range']:active::-moz-range-thumb {
   .pl-grid-panel,
   .pl-grid-panel-inner,
   .pl-grid-caret,
-  .nav-indicator { transition: none !important; }
+  .nav-indicator,
+  .cover-fade { transition: none !important; }
 }
 
 /* Suspense fallback for a lazily-loaded view (components/ViewSkeleton).

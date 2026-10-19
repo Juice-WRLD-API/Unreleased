@@ -50,6 +50,8 @@ import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 import { showAppToast } from '../lib/appToast'
+import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
+import { PopLayer } from './PopLayer'
 
 // Only opened from the "more" button / right-click, so it loads on first use
 // instead of riding in the startup bundle with the player itself.
@@ -1777,6 +1779,10 @@ export default function Player(): JSX.Element {
   // Cover art error state - reset when track changes
   const [coverArtError, setCoverArtError] = useState(false)
   useEffect(() => { setCoverArtError(false) }, [currentTrack?.id])
+  // What the title/artist blocks animate on: the song (or the 999FM now-
+  // playing line), with its queue position telling next from previous.
+  const swapKey = radioFmActive ? `fm:${radioFmNowPlaying?.title ?? ''}:${radioFmNowPlaying?.artist ?? ''}` : (currentTrack?.id ?? '')
+  const swapOrder = radioFmActive ? undefined : queueIndex
 
   // Output device picker
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
@@ -1850,15 +1856,20 @@ export default function Player(): JSX.Element {
       ) : createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowEqPanel(false)} />
-          <div
+          <PopLayer
             onMouseDown={(e) => e.stopPropagation()}
-            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto slim-scroll"
+            className="fixed z-50 bg-surface-highest border border-[var(--border)] rounded-xl shadow-2xl overflow-y-auto slim-scroll animate-menu-pop"
             // Cap below the title bar so a full panel scrolls internally
-            // instead of growing under the window controls.
-            style={{ bottom: eqPos.bottom, top: eqPos.top, right: eqPos.right, maxHeight: `calc(100vh - ${(eqPos.bottom ?? eqPos.top ?? 0) + 48}px)` }}
+            // instead of growing under the window controls. Grows out of the
+            // corner nearest the EQ button.
+            style={{
+              bottom: eqPos.bottom, top: eqPos.top, right: eqPos.right,
+              maxHeight: `calc(100vh - ${(eqPos.bottom ?? eqPos.top ?? 0) + 48}px)`,
+              transformOrigin: eqPos.bottom != null ? 'bottom right' : 'top right',
+            }}
           >
             <Suspense fallback={null}><EqualizerPanel /></Suspense>
-          </div>
+          </PopLayer>
         </>,
         document.body
       ))}
@@ -1928,13 +1939,13 @@ export default function Player(): JSX.Element {
           <div className="w-10 h-10 rounded bg-surface-overlay shrink-0 overflow-hidden">
             {radioFmActive ? (
               radioFmMatchedSong?.imageUrl
-                ? <img src={radioFmMatchedSong.imageUrl} alt="" className="w-full h-full object-cover" />
+                ? <CoverFade src={radioFmMatchedSong.imageUrl} />
                 : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
             ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
-              // Keyed per cover - the bar keeps one element across track
-              // changes, so without this the previous song's art stays painted
-              // until the new one decodes.
-              <img key={currentTrackFull?.albumArt ?? currentTrack?.imageUrl} src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl)} alt="" className="w-full h-full object-cover" onError={() => setCoverArtError(true)} />
+              // Crossfades per cover - the old art fades straight out, so it
+              // never stays painted next to the new title while the new one
+              // loads.
+              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} onError={() => setCoverArtError(true)} />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-text-muted">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -1943,7 +1954,7 @@ export default function Player(): JSX.Element {
               </div>
             )}
           </div>
-          <div className="flex-1 min-w-0">
+          <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
             <p
               className="text-sm font-medium text-text-primary truncate"
               title={radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || undefined)}
@@ -1957,7 +1968,7 @@ export default function Player(): JSX.Element {
                 ? radioFmNowPlaying.artist
                 : (currentTrack?.artist || '')}
             </p>
-          </div>
+          </TrackSwap>
           <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
             {!radioFmActive && (
               <button onClick={toggleShuffle} title={shuffleTitle} className={`p-1.5 transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
@@ -1973,9 +1984,11 @@ export default function Player(): JSX.Element {
               title={isPlaying ? 'Pause' : 'Play'}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             >
-              {isPlaying
-                ? <Pause size={16} fill="#000" className="text-black" />
-                : <Play  size={16} fill="#000" className="text-black ml-0.5" />}
+              <SwapIcon swapKey={isPlaying}>
+                {isPlaying
+                  ? <Pause size={16} fill="#000" className="text-black" />
+                  : <Play  size={16} fill="#000" className="text-black ml-0.5" />}
+              </SwapIcon>
             </button>
             <button onClick={handleNext} disabled={radioFmActive} title="Next" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
               <SkipForward size={18} fill="currentColor" />
@@ -2009,18 +2022,20 @@ export default function Player(): JSX.Element {
             className="ml-4 w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             title={isPlaying ? 'Pause' : 'Play'}
           >
-            {isPlaying
-              ? <Pause size={12} fill="#000" className="text-black" />
-              : <Play  size={12} fill="#000" className="text-black ml-0.5" />}
+            <SwapIcon swapKey={isPlaying}>
+              {isPlaying
+                ? <Pause size={12} fill="#000" className="text-black" />
+                : <Play  size={12} fill="#000" className="text-black ml-0.5" />}
+            </SwapIcon>
           </button>
-          <span className="ml-3 text-xs truncate min-w-0 flex-1">
+          <TrackSwap swapKey={swapKey} order={swapOrder} className="ml-3 text-xs truncate min-w-0 flex-1">
             <span className="text-text-secondary font-medium">
               {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || 'Not playing')}
             </span>
             {(radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist) && (
               <span className="text-text-muted"> - {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist}</span>
             )}
-          </span>
+          </TrackSwap>
           <span className="text-text-muted text-xs tabular-nums shrink-0">
             {radioFmActive
               ? `${formatDuration(Math.floor(fmElapsedMs / 1000))} / ${formatDuration(Math.floor(fmDurationMs / 1000))}`
@@ -2045,10 +2060,10 @@ export default function Player(): JSX.Element {
           >
             {radioFmActive ? (
               radioFmMatchedSong?.imageUrl
-                ? <img src={radioFmMatchedSong.imageUrl} alt="" className="w-full h-full object-cover" />
+                ? <CoverFade src={radioFmMatchedSong.imageUrl} />
                 : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={22} className="text-red-400 opacity-80" /></div>
             ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
-              <img key={currentTrackFull?.albumArt ?? currentTrack?.imageUrl} src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl)} alt="Album art" className="w-full h-full object-cover" onError={() => setCoverArtError(true)} />
+              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} alt="Album art" onError={() => setCoverArtError(true)} />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-text-muted">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
@@ -2058,7 +2073,7 @@ export default function Player(): JSX.Element {
             )}
           </button>
 
-          <div className="min-w-0 flex-1">
+          <TrackSwap swapKey={swapKey} order={swapOrder} className="min-w-0 flex-1">
             {/* Title + heart + 3-dot inline */}
             <div className="flex items-center gap-1 min-w-0">
               <p
@@ -2076,7 +2091,9 @@ export default function Player(): JSX.Element {
                     onClick={() => currentTrack && toggleLike(currentTrack.id)}
                     title="Like"
                   >
-                    <Heart size={13} fill={currentTrack && likedTrackIds.includes(currentTrack.id) ? 'currentColor' : 'none'} />
+                    <LikePop liked={!!currentTrack && likedTrackIds.includes(currentTrack.id)} trackKey={currentTrack?.id ?? ''}>
+                      <Heart size={13} fill={currentTrack && likedTrackIds.includes(currentTrack.id) ? 'currentColor' : 'none'} />
+                    </LikePop>
                   </button>
                 )}
 
@@ -2137,7 +2154,7 @@ export default function Player(): JSX.Element {
                 </span>
               )}
             </div>
-          </div>
+          </TrackSwap>
         </div>
 
         {/* Center: controls + progress */}
@@ -2158,9 +2175,11 @@ export default function Player(): JSX.Element {
               title={isPlaying ? 'Pause' : 'Play'}
               className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
             >
-              {isPlaying
-                ? <Pause size={18} fill="#000" className="text-black" />
-                : <Play  size={18} fill="#000" className="text-black ml-0.5" />}
+              <SwapIcon swapKey={isPlaying}>
+                {isPlaying
+                  ? <Pause size={18} fill="#000" className="text-black" />
+                  : <Play  size={18} fill="#000" className="text-black ml-0.5" />}
+              </SwapIcon>
             </button>
 
             <button onClick={handleNext} disabled={radioFmActive} title="Next" className="text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">

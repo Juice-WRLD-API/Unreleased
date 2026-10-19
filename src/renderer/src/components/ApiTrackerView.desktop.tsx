@@ -1,3 +1,5 @@
+import { useCascade } from '../hooks/useCascade'
+import { MotionOverlay } from './MotionOverlay'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
   Search, Play, Loader2, Music2, X, Check,
@@ -979,6 +981,7 @@ function CompactGroupList({
   onToggleSelect: (song: JWApiSong) => void
 }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(groups.length > 0)
 
   // Row stride mirrors CompactGroupRow/SongRow's natural height plus the 2px
   // gap the old space-y-0.5 flow layout provided - absolutely positioned rows
@@ -1003,7 +1006,7 @@ function CompactGroupList({
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, rows.length, stride)
 
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {rows.slice(start, end).map((row, i) => {
         const top = (start + i) * stride
         if (row.kind === 'group') {
@@ -1076,11 +1079,12 @@ function VirtualSongList({
   selectMode, selected, onToggleSelect,
 }: VirtualSongsProps): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(songs.length > 0)
   const rowH = useScaledRowH(52, 60)
   const stride = rowH + 2 // + the old space-y-0.5 gap
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, songs.length, stride)
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {songs.slice(start, end).map((song, i) => (
         <div key={song.id} style={{ position: 'absolute', top: (start + i) * stride, left: 0, right: 0, height: rowH }}>
           <SongRow
@@ -1126,12 +1130,13 @@ function VirtualSongDetailList({
   selectMode, selected, onToggleSelect, onFieldMenu,
 }: VirtualSongsProps & { onFieldMenu: (index: number, e: React.MouseEvent) => void }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(songs.length > 0)
   const fieldCount = useStore((s) => s.trackerDetailFields.length)
   const rowH = useScaledRowH(...detailRowHeights(fieldCount))
   const stride = rowH + DETAIL_ROW_GAP
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, songs.length, stride)
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {songs.slice(start, end).map((song, i) => (
         <div key={song.id} style={{ position: 'absolute', top: (start + i) * stride, left: 0, right: 0, height: rowH }}>
           <DetailedSongRow
@@ -1530,6 +1535,7 @@ function VirtualSongGrid({
   selectMode, selected, onToggleSelect,
 }: VirtualSongsProps & { onQueue: (track: Track) => void }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(songs.length > 0)
   const width = useElementWidth(contentRef)
 
   // Card box heights follow Settings → App text size (see gridMetrics). Memoized
@@ -1605,7 +1611,7 @@ function VirtualSongGrid({
   const viewBottom = Math.max(0, scrollTop - offsetTop) + clientH * 2
 
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {width > 0 && Array.from({ length: rowCount }, (_, r) => r)
         .filter((r) => offsets[r + 1] >= viewTop && offsets[r] <= viewBottom)
         .map((r) => songs.slice(r * cols, r * cols + cols).map((song, c) => {
@@ -1790,7 +1796,7 @@ function VersionTitlePromptModal({
 }): JSX.Element {
   const [value, setValue] = useState('')
   return (
-    <div
+    <MotionOverlay
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onSkip() }}
     >
@@ -1820,7 +1826,7 @@ function VersionTitlePromptModal({
           </button>
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 

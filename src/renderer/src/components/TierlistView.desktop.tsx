@@ -2,6 +2,7 @@
 // by dragging them into rows, or by tap-to-select then tap-a-row on touch.
 // Unlike Heardle/Wordle there's no daily puzzle or score: it's a personal
 // ranking, persisted locally (see lib/tierlist) with no server round-trip.
+import { MotionOverlay } from './MotionOverlay'
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
@@ -133,7 +134,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
 }) {
   const colorLabelId = useId()
   return (
-    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-xs rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4"
         onClick={(e) => e.stopPropagation()}
@@ -173,7 +174,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
           </button>
         )}
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
@@ -186,7 +187,7 @@ function Modal({ title, onClose, children, wide }: {
   wide?: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className={`w-full ${wide ? 'max-w-md' : 'max-w-sm'} max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4`}
         onClick={(e) => e.stopPropagation()}
@@ -199,7 +200,7 @@ function Modal({ title, onClose, children, wide }: {
         </div>
         {children}
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 

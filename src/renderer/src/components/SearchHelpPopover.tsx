@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { PopLayer } from './PopLayer'
 import { Info } from 'lucide-react'
 import { SEARCH_FIELD_HELP } from '../lib/trackerSearch'
 import { FILE_SEARCH_HELP } from '../lib/fileSearch'
@@ -64,13 +65,13 @@ export default function SearchHelpPopover({ onClose, kind = 'songs' }: { onClose
     <>
       <span ref={markerRef} className="hidden" />
       {pos && createPortal(
-        <div
+        <PopLayer
           ref={ref}
           // preventDefault keeps focus in the search box underneath, so reading
           // this doesn't blur (and, in playlists, close) the search.
           onMouseDown={(e) => e.preventDefault()}
           style={{ top: pos.top, left: pos.left, width: WIDTH, maxHeight: pos.maxHeight }}
-          className="fixed overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl z-[200] p-3"
+          className="fixed overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl z-[200] p-3 animate-menu-pop"
         >
           <p className="text-text-primary text-xs font-semibold mb-1">Search syntax</p>
           {kind === 'files' ? (
@@ -96,7 +97,7 @@ export default function SearchHelpPopover({ onClose, kind = 'songs' }: { onClose
               </div>
             ))}
           </div>
-        </div>,
+        </PopLayer>,
         document.body,
       )}
     </>
