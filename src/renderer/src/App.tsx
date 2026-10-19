@@ -75,6 +75,7 @@ import NewsNotifier from './components/NewsNotifier'
 import BroadcastNotifier from './components/BroadcastNotifier'
 import AppToastHost from './components/AppToastHost'
 import DebugRecordingPill from './components/DebugRecorder'
+import { useDebugLogViewer } from './lib/debugLog'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import ReportModal from './components/ReportModal'
 import InstallPrompt from './components/InstallPrompt'
@@ -106,6 +107,7 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 // shipped to every visitor in the startup bundle.
 import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
+const DebugLogViewer = lazyView(() => import('./components/DebugLogViewer'))
 const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
@@ -133,6 +135,7 @@ export default function App(): JSX.Element {
   }
   const heldView = heldViewRef.current
   const isMobile = useIsMobile()
+  const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -400,6 +403,11 @@ export default function App(): JSX.Element {
       {showDiagnostics && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowDiagnostics(false)}>
           <Suspense fallback={null}><DiagnosticsModal /></Suspense>
+        </ErrorBoundary>
+      )}
+      {debugLogOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useDebugLogViewer.getState().close()}>
+          <Suspense fallback={null}><DebugLogViewer /></Suspense>
         </ErrorBoundary>
       )}
       {showUploadManager && (

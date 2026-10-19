@@ -8,7 +8,7 @@ import {
   ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Wrench, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
   Activity,
 } from 'lucide-react'
-import { DebugRecordButton } from './DebugRecorder'
+import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
@@ -164,6 +164,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
+  { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
@@ -1800,7 +1801,10 @@ export default function Settings(): JSX.Element {
                     label="Record debug log"
                     sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
                   >
-                    <DebugRecordButton size="lg" />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <DebugLogOpenButton />
+                      <DebugRecordButton size="lg" />
+                    </div>
                   </Row>
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
