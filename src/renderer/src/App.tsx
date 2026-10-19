@@ -69,8 +69,7 @@ import CookieNotice from './components/CookieNotice'
 import DonationNotice from './components/DonationNotice'
 import { GlobalSongInfoHost } from './components/SongInfoModal'
 import Player from './components/Player'
-import NowPlaying from './components/NowPlaying'
-import QueuePanel from './components/QueuePanel'
+import SidePanels from './components/SidePanels'
 import DownloadManager from './components/DownloadManager'
 import LibraryTab from './components/LibraryTab'
 import AppMenu from './components/AppMenu'
@@ -143,10 +142,6 @@ function WindowControls(): JSX.Element {
 export default function App(): JSX.Element {
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav } = useStorePick(
     'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav')
-  // Keep the panel mounted after its first open instead of unmounting on
-  // close - unmounting destroyed every cover <img>, so reopening the queue
-  // made them all reload/re-decode from scratch instead of just reappearing.
-  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
   // Opening the terminal from a view that holds unsaved local state (the song
   // editor's draft, a half-filled submission, an open playlist...) must not
   // unmount it - closing the terminal would otherwise remount it empty. Derived
@@ -159,7 +154,6 @@ export default function App(): JSX.Element {
     heldViewRef.current = null
   }
   const heldView = heldViewRef.current
-  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
   const isMobile = useIsMobile()
   useThemeEffects()
   useChatBootstrap()
@@ -330,7 +324,7 @@ export default function App(): JSX.Element {
           ? <AutoHideNav position={sidebarPosition} autoHide={autoHideNav && navStyle !== 'pill'} pill={navStyle === 'pill'}><Sidebar /></AutoHideNav>
           : <Sidebar />}
         <main className="flex-1 overflow-hidden flex flex-col relative">
-          <div className="flex-1 overflow-hidden flex">
+          <div className="flex-1 overflow-hidden flex relative">
             <ErrorBoundary>
             <Suspense fallback={null}>
             {/* Holdable views live in their own keyed slots so toggling between
@@ -376,16 +370,7 @@ export default function App(): JSX.Element {
             )}
             </Suspense>
           </ErrorBoundary>
-            {showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
-            {queueEverOpened && (
-              <ErrorBoundary>
-                {/* flex so QueuePanel stretches to the full height; a plain
-                    block wrapper let it collapse to its content height. */}
-                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
-                  <QueuePanel />
-                </div>
-              </ErrorBoundary>
-            )}
+            <SidePanels nowPlaying={showNowPlaying && activeView !== 'wrld'} queue={showQueue && activeView !== 'wrld'} />
           </div>
         </main>
       </div>

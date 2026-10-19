@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { copyText } from '../lib/clipboard'
 import { useEffect, useState, useMemo } from 'react'
 import { X, Download, Loader2, AlertCircle, Check, Clipboard, WrapText } from 'lucide-react'
@@ -63,7 +64,7 @@ export default function TextFileViewer({ source, onClose }: Props): JSX.Element 
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div
         className="w-full max-w-4xl max-h-full flex flex-col bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -126,6 +127,6 @@ export default function TextFileViewer({ source, onClose }: Props): JSX.Element 
           )}
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }

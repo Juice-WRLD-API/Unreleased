@@ -39,7 +39,7 @@ export default function SandboxNotch(): JSX.Element {
     // descendant, breaking useDraggableModal's dragged/resized panels (their
     // fixed left/top are computed in viewport coordinates).
     <div
-      className={`fixed inset-0 z-[500] flex flex-col items-center transition-colors ${
+      className={`fixed inset-0 z-[500] flex flex-col items-center transition-[background-color,backdrop-filter] duration-200 ${
         showBackdrop ? 'bg-black/40 backdrop-blur-sm pointer-events-auto' : 'pointer-events-none'
       }`}
       onClick={(e) => { if (e.target === e.currentTarget) collapse() }}

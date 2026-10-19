@@ -1,3 +1,4 @@
+import { MotionOverlay } from '../MotionOverlay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
@@ -25,11 +26,11 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
 }): JSX.Element {
   useEscapeToClose(onClose)
   return createPortal(
-    <div className="fixed inset-0 z-[140] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[140] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className={`chat-sheet relative w-full ${width} max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-surface shadow-2xl`}
+        className={`relative w-full ${width} max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-surface shadow-2xl`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <header className="flex items-start gap-3 px-5 pt-5 pb-3">
@@ -42,7 +43,7 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
         <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-5 pb-4">{children}</div>
         {footer && <footer className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-[var(--border)] bg-surface-raised/40 md:rounded-b-2xl">{footer}</footer>}
       </div>
-    </div>,
+    </MotionOverlay>,
     document.body,
   )
 }

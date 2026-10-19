@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
@@ -1596,7 +1597,7 @@ export default function ApiFilesBrowser(): JSX.Element {
           into a folder that doesn't exist yet, and its name is the one thing
           the drag itself can't say. */}
       {bundlePrompt && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setBundlePrompt(null)}>
+        <MotionOverlay className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setBundlePrompt(null)}>
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
             <p className="text-text-muted text-xs mb-3">
@@ -1622,11 +1623,11 @@ export default function ApiFilesBrowser(): JSX.Element {
               >Queue folder</button>
             </div>
           </div>
-        </div>
+        </MotionOverlay>
       )}
 
       {newFolderPrompt !== null && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setNewFolderPrompt(null)}>
+        <MotionOverlay className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setNewFolderPrompt(null)}>
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
             <p className="text-text-muted text-xs mb-3">
@@ -1651,7 +1652,7 @@ export default function ApiFilesBrowser(): JSX.Element {
               >Queue folder</button>
             </div>
           </div>
-        </div>
+        </MotionOverlay>
       )}
 
       {/* Hidden pickers behind the context menu's upload items. */}

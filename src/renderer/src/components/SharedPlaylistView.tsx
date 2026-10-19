@@ -1,3 +1,4 @@
+import { useCascade } from '../hooks/useCascade'
 import { useEffect, useState } from 'react'
 import { Play, Loader2, Music2, Share2, Download, ChevronLeft } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -107,6 +108,7 @@ export default function SharedPlaylistView(): JSX.Element {
   const [tracks, setTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const cascade = useCascade(tracks.length > 0)
 
   useEffect(() => {
     if (!shareId) { setError(true); setLoading(false); return }
@@ -175,7 +177,7 @@ export default function SharedPlaylistView(): JSX.Element {
       )}
 
       {/* Track list */}
-      <div className="space-y-0.5">
+      <div className={`space-y-0.5 ${cascade ? 'rows-cascade' : ''}`}>
         {tracks.map((t, i) => (
           <div
             key={t.id}

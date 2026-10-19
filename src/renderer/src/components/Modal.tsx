@@ -5,6 +5,7 @@ import { Lock, Unlock } from 'lucide-react'
 import { ls } from '../lib/persist'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import { useOverlayMotion } from '../hooks/useOverlayMotion'
 
 // Locked panels sit in their own z-index band, comfortably above anything
 // zCounter could reach in a real session - so "locked" always beats
@@ -346,6 +347,12 @@ export function ModalOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floating, dockingOff])
 
+  // Opens with a fade and a lift, and closes the same way in reverse - after
+  // the centering above, so the panel rises into its centered spot. Not for a
+  // pop-out: that's a real OS window, which opens and closes on its own.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useOverlayMotion(rootRef, !floating)
+
   // Keeps this panel available as a snap target for everyone else, and drops
   // it once it's no longer explicitly positioned (never dragged, or closed).
   useEffect(() => {
@@ -427,6 +434,7 @@ export function ModalOverlay({
     // or the user turned the sandbox off in Settings.
     return createPortal(
       <div
+        ref={rootRef}
         className={`fixed inset-0 ${zIndexClassName} flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:px-4`}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
         // Fades out (rather than translating) as the panel is dragged, so the
@@ -461,7 +469,7 @@ export function ModalOverlay({
     // multiple docked modals overlap - each panel's own tier class would
     // otherwise always win regardless of interaction order. `relative` is
     // required too - z-index does nothing on a statically positioned element.
-    <div className={`relative ${zIndexClassName}`} style={{ zIndex: z }} data-modal-id={id}>
+    <div ref={rootRef} className={`relative ${zIndexClassName}`} style={{ zIndex: z }} data-modal-id={id}>
       {/* panelClassName stays applied even after a drag/resize - its size
           classes (w-full max-w-*, h-[...]) just lose to panelStyle's explicit
           width/height/maxWidth/maxHeight via inline-style specificity, while

@@ -8,11 +8,13 @@ import { initWindowSync } from './lib/windowSync'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
 import { installDebugRecorder } from './lib/debugRecorder'
 import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
+import { installImageFade } from './lib/imageFade'
 
 installDebugRecorder()
 installGlobalErrorLogging()
 installTranslateDomGuard()
 installHoverScrollTruncated()
+installImageFade()
 
 // Pop-out windows boot this same bundle with ?float=<view> (see main.js
 // createFloatWindow) and mount a single view instead of the full app. Every

@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { copyText } from '../lib/clipboard'
 import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
 import { usePlaylistDetailData, usePlaylistCoverEditing } from '../hooks/usePlaylistDetailData'
@@ -5,6 +6,7 @@ import { usePlaylistSharing } from '../hooks/usePlaylistSharing'
 import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
 import { useClosingValue } from '../hooks/usePresence'
+import { useCascade } from '../hooks/useCascade'
 import { createPortal } from 'react-dom'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft,
@@ -950,6 +952,9 @@ export default function PlaylistsView(): JSX.Element {
   const TRACK_ROW_H = Math.round(56 * appTextScale)
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
     useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, TRACK_ROW_H)
+  // Rows cascade in on opening a playlist - each list/grid/compact container
+  // below carries the flag.
+  const rowsCascade = useCascade(displayTracks.length > 0, `${selectedId}|${localSelectedId}|${donorSelectedId}|${showLiked}`)
 
   // Compact view's rows: one per song, in whatever order (search + sort)
   // displayTracks has, led by the song's first visible entry. A track the
@@ -2813,7 +2818,7 @@ export default function PlaylistsView(): JSX.Element {
               ) : compactRows.length === 0 ? (
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div>
+                <div className={rowsCascade ? 'rows-cascade' : undefined}>
                   {compactRows.map(({ lead, unit }, idx) => {
                     const hasVersions = unit.versions.length > 1
                     const open = hasVersions && expandedGroups.has(unit.groupId!)
@@ -2848,7 +2853,7 @@ export default function PlaylistsView(): JSX.Element {
               displayTracks.length === 0 ? (
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div className="grid gap-4 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))' }}>
+                <div className={`grid gap-4 pt-1 ${rowsCascade ? 'rows-cascade' : ''}`} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))' }}>
                   {/* Drag-to-reorder mirrors the list view: idx doubles as both
                       the original playlist index and the displayTracks index
                       because dragEnabled only allows dragging when there's no
@@ -2893,7 +2898,7 @@ export default function PlaylistsView(): JSX.Element {
             {/* Windowed rows — absolutely positioned at displayIdx * TRACK_ROW_H
                 inside a container sized to the full list, so only the visible
                 slice is mounted (see useVirtualWindowEl). */}
-            <div ref={setListContentEl} style={{ height: rowsTotalHeight, position: 'relative' }}>
+            <div ref={setListContentEl} className={rowsCascade ? 'rows-cascade' : undefined} style={{ height: rowsTotalHeight, position: 'relative' }}>
             {displayTracks.slice(rowStart, rowEnd).map((track, sliceIdx) => {
               const displayIdx = rowStart + sliceIdx
               return renderTrackRow(track, displayIdx, {
@@ -3160,7 +3165,7 @@ export default function PlaylistsView(): JSX.Element {
   // The local-vs-API chooser shown after an .m3u is parsed. "Local" matches
   // each line's path to your library; "API" looks each song up by name online.
   const choiceModal = m3uChoice ? createPortal(
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={() => setM3uChoice(null)}>
+    <MotionOverlay className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4" onClick={() => setM3uChoice(null)}>
       <div className="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
         <h3 className="text-text-primary text-lg font-bold">Import “{m3uChoice.name}”</h3>
         <p className="text-text-muted text-sm mt-1 mb-5">{m3uChoice.entries.length} track{m3uChoice.entries.length === 1 ? '' : 's'}. How should they be added?</p>
@@ -3189,7 +3194,7 @@ export default function PlaylistsView(): JSX.Element {
         </div>
         <button onClick={() => setM3uChoice(null)} className="mt-4 w-full py-2 text-sm text-text-muted hover:text-text-primary transition-colors">Cancel</button>
       </div>
-    </div>,
+    </MotionOverlay>,
     document.body,
   ) : null
 

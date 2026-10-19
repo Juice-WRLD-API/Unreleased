@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { useRef } from 'react'
 import { Loader2, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
@@ -35,9 +36,9 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   useEscapeToClose(onClose)
 
   return (
-    <div ref={overlayRef} className="fixed inset-0 z-50 flex items-end justify-center" onClick={e => { if (e.target === overlayRef.current) onClose() }}>
+    <MotionOverlay ref={overlayRef} className="fixed inset-0 z-50 flex items-end justify-center" onClick={e => { if (e.target === overlayRef.current) onClose() }}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl bg-[var(--surface)] rounded-t-2xl shadow-2xl border border-[var(--border)] border-b-0 animate-slide-up flex flex-col max-h-[88dvh]">
+      <div className="relative w-full max-w-2xl bg-[var(--surface)] rounded-t-2xl shadow-2xl border border-[var(--border)] border-b-0 flex flex-col max-h-[88dvh]">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-[var(--border)] shrink-0">
           <div className="w-9 h-9 rounded-2xl bg-accent/15 border border-accent/20 flex items-center justify-center shrink-0">
@@ -182,6 +183,6 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           onClose={() => setPickingFile(false)}
         />
       )}
-    </div>
+    </MotionOverlay>
   )
 }

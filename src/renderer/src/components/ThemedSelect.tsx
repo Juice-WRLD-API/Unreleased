@@ -1,3 +1,4 @@
+import { PopLayer } from './PopLayer'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
@@ -138,7 +139,7 @@ export default function ThemedSelect({
       </button>
 
       {open && pos && createPortal(
-        <div
+        <PopLayer
           ref={listRef}
           role="listbox"
           className={`z-[9999] overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--border)] bg-surface shadow-2xl p-1 animate-menu-pop ${menuClassName}`}
@@ -167,7 +168,7 @@ export default function ThemedSelect({
               </div>
             )
           })}
-        </div>,
+        </PopLayer>,
         document.body,
       )}
     </>

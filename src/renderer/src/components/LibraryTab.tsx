@@ -1,3 +1,4 @@
+import { useCascade } from '../hooks/useCascade'
 import { useState, useEffect, useRef, useMemo, createContext, useContext } from 'react'
 import {
   Music, Play, Pause, Shuffle, Search, MoreHorizontal,
@@ -273,6 +274,7 @@ function CardGrid({ count, render, circular = false }: {
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(count > 0)
   const [cols, setCols] = useState(1)
   const [colW, setColW] = useState(CARD_MIN)
 
@@ -301,7 +303,7 @@ function CardGrid({ count, render, circular = false }: {
       {count === 0 ? (
         <p className="text-text-muted text-sm text-center py-16">Nothing here yet</p>
       ) : (
-        <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+        <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
           {Array.from({ length: end - start }, (_, r) => {
             const row = start + r
             return (
@@ -328,6 +330,7 @@ function SongList({ tracks, header, onContext }: {
 }): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(tracks.length > 0)
   // Windowed row height must be concrete px, so scale it with the app text-size
   // setting — the row's rem-based cover/text grow with it, and a fixed 56 would
   // otherwise clip them (and shrink the cover) at larger scales.
@@ -341,7 +344,7 @@ function SongList({ tracks, header, onContext }: {
       {tracks.length === 0 ? (
         <p className="text-text-muted text-sm text-center py-16">No songs found</p>
       ) : (
-        <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+        <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
           {tracks.slice(start, end).map((t, i) => {
             const index = start + i
             return (
@@ -413,6 +416,7 @@ function AlbumDetail({ album, onBack, onContext }: {
   const art = useTrackArt(album.coverTrack)
   const tracks = useMemo(() => [...album.tracks].sort(byTrackNo), [album])
   useVisibleTracks(tracks)
+  const cascade = useCascade(tracks.length > 0)
   const total = tracks.reduce((s, t) => s + t.duration, 0)
   const play = (list: LibraryTrack[]) => { const q = list.map(toQueueTrack); if (q.length) playCollection(q) }
   const shuffle = (list: LibraryTrack[]) => { void shufflePlay(list.map(toQueueTrack)) }
@@ -425,7 +429,7 @@ function AlbumDetail({ album, onBack, onContext }: {
         onBack={onBack} onPlay={() => play(tracks)} onShuffle={() => shuffle(tracks)}
         fallbackIcon={<Music size={48} className="text-text-muted" />}
       />
-      <div className="px-3 pb-8">
+      <div className={`px-3 pb-8 ${cascade ? 'rows-cascade' : ''}`}>
         {tracks.map((t, i) => <SongRow key={t.id} track={t} index={i} queue={tracks} onContext={onContext} showAlbum={false} />)}
       </div>
     </div>
@@ -445,6 +449,7 @@ function ArtistDetail({ artist, albums, onBack, onOpenAlbum, onContext }: {
   const art = useTrackArt(artist.coverTrack)
   const allTracks = useMemo(() => [...artist.tracks].sort((a, b) => a.title.localeCompare(b.title)), [artist])
   useVisibleTracks(allTracks)
+  const cascade = useCascade(allTracks.length > 0)
   const total = artist.tracks.reduce((s, t) => s + t.duration, 0)
   const play = (list: LibraryTrack[]) => { const q = list.map(toQueueTrack); if (q.length) playCollection(q) }
   const shuffle = (list: LibraryTrack[]) => { void shufflePlay(list.map(toQueueTrack)) }
@@ -468,7 +473,7 @@ function ArtistDetail({ artist, albums, onBack, onOpenAlbum, onContext }: {
       <div className="px-6 pt-4 pb-2">
         <h2 className="text-text-primary text-lg font-bold">Songs</h2>
       </div>
-      <div className="px-3 pb-8">
+      <div className={`px-3 pb-8 ${cascade ? 'rows-cascade' : ''}`}>
         {allTracks.slice(0, 60).map((t, i) => <SongRow key={t.id} track={t} index={i} queue={allTracks} onContext={onContext} />)}
       </div>
     </div>

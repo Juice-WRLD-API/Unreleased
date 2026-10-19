@@ -1,3 +1,4 @@
+import { SwapIcon } from './PlayerMotion'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2, Star, Ban } from 'lucide-react'
@@ -999,9 +1000,11 @@ export default function WrldView(): JSX.Element {
                       className="w-12 h-12 rounded-full flex items-center justify-center shadow-xl transition-opacity hover:opacity-80 active:scale-95"
                       style={{ background: txtPri, color: textIsDark ? 'white' : 'black' }}
                     >
-                      {isPlaying
-                        ? <Pause size={20} fill="currentColor" />
-                        : <Play  size={20} fill="currentColor" className="ml-0.5" />}
+                      <SwapIcon swapKey={isPlaying}>
+                        {isPlaying
+                          ? <Pause size={20} fill="currentColor" />
+                          : <Play  size={20} fill="currentColor" className="ml-0.5" />}
+                      </SwapIcon>
                     </button>
                     <button
                       onClick={() => runHotkeyAction('next')}
@@ -1196,9 +1199,11 @@ export default function WrldView(): JSX.Element {
                     className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl transition-opacity hover:opacity-80 active:scale-95"
                     style={{ background: txtPri, color: textIsDark ? 'white' : 'black' }}
                   >
-                    {isPlaying
-                      ? <Pause size={24} fill="currentColor" />
-                      : <Play  size={24} fill="currentColor" className="ml-0.5" />}
+                    <SwapIcon swapKey={isPlaying}>
+                      {isPlaying
+                        ? <Pause size={24} fill="currentColor" />
+                        : <Play  size={24} fill="currentColor" className="ml-0.5" />}
+                    </SwapIcon>
                   </button>
 
                   {/* Next */}

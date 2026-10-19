@@ -1,3 +1,4 @@
+import { PopLayer } from './PopLayer'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useAnchoredPopover } from './anchoredPopover'
@@ -199,7 +200,7 @@ export default function ThemedColorPicker({
       </button>
 
       {pop.open && pop.pos && createPortal(
-        <div
+        <PopLayer
           ref={popRef}
           role="dialog"
           aria-label="Choose a color"
@@ -207,7 +208,7 @@ export default function ThemedColorPicker({
           style={{ ...pop.pos, WebkitAppRegion: 'no-drag' } as CSSProperties}
         >
           <Panel value={hex} onChange={onChange} onClose={close} />
-        </div>,
+        </PopLayer>,
         document.body,
       )}
     </>
