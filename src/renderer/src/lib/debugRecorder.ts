@@ -450,6 +450,27 @@ function environment(): Record<string, unknown> {
   }
 }
 
+export type DebugSummary = {
+  console: number; consoleErrors: number; uncaughtErrors: number
+  requests: number; failedRequests: number; resources: number
+  websocketEvents: number; droppedOldest: number
+}
+
+// The file's `summary` block. Shared with lib/debugLog, which recomputes it
+// when a saved log is opened rather than trusting the one in the file.
+export function summarizeDebugEntries(list: DebugEntry[], droppedOldest: number): DebugSummary {
+  return {
+    console: list.filter(e => e.kind === 'console').length,
+    consoleErrors: list.filter(e => e.kind === 'console' && (e.level === 'error' || e.level === 'warn')).length,
+    uncaughtErrors: list.filter(e => e.kind === 'error' || e.kind === 'rejection').length,
+    requests: list.filter(e => e.kind === 'fetch' || e.kind === 'xhr').length,
+    failedRequests: list.filter(e => (e.kind === 'fetch' || e.kind === 'xhr') && (e.error || (e.status != null && e.status >= 400))).length,
+    resources: list.filter(e => e.kind === 'resource').length,
+    websocketEvents: list.filter(e => e.kind === 'websocket').length,
+    droppedOldest,
+  }
+}
+
 function stamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
@@ -463,16 +484,7 @@ export function stopDebugRecording(): { blob: Blob; filename: string; count: num
   try { sessionStorage.removeItem(SESSION_KEY) } catch { /* ignore */ }
   const stoppedAt = Date.now()
   const sorted = [...entries].sort((a, b) => a.t - b.t)
-  const summary = {
-    console: sorted.filter(e => e.kind === 'console').length,
-    consoleErrors: sorted.filter(e => e.kind === 'console' && (e.level === 'error' || e.level === 'warn')).length,
-    uncaughtErrors: sorted.filter(e => e.kind === 'error' || e.kind === 'rejection').length,
-    requests: sorted.filter(e => e.kind === 'fetch' || e.kind === 'xhr').length,
-    failedRequests: sorted.filter(e => (e.kind === 'fetch' || e.kind === 'xhr') && (e.error || (e.status != null && e.status >= 400))).length,
-    resources: sorted.filter(e => e.kind === 'resource').length,
-    websocketEvents: sorted.filter(e => e.kind === 'websocket').length,
-    droppedOldest: dropped,
-  }
+  const summary = summarizeDebugEntries(sorted, dropped)
   const file = {
     format: 'unreleased-debug-log/1',
     startedAt: new Date(startedAt).toISOString(),
@@ -502,8 +514,9 @@ export function discardDebugRecording(): void {
   notify()
 }
 
-// Stop + trigger the download in one go - what the UI buttons call.
-export function stopAndDownloadDebugRecording(): number {
+// Stop + trigger the download in one go - what the UI buttons call. The file
+// comes back too, so the caller can offer to open it (lib/debugLog).
+export function stopAndDownloadDebugRecording(): { blob: Blob; filename: string; count: number } {
   const { blob, filename, count } = stopDebugRecording()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -513,5 +526,5 @@ export function stopAndDownloadDebugRecording(): number {
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
-  return count
+  return { blob, filename, count }
 }

@@ -17,7 +17,8 @@ import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, set
 import { updatePrivacySettings } from '../userApi'
 import type { AudioFx } from '../audioEffects'
 import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, isDebugRecording, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
-import { fail, parseBool, pickByName, type TermCommand } from './types'
+import { describeEntry, describeLog, formatOffset, isProblem, openDebugLogBlob, openDebugLogFile, type DebugLog } from '../debugLog'
+import { asJson, fail, oneLine, parseArgs, parseBool, pickByName, type TermCommand, type TermCtx } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -274,6 +275,29 @@ function isHttpUrl(s: string): boolean {
 
 const reloadAfter = (apply: () => void): void => { setTimeout(apply, 500) }
 
+// `debuglog open` / `debuglog stop --view`: the log's summary, then its
+// problems (or every event with --all) - the same rows the viewer lists.
+function printDebugLog(ctx: TermCtx, log: DebugLog, all: boolean, json: boolean): void {
+  const rows = all ? log.entries : log.entries.filter(isProblem)
+  if (asJson(ctx, json, {
+    file: log.fileName, startedAt: new Date(log.startedAt).toISOString(), stoppedAt: new Date(log.stoppedAt).toISOString(),
+    environment: log.environment, summary: log.summary, warnings: log.warnings, entries: rows,
+  })) return
+  const s = log.summary
+  ctx.print(`${log.fileName} - ${describeLog(log)}`)
+  ctx.print(`${log.entries.length} events: ${s.requests} requests (${s.failedRequests} failed), ${s.console} console (${s.consoleErrors} errors/warnings), ${s.uncaughtErrors} uncaught errors, ${s.resources} resources, ${s.websocketEvents} websocket events`, 'dim')
+  for (const w of log.warnings) ctx.print(`warning: ${w}`, 'dim')
+  if (rows.length === 0) ctx.print(all ? 'no events' : 'no problems recorded', 'ok')
+  else {
+    if (!all) ctx.print(`${rows.length} ${rows.length === 1 ? 'problem' : 'problems'} (--all lists every event):`)
+    ctx.print(rows.map((e) => {
+      const d = describeEntry(e)
+      return `${formatOffset(e.sinceStartMs).padEnd(11)}${d.tag.padEnd(10)}${oneLine(d.text, 80)}${d.meta ? `  ${oneLine(d.meta, 40)}` : ''}`
+    }).join('\n'))
+  }
+  ctx.print('opened in the debug log viewer', 'dim')
+}
+
 export const SETTINGS_COMMANDS: TermCommand[] = [
   {
     name: 'nav', aliases: ['menu', 'navbar'], group: 'Settings', usage: 'nav [show|hide|toggle <item> | move <item> <up|down|top|bottom|n> | reset]',
@@ -343,12 +367,20 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start|stop|discard]',
-    description: 'Record console messages and network requests, then save them to a file to send us (same as Settings > About > Record debug log)',
-    complete: (before, partial) => before.length === 0 ? ['start', 'stop', 'discard'].filter((v) => v.startsWith(partial.toLowerCase())) : [],
-    run: (args, ctx) => {
-      const verb = args.trim().toLowerCase()
+    name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start|stop [--view]|discard|open [--all] [--json]]',
+    description: 'Record console messages and network requests, then save them to a file to send us; open reads a saved log back - prints its summary and problems (--all: every event) and shows it in the viewer (same as Settings > About > Record debug log / Open log)',
+    complete: (before, partial) => before.length === 0 ? ['start', 'stop', 'discard', 'open'].filter((v) => v.startsWith(partial.toLowerCase())) : [],
+    run: async (args, ctx) => {
+      const { rest, bool } = parseArgs(args)
+      const verb = (rest[0] ?? '').toLowerCase()
       const on = isDebugRecording()
+      if (verb === 'open' || verb === 'view') {
+        // The picker has to open straight off the keypress, before any await.
+        const log = await openDebugLogFile()
+        if (!log) { ctx.print('cancelled', 'dim'); return }
+        printDebugLog(ctx, log, bool.has('all'), bool.has('json'))
+        return
+      }
       if (!verb || verb === 'status') {
         ctx.print(on ? `recording - ${Math.round((Date.now() - debugRecordingStartedAt()) / 1000)}s, ${debugRecordingCount()} events (debuglog stop saves it)` : 'not recording (debuglog start)', on ? 'ok' : 'dim')
         return
@@ -361,8 +393,9 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       }
       if (verb === 'stop' || verb === 'save') {
         if (!on) fail('debuglog: not recording')
-        const n = stopAndDownloadDebugRecording()
-        ctx.print(`saved debug log (${n} events)`, 'ok')
+        const { blob, filename, count } = stopAndDownloadDebugRecording()
+        ctx.print(`saved debug log (${count} events) - ${filename}`, 'ok')
+        if (bool.has('view') || bool.has('open')) printDebugLog(ctx, await openDebugLogBlob(blob, filename), bool.has('all'), bool.has('json'))
         return
       }
       if (verb === 'discard') {
@@ -371,7 +404,7 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
         ctx.print('recording discarded', 'ok')
         return
       }
-      fail('usage: debuglog [start|stop|discard]')
+      fail('usage: debuglog [start|stop [--view]|discard|open [--all] [--json]]')
     },
   },
   {

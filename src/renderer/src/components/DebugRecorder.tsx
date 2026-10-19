@@ -1,13 +1,16 @@
 // UI for lib/debugRecorder: the Settings button that starts/stops a recording,
 // and a floating pill shown everywhere while one is running - the user leaves
-// Settings to reproduce the bug, so the way to stop has to follow them.
+// Settings to reproduce the bug, so the way to stop has to follow them. Saved
+// logs open in DebugLogViewer (the "View" toast after saving, or "Open log").
 import { useEffect, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { Circle, Square } from 'lucide-react'
+import { Circle, FolderOpen, Square } from 'lucide-react'
 import {
   isDebugRecording, debugRecordingStartedAt, debugRecordingCount,
   subscribeDebugRecorder, startDebugRecording, stopAndDownloadDebugRecording,
 } from '../lib/debugRecorder'
+import { openDebugLogBlob, openDebugLogFile } from '../lib/debugLog'
+import { showAppToast } from '../lib/appToast'
 
 export function useDebugRecorder(): { recording: boolean; elapsed: number; count: number } {
   const [recording, setRecording] = useState(isDebugRecording)
@@ -33,8 +36,28 @@ export function formatElapsed(sec: number): string {
 }
 
 export function toggleDebugRecording(): void {
-  if (isDebugRecording()) stopAndDownloadDebugRecording()
-  else startDebugRecording()
+  if (!isDebugRecording()) { startDebugRecording(); return }
+  const { blob, filename, count } = stopAndDownloadDebugRecording()
+  showAppToast(`Debug log saved (${count} events)`, {
+    tone: 'info',
+    action: { label: 'View', onClick: () => { void openDebugLogBlob(blob, filename) } },
+  })
+}
+
+// Settings' "Open log" - shows a saved debug log file in DebugLogViewer.
+export function DebugLogOpenButton(): JSX.Element {
+  const open = (): void => {
+    openDebugLogFile().catch((err) => showAppToast(`Couldn’t open that debug log: ${err instanceof Error ? err.message : String(err)}`))
+  }
+  return (
+    <button
+      onClick={open}
+      title="View a saved debug log file"
+      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-[var(--surface-overlay)] text-text-secondary hover:text-text-primary border border-[var(--border)]"
+    >
+      <FolderOpen size={12} /> Open log
+    </button>
+  )
 }
 
 export function DebugRecordButton({ size = 'sm' }: { size?: 'sm' | 'lg' }): JSX.Element {

@@ -58,6 +58,7 @@ import NewsNotifier from './components/NewsNotifier'
 import BroadcastNotifier from './components/BroadcastNotifier'
 import AppToastHost from './components/AppToastHost'
 import DebugRecordingPill from './components/DebugRecorder'
+import { useDebugLogViewer } from './lib/debugLog'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
@@ -106,6 +107,7 @@ const ContributorPage = lazyView(() => import('./components/ContributorPage'))
 const ContributorProfileView = lazyView(() => import('./components/ContributorProfileView'))
 const Settings = lazyView(() => import('./components/Settings'))
 const DiagnosticsModal = lazyView(() => import('./components/DiagnosticsModal'))
+const DebugLogViewer = lazyView(() => import('./components/DebugLogViewer'))
 const TerminalPage = lazyView(() => import('./components/TerminalPage'))
 const TrackView = lazyView(() => import('./components/TrackView'))
 const ThankYouView = lazyView(() => import('./components/ThankYouView'))
@@ -155,6 +157,7 @@ export default function App(): JSX.Element {
   }
   const heldView = heldViewRef.current
   const isMobile = useIsMobile()
+  const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   useThemeEffects()
   useChatBootstrap()
 
@@ -402,6 +405,11 @@ export default function App(): JSX.Element {
       {showDiagnostics && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowDiagnostics(false)}>
           <Suspense fallback={null}><DiagnosticsModal /></Suspense>
+        </ErrorBoundary>
+      )}
+      {debugLogOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useDebugLogViewer.getState().close()}>
+          <Suspense fallback={null}><DebugLogViewer /></Suspense>
         </ErrorBoundary>
       )}
       {showUserAuth && (
