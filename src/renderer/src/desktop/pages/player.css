@@ -26,6 +26,12 @@
 .circle.quiet:hover { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.85); }
 .circle.quiet.gone { opacity: 0; scale: 0.6; pointer-events: none; }
 .circle svg { width: calc(17px * var(--s)); height: calc(17px * var(--s)); }
+/* The versions button, while the song has no other versions. */
+.circle.away { display: none; }
+/* 999 FM: lit while it's on, faded while it's off the air. */
+.circle.on { background: rgba(255, 255, 255, 0.24); color: #fff; }
+.circle:disabled { opacity: 0.4; }
+.circle:disabled:hover { transform: none; }
 
 .notice { display: flex; align-items: center; gap: calc(10px * var(--s)); padding: calc(7px * var(--s)) calc(16px * var(--s)) calc(7px * var(--s)) calc(7px * var(--s));
   min-height: calc(42px * var(--s)); border-radius: calc(21px * var(--s)); background: rgba(10, 10, 14, 0.62); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 calc(3px * var(--s)) calc(8px * var(--s)) rgba(0, 0, 0, 0.25);
@@ -105,6 +111,13 @@
 .heart.liked svg + svg { opacity: 1; transform: scale(1); }
 .heart.beat svg + svg { animation: heart-beat 0.45s cubic-bezier(0.3, 1.4, 0.5, 1); }
 @keyframes heart-beat { 0% { transform: scale(0.5); } 55% { transform: scale(1.3); } 100% { transform: scale(1); } }
+/* The song's own menu, beside the heart. */
+.more { width: calc(24px * var(--s)); height: calc(24px * var(--s)); flex: none; display: grid; place-items: center; border-radius: 50%;
+  color: rgba(255, 255, 255, 0.6); transition: color 0.2s, background 0.2s, transform 0.25s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.more:hover { color: rgba(255, 255, 255, 0.95); background: rgba(255, 255, 255, 0.1); }
+.more:active { transform: scale(0.88); }
+.more.gone { display: none; }
+.more svg { width: calc(14px * var(--s)); height: calc(14px * var(--s)); }
 .progress { position: relative; height: calc(6px * var(--s)); }
 .progress .rail, .progress .fill { position: absolute; left: 0; bottom: 0; width: 100%; height: calc(2px * var(--s)); border-radius: 99px; transition: height 0.22s ease-out; }
 .progress .rail { background: rgba(255, 255, 255, 0.16); }
@@ -234,6 +247,13 @@
 #menu button { display: block; width: 100%; text-align: left; padding: calc(7px * var(--s)) calc(10px * var(--s)); border-radius: calc(8px * var(--s));
   font-size: calc(12.5px * var(--s)); color: rgba(255, 255, 255, 0.9); }
 #menu button:hover { background: rgba(255, 255, 255, 0.1); }
+/* The song's other versions, and the ⋯ menu with its playlists, over their buttons: a long list scrolls. */
+#menu.listing { max-height: var(--carousel-height); max-width: calc(260px * var(--s)); overflow-y: auto; scrollbar-width: thin; }
+#menu.listing button, #menu .menu-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#menu .menu-title { padding: calc(5px * var(--s)) calc(10px * var(--s)) calc(3px * var(--s)); font-size: calc(11px * var(--s)); font-weight: 600; color: rgba(255, 255, 255, 0.5); }
+#menu button.menu-title { border-radius: calc(8px * var(--s)); }
+#menu button.menu-title:hover { color: rgba(255, 255, 255, 0.85); }
+#menu .menu-note { padding: calc(7px * var(--s)) calc(10px * var(--s)); font-size: calc(12px * var(--s)); color: rgba(255, 255, 255, 0.45); }
 
 /* In the WRLD tab: no desk to clear, and the app it would open is the one it's in. */
 .in-tab [data-action="clear"], .in-tab .cover-arrow { display: none; }

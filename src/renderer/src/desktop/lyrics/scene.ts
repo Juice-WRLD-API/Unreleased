@@ -22,7 +22,18 @@ export interface StageClock { seconds: number; at: number; running: boolean; rat
 /** The song's time now, by its clock. */
 export const clockTime = (clock: StageClock): number =>
   clock.running ? clock.seconds + (epochNow() - clock.at) * (clock.rate ?? 1) : clock.seconds
-export interface StageLook { clock: StageClock | null; isSeen: boolean; colors: AlbumColors | null; face: string; scale: number }
+export interface StageLook {
+  clock: StageClock | null
+  isSeen: boolean
+  colors: AlbumColors | null
+  face: string
+  scale: number
+  /** The app's own lyric settings, for a style that follows them (Karaoke). */
+  tune?: LyricTune
+}
+/** The app's lyric settings (Settings > Lyrics): the text size, and the line sung's and the others' colors (null:
+ *  the style's own). */
+export interface LyricTune { size: number; active: string | null; inactive: string | null }
 
 /** What draws the lyrics: one of the styles here, or the fisheye. */
 export interface LyricRenderer {
@@ -47,6 +58,7 @@ export class LyricScene implements LyricRenderer {
   s = 1
   face: string | null = null
   colors: AlbumColors | null = null
+  tune: LyricTune | null = null
   song: StageSong | null = null
   clock: StageClock | null = null
   isSeen = true
@@ -96,6 +108,9 @@ export class LyricScene implements LyricRenderer {
   /** The style shows the song's name before the singing begins (for its first seconds, then the note). One that
    *  doesn't has the note from the start. */
   get showsTitle(): boolean { return true }
+
+  /** The style sings the adlibs in the line, as written, rather than leaving them out. */
+  get singsAdlibs(): boolean { return false }
 
   /** The face at `size`, matched to the standard's capitals, as a CSS font. */
   font(size: number): string { return faceCSS(this.face!, matchedSize(this.face!, size)) }
@@ -169,19 +184,22 @@ export class LyricScene implements LyricRenderer {
 
   // ---- following the song ----
 
-  show(song: StageSong, { clock, isSeen, colors, face, scale }: StageLook): void {
+  show(song: StageSong, { clock, isSeen, colors, face, scale, tune: tuned }: StageLook): void {
     let redo = false
+    const tune = tuned ?? null
     const colorsChanged = JSON.stringify(colors) !== JSON.stringify(this.colors)
-    if (face !== this.face || colorsChanged || scale !== this.s) {
+    const tuneChanged = JSON.stringify(tune) !== JSON.stringify(this.tune)
+    if (face !== this.face || colorsChanged || tuneChanged || scale !== this.s) {
       this.face = face
       this.colors = colors
+      this.tune = tune
       this.s = scale
       this.restyle()
       redo = true
     }
     if (song.id !== this.song?.id || song.lyrics !== this.song?.lyrics) {
       this.song = song
-      this.lines = LyricScene.linesOf(song)
+      this.lines = LyricScene.linesOf(song, this.singsAdlibs)
       redo = true
     }
     const clockChanged = JSON.stringify(clock) !== JSON.stringify(this.clock)
@@ -212,10 +230,10 @@ export class LyricScene implements LyricRenderer {
     this.stage.remove()
   }
 
-  /** The song's timed lines with their words. */
-  static linesOf(song: StageSong | null): SceneLine[] {
-    return (song?.lyrics?.lines || []).filter((l) => l.words?.length && l.text?.trim())
-      .map((l, index) => ({ index, words: l.words }))
+  /** The song's timed lines with their words: the adlibs left out, or `withAdlibs` sung where they're written. */
+  static linesOf(song: StageSong | null, withAdlibs = false): SceneLine[] {
+    return (song?.lyrics?.lines || []).map((l) => (withAdlibs ? l.all ?? l.words : l.text?.trim() ? l.words : []))
+      .filter((words) => words?.length).map((words, index) => ({ index, words }))
   }
 
   get titleLine(): SceneLine {

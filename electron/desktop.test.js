@@ -94,6 +94,8 @@ test('a line\'s words are spread over it in order, and adlibs kept apart', () =>
   const first = lyrics.lines[0]
   assert.deepEqual(first.words.map((w) => w.text), ['all', 'girls', 'are', 'the', 'same'])
   assert.deepEqual(first.adlibs.map((a) => a.text), ['yeah'])
+  // Every word as written too, for a style that sings the adlibs in the line (Karaoke).
+  assert.deepEqual(first.all.map((w) => w.text), ['all', 'girls', 'are', 'the', 'same', '(yeah)'])
   for (let i = 1; i < first.words.length; i++) assert.ok(first.words[i].start >= first.words[i - 1].end - 1e-9)
   assert.ok(first.words[first.words.length - 1].end <= 12.5)
 })
@@ -141,7 +143,7 @@ test('everything Desktop starts off, and saved settings keep defaults added late
   assert.equal(d.player.isOn, false)
   assert.equal(d.playlist.isOn, false)
   assert.equal(d.clock.isOn, false)
-  assert.equal(d.lyrics.look, 'classic')
+  assert.equal(d.lyrics.look, 'karaoke')
   // Out of the desktop, but all three in WRLD's Widgets layout once that's picked.
   for (const which of ['player', 'playlist', 'clock']) { assert.equal(d[which].inWrld, true); assert.equal(d[which].tabPlace, null) }
   const merged = slice.mergeDesktop(d, { light: { look: 'lava' }, player: { size: 1 }, hiddenDisplays: ['DELL', 3] })
@@ -181,6 +183,17 @@ test('a widget\'s right-click menu hides and shows it where it was clicked, and 
   assert.deepEqual(find(onDesktop, 'Widgets').children.map((w) => w.checked), [false, true, false])
   assert.deepEqual(find(onDesktop, 'Mini player').arg, { player: { mini: true } })
   assert.equal(find(onDesktop, 'Bring everything back').cmd, 'clear')
+
+  // On the lyrics: theirs in place of the player's own, the widget's place and the rest still after.
+  const onLyrics = widgetMenu('player', d, { where: 'tab', desktopToo: true, playlists: [], part: 'lyrics', lyrics: { has: true, timed: false } })
+  assert.equal(find(onLyrics, 'Copy lyrics').cmd, 'copy-lyrics')
+  assert.equal(find(onLyrics, 'Download synced lyrics'), undefined)
+  assert.equal(find(onLyrics, 'Mini player'), undefined)
+  assert.deepEqual(find(find(onLyrics, 'Style').children, 'Karaoke'), { label: 'Karaoke', radio: true, checked: true, cmd: 'set', arg: { lyrics: { look: 'karaoke' } } })
+  assert.deepEqual(find(onLyrics, 'Hide lyrics').arg, { player: { lyricsOpen: false } })
+  assert.ok(find(onLyrics, 'Lock position'))
+  const noLyrics = widgetMenu('player', d, { where: 'tab', desktopToo: true, playlists: [], part: 'lyrics', lyrics: { has: false, timed: false } })
+  assert.equal(find(noLyrics, 'Copy lyrics').disabled, true)
 })
 
 // ---- the main process ----

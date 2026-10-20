@@ -54,7 +54,7 @@ export function frameBridge(): Bridge {
     keys: () => {},
     size: (width: number, height: number) => post({ type: 'size', width: Number(width) || 0, height: Number(height) || 0 }),
     curtainOpened: () => {},
-    menu: (x: number, y: number) => post({ type: 'menu', x: Number(x) || 0, y: Number(y) || 0 }),
+    menu: (x: number, y: number, part?: string) => post({ type: 'menu', x: Number(x) || 0, y: Number(y) || 0, ...(part === 'lyrics' ? { part } : {}) }),
   }
   return bridge as unknown as Bridge
 }

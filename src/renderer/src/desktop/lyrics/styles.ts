@@ -85,7 +85,8 @@ export class SpreadScene extends LyricScene {
 interface KaraokeRow { el: HTMLDivElement; sharp: HTMLCanvasElement; soft: HTMLCanvasElement; lit: HTMLElement[] }
 
 /** A sing-along: the lines in a column gliding up, the one sung large and bright, lit whole as it begins - not word
- *  by word; the others smaller, faint, the near ones softly out of focus. */
+ *  by word; the others smaller, faint, the near ones softly out of focus. Every word as written, adlibs too, in the
+ *  app's lyric size and colors. */
 export class KaraokeScene extends LyricScene {
   rows = new Map<number, KaraokeRow>()
   tops: number[] = []
@@ -104,6 +105,8 @@ export class KaraokeScene extends LyricScene {
 
   /** The note from the start: the column shows no name. */
   get showsTitle(): boolean { return false }
+  /** A sing-along has the whole line to sing, "(yeah)" and all. */
+  get singsAdlibs(): boolean { return true }
 
   constructor(host: HTMLElement) {
     super(host)
@@ -114,7 +117,7 @@ export class KaraokeScene extends LyricScene {
     this.stage.style.maskImage = 'linear-gradient(to bottom, transparent 0%, black 18%, black 78%, transparent 100%)'
   }
 
-  get size(): number { return 30 * this.s }
+  get size(): number { return 30 * this.s * (this.tune?.size || 1) }
   get boxWidth(): number { return Math.min(this.width, 520 * this.s) }
   get room(): number { return this.boxWidth - 20 * this.s }
   get space(): number { return this.size * 0.28 }
@@ -226,8 +229,10 @@ export class KaraokeScene extends LyricScene {
       g.scale(scale, scale)
       g.font = this.css
       const away = w * 4
-      g.fillStyle = 'rgba(255,255,255,0.32)'
-      if (blur) { g.shadowColor = 'rgba(255,255,255,0.32)'; g.shadowBlur = blur * scale; g.shadowOffsetX = -away * scale }
+      // A color picked for the other lines is painted whole: the row's own fading dims it as it does the white.
+      const dim = this.tune?.inactive || 'rgba(255,255,255,0.32)'
+      g.fillStyle = dim
+      if (blur) { g.shadowColor = dim; g.shadowBlur = blur * scale; g.shadowOffsetX = -away * scale }
       const ascent = this.metrics(this.size).ascent
       line.words.forEach((word, i) => {
         const p = set.places[i]
@@ -246,7 +251,7 @@ export class KaraokeScene extends LyricScene {
     const glows = [{ color: cssColor(this.glow, 0.55), radius: 9 * this.s }]
     return line.words.map((word, i) => {
       const p = set.places[i]
-      const picture = ink(word.text, this.css, '#fff', { glows })
+      const picture = ink(word.text, this.css, this.tune?.active || '#fff', { glows })
       el.appendChild(this.place(picture, { x: p.x, y: p.row * (this.rowHeight + this.rowGap) }, null, picture.h - 2 * picture.pad))
       return picture.el
     })

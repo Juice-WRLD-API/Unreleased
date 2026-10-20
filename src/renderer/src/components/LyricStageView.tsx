@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
-import { LyricStage, type StageSong } from '../desktop/lyrics/stage'
+import { useShallow } from 'zustand/react/shallow'
+import { LyricStage, type LyricTune, type StageSong } from '../desktop/lyrics/stage'
 import { lyricFontFor } from '../desktop/lyrics/looks'
 import { timedFromLines, pacedFromText } from '../desktop/lyrics/timing'
 import { useAlbumColors } from '../desktop/artColors'
@@ -31,6 +32,8 @@ export default function LyricStageView({ look, trackId, title, artist, duration,
   const stageRef = useRef<LyricStage | null>(null)
   const lyricsOffset = useStore((s) => s.lyricsOffset)
   const fonts = useStore((s) => s.desktop.lyrics.fonts)
+  // The app's lyric size and colors, for the styles that follow them.
+  const tune = useStore(useShallow((s): LyricTune => ({ size: s.lyricsScale, active: s.lyricsColorActive, inactive: s.lyricsColorInactive })))
   const colors = useAlbumColors(artUrl)
   const clock = usePlayClock()
   const [scale, setScale] = useState(1)
@@ -69,8 +72,8 @@ export default function LyricStageView({ look, trackId, title, artist, duration,
     if (!stage) return
     stage.use(look)
     if (!song.lyrics.lines.length || !clock) { stage.stop(); return }
-    stage.show(song, { clock, isSeen: seen, colors, face: lyricFontFor(fonts, stage.look), scale })
-  }, [look, song, clock, seen, colors, fonts, scale])
+    stage.show(song, { clock, isSeen: seen, colors, face: lyricFontFor(fonts, stage.look), scale, tune })
+  }, [look, song, clock, seen, colors, fonts, scale, tune])
 
   return (
     <div className="relative flex-1 min-h-0">

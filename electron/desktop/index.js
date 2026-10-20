@@ -184,7 +184,7 @@ function createDesktop(options) {
   /** A press on a desktop window (or a row of its menu), for the main window to act on - but the desk, which is ours. */
   function command(cmd, arg) {
     if (cmd === 'clear') { clear.set(arg === undefined ? undefined : Boolean(arg)); return }
-    if (cmd === 'open-app' || cmd === 'open-settings') showMainWindow()
+    if (cmd === 'open-app' || cmd === 'open-settings' || cmd === 'song-info' || cmd === 'edit-song') showMainWindow()
     main()?.webContents.send('desktop:command', cmd, arg)
   }
 
@@ -203,10 +203,10 @@ function createDesktop(options) {
     })
   }
 
-  /** A widget right-clicked: its menu at the pointer. */
-  async function showMenu(which) {
+  /** A widget right-clicked: its menu at the pointer (the lyrics' own, for `part` 'lyrics'). */
+  async function showMenu(which, part) {
     const win = widgets[which]?.window
-    const entries = await ask('widget-menu', { which, isClear: clear.isOn })
+    const entries = await ask('widget-menu', { which, isClear: clear.isOn, part })
     if (!entries || !win || win.isDestroyed()) return
     Menu.buildFromTemplate(menuTemplate(entries)).popup({ window: win })
   }
@@ -242,9 +242,9 @@ function createDesktop(options) {
     'desktop:command': (event, cmd, arg) => {
       if (roles.has(event.sender) && typeof cmd === 'string') command(cmd, arg)
     },
-    'desktop:menu': (event) => {
+    'desktop:menu': (event, part) => {
       const role = roles.get(event.sender)
-      if (role && widgets[role.which]) void showMenu(role.which)
+      if (role && widgets[role.which]) void showMenu(role.which, part === 'lyrics' ? 'lyrics' : undefined)
     },
     'desktop:solid': (event, on) => { const role = roles.get(event.sender); if (role) widgets[role.which]?.solid(Boolean(on)) },
     'desktop:drag': (event, phase) => { const role = roles.get(event.sender); if (role) widgets[role.which]?.dragPhase(phase) },

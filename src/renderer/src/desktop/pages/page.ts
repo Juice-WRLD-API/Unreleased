@@ -4,9 +4,10 @@
 import { frameBridge } from './frameBridge'
 import type { DesktopSettings } from '../../store/desktopSlice'
 import type { AlbumColors, Meter } from '../light/engine'
-import type { StageClock } from '../lyrics/scene'
+import type { LyricTune, StageClock } from '../lyrics/scene'
 import type { TimedLine } from '../lyrics/timing'
 import type { DesktopTrack } from '../../lib/desktopBridge'
+import type { WidgetPart } from '../widgetMenu'
 
 export type { DesktopTrack }
 
@@ -23,9 +24,17 @@ export interface DesktopState {
   volume?: number
   repeat?: 'none' | 'all' | 'one'
   shuffle?: boolean
+  /** Anything in the equalizer set away from neutral: its button lights up, as the app's does. */
+  eq?: boolean
+  /** The song's other versions that can be played (WRLD's version notch's list), labeled by version alone. */
+  versions?: { songId: number; label: string | null }[]
   fm?: boolean
+  /** Whether 999 FM is on the air (null: not known yet). */
+  fmLive?: boolean | null
   cards?: { from: number; current: number; items: DesktopTrack[] }
   lyrics?: { id: string; lines: TimedLine[] } | null
+  /** The app's lyric size and colors, for the lyric styles that follow them. */
+  lyricTune?: LyricTune
   listsVersion?: number
 }
 
@@ -66,8 +75,8 @@ export interface Bridge {
   keys(on: boolean): void
   size(width: number, height: number): void
   curtainOpened(): void
-  /** Right-clicked at this point: the widget's menu, from the app. */
-  menu?(x: number, y: number): void
+  /** Right-clicked at this point: the widget's menu, from the app - the lyrics' own when it was on them (`part`). */
+  menu?(x: number, y: number, part?: WidgetPart): void
 }
 
 export const page = (window as unknown as { desktopPage?: Bridge }).desktopPage ?? frameBridge()
@@ -131,12 +140,13 @@ export function seeThrough(isSolid: (x: number, y: number) => boolean): void {
 }
 
 /** A right-click opens the widget's menu - its settings, its place, hiding it - which the app shows: its own menu in
- *  the WRLD tab, the system's on the desktop. Not one the page answers itself (a song's menu), nor in a field. */
-export function menuOnRightClick(): void {
+ *  the WRLD tab, the system's on the desktop. Not one the page answers itself (a song's menu), nor in a field.
+ *  `partAt` names a part with a menu of its own at a point (the player's lyrics). */
+export function menuOnRightClick(partAt?: (x: number, y: number) => WidgetPart | null): void {
   document.addEventListener('contextmenu', (event) => {
     if (event.defaultPrevented || (event.target as Element | null)?.closest?.('input, textarea, [contenteditable="true"]')) return
     event.preventDefault()
-    page.menu?.(event.clientX, event.clientY)
+    page.menu?.(event.clientX, event.clientY, partAt?.(event.clientX, event.clientY) ?? undefined)
   })
 }
 

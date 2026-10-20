@@ -1,10 +1,18 @@
 // The app's lyrics, timed word by word for the lyric styles. Unreleased times its lyrics line by line (LRC), so each
 // line's words are spread over the time it's sung, by syllables, never slower than an easy pace; lyrics with no
-// timing at all are given an even pace over the song. "(yeah)" and "[uh]" are adlibs, kept apart from the words.
+// timing at all are given an even pace over the song. "(yeah)" and "[uh]" are adlibs, kept apart from the words -
+// though a style may sing every word as written instead (Karaoke).
 // Pure logic, so it can be checked on its own.
 
 export interface TimedWord { text: string; start: number; end: number }
-export interface TimedLine { time: number; text: string; words: TimedWord[]; adlibs: TimedWord[] }
+export interface TimedLine {
+  time: number
+  text: string
+  words: TimedWord[]
+  adlibs: TimedWord[]
+  /** Every word as written, the adlibs in their place: for a style that sings them in the line. */
+  all?: TimedWord[]
+}
 export interface TimedLyrics { lines: TimedLine[]; isSynced: boolean }
 
 function syllables(word: string): number {
@@ -62,7 +70,8 @@ export function timedFromLines(lines: readonly { time: number; text: string }[],
     isSynced: true,
     lines: sorted.map((line, i) => {
       const next = sorted[i + 1] ? sorted[i + 1].time : null
-      return { time: line.time, text: line.text, ...separate(spread(line.text, line.time, next)) }
+      const all = spread(line.text, line.time, next)
+      return { time: line.time, text: line.text, all, ...separate(all) }
     }),
   }
 }
@@ -76,8 +85,9 @@ export function pacedFromText(text: string, duration: number): TimedLyrics {
     isSynced: true,
     lines: sung.map((line, index) => {
       const start = index * step
-      const { words, adlibs } = separate(spread(line, start, start + step))
-      return { time: start, text: words.map((w) => w.text).join(' '), words, adlibs }
+      const all = spread(line, start, start + step)
+      const { words, adlibs } = separate(all)
+      return { time: start, text: words.map((w) => w.text).join(' '), words, adlibs, all }
     }),
   }
 }
