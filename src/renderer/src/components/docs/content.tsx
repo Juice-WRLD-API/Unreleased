@@ -112,20 +112,29 @@ function OverviewTab() {
           <Endpoint method="POST" path="/accounts/logout/" description="Invalidate the current token" />
           <Endpoint method="GET" path="/accounts/application/" description="Fetch the logged-in user's editor or contributor application" />
           <Endpoint method="POST" path="/accounts/application/" description="Apply to become an editor or contributor" />
-          <Endpoint method="GET" path="/accounts/editor/proposals/" description="List your own edit proposals" />
+          <Endpoint method="GET" path="/accounts/editor/proposals/" description="List your own edit proposals (paginated summaries, limit/offset)" />
           <Endpoint method="POST" path="/accounts/editor/proposals/" description="Submit an edit proposal (editor+)" />
           <Endpoint method="GET" path="/accounts/editor/proposals/{id}/" description="Fetch a single proposal by id, any status" />
           <Endpoint method="PATCH" path="/accounts/editor/proposals/{id}/" description="Edit a pending proposal" />
           <Endpoint method="DELETE" path="/accounts/editor/proposals/{id}/" description="Withdraw a proposal" />
+          <Endpoint method="POST" path="/accounts/editor/proposals/batch/" description="Submit many edit proposals as one batch (JSON)" />
+          <Endpoint method="POST" path="/accounts/editor/proposals/batch/withdraw/" description="Withdraw a batch, or a list of your pending proposals" />
           <Endpoint method="GET" path="/accounts/editor/leaderboard/" description="Editor approved-count leaderboard with badges" />
           <Endpoint method="GET" path="/accounts/contributor/proposals/" description="List your own comp-file proposals (contributor+)" />
           <Endpoint method="POST" path="/accounts/contributor/proposals/" description="Submit a comp-file proposal (multipart, contributor+)" />
           <Endpoint method="PATCH" path="/accounts/contributor/proposals/{id}/" description="Edit a pending comp-file proposal (multipart)" />
           <Endpoint method="DELETE" path="/accounts/contributor/proposals/{id}/" description="Withdraw a comp-file proposal" />
+          <Endpoint method="POST" path="/accounts/contributor/proposals/upload/stage/" description="Stage many small files in one multipart request, get an upload_id each" />
+          <Endpoint method="POST" path="/accounts/contributor/proposals/batch/" description="Submit many comp-file proposals as one ordered batch (JSON)" />
+          <Endpoint method="POST" path="/accounts/contributor/proposals/batch/withdraw/" description="Withdraw a batch, or a list of your pending comp-file proposals" />
+          <Endpoint method="POST" path="/accounts/admin/proposals/batch/review/" description="Approve/reject a batch or list of edit proposals (admin/manager)" />
+          <Endpoint method="POST" path="/accounts/admin/proposals/batch/reverse/" description="Reverse a batch or list of approved edit proposals (admin/manager)" />
           <Endpoint method="GET" path="/accounts/admin/comp-proposals/" description="List all comp-file proposals (admin)" />
           <Endpoint method="POST" path="/accounts/admin/comp-proposals/{id}/review/" description="Approve/reject a comp-file proposal (admin)" />
           <Endpoint method="POST" path="/accounts/admin/comp-proposals/{id}/reverse/" description="Reverse an approved comp-file proposal (admin)" />
           <Endpoint method="GET" path="/accounts/admin/comp-proposals/{id}/staging/" description="Download the staged file for review (admin)" />
+          <Endpoint method="POST" path="/accounts/admin/comp-proposals/batch/review/" description="Approve/reject a batch or list of comp-file proposals, in order (admin/manager)" />
+          <Endpoint method="POST" path="/accounts/admin/comp-proposals/batch/reverse/" description="Reverse a batch or list of approved comp-file proposals, newest first (admin/manager)" />
           <Endpoint method="GET" path="/accounts/admin/comp-files/{filepath}/history/" description="Revision history for a compilation file (admin)" />
           <Endpoint method="GET" path="/accounts/admin/channels/" description="List all comp channels, incl. inactive (admin)" />
           <Endpoint method="POST" path="/accounts/admin/channels/" description="Create a comp channel (admin)" />
@@ -484,7 +493,7 @@ function FilesTab() {
         <Table
           headers={['Param', 'Required', 'Description']}
           rows={[
-            [<Code>path</Code>, 'No', 'Only return what is below this folder (any depth), in one request. Item paths stay relative to the channel root; the response gains base'],
+            [<Code>path</Code>, 'No', <>Only return what is below this folder (any depth), in one request. Item paths stay relative to the channel root; the response gains <Code>base</Code>. Handy for du/tree-style tools that would otherwise list folder by folder</>],
             [<Code>channel</Code>, 'No', 'Comp channel slug. Defaults to the primary channel'],
           ]}
         />
@@ -608,7 +617,7 @@ GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&size=400`}</Pre>
             <p className="text-xs text-text-muted"><Code>channel</Code> is optional; omit it for the primary channel.</p>
           </div>
           <div>
-            <MethodPath method="GET" path={`/zip-job-status/{'{job_id}'}/ `} />
+            <MethodPath method="GET" path="/zip-job-status/{job_id}/" />
             <p className="text-xs text-text-muted">
               Poll ZIP job progress. Once <Code>status</Code> is <Code>"done"</Code>, the response carries a{' '}
               <Code>download_url</Code> pointing at <Code>{'GET /zip-jobs/{filename}'}</Code>, which streams the
@@ -616,7 +625,7 @@ GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&size=400`}</Pre>
             </p>
           </div>
           <div>
-            <MethodPath method="POST" path={`/cancel-zip-job/{'{job_id}'}/ `} />
+            <MethodPath method="POST" path="/cancel-zip-job/{job_id}/" />
             <p className="text-xs text-text-muted">Cancel an in-progress ZIP job.</p>
           </div>
           <div>
@@ -667,7 +676,7 @@ function PlaylistsTab() {
             </p>
           </div>
           <div>
-            <MethodPath method="GET" path={`/playlists/shared/{'{share_id}'}/ `} />
+            <MethodPath method="GET" path="/playlists/shared/{share_id}/" />
             <p className="text-xs text-text-muted">Full shared playlist with all track metadata. Each call increments <Code>view_count</Code>.</p>
             <Pre>{`{
   "success": true,
@@ -680,7 +689,7 @@ function PlaylistsTab() {
             </p>
           </div>
           <div>
-            <MethodPath method="GET" path={`/playlists/shared/{'{share_id}'}/info/`} />
+            <MethodPath method="GET" path="/playlists/shared/{share_id}/info/" />
             <p className="text-xs text-text-muted">Lightweight preview, no song fetch and no <Code>view_count</Code> increment. Same <Code>404</Code> / <Code>410</Code> errors as above.</p>
             <Pre>{`{ "success": true, "name": "Late night drive", "description": "", "song_count": 3, "mode": "shuffle", "created_at": "...", "view_count": 12 }`}</Pre>
           </div>
@@ -694,7 +703,7 @@ function PlaylistsTab() {
         <Table
           headers={['Method', 'Path', 'Description']}
           rows={[
-            ['GET', '/library/playlists/', 'List all playlists for logged-in user (supports ?omit_cover_image=true)'],
+            ['GET', '/library/playlists/', 'List all playlists for logged-in user (supports ?omit_cover_image=true, ?include_items=true)'],
             ['POST', '/library/playlists/', 'Create a playlist'],
             ['GET', '/library/playlists/{id}/', 'Get playlist with full track list'],
             ['PATCH', '/library/playlists/{id}/', 'Update name, description, cover, visibility, or reorder tracks'],
@@ -706,6 +715,11 @@ function PlaylistsTab() {
         <p className="text-xs text-text-muted mt-2">
           <Code>?omit_cover_image=true</Code> drops the (large, base64) <Code>cover_image</Code> field from the response. Use it for
           list views that only need <Code>cover_image_url</Code>.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          <Code>?include_items=true</Code> (also <Code>1</Code> or <Code>yes</Code>) returns each playlist in the detail shape, with its
+          full track list, plus a <Code>track_count</Code> field. One request then carries both the summary list and every
+          playlist&apos;s detail.
         </p>
         <p className="text-xs text-text-muted font-semibold mt-3">Create:</p>
         <Pre>{`POST /library/playlists/
@@ -1007,6 +1021,9 @@ Authorization: Token <token>`}</Pre>
     { "song": 94086, "played_at": "2026-08-03T20:14:00Z" }
   ],
   "news_subscriptions": ["announcements"],   // news-channel slugs the user follows, max 50
+  "notch_pins": [
+    { "id": 7, "name": "Album name", "section": 2, "cover_url": "...", "song_count": 14 }
+  ],                                         // albums the user pinned, ordered by section then position; read-only here
   "memberships": [
     { "channel_slug": "alrdywrld", "channel_name": "alrdywrld", "is_primary": false, "is_editor": true, "is_contributor": true, "is_manager": false, "auto_approve_proposals": false, "auto_approve_comp_proposals": false }
   ]
@@ -1203,6 +1220,9 @@ Authorization: Token <token>`}</Pre>
             <p className="text-xs text-text-muted mt-2">
               Every PATCH that changes <Code>now_playing</Code> or <Code>public_now_playing</Code> also pushes a{' '}
               <Code>now_playing.updated</Code> event to chat sockets (see the Staff Chat tab), so staff chat can show it live without polling.
+              When the publicly visible song actually changes (new track, stop, or the visibility toggle), it also pushes a public{' '}
+              <Code>now_playing.updated</Code> event to the notifications socket (see the Realtime Sockets tab); keepalive PATCHes
+              repeating the same song are not pushed.
             </p>
             <p className="text-xs text-text-muted mt-2">
               The server stamps <Code>updated_at</Code> on every successful PATCH — don&apos;t send it yourself.
@@ -1549,6 +1569,70 @@ Authorization: Token <token>`}</Pre>
 // Response: { "otp_enabled": true }`}</Pre>
       </Section>
 
+      <Section title="Login Approval (sign in from another device)" defaultOpen={false}>
+        <p className="text-xs text-text-muted">
+          An alternative to typing an authenticator code. After a correct password the new device asks the account&apos;s
+          already signed-in devices for a yes. Only for accounts with two-factor enabled (<Code>otp_enabled</Code>); others get{' '}
+          <Code>{'400 { "detail": "Two-factor is not enabled for this account." }'}</Code>.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Auth', 'Description']}
+          rows={[
+            ['POST', '/accounts/auth/login/approval/', 'none', 'New device: send the password, get a pending request'],
+            ['POST', '/accounts/auth/login/approval/{id}/poll/', 'none (secret)', 'New device: poll until approved or denied'],
+            ['GET', '/accounts/account/login-approvals/', 'token', 'Signed-in device: requests waiting for a decision'],
+            ['POST', '/accounts/account/login-approvals/{id}/{decision}/', 'token', <>Signed-in device: <Code>decision</Code> is <Code>approve</Code> or <Code>deny</Code></>],
+          ]}
+        />
+        <p className="text-xs text-text-muted font-semibold mt-3">1. Request (new device)</p>
+        <Pre>{`// POST /accounts/auth/login/approval/
+{ "username": "myuser", "password": "secure-password" }
+
+// 201
+{ "id": "6f1c…", "secret": "kT3…", "code": "47", "expires_in": 120 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Show <Code>code</Code> on the new device&apos;s screen. Keep <Code>secret</Code> private: it is the only thing that can
+          collect the result, and the server stores just its hash. A wrong password or disabled account returns{' '}
+          <Code>{'400 { "detail": "Invalid username or password." }'}</Code> and counts toward the failed-login throttle. More
+          than 5 live requests for the account returns <Code>429</Code>.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">2. Decide (signed-in device)</p>
+        <p className="text-xs text-text-muted">
+          <Code>GET /accounts/account/login-approvals/</Code> returns the live requests, newest first:
+        </p>
+        <Pre>{`[ { "id": "6f1c…", "code": "47", "ip": "203.0.113.7", "user_agent": "Mozilla/5.0 …", "created_at": "2026-10-04T12:00:00Z" } ]`}</Pre>
+        <p className="text-xs text-text-muted">
+          Show the <Code>code</Code>, <Code>ip</Code> and <Code>user_agent</Code>, and let the user compare the code with the one
+          on the new device before approving. <Code>{'POST …/{id}/approve/'}</Code> or <Code>{'…/{id}/deny/'}</Code> returns{' '}
+          <Code>{'{ "status": "approved" }'}</Code> or <Code>{'{ "status": "denied" }'}</Code>. A request that is unknown, not
+          yours, already decided or older than 2 minutes returns <Code>{'404 { "detail": "This request has expired." }'}</Code>;
+          any other <Code>decision</Code> returns <Code>400</Code>.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-3">3. Poll (new device)</p>
+        <p className="text-xs text-text-muted">
+          <Code>POST</Code> <Code>{'{ "secret": "kT3…" }'}</Code> every second or two. Responses:
+        </p>
+        <Table
+          headers={['Body', 'Meaning']}
+          rows={[
+            [<Code>{'{ "status": "pending" }'}</Code>, 'Keep polling'],
+            [<Code>{'{ "status": "denied" }'}</Code>, 'The user said no. Stop'],
+            [<Code>{'{ "status": "approved", "token": "abc123…", "user": { … } }'}</Code>, <>Signed in. <Code>user</Code> has the same shape as <Code>GET /accounts/account/me/</Code></>],
+            [<Code>{'{ "status": "expired" }'}</Code>, 'Timed out, or the token was already collected. Start over'],
+            [<Code>{'404 { "status": "expired" }'}</Code>, 'Unknown id or wrong secret'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          New requests also push a <Code>login_approval.created</Code> event to the account&apos;s authenticated notifications
+          sockets so signed-in devices can show the prompt immediately instead of waiting for a poll (see the Realtime Sockets
+          tab). The event carries only the request <Code>id</Code>.
+        </p>
+        <p className="text-xs text-text-muted mt-2">
+          The token is released exactly once: the request flips to consumed on the first approved poll, so a replay gets{' '}
+          <Code>expired</Code>. Requests live for 2 minutes from creation.
+        </p>
+      </Section>
+
       <Section title="API Keys" defaultOpen={false}>
         <p className="text-xs text-text-muted">
           Named keys for scripts and integrations. A key acts as its owner, limited by its scopes, and never raises the account's
@@ -1613,7 +1697,7 @@ function EditorWorkflowTab() {
         <Table
           headers={['Method', 'Path', 'Description']}
           rows={[
-            ['GET', '/accounts/editor/proposals/', "List the logged-in editor's own proposals"],
+            ['GET', '/accounts/editor/proposals/', "List the logged-in editor's own proposals: paginated summaries, see Listing your proposals below"],
             ['POST', '/accounts/editor/proposals/', 'Submit a new proposal'],
             ['GET', '/accounts/editor/proposals/{id}/', 'Fetch a single proposal by id, any status - not just pending'],
             ['PATCH', '/accounts/editor/proposals/{id}/', 'Edit a still-pending proposal'],
@@ -1679,6 +1763,121 @@ Content-Type: application/json
   "reviewed_at": null
 }`}</Pre>
         <p className="text-xs text-text-muted"><Code>status</Code> is one of <Code>pending</Code>, <Code>approved</Code>, <Code>rejected</Code>, <Code>reversed</Code>.</p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Listing your proposals</p>
+        <p className="text-xs text-text-muted">
+          <Code>GET /accounts/editor/proposals/</Code> returns a page of summaries, newest first. It used to return a bare
+          array of full proposals; read <Code>results</Code> now.
+        </p>
+        <Table
+          headers={['Param', 'Type', 'Description']}
+          rows={[
+            [<Code>channel</Code>, 'string', 'Optional channel slug, as above'],
+            [<Code>limit</Code>, 'number', 'Page size, default 50, clamped to 1–200. Non-numeric falls back to the default'],
+            [<Code>offset</Code>, 'number', 'Rows to skip, default 0'],
+            [<Code>batch</Code>, 'string', <>Only the proposals of one batch (see Batch submission below)</>],
+          ]}
+        />
+        <Pre>{`GET /accounts/editor/proposals/?channel=comp&limit=50&offset=0
+Authorization: Token <token>`}</Pre>
+        <Pre>{`{
+  "count": 312,
+  "limit": 50,
+  "offset": 0,
+  "results": [
+    {
+      "id": 167,
+      "editor_username": "freakypallet",
+      "editor_id": 12,
+      "channel_slug": "comp",
+      "song": 94086,
+      "song_public_id": 163,
+      "change_type": "update",
+      "title": "Song Title",
+      "revised_by_admin": false,
+      "editor_notes": "",
+      "status": "pending",
+      "reviewer_username": null,
+      "review_notes": "",
+      "edit_count": 0,
+      "last_edited_at": null,
+      "created_at": "2026-06-16T22:07:24.970047Z",
+      "reviewed_at": null,
+      "changed_fields": ["lyrics"]
+    }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          A summary is the proposal object above without <Code>proposed_data</Code>, <Code>original_proposed_data</Code>,{' '}
+          <Code>applied_data</Code> and <Code>original_snapshot</Code>, which carry song data such as full lyrics. In their
+          place, <Code>changed_fields</Code> lists the keys of <Code>proposed_data</Code>, sorted, so a row can say what the
+          proposal touches. When a proposal is expanded, fetch <Code>{'GET /accounts/editor/proposals/{id}/'}</Code> for the
+          full object, including the diff fields.
+        </p>
+        <p className="text-xs text-text-muted">
+          There are more pages while <Code>offset + results.length &lt; count</Code>. The admin queue
+          (<Code>/accounts/admin/proposals/</Code>, Admin tab) is unchanged: unpaginated, with <Code>proposed_data</Code> and
+          the trimmed <Code>original_snapshot</Code> inline.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Batch submission</p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['POST', '/accounts/editor/proposals/batch/', 'Submit many proposals in one request (JSON)'],
+            ['POST', '/accounts/editor/proposals/batch/withdraw/', 'Withdraw a whole batch, or a list of your pending proposals'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Proposals sent together share a <Code>batch_id</Code>, so a reviewer can approve or reject them in one call (Admin
+          tab, Batch Review). Each item takes the same fields as a single <Code>POST /accounts/editor/proposals/</Code>. A
+          batch holds up to 5000 items.
+        </p>
+        <Pre>{`POST /accounts/editor/proposals/batch/
+Authorization: Token <token>
+Content-Type: application/json
+
+{
+  "channel": "optional, channel slug",
+  "items": [
+    { "change_type": "update", "song": 94086, "title": "Song A", "proposed_data": { "bpm": 140 } },
+    { "change_type": "update", "song": 94087, "title": "Song B", "proposed_data": { "key": "C minor" }, "editor_notes": "per the stems" }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Every item is validated before anything is saved. If any item is invalid, the response is a <Code>400</Code> and no
+          proposal is created:
+        </p>
+        <Pre>{`{
+  "detail": "1 of 2 items are invalid; nothing was submitted.",
+  "errors": [
+    { "index": 1, "errors": { "non_field_errors": ["A song is required for update or delete proposals."] } }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">On success (<Code>201</Code>):</p>
+        <Pre>{`{
+  "batch_id": "3f0c9d52-6a1e-4f7b-9d0e-1c2b3a4d5e6f",
+  "count": 2,
+  "auto_approved": 0,
+  "pending": 2,
+  "proposals": [ /* proposal objects, in item order */ ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          For a trusted editor (<Code>auto_approve_proposals</Code>) the items are applied in order straight away. If one
+          fails, it and every item after it stay <Code>pending</Code> for a reviewer, and the response adds{' '}
+          <Code>{'"auto_approve_error": { "id": 171, "detail": "..." }'}</Code>. Discord gets one summary post for the batch,
+          not one per proposal.
+        </p>
+        <p className="text-xs text-text-muted">
+          Every proposal object carries <Code>batch_id</Code> (<Code>null</Code> for proposals submitted on their own).{' '}
+          <Code>{'GET /accounts/editor/proposals/?batch=<batch_id>'}</Code> lists one batch.
+        </p>
+        <p className="text-xs text-text-muted">
+          To withdraw, send <Code>{'{ "batch_id": "..." }'}</Code> or <Code>{'{ "ids": [171, 172] }'}</Code> to{' '}
+          <Code>/batch/withdraw/</Code>. Only your own pending proposals are withdrawn; the others come back as{' '}
+          <Code>skipped</Code>. Ids that aren&apos;t yours return a <Code>404</Code> with <Code>missing_ids</Code>, and nothing is
+          withdrawn. The response has the batch-result shape described under Batch Review on the Admin tab.
+        </p>
       </Section>
 
 
@@ -1964,6 +2163,103 @@ Content-Type: application/json
           <Code>status</Code> is <Code>pending</Code>, <Code>approved</Code>, <Code>rejected</Code>, or{' '}
           <Code>reversed</Code>. <Code>staging_filename</Code> points at the uploaded file sitting in staging until
           an admin approves it; <Code>applied_commit_id</Code> is set once approval actually lands the change.
+        </p>
+
+        <p className="text-xs text-text-muted font-semibold mt-4">Batch submission (many files at once)</p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['POST', '/accounts/contributor/proposals/upload/stage/', <>Stage many small files in one multipart request; returns an <Code>upload_id</Code> per file</>],
+            ['POST', '/accounts/contributor/proposals/batch/', 'Submit many comp-file proposals as one ordered batch (JSON)'],
+            ['POST', '/accounts/contributor/proposals/batch/withdraw/', 'Withdraw a whole batch, or a list of your pending proposals'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Use a batch for changes that touch many files: re-uploading a whole comp, clearing a folder and filling it again,
+          mass moves. A batch is ordered. Each item is validated against the comp as the items before it leave it, so one
+          batch can delete a folder and then upload new files to the same paths. Approval applies the items in the same order.
+        </p>
+        <p className="text-xs text-text-muted">
+          <span className="font-semibold text-text-primary">1. Get the files onto the server.</span> Each upload in a batch is
+          referenced by an <Code>upload_id</Code>:
+        </p>
+        <ul className="text-xs text-text-muted list-disc pl-5 space-y-1">
+          <li>
+            Small files: <Code>POST /accounts/contributor/proposals/upload/stage/</Code>, multipart, with one{' '}
+            <Code>files</Code> field per file. Up to 100 files per request, each at most 100 MB. Keep each request&apos;s total
+            size reasonable and send more requests for the rest.
+          </li>
+          <li>
+            Large files (16 MB and up): <Code>upload/init/</Code> and <Code>upload/chunk/</Code> as described above, but
+            don&apos;t call <Code>upload/complete/</Code>. Put the <Code>upload_id</Code> in the batch instead.
+          </li>
+        </ul>
+        <Pre>{`POST /accounts/contributor/proposals/upload/stage/
+Authorization: Token <token>
+FormData:
+  files     <binary>   // repeat per file; the filename needs an allowed comp extension
+  files     <binary>
+  channel   "optional, channel slug"
+
+→ { "uploads": [ { "upload_id": "...", "filename": "Song.mp3", "size": 5123456 } ] }   // same order as sent`}</Pre>
+        <p className="text-xs text-text-muted">
+          If any file is rejected, none of the request&apos;s files are kept. Staged uploads that no batch uses expire after 24
+          hours.
+        </p>
+        <p className="text-xs text-text-muted">
+          <span className="font-semibold text-text-primary">2. Submit the batch.</span>
+        </p>
+        <Pre>{`POST /accounts/contributor/proposals/batch/
+Authorization: Token <token>
+Content-Type: application/json
+
+{
+  "channel": "optional, channel slug",
+  "contributor_notes": "optional, default for every item",
+  "is_new_leak": false,
+  "items": [
+    { "change_type": "delete_folder", "file_path": "Era Name" },
+    { "change_type": "upload", "file_path": "Era Name/Song.mp3", "upload_id": "..." },
+    { "change_type": "upload", "file_path": "Era Name/Song (Alt).wav", "upload_id": "...", "contributor_notes": "per-item notes win", "is_new_leak": true },
+    { "change_type": "move", "file_path": "Misc/Old.mp3", "destination_path": "Era Name/Old.mp3" }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Items take the same fields as a single proposal, except that the file is given as <Code>upload_id</Code>: required
+          for <Code>upload</Code> and <Code>replace</Code>, rejected on every other change type, and usable once per batch.
+          The <Code>upload_id</Code> must belong to you, be fully received, and be in the same channel. A batch holds up to
+          5000 items.
+        </p>
+        <p className="text-xs text-text-muted">
+          Every item is validated before anything is created. If any item is invalid, the response is a <Code>400</Code> and
+          nothing is submitted. Your staged uploads are kept, so you can fix the batch and send it again:
+        </p>
+        <Pre>{`{
+  "detail": "1 of 4 items are invalid; nothing was submitted.",
+  "errors": [
+    { "index": 3, "errors": { "destination_path": ["An active file already exists at the destination."] } }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          On success (<Code>201</Code>) the response has the same shape as an editor batch: <Code>batch_id</Code>,{' '}
+          <Code>count</Code>, <Code>auto_approved</Code>, <Code>pending</Code> and <Code>proposals</Code> (comp proposal
+          objects, in item order). The staged uploads become the proposals&apos; staged files, and their{' '}
+          <Code>upload_id</Code>s can&apos;t be used again.
+        </p>
+        <p className="text-xs text-text-muted">
+          Auto-approve: a trusted contributor&apos;s batch is applied straight away, in order, only when it contains no{' '}
+          <Code>delete</Code> or <Code>delete_folder</Code> item. Otherwise the whole batch waits for review, because uploads
+          that rely on a pending delete would fail if applied ahead of it. If an auto-applied item fails, it and every item
+          after it stay <Code>pending</Code>, and the response adds <Code>auto_approve_error</Code>.
+        </p>
+        <p className="text-xs text-text-muted">
+          To clear out a comp before re-uploading it, note that <Code>delete_folder</Code> items need a second administrator
+          to approve (Admin tab), while per-file <Code>delete</Code> items can be approved by the channel&apos;s manager.
+        </p>
+        <p className="text-xs text-text-muted">
+          Every comp proposal object carries <Code>batch_id</Code>;{' '}
+          <Code>{'GET /accounts/contributor/proposals/?batch=<batch_id>'}</Code> lists one batch. <Code>/batch/withdraw/</Code>{' '}
+          works like the editor one and also deletes the withdrawn proposals&apos; staged files.
         </p>
       </Section>
 
@@ -2303,6 +2599,75 @@ function AdminTab() {
       </Section>
 
 
+      <Section title="Admin: Batch Review" defaultOpen={false}>
+        <p className="text-xs text-text-muted">
+          Review or reverse many proposals in one request: a whole batch (see Batch submission on the Editor Workflow tab) or
+          any list of proposal ids.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['POST', '/accounts/admin/proposals/batch/review/', 'Approve or reject edit proposals'],
+            ['POST', '/accounts/admin/proposals/batch/reverse/', 'Reverse approved edit proposals'],
+            ['POST', '/accounts/admin/comp-proposals/batch/review/', 'Approve or reject comp-file proposals, in order'],
+            ['POST', '/accounts/admin/comp-proposals/batch/reverse/', 'Reverse approved comp-file proposals, newest first'],
+          ]}
+        />
+        <Pre>{`POST /accounts/admin/comp-proposals/batch/review/
+Authorization: Token <token>
+Content-Type: application/json
+
+{
+  "batch_id": "3f0c9d52-6a1e-4f7b-9d0e-1c2b3a4d5e6f",   // or "ids": [101, 102, 103]; send exactly one of the two
+  "action": "approve",                                  // review endpoints only: "approve" | "reject"
+  "review_notes": "optional, stored on every proposal",
+  "stop_on_error": true,                                // optional, default true
+  "channel": "the proposals' channel slug"
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Permissions are the same as the single-proposal endpoints: admin or manager of the proposals&apos; own channel, with{' '}
+          <Code>channel</Code> sent the same way. If any id doesn&apos;t exist or is in a channel you can&apos;t manage, the
+          response is a <Code>404</Code> with <Code>missing_ids</Code> and nothing is done. There is no{' '}
+          <Code>"revise"</Code> action in a batch; revise edit proposals one at a time.
+        </p>
+        <p className="text-xs text-text-muted font-semibold mt-2">How a run works:</p>
+        <ul className="text-xs text-text-muted list-disc pl-5 space-y-1">
+          <li>Proposals are processed oldest first. Reverse goes newest first, so items that built on earlier ones are undone before them.</li>
+          <li>Each proposal is applied in its own transaction. A comp change moves files on disk, so once a proposal is applied it stays applied even if a later one fails.</li>
+          <li>With <Code>stop_on_error</Code> (the default), the first failure stops the run. The remaining proposals are reported as <Code>not_run</Code> and are left as they were.</li>
+          <li>A proposal that&apos;s no longer in the right status (already reviewed, withdrawn) is <Code>skipped</Code>. Sending the same request again after fixing a failure therefore continues where the last run stopped.</li>
+          <li>On comp approvals, the <Code>delete_folder</Code> rules apply to every pending item. If you can&apos;t approve one of them, the response is a <Code>403</Code> listing them in <Code>{'blocked: [{ id, detail }]'}</Code>, and nothing is applied.</li>
+          <li>Discord gets one summary post per batch action, not one per proposal.</li>
+        </ul>
+        <p className="text-xs text-text-muted mt-2">
+          The response is a <Code>200</Code> even when some proposals fail; check <Code>summary.failed</Code>.
+        </p>
+        <Pre>{`{
+  "batch_id": "3f0c9d52-6a1e-4f7b-9d0e-1c2b3a4d5e6f",
+  "action": "approve",
+  "summary": { "approved": 118, "skipped": 0, "failed": 1, "not_run": 381 },
+  "results": [
+    { "id": 101, "result": "approved", "proposal": { /* proposal object */ } },
+    { "id": 219, "result": "failed", "detail": "An active file already exists at this path.", "status_code": 409, "proposal": { } },
+    { "id": 220, "result": "not_run", "proposal": { } }
+  ]
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>batch_id</Code> is <Code>null</Code> when <Code>ids</Code> were sent. <Code>result</Code> is{' '}
+          <Code>approved</Code>, <Code>rejected</Code>, <Code>withdrawn</Code> or <Code>reversed</Code> for proposals the
+          action went through on; <Code>skipped</Code> and <Code>failed</Code> come with a <Code>detail</Code>, and{' '}
+          <Code>failed</Code> also carries the status code the single-proposal endpoint would have returned. Edit proposals in{' '}
+          <Code>results</Code> use the trimmed admin-list shape.
+        </p>
+        <p className="text-xs text-text-muted">
+          A whole-comp approval runs inside the request and can take minutes. If the connection drops, the server finishes the
+          run. To see progress, use <Code>{'GET /accounts/admin/comp-proposals/?batch=<batch_id>&counts=1'}</Code>; to continue
+          after a failure, send the request again. Both admin lists accept <Code>{'?batch=<batch_id>'}</Code>, alone or with{' '}
+          <Code>?status=</Code> and <Code>?counts=1</Code>.
+        </p>
+      </Section>
+
+
       <Section title="Admin: Comp File History" defaultOpen={false}>
         <Table
           headers={['Method', 'Path', 'Description']}
@@ -2421,7 +2786,7 @@ function FeedbackTab() {
   "song": 94086,
   "song_name": "Maze",
   "message": "Issues: Wrong era\\n\\nSong: Maze\\n\\n(Unreleased v1.18.0)",
-  "contact": "someuser",
+  "reporter_contact": "someuser",   // the "contact" sent on submit
   "status": "pending",
   "review_notes": "",
   "reviewer_username": null,
@@ -4130,10 +4495,14 @@ function ChatTab() {
       </Section>
 
       <Section title="WebSocket">
-        <Pre>{`wss://YOUR_HOST/juicewrld/ws/chat/?token=YOUR_TOKEN`}</Pre>
+        <Pre>{`wss://YOUR_HOST/juicewrld/ws/chat/`}</Pre>
         <p className="text-xs text-text-muted">
-          Authenticates from the <Code>token</Code> query param; closes with code <Code>4401</Code> if missing/
-          invalid or the user isn&apos;t staff. On connect you receive, in order:
+          Authenticate with a short-lived ticket: <Code>POST /chat/ws-ticket/</Code> with your token header, open the socket
+          with no query string, and send <Code>{'{ "type": "auth", "ticket": "..." }'}</Code> as the first frame within 10
+          seconds. Failure or silence closes the socket with <Code>4401</Code>, and so does the account later losing access
+          (token deleted or rotated, deactivation, site ban). A legacy <Code>?token=</Code> in the URL may still be accepted,
+          but don&apos;t rely on it. Full flow, rules and close conditions: Realtime Sockets tab. On connect you receive, in
+          order:
         </p>
         <Pre>{`{ "type": "connected", "user_id": 12 }
 { "type": "presence.snapshot", "online": [12, 15] }`}</Pre>
@@ -4174,6 +4543,8 @@ function ChatTab() {
             [<><Code>channel.created</Code> / <Code>channel.updated</Code></>, 'server, channel'],
             [<Code>channel.deleted</Code>, 'server, channel_id'],
             [<Code>conversation.updated</Code>, 'conversation'],
+            [<Code>room.updated</Code>, 'kind (channel|conversation), id, server (channels), last_message_id, last_message_at, author_id (every new message; see the Realtime Sockets tab)'],
+            [<Code>unread.changed</Code>, "kind, id, last_read_message_id, unread (reader's own sockets only; see the Realtime Sockets tab)"],
             [<Code>key.rotated</Code>, 'conversation, key_version'],
             [<Code>device.added</Code>, 'conversation, user_id'],
             [<Code>envelope.available</Code>, 'conversation, key_version'],
@@ -4182,6 +4553,8 @@ function ChatTab() {
             [<Code>identity.changed</Code>, 'user_id, conversation (v2 — identity reset; same fan-out as devices.updated)'],
             [<Code>todevice.available</Code>, 'device_id (v2 — to the recipient user only; fetch if it names this device)'],
             [<Code>link.claimed</Code>, 'session_id (v2 — to the linking user only)'],
+            [<Code>link.requested</Code>, 'device_id, label, expires_at (v2; own sockets; the code is never pushed; see the Realtime Sockets tab)'],
+            [<><Code>device.registered</Code> / <Code>device.revoked</Code></>, 'device_id (v1; own sockets only)'],
             [<Code>backup.updated</Code>, '(no payload) (v2 — to the backup owner only)'],
             [<><Code>role.created</Code> / <Code>role.updated</Code></>, 'server, role'],
             [<Code>role.deleted</Code>, 'server, role_id'],
@@ -4201,6 +4574,10 @@ function ChatTab() {
         <p className="text-xs text-text-muted">
           Override changes also trigger a <Code>resync</Code> to affected members so their channel list
           refreshes. Non-staff members of public servers can now connect to the WebSocket.
+        </p>
+        <p className="text-xs text-text-muted">
+          <Code>room.updated</Code> and <Code>unread.changed</Code> replace the periodic chat/DM list poll; see the Realtime
+          Sockets tab.
         </p>
       </Section>
 
@@ -5362,7 +5739,7 @@ function SocketsTab() {
           </ol>
           <p className="text-sm text-text-secondary leading-relaxed">Authenticating adds the socket to the account&apos;s private group; it never removes the public events. Unauthenticated sockets never receive per-user events. Ticket rules (30s, bound to the API token) match the chat socket. Authorization is checked once at auth time, so a token rotated afterwards doesn&apos;t close the socket; reconnect with a fresh ticket.</p>
           <p className="text-sm font-medium text-text-primary mt-2">News events</p>
-          <p className="text-sm text-text-secondary leading-relaxed">Fired when a news post is created (<Code>{"news/views.py"}</Code>). Edits and deletes are not pushed.</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Fired when a news post is created. Edits and deletes are not pushed.</p>
           <Pre>{`{ "type": "news", "action": "created", "post": { "id": 12, "title": "New leak dropped", "summary": "...", "channel": "leaks", "featured": true, "image_url": "...", "author": "someuser", "published_at": "..." } }`}</Pre>
           <Table
             headers={["Field", "Notes"]}
@@ -5373,6 +5750,39 @@ function SocketsTab() {
             ]}
           />
           <p className="text-sm text-text-secondary leading-relaxed">Every post is broadcast regardless of news channel.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Device events (per user)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Sent only to the account&apos;s own authenticated notifications sockets (see the ticket above), so a client that isn&apos;t on the chat socket still hears about its encrypted-chat devices.</p>
+          <Pre>{`{ "type": "device", "action": "registered", "device_id": "abc123", "label": "Firefox on Linux" }
+{ "type": "todevice", "action": "available", "device_id": "abc123" }`}</Pre>
+          <Table
+            headers={["Event", "When", "Do"]}
+            rows={[
+              [<><Code>{"device.registered"}</Code></>, "One of your devices registered or re-registered a key", "Refetch your device list"],
+              [<><Code>{"todevice.available"}</Code></>, "A to-device message was queued for one of your devices", <>If <Code>{"device_id"}</Code> is this device, drain <Code>{"/chat/keys/to-device/"}</Code></>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">These mirror the chat socket&apos;s <Code>{"device.registered"}</Code> and <Code>{"todevice.available"}</Code>. Treat the two as the same signal and don&apos;t act twice.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Login approval (per user)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Sent only to the account&apos;s own authenticated notifications sockets, when a new device asks to sign in with login approval (Accounts tab).</p>
+          <Pre>{`{ "type": "login_approval", "action": "created", "id": "6f1c..." }`}</Pre>
+          <Table
+            headers={["Event", "When", "Do"]}
+            rows={[
+              [<><Code>{"login_approval.created"}</Code></>, "A new login approval request was created for your account", <>Refetch <Code>{"GET /accounts/account/login-approvals/"}</Code> and show the approve prompt</>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">The code, secret, IP and user agent are never pushed; the event only wakes the device, which reads the details over authenticated REST. Keep a slow fallback poll in case the socket is down.</p>
+          <p className="text-sm font-medium text-text-primary mt-2">Now playing (public)</p>
+          <p className="text-sm text-text-secondary leading-relaxed">Sent to every notifications socket, authenticated or not, so profile pages can update live.</p>
+          <Pre>{`{ "type": "now_playing", "action": "updated", "user_id": 42, "now_playing": { "song": 94080, "path": "...", "position": 12.5, "updated_at": "..." } }`}</Pre>
+          <Table
+            headers={["Field", "Notes"]}
+            rows={[
+              [<><Code>{"user_id"}</Code></>, "The user whose state changed"],
+              [<><Code>{"now_playing"}</Code></>, <>The track object (the inner <Code>{"now_playing"}</Code> of <Code>{"GET /accounts/profile/{id}/np/"}</Code>), or <Code>{"null"}</Code> when playback stopped, was cleared, or the user has <Code>{"public_now_playing"}</Code> off</>],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">Sent only when the publicly visible song changes: a new track, a stop, or the <Code>{"public_now_playing"}</Code> toggle. The client&apos;s 20s keepalive PATCH of the same song is not pushed, and nothing is sent for users who keep it private.</p>
           <p className="text-sm font-medium text-text-primary mt-2">Broadcast messages (admin)</p>
           <p className="text-sm text-text-secondary leading-relaxed">An administrator can push a message to every connected notifications socket from the frontend. The REST call does the sending, so it works from any client that can reach the API.</p>
           <p className="text-sm text-text-secondary leading-relaxed"><Code>{"POST /notifications/broadcast/"}</Code> (also <Code>{"/juicewrld/notifications/broadcast/"}</Code>) with <Code>{"Authorization: Token ..."}</Code>. Requires an administrator account with two-factor enabled; anyone else gets <Code>{"403"}</Code>.</p>

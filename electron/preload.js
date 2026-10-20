@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Tray — playback state up to main, media commands back down
   setTrayPlayback: (state) => ipcRenderer.send('tray-playback-state', state),
+  setIjwaLyrics: (snapshot) => ipcRenderer.send('ijwa-lyrics', snapshot),
   onTrayCommand: (cb) => {
     const fn = (_, cmd) => cb(cmd)
     ipcRenderer.on('tray-command', fn)

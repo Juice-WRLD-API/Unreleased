@@ -10,12 +10,13 @@ export type { Boost, Quality, VizLayout };
 export interface VisualizerOption {
   id: string;
   name: string;
-  group: "ambient" | "spectrum" | "shader";
-  engine: "2d" | "gl";
+  group: "ambient" | "spectrum" | "shader" | "layout";
+  engine: "2d" | "gl" | "layout";
 }
 
 export const VISUALIZERS: VisualizerOption[] = [
   { id: "none", name: "Off", group: "ambient", engine: "2d" },
+  { id: "coverflow", name: "Cover Flow", group: "layout", engine: "layout" },
   { id: "aurora", name: "Aurora", group: "ambient", engine: "2d" },
   { id: "bars", name: "Bars", group: "spectrum", engine: "2d" },
   { id: "mirror", name: "Mirror", group: "spectrum", engine: "2d" },

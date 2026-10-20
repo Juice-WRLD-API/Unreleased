@@ -118,6 +118,58 @@ function log(...args) {
   if (isDev) console.log(...args)
 }
 
+// ── Launched mid-update ───────────────────────────────────────────────────────
+// Quitting with an update pending hands off to the installer (silently for
+// install-on-quit), which takes several seconds. Launching again inside that
+// window started the OLD exe: it found the same cached update and prompted
+// again, its quit spawned a second installer, and the next launch was killed a
+// few seconds in by that installer's "close the running app" step. So the quit
+// leaves this marker (see the 'quit' handler by the auto-updater events), and
+// a launch that finds it while the installer is still running steps aside: it
+// exits before showing anything and leaves a watcher that starts the app once
+// the installer process is gone, i.e. on the new build.
+const updateInstallingMarkerPath = path.join(app.getPath('userData'), 'update-installing')
+
+function handOffToRunningUpdateInstall() {
+  let marker
+  try { marker = JSON.parse(fs.readFileSync(updateInstallingMarkerPath, 'utf-8')) } catch { return false }
+  const clear = () => { try { fs.rmSync(updateInstallingMarkerPath, { force: true }) } catch {} }
+  // Already on the target build (install done), or a marker too old to be a
+  // live install. Equality rather than "newer": leaving the beta installs a
+  // lower version.
+  if (!marker || !marker.installer || marker.version === app.getVersion() || !(Date.now() - marker.at < 10 * 60 * 1000)) {
+    clear()
+    return false
+  }
+  let pids = []
+  try {
+    const out = require('child_process').execFileSync('tasklist',
+      ['/FI', `IMAGENAME eq ${path.basename(marker.installer)}`, '/FO', 'CSV', '/NH'],
+      { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    pids = out.split(/\r?\n/).map(l => l.match(/^"[^"]*","(\d+)"/)).filter(Boolean).map(m => m[1])
+  } catch {}
+  // No installer running: it finished without updating us or never started.
+  // Carry on as a normal launch (which will offer the update again).
+  if (!pids.length) {
+    clear()
+    return false
+  }
+  log(`Launched while the ${marker.version} installer is running (pid ${pids.join(',')}); relaunching when it finishes`)
+  const exe = process.execPath.replace(/'/g, "''")
+  try {
+    spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command',
+      `Wait-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue; Start-Process -FilePath '${exe}'`],
+      { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  } catch (e) {
+    log('Relaunch watcher failed:', e.message)
+  }
+  return true
+}
+
+if (gotSingleInstanceLock && app.isPackaged && process.platform === 'win32' && handOffToRunningUpdateInstall()) {
+  process.exit(0)
+}
+
 // ── Run / crash logging ─────────────────────────────────────────────────────
 // A rolling log of the current run. At startup the previous run's log is kept
 // as `previous-run.log` so that after a hang/crash (or a plain restart) we can
@@ -217,6 +269,9 @@ autoUpdater.autoInstallOnAppQuit = true
 // waiting on "Restart now" — re-checking in either case just wastes a request.
 let updateCheckInProgress = false
 let updateDownloadedPending = false
+// { version, installer } of the downloaded update, for the update-installing
+// marker written on quit (see handOffToRunningUpdateInstall).
+let pendingUpdate = null
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 
 async function runUpdateCheck(reason) {
@@ -360,6 +415,7 @@ async function checkBetaUpdate({ force = false } = {}) {
 
   betaInstallerPath = dest
   updateDownloadedPending = true
+  pendingUpdate = { version: newest, installer: dest }
   log('Beta installer ready:', dest)
   broadcastToWindows('update-status', { type: 'downloaded', version: newest })
 
@@ -395,6 +451,10 @@ const iconPath = process.platform === 'linux'
 const preloadPath = path.join(__dirname, 'preload.js')
 
 let mainWindow = null
+let ijwaLyrics = null
+ipcMain.on('ijwa-lyrics', (event, snapshot) => {
+  if (event.sender === mainWindow?.webContents) ijwaLyrics?.publish(snapshot)
+})
 let tray = null
 let isQuitting = false
 // Deliberate/programmatic quits (tray "Quit", restart, update install, OS
@@ -948,7 +1008,11 @@ function createWindow() {
   // frozen (e.g. a synchronous blowup like sorting/rendering a huge list), which
   // is the classic "nearly crashed my PC" hang. Both land in the run log.
   mainWindow.webContents.on('render-process-gone', (_, details) => {
+    ijwaLyrics?.publish(null)
     runLog('renderer', `PROCESS GONE reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) ijwaLyrics?.publish(null)
   })
   mainWindow.webContents.on('unresponsive', () => {
     runLog('renderer', `UNRESPONSIVE (renderer frozen) ${memSnapshot()}`)
@@ -1022,6 +1086,7 @@ function createWindow() {
   // app running headless (window-all-closed never fires) with handlers still
   // pointed at a destroyed mainWindow.
   mainWindow.on('closed', () => {
+    ijwaLyrics?.publish(null)
     mainWindow = null
     closeAllFloatWindows()
   })
@@ -1758,6 +1823,7 @@ async function installLatestStable() {
       (percent) => broadcastToWindows('update-status', { type: 'downloading', percent, version }))
     betaInstallerPath = dest
     updateDownloadedPending = true
+    pendingUpdate = { version, installer: dest }
     broadcastToWindows('update-status', { type: 'downloaded', version })
     installUpdateAndRestart()
   } catch (err) {
@@ -3731,6 +3797,10 @@ app.whenReady().then(() => {
   )
 
   if (isDev && process.env.UNRELEASED_DEV_SEED !== '0') devStorageSeedReady = readInstalledLocalStorage()
+  if (process.platform === 'win32' && !isSmokeTest) {
+    const { createLyricsBridge, pipeName } = require('./ijwaLyrics')
+    ijwaLyrics = createLyricsBridge({ endpoint: pipeName(!app.isPackaged), onError: (error) => log('iJWA lyrics:', error.message) })
+  }
   createWindow()
   if (isSmokeTest) return
   createTray()
@@ -3770,12 +3840,27 @@ app.on('window-all-closed', () => {
 // silently on a plain quit, same as a stable install-on-quit: no relaunch
 // marker, so the app stays closed and the next launch is the new build.
 app.on('will-quit', () => {
+  ijwaLyrics?.close()
   if (!betaInstallerPath || installingUpdate) return
   log('Installing pending beta on quit:', betaInstallerPath)
   try {
     spawn(betaInstallerPath, ['--updated', '/S'], { detached: true, stdio: 'ignore' }).unref()
   } catch (e) {
     log('Beta install-on-quit failed:', e.message)
+  }
+})
+
+// Every quit with an update pending hands off to its installer: "Restart now",
+// electron-updater's install-on-quit, or the beta install-on-quit above. Mark
+// it so a launch during the install steps aside (handOffToRunningUpdateInstall).
+// A quit that ends up not installing (non-zero exit code) leaves a marker
+// with no installer running, which the next launch just clears.
+app.on('quit', () => {
+  if (process.platform !== 'win32' || !updateDownloadedPending || !pendingUpdate?.installer) return
+  try {
+    fs.writeFileSync(updateInstallingMarkerPath, JSON.stringify({ ...pendingUpdate, at: Date.now() }))
+  } catch (e) {
+    log('Failed to write update-installing marker:', e.message)
   }
 })
 
@@ -3866,6 +3951,7 @@ function installUpdateAndRestart() {
 autoUpdater.on('update-downloaded', (info) => {
   log('Update downloaded:', info.version)
   updateDownloadedPending = true
+  pendingUpdate = { version: info.version, installer: info.downloadedFile }
   betaInstallerPath = null
   broadcastToWindows('update-status', { type: 'downloaded', version: info.version })
 
@@ -3926,6 +4012,7 @@ autoUpdater.on('error', (err) => {
   if (isCorruptCacheError(msg)) {
     clearUpdaterCache()
     updateDownloadedPending = false
+    pendingUpdate = null
   }
 
   broadcastToWindows('update-status', { type: 'error', message: msg })
