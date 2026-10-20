@@ -273,7 +273,7 @@ function VizSettings(): JSX.Element {
         </div>
         <div className="min-w-0 flex-1">
           <span className="text-text-primary text-sm">WRLD visualizer</span>
-          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → and V work in fullscreen: ← → switches visualizer, V toggles visualizer only</p>
+          <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → switches visualizer in fullscreen</p>
         </div>
         <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>

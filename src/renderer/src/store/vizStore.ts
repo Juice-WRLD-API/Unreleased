@@ -13,13 +13,11 @@ import { useStore } from './useStore'
 // hotkey). A second, fullscreen-only switch could disagree with it - lyrics
 // hidden by one while the other says they're on, so the key appears dead.
 
-export type CaptionPos = 'bl' | 'br' | 'tl' | 'tr'
 export type VizCycle = 'off' | 'track' | 'album'
 
 const QUALITIES: readonly Quality[] = ['low', 'medium', 'high', 'ultra']
 const BOOSTS: readonly Boost[] = ['off', 'auto', '2', '4', '8']
 const CYCLES: readonly VizCycle[] = ['off', 'track', 'album']
-const CORNERS: readonly CaptionPos[] = ['bl', 'br', 'tl', 'tr']
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback
@@ -46,11 +44,8 @@ interface VizState {
   vizUseArtwork: boolean
   vizBoost: Boost
   vizCycle: VizCycle
-  /** Visualizer-only layout: hides the player and lyrics, leaving a caption. */
-  immMinimal: boolean
   /** Widgets layout: the desktop's player, playlist and clock stand in the tab instead of WRLD's own player and lyrics. */
   wrldWidgets: boolean
-  immCaptionPos: CaptionPos
   /** The Edge light (its look's id) drawn round the edges: over the visualizer, or on its own with it Off; null for none. */
   vizEdgeOverlay: string | null
 
@@ -59,9 +54,7 @@ interface VizState {
   setVizUseArtwork: (on: boolean) => void
   setVizBoost: (b: Boost) => void
   setVizCycle: (c: VizCycle) => void
-  setImmMinimal: (on: boolean) => void
   setWrldWidgets: (on: boolean) => void
-  setImmCaptionPos: (p: CaptionPos) => void
   setVizEdgeOverlay: (look: string | null) => void
 }
 
@@ -72,9 +65,8 @@ export const useVizStore = create<VizState>((set) => ({
   vizUseArtwork: ls.get<boolean>('vizUseArtwork') ?? true,
   vizBoost: pick(ls.get('vizBoost'), BOOSTS, 'off'),
   vizCycle: pick(ls.get('vizCycle'), CYCLES, 'off'),
-  immMinimal: ls.get<boolean>('immMinimal') ?? false,
-  wrldWidgets: (ls.get<boolean>('wrldWidgets') ?? false) && !ls.get<boolean>('immMinimal'),
-  immCaptionPos: pick(ls.get('immCaptionPos'), CORNERS, 'bl'),
+  // The default. Someone who had the retired visualizer-only layout gets the widgets, where hiding all three is the same.
+  wrldWidgets: ls.get<boolean>('immMinimal') ? true : (ls.get<boolean>('wrldWidgets') ?? true),
   vizEdgeOverlay: edgeLook(ls.get('vizEdgeOverlay')),
 
   selectMode: (id, persist) => {
@@ -90,18 +82,11 @@ export const useVizStore = create<VizState>((set) => ({
   setVizUseArtwork: (vizUseArtwork) => { set({ vizUseArtwork }); ls.set('vizUseArtwork', vizUseArtwork) },
   setVizBoost: (vizBoost) => { set({ vizBoost }); ls.set('vizBoost', vizBoost) },
   setVizCycle: (vizCycle) => { set({ vizCycle }); ls.set('vizCycle', vizCycle) },
-  // The layouts are one or the other: visualizer only, the widgets, or neither (WRLD's own player and lyrics).
-  setImmMinimal: (immMinimal) => {
-    set(immMinimal ? { immMinimal, wrldWidgets: false } : { immMinimal })
-    ls.set('immMinimal', immMinimal)
-    if (immMinimal) ls.set('wrldWidgets', false)
-  },
   setWrldWidgets: (wrldWidgets) => {
-    set(wrldWidgets ? { wrldWidgets, immMinimal: false } : { wrldWidgets })
+    set({ wrldWidgets })
     ls.set('wrldWidgets', wrldWidgets)
-    if (wrldWidgets) ls.set('immMinimal', false)
+    ls.set('immMinimal', false)
   },
-  setImmCaptionPos: (immCaptionPos) => { set({ immCaptionPos }); ls.set('immCaptionPos', immCaptionPos) },
   // A light picked for WRLD is the screen light's look too: there's one look, the screen light's (Settings > Desktop).
   setVizEdgeOverlay: (look) => {
     const vizEdgeOverlay = edgeLook(look)

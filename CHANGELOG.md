@@ -6,7 +6,7 @@ All notable changes to this project are documented here.
 
 ---
 
-## [Unreleased]
+## [2.5.0] — 2026-10-20
 
 - **New** **Desktop**, in Settings → Desktop: iJWA's light and widgets built into the app, following what Unreleased plays. Everything starts off
   - **Screen-edge light** (Windows): a glow round your screens in 22 looks (Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow…), all round or at the bottom, top or corners, moving with the music or flowing on its own, in your colors or the cover's. It can show only while the desktop is in front, and you choose which displays get it

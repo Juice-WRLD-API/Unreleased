@@ -11,7 +11,7 @@ import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, getRouteRules, norma
 import cdnService from '../cdn'
 import { useSandboxStore } from '../../components/Modal'
 import { useChatStore } from '../../store/chatStore'
-import { useVizStore, wrldEdgeLook, type CaptionPos, type VizCycle } from '../../store/vizStore'
+import { useVizStore, wrldEdgeLook, type VizCycle } from '../../store/vizStore'
 import { VISUALIZERS, type Boost, type Quality } from '../viz'
 import { LOOKS } from '../../desktop/light/looks'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
@@ -141,9 +141,7 @@ const SETTINGS: Setting[] = [
   choice('viz-quality','Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
   choice('viz-boost', 'Visualizer input boost', pills('off', 'auto', '2', '4', '8'), () => vz().vizBoost, (v) => vz().setVizBoost(v as Boost)),
   choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
-  bool('viz-minimal', 'Fullscreen shows the visualizer only', () => vz().immMinimal, (v) => vz().setImmMinimal(v)),
   bool('wrld-widgets', 'WRLD shows the desktop player, playlist and clock instead of its own player', () => vz().wrldWidgets, (v) => vz().setWrldWidgets(v)),
-  choice('viz-caption', 'Where the caption sits in visualizer-only mode', pills('tl', 'tr', 'bl', 'br'), () => vz().immCaptionPos, (v) => vz().setImmCaptionPos(v as CaptionPos)),
   bool('viz-artwork', 'Visualizer uses colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
   choice('audio-output', 'Audio output device (default = system)', () => [{ value: 'default', label: 'system default' }, ...audioDevices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` }))], () => st().audioOutput || 'default', (v) => st().setAudioOutput(v === 'default' ? '' : v)),
   choice('notification-sound', 'Sound for chat and news notifications', () => NOTIFICATION_SOUNDS.map((x) => ({ value: x.id, label: x.label })), () => getNotificationSoundId(), (v) => { setNotificationSoundId(v); playNotificationSound(v) }),

@@ -1,11 +1,6 @@
-import { useState } from 'react'
-import { AlignLeft, AlignCenter, LayoutGrid } from 'lucide-react'
+import { AlignLeft, AlignCenter } from 'lucide-react'
 import ThemedColorPicker from './ThemedColorPicker'
-import { useStore, useStorePick } from '../store/useStore'
-import { LYRIC_LOOKS } from '../desktop/lyrics/looks'
-import { lazyOverlay } from '../lib/lazyView'
-
-const DesktopPicker = lazyOverlay(() => import('./DesktopPicker'))
+import { useStorePick } from '../store/useStore'
 
 // Lyric display controls (size, alignment, blur, colors). Shared by the WRLD
 // tab's Customize lyrics modal and the visualizer toolbar's settings popup.
@@ -16,49 +11,6 @@ const LYRIC_TEXT_SIZES: { label: string; value: number }[] = [
   { label: 'L', value: 1.2 },
   { label: 'XL', value: 1.4 },
 ]
-// The iJWA lyric styles (Settings > Desktop) are desktop-app only, like the rest of Desktop.
-const IS_ELECTRON = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron')
-
-/** Classic (the scrolling list these controls style) or one of the iJWA styles, sung word by word. */
-function LyricStyleRow(): JSX.Element {
-  const look = useStore((s) => s.desktop.lyrics.look)
-  const setDesktop = useStore((s) => s.setDesktop)
-  const [browsing, setBrowsing] = useState(false)
-  const chip = (id: string, title: string): JSX.Element => (
-    <button
-      key={id}
-      onClick={() => setDesktop({ lyrics: { look: id } })}
-      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
-        look === id
-          ? 'bg-accent/15 text-accent border-[var(--accent)]'
-          : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
-      }`}
-    >
-      {title}
-    </button>
-  )
-  return (
-    <div>
-      <p className="text-text-secondary text-xs mb-2">Style</p>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {chip('classic', 'Classic')}
-        {LYRIC_LOOKS.map((l) => chip(l.id, l.title))}
-        <button
-          onClick={() => setBrowsing(true)}
-          title="See every style playing"
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-[var(--border)] text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
-        >
-          <LayoutGrid size={11} /> Browse
-        </button>
-      </div>
-      {look !== 'classic' && (
-        <p className="text-text-muted text-[11px] mt-2">Fonts for each style are in Settings › Desktop. Size, alignment, blur and colors below style Classic.</p>
-      )}
-      {browsing && <DesktopPicker kind="lyrics" onClose={() => setBrowsing(false)} />}
-    </div>
-  )
-}
-
 const LYRIC_ACTIVE_PRESETS = ['#ffffff', '#1db954', '#a78bfa', '#60a5fa', '#f472b6', '#facc15']
 const LYRIC_INACTIVE_PRESETS = ['#9ca3af', '#6b7280', '#94a3b8', '#c4b5fd', '#7dd3fc', '#fda4af']
 
@@ -117,7 +69,6 @@ export default function LyricsControls(): JSX.Element {
 
   return (
     <div className="flex flex-col gap-5">
-        {IS_ELECTRON && <LyricStyleRow />}
         <div>
           <p className="text-text-secondary text-xs mb-2">Text size</p>
           <div className="flex items-center gap-2 flex-wrap">
