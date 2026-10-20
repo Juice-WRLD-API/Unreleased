@@ -1,9 +1,10 @@
 import { AlignLeft, AlignCenter } from 'lucide-react'
 import ThemedColorPicker from './ThemedColorPicker'
-import { useStorePick } from '../store/useStore'
+import { useStore, useStorePick } from '../store/useStore'
 
 // Lyric display controls (size, alignment, blur, colors). Shared by the WRLD
 // tab's Customize lyrics modal and the visualizer toolbar's settings popup.
+// Alignment and blur belong to the Classic list; the other lyric styles take size and colors only.
 
 const LYRIC_TEXT_SIZES: { label: string; value: number }[] = [
   { label: 'S', value: 0.85 },
@@ -67,6 +68,8 @@ export default function LyricsControls(): JSX.Element {
     'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive',
   )
 
+  const classic = useStore((s) => s.desktop.lyrics.look === 'classic')
+
   return (
     <div className="flex flex-col gap-5">
         <div>
@@ -91,6 +94,8 @@ export default function LyricsControls(): JSX.Element {
           </div>
         </div>
 
+        {classic && (
+          <>
         <div>
           <p className="text-text-secondary text-xs mb-2">Alignment</p>
           <div className="flex items-center gap-2 flex-wrap">
@@ -138,6 +143,8 @@ export default function LyricsControls(): JSX.Element {
             </div>
           )}
         </div>
+          </>
+        )}
 
         <div className="flex flex-col gap-3">
           <p className="text-text-secondary text-xs -mb-1">Colors</p>

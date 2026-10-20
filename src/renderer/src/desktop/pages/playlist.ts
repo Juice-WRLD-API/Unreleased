@@ -106,6 +106,7 @@ function drawShelf(): void {
   const el = $('#shelf')
   el.classList.toggle('gone', !shelfOpen)
   $('.names .title').classList.toggle('open', shelfOpen)
+  listEl.classList.toggle('behind', shelfOpen)
   el.replaceChildren(...shelf.map((item) => {
     const row = document.createElement('button')
     row.className = `shelf-row${item.id === source() ? ' chosen' : ''}`
