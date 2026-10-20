@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { VISUALIZERS, needsWebGL, type Boost, type Quality } from '../lib/viz'
-import { useVizStore, useWrldEdgeLook, type CaptionPos, type VizCycle } from '../store/vizStore'
+import { useVizStore, type VizCycle } from '../store/vizStore'
 import { lazyOverlay } from '../lib/lazyView'
-import { LOOKS } from '../desktop/light/looks'
-import ThemedSelect from './ThemedSelect'
 
-// Every visualizer, or every Edge light, playing at once to pick one from (the picker Settings > Desktop uses too).
+// Every visualizer, Edge light or lyric style, playing at once to pick one from (the picker Settings > Desktop uses too).
 const DesktopPicker = lazyOverlay(() => import('./DesktopPicker'))
+// The iJWA lyric styles are desktop-app only, like the rest of Desktop.
+const IS_ELECTRON = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron')
 
 export function Pills<T extends string>({ value, options, onChange }: {
   value: T
@@ -74,16 +74,15 @@ export function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => vo
  */
 export default function VizControls({ modes = true }: { modes?: boolean }): JSX.Element {
   const s = useVizStore()
-  const edgeLook = useWrldEdgeLook()
   const gl = webglAvailable()
-  const [browsing, setBrowsing] = useState<'viz' | 'overlay' | null>(null)
+  const [browsing, setBrowsing] = useState<'viz' | 'overlay' | 'lyrics' | null>(null)
   const line = (label: string, control: ReactNode): JSX.Element => (
     <div className="flex items-start gap-2">
       <span className="text-text-muted text-[11px] w-[86px] shrink-0 pt-1">{label}</span>
       <div className="min-w-0 flex-1">{control}</div>
     </div>
   )
-  const browse = (kind: 'viz' | 'overlay', title: string): JSX.Element => (
+  const browse = (kind: 'viz' | 'overlay' | 'lyrics', title: string): JSX.Element => (
     <button
       onClick={() => setBrowsing(kind)}
       className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-[var(--border)] text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
@@ -108,17 +107,8 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
         />
       ))}
       {line('Visualizers', browse('viz', 'See every classic visualizer and shader playing, then pick one'))}
-      {gl && line('Edge light', (
-        <div className="flex items-center gap-1.5" title="A light round the edges: over the visualizer, or on its own with the visualizer Off">
-          <ThemedSelect
-            value={edgeLook ?? ''}
-            onChange={(id) => s.setVizEdgeOverlay(id || null)}
-            options={[{ value: '', label: 'None' }, ...LOOKS.map((l) => ({ value: l.id, label: l.title }))]}
-            className="bg-[var(--surface-overlay)] text-text-primary text-[11px] rounded-lg px-2 py-1 border border-[var(--border)] min-w-0 max-w-[150px]"
-          />
-          {browse('overlay', 'See every Edge light playing, then pick one')}
-        </div>
-      ))}
+      {gl && line('Edge light', browse('overlay', 'See every Edge light playing, then pick one. A light round the edges: over the visualizer, or on its own with the visualizer Off'))}
+      {IS_ELECTRON && line('Lyric style', browse('lyrics', 'See every lyric style playing, then pick one'))}
       {browsing && (
         <DesktopPicker kind={browsing} onClose={() => setBrowsing(null)} />
       )}
@@ -159,25 +149,12 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
         />
       ))}
       {line('Layout', (
-        <Pills<'player' | 'minimal' | 'widgets'>
-          value={s.wrldWidgets ? 'widgets' : s.immMinimal ? 'minimal' : 'player'}
-          onChange={(v) => { if (v === 'widgets') s.setWrldWidgets(true); else { s.setWrldWidgets(false); s.setImmMinimal(v === 'minimal') } }}
+        <Pills<'player' | 'widgets'>
+          value={s.wrldWidgets ? 'widgets' : 'player'}
+          onChange={(v) => s.setWrldWidgets(v === 'widgets')}
           options={[
+            { value: 'widgets', label: 'Widgets', title: 'The desktop player, playlist and clock, here in WRLD. Hide all three for the visualizer only' },
             { value: 'player', label: 'Player & lyrics' },
-            { value: 'minimal', label: 'Visualizer only' },
-            { value: 'widgets', label: 'Widgets', title: 'The desktop player, playlist and clock, here in WRLD' },
-          ]}
-        />
-      ))}
-      {s.immMinimal && line('Caption', (
-        <Pills<CaptionPos>
-          value={s.immCaptionPos}
-          onChange={s.setImmCaptionPos}
-          options={[
-            { value: 'tl', label: 'Top left' },
-            { value: 'tr', label: 'Top right' },
-            { value: 'bl', label: 'Bottom left' },
-            { value: 'br', label: 'Bottom right' },
           ]}
         />
       ))}

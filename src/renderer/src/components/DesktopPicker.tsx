@@ -435,6 +435,11 @@ export default function DesktopPicker({ kind, onClose, onPicked }: {
                 None
               </button>
             )}
+            {kind === 'lyrics' && lyricLook !== 'classic' && (
+              <button onClick={() => { setDesktop({ lyrics: { look: 'classic' } }); onPicked?.('classic') }} title="The plain scrolling lyrics" className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] text-xs font-medium transition-colors">
+                Classic
+              </button>
+            )}
             <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]" aria-label="Close">
               <X size={16} />
             </button>

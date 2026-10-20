@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -75,6 +75,9 @@ interface Props {
    *  which is server-driven and can't be manually redirected). */
   disableChangeVersion?: boolean
 
+  /** WRLD only - opens the lyric share card for the playing song. */
+  onShareLyrics?: () => void
+
   /** Session-edit file linking (Tracker only) - lets an editor/contributor
    *  manually point a recording-session song at its session-edit audio file
    *  when the automatic filename match got it wrong or found nothing. */
@@ -127,7 +130,7 @@ function downloadZipEntry(entry: JWApiFileEntry): void {
 export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
   onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect,
-  liked, onToggleLike, removeAction, song, disableChangeVersion,
+  liked, onToggleLike, removeAction, song, disableChangeVersion, onShareLyrics,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
   const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
@@ -348,6 +351,7 @@ export default function SongContextMenu({
           childrenFooter: playlistFooter,
         },
         canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
+        onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
         hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },

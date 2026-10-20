@@ -1,7 +1,7 @@
 import { SwapIcon } from './PlayerMotion'
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, MicVocal, Loader2, Settings2 } from 'lucide-react'
+import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, TextQuote, Loader2, Settings2 } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
 import CoverEditor from './CoverEditor'
@@ -140,6 +140,7 @@ export default function WrldView(): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const activeRef    = useRef<HTMLDivElement>(null)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
+  const openShareLyrics = useCallback(() => setShowShareLyrics(true), [])
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
 
   const { artSrc, artError, setArtError, coverSongId } = useWrldArt(
@@ -254,15 +255,11 @@ export default function WrldView(): JSX.Element {
     return () => setWrldFullscreen(false)
   }, [fullscreen, setWrldFullscreen])
 
-  // Visualizer-only: in fullscreen, the player, lyrics and page chrome step
-  // aside and WrldVisualizer draws a caption in their place. Hidden with
-  // display rather than unmounted, so toggling back doesn't restart the lyric
-  // scroll or refetch anything.
-  const immMinimal = useVizStore(s => s.immMinimal)
-  // The Widgets layout puts the desktop's player, playlist and clock in their place, in or out of fullscreen.
+  // The Widgets layout puts the desktop's player, playlist and clock in place of WRLD's own player and lyrics, in or
+  // out of fullscreen. Those are hidden with display rather than unmounted, so switching back doesn't restart the
+  // lyric scroll or refetch anything.
   const wrldWidgets = useVizStore(s => s.wrldWidgets)
-  const vizMinimal = immMinimal || wrldWidgets
-  const hideForViz = vizMinimal ? { display: 'none' } : undefined
+  const hideForViz = wrldWidgets ? { display: 'none' } : undefined
 
   const {
     suggestQuery, setSuggestQuery, suggestResults, suggestLoading,
@@ -910,16 +907,6 @@ export default function WrldView(): JSX.Element {
                 )}
                 {rawLyrics && (
                   <button
-                    onClick={() => setShowShareLyrics(true)}
-                    title="Share lyrics"
-                    className="p-1.5 rounded-full transition-colors hover:bg-white/10"
-                    style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
-                  >
-                    <MicVocal size={16} />
-                  </button>
-                )}
-                {rawLyrics && (
-                  <button
                     onClick={() => setShowLyricsSettings(true)}
                     title="Customize lyrics"
                     className="p-1.5 rounded-full transition-colors hover:bg-white/10"
@@ -929,7 +916,7 @@ export default function WrldView(): JSX.Element {
                   </button>
                 )}
                 <FmLikeButton light={textIsDark} />
-                <SongMenu light={textIsDark} />
+                <SongMenu light={textIsDark} onShareLyrics={rawLyrics ? openShareLyrics : undefined} />
               </div>
             </div>
 
@@ -1131,18 +1118,21 @@ export default function WrldView(): JSX.Element {
                     {displayArtist && <p className="text-sm mt-0.5 truncate" style={{ color: txtSec }}>{displayArtist}</p>}
                     {radioFmActive && !radioFmNowPlaying && <p className="text-sm mt-0.5" style={{ color: txtTer }}>Tuning in…</p>}
                   </div>
-                  {rawLyrics && (
+                  {/* Swaps the right column between queue and lyrics - the icon
+                      is the view it switches to. */}
+                  {!radioFmActive && (
                     <button
-                      onClick={() => setShowShareLyrics(true)}
-                      title="Share lyrics"
+                      onClick={() => setShowQueue(!showQueue)}
+                      title={showQueue ? 'Show lyrics' : 'Playing Next'}
+                      aria-pressed={showQueue}
                       className="p-1.5 rounded-full transition-colors hover:bg-white/10"
                       style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
                     >
-                      <MicVocal size={16} />
+                      {showQueue ? <TextQuote size={16} /> : <ListMusic size={16} />}
                     </button>
                   )}
                   <FmLikeButton light={textIsDark} />
-                  <SongMenu light={textIsDark} />
+                  <SongMenu light={textIsDark} onShareLyrics={rawLyrics ? openShareLyrics : undefined} />
                 </div>
               </div>
 
@@ -1617,7 +1607,7 @@ const FmLikeButton = memo(function FmLikeButton({ light }: { light: boolean }): 
 // Apple Music-style "···" context menu for the current track. Module-level
 // (like LyricsPanel/FmProgressBar) so it reads the store directly instead of
 // drilling props from WrldView.
-const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Element {
+const SongMenu = memo(function SongMenu({ light, onShareLyrics }: { light: boolean; onShareLyrics?: () => void }): JSX.Element {
   const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike } = useStore(useShallow(s => ({
     currentTrack: s.currentTrack,
     radioFmActive: s.radioFmActive,
@@ -1694,6 +1684,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
           liked={likedTrackIds.includes(`jw-${fmSongId}`)}
           onToggleLike={() => toggleLike(`jw-${fmSongId}`)}
           disableChangeVersion
+          onShareLyrics={onShareLyrics}
         />,
         document.body
       )}
@@ -1711,6 +1702,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
           onInfo={() => currentSongId != null && openInfo(currentSongId)}
           liked={likedTrackIds.includes(currentTrack.id)}
           onToggleLike={() => toggleLike(currentTrack.id)}
+          onShareLyrics={onShareLyrics}
         />,
         document.body
       )}
