@@ -32,6 +32,7 @@ import SongContextMenu from './SongContextMenu'
 import ContextMenu from './ContextMenu'
 import { getSkin } from '../lib/skins'
 import WrldVisualizer from './WrldVisualizer'
+import WrldCoverFlow from './WrldCoverFlow'
 import LyricsControls from './LyricsControls'
 import { useVizStore } from '../store/vizStore'
 import {
@@ -257,8 +258,14 @@ export default function WrldView(): JSX.Element {
   // display rather than unmounted, so toggling back doesn't restart the lyric
   // scroll or refetch anything.
   const immMinimal = useVizStore(s => s.immMinimal)
-  const vizMinimal = immMinimal
-  const hideForViz = vizMinimal ? { display: 'none' } : undefined
+  const coverFlow = useVizStore(s => s.activeMode === 'coverflow')
+  const hideForViz = immMinimal || coverFlow ? { display: 'none' } : undefined
+
+  // This preset is a queue player. RadioFmPlayer observes this state and
+  // stops the stream/listening session; local playback remains user-controlled.
+  useEffect(() => {
+    if (coverFlow && radioFmActive) setRadioFmActive(false)
+  }, [coverFlow, radioFmActive, setRadioFmActive])
 
   const {
     suggestQuery, setSuggestQuery, suggestResults, suggestLoading,
@@ -388,7 +395,7 @@ export default function WrldView(): JSX.Element {
   const lyricsVisible = useLyricsVisible(!!rawLyrics, lyricsOverride, !radioFmActive && lyricsLoading(currentTrack, currentTrackFull))
   // FM's column is on by default and the override turns it off; otherwise the
   // override is XORed against whether lyrics exist.
-  const showLyricsColumn = radioFmActive ? !lyricsOverride : showQueue || lyricsVisible
+  const showLyricsColumn = !coverFlow && (radioFmActive ? !lyricsOverride : showQueue || lyricsVisible)
 
   // Desktop panel animation. The column outlives showLyricsColumn by its exit
   // animation, still showing whatever view it had (the stores have already
@@ -836,7 +843,7 @@ export default function WrldView(): JSX.Element {
               page renders over a still-mounted bgView (App.tsx), so the page
               you came from bled through those corners. */}
           <div className="absolute inset-0 overflow-hidden bg-black">
-            {wrldThemeBackground ? (
+            {coverFlow ? null : wrldThemeBackground ? (
               <div
                 className="absolute inset-0 bg-surface"
                 style={gradientsEnabled ? {
@@ -855,7 +862,7 @@ export default function WrldView(): JSX.Element {
             ) : (
               <div className={`absolute inset-0 ${radioFmActive ? 'bg-gradient-to-br from-red-950/60 to-black dark:from-red-950/60 dark:to-black' : 'bg-gradient-to-br from-gray-200 to-gray-100 dark:from-gray-900 dark:to-black'}`} />
             )}
-            {!wrldThemeBackground && (
+            {!coverFlow && !wrldThemeBackground && (
               <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/20 dark:from-black/40 dark:via-transparent dark:to-black/70" />
             )}
           </div>
@@ -878,6 +885,13 @@ export default function WrldView(): JSX.Element {
               onEnter={enterFullscreen}
               onExit={exitFullscreen}
             />
+
+          {coverFlow && (
+            <WrldCoverFlow
+              progress={<ProgressBar txtPri="#efefef" txtTer="#a6a6a6" trackBg="rgba(255,255,255,0.18)" />}
+              menu={<SongMenu light={false} />}
+            />
+          )}
 
           {/* Mobile layout */}
           <div className="md:hidden relative z-10 flex flex-col h-full min-h-0" style={hideForViz}>
@@ -1491,12 +1505,12 @@ export default function WrldView(): JSX.Element {
           an inline drawer like the desktop layout gets). Hidden during 999FM,
           a live stream with nothing to queue/reorder. */}
       {queueEverOpened && (
-        <div className="md:hidden" style={showQueue && !radioFmActive ? undefined : { display: 'none' }}>
+        <div className="md:hidden" style={showQueue && !radioFmActive && !coverFlow ? undefined : { display: 'none' }}>
           <WrldQueuePanel variant="sheet" onClose={() => setShowQueue(false)} />
         </div>
       )}
 
-      {showShareLyrics && rawLyrics && (
+      {!coverFlow && showShareLyrics && rawLyrics && (
         <ShareLyricsModal
           title={displayTitle || 'Lyrics'}
           artist={displayArtist || ''}
@@ -1506,7 +1520,7 @@ export default function WrldView(): JSX.Element {
         />
       )}
 
-      {showLyricsSettings && (
+      {!coverFlow && showLyricsSettings && (
         <LyricsSettingsModal onClose={() => setShowLyricsSettings(false)} />
       )}
 

@@ -132,9 +132,10 @@ export default function WrldVisualizer({
   const vizRef = useRef<Visualizer | null>(null)
   const [glSupported, setGlSupported] = useState(true)
   // The layout provider outlives any one render, so it reads through a ref.
-  const minimal = immMinimal
-  // "Off" tears the engine down entirely - no canvases, audio tap or frame loop.
-  const off = activeMode === 'none'
+  const coverFlow = activeMode === 'coverflow'
+  const minimal = immMinimal && !coverFlow
+  // Layout presets don't need canvases, an audio tap or a frame loop.
+  const off = activeMode === 'none' || coverFlow
   const [showSettings, setShowSettings] = useState(false)
   useEscapeToClose(() => setShowSettings(false), showSettings)
   const minimalRef = useRef(minimal)
@@ -293,7 +294,7 @@ export default function WrldVisualizer({
   const glRef = useRef(glSupported)
   glRef.current = glSupported
   const usableModes = (): string[] =>
-    VISUALIZERS.filter((v) => v.id !== 'none' && (v.engine !== 'gl' || glRef.current)).map((v) => v.id)
+    VISUALIZERS.filter((v) => v.id !== 'none' && v.engine !== 'layout' && (v.engine !== 'gl' || glRef.current)).map((v) => v.id)
 
   const cycle = useCallback((dir: 1 | -1): void => {
     // Unlike auto-switch, the arrows also stop on "Off".
@@ -334,6 +335,7 @@ export default function WrldVisualizer({
   }
 
   const toggleMinimal = useCallback((): void => {
+    if (useVizStore.getState().activeMode === 'coverflow') return
     const { immMinimal: cur, setImmMinimal } = useVizStore.getState()
     setImmMinimal(!cur)
     announce(cur ? 'Player' : 'Visualizer only')
@@ -344,7 +346,7 @@ export default function WrldVisualizer({
   // cycles off -> lyrics -> queue, or off -> radio -> lyrics during FM.
   const showQueue = useStore((s) => s.showQueue)
   const lyricsVisible = fm.active ? !lyricsOverride : hasLyrics !== lyricsOverride
-  const panel: 'off' | 'lyrics' | 'queue' | 'radio' = fm.active
+  const panel: 'off' | 'lyrics' | 'queue' | 'radio' = coverFlow ? 'off' : fm.active
     ? (lyricsVisible ? fm.tab : 'off')
     : showQueue ? 'queue' : lyricsVisible ? 'lyrics' : 'off'
 
@@ -386,6 +388,7 @@ export default function WrldVisualizer({
       if (hasEscapeLayer()) return
       const combo = eventToCombo(e)
       if (!fullscreen) return
+      if (t?.closest('[data-cover-flow-carousel]') && (combo === 'ArrowLeft' || combo === 'ArrowRight')) return
       if (combo === 'ArrowLeft') cycle(-1)
       else if (combo === 'ArrowRight') cycle(1)
       else if (combo === 'V') toggleMinimal()
@@ -409,7 +412,7 @@ export default function WrldVisualizer({
     prevAlbum.current = albumKey
     if (first || !trackChanged || !trackKey) return
     const { vizCycle, activeMode: cur, selectMode } = useVizStore.getState()
-    if (vizCycle === 'off' || cur === 'none') return
+    if (vizCycle === 'off' || cur === 'none' || cur === 'coverflow') return
     if (vizCycle === 'album' && !albumChanged) return
     const ids = usableModes().filter((id) => id !== cur)
     if (!ids.length) return
@@ -444,7 +447,7 @@ export default function WrldVisualizer({
         onMouseEnter={() => { overToolbar.current = true }}
         onMouseLeave={() => { overToolbar.current = false; wake() }}
       >
-        <button
+        {!coverFlow && <><button
           className={`h-9 px-2.5 flex items-center gap-1.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${fm.active ? (fm.live ? 'text-red-400 bg-red-500/15' : toolOn) : toolIdle}`}
           onClick={fm.toggle}
           disabled={fm.disabled}
@@ -455,7 +458,7 @@ export default function WrldVisualizer({
           <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
           <span>{fm.label}</span>
         </button>
-        <span className="w-px h-5 mx-1 bg-white/10" />
+        <span className="w-px h-5 mx-1 bg-white/10" /></>}
         <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
           <ChevronLeft size={19} />
         </button>
@@ -483,6 +486,7 @@ export default function WrldVisualizer({
             >
               {[
                 { label: null, modes: VISUALIZERS.filter((v) => v.id === 'none') },
+                { label: 'Layouts', modes: VISUALIZERS.filter((v) => v.engine === 'layout') },
                 { label: 'Classic', modes: VISUALIZERS.filter((v) => v.id !== 'none' && v.engine === '2d') },
                 { label: 'Shaders', modes: VISUALIZERS.filter((v) => v.engine === 'gl') },
               ].map((sec) => (
@@ -520,7 +524,7 @@ export default function WrldVisualizer({
           <ChevronRight size={19} />
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
-        <button
+        {!coverFlow && <><button
           className={`${tool} ${panel !== 'off' && !minimal ? toolOn : toolIdle}`}
           onClick={toggleLyrics}
           title={fm.active ? "Cycle: off / radio / lyrics" : "Cycle: off / lyrics / queue"}
@@ -542,7 +546,7 @@ export default function WrldVisualizer({
           aria-pressed={immMinimal}
         >
           <AudioLines size={18} />
-        </button>
+        </button></>}
         <button
           className={`${tool} ${showSettings ? toolOn : toolIdle}`}
           onClick={() => setShowSettings((v) => !v)}
@@ -573,8 +577,10 @@ export default function WrldVisualizer({
             className="absolute top-full right-0 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl"
           >
             <VizControls modes={false} />
-            <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
-            <LyricsControls />
+            {!coverFlow && <>
+              <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
+              <LyricsControls />
+            </>}
           </div>
         )}
       </div>

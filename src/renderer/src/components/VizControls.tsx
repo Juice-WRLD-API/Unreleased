@@ -69,6 +69,7 @@ export function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => vo
 export default function VizControls({ modes = true }: { modes?: boolean }): JSX.Element {
   const s = useVizStore()
   const gl = webglAvailable()
+  const coverFlow = s.activeMode === 'coverflow'
   const line = (label: string, control: ReactNode): JSX.Element => (
     <div className="flex items-start gap-2">
       <span className="text-text-muted text-[11px] w-[86px] shrink-0 pt-1">{label}</span>
@@ -90,6 +91,9 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
           }))}
         />
       ))}
+      {coverFlow ? (
+        <p className="text-text-secondary text-xs leading-relaxed">Cover Flow shows your queue, a clock and playback controls. Lyrics, 999 FM and automatic preset switching are off in this mode.</p>
+      ) : <>
       {line('Quality', (
         <Pills<Quality>
           value={s.vizQuality}
@@ -152,6 +156,7 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
         <span className="text-text-muted text-[11px] w-[86px] shrink-0">Artwork colors</span>
         <Toggle on={s.vizUseArtwork} onClick={() => s.setVizUseArtwork(!s.vizUseArtwork)} />
       </div>
+      </>}
     </div>
   )
 }
