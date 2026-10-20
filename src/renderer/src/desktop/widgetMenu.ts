@@ -1,10 +1,14 @@
-// What a right-click on a widget offers - its own settings, its place, hiding it and showing the others - as plain
+// What a right-click on a widget offers - its own settings, its place, hiding it and showing the others; on the
+// player's lyrics, what's theirs: copying them, their style - as plain
 // data, so the one list serves both: the app's own menu over the WRLD tab (components/WrldWidgets.tsx), and the
 // system's menu over a window on the desktop (electron/desktop, which asks the main window for it). Picking a row
 // sends its command as a widget's press does (lib/desktopBridge's runDesktopCommand; 'clear' is the main process's).
 import { DESKTOP_DEFAULTS, type DesktopSettings, type PlaylistSource } from '../store/desktopSlice'
+import { LYRIC_LOOKS } from './lyrics/looks'
 
 export type WidgetWhich = 'player' | 'playlist' | 'clock'
+/** A part of a widget with a menu of its own: the player's lyrics. */
+export type WidgetPart = 'lyrics'
 
 export interface WidgetMenuItem {
   label: string
@@ -28,6 +32,10 @@ export interface WidgetMenuContext {
   isClear?: boolean
   /** What the playlist can show besides the queue and liked songs. */
   playlists: { id: string; name: string }[]
+  /** Right-clicked on this part of the widget. */
+  part?: WidgetPart
+  /** The song playing has lyrics, and whether they're timed (LRC). */
+  lyrics?: { has: boolean; timed: boolean }
 }
 
 export const WIDGET_TITLES: Record<WidgetWhich, string> = { player: 'Player', playlist: 'Playlist', clock: 'Clock' }
@@ -50,7 +58,19 @@ export function widgetMenu(which: WidgetWhich, desktop: DesktopSettings, ctx: Wi
   }
 
   const own: WidgetMenuEntry[] = []
-  if (which === 'player') {
+  if (which === 'player' && ctx.part === 'lyrics') {
+    const p = desktop.player
+    // The widget sings the app's style, or the fisheye where the app has its plain list.
+    const look = desktop.lyrics.look !== 'classic' ? desktop.lyrics.look : 'fisheye'
+    own.push(
+      { label: 'Copy lyrics', cmd: 'copy-lyrics', disabled: !ctx.lyrics?.has },
+      ...(ctx.lyrics?.timed ? [{ label: 'Download synced lyrics', cmd: 'download-lyrics' }] : []),
+      'divider',
+      { label: 'Style', children: LYRIC_LOOKS.map((l) => ({ label: l.title, radio: true, checked: l.id === look, cmd: 'set', arg: { lyrics: { look: l.id } } })) },
+      toggle('Fold the card away with lyrics', 'hidesLyricsCard', p.hidesLyricsCard),
+      { label: 'Hide lyrics', ...set({ lyricsOpen: false }) },
+    )
+  } else if (which === 'player') {
     const p = desktop.player
     own.push(
       toggle('Mini player', 'mini', p.mini),

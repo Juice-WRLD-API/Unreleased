@@ -113,6 +113,21 @@ export function useWrldLyricsSource(
   return { rawLyrics, isSynced, isEditor, syncedLines }
 }
 
+/** 999 FM on or off: tuning in pauses the song playing. WRLD's FM button and
+ * the desktop player's (lib/desktopBridge). */
+export function toggleRadioFm(): void {
+  const { radioFmActive, setRadioFmActive, setIsPlaying } = useStore.getState()
+  const next = !radioFmActive
+  if (next) {
+    setIsPlaying(false)
+    resumeEffectsContext()
+    void getActiveRadioClient()?.startListening()?.catch(() => setRadioFmActive(false))
+  } else {
+    getActiveRadioClient()?.stopListening()
+  }
+  setRadioFmActive(next)
+}
+
 /** Now-playing title/artist/album (FM-or-track), the transport-disabled
  * flags, and the FM on/off toggle handler. Byte-identical in both views. */
 export function useWrldNowPlaying(
@@ -120,8 +135,6 @@ export function useWrldNowPlaying(
   radioFmIsLive: boolean | null,
   radioFmNowPlaying: RadioTrack | null,
   currentTrack: Track | null,
-  setRadioFmActive: (v: boolean) => void,
-  setIsPlaying: (v: boolean) => void,
 ): {
   displayTitle: string | undefined
   displayArtist: string | undefined
@@ -138,19 +151,7 @@ export function useWrldNowPlaying(
   // look interactive when there's no track loaded (and FM isn't filling in).
   const noTrack = !radioFmActive && !currentTrack
 
-  const toggleFm = (): void => {
-    const next = !radioFmActive
-    if (next) {
-      setIsPlaying(false)
-      resumeEffectsContext()
-      void getActiveRadioClient()?.startListening()?.catch(() => setRadioFmActive(false))
-    } else {
-      getActiveRadioClient()?.stopListening()
-    }
-    setRadioFmActive(next)
-  }
-
-  return { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm }
+  return { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm: toggleRadioFm }
 }
 
 /** Play a sibling version of the current song from the version-notch menu.

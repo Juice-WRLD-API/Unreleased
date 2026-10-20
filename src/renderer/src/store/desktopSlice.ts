@@ -110,7 +110,7 @@ export const DESKTOP_DEFAULTS: DesktopSettings = {
     isOn: false, inWrld: true, size: 0.5, stretch: 0.55, weight: 0.3, tint: 0.45, useArtworkColor: true, showDate: true,
     locked: false, place: null, tabPlace: null,
   },
-  lyrics: { look: 'classic', fonts: {} },
+  lyrics: { look: 'karaoke', fonts: {} },
   hiddenDisplays: [],
 }
 
@@ -140,8 +140,20 @@ function save(value: DesktopSettings): void {
   saveTimer = setTimeout(() => ls.set('desktop', value), 300)
 }
 
+/** The saved settings. Karaoke is the lyric style to start with now, not the plain list: settings saved on the plain
+ *  list from before take it too, once - picking the list again after keeps it. */
+function loadDesktop(): DesktopSettings {
+  const desktop = mergeDesktop(DESKTOP_DEFAULTS, ls.get<DesktopPatch>('desktop'))
+  if (ls.get<boolean>('desktopKaraokeDefault')) return desktop
+  ls.set('desktopKaraokeDefault', true)
+  if (desktop.lyrics.look !== 'classic') return desktop
+  const next = { ...desktop, lyrics: { ...desktop.lyrics, look: 'karaoke' } }
+  save(next)
+  return next
+}
+
 export const createDesktopSlice: StateCreator<DesktopSlice, [], [], DesktopSlice> = (set, get) => ({
-  desktop: mergeDesktop(DESKTOP_DEFAULTS, ls.get<DesktopPatch>('desktop')),
+  desktop: loadDesktop(),
   setDesktop: (patch) => {
     const desktop = mergeDesktop(get().desktop, patch)
     set({ desktop })

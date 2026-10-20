@@ -4,7 +4,8 @@ import { FRAME_MARK, isOurs, type FromFrame, type ToFrame } from '../desktop/fra
 import { DEFAULT_PLACES, fitOf, playerMetrics, playlistMetrics } from '../desktop/metrics'
 import { listenToMeter } from '../desktop/meter'
 import { answerDesktopRequest, runDesktopCommand, watchDesktopState, widgetMenuOf } from '../lib/desktopBridge'
-import { WIDGET_TITLES, type WidgetMenuEntry } from '../desktop/widgetMenu'
+import { WIDGET_TITLES, type WidgetMenuEntry, type WidgetPart } from '../desktop/widgetMenu'
+import { setEqAnchor } from '../lib/eqAnchor'
 import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
 
 // WRLD's Widgets layout: the desktop's player, playlist and clock (Settings > Desktop) standing in the tab instead of on
@@ -46,7 +47,7 @@ export default function WrldWidgets(): JSX.Element {
   const playerSolid = useRef(false)
   const pointerIn = useRef(false)
   /** A widget right-clicked: its menu, at that point in the tab's window. */
-  const [menu, setMenu] = useState<{ which: Which; x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ which: Which; x: number; y: number; part?: WidgetPart } | null>(null)
 
   // A click in a frame doesn't reach the menu's outside-click check, but the window loses the focus to the frame.
   useEffect(() => {
@@ -170,6 +171,17 @@ export default function WrldWidgets(): JSX.Element {
         case 'command':
           // No desk to clear in the tab, and the app it would open is this one.
           if (message.cmd === 'clear' || message.cmd === 'open-app') break
+          // The app's own equalizer, over the tab, beside the button pressed.
+          if (message.cmd === 'equalizer') {
+            const r = frames.current[which]?.getBoundingClientRect()
+            const b = message.arg as { x?: number; y?: number; width?: number; height?: number } | null
+            if (r && b && [b.x, b.y, b.width, b.height].every((v) => Number.isFinite(v))) {
+              const at = new DOMRect(r.left + b.x!, r.top + b.y!, b.width, b.height)
+              setEqAnchor({ isConnected: true, getBoundingClientRect: () => at })
+            }
+            useStore.getState().toggleEqPanel()
+            break
+          }
           void runDesktopCommand(message.cmd, message.arg).catch((e) => console.warn('[wrld widgets] command failed', message.cmd, e))
           break
         case 'solid':
@@ -197,7 +209,7 @@ export default function WrldWidgets(): JSX.Element {
           break
         case 'menu': {
           const r = frames.current[which]?.getBoundingClientRect()
-          if (r) setMenu({ which, x: r.left + message.x, y: r.top + message.y })
+          if (r) setMenu({ which, x: r.left + message.x, y: r.top + message.y, part: message.part === 'lyrics' ? 'lyrics' : undefined })
           break
         }
         case 'key': {
@@ -247,8 +259,8 @@ export default function WrldWidgets(): JSX.Element {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          title={WIDGET_TITLES[menu.which]}
-          items={menuItems(widgetMenuOf(menu.which, 'tab'))}
+          title={menu.part === 'lyrics' ? 'Lyrics' : WIDGET_TITLES[menu.which]}
+          items={menuItems(widgetMenuOf(menu.which, 'tab', false, menu.part))}
           checkColumn="auto"
           onClose={() => setMenu(null)}
         />

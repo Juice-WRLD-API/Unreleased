@@ -87,7 +87,8 @@ interface Props {
   onClearSessionLink?: () => void
 }
 
-function downloadTrack(track: Track, songId: number | null): void {
+/** Saves the song's file. Also the desktop player's song menu (lib/desktopBridge). */
+export function downloadTrack(track: Track, songId: number | null): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {

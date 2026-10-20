@@ -13,8 +13,8 @@ export type FromFrame =
   | { type: 'drag'; phase: 'start' | 'end' }
   | { type: 'drag-to'; x: number; y: number }
   | { type: 'size'; width: number; height: number }
-  /** Right-clicked at this point in the frame: the widget's menu. */
-  | { type: 'menu'; x: number; y: number }
+  /** Right-clicked at this point in the frame: the widget's menu, or the lyrics' (`part`). */
+  | { type: 'menu'; x: number; y: number; part?: 'lyrics' }
   /** A key pressed in the frame that the page doesn't use itself: the app's hotkeys still work after a click on it. */
   | { type: 'key'; key: string; code: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
 

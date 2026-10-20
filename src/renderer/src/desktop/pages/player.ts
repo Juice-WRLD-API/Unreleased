@@ -25,6 +25,8 @@ document.body.innerHTML = `<div id="player" data-clear>
   <div id="tools" data-clear>
     <button class="circle quiet gone" data-tool="lyricsCard" aria-label="Hide the card"></button>
     <div id="notice-slot" data-clear></div>
+    <button class="circle" data-tool="fm" aria-label="999 FM"></button>
+    <button class="circle away" data-tool="versions" data-menu-button aria-label="Other versions" title="Other versions"></button>
     <button class="circle" data-tool="settings" aria-label="Desktop settings" title="Desktop settings"></button>
     <div id="searchbar" class="circle"><span class="mag"></span><input type="text" placeholder="Search songs and eras" spellcheck="false" aria-label="Search"><span class="spin"></span><button class="clear" aria-label="Clear"></button></div>
     <button class="circle" data-tool="mini" aria-label="Make the player small" title="Make the player small"></button>
@@ -156,21 +158,24 @@ class Bar {
     this.host = host
     host.innerHTML = `
       <div class="bar-glass"></div>
-      <div class="bar-left">${button('previous', 16)}${button('toggle', 22)}${button('next', 16)}${button('repeat', 13, { quiet: true })}</div>
+      <div class="bar-left">${button('shuffle', 13, { quiet: true, label: 'Shuffle' })}${button('previous', 16)}${button('toggle', 22)}${button('next', 16)}${button('repeat', 13, { quiet: true })}</div>
       <div class="strip">
         <div class="strip-row">
           <button class="cover-button" data-action="open" aria-label="Open Unreleased"><span class="cover-art"></span><span class="cover-arrow">${icons.arrowOut}</span></button>
           <div class="strip-texts"><div class="marquee title"><span></span></div><div class="marquee subtitle"><span></span></div></div>
           <div class="time-left"></div>
           <button class="heart" data-action="like" aria-label="Like">${icons.heart}${icons.heartFill}</button>
+          <button class="more" data-action="more" data-menu-button aria-label="More options" title="More options">${icons.ellipsis}</button>
         </div>
         <div class="progress"><div class="rail"></div><div class="fill"></div></div>
       </div>
-      <div class="bar-right">${button('lyrics', 15, { label: 'Lyrics' })}${button('clear', 14, { label: 'Clear the desk' })}<div class="volume"><input type="range" min="0" max="1" step="0.01" value="0.5" aria-label="Volume">${button('volume', 15, { label: 'Volume' })}</div></div>`
+      <div class="bar-right">${button('equalizer', 15, { label: 'Equalizer' })}${button('lyrics', 15, { label: 'Lyrics' })}${button('clear', 14, { label: 'Clear the desk' })}<div class="volume"><input type="range" min="0" max="1" step="0.01" value="0.5" aria-label="Volume">${button('volume', 15, { label: 'Volume' })}</div></div>`
     sizeButtons(host)
     const glyph = (action: string): HTMLElement => $(`[data-action="${action}"] .glyph`, host)
+    glyph('shuffle').innerHTML = icons.shuffle
     glyph('previous').innerHTML = icons.backward
     glyph('next').innerHTML = icons.forward
+    glyph('equalizer').innerHTML = icons.equalizer
     glyph('lyrics').innerHTML = icons.lyrics
     glyph('clear').innerHTML = icons.moon
     glyph('volume').innerHTML = icons.speaker2
@@ -192,6 +197,13 @@ class Bar {
       if (action === 'volume') { this.toggleVolume(); return }
       if (action === 'clear') { page.command('clear'); return }
       if (action === 'open') { if (!live.inTab) page.command('open-app'); return }
+      if (action === 'more') { if (songMenuOpen()) closeMenu(); else void openSongMenu(); return }
+      // Where the button is, for the WRLD tab to open the equalizer beside it; on the desktop it gets its own window.
+      if (action === 'equalizer') {
+        const r = target.getBoundingClientRect()
+        page.command('equalizer', { x: r.left, y: r.top, width: r.width, height: r.height })
+        return
+      }
       page.command(action ?? '')
     })
     this.slider.addEventListener('input', () => {
@@ -234,6 +246,10 @@ class Bar {
     $('[data-action="toggle"] .glyph', this.host).innerHTML = state.playing ? icons.pause : icons.play
     $('[data-action="repeat"] .glyph', this.host).innerHTML = state.repeat === 'one' ? icons.repeatOne : icons.repeat
     $('[data-action="repeat"]', this.host).classList.toggle('active', !!state.repeat && state.repeat !== 'none')
+    const shuffle = $('[data-action="shuffle"]', this.host)
+    shuffle.classList.toggle('active', !!state.shuffle)
+    shuffle.title = state.shuffle ? 'Shuffle on' : 'Shuffle'
+    $('[data-action="equalizer"]', this.host).classList.toggle('active', !!state.eq)
     const clear = $('[data-action="clear"]', this.host)
     clear.classList.toggle('active', live.isClear)
     clear.title = live.isClear ? 'Bring everything back' : 'Clear the desk'
@@ -259,6 +275,8 @@ class Bar {
     this.heart.title = state.liked ? 'Liked' : 'Like'
     if (state.liked && !this.wasLiked) { this.heart.classList.remove('beat'); void this.heart.offsetWidth; this.heart.classList.add('beat') }
     this.wasLiked = !!state.liked
+    // The song's menu: there while something plays.
+    $('[data-action="more"]', this.host).classList.toggle('gone', !t)
     if (this.volumeOpen && !this.volumeTouched && typeof state.volume === 'number') { this.slider.value = String(state.volume); this.paintVolume(state.volume) }
     this.restartLine()
   }
@@ -529,19 +547,113 @@ function play(song: DesktopTrack, list: DesktopTrack[]): void {
 
 // ---- a song's menu ----
 
+/** Which menu is open: a search result's, the song's other versions, or the song playing's own (the ⋯). */
+type MenuKind = 'result' | 'versions' | 'song'
+let menuKind: MenuKind | null = null
+/** Goes up as the ⋯ menu is asked for or any menu closes: an answer for a menu since closed is dropped. */
+let songMenuTurn = 0
 let menuFor: { song: DesktopTrack; list: DesktopTrack[] } | null = null
-function openMenu(x: number, y: number, song: DesktopTrack, list: DesktopTrack[]): void {
+const menuOpen = (kind: MenuKind): boolean => menuKind === kind
+
+/** The menu filled and shown as `kind`: the result's at the pointer, the others over their buttons. */
+function showMenu(kind: MenuKind, html: string, at: { x: number; y: number } | HTMLElement): void {
   const menu = $('#menu')
-  menuFor = { song, list }
-  menu.innerHTML = `<button data-menu="play">Play</button><button data-menu="next">Play next</button><button data-menu="queue">Add to queue</button>`
+  menuKind = kind
+  menu.classList.toggle('listing', kind !== 'result')
+  menu.innerHTML = html
   menu.classList.remove('hidden')
   const r = menu.getBoundingClientRect()
-  menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`
-  menu.style.top = `${Math.min(y, window.innerHeight - r.height - 8)}px`
+  if (at instanceof HTMLElement) {
+    // Above the button, its right edge on the button's; below it if there's no room.
+    const b = at.getBoundingClientRect()
+    menu.style.left = `${Math.min(Math.max(b.right - r.width, 8), window.innerWidth - r.width - 8)}px`
+    menu.style.top = `${b.top - r.height - 8 >= 8 ? b.top - r.height - 8 : b.bottom + 8}px`
+  } else {
+    menu.style.left = `${Math.min(at.x, window.innerWidth - r.width - 8)}px`
+    menu.style.top = `${Math.min(at.y, window.innerHeight - r.height - 8)}px`
+  }
 }
-function closeMenu(): void { $('#menu').classList.add('hidden'); menuFor = null }
+
+function openMenu(x: number, y: number, song: DesktopTrack, list: DesktopTrack[]): void {
+  menuFor = { song, list }
+  showMenu('result', `<button data-menu="play">Play</button><button data-menu="next">Play next</button><button data-menu="queue">Add to queue</button>`, { x, y })
+}
+function closeMenu(): void { $('#menu').classList.add('hidden'); menuKind = null; menuFor = null; songMenuTurn++ }
+
+// ---- the song's other versions: WRLD's version notch, as a menu over the versions button ----
+
+const versionsOpen = (): boolean => menuOpen('versions')
+function openVersions(): void {
+  const versions = live.state.versions ?? []
+  if (!versions.length) return
+  menuFor = null
+  showMenu('versions', `<div class="menu-title">Other versions</div>${versions.map((v, i) =>
+    `<button data-version="${v.songId}">${escapeText(v.label ?? `Version ${i + 1}`)}</button>`).join('')}`, $<HTMLElement>('[data-tool="versions"]'))
+}
+
+// ---- the song playing's own menu (the ⋯ by the heart): what of the app's song menu a widget can do ----
+
+interface SongMenu { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; playlists: { id: number; name: string }[] | null }
+let songMenu: SongMenu | null = null
+const songMenuOpen = (): boolean => menuOpen('song')
+
+async function openSongMenu(): Promise<void> {
+  const turn = ++songMenuTurn
+  const answer = await page.request<SongMenu>('song-menu')
+  if (turn !== songMenuTurn || !answer) return
+  songMenu = answer
+  paintSongMenu(false)
+}
+
+/** Its rows, or (`playlists`) the playlists to add the song to. */
+function paintSongMenu(playlists: boolean): void {
+  const m = songMenu
+  if (!m) return
+  menuFor = null
+  const row = (what: string, label: string): string => `<button data-more="${what}">${label}</button>`
+  let html: string
+  if (playlists && m.playlists) {
+    html = `<button class="menu-title back" data-more="back">‹ Add to playlist</button>${m.playlists.length
+      ? m.playlists.map((p) => `<button data-playlist="${p.id}">${escapeText(p.name)}</button>`).join('')
+      : '<div class="menu-note">No playlists yet</div>'}`
+  } else {
+    const rows = [m.info && row('info', 'Song info'), m.playlists && row('playlists', 'Add to playlist…'), m.link && row('link', 'Copy link'),
+      m.download && row('download', 'Download'), m.edit && row('edit', 'Edit')].filter(Boolean).join('')
+    html = `<div class="menu-title">${escapeText(m.title)}</div>${rows || '<div class="menu-note">Nothing more for this song</div>'}`
+  }
+  showMenu('song', html, $<HTMLElement>('[data-action="more"]'))
+}
+
+/** A row picked. The quick ones show done at once, and say so if the app couldn't. */
+function songMenuPick(what: string): void {
+  const title = songMenu?.title ?? ''
+  if (what === 'back' || what === 'playlists') { paintSongMenu(what === 'playlists'); return }
+  closeMenu()
+  if (what === 'info') page.command('song-info')
+  if (what === 'edit') page.command('edit-song')
+  if (what === 'download') { page.command('download-song'); notice('Downloading', title) }
+  if (what === 'link') {
+    notice('Link copied', title)
+    void page.request<boolean>('copy-link').then((ok) => { if (!ok) notice('Couldn’t copy the link', title) })
+  }
+}
+
+function addToPlaylist(id: number): void {
+  const name = songMenu?.playlists?.find((p) => p.id === id)?.name ?? 'Playlist'
+  closeMenu()
+  notice('Added to playlist', name)
+  void page.request<boolean>('add-to-playlist', id).then((ok) => { if (!ok) notice('Couldn’t add to playlist', name) })
+}
+
 $('#menu').addEventListener('click', (event) => {
-  const what = (event.target as Element).closest<HTMLElement>('[data-menu]')?.dataset.menu
+  const target = event.target as Element
+  const more = target.closest<HTMLElement>('[data-more]')?.dataset.more
+  if (more) { songMenuPick(more); return }
+  const playlist = target.closest<HTMLElement>('[data-playlist]')?.dataset.playlist
+  if (playlist) { addToPlaylist(Number(playlist)); return }
+  const version = target.closest<HTMLElement>('[data-version]')?.dataset.version
+  if (version) { closeMenu(); page.command('play-version', Number(version)); return }
+  const what = target.closest<HTMLElement>('[data-menu]')?.dataset.menu
   const chosen = menuFor
   closeMenu()
   if (!what || !chosen) return
@@ -549,7 +661,8 @@ $('#menu').addEventListener('click', (event) => {
   if (what === 'next') { page.command('play-next', chosen.song.track); notice('Playing next', chosen.song.title) }
   if (what === 'queue') { page.command('add-to-queue', chosen.song.track); notice('Added to queue', chosen.song.title) }
 })
-window.addEventListener('pointerdown', (event) => { if (!(event.target as Element).closest('#menu')) closeMenu() }, true)
+// The versions button and the ⋯ toggle their own menus, so a press on one is left to its click.
+window.addEventListener('pointerdown', (event) => { if (!(event.target as Element).closest('#menu, [data-menu-button]')) closeMenu() }, true)
 
 // ---- the lyrics ----
 
@@ -586,7 +699,36 @@ function drawLyrics(open: boolean): void {
   stage.use(look)
   const song = songForStage()
   if (!song) return
-  stage.show(song, { clock: live.state.clock ?? null, isSeen: !document.hidden, colors: live.state.colors ?? null, face: lyricFontFor(live.settings?.lyrics.fonts, stage.look), scale: m.s })
+  stage.show(song, { clock: live.state.clock ?? null, isSeen: !document.hidden, colors: live.state.colors ?? null, face: lyricFontFor(live.settings?.lyrics.fonts, stage.look), scale: m.s, tune: live.state.lyricTune })
+}
+
+/** The lyrics are drawn at this point: words (or the note between them, or "No lyrics") in sight there. The lyrics
+ *  take no pointer themselves, so what's under them is what's hit; this says the point is theirs all the same. */
+function onLyrics(x: number, y: number): boolean {
+  if ($('#lyrics').classList.contains('gone')) return false
+  const over = (el: Element): boolean => {
+    const r = el.getBoundingClientRect()
+    return r.width > 0 && r.height > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+  }
+  const quiet = $('#lyrics .quiet')
+  if (!quiet.classList.contains('gone')) return [...quiet.children].some(over)
+  // Only what's drawn: a picture, letters or a painted box, not an empty box round them; and not faded out.
+  const drawn = (el: Element): boolean => el instanceof HTMLCanvasElement || el instanceof SVGElement || !!el.textContent?.trim()
+    || getComputedStyle(el).backgroundImage !== 'none'
+  const seen = (el: Element): boolean => {
+    let opacity = 1
+    for (let at: Element | null = el; at && at !== lyricHost; at = at.parentElement) {
+      const style = getComputedStyle(at)
+      if (style.visibility === 'hidden' || style.display === 'none') return false
+      opacity *= Number(style.opacity)
+    }
+    return opacity > 0.05
+  }
+  for (const el of lyricHost.querySelectorAll('*')) {
+    if (el.childElementCount || !over(el)) continue
+    if (drawn(el) && seen(el)) return true
+  }
+  return false
 }
 
 // ---- the cards ----
@@ -622,6 +764,17 @@ function render(): void {
   const lyricsCard = lyricsOut && home >= 0 ? list[home]?.key ?? null : null
   const folded = !!p?.hidesLyricsCard && lyricsCard != null
   const beside = !folded && lyricsCard != null
+
+  // The versions button: there while the song has other versions.
+  const hasVersions = !!live.state.versions?.length
+  $('[data-tool="versions"]').classList.toggle('away', !hasVersions)
+  if (!hasVersions && versionsOpen()) closeMenu()
+  // 999 FM: lit while it's on, and not to be tuned in while it's off the air.
+  const fm = $<HTMLButtonElement>('[data-tool="fm"]')
+  const offAir = live.state.fmLive === false && !live.state.fm
+  fm.classList.toggle('on', !!live.state.fm)
+  fm.disabled = offAir
+  fm.title = live.state.fm ? 'Leave 999 FM' : offAir ? '999 FM is off the air' : 'Listen to 999 FM'
 
   const eye = $('[data-tool="lyricsCard"]')
   eye.classList.toggle('gone', !lyricsCard)
@@ -667,7 +820,8 @@ carousel.addEventListener('pointermove', (event) => {
 })
 carousel.addEventListener('pointerleave', () => { if (hoveredKey) { hoveredKey = null; render() } cards.lean(null, null) })
 carousel.addEventListener('click', (event) => {
-  if (justDragged()) return
+  // A click on the lyrics themselves is theirs (their menu is a right-click), not the cards'.
+  if (justDragged() || onLyrics(event.clientX, event.clientY)) return
   // The lyrics open: a click on the cards goes back to them.
   if (live.settings?.player.lyricsOpen) { page.command('set', { player: { lyricsOpen: false } }); return }
   const hit = cards.hit(event.clientX, event.clientY)
@@ -702,20 +856,25 @@ $('#tools').addEventListener('click', (event) => {
   if (tool === 'mini') page.command('set', { player: { mini: true } })
   if (tool === 'lyricsCard') page.command('set', { player: { hidesLyricsCard: !live.settings?.player.hidesLyricsCard } })
   if (tool === 'settings') page.command('open-settings')
+  if (tool === 'versions') { if (versionsOpen()) closeMenu(); else openVersions() }
+  if (tool === 'fm') page.command('fm')
 })
+$('[data-tool="fm"]').innerHTML = icons.radio
+$('[data-tool="versions"]').innerHTML = icons.stack
 $('[data-tool="settings"]').innerHTML = icons.gear
 $('[data-tool="mini"]').innerHTML = icons.mini
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && search.isOpen) search.close() })
 window.addEventListener('blur', () => { if (search.isOpen && !search.query) search.close() })
 
-// What takes clicks: everything drawn, but none of the clear containers round it.
+// What takes clicks: everything drawn, but none of the clear containers round it - and the lyrics' words.
 seeThrough((x, y) => {
   const el = document.elementFromPoint(x, y)
-  return !!el && el !== document.body && el !== document.documentElement && !el.hasAttribute('data-clear')
+  return (!!el && el !== document.body && el !== document.documentElement && !el.hasAttribute('data-clear')) || onLyrics(x, y)
 })
 // The bar's and the capsule's empty glass, and the cards, move the player.
 dragToMove((target) => !!target.closest('.bar-glass, .strip-texts, #mini, .dk-card, #empty') && !target.closest('button, input, .progress'))
-menuOnRightClick()
+// The lyrics have their own menu.
+menuOnRightClick((x, y) => (onLyrics(x, y) ? 'lyrics' : null))
 
 const bar = new Bar($('#bar'))
 const miniBar = new MiniBar($('#mini'))
@@ -724,6 +883,10 @@ const search = new Search()
 live.on((what, patch) => {
   if (what === 'settings') applyMetrics()
   if (what === 'state' && patch && 'track' in patch) { browseKey = null }
+  // A new song's versions: the list open was the last song's.
+  if (what === 'state' && patch && 'versions' in patch && versionsOpen()) closeMenu()
+  // And the ⋯ menu open was about the song before.
+  if (what === 'state' && patch && 'track' in patch && songMenuOpen()) closeMenu()
   if (what === 'state' && search.isOpen && patch && 'track' in patch) search.paint()
   render()
 })

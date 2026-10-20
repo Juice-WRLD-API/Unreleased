@@ -9,15 +9,23 @@ import { watchPlayClock } from '../desktop/playClock'
 import { listenToMeter } from '../desktop/meter'
 import { albumColorsFor } from '../desktop/artColors'
 import { timedFromLines, pacedFromText, type TimedLine } from '../desktop/lyrics/timing'
-import { isLrcFormat, parseLrc } from './lyrics'
+import { downloadSyncedLyrics, isLrcFormat, parseLrc } from './lyrics'
 import { runHotkeyAction } from './hotkeys'
 import { seekAudio, getAudioDuration } from '../components/Player'
-import { apiFetch, buildImageUrl, playlistCoverUrl, searchSongs, sizedCoverUrl, smallCoverUrl, songToTrack, type JWApiPaginatedResponse } from './juicewrldApi'
+import { apiFetch, buildImageUrl, getSongById, playlistCoverUrl, searchSongs, sizedCoverUrl, smallCoverUrl, songToTrack, type JWApiPaginatedResponse } from './juicewrldApi'
 import * as userApi from './userApi'
 import { listEras } from './eras'
 import { libraryTrackToTrack } from './fileTypes'
+import { fxInUse } from './audioEffects'
+import { loadVersionEntries } from './songVersions'
+import { prefLabel } from './versionPrefs'
+import { showAppToast } from './appToast'
+import { trackShareUrl } from './platform'
+import { addSongsInBackground } from './optimisticPlaylist'
+import { toggleRadioFm } from '../hooks/useWrldCore'
+import { downloadTrack } from '../components/SongContextMenu'
 import type { DesktopPatch } from '../store/desktopSlice'
-import { widgetMenu, type WidgetWhich } from '../desktop/widgetMenu'
+import { widgetMenu, type WidgetPart, type WidgetWhich } from '../desktop/widgetMenu'
 import type { Track } from '../types'
 
 /** The queue's songs either side of the one playing that the desktop is told of: the cards and the playlist. */
@@ -68,6 +76,38 @@ function nowTrack(s: AppStore): { id: string; title: string; artist: string; alb
   return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration || 0, cover: sizedCoverUrl(t.imageUrl, 600) ?? art ?? null }
 }
 
+/** Anything in the equalizer away from neutral, as the app's EQ button reckons it (components/Player.tsx). */
+const eqInUse = (s: AppStore): boolean => s.eqEnabled || s.playbackSpeed !== 1 || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1
+  || s.skipSilence || s.reverbEnabled || fxInUse(s.audioFx, s.eqEnabled)
+
+/** The song the player's ⋯ menu is about: the one playing, or 999 FM's (which has no file of ours to save). */
+function menuSong(s: AppStore): { songId: number | null; track: Track | null } {
+  if (s.radioFmActive) return { songId: s.radioFmNowPlaying?.song_id ?? s.radioFmMatchedSong?.songId ?? null, track: null }
+  const track = s.currentTrack
+  return { songId: track ? userApi.trackIdToSongId(track.id) : null, track }
+}
+
+/** What the ⋯ menu offers for it, as the app's song menu would (components/SongContextMenu). */
+function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; playlists: { id: number; name: string }[] | null } | null {
+  const { songId, track } = menuSong(s)
+  const title = nowTrack(s)?.title
+  if (!title || (songId == null && !track)) return null
+  const has = songId != null && songId > 0
+  const editor = userApi.isChannelEditor(s.account, s.channels.find((c) => c.is_primary)?.slug, true)
+  return {
+    title, info: has, link: has, edit: has && editor,
+    download: !!track?.path && !(songId == null && track.id.startsWith('local-')),
+    // Signed in, an API song can go on a playlist.
+    playlists: has && s.account ? s.playlists.map((p) => ({ id: p.id, name: p.name })) : null,
+  }
+}
+
+/** The song's other versions that can be played, as WRLD's version notch lists them (hooks/useSongVersions). */
+async function versionsOf(songId: number): Promise<{ songId: number; label: string | null }[]> {
+  const entries = await loadVersionEntries(songId).catch(() => [])
+  return entries.filter((e) => e.playable).map(({ song, meta }) => ({ songId: song.id, label: prefLabel(meta) ?? meta.versionTitle }))
+}
+
 function queueWindow(s: AppStore): { from: number; current: number; items: DesktopTrack[] } {
   if (!s.queue.length) return s.currentTrack ? { from: 0, current: 0, items: [desktopTrack(s.currentTrack, `${s.currentTrack.id}#0`)] } : { from: 0, current: -1, items: [] }
   const from = Math.max(0, s.queueIndex - BEFORE)
@@ -75,14 +115,18 @@ function queueWindow(s: AppStore): { from: number; current: number; items: Deskt
   return { from, current: s.queueIndex, items }
 }
 
+/** The song's lyrics as the app has them: LRC when they're timed, plain text when not. */
+function rawLyrics(s: AppStore): string | null {
+  return s.radioFmActive
+    ? (s.radioFmMatchedSong?.syncedLyrics || s.radioFmMatchedSong?.lyrics || null)
+    : (s.currentTrackFull && s.currentTrackFull.id === s.currentTrack?.id ? s.currentTrackFull.syncedLyrics || s.currentTrackFull.lyrics : null)
+}
+
 let lyricsFor: { raw: string | null; offset: number; duration: number } | null = null
 let lyricsMade: { id: string; lines: TimedLine[] } | null = null
 /** The song's lyrics timed word by word, shifted by the lyrics offset; paced over the song when they aren't timed. */
 function nowLyrics(s: AppStore): { id: string; lines: TimedLine[] } | null {
-  const fm = s.radioFmActive
-  const raw = fm
-    ? (s.radioFmMatchedSong?.syncedLyrics || s.radioFmMatchedSong?.lyrics || null)
-    : (s.currentTrackFull && s.currentTrackFull.id === s.currentTrack?.id ? s.currentTrackFull.syncedLyrics || s.currentTrackFull.lyrics : null)
+  const raw = rawLyrics(s)
   const id = nowTrack(s)?.id ?? ''
   const duration = s.currentTrack?.duration || 0
   if (lyricsFor && lyricsFor.raw === raw && lyricsFor.offset === s.lyricsOffset && lyricsFor.duration === duration && lyricsMade?.id === id) return lyricsMade
@@ -176,6 +220,36 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
     case 'repeat': runHotkeyAction('loop'); break
     case 'shuffle': runHotkeyAction('shuffle'); break
     case 'like': runHotkeyAction('like'); break
+    // From the lyrics' menu: the words alone, without the timing; or the timed ones as an .lrc file.
+    case 'copy-lyrics': {
+      const raw = rawLyrics(s)
+      if (!raw?.trim()) break
+      const text = isLrcFormat(raw) ? parseLrc(raw).map((l) => l.text).join('\n') : raw.trim()
+      // The clipboard by the app's own hand: on the desktop the main window hasn't the focus a page's copy needs.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const el = (window as any).electron
+      try {
+        if (el?.copyTextToClipboard) await el.copyTextToClipboard(text)
+        else await navigator.clipboard.writeText(text)
+        showAppToast('Lyrics copied')
+      } catch { showAppToast("Couldn't copy the lyrics", { tone: 'error' }) }
+      break
+    }
+    case 'download-lyrics': {
+      const raw = rawLyrics(s)
+      const track = nowTrack(s)
+      if (raw && isLrcFormat(raw)) downloadSyncedLyrics(track?.title || 'lyrics', track?.artist ?? '', raw)
+      break
+    }
+    // The equalizer from a widget on the desktop: its own window, since the main one is likely hidden behind (the
+    // WRLD tab's widgets open the app's own, beside the button). On the web there's only the app's.
+    case 'equalizer': {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const el = (window as any).electron
+      if (el?.toggleFloatWindow) void el.toggleFloatWindow('equalizer')
+      else s.toggleEqPanel()
+      break
+    }
     case 'seek': {
       const fraction = Number(arg)
       const duration = getAudioDuration()
@@ -201,6 +275,35 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       if (!isTrack(track)) break
       const list = Array.isArray(context) ? context.filter(isTrack) : [track]
       s.playTrack(track, list.length ? list : [track])
+      break
+    }
+    case 'fm': toggleRadioFm(); break
+    // The ⋯ menu's rows that open the app: song info and the editor (the main process brings the window forward).
+    case 'song-info': {
+      const { songId } = menuSong(s)
+      if (songId != null) s.setInfoSongId(songId)
+      break
+    }
+    case 'edit-song': {
+      const { songId } = menuSong(s)
+      if (songId != null) s.openSongEditor(songId)
+      break
+    }
+    case 'download-song': {
+      const { songId, track } = menuSong(s)
+      if (track?.path) downloadTrack(track, songId)
+      break
+    }
+    // Another version of the song playing, swapped in where it is so the queue is kept (as WRLD's version notch does).
+    case 'play-version': {
+      const songId = Number(arg)
+      if (!Number.isInteger(songId)) break
+      try {
+        const track = songToTrack(await getSongById(songId))
+        const { currentTrack } = useStore.getState()
+        if (currentTrack) s.changeVersion(currentTrack, track)
+        else s.playTrack(track, [track])
+      } catch { showAppToast("Couldn't switch to that version") }
       break
     }
     case 'play-next': if (isTrack(arg)) s.playNext(arg); break
@@ -247,6 +350,20 @@ export async function answerDesktopRequest(kind: string, arg: unknown): Promise<
     case 'search': return typeof arg === 'string' && arg.trim() ? search(arg.trim()) : { songs: [], eras: [] }
     case 'era': return typeof arg === 'string' ? era(arg) : null
     case 'lists': return shelf()
+    case 'song-menu': return songMenu(useStore.getState())
+    // The ⋯ menu's quick rows, answered with whether they worked: the widget shows them done at once and takes it back
+    // if not.
+    case 'copy-link': {
+      const { songId } = menuSong(useStore.getState())
+      if (songId == null) return false
+      return navigator.clipboard.writeText(trackShareUrl(songId)).then(() => true, () => false)
+    }
+    case 'add-to-playlist': {
+      const { songId } = menuSong(useStore.getState())
+      const playlistId = Number(arg)
+      if (songId == null || !Number.isInteger(playlistId)) return false
+      return (await addSongsInBackground(playlistId, [songId])).length === 0
+    }
     case 'list': {
       if (typeof arg !== 'string') return null
       const tracks = await listTracks(arg)
@@ -254,20 +371,23 @@ export async function answerDesktopRequest(kind: string, arg: unknown): Promise<
     }
     // A widget on the desktop right-clicked: its menu, for the main process to show.
     case 'widget-menu': {
-      const { which, isClear } = (arg ?? {}) as { which?: string; isClear?: boolean }
+      const { which, isClear, part } = (arg ?? {}) as { which?: string; isClear?: boolean; part?: string }
       if (which !== 'player' && which !== 'playlist' && which !== 'clock') return null
-      return widgetMenuOf(which, 'desktop', !!isClear)
+      return widgetMenuOf(which, 'desktop', !!isClear, part === 'lyrics' ? part : undefined)
     }
     default: return null
   }
 }
 
-/** A widget's right-click menu, with what's this app's to know: the playlists, whether the desktop has widgets. */
-export function widgetMenuOf(which: WidgetWhich, where: 'desktop' | 'tab', isClear = false): ReturnType<typeof widgetMenu> {
+/** A widget's right-click menu, with what's this app's to know: the playlists, whether the desktop has widgets, the
+ *  lyrics there are (for the player's lyrics, `part`). */
+export function widgetMenuOf(which: WidgetWhich, where: 'desktop' | 'tab', isClear = false, part?: WidgetPart): ReturnType<typeof widgetMenu> {
   const s = useStore.getState()
+  const raw = rawLyrics(s)
   return widgetMenu(which, s.desktop, {
-    where, isClear, desktopToo: desktopWindowsSupported(),
+    where, isClear, part, desktopToo: desktopWindowsSupported(),
     playlists: s.playlists.map((p) => ({ id: String(p.id), name: p.name })),
+    lyrics: { has: !!raw?.trim(), timed: !!raw && isLrcFormat(raw) },
   })
 }
 
@@ -311,6 +431,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
   }
 
   let colorsFor: string | null | undefined
+  let versionsFor: number | null | undefined
   const sendState = (): void => {
     const s = useStore.getState()
     const track = nowTrack(s)
@@ -322,15 +443,25 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
       volume: s.volume,
       repeat: s.repeat,
       shuffle: s.shuffle,
+      eq: eqInUse(s),
       fm: s.radioFmActive,
+      fmLive: s.radioFmIsLive,
       cards: queueWindow(s),
       lyrics: nowLyrics(s),
+      lyricTune: { size: s.lyricsScale, active: s.lyricsColorActive, inactive: s.lyricsColorInactive },
       listsVersion,
     })
     if (track?.cover !== colorsFor) {
       const cover = track?.cover ?? null
       colorsFor = cover
       void albumColorsFor(cover).then((colors) => { if (colorsFor === cover) push({ colors }) })
+    }
+    // The last song's versions go at once; the new one's follow when they're known.
+    const songId = !s.radioFmActive && s.currentTrack ? userApi.trackIdToSongId(s.currentTrack.id) : null
+    if (songId !== versionsFor) {
+      versionsFor = songId
+      push({ versions: [] })
+      if (songId != null) void versionsOf(songId).then((versions) => { if (versionsFor === songId) push({ versions }) })
     }
   }
 
@@ -349,7 +480,10 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     if (s.currentTrack !== p.currentTrack || s.currentTrackFull !== p.currentTrackFull || s.isPlaying !== p.isPlaying || s.queue !== p.queue
       || s.queueIndex !== p.queueIndex || s.likedTrackIds !== p.likedTrackIds || s.volume !== p.volume || s.repeat !== p.repeat
       || s.shuffle !== p.shuffle || s.lyricsOffset !== p.lyricsOffset || s.radioFmActive !== p.radioFmActive || s.radioFmNowPlaying !== p.radioFmNowPlaying
-      || s.radioFmMatchedSong !== p.radioFmMatchedSong || s.playlists !== p.playlists) later()
+      || s.radioFmMatchedSong !== p.radioFmMatchedSong || s.playlists !== p.playlists || s.radioFmIsLive !== p.radioFmIsLive
+      || s.eqEnabled !== p.eqEnabled || s.playbackSpeed !== p.playbackSpeed || s.eqBalance !== p.eqBalance || s.eqMono !== p.eqMono
+      || s.eqBoost !== p.eqBoost || s.skipSilence !== p.skipSilence || s.reverbEnabled !== p.reverbEnabled || s.audioFx !== p.audioFx
+      || s.lyricsScale !== p.lyricsScale || s.lyricsColorActive !== p.lyricsColorActive || s.lyricsColorInactive !== p.lyricsColorInactive) later()
   })
   return () => { stopped = true; stopClock(); unsubscribe() }
 }

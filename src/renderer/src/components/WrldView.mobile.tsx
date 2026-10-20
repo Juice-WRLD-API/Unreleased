@@ -207,7 +207,7 @@ export default function WrldView(): JSX.Element {
   const trackBg  = textIsDark ? 'rgba(0,0,0,0.15)'  : 'rgba(255,255,255,0.2)'
 
   const { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm } = useWrldNowPlaying(
-    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack, setRadioFmActive, setIsPlaying,
+    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack,
   )
 
   // The chevron collapses the player back to wherever you came from - the same

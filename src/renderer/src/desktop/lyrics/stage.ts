@@ -6,7 +6,7 @@ import { SCENES } from './styles'
 import { lyricLookOf } from './looks'
 import type { LyricRenderer, StageLook, StageSong } from './scene'
 
-export type { StageSong, StageLook, StageClock } from './scene'
+export type { StageSong, StageLook, StageClock, LyricTune } from './scene'
 
 export class LyricStage {
   host: HTMLElement

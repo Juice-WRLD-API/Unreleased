@@ -512,7 +512,7 @@ export default function WrldView(): JSX.Element {
     : radioFmIsLive === false ? '999 FM · OFF' : '999 FM'
 
   const { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm } = useWrldNowPlaying(
-    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack, setRadioFmActive, setIsPlaying,
+    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack,
   )
 
   // ArtBox / FmRadioPanel / AlbumsGrid / AlbumDetail are rendered via plain
