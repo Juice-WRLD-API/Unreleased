@@ -3,7 +3,7 @@
 import './base.css'
 import './clock.css'
 import { hsbToRgb, type RGB } from '../light/engine'
-import { Live, dragToMove, page } from './page'
+import { Live, dragToMove, menuOnRightClick, page } from './page'
 
 const live = new Live()
 const SVG = 'http://www.w3.org/2000/svg'
@@ -97,6 +97,7 @@ function everyMinute(): void {
 }
 
 dragToMove(() => true)
+menuOnRightClick()
 live.on((what, patch) => {
   if (what === 'state' && patch && !('playing' in patch) && !('colors' in patch)) return
   draw()

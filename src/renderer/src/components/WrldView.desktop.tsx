@@ -390,6 +390,16 @@ export default function WrldView(): JSX.Element {
   // FM's column is on by default and the override turns it off; otherwise the
   // override is XORed against whether lyrics exist.
   const showLyricsColumn = radioFmActive ? !lyricsOverride : showQueue || lyricsVisible
+  const lyricsShown = !radioFmActive && !showQueue && lyricsVisible
+  // Lyrics show when the held has-lyrics value !== override, so these pick the
+  // override that shows or hides them for the current track. From the queue
+  // it switches straight to lyrics rather than closing the column.
+  const toggleLyricsPanel = (): void => {
+    const s = useStore.getState()
+    const hasLyrics = lyricsVisible !== lyricsOverride
+    if (showQueue) { s.setShowQueue(false); s.setLyricsOverride(!hasLyrics) }
+    else s.setLyricsOverride(lyricsVisible ? hasLyrics : !hasLyrics)
+  }
 
   // Desktop panel animation. The column outlives showLyricsColumn by its exit
   // animation, still showing whatever view it had (the stores have already
@@ -895,6 +905,17 @@ export default function WrldView(): JSX.Element {
                   {displayAlbum  && <p className="text-xs mt-0.5 truncate" style={{ color: txtTer }}>{displayAlbum}</p>}
                   {radioFmActive && !radioFmNowPlaying && <p className="text-xs mt-0.5" style={{ color: txtTer }}>Tuning in…</p>}
                 </div>
+                {!radioFmActive && rawLyrics && (
+                  <button
+                    onClick={toggleLyricsPanel}
+                    title="Lyrics"
+                    aria-pressed={lyricsShown}
+                    className="p-1.5 rounded-full transition-colors hover:bg-white/10"
+                    style={{ color: lyricsShown ? 'var(--accent)' : (textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)') }}
+                  >
+                    <TextQuote size={18} />
+                  </button>
+                )}
                 {!radioFmActive && (
                   <button
                     onClick={() => setShowQueue(!showQueue)}
@@ -1118,17 +1139,26 @@ export default function WrldView(): JSX.Element {
                     {displayArtist && <p className="text-sm mt-0.5 truncate" style={{ color: txtSec }}>{displayArtist}</p>}
                     {radioFmActive && !radioFmNowPlaying && <p className="text-sm mt-0.5" style={{ color: txtTer }}>Tuning in…</p>}
                   </div>
-                  {/* Swaps the right column between queue and lyrics - the icon
-                      is the view it switches to. */}
+                  {!radioFmActive && rawLyrics && (
+                    <button
+                      onClick={toggleLyricsPanel}
+                      title="Lyrics"
+                      aria-pressed={lyricsShown}
+                      className="p-1.5 rounded-full transition-colors hover:bg-white/10"
+                      style={{ color: lyricsShown ? 'var(--accent)' : (textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)') }}
+                    >
+                      <TextQuote size={16} />
+                    </button>
+                  )}
                   {!radioFmActive && (
                     <button
                       onClick={() => setShowQueue(!showQueue)}
-                      title={showQueue ? 'Show lyrics' : 'Playing Next'}
+                      title="Playing Next"
                       aria-pressed={showQueue}
                       className="p-1.5 rounded-full transition-colors hover:bg-white/10"
-                      style={{ color: textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)' }}
+                      style={{ color: showQueue ? 'var(--accent)' : (textIsDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.55)') }}
                     >
-                      {showQueue ? <TextQuote size={16} /> : <ListMusic size={16} />}
+                      <ListMusic size={16} />
                     </button>
                   )}
                   <FmLikeButton light={textIsDark} />

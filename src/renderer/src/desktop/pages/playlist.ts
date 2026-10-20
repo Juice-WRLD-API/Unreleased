@@ -7,7 +7,7 @@ import '../cards/cards.css'
 import './playlist.css'
 import { PlayingGlass } from '../cards/glass'
 import { hsbToRgb } from '../light/engine'
-import { Live, page, dragToMove, justDragged, escapeText, type DesktopTrack } from './page'
+import { Live, page, dragToMove, menuOnRightClick, justDragged, escapeText, type DesktopTrack } from './page'
 import { icons } from './icons'
 
 const live = new Live()
@@ -201,6 +201,7 @@ window.addEventListener('pointerdown', (event) => {
 
 // The header's and the list's empty glass move it.
 dragToMove((target) => !target.closest('button, .row, #shelf'))
+menuOnRightClick()
 
 live.on((what, patch) => {
   if (what === 'settings') { applyMetrics(); void fetchList() }

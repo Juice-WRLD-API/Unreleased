@@ -17,6 +17,7 @@ import * as userApi from './userApi'
 import { listEras } from './eras'
 import { libraryTrackToTrack } from './fileTypes'
 import type { DesktopPatch } from '../store/desktopSlice'
+import { widgetMenu, type WidgetWhich } from '../desktop/widgetMenu'
 import type { Track } from '../types'
 
 /** The queue's songs either side of the one playing that the desktop is told of: the cards and the playlist. */
@@ -251,8 +252,23 @@ export async function answerDesktopRequest(kind: string, arg: unknown): Promise<
       const tracks = await listTracks(arg)
       return { id: arg, name: listName(arg), rows: tracks.map((t, i) => desktopTrack(t, `${t.id}#${i}`)) }
     }
+    // A widget on the desktop right-clicked: its menu, for the main process to show.
+    case 'widget-menu': {
+      const { which, isClear } = (arg ?? {}) as { which?: string; isClear?: boolean }
+      if (which !== 'player' && which !== 'playlist' && which !== 'clock') return null
+      return widgetMenuOf(which, 'desktop', !!isClear)
+    }
     default: return null
   }
+}
+
+/** A widget's right-click menu, with what's this app's to know: the playlists, whether the desktop has widgets. */
+export function widgetMenuOf(which: WidgetWhich, where: 'desktop' | 'tab', isClear = false): ReturnType<typeof widgetMenu> {
+  const s = useStore.getState()
+  return widgetMenu(which, s.desktop, {
+    where, isClear, desktopToo: desktopWindowsSupported(),
+    playlists: s.playlists.map((p) => ({ id: String(p.id), name: p.name })),
+  })
 }
 
 // ---- what's playing, told ----

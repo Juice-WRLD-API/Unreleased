@@ -12,7 +12,7 @@ import { LyricStage, type StageSong } from '../lyrics/stage'
 import { lyricFontFor } from '../lyrics/looks'
 import { clockTime } from '../lyrics/scene'
 import { DEFAULT_LIGHT, hsbToRgb, type HSB } from '../light/engine'
-import { Live, page, seeThrough, dragToMove, frosted, justDragged, escapeText, clockText, type DesktopTrack } from './page'
+import { Live, page, seeThrough, dragToMove, menuOnRightClick, frosted, justDragged, escapeText, clockText, type DesktopTrack } from './page'
 import { icons } from './icons'
 
 const live = new Live()
@@ -715,6 +715,7 @@ seeThrough((x, y) => {
 })
 // The bar's and the capsule's empty glass, and the cards, move the player.
 dragToMove((target) => !!target.closest('.bar-glass, .strip-texts, #mini, .dk-card, #empty') && !target.closest('button, input, .progress'))
+menuOnRightClick()
 
 const bar = new Bar($('#bar'))
 const miniBar = new MiniBar($('#mini'))
