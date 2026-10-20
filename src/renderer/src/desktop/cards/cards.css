@@ -1,0 +1,69 @@
+/* The glass cards (ring.ts), the glow round the playing one (aura.ts) and the playing song's lens (glass.ts). Every
+   size is the design's size times --s; the element holding the stage sets the variables (metricsStyle). */
+.dk-stage { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.dk-aura { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.dk-aura .aura-stage, .dk-aura .aura-glow, .dk-aura .aura-sparks { position: absolute; inset: 0; }
+.dk-aura .aura-breath, .dk-aura .aura-flare { position: absolute; }
+.dk-aura .aura-flare { opacity: 0; }
+.dk-aura .spark { position: absolute; left: 0; top: 0; border-radius: 50%; opacity: 0; will-change: transform, opacity; }
+
+.dk-card { position: absolute; left: calc(var(--card-width) / -2); top: calc(var(--card-height) / -2); width: var(--card-width); height: var(--card-height);
+  transform-origin: 50% 50%; will-change: transform, opacity; color: #fff; }
+.dk-card .veil, .dk-card .floater, .dk-card .leaner { position: absolute; inset: 0; transform-origin: 50% 50%; }
+/* The card beside the lyrics floats: a slow rise and fall of 4 points and nothing more, the compositor moving the
+   card's layer as it is - nothing painted again. */
+.dk-card.floating .floater { will-change: transform; animation: dk-card-float 3s ease-in-out 0.6s infinite alternate; }
+@keyframes dk-card-float { from { transform: translateY(0); } to { transform: translateY(calc(-4px * var(--s))); } }
+
+.dk-card .body { position: absolute; inset: 0; border-radius: var(--card-radius); overflow: hidden; background: rgb(36, 36, 40);
+  box-shadow: 0 calc(10px * var(--s)) calc(32px * var(--s)) rgba(0, 0, 0, 0.35); }
+.dk-card .frost { position: absolute; inset: -30%; background-size: cover; background-position: center; filter: blur(calc(26px * var(--s))) saturate(1.25); transform: scale(1.1); }
+.dk-card .frost.plain { background: rgb(36, 36, 40); filter: none; }
+.dk-card .shade { position: absolute; inset: 0; background: #000; opacity: 0.25; }
+.dk-card .tint { position: absolute; inset: 0; background: rgba(255, 255, 255, calc(0.02 + 0.12 * var(--glass))); }
+.dk-card .face { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; padding-top: var(--card-inset); }
+.dk-card .cover { width: var(--cover-side); height: var(--cover-side); border-radius: var(--cover-radius); object-fit: cover; flex: none; display: block; }
+.dk-card .cover.none { background: linear-gradient(135deg, rgb(61, 61, 61), rgb(26, 26, 26)); }
+.dk-card .caption { width: 100%; height: var(--caption-height); display: flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: calc(2px * var(--s)); padding: 0 calc(12px * var(--s)); text-align: center; }
+.dk-card .title { font-size: calc(17px * var(--s)); font-weight: 600; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dk-card .line { font-size: calc(14.5px * var(--s)); color: rgba(255, 255, 255, 0.62); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dk-card .glare { position: absolute; inset: 0; opacity: 0; }
+.dk-card .dim { position: absolute; inset: 0; background: #000; opacity: 0; }
+/* A rim of light brightest at the top-left. */
+.dk-card .rim { position: absolute; inset: 0; border-radius: var(--card-radius); padding: 1px; pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 255, 255, calc(0.35 + 0.5 * var(--glass))) 0%, rgba(255, 255, 255, calc(0.12 + 0.12 * var(--glass))) 45%, rgba(255, 255, 255, calc(0.2 + 0.25 * var(--glass))) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+
+/* The song playing, standing out of its list as a lens of glass. */
+/* The row itself must be positioned (relative or absolute), so the glass can stand over it. */
+.pg-row > :not(.pg) { transition: opacity 0.2s ease-out 0.14s; }
+.pg-row.pg-up > :not(.pg) { opacity: 0; transition: opacity 0.18s ease-out; }
+.pg-row.pg-up { z-index: 2; background: transparent !important; box-shadow: none !important; }
+.pg { position: absolute; left: 0; top: 0; pointer-events: none; }
+.pg > *, .pg-stage > * { position: absolute; box-sizing: border-box; }
+.pg-floor { background: rgba(0, 0, 0, 0.5); }
+.pg-stage { transform-style: preserve-3d; transform: translateZ(0); transition: transform 0.3s cubic-bezier(0.42, 0, 1, 1); }
+.pg.standing .pg-stage { transition: transform 0.7s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.pg-glass, .pg-floor { opacity: 0; transition: opacity 0.25s; }
+.pg.standing .pg-glass, .pg.standing .pg-floor { opacity: 1; transition: opacity 0.35s; }
+.pg-face { opacity: 0; transition: opacity 0.2s 0.12s, transform 0.3s cubic-bezier(0.42, 0, 1, 1); }
+.pg.standing .pg-face { opacity: 1; transition: opacity 0.18s, transform 0.7s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.pg.instant, .pg.instant * { transition: none !important; }
+.pg-ring { border-style: solid; border-color: transparent; background-origin: border-box; background-clip: border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.pg-face > * { position: absolute; white-space: nowrap; line-height: 1.2; }
+.pg-cover { overflow: hidden; background: rgba(255, 255, 255, 0.1) center / cover no-repeat; }
+.pg-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.38); }
+.pg-bar { position: absolute; bottom: 0; background: #fff; transform-origin: 50% 100%; transform: scaleY(var(--h)); }
+.pg.running .pg-bar { animation: pg-beat var(--d) ease-in-out var(--delay) infinite alternate backwards; }
+@keyframes pg-beat { from { transform: scaleY(var(--h)); } to { transform: scaleY(1); } }
+.pg-title { display: flex; align-items: center; color: #fff; font-weight: 700; }
+.pg-title b { font-weight: 700; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pg-line { color: rgba(255, 255, 255, 0.72); overflow: hidden; text-overflow: ellipsis; }
+.pg-time { color: rgba(255, 255, 255, 0.7); text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dk-card.floating .floater { animation: none; }
+  .pg.running .pg-bar { animation: none; }
+}

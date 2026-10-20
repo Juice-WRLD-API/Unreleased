@@ -451,10 +451,8 @@ const iconPath = process.platform === 'linux'
 const preloadPath = path.join(__dirname, 'preload.js')
 
 let mainWindow = null
-let ijwaLyrics = null
-ipcMain.on('ijwa-lyrics', (event, snapshot) => {
-  if (event.sender === mainWindow?.webContents) ijwaLyrics?.publish(snapshot)
-})
+// Desktop (electron/desktop): the light round the screens and the desktop widgets, Windows only.
+let desktop = null
 let tray = null
 let isQuitting = false
 // Deliberate/programmatic quits (tray "Quit", restart, update install, OS
@@ -815,8 +813,49 @@ function buildTrayMenu() {
     { type: 'separator' },
     { label: 'Open Unreleased', click: () => showMainWindow() },
     { label: 'Open mini player', click: () => createFloatWindow('mini-player') },
+    ...desktopTrayItems(),
     { label: 'Quit', click: () => { isQuitting = true; app.quit() } },
   ])
+}
+
+// The tray's Desktop menu: the light, how it moves, each widget, and the desk cleared - as Settings > Desktop has them.
+/** @returns {Electron.MenuItemConstructorOptions[]} */
+function desktopTrayItems() {
+  const d = desktop?.settings
+  if (!desktop || !d) return []
+  /** @returns {Electron.MenuItemConstructorOptions} */
+  const motion = (value, label) => ({ label, type: 'radio', checked: d.light.motion === value, click: () => desktop.set({ light: { motion: value } }) })
+  return [{
+    label: 'Desktop',
+    submenu: [
+      { label: 'Screen-edge light', type: 'checkbox', checked: !!d.light.isOn, click: (item) => desktop.set({ light: { isOn: item.checked } }) },
+      { label: 'Motion', submenu: [motion('flow', 'Flow'), motion('music', 'Music Sync'), motion('still', 'Still')] },
+      { type: 'separator' },
+      { label: 'Desktop player', type: 'checkbox', checked: !!d.player.isOn, click: (item) => desktop.set({ player: { isOn: item.checked } }) },
+      { label: 'Desktop playlist', type: 'checkbox', checked: !!d.playlist.isOn, click: (item) => desktop.set({ playlist: { isOn: item.checked } }) },
+      { label: 'Desktop clock', type: 'checkbox', checked: !!d.clock.isOn, click: (item) => desktop.set({ clock: { isOn: item.checked } }) },
+      { type: 'separator' },
+      { label: desktop.isClear ? 'Bring everything back' : 'Clear the desk', click: () => desktop.toggleClear() },
+    ],
+  }]
+}
+
+function startDesktop() {
+  if (desktop || process.platform !== 'win32' || !mainWindow) return
+  try {
+    desktop = require('./desktop').createDesktop({
+      isDev,
+      devUrl: 'http://localhost:3018',
+      distDir: path.join(__dirname, '../dist'),
+      getMainWindow: () => mainWindow,
+      showMainWindow,
+      log,
+      onChange: () => updateTray(),
+    })
+  } catch (e) {
+    log('Desktop failed to start:', e.message)
+    desktop = null
+  }
 }
 
 function showMainWindow() {
@@ -1008,11 +1047,7 @@ function createWindow() {
   // frozen (e.g. a synchronous blowup like sorting/rendering a huge list), which
   // is the classic "nearly crashed my PC" hang. Both land in the run log.
   mainWindow.webContents.on('render-process-gone', (_, details) => {
-    ijwaLyrics?.publish(null)
     runLog('renderer', `PROCESS GONE reason=${details.reason} exitCode=${details.exitCode}`)
-  })
-  mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) ijwaLyrics?.publish(null)
   })
   mainWindow.webContents.on('unresponsive', () => {
     runLog('renderer', `UNRESPONSIVE (renderer frozen) ${memSnapshot()}`)
@@ -1086,7 +1121,9 @@ function createWindow() {
   // app running headless (window-all-closed never fires) with handlers still
   // pointed at a destroyed mainWindow.
   mainWindow.on('closed', () => {
-    ijwaLyrics?.publish(null)
+    // The desktop's windows can't outlive the main window either: they'd keep the app running with nothing to drive them.
+    desktop?.dispose()
+    desktop = null
     mainWindow = null
     closeAllFloatWindows()
   })
@@ -1326,6 +1363,7 @@ const KNOWN_GLOBAL_SHORTCUT_IDS = new Set([
   'view-tracker', 'view-playlists', 'view-library', 'view-wrld', 'view-admin',
   'open-settings', 'open-diagnostics', 'toggle-queue', 'focus-search', 'mini-player',
   'close-float-windows', 'restart-app', 'rescan-library', 'discord-status', 'toggle-devtools',
+  'desktop-light', 'desktop-widgets', 'clear-desk', 'next-light', 'next-lyric-style', 'wrld-widgets',
 ])
 const ACCELERATOR_RE = /^(?:Cmd|Command|Ctrl|Control|CommandOrControl|CmdOrCtrl|Alt|Option|AltGr|Shift|Super|Meta)(?:\+(?:Cmd|Command|Ctrl|Control|CommandOrControl|CmdOrCtrl|Alt|Option|AltGr|Shift|Super|Meta))*\+[A-Za-z0-9`~!@#$%^&*()\-=_+[\]{}\\|;:'",.<>/?]$|^(?:F(?:[1-9]|1[0-9]|2[0-4])|[A-Za-z0-9]|Plus|Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|Escape|VolumeUp|VolumeDown|VolumeMute|MediaNextTrack|MediaPreviousTrack|MediaStop|MediaPlayPause|PrintScreen)$/
 ipcMain.handle('register-global-shortcuts', (_, entries) => {
@@ -3797,12 +3835,9 @@ app.whenReady().then(() => {
   )
 
   if (isDev && process.env.UNRELEASED_DEV_SEED !== '0') devStorageSeedReady = readInstalledLocalStorage()
-  if (process.platform === 'win32' && !isSmokeTest) {
-    const { createLyricsBridge, pipeName } = require('./ijwaLyrics')
-    ijwaLyrics = createLyricsBridge({ endpoint: pipeName(!app.isPackaged), onError: (error) => log('iJWA lyrics:', error.message) })
-  }
   createWindow()
   if (isSmokeTest) return
+  startDesktop()
   createTray()
   discordRpc.setEnabled(appSettings.discordRpcEnabled !== false)
 
@@ -3840,7 +3875,8 @@ app.on('window-all-closed', () => {
 // silently on a plain quit, same as a stable install-on-quit: no relaunch
 // marker, so the app stays closed and the next launch is the new build.
 app.on('will-quit', () => {
-  ijwaLyrics?.close()
+  desktop?.dispose()
+  desktop = null
   if (!betaInstallerPath || installingUpdate) return
   log('Installing pending beta on quit:', betaInstallerPath)
   try {

@@ -1,0 +1,8 @@
+/* The clock on the desktop: the date, and beneath it the time in tall digits of glass, tinted with the playing song's
+   cover. Bahnschrift, Windows' own narrow face, is stretched upward the way a lock screen's digits stand. */
+#clock { position: absolute; left: 24px; top: 24px; display: flex; flex-direction: column; align-items: center; cursor: default; }
+#date { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; font-weight: 500; letter-spacing: 0.3px; white-space: nowrap;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.2)); background-clip: text; -webkit-background-clip: text; color: transparent; transition: background-image 1.2s; }
+#digits { display: block; overflow: visible; filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.22)); }
+#digits text { pointer-events: none; font-family: Bahnschrift, "DIN Condensed", "Arial Narrow", sans-serif; }
+#digits stop { transition: stop-color 1.2s, stop-opacity 1.2s; }

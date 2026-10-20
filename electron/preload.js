@@ -130,11 +130,41 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Tray — playback state up to main, media commands back down
   setTrayPlayback: (state) => ipcRenderer.send('tray-playback-state', state),
-  setIjwaLyrics: (snapshot) => ipcRenderer.send('ijwa-lyrics', snapshot),
   onTrayCommand: (cb) => {
     const fn = (_, cmd) => cb(cmd)
     ipcRenderer.on('tray-command', fn)
     return () => ipcRenderer.removeListener('tray-command', fn)
+  },
+
+  // Desktop (electron/desktop, Windows): the light round the screens and the desktop widgets, driven from the main
+  // window - its settings and what's playing go out, the widgets' presses and questions come back.
+  desktop: {
+    setSettings: (settings) => ipcRenderer.send('desktop:settings', settings),
+    setState: (patch) => ipcRenderer.send('desktop:state', patch),
+    meter: (value) => ipcRenderer.send('desktop:meter', value),
+    displays: () => ipcRenderer.invoke('desktop:displays'),
+    clearDesk: (on) => ipcRenderer.send('desktop:clear', on === undefined ? null : Boolean(on)),
+    reply: (id, value) => ipcRenderer.send('desktop:reply', id, value),
+    onCommand: (cb) => {
+      const fn = (_, cmd, arg) => cb(cmd, arg)
+      ipcRenderer.on('desktop:command', fn)
+      return () => ipcRenderer.removeListener('desktop:command', fn)
+    },
+    onRequest: (cb) => {
+      const fn = (_, id, kind, arg) => cb(id, kind, arg)
+      ipcRenderer.on('desktop:request', fn)
+      return () => ipcRenderer.removeListener('desktop:request', fn)
+    },
+    onPlace: (cb) => {
+      const fn = (_, which, place) => cb(which, place)
+      ipcRenderer.on('desktop:place', fn)
+      return () => ipcRenderer.removeListener('desktop:place', fn)
+    },
+    onClearState: (cb) => {
+      const fn = (_, on) => cb(on)
+      ipcRenderer.on('desktop:clear-state', fn)
+      return () => ipcRenderer.removeListener('desktop:clear-state', fn)
+    },
   },
 
   // Discord Rich Presence

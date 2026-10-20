@@ -123,6 +123,15 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
+    // The app, and the desktop's own windows (electron/desktop): the light round the screens, the widgets, the
+    // desk's curtain, and the hidden page the widgets share a process through. Each is a page of its own.
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'src/renderer/index.html'),
+        ...Object.fromEntries(['host', 'light', 'player', 'playlist', 'clock', 'curtain']
+          .map((name) => [`desktop-${name}`, resolve(__dirname, `src/renderer/desktop/${name}.html`)])),
+      },
+    },
   },
   server: {
     port: 3018,

@@ -2,7 +2,7 @@ import { copyText } from '../lib/clipboard'
 import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } from 'react'
 import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud, FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical, PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2, ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload, ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal, Bell, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, LogIn,
-  Activity,
+  Activity, Lightbulb,
 } from 'lucide-react'
 import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls from './VizControls'
@@ -35,6 +35,8 @@ import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
 import ThemedSelect from './ThemedSelect'
 import ThemedColorPicker from './ThemedColorPicker'
+import { Row, Toggle } from './SettingsRow'
+import DesktopSettings from './DesktopSettings'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -88,7 +90,7 @@ const POPOUT_KINDS: { key: PopoutWindowKind; label: string; sub?: string }[] = [
 ]
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'library' | 'app' | 'developer' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `electronOnly`/`devOnly` mirror
@@ -118,7 +120,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, visualizer-only or widgets layout, artwork colors' },
   // Preferences
   { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'preferences', label: 'Auto-hide navigation', sub: 'Hide the nav menu until the pointer reaches its edge' },
@@ -147,6 +149,25 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'library', label: 'Library folders', sub: 'Local folders scanned into your library', electronOnly: true },
   { tab: 'library', label: 'Auto-refresh changed files', electronOnly: true },
   // App
+  // Desktop (the light round the screen, the desktop's own windows and the
+  // desk cleared are Windows only; the tab, its lyric styles, the Edge light
+  // and the widgets' looks - for WRLD's Widgets layout - are everywhere)
+  { tab: 'desktop', label: 'Screen-edge light', sub: 'A glow round your screens that moves with the music', electronOnly: true },
+  { tab: 'desktop', label: 'Light', sub: 'Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow… and how WRLD’s Edge light looks' },
+  { tab: 'desktop', label: 'Light place', sub: 'Everywhere, bottom, top or corners' },
+  { tab: 'desktop', label: 'Only on the desktop', sub: 'Light hidden while another app is in front', electronOnly: true },
+  { tab: 'desktop', label: 'Light animation', sub: 'Flow, still or music sync' },
+  { tab: 'desktop', label: 'Sensitivity', sub: 'How the light follows the music' },
+  { tab: 'desktop', label: 'Light thickness, glow and particles' },
+  { tab: 'desktop', label: 'Light colors', sub: 'One or two colors, or the cover’s' },
+  { tab: 'desktop', label: 'Lyric style', sub: 'Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch, Cinema' },
+  { tab: 'desktop', label: 'Lyric font', sub: 'A font for each lyric style' },
+  { tab: 'desktop', label: 'Player widget', sub: 'Your queue as glass cards, on the desktop or in WRLD’s Widgets layout' },
+  { tab: 'desktop', label: 'Mini player widget' },
+  { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, on the desktop or in WRLD' },
+  { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, on the desktop or in WRLD' },
+  { tab: 'desktop', label: 'Clear desk', sub: 'Hide every other window and the taskbar', electronOnly: true },
+  { tab: 'desktop', label: 'Displays', sub: 'Which screens get the light and the widgets', electronOnly: true },
   { tab: 'app', label: 'Download folder', electronOnly: true },
   { tab: 'app', label: 'Offline songs folder', electronOnly: true },
   { tab: 'app', label: 'Offline downloads' , electronOnly: true },
@@ -186,43 +207,6 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'about', label: 'Become a Contributor' },
   { tab: 'about', label: 'FAQ', sub: 'What is this? Who are you? Why did you build this? Technical stuff?' },
 ]
-
-// ── Flat row primitive — no card/box, just an icon + label on the left and
-// a control on the right, separated by a hairline. Used inside each tab's
-// content pane (macOS System Settings' detail-pane idiom, not the boxed
-// inset-grouped list). The icon sits in a colored badge (iOS Settings-style)
-// — a fixed color + white icon reads correctly in both themes, unlike the
-// plain `text-muted` icon this replaced, which nearly disappeared in light
-// mode. ──
-
-function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
-  icon: ElementType
-  iconColor: string
-  label: string
-  sub?: string
-  // Rendered immediately after the label, on the left — for controls that
-  // are conceptually part of the label (e.g. an on/off toggle right next
-  // to "Crossfade"), as opposed to `children`, which sits at the row's
-  // right edge (e.g. the crossfade duration slider).
-  labelExtra?: ReactNode
-  children?: ReactNode
-}): JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border)] last:border-b-0">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: iconColor }}>
-          <Icon size={13} className="text-white" strokeWidth={2.25} />
-        </div>
-        <div className="min-w-0">
-          <p className="text-text-primary text-sm truncate">{label}</p>
-          {sub && <p className="text-text-muted text-[11px] truncate">{sub}</p>}
-        </div>
-        {labelExtra}
-      </div>
-      {children}
-    </div>
-  )
-}
 
 // One line of the "Lyric colors" setting: presets + a custom picker, with
 // "Auto" (value === null) meaning "leave it to the surface's own colors" —
@@ -297,27 +281,6 @@ function VizSettings(): JSX.Element {
       <div className="pl-[34px]"><VizControls /></div>
       )}
     </div>
-  )
-}
-
-function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => void; locked?: boolean }): JSX.Element {
-  return (
-    <button
-      onClick={onClick}
-      disabled={locked}
-      title={locked ? 'Locked off while the Pill navigation style is selected' : undefined}
-      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
-    >
-      {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
-          block centering trick) instead of a manual top offset — a fixed
-          `top-0.5` still relied on the button having zero padding/border to
-          land exactly right, and browsers don't zero those out on <button>
-          by default. auto-margin centering can't drift regardless of the
-          button's own box model. No shadow on the knob either — its default
-          downward offset (0 1px 3px) reads as visual weight sitting low,
-          making it look off-center even when it's geometrically centered. */}
-      <span className={`absolute inset-y-0 my-auto w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
-    </button>
   )
 }
 
@@ -775,6 +738,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
+    { id: 'desktop' as Tab, label: 'Desktop', icon: Lightbulb },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     ...(isElectron ? [{ id: 'library' as Tab, label: 'Library', icon: FolderOpen }] : []),
     ...(isElectron ? [{ id: 'app' as Tab, label: 'App', icon: Monitor }] : []),
@@ -2254,6 +2218,8 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
             )}
 
             {/* ── Shortcuts ── */}
+            {!settingsQueryTrimmed && tab === 'desktop' && <DesktopSettings />}
+
             {!settingsQueryTrimmed && tab === 'shortcuts' && (
               <div>
                 <div className="flex items-center justify-between mb-1">

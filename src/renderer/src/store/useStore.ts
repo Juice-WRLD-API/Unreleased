@@ -41,6 +41,7 @@ import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
 import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
+import { createDesktopSlice, type DesktopSlice } from './desktopSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import type { GifResult } from '../lib/gifApi'
 import { listDonorFiles } from '../lib/donorFilesApi'
@@ -196,7 +197,7 @@ export type AppMenuPosition = 'title-bar' | 'sidebar' | 'hidden'
 // The Settings dialog's tabs � the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
 
 // The detached ("pop-out") BrowserWindows the desktop build can open instead of
 // rendering a view inline (see FloatApp). Each can be turned off individually:
@@ -1042,7 +1043,7 @@ interface AppActions {
   clearStagedSongChanges: () => void
 }
 
-export type AppStore = QueueSlice & AppState & AppActions
+export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
 
 // --- Store --------------------------------------------------------------------
 
@@ -1353,6 +1354,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // -- Queue slice (all queue + playback logic) -------------------------------
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ...createQueueSlice(set, get, store as any),
+  // -- Desktop (the light, the desktop widgets, the lyric styles) -------------
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...createDesktopSlice(set, get, store as any),
 
   // -- Playback extras -------------------------------------------------------
   currentTrackFull: null,

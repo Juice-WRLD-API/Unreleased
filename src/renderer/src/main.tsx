@@ -5,7 +5,7 @@ import FloatApp from './FloatApp'
 import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { initWindowSync } from './lib/windowSync'
-import { initIjwaLyrics } from './lib/ijwaLyrics'
+import { initDesktopBridge } from './lib/desktopBridge'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
 import { installDebugRecorder } from './lib/debugRecorder'
 import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
@@ -23,7 +23,8 @@ installImageFade()
 const floatView = new URLSearchParams(window.location.search).get('float')
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if ((window as any).electron) initWindowSync(!!floatView)
-if (!floatView) initIjwaLyrics()
+// Desktop (Windows): only the main window drives the light and the desktop widgets.
+if (!floatView) initDesktopBridge()
 declare global {
   interface Window {
     api: {

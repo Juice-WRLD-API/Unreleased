@@ -65,6 +65,9 @@ const SYNC_KEYS = [
   // Without these a pop-out mini-player never sees a ballot at all, and its FM
   // badge can't tell "offline" from "not checked yet".
   'radioFmIsLive', 'radioFmVote', 'radioFmVoteDismissed',
+  // Desktop settings: Settings can be popped out, but only the main window
+  // drives the light and the desktop widgets.
+  'desktop',
 ] as const satisfies readonly (keyof AppStore)[]
 
 type SyncKey = (typeof SYNC_KEYS)[number]

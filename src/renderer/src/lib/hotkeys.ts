@@ -92,6 +92,13 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'rescan-library',       label: 'Rescan library',              category: 'App', defaultBinding: '', electronOnly: true },
   { id: 'discord-status',       label: 'Toggle Discord status',       category: 'App', defaultBinding: '', electronOnly: true },
   { id: 'toggle-devtools',      label: 'Toggle DevTools',              category: 'App', defaultBinding: 'F12', electronOnly: true, devModeOnly: true },
+  // Desktop (Settings > Desktop): the light round the screens and the widgets are Windows only.
+  { id: 'desktop-light',        label: 'Toggle screen-edge light',    category: 'App', defaultBinding: '', electronOnly: true },
+  { id: 'desktop-widgets',      label: 'Show / hide desktop widgets', category: 'App', defaultBinding: '', electronOnly: true },
+  { id: 'clear-desk',           label: 'Clear the desk',              category: 'App', defaultBinding: '', electronOnly: true },
+  { id: 'next-light',           label: 'Next light',                  category: 'App', defaultBinding: '', electronOnly: true },
+  { id: 'next-lyric-style',     label: 'Next lyric style',            category: 'App', defaultBinding: '', electronOnly: true },
+  { id: 'wrld-widgets',         label: 'WRLD widgets layout',         category: 'App', defaultBinding: '' },
   { id: 'open-terminal',    label: 'Open terminal', category: 'Navigation', defaultBinding: 'Ctrl+`' },
 ] as const
 

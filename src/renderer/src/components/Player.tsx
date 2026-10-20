@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import * as desktopActions from '../desktop/actions'
 import { createPortal } from 'react-dom'
 import {
   Play,
@@ -22,6 +23,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useVizStore } from '../store/vizStore'
 import { registerPlayerCommandHandler, runPlayerCommand } from '../lib/windowSync'
 import { eventToCombo, resolveAction, getAction, effectiveGlobalBinding, comboToAccelerator, registerHotkeyDispatch, HOTKEY_ACTIONS } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
@@ -1722,6 +1724,12 @@ export default function Player(): JSX.Element {
     'close-float-windows': () => (window as any).electron?.closeFloatWindows?.(),
     'restart-app':         () => (window as any).electron?.relaunchApp?.(),
     'rescan-library':      () => useStore.getState().scanLibrary(),
+    'desktop-light':       () => desktopActions.setLight(),
+    'desktop-widgets':     () => desktopActions.setWidgets(),
+    'clear-desk':          () => desktopActions.clearDesk(),
+    'next-light':          () => desktopActions.stepLight(1),
+    'next-lyric-style':    () => desktopActions.stepLyricStyle(1),
+    'wrld-widgets':        () => { const v = useVizStore.getState(); v.setWrldWidgets(!v.wrldWidgets) },
     'discord-status': async () => {
       const el = (window as any).electron
       if (!el?.getAppSettings) return

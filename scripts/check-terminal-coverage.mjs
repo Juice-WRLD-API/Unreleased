@@ -38,6 +38,7 @@ const NOT_APPLICABLE = {
   'donorUploads.*': 'upload queue wrapper around donorFilesApi.uploadDonorFile (donor up)',
   'compUploads.*': 'upload queue wrapper around the comp proposal upload (comp new)',
   'donorPlayback.*': 'caches donorFilesApi.fetchDonorFileBlob for the player (donor get)',
+  'desktopBridge.*': 'answers the desktop widgets with searchSongs, userApi.getFavorites/getPlaylist and /songs/?era=, all reachable (search, liked, playlist, find)',
   'donorImageCache.*': 'caches donorFilesApi.fetchDonorFileBlob (donor get)',
   'donorCoverArt.*': 'caches donorFilesApi.fetchDonorFileBlob (donor get)',
   'heardleMatchApi.*': 'live versus match runs over a websocket; the REST queue calls are covered by daily versus',

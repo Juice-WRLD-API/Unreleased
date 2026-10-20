@@ -1,0 +1,8 @@
+/* What every desktop window's page starts from: see-through, nothing to select, the system's own face. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; color-scheme: dark; }
+button { background: none; border: none; color: inherit; font: inherit; cursor: default; outline: none; }
+img { -webkit-user-drag: none; }
+.full { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hidden { display: none !important; }

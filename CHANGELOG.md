@@ -6,6 +6,23 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased]
+
+- **New** **Desktop**, in Settings → Desktop: iJWA's light and widgets built into the app, following what Unreleased plays. Everything starts off
+  - **Screen-edge light** (Windows): a glow round your screens in 22 looks (Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow…), all round or at the bottom, top or corners, moving with the music or flowing on its own, in your colors or the cover's. It can show only while the desktop is in front, and you choose which displays get it
+  - **Desktop player, playlist and clock** (Windows): your queue as glass cards on the desktop with a glass control bar, lyrics beside the playing card, and catalog search with era pages; a tilted see-through list of your queue, liked songs or a playlist; tall glass digits tinted by the cover. Drag them anywhere, lock them, or make the player small
+  - **Widgets in WRLD** (everywhere, the web too): the same player, playlist and clock inside the WRLD tab, over the visualizer, from the toolbar's Widgets button or Layout → Widgets in the visualizer settings. Drag them about the tab; each can be left out in Settings → Desktop
+  - **Clear desk** (Windows): lays the wallpaper over every other window and the taskbar, leaving only the light and the widgets; any other app coming forward brings it all back
+  - **Lyric styles** for the WRLD tab and the desktop player: Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch and Cinema, sung word by word, each in a font of your choice, with a note through instrumental breaks
+  - An **Edge light** for the WRLD tab: any of the 22 lights round its edges, over the visualizer or on its own with the visualizer off. It's the screen light's look, sized and colored the same way, so a look picked in either place is both
+  - Browse every light and every lyric style playing live before picking one; hotkeys, a `desktop` terminal command and a Desktop menu in the tray reach all of it
+- **New** Browse every WRLD visualizer, classic and shader, playing live before picking one, from the visualizer settings
+- **New** An Edge light can play round the edges on top of any classic or shader WRLD visualizer: Edge on top in the visualizer settings, or `set viz-edge` in the terminal
+- **Change** The lyrics pipe for the standalone iJWA app is gone: Desktop replaces it
+- **Change** WRLD's Cover Flow layout is gone: its queue cards, clock and controls are the Desktop player and clock now, on the desktop or in WRLD's Widgets layout. A saved Cover Flow opens as Aurora
+
+---
+
 ## [2.4.1] — 2026-10-12
 
 - **Fix** After an update, the installer starts the new version itself once its files are in place. Before, the app could relaunch mid-install and run the same update again

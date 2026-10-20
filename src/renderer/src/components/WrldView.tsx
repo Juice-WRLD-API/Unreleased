@@ -34,7 +34,8 @@ import { SearchHelpButton } from './SearchHelpPopover'
 import ContextMenu from './ContextMenu'
 import { getSkin } from '../lib/skins'
 import WrldVisualizer from './WrldVisualizer'
-import WrldCoverFlow from './WrldCoverFlow'
+import WrldWidgets from './WrldWidgets'
+import LyricStageView from './LyricStageView'
 import LyricsControls from './LyricsControls'
 import { useVizStore } from '../store/vizStore'
 import {
@@ -291,14 +292,10 @@ export default function WrldView(): JSX.Element {
   // display rather than unmounted, so toggling back doesn't restart the lyric
   // scroll or refetch anything.
   const immMinimal = useVizStore(s => s.immMinimal)
-  const coverFlow = useVizStore(s => s.activeMode === 'coverflow')
-  const hideForViz = immMinimal || coverFlow ? { display: 'none' } : undefined
-
-  // This preset is a queue player. RadioFmPlayer observes this state and
-  // stops the stream/listening session; local playback remains user-controlled.
-  useEffect(() => {
-    if (coverFlow && radioFmActive) setRadioFmActive(false)
-  }, [coverFlow, radioFmActive, setRadioFmActive])
+  // The Widgets layout puts the desktop's player, playlist and clock in their place, in or out of fullscreen.
+  const wrldWidgets = useVizStore(s => s.wrldWidgets)
+  const vizMinimal = immMinimal || wrldWidgets
+  const hideForViz = vizMinimal ? { display: 'none' } : undefined
 
   const {
     suggestQuery, setSuggestQuery, suggestResults, suggestLoading,
@@ -401,7 +398,7 @@ export default function WrldView(): JSX.Element {
   const lyricsVisible = useLyricsVisible(!!rawLyrics, lyricsOverride, !radioFmActive && lyricsLoading(currentTrack, currentTrackFull))
   // FM's column is on by default and the override turns it off; otherwise the
   // override is XORed against whether lyrics exist.
-  const showLyricsColumn = !coverFlow && (radioFmActive ? !lyricsOverride : showQueue || lyricsVisible)
+  const showLyricsColumn = radioFmActive ? !lyricsOverride : showQueue || lyricsVisible
 
   // Desktop panel animation. The column outlives showLyricsColumn by its exit
   // animation, still showing whatever view it had (the stores have already
@@ -856,7 +853,7 @@ export default function WrldView(): JSX.Element {
               page renders over a still-mounted bgView (App.tsx), so the page
               you came from bled through those corners. */}
           <div className="absolute inset-0 overflow-hidden bg-black">
-            {coverFlow ? null : wrldThemeBackground ? (
+            {wrldThemeBackground ? (
               <div
                 className="absolute inset-0 bg-surface"
                 style={gradientsEnabled ? {
@@ -875,7 +872,7 @@ export default function WrldView(): JSX.Element {
             ) : (
               <div className={`absolute inset-0 ${radioFmActive ? 'bg-gradient-to-br from-red-950/60 to-black dark:from-red-950/60 dark:to-black' : 'bg-gradient-to-br from-gray-200 to-gray-100 dark:from-gray-900 dark:to-black'}`} />
             )}
-            {!coverFlow && !wrldThemeBackground && (
+            {!wrldThemeBackground && (
               <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/20 dark:from-black/40 dark:via-transparent dark:to-black/70" />
             )}
           </div>
@@ -900,12 +897,7 @@ export default function WrldView(): JSX.Element {
               onPopOutMini={isElectronApp ? () => elFullscreen?.openFloatWindow?.('mini-player') : undefined}
             />
 
-          {coverFlow && (
-            <WrldCoverFlow
-              progress={<ProgressBar txtPri="#efefef" txtTer="#a6a6a6" trackBg="rgba(255,255,255,0.18)" />}
-              menu={<SongMenu light={false} />}
-            />
-          )}
+          {wrldWidgets && <WrldWidgets />}
 
           {/* Mobile layout */}
           <div className="md:hidden relative z-10 flex flex-col h-full min-h-0" style={hideForViz}>
@@ -976,7 +968,7 @@ export default function WrldView(): JSX.Element {
               <div key={radioFmActive ? fmTab : 'lyrics'} className="flex-1 min-h-0 flex flex-col animate-wrld-view-in">
                 {radioFmActive && fmTab === 'radio'
                   ? FmRadioPanel()
-                  : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />}
+                  : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} artUrl={artSrc} />}
               </div>
             )}
 
@@ -1441,7 +1433,7 @@ export default function WrldView(): JSX.Element {
               )}
               {lyricsPresence.mounted && (
                 <WrldPanelLayer exiting={lyricsPresence.exiting} animateIn={viewCrossfade} className="absolute inset-0 flex flex-col">
-                  <LyricsPanel padded rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} />
+                  <LyricsPanel padded rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} artUrl={artSrc} />
                 </WrldPanelLayer>
               )}
             </div>
@@ -1549,12 +1541,12 @@ export default function WrldView(): JSX.Element {
           an inline drawer like the desktop layout gets). Hidden during 999FM,
           a live stream with nothing to queue/reorder. */}
       {queueEverOpened && (
-        <div className="md:hidden" style={showQueue && !radioFmActive && !coverFlow ? undefined : { display: 'none' }}>
+        <div className="md:hidden" style={showQueue && !radioFmActive ? undefined : { display: 'none' }}>
           <WrldQueuePanel variant="sheet" onClose={() => setShowQueue(false)} />
         </div>
       )}
 
-      {!coverFlow && showShareLyrics && rawLyrics && (
+      {showShareLyrics && rawLyrics && (
         <ShareLyricsModal
           title={displayTitle || 'Lyrics'}
           artist={displayArtist || ''}
@@ -1564,7 +1556,7 @@ export default function WrldView(): JSX.Element {
         />
       )}
 
-      {!coverFlow && showLyricsSettings && (
+      {showLyricsSettings && (
         <LyricsSettingsModal onClose={() => setShowLyricsSettings(false)} />
       )}
 
@@ -2197,13 +2189,17 @@ interface LyricsPanelProps {
   currentTrack: Track | null
   isEditor: boolean | null | undefined
   txtPri: string; txtSec: string; txtTer: string; txtFaint: string
+  /** The cover shown, for the iJWA lyric styles' colors. */
+  artUrl?: string | null
 }
 
 const LyricsPanel = memo(function LyricsPanel({
   rawLyrics, isSynced, syncedLines, padded,
   radioFmActive, currentTrack, isEditor,
-  txtPri, txtSec, txtTer,
+  txtPri, txtSec, txtTer, artUrl,
 }: LyricsPanelProps) {
+  // Settings > Desktop > Lyric style: 'classic' is this list, anything else an iJWA style.
+  const lyricLook = useStore(s => s.desktop.lyrics.look)
   const viewportRef = useRef<HTMLDivElement>(null)
   const linesRef    = useRef<HTMLDivElement>(null)
   const activeRef   = useRef<HTMLDivElement>(null)
@@ -2366,6 +2362,22 @@ const LyricsPanel = memo(function LyricsPanel({
               </>
         }
       </div>
+    )
+  }
+
+  if (lyricLook !== 'classic' && currentTrack) {
+    return (
+      <LyricStageView
+        look={lyricLook}
+        trackId={currentTrack.id}
+        title={currentTrack.title}
+        artist={currentTrack.artist}
+        duration={currentTrack.duration}
+        rawLyrics={rawLyrics}
+        isSynced={isSynced}
+        syncedLines={syncedLines}
+        artUrl={artUrl}
+      />
     )
   }
 
