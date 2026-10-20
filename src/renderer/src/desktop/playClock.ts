@@ -10,8 +10,16 @@ import { epochNow, type StageClock } from './lyrics/scene'
 const DRIFT = 0.25
 const CHECK_MS = 250
 
+/** 999 FM's position: the station's elapsed time at its last update, run on from there. */
+let fmBase: { elapsed: number; at: number } | null = null
+
 function read(): StageClock {
   const s = useStore.getState()
+  if (s.radioFmActive) {
+    const elapsed = s.radioFmNowPlaying?.elapsed_ms ?? 0
+    if (!fmBase || fmBase.elapsed !== elapsed) fmBase = { elapsed, at: Date.now() }
+    return { seconds: (elapsed + Date.now() - fmBase.at) / 1000, at: epochNow(), running: true, rate: 1 }
+  }
   return { seconds: getAudioCurrentTime(), at: epochNow(), running: s.isPlaying, rate: s.playbackSpeed || 1 }
 }
 
@@ -31,7 +39,8 @@ export function watchPlayClock(onChange: (clock: StageClock) => void): () => voi
   const timer = window.setInterval(check, CHECK_MS)
   // The audio's own time updates (a few a second, never held back like a hidden page's timers) catch a seek too.
   const unsubscribe = useStore.subscribe((s, p) => {
-    if (s.isPlaying !== p.isPlaying || s.currentTrack !== p.currentTrack || s.playbackSpeed !== p.playbackSpeed || s.currentTime !== p.currentTime) check()
+    if (s.radioFmActive !== p.radioFmActive || s.radioFmNowPlaying !== p.radioFmNowPlaying
+      || s.isPlaying !== p.isPlaying || s.currentTrack !== p.currentTrack || s.playbackSpeed !== p.playbackSpeed || s.currentTime !== p.currentTime) check()
   })
   return () => { window.clearInterval(timer); unsubscribe() }
 }

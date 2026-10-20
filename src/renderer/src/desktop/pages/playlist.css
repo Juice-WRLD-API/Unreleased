@@ -29,6 +29,8 @@
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 calc(10px * var(--s)), #000 calc(100% - 26px * var(--s)), transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0, #000 calc(10px * var(--s)), #000 calc(100% - 26px * var(--s)), transparent 100%); }
 #list::-webkit-scrollbar { display: none; }
+#list { transition: opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1); }
+#list.behind { opacity: 0; pointer-events: none; }
 .row { position: relative; height: var(--row-height); border-radius: calc(10px * var(--s)); transition: background 0.15s, opacity 0.45s; }
 .row:hover { background: rgba(255, 255, 255, 0.08); }
 .row .face { position: absolute; inset: 0; display: flex; align-items: center; gap: calc(12px * var(--s)); padding: 0 calc(10px * var(--s));

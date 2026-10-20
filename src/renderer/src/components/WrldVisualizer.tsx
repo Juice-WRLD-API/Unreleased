@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronLeft, ChevronRight, LayoutDashboard, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Disc3, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { LOOKS, lookOf } from '../desktop/light/looks'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
@@ -352,7 +352,7 @@ export default function WrldVisualizer({
   const toggleWidgets = (): void => {
     const { wrldWidgets: cur, setWrldWidgets } = useVizStore.getState()
     setWrldWidgets(!cur)
-    announce(cur ? 'Player' : 'Widgets')
+    announce(cur ? 'Old style on' : 'Old style off')
   }
 
   // The real widgets out on the desktop (Windows). Off puts away whichever are out and remembers them; on brings
@@ -555,13 +555,13 @@ export default function WrldVisualizer({
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
         <button
-          className={`${tool} ${wrldWidgets ? toolOn : toolIdle}`}
+          className={`${tool} ${wrldWidgets ? toolIdle : toolOn}`}
           onClick={toggleWidgets}
-          title="Widgets: the desktop player, playlist and clock, here in WRLD"
-          aria-label="Widgets"
-          aria-pressed={wrldWidgets}
+          title={wrldWidgets ? 'Old style is off: click for the original player' : 'Old style is on: click for the widgets'}
+          aria-label={wrldWidgets ? 'Old style is off' : 'Old style is on'}
+          aria-pressed={!wrldWidgets}
         >
-          <LayoutDashboard size={17} />
+          <Disc3 size={17} />
         </button>
         {desktopWidgetsSupported && (
           <button

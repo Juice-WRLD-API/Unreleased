@@ -109,6 +109,13 @@ async function versionsOf(songId: number): Promise<{ songId: number; label: stri
 }
 
 function queueWindow(s: AppStore): { from: number; current: number; items: DesktopTrack[] } {
+  // 999 FM has no queue of ours: the card is the song on the air.
+  if (s.radioFmActive) {
+    const t = nowTrack(s)
+    if (!t) return { from: 0, current: -1, items: [] }
+    const track = { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration, imageUrl: t.cover ?? undefined } as unknown as Track
+    return { from: 0, current: 0, items: [{ key: `${t.id}#0`, id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration, cover: t.cover, track }] }
+  }
   if (!s.queue.length) return s.currentTrack ? { from: 0, current: 0, items: [desktopTrack(s.currentTrack, `${s.currentTrack.id}#0`)] } : { from: 0, current: -1, items: [] }
   const from = Math.max(0, s.queueIndex - BEFORE)
   const items = s.queue.slice(from, s.queueIndex + AFTER + 1).map((t, i) => desktopTrack(t, `${t.id}#${from + i}`))
@@ -128,7 +135,7 @@ let lyricsMade: { id: string; lines: TimedLine[] } | null = null
 function nowLyrics(s: AppStore): { id: string; lines: TimedLine[] } | null {
   const raw = rawLyrics(s)
   const id = nowTrack(s)?.id ?? ''
-  const duration = s.currentTrack?.duration || 0
+  const duration = s.radioFmActive ? (s.radioFmNowPlaying?.duration_ms || 0) / 1000 : s.currentTrack?.duration || 0
   if (lyricsFor && lyricsFor.raw === raw && lyricsFor.offset === s.lyricsOffset && lyricsFor.duration === duration && lyricsMade?.id === id) return lyricsMade
   lyricsFor = { raw, offset: s.lyricsOffset, duration }
   if (!raw?.trim()) { lyricsMade = null; return null }
@@ -436,7 +443,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     const s = useStore.getState()
     const track = nowTrack(s)
     push({
-      playing: s.isPlaying,
+      playing: s.radioFmActive ? true : s.isPlaying,
       track,
       liked: !!s.currentTrack && !s.radioFmActive && s.likedTrackIds.includes(s.currentTrack.id),
       canLike: !!s.currentTrack && !s.radioFmActive,

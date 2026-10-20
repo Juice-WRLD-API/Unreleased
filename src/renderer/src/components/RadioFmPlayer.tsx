@@ -115,6 +115,8 @@ export default function RadioFmPlayer(): JSX.Element {
     const title = radioFmNowPlaying?.title
     if (!title) { setRadioFmMatchedSong(null); return }
     let cancelled = false
+    // The last song's cover and lyrics go at once rather than showing while the new one's are fetched.
+    setRadioFmMatchedSong(null)
 
     const apply = (song: JWApiSong) => {
       if (cancelled) return

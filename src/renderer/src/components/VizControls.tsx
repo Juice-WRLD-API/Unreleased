@@ -5,8 +5,6 @@ import { lazyOverlay } from '../lib/lazyView'
 
 // Every visualizer, Edge light or lyric style, playing at once to pick one from (the picker Settings > Desktop uses too).
 const DesktopPicker = lazyOverlay(() => import('./DesktopPicker'))
-// The iJWA lyric styles are desktop-app only, like the rest of Desktop.
-const IS_ELECTRON = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron')
 
 export function Pills<T extends string>({ value, options, onChange }: {
   value: T
@@ -108,7 +106,7 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
       ))}
       {line('Visualizers', browse('viz', 'See every classic visualizer and shader playing, then pick one'))}
       {gl && line('Edge light', browse('overlay', 'See every Edge light playing, then pick one. A light round the edges: over the visualizer, or on its own with the visualizer Off'))}
-      {IS_ELECTRON && line('Lyric style', browse('lyrics', 'See every lyric style playing, then pick one'))}
+      {line('Lyric style', browse('lyrics', 'See every lyric style playing, then pick one'))}
       {browsing && (
         <DesktopPicker kind={browsing} onClose={() => setBrowsing(null)} />
       )}
