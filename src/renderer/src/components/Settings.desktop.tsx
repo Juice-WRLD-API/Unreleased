@@ -7,10 +7,11 @@ import {
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
   AudioLines, SlidersHorizontal, LogIn,
-  Activity,
+  Activity, Lightbulb,
 } from 'lucide-react'
 import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls, { Pills, Toggle } from './VizControls'
+import DesktopSettings from './DesktopSettings'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
 import { SKINS, getSkin } from '../lib/skins'
@@ -71,7 +72,7 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'developer' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'developer' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `devOnly` mirrors the same gate
@@ -101,7 +102,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, visualizer-only or widgets layout, artwork colors' },
   // Preferences
   { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'preferences', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
@@ -122,6 +123,18 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Last.fm scrobbling' },
   { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Shortcuts
+  // Desktop: the lyric styles, WRLD's Edge light and the widgets' looks for WRLD's Widgets layout
+  { tab: 'desktop', label: 'Light', sub: 'Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow… and how WRLD’s Edge light looks' },
+  { tab: 'desktop', label: 'Light place', sub: 'Everywhere, bottom, top or corners' },
+  { tab: 'desktop', label: 'Light animation', sub: 'Flow, still or music sync' },
+  { tab: 'desktop', label: 'Sensitivity', sub: 'How the light follows the music' },
+  { tab: 'desktop', label: 'Light thickness, glow and particles' },
+  { tab: 'desktop', label: 'Light colors', sub: 'One or two colors, or the cover’s' },
+  { tab: 'desktop', label: 'Lyric style', sub: 'Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch, Cinema' },
+  { tab: 'desktop', label: 'Lyric font', sub: 'A font for each lyric style' },
+  { tab: 'desktop', label: 'Player widget', sub: 'Your queue as glass cards, in WRLD’s Widgets layout' },
+  { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, in WRLD' },
+  { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, in WRLD' },
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
   // Developer
@@ -574,6 +587,7 @@ export default function Settings(): JSX.Element {
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
+    { id: 'desktop' as Tab, label: 'Desktop', icon: Lightbulb },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     ...(developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench }] : []),
     { id: 'about', label: 'About', icon: Info },
@@ -1793,6 +1807,8 @@ export default function Settings(): JSX.Element {
                 </Row>
               </div>
             )}
+
+            {!settingsQueryTrimmed && tab === 'desktop' && <DesktopSettings />}
 
             {/* ── Shortcuts ── */}
             {!settingsQueryTrimmed && tab === 'shortcuts' && (

@@ -10,6 +10,14 @@ Releases before 1.20.9 were built from the same code as the desktop app. Their n
 
 ## [Unreleased]
 
+- **New** **Desktop**, in Settings → Desktop: the lyric styles, an Edge light and the widgets for the WRLD tab, following what you play. Everything starts off
+  - **Widgets in WRLD**: the player, playlist and clock inside the WRLD tab, over the visualizer, from the toolbar's Widgets button or Layout → Widgets in the visualizer settings. Drag them about the tab; each can be left out in Settings → Desktop
+  - **Lyric styles** for the WRLD tab: Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch and Cinema, sung word by word, each in a font of your choice, with a note through instrumental breaks
+  - An **Edge light** for the WRLD tab: any of the 22 lights round its edges, over the visualizer or on its own with the visualizer off, in your colors or the cover's
+  - Browse every light and every lyric style playing live before picking one; hotkeys and a `desktop` terminal command reach all of it
+- **New** Browse every WRLD visualizer, classic and shader, playing live before picking one, from the visualizer settings
+- **New** An Edge light can play round the edges on top of any classic or shader WRLD visualizer: Edge on top in the visualizer settings, or `set viz-edge` in the terminal
+- **Change** WRLD's Cover Flow layout is gone: its queue cards, clock and controls are the player and clock widgets now, in WRLD's Widgets layout. A saved Cover Flow opens as Aurora
 - **New** **Chat message search** across DMs and servers (encrypted DMs are searched on your device), with filters like `from:`, `mentions:`, `in:`, `has:`, `before:`/`after:`, negation and exact phrases. Ctrl+F opens it from any room, and the terminal can `grep` chat history
 - **New** **Beta admin tab**: admins can manage beta access codes and publish, toggle or delete beta builds (also via the terminal's `beta` command)
 - **New** Chat attachments upload with a progress bar and can be cancelled from the Transfers panel

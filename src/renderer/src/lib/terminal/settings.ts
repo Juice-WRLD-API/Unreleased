@@ -11,8 +11,9 @@ import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, getRouteRules, norma
 import cdnService from '../cdn'
 import { useSandboxStore } from '../../components/Modal'
 import { useChatStore } from '../../store/chatStore'
-import { useVizStore, type CaptionPos, type VizCycle } from '../../store/vizStore'
+import { useVizStore, wrldEdgeLook, type CaptionPos, type VizCycle } from '../../store/vizStore'
 import { VISUALIZERS, type Boost, type Quality } from '../viz'
+import { LOOKS } from '../../desktop/light/looks'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
 import type { AudioFx } from '../audioEffects'
@@ -137,10 +138,12 @@ const SETTINGS: Setting[] = [
   bool('sandbox', 'Dock modals into a collapsible pill instead of a centered popup', () => useSandboxStore.getState().sandboxEnabled, (v) => useSandboxStore.getState().setSandboxEnabled(v)),
   bool('playlist-hero', 'Blurred cover art behind a playlist header (for the active light/dark skin)', () => (getSkin(st().theme).dark ? st().playlistHeroEnabledDark : st().playlistHeroEnabledLight), (v) => st().setPlaylistHeroEnabled(v)),
   choice('viz', 'WRLD visualizer', () => VISUALIZERS.map((v) => ({ value: v.id, label: v.name })), () => vz().vizMode, (v) => vz().selectMode(v, true)),
-  choice('viz-quality', 'Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
+  choice('viz-edge', 'Edge light round the WRLD visualizer (on its own with the visualizer off); a look picked is the screen light\'s too', () => [{ value: 'none', label: 'none' }, ...LOOKS.map((l) => ({ value: l.id, label: l.title }))], () => wrldEdgeLook() ?? 'none', (v) => vz().setVizEdgeOverlay(v === 'none' ? null : v)),
+  choice('viz-quality','Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
   choice('viz-boost', 'Visualizer input boost', pills('off', 'auto', '2', '4', '8'), () => vz().vizBoost, (v) => vz().setVizBoost(v as Boost)),
   choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
   bool('viz-minimal', 'Fullscreen shows the visualizer only', () => vz().immMinimal, (v) => vz().setImmMinimal(v)),
+  bool('wrld-widgets', 'WRLD shows the desktop player, playlist and clock instead of its own player', () => vz().wrldWidgets, (v) => vz().setWrldWidgets(v)),
   choice('viz-caption', 'Where the caption sits in visualizer-only mode', pills('tl', 'tr', 'bl', 'br'), () => vz().immCaptionPos, (v) => vz().setImmCaptionPos(v as CaptionPos)),
   bool('viz-artwork', 'Visualizer uses colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
   choice('audio-output', 'Audio output device (default = system)', () => [{ value: 'default', label: 'system default' }, ...audioDevices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` }))], () => st().audioOutput || 'default', (v) => st().setAudioOutput(v === 'default' ? '' : v)),

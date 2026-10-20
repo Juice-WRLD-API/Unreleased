@@ -1,0 +1,240 @@
+/* The desktop player: the queue as glass cards, a glass bar beneath, the lyrics beside the playing card, and search
+   over the cards. Every size is the design's size times --s; the page sets the variables from the player's metrics. */
+:root { --s: 1; --glass: 0.6; }
+#player { position: absolute; inset: 0; }
+
+/* ---- the cards ---- */
+#carousel { position: absolute; z-index: 1; left: 0; top: calc(40px * var(--s)); width: 100%; height: var(--carousel-height); }
+#empty { position: absolute; left: 50%; top: 50%; width: var(--card-width); height: var(--card-height); transform: translate(-50%, -50%);
+  border-radius: var(--card-radius); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(12px * var(--s));
+  color: rgba(255, 255, 255, 0.6); font-size: calc(14px * var(--s)); font-weight: 500; text-align: center; padding: 0 calc(20px * var(--s));
+  background: rgba(40, 40, 46, 0.45); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); transition: opacity 0.3s ease-out; pointer-events: none; }
+#empty.gone { opacity: 0; }
+
+/* ---- the tools over the bar's right end: the card folded away, search, settings, the player made small ---- */
+#tools { position: absolute; z-index: 24; left: 50%; transform: translateX(-50%); width: var(--bar-width); height: calc(42px * var(--s)); top: var(--tools-top);
+  display: flex; align-items: center; justify-content: flex-end; gap: calc(10px * var(--s)); transition: opacity 0.3s; }
+#tools.gone { opacity: 0; pointer-events: none; }
+#notice-slot { flex: 1; display: flex; justify-content: flex-end; pointer-events: none; }
+.circle { position: relative; width: calc(42px * var(--s)); height: calc(42px * var(--s)); border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: rgba(30, 30, 36, 0.38); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 calc(3px * var(--s)) calc(10px * var(--s)) rgba(0, 0, 0, 0.18);
+  transition: transform 0.25s cubic-bezier(0.3, 1.4, 0.5, 1), background 0.2s; color: rgba(255, 255, 255, 0.85); }
+.circle:hover { transform: scale(1.06); background: rgba(50, 50, 58, 0.5); color: #fff; }
+.circle:active { transform: scale(0.9); }
+.circle.quiet { width: calc(34px * var(--s)); height: calc(34px * var(--s)); background: rgba(255, 255, 255, 0.04); box-shadow: none; color: rgba(255, 255, 255, 0.5);
+  transition: transform 0.25s cubic-bezier(0.3, 1.4, 0.5, 1), background 0.2s, opacity 0.25s, scale 0.25s; }
+.circle.quiet:hover { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.85); }
+.circle.quiet.gone { opacity: 0; scale: 0.6; pointer-events: none; }
+.circle svg { width: calc(17px * var(--s)); height: calc(17px * var(--s)); }
+
+.notice { display: flex; align-items: center; gap: calc(10px * var(--s)); padding: calc(7px * var(--s)) calc(16px * var(--s)) calc(7px * var(--s)) calc(7px * var(--s));
+  min-height: calc(42px * var(--s)); border-radius: calc(21px * var(--s)); background: rgba(10, 10, 14, 0.62); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 calc(3px * var(--s)) calc(8px * var(--s)) rgba(0, 0, 0, 0.25);
+  animation: notice-in 0.38s cubic-bezier(0.3, 1.3, 0.5, 1) both; transform-origin: right center; }
+.notice.leaving { animation: notice-out 0.35s ease-out both; }
+.notice .note { width: calc(28px * var(--s)); height: calc(28px * var(--s)); border-radius: 50%; background: rgba(255, 255, 255, 0.12); display: grid; place-items: center; flex: none; }
+.notice .note svg { width: calc(14px * var(--s)); height: calc(14px * var(--s)); }
+.notice .text b { display: block; font-size: calc(12.5px * var(--s)); font-weight: 600; }
+.notice .text span { display: block; font-size: calc(11px * var(--s)); color: rgba(255, 255, 255, 0.62); }
+@keyframes notice-in { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+@keyframes notice-out { to { opacity: 0; } }
+
+/* ---- frosted glass: the wallpaper behind it, blurred (page.ts frosted) ---- */
+.frost-layer { position: absolute; inset: 0; border-radius: inherit; background-repeat: no-repeat; pointer-events: none; opacity: 0; }
+.frosted > .frost-layer { opacity: 1; }
+
+/* ---- the bar ---- */
+#bar { position: absolute; z-index: 25; left: 50%; transform: translateX(-50%); width: var(--bar-width); height: calc(64px * var(--s)); top: var(--bar-top);
+  display: flex; align-items: center; padding: 0 calc(16px * var(--s)); border-radius: 999px;
+  transition: opacity 0.35s, transform 0.5s cubic-bezier(0.3, 1.3, 0.5, 1); }
+#bar.gone { opacity: 0; transform: translateX(-50%) scale(0.72); pointer-events: none; }
+.bar-glass { position: absolute; inset: 0; border-radius: 999px; overflow: hidden; background: rgba(36, 36, 42, calc(0.5 - 0.2 * var(--glass)));
+  box-shadow: inset 0 0 0 100vmax rgba(255, 255, 255, calc(0.04 + 0.26 * var(--glass) * 0.5)), 0 calc(8px * var(--s)) calc(28px * var(--s)) rgba(0, 0, 0, 0.28); }
+.bar-glass.frosted { background: rgba(36, 36, 42, calc(0.3 - 0.15 * var(--glass))); }
+.bar-glass::after { content: ''; position: absolute; inset: 0; border-radius: 999px; padding: 1px; pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 255, 255, calc(0.35 + 0.5 * var(--glass))) 0%, rgba(255, 255, 255, calc(0.12 + 0.12 * var(--glass))) 45%, rgba(255, 255, 255, calc(0.2 + 0.25 * var(--glass))) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.bar-left, .bar-right { position: relative; display: flex; align-items: center; gap: calc(10px * var(--s)); flex: none; }
+.bar-button { position: relative; width: calc(var(--size) * 1.8px * var(--s)); height: calc(var(--size) * 1.8px * var(--s)); display: grid; place-items: center;
+  transition: transform 0.25s cubic-bezier(0.3, 1.5, 0.5, 1); color: rgba(255, 255, 255, 0.82); }
+.bar-button.quiet { color: rgba(255, 255, 255, 0.48); }
+.bar-button .disc { position: absolute; inset: 0; border-radius: 50%; background: rgba(255, 255, 255, 0); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0);
+  transform: scale(0.55); transition: transform 0.3s cubic-bezier(0.3, 1.5, 0.5, 1), background 0.3s, box-shadow 0.3s; }
+.bar-button .glyph { position: relative; width: calc(var(--size) * 1px * var(--s)); height: calc(var(--size) * 1px * var(--s)); transition: transform 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.bar-button .glyph svg { width: 100%; height: 100%; display: block; }
+.bar-button:hover, .bar-button.active { color: #fff; }
+.bar-button:hover .disc { transform: scale(1); background: rgba(255, 255, 255, 0.11); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22); }
+.bar-button.active .disc { transform: scale(1); background: rgba(255, 255, 255, 0.16); }
+.bar-button:hover .glyph { transform: scale(1.12); }
+.bar-button:active { transform: scale(0.86); }
+
+.strip { position: relative; flex: 1; min-width: 0; margin: 0 calc(14px * var(--s)); display: flex; flex-direction: column; gap: calc(4px * var(--s)); }
+.strip-row { display: flex; align-items: center; gap: calc(10px * var(--s)); height: calc(38px * var(--s)); }
+.cover-button { position: relative; width: calc(36px * var(--s)); height: calc(36px * var(--s)); flex: none; border-radius: calc(6px * var(--s));
+  transition: transform 0.28s cubic-bezier(0.3, 1.5, 0.5, 1), box-shadow 0.28s; }
+.cover-art, .cover-art img { display: block; width: 100%; height: 100%; border-radius: calc(6px * var(--s)); object-fit: cover; overflow: hidden; }
+.cover-art .no-art { display: grid; place-items: center; width: 100%; height: 100%; background: linear-gradient(135deg, #3d3d3d, #1a1a1a); color: rgba(255, 255, 255, 0.35); }
+.cover-art .no-art svg { width: 40%; height: 40%; }
+.cover-arrow { position: absolute; left: 50%; top: 50%; width: calc(18px * var(--s)); height: calc(18px * var(--s)); margin: calc(-9px * var(--s)) 0 0 calc(-9px * var(--s));
+  border-radius: 50%; background: rgba(0, 0, 0, 0.45); display: grid; place-items: center; opacity: 0; transform: scale(0.5); transition: opacity 0.25s, transform 0.28s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.cover-arrow svg { width: 60%; height: 60%; }
+.cover-button:hover { transform: scale(1.08); box-shadow: 0 0 calc(8px * var(--s)) var(--glow, rgba(255, 255, 255, 0.7)); }
+.cover-button:hover .cover-arrow { opacity: 1; transform: scale(1); }
+.cover-button:active { transform: scale(0.94); }
+.strip-texts { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(2px * var(--s)); }
+.marquee { position: relative; overflow: hidden; white-space: nowrap; }
+.marquee.title { font-size: calc(13.5px * var(--s)); font-weight: 600; }
+.marquee.subtitle { font-size: calc(12px * var(--s)); color: rgba(255, 255, 255, 0.6); }
+.marquee span { display: inline-block; }
+.marquee.overflowing { -webkit-mask: linear-gradient(90deg, transparent 0, #000 6px, #000 calc(100% - 14px), transparent 100%); }
+.marquee .copy { margin-left: 40px; }
+.marquee.overflowing.running span { animation: marquee var(--duration) linear 1.5s infinite; }
+@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(calc(var(--travel) * -1)); } }
+.time-left { font-size: calc(11.5px * var(--s)); font-weight: 600; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.7); flex: none;
+  opacity: 0; transform: scale(0.8); transform-origin: right center; transition: opacity 0.25s, transform 0.3s cubic-bezier(0.3, 1.4, 0.5, 1); width: 0; overflow: hidden; }
+.time-left.shown { opacity: 1; transform: scale(1); width: auto; }
+.time-left.scrubbing { color: #fff; }
+/* The heart: there where the song can be liked; filled in the song's color, glowing, when it is. */
+.heart { width: 0; height: calc(24px * var(--s)); flex: none; display: grid; place-items: center; border-radius: 50%; color: rgba(255, 255, 255, 0.7);
+  opacity: 0; transform: scale(0.6); overflow: hidden; transition: opacity 0.25s, transform 0.3s cubic-bezier(0.3, 1.4, 0.5, 1), width 0.3s, color 0.2s; }
+.heart.shown { width: calc(24px * var(--s)); opacity: 1; transform: scale(1); }
+.heart:hover { color: rgba(255, 255, 255, 0.95); }
+.heart svg { grid-area: 1 / 1; width: calc(14px * var(--s)); height: calc(14px * var(--s)); transition: opacity 0.2s, transform 0.25s; }
+.heart svg + svg { opacity: 0; transform: scale(0.5); }
+.heart.liked { color: var(--like, #fff); filter: drop-shadow(0 0 calc(6px * var(--s)) var(--like, #fff)); }
+.heart.liked svg:first-child { opacity: 0; }
+.heart.liked svg + svg { opacity: 1; transform: scale(1); }
+.heart.beat svg + svg { animation: heart-beat 0.45s cubic-bezier(0.3, 1.4, 0.5, 1); }
+@keyframes heart-beat { 0% { transform: scale(0.5); } 55% { transform: scale(1.3); } 100% { transform: scale(1); } }
+.progress { position: relative; height: calc(6px * var(--s)); }
+.progress .rail, .progress .fill { position: absolute; left: 0; bottom: 0; width: 100%; height: calc(2px * var(--s)); border-radius: 99px; transition: height 0.22s ease-out; }
+.progress .rail { background: rgba(255, 255, 255, 0.16); }
+.progress .fill { background: rgba(255, 255, 255, 0.9); transform-origin: left center; transform: scaleX(0); }
+.progress.thick .rail, .progress.thick .fill { height: calc(4px * var(--s)); }
+
+.volume { display: flex; align-items: center; gap: calc(4px * var(--s)); }
+.volume input { width: 0; opacity: 0; transition: width 0.4s cubic-bezier(0.3, 1.2, 0.5, 1), opacity 0.3s; -webkit-appearance: none; appearance: none; height: calc(4px * var(--s));
+  border-radius: 99px; background: linear-gradient(90deg, rgba(255,255,255,0.9) var(--fill, 50%), rgba(255,255,255,0.2) var(--fill, 50%)); pointer-events: none; }
+.volume.open input { width: calc(84px * var(--s)); opacity: 1; pointer-events: auto; }
+.volume input::-webkit-slider-thumb { -webkit-appearance: none; width: calc(12px * var(--s)); height: calc(12px * var(--s)); border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+
+/* ---- the player made small ---- */
+#mini { position: absolute; z-index: 25; left: 50%; top: calc(var(--bar-top) + 4px * var(--s)); height: calc(56px * var(--s)); transform: translateX(-50%) scale(1);
+  display: flex; align-items: center; gap: calc(10px * var(--s)); padding: 0 calc(10px * var(--s)) 0 calc(8px * var(--s)); border-radius: 999px;
+  transition: opacity 0.35s, transform 0.5s cubic-bezier(0.3, 1.3, 0.5, 1); }
+#mini.gone { opacity: 0; transform: translateX(-50%) scale(1.3); pointer-events: none; }
+#mini .mini-art { position: relative; width: calc(40px * var(--s)); height: calc(40px * var(--s)); border-radius: calc(9px * var(--s)); overflow: hidden; flex: none;
+  box-shadow: 0 calc(2px * var(--s)) calc(4px * var(--s)) rgba(0, 0, 0, 0.3); background: rgb(51, 51, 51); display: grid; place-items: center; color: rgba(255,255,255,0.5); }
+#mini .mini-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#mini .mini-art svg { width: 45%; height: 45%; }
+#mini .mini-texts { position: relative; width: calc(150px * var(--s)); display: flex; flex-direction: column; gap: calc(1px * var(--s)); }
+#mini .mini-texts .marquee.title { font-size: calc(13px * var(--s)); }
+#mini .mini-texts .marquee.subtitle { font-size: calc(11.5px * var(--s)); }
+#mini .mini-buttons { position: relative; display: flex; align-items: center; gap: calc(2px * var(--s)); }
+
+/* ---- the lyrics: beside the playing card, or across the cards' place with the card folded away ---- */
+#lyrics { position: absolute; z-index: 2; left: 0; width: 100%; top: calc(40px * var(--s)); height: var(--carousel-height);
+  pointer-events: none; transition: opacity 0.45s ease-out 0.2s, transform 0.45s ease-out 0.2s; }
+#lyrics.beside { left: calc(50% + var(--lyrics-x) - var(--lyrics-width) / 2); width: var(--lyrics-width); }
+#lyrics.gone { opacity: 0; transform: translateY(calc(14px * var(--s))); transition: opacity 0.18s ease-in, transform 0.18s ease-in; }
+#lyrics .lyric-host { position: absolute; inset: 0; }
+#lyrics .quiet { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(12px * var(--s));
+  color: rgba(255, 255, 255, 0.7); font-size: calc(17px * var(--s)); font-weight: 600; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); }
+#lyrics .quiet.gone { display: none; }
+#lyrics .quiet-icon svg { width: calc(30px * var(--s)); height: calc(30px * var(--s)); }
+
+/* ---- search: the magnifier springs open into a glass bar as wide as the player's; its results take the cards' place ---- */
+#searchbar { width: calc(42px * var(--s)); border-radius: 999px; justify-content: start; display: flex; align-items: center; overflow: hidden;
+  transition: width 0.5s cubic-bezier(0.3, 1.25, 0.4, 1), transform 0.25s cubic-bezier(0.3, 1.4, 0.5, 1), background 0.2s; }
+#searchbar .mag { width: calc(42px * var(--s)); height: calc(42px * var(--s)); flex: none; display: grid; place-items: center; color: rgba(255, 255, 255, 0.72); }
+#searchbar:hover .mag, #searchbar.open .mag { color: rgba(255, 255, 255, 0.92); }
+#searchbar .mag svg { width: calc(17px * var(--s)); height: calc(17px * var(--s)); }
+#searchbar input { flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: none; color: #fff; caret-color: #fff;
+  font: 500 calc(15.5px * var(--s)) "Segoe UI Variable Text", "Segoe UI", sans-serif; opacity: 0; transition: opacity 0.15s; pointer-events: none; }
+#searchbar input::placeholder { color: rgba(255, 255, 255, 0.42); }
+#searchbar .spin { width: calc(14px * var(--s)); height: calc(14px * var(--s)); margin-right: calc(10px * var(--s)); border-radius: 50%; flex: none;
+  border: calc(2px * var(--s)) solid rgba(255, 255, 255, 0.2); border-top-color: rgba(255, 255, 255, 0.8); animation: turn 0.8s linear infinite; display: none; }
+#searchbar .clear { width: calc(18px * var(--s)); height: calc(18px * var(--s)); margin-right: calc(14px * var(--s)); color: rgba(255, 255, 255, 0.5); display: none; flex: none; }
+#searchbar .clear svg { width: 100%; height: 100%; display: block; }
+#searchbar.open { width: var(--bar-width); background: rgba(30, 30, 36, 0.5); }
+#searchbar.open:hover { transform: none; }
+#searchbar.open input { opacity: 1; pointer-events: auto; transition-delay: 0.14s; }
+#searchbar.open.busy .spin { display: block; }
+#searchbar.open .clear { display: grid; place-items: center; }
+#tools.searching .circle:not(#searchbar), #tools.searching #notice-slot:empty { display: none; }
+#tools.searching #searchbar.open { flex: 0 1 auto; min-width: 0; }
+@keyframes turn { to { transform: rotate(360deg); } }
+
+#search-grid { position: absolute; z-index: 20; left: 50%; top: calc(40px * var(--s)); width: var(--bar-width); height: var(--carousel-height); transform: translateX(-50%);
+  border-radius: calc(24px * var(--s)); transition: opacity 0.3s ease, transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1); }
+#search-grid.gone { opacity: 0; transform: translateX(-50%) translateY(calc(10px * var(--s))) scale(0.98); pointer-events: none; }
+#search-grid .glass { position: absolute; inset: 0; border-radius: calc(24px * var(--s)); overflow: hidden; background: rgba(16, 16, 20, calc(0.5 + 0.15 * var(--glass)));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 calc(12px * var(--s)) calc(36px * var(--s)) rgba(0, 0, 0, 0.35); }
+#search-grid .glass.frosted { background: rgba(16, 16, 20, calc(0.4 + 0.15 * var(--glass))); }
+#search-grid .scroll { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; border-radius: calc(24px * var(--s)); scrollbar-width: none;
+  padding: calc(16px * var(--s)) calc(20px * var(--s)); }
+#search-grid .scroll::-webkit-scrollbar { display: none; }
+#search-grid .note { position: absolute; inset: 0; display: grid; place-items: center; font-size: calc(14px * var(--s)); color: rgba(255, 255, 255, 0.5);
+  opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+#search-grid .note.shown { opacity: 1; }
+.section { font-size: calc(13px * var(--s)); font-weight: 700; color: rgba(255, 255, 255, 0.9); letter-spacing: 0.01em; margin: calc(4px * var(--s)) 0 calc(10px * var(--s)); }
+.section + .songs, .section + .tiles { margin-bottom: calc(16px * var(--s)); }
+.songs { display: grid; grid-template-columns: 1fr 1fr; gap: calc(4px * var(--s)) calc(12px * var(--s)); }
+.songs.one { grid-template-columns: 1fr; }
+.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: calc(14px * var(--s)); }
+
+.result { position: relative; animation: rise-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1) both; animation-delay: var(--delay, 0s); }
+@keyframes rise-in { from { opacity: 0; transform: translateY(calc(8px * var(--s))); } }
+.result .art { position: relative; overflow: hidden; }
+.result img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
+.result .words { display: flex; flex-direction: column; min-width: 0; }
+.result .words b, .result .words span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result .words span { color: rgba(255, 255, 255, 0.55); }
+.result.tile .art { width: 100%; aspect-ratio: 1; border-radius: calc(10px * var(--s)); background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 calc(5px * var(--s)) calc(9px * var(--s)) rgba(0, 0, 0, 0.3); transition: transform 0.3s cubic-bezier(0.3, 1.4, 0.5, 1), box-shadow 0.3s; }
+.result.tile .words { padding: calc(6px * var(--s)) calc(1px * var(--s)) 0; gap: calc(1px * var(--s)); }
+.result.tile .words b { font-size: calc(12.5px * var(--s)); font-weight: 600; }
+.result.tile .words span { font-size: calc(11px * var(--s)); }
+.result.tile:hover .art { transform: scale(1.05) translateY(calc(-2px * var(--s))); box-shadow: 0 calc(9px * var(--s)) calc(18px * var(--s)) rgba(0, 0, 0, 0.4); }
+.result.row { display: flex; align-items: center; gap: calc(10px * var(--s)); padding: calc(5px * var(--s)) calc(8px * var(--s)); border-radius: calc(10px * var(--s)); transition: background 0.15s; }
+.result.row .art { width: calc(36px * var(--s)); height: calc(36px * var(--s)); flex: none; border-radius: calc(6px * var(--s)); background: rgba(255, 255, 255, 0.07); }
+.result.row .play { position: absolute; inset: 0; border-radius: inherit; background: rgba(0, 0, 0, 0.45); display: grid; place-items: center; opacity: 0; transition: opacity 0.15s; }
+.result.row .play svg { width: 45%; height: 45%; }
+.result.row .words { flex: 1; gap: calc(1px * var(--s)); }
+.result.row .words b { font-size: calc(13px * var(--s)); font-weight: 600; }
+.result.row .words span { font-size: calc(11.5px * var(--s)); }
+.result.row .time { font-size: calc(11.5px * var(--s)); color: rgba(255, 255, 255, 0.5); font-variant-numeric: tabular-nums; }
+.result.row:hover { background: rgba(255, 255, 255, 0.08); }
+.result.row:hover .play { opacity: 1; }
+.result.playing .words b { color: #fff; }
+.result.playing.row { background: rgba(255, 255, 255, 0.12); }
+
+/* An era opened from search: its cover, its name, Play and Shuffle; its songs beneath. */
+.era-head { display: flex; align-items: center; gap: calc(16px * var(--s)); margin-bottom: calc(14px * var(--s)); }
+.era-head .back { width: calc(30px * var(--s)); height: calc(30px * var(--s)); border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.85); }
+.era-head .back:hover { background: rgba(255, 255, 255, 0.16); }
+.era-head .back svg { width: 45%; height: 45%; transform: scaleX(-1); }
+.era-head .era-art { width: calc(84px * var(--s)); height: calc(84px * var(--s)); border-radius: calc(12px * var(--s)); overflow: hidden; flex: none; background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 calc(6px * var(--s)) calc(14px * var(--s)) rgba(0, 0, 0, 0.35); }
+.era-head .era-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.era-head .era-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: calc(4px * var(--s)); }
+.era-head .era-words b { font-size: calc(20px * var(--s)); font-weight: 700; }
+.era-head .era-words span { font-size: calc(12px * var(--s)); color: rgba(255, 255, 255, 0.6); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.era-head .era-buttons { display: flex; gap: calc(8px * var(--s)); margin-top: calc(4px * var(--s)); }
+.pill { display: inline-flex; align-items: center; gap: calc(6px * var(--s)); padding: calc(6px * var(--s)) calc(14px * var(--s)); border-radius: 999px;
+  font-size: calc(12.5px * var(--s)); font-weight: 600; background: rgba(255, 255, 255, 0.9); color: #111; transition: transform 0.2s cubic-bezier(0.3, 1.5, 0.5, 1); }
+.pill.ghost { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.pill:hover { transform: scale(1.04); }
+.pill svg { width: calc(12px * var(--s)); height: calc(12px * var(--s)); }
+
+/* A song's menu: Play, Play next, Add to queue. */
+#menu { position: fixed; z-index: 40; min-width: calc(160px * var(--s)); padding: calc(5px * var(--s)); border-radius: calc(12px * var(--s));
+  background: rgba(22, 22, 28, 0.92); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 calc(10px * var(--s)) calc(28px * var(--s)) rgba(0, 0, 0, 0.45);
+  animation: notice-in 0.2s ease-out both; }
+#menu button { display: block; width: 100%; text-align: left; padding: calc(7px * var(--s)) calc(10px * var(--s)); border-radius: calc(8px * var(--s));
+  font-size: calc(12.5px * var(--s)); color: rgba(255, 255, 255, 0.9); }
+#menu button:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* In the WRLD tab: no desk to clear, and the app it would open is the one it's in. */
+.in-tab [data-action="clear"], .in-tab .cover-arrow { display: none; }
+.in-tab .cover-button { pointer-events: none; }

@@ -134,7 +134,13 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
+    // The app, and the pages the WRLD tab's widgets (player, playlist, clock) are drawn in: each is a page of its own.
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'src/renderer/index.html'),
+        ...Object.fromEntries(['host', 'light', 'player', 'playlist', 'clock', 'curtain']
+          .map((name) => [`desktop-${name}`, resolve(__dirname, `src/renderer/desktop/${name}.html`)])),
+      },
       output: {
         manualChunks: iconChunk,
       },

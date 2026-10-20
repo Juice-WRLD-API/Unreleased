@@ -44,6 +44,7 @@ import type { AdminTab } from '../hooks/useAdminQueue'
 import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
+import { createDesktopSlice, type DesktopSlice } from './desktopSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import { getFont } from '../lib/fonts'
 import {
@@ -155,7 +156,7 @@ export type NavStyle = 'classic' | 'pill'
 // The Settings dialog's tabs - the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
 
 // ─── Non-queue state ──────────────────────────────────────────────────────────
 
@@ -953,7 +954,7 @@ interface AppActions {
   clearStagedSongChanges: () => void
 }
 
-export type AppStore = QueueSlice & AppState & AppActions
+export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
@@ -1209,6 +1210,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // ── Queue slice (all queue + playback logic) ───────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ...createQueueSlice(set, get, store as any),
+  // ── Desktop (the lyric styles, the edge light, the WRLD widgets) ──────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...createDesktopSlice(set, get, store as any),
 
   // ── Playback extras ───────────────────────────────────────────────────────
   currentTrackFull: null,

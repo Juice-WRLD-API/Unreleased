@@ -1,0 +1,5 @@
+/* The desk cleared: the wallpaper laid over every window like a curtain, the desktop's own windows over it. Every
+   fade is the compositor's. */
+#curtain { position: absolute; inset: 0; opacity: 0; background: #000; transition: opacity 0.7s ease-in-out; }
+#curtain.shown { opacity: 1; }
+#curtain img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }

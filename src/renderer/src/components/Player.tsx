@@ -21,6 +21,8 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
+import { useVizStore } from '../store/vizStore'
+import * as desktopActions from '../desktop/actions'
 import ContextMenu from './ContextMenu'
 import { eventToCombo, resolveAction, registerHotkeyDispatch } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
@@ -1652,6 +1654,9 @@ export default function Player(): JSX.Element {
     'open-diagnostics': () => useStore.getState().setShowDiagnostics(true),
     'toggle-queue':     () => { const s = useStore.getState(); s.setShowQueue(!s.showQueue) },
     'open-terminal':    () => { const s = useStore.getState(); s.setActiveView(s.activeView === 'terminal' ? (s.previousView ?? 'home') : 'terminal') },
+    'next-light':       () => desktopActions.stepLight(1),
+    'next-lyric-style': () => desktopActions.stepLyricStyle(1),
+    'wrld-widgets':     () => { const v = useVizStore.getState(); v.setWrldWidgets(!v.wrldWidgets) },
     'focus-search':     () => {
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()

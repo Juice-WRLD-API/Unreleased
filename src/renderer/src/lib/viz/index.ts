@@ -10,13 +10,17 @@ export type { Boost, Quality, VizLayout };
 export interface VisualizerOption {
   id: string;
   name: string;
-  group: "ambient" | "spectrum" | "shader" | "layout";
-  engine: "2d" | "gl" | "layout";
+  group: "ambient" | "spectrum" | "shader";
+  engine: "2d" | "gl";
 }
+
+/** The Edge lights were visualizers of their own once, with ids of "edge-" and the light's id (desktop/light/looks.ts).
+ *  They're the separate Edge light now (vizStore's vizEdgeOverlay); a saved one of these is read back as Off with that
+ *  light round it. */
+export const EDGE_PREFIX = "edge-";
 
 export const VISUALIZERS: VisualizerOption[] = [
   { id: "none", name: "Off", group: "ambient", engine: "2d" },
-  { id: "coverflow", name: "Cover Flow", group: "layout", engine: "layout" },
   { id: "aurora", name: "Aurora", group: "ambient", engine: "2d" },
   { id: "bars", name: "Bars", group: "spectrum", engine: "2d" },
   { id: "mirror", name: "Mirror", group: "spectrum", engine: "2d" },
@@ -53,6 +57,9 @@ export const VISUALIZERS: VisualizerOption[] = [
   { id: "vortex", name: "Vortex", group: "shader", engine: "gl" },
   { id: "gooey", name: "Gooey", group: "shader", engine: "gl" },
 ];
+
+/** Whether a visualizer can only draw with WebGL. */
+export const needsWebGL = (v: VisualizerOption | undefined): boolean => v?.engine === "gl";
 
 /** Maps retired/unknown ids onto a current mode. */
 export function normalizeMode(id: string): string {
