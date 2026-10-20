@@ -2,7 +2,7 @@
 // Windows. The main window stays the source of truth: it sends the Desktop settings and what's playing (desktop/
 // bridge in the renderer), and everything the desktop's windows press or ask for goes back to it, so a press on the
 // desktop player runs exactly the code the app's own buttons do.
-const { ipcMain, screen } = require('electron')
+const { ipcMain, screen, Menu } = require('electron')
 const path = require('path')
 const { pathToFileURL } = require('url')
 const { EdgeLights } = require('./light')
@@ -181,6 +181,36 @@ function createDesktop(options) {
     })
   }
 
+  /** A press on a desktop window (or a row of its menu), for the main window to act on - but the desk, which is ours. */
+  function command(cmd, arg) {
+    if (cmd === 'clear') { clear.set(arg === undefined ? undefined : Boolean(arg)); return }
+    if (cmd === 'open-app' || cmd === 'open-settings') showMainWindow()
+    main()?.webContents.send('desktop:command', cmd, arg)
+  }
+
+  /** The system's menu from a widget's menu as the main window describes it (src/renderer/src/desktop/widgetMenu.ts).
+   *  @returns {Electron.MenuItemConstructorOptions[]} */
+  function menuTemplate(entries) {
+    if (!Array.isArray(entries)) return []
+    return entries.map((e) => {
+      if (e === 'divider' || !e || typeof e !== 'object') return /** @type {Electron.MenuItemConstructorOptions} */ ({ type: 'separator' })
+      /** @type {Electron.MenuItemConstructorOptions} */
+      const item = { label: String(e.label ?? '').replace(/&/g, '&&'), enabled: !e.disabled }
+      if (Array.isArray(e.children)) item.submenu = menuTemplate(e.children)
+      else if (typeof e.checked === 'boolean') { item.type = e.radio ? 'radio' : 'checkbox'; item.checked = e.checked }
+      if (typeof e.cmd === 'string') { const { cmd, arg } = e; item.click = () => command(cmd, arg) }
+      return item
+    })
+  }
+
+  /** A widget right-clicked: its menu at the pointer. */
+  async function showMenu(which) {
+    const win = widgets[which]?.window
+    const entries = await ask('widget-menu', { which, isClear: clear.isOn })
+    if (!entries || !win || win.isDestroyed()) return
+    Menu.buildFromTemplate(menuTemplate(entries)).popup({ window: win })
+  }
+
   // ---- from the main window ----
 
   const handlers = {
@@ -210,10 +240,11 @@ function createDesktop(options) {
     },
     // ---- from the desktop's pages ----
     'desktop:command': (event, cmd, arg) => {
-      if (!roles.has(event.sender) || typeof cmd !== 'string') return
-      if (cmd === 'clear') { clear.set(arg === undefined ? undefined : Boolean(arg)); return }
-      if (cmd === 'open-app' || cmd === 'open-settings') showMainWindow()
-      main()?.webContents.send('desktop:command', cmd, arg)
+      if (roles.has(event.sender) && typeof cmd === 'string') command(cmd, arg)
+    },
+    'desktop:menu': (event) => {
+      const role = roles.get(event.sender)
+      if (role && widgets[role.which]) void showMenu(role.which)
     },
     'desktop:solid': (event, on) => { const role = roles.get(event.sender); if (role) widgets[role.which]?.solid(Boolean(on)) },
     'desktop:drag': (event, phase) => { const role = roles.get(event.sender); if (role) widgets[role.which]?.dragPhase(phase) },

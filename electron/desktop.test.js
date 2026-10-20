@@ -153,6 +153,36 @@ test('everything Desktop starts off, and saved settings keep defaults added late
   assert.equal(slice.mergeDesktop(d, null), d)
 })
 
+test('a widget\'s right-click menu hides and shows it where it was clicked, and sets what the settings do', () => {
+  const slice = loadTs(path.join(RENDERER, 'store/desktopSlice.ts'), { '../lib/persist': { ls: { get: () => null, set: () => {} } } })
+  const { widgetMenu } = loadTs(path.join(RENDERER, 'desktop/widgetMenu.ts'), { '../lib/persist': { ls: { get: () => null, set: () => {} } } })
+  const d = slice.mergeDesktop(slice.DESKTOP_DEFAULTS, { playlist: { isOn: true, source: 'playlist:7' } })
+  const rows = (entries) => entries.filter((e) => e !== 'divider')
+  const find = (entries, label) => rows(entries).find((e) => e.label === label)
+
+  const inTab = widgetMenu('playlist', d, { where: 'tab', desktopToo: true, playlists: [{ id: '7', name: 'Night & Day' }] })
+  assert.deepEqual(find(inTab, 'Hide playlist from WRLD').arg, { playlist: { inWrld: false } })
+  assert.deepEqual(find(inTab, 'Reset position').arg, { playlist: { tabPlace: null } })
+  assert.deepEqual(find(inTab, 'Also on the desktop'), { label: 'Also on the desktop', checked: true, cmd: 'set', arg: { playlist: { isOn: false } } })
+  const shown = find(find(inTab, 'Show').children, 'Night & Day')
+  assert.equal(shown.checked, true)
+  assert.deepEqual(find(inTab, 'Widgets').children.map((w) => w.checked), [true, true, true])
+  assert.equal(find(inTab, 'Clear the desk'), undefined)
+  // Medium is the widget's own default size; a size between the stops ticks none.
+  assert.equal(find(find(inTab, 'Size').children, 'Medium').checked, true)
+  const between = slice.mergeDesktop(d, { playlist: { size: 0.6 } })
+  assert.equal(find(widgetMenu('playlist', between, { where: 'tab', desktopToo: true, playlists: [] }), 'Size').children.some((s) => s.checked), false)
+  // Only on Windows can a widget go out on the desktop.
+  assert.equal(find(widgetMenu('clock', d, { where: 'tab', desktopToo: false, playlists: [] }), 'Also on the desktop'), undefined)
+
+  const onDesktop = widgetMenu('player', d, { where: 'desktop', desktopToo: true, isClear: true, playlists: [] })
+  assert.deepEqual(find(onDesktop, 'Hide player from the desktop').arg, { player: { isOn: false } })
+  assert.deepEqual(find(onDesktop, 'Reset position').arg, { player: { place: null } })
+  assert.deepEqual(find(onDesktop, 'Widgets').children.map((w) => w.checked), [false, true, false])
+  assert.deepEqual(find(onDesktop, 'Mini player').arg, { player: { mini: true } })
+  assert.equal(find(onDesktop, 'Bring everything back').cmd, 'clear')
+})
+
 // ---- the main process ----
 
 test('the widgets are measured as their pages lay themselves out', () => {

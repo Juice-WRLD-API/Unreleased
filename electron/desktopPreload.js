@@ -30,4 +30,6 @@ contextBridge.exposeInMainWorld('desktopPage', {
   /** The page measured itself: the window's size to be. */
   size: (width, height) => ipcRenderer.send('desktop:size', { width: Number(width) || 0, height: Number(height) || 0 }),
   curtainOpened: () => ipcRenderer.send('desktop:curtain-opened'),
+  /** Right-clicked: the widget's menu, shown at the pointer. */
+  menu: () => ipcRenderer.send('desktop:menu'),
 })

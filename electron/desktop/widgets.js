@@ -141,8 +141,10 @@ class Widget {
       watchPresses(win)
       if (this.options.seeThrough) {
         // Clear until the pointer is over the widget itself (the page's solidAt); feel() tells it where the pointer is.
-        win.setIgnoreMouseEvents(true)
+        // Let clicks through only once it's on the screen: told so before its first showing, the window is drawn over
+        // solid gray (#2b2b2b) instead of the desktop - with the player's lyrics open, every time.
         this.seeThrough = true
+        win.once('show', () => { if (!win.isDestroyed()) win.setIgnoreMouseEvents(this.seeThrough) })
         this.feel()
       }
       win.once('ready-to-show', () => { if (!win.isDestroyed()) win.showInactive() })
@@ -170,7 +172,8 @@ class Widget {
   solid(on) {
     if (!this.window || this.window.isDestroyed()) return
     this.seeThrough = !on
-    this.window.setIgnoreMouseEvents(!on)
+    // Not yet shown, it's set as it shows.
+    if (this.window.isVisible()) this.window.setIgnoreMouseEvents(!on)
   }
 
   // A see-through window hears nothing, so the pointer is looked at here - 25 times a second near the widget, 10 away

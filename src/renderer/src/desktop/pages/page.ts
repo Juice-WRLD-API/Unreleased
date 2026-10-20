@@ -66,6 +66,8 @@ export interface Bridge {
   keys(on: boolean): void
   size(width: number, height: number): void
   curtainOpened(): void
+  /** Right-clicked at this point: the widget's menu, from the app. */
+  menu?(x: number, y: number): void
 }
 
 export const page = (window as unknown as { desktopPage?: Bridge }).desktopPage ?? frameBridge()
@@ -126,6 +128,16 @@ export function seeThrough(isSolid: (x: number, y: number) => boolean): void {
   page.on('desktop:pointer', (at) => { say(Boolean(at) && isSolid(at!.x, at!.y)) })
   document.addEventListener('pointermove', (e) => { if (!e.buttons) say(isSolid(e.clientX, e.clientY)) })
   document.addEventListener('pointerleave', () => say(false))
+}
+
+/** A right-click opens the widget's menu - its settings, its place, hiding it - which the app shows: its own menu in
+ *  the WRLD tab, the system's on the desktop. Not one the page answers itself (a song's menu), nor in a field. */
+export function menuOnRightClick(): void {
+  document.addEventListener('contextmenu', (event) => {
+    if (event.defaultPrevented || (event.target as Element | null)?.closest?.('input, textarea, [contenteditable="true"]')) return
+    event.preventDefault()
+    page.menu?.(event.clientX, event.clientY)
+  })
 }
 
 let draggedAt = 0

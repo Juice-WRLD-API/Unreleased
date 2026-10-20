@@ -3,18 +3,20 @@ import { useStore } from '../store/useStore'
 import { FRAME_MARK, isOurs, type FromFrame, type ToFrame } from '../desktop/frame'
 import { DEFAULT_PLACES, fitOf, playerMetrics, playlistMetrics } from '../desktop/metrics'
 import { listenToMeter } from '../desktop/meter'
-import { answerDesktopRequest, runDesktopCommand, watchDesktopState } from '../lib/desktopBridge'
+import { answerDesktopRequest, runDesktopCommand, watchDesktopState, widgetMenuOf } from '../lib/desktopBridge'
+import { WIDGET_TITLES, type WidgetMenuEntry } from '../desktop/widgetMenu'
+import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
 
 // WRLD's Widgets layout: the desktop's player, playlist and clock (Settings > Desktop) standing in the tab instead of on
 // the desktop, for the web and for anyone who'd rather keep them in the app. They're the very pages the desktop's
 // windows show, each in a frame, and this answers them as the main process answers a window: it tells them the
 // settings, what's playing and the music, does what they press with the app's own code, lets clicks through the
-// player's clear parts, moves them when they're dragged, and keeps where they were left.
+// player's clear parts, moves them when they're dragged, keeps where they were left, and shows a widget's menu when
+// it's right-clicked.
 
 type Which = 'player' | 'playlist' | 'clock'
 /** Back to front. */
 const WIDGETS: Which[] = ['clock', 'playlist', 'player']
-const TITLES: Record<Which, string> = { player: 'Player', playlist: 'Playlist', clock: 'Clock' }
 /** At most this often is the meter passed on. */
 const METER_MS = 16
 /** The clock's size until it has measured itself. */
@@ -22,6 +24,15 @@ const CLOCK_SIZE = { width: 400, height: 420 }
 
 /** A widget's page, beside the app's own: over file:// in the desktop build, from the site's root on the web. */
 const pageUrl = (which: Which): string => new URL(`desktop/${which}.html`, document.baseURI).href
+
+/** A widget's menu, as the app's own menu has it: each row sends its command as the widget's presses do. */
+const menuItems = (entries: WidgetMenuEntry[]): ContextMenuEntry[] => entries.map((e) => e === 'divider' ? e : {
+  label: e.label,
+  checked: e.checked,
+  disabled: e.disabled,
+  children: e.children ? menuItems(e.children) : undefined,
+  onSelect: e.cmd ? () => void runDesktopCommand(e.cmd!, e.arg).catch((err) => console.warn('[wrld widgets] menu command failed', e.cmd, err)) : undefined,
+})
 
 export default function WrldWidgets(): JSX.Element {
   const desktop = useStore((s) => s.desktop)
@@ -34,6 +45,16 @@ export default function WrldWidgets(): JSX.Element {
   /** The player's frame takes clicks (the pointer is over something solid), and whether the pointer is over it. */
   const playerSolid = useRef(false)
   const pointerIn = useRef(false)
+  /** A widget right-clicked: its menu, at that point in the tab's window. */
+  const [menu, setMenu] = useState<{ which: Which; x: number; y: number } | null>(null)
+
+  // A click in a frame doesn't reach the menu's outside-click check, but the window loses the focus to the frame.
+  useEffect(() => {
+    if (!menu) return
+    const close = (): void => setMenu(null)
+    window.addEventListener('blur', close)
+    return () => window.removeEventListener('blur', close)
+  }, [menu])
 
   useLayoutEffect(() => {
     const layer = layerRef.current
@@ -174,6 +195,11 @@ export default function WrldWidgets(): JSX.Element {
             setClockSize((was) => (was.width === Math.ceil(message.width) && was.height === Math.ceil(message.height) ? was : { width: Math.ceil(message.width), height: Math.ceil(message.height) }))
           }
           break
+        case 'menu': {
+          const r = frames.current[which]?.getBoundingClientRect()
+          if (r) setMenu({ which, x: r.left + message.x, y: r.top + message.y })
+          break
+        }
         case 'key': {
           // As if pressed in the app: its hotkeys (and WRLD's own keys) hear it.
           const { key, code, ctrlKey, shiftKey, altKey, metaKey } = message
@@ -210,13 +236,23 @@ export default function WrldWidgets(): JSX.Element {
               }
             }}
             src={pageUrl(which)}
-            title={TITLES[which]}
+            title={WIDGET_TITLES[which]}
             className="absolute border-0 bg-transparent"
             // The pages are drawn dark: a frame whose color scheme differed from its page's would get an opaque backdrop.
             style={{ left: f.left, top: f.top, width: f.width, height: f.height, colorScheme: 'dark', ...(which === 'player' ? {} : { pointerEvents: 'auto' }) }}
           />
         )
       })}
+      {menu && desktop[menu.which].inWrld && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          title={WIDGET_TITLES[menu.which]}
+          items={menuItems(widgetMenuOf(menu.which, 'tab'))}
+          checkColumn="auto"
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }
