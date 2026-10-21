@@ -1,5 +1,7 @@
 import { useStore } from '../../store/useStore'
-import { FONTS } from '../fonts'
+import { addFontFile, addInstalledFont, allFonts, FONT_ACCEPT, listCustomFonts } from '../fonts'
+import { deleteFont } from '../fontActions'
+import { pickLocalFile } from './pick'
 import { allSkins, getSkin } from '../skins'
 import { HOME_SECTIONS, isHomeSectionVisible } from '../homeSections'
 import {
@@ -84,8 +86,8 @@ const SETTINGS: Setting[] = [
   num('auto-hide-nav-zone', 'Width of the edge strip that reveals the hidden navigation', 4, 120, () => st().autoHideNavZone, (v) => st().setAutoHideNavZone(v), 'px'),
   bool('lyrics-override', 'Use your own lyrics colours over the theme', () => st().lyricsOverride, (v) => st().setLyricsOverride(v)),
   num('text-scale', 'App-wide text size', 0.75, 1.5, () => st().appTextScale, (v) => st().setAppTextScale(v), 'x'),
-  choice('font', 'App font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().appFont, (v) => st().setAppFont(v)),
-  choice('lyrics-font', 'Lyrics font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().lyricsFont, (v) => st().setLyricsFont(v)),
+  choice('font', 'App font (add your own with the fonts command)', () => allFonts().map((f) => ({ value: f.id, label: f.custom ? f.name : f.id })), () => st().appFont, (v) => st().setAppFont(v)),
+  choice('lyrics-font', 'Lyrics font (add your own with the fonts command)', () => allFonts().map((f) => ({ value: f.id, label: f.custom ? f.name : f.id })), () => st().lyricsFont, (v) => st().setLyricsFont(v)),
   num('lyrics-scale', 'Lyrics text size', 0.5, 2, () => st().lyricsScale, (v) => st().setLyricsScale(v), 'x'),
   choice('lyrics-align', 'Lyrics alignment', () => [{ value: 'left', label: 'left' }, { value: 'center', label: 'center' }], () => st().lyricsAlign, (v) => st().setLyricsAlign(v as 'left' | 'center')),
   bool('lyrics-blur', 'Blur the lines that are not playing', () => st().lyricsBlur, (v) => st().setLyricsBlur(v)),
@@ -299,7 +301,51 @@ function printDebugLog(ctx: TermCtx, log: DebugLog, all: boolean, json: boolean)
   ctx.print('opened in the debug log viewer', 'dim')
 }
 
+const FONT_VERBS = ['import', 'add', 'remove']
+
 export const SETTINGS_COMMANDS: TermCommand[] = [
+  {
+    name: 'fonts', aliases: ['font'], group: 'Settings', usage: 'fonts [import | add <installed font name> | remove <font>]',
+    description: 'List the fonts you can pick, add your own - import a .ttf/.otf/.woff/.woff2 file or use one installed on this computer - or remove one (same as Settings > Appearance > Custom fonts). Pick it with "set font" / "set lyrics-font"',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return FONT_VERBS.filter((v) => v.startsWith(p))
+      return before.length === 1 && before[0].toLowerCase() === 'remove' ? listCustomFonts().map((f) => f.id).filter((id) => id.toLowerCase().startsWith(p)) : []
+    },
+    run: async (args, ctx) => {
+      const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
+      const verb = sub.toLowerCase()
+      if (!verb || verb === 'list') {
+        ctx.print(allFonts().map((f) => `${f.id.padEnd(40)}${f.name}${st().appFont === f.id ? '  (app)' : ''}${st().lyricsFont === f.id ? '  (lyrics)' : ''}`).join('\n'))
+        return
+      }
+      if (verb === 'import') {
+        // The picker has to open straight off the keypress, before any await.
+        let file: File
+        try { file = await pickLocalFile(FONT_ACCEPT) } catch { ctx.print('cancelled', 'dim'); return }
+        const font = await addFontFile(file).catch((e: unknown) => fail(e instanceof Error ? e.message : 'could not add that font'))
+        ctx.print(`added ${font.name} (${font.id}) - set font ${font.id}`, 'ok')
+        return
+      }
+      if (verb === 'add') {
+        const name = rest.join(' ')
+        if (!name) fail('usage: fonts add <installed font name>')
+        let font
+        try { font = addInstalledFont(name) } catch (e) { fail(e instanceof Error ? e.message : 'could not add that font') }
+        ctx.print(`added ${font!.name} (${font!.id}) - set font ${font!.id}`, 'ok')
+        return
+      }
+      if (verb === 'remove' || verb === 'rm') {
+        const q = rest.join(' ')
+        const custom = allFonts().filter((f) => f.custom)
+        const font = custom.find((f) => f.id.toLowerCase() === q.toLowerCase()) ?? pickByName(custom, (f) => f.name, q) ?? fail(`no custom font "${q}" (fonts lists them)`)
+        await deleteFont(font.id)
+        ctx.print(`removed ${font.name}`, 'ok')
+        return
+      }
+      fail('usage: fonts [import | add <installed font name> | remove <font>]')
+    },
+  },
   {
     name: 'nav', aliases: ['menu', 'navbar'], group: 'Settings', usage: 'nav [show|hide|toggle <item> | move <item> <up|down|top|bottom|n> | reset]',
     description: 'List the menu items and bottom buttons, show or hide them, reorder them, or reset to the defaults (same as Settings > Menu items)',

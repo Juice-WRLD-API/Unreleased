@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.1** · updated 2026-10-21. Bump the version and date whenever you
+**Version 1.3** · updated 2026-10-21. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -111,6 +111,11 @@ docs and the server disagree, the backend code in `backend/` wins.
   every album. Don't build album track lists on them.
 - **`/files/download/?path=` supports Range** (206 with `Content-Range`, CORS
   exposes the range headers). An `<audio>` element handles seeking by itself.
+- **`/files/image-thumbnail/` 404s for real images** (nginx's HTML 404 page,
+  every personal cover tried on 2026-10-21; a missing path still gets Django's
+  JSON 404). `/files/download/?…&small=1` works for the same files. Never let a
+  sized cover be the only URL tried: keep `small=1` as the fallback, as
+  `ProgressiveCover` and the Desktop bridge's `coverAt` do.
 - **`/files/channels/`** lists the comp channels: `comp` (primary,
   "Compilation"), `redemptionz`, `legacy`. Non-primary files need
   `&channel=<slug>` on file URLs.
@@ -306,6 +311,10 @@ Node 22.
   0.45–0.65 s), transform and opacity only, no animating width/height/left on
   heavy elements, no scaling text, no child entrance stacked inside a parent's,
   respect `prefers-reduced-motion`. No expo-out curves.
+- **Palette changes**: never transition the skin variables on `<html>`
+  (`--surface`, `--accent`…). Every element restyles on every frame and skin
+  switches lag. Write them through `paintPalette` in `lib/themeEffects.ts`,
+  which cross-fades with a view transition.
 - Write copy plainly. Match the surrounding code's comment density and naming.
 
 ---

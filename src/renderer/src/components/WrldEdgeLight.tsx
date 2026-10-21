@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useReducer, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { EdgeLight } from '../desktop/light/renderer'
 import { listenToMeter, latestMeter } from '../desktop/meter'
 import { useAlbumColors } from '../desktop/artColors'
 import { tickerLine } from '../desktop/ticker'
-import { nowCover } from '../lib/desktopBridge'
+import { nowCover, watchCovers } from '../lib/desktopBridge'
 import type { LightStyle } from '../desktop/light/engine'
 
 // WRLD's Edge light: iJWA's light round the tab's edges, over its visualizer or on its own - the screen light's own
@@ -28,7 +28,9 @@ export default function WrldEdgeLight({ look, held, onUnsupported }: {
   const light = useStore((s) => s.desktop.light)
   const styleRef = useRef<LightStyle>({ ...light, look })
   styleRef.current = { ...light, look }
-  // The same cover, read the same way, as the screen light's colors.
+  // The same cover, read the same way, as the screen light's colors - read again when one turns out not to load.
+  const [, coversChanged] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => watchCovers(coversChanged), [])
   const cover = useStore(nowCover)
   const colors = useAlbumColors(light.useArtworkColors ? cover : null)
   const unsupported = useRef(onUnsupported)

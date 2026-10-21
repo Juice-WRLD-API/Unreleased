@@ -745,9 +745,9 @@ export default function HeardleView(): JSX.Element {
         </button>
       </div>
       {/* isElectron, not a width breakpoint — the extra top offset clears the
-          frameless window's min/max/close buttons plus the fixed downloads
-          trigger (see App.tsx's WindowControls/DownloadManager), which only
-          exist in the desktop build and sit right above this corner. */}
+          frameless window's min/max/close buttons (see App.tsx's
+          WindowControls), which only exist in the desktop build and sit
+          right above this corner. */}
       <div
         className="absolute right-4 z-20 flex items-center gap-1.5"
         style={{

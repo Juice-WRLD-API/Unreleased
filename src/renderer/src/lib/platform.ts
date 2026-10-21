@@ -22,7 +22,9 @@ export const IS_ELECTRON =
   typeof window !== 'undefined' &&
   !!(window as unknown as { electron?: unknown }).electron
 
-export const ELECTRON_TITLEBAR_CLEARANCE_X = 188
+// The frameless window's min/max/close buttons (3 × 44px = 132px, fixed
+// top-right - see WindowControls in App.tsx) plus 8px of breathing room.
+export const ELECTRON_TITLEBAR_CLEARANCE_X = 140
 export const ELECTRON_TITLEBAR_CLEARANCE_Y = 40
 
 /** Runs `fn` once the browser is idle, or after `timeoutMs` at the latest.

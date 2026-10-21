@@ -452,8 +452,7 @@ export default function EditorPage({ initialSongId = null }: {
     <div className="flex-1 flex flex-col min-h-0">
 
       {/* Top bar */}
-      {/* 188px clears the window controls (132px) plus the fixed downloads
-          trigger next to them (right: 144px + 36px wide - see DownloadManager) */}
+      {/* Clears the window controls (132px, see ELECTRON_TITLEBAR_CLEARANCE_X) */}
       <div className="shrink-0 flex items-center gap-3 px-5 py-3" style={(window as any).electron ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
         {/* Back - only in the in-app editor; the pop-out window has nowhere to go back to */}
         {!IS_FLOAT_WINDOW && (

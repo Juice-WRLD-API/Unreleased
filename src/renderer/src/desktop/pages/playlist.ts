@@ -147,11 +147,20 @@ function draw(): void {
       const row = document.createElement('div')
       row.className = 'row'
       row.dataset.index = String(index)
+      row.dataset.cover = r.cover ?? ''
       row.innerHTML = `<div class="face"><div class="cover-slot"></div><div class="texts"><div class="t">${escapeText(r.title)}</div><div class="a">${escapeText(r.artist || r.album)}</div></div></div>`
       $('.cover-slot', row).replaceWith(cover(r.cover, 'cover'))
       return row
     }))
     if (id === 'queue') listEl.scrollTop = 0
+  } else {
+    // A cover sent again (one that wouldn't load, now one that does) is put in where it is, the list left as it was.
+    items.forEach((r, index) => {
+      const row = listEl.children[index] as HTMLElement | undefined
+      if (!row || row.dataset.cover === (r.cover ?? '')) return
+      row.dataset.cover = r.cover ?? ''
+      row.querySelector('.face > .cover')?.replaceWith(cover(r.cover, 'cover'))
+    })
   }
   const playingRow = playingIndex >= 0 ? listEl.children[playingIndex] as HTMLElement | undefined : undefined
   if (glass && glass.row !== playingRow) { glass.destroy(); glass = null }

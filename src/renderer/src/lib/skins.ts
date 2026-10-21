@@ -35,7 +35,7 @@ export interface SkinVars {
   '--border': string
   '--scrollbar': string
   // Optional overrides for the frameless-window title-bar cluster (minimize /
-  // maximize / close and the downloads trigger). Absent on the built-in skins,
+  // maximize / close). Absent on the built-in skins,
   // which inherit --text-muted (idle) / --text-primary (hover) via CSS var
   // fallback - see WindowControls. A custom skin can set these to make the
   // window controls legible on a title bar where muted text is too faint.

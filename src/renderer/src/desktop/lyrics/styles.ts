@@ -1,6 +1,6 @@
 // The lyric styles beside the fisheye, each on LyricScene: they wake only as a word or a line is due, and every move
 // is the browser's own animation.
-import { LyricScene, type SceneLine } from './scene'
+import { LyricScene, type SceneLine, type StageLook, type StageSong } from './scene'
 import { chance, cssColor, ink, spring, width, wrap, type Wrapped } from './type'
 
 const GLIDE = spring(0.6, 0.86)
@@ -35,8 +35,8 @@ export class SpreadScene extends LyricScene {
     this.words = []
     if (!line?.words.length) return
     const room = 330 * this.s
-    let size = 46 * this.s, css = this.font(size), set = this.rows(line, css, room, size * 0.3)
-    while (set.length > 5 && size > 22 * this.s) { size *= 0.9; css = this.font(size); set = this.rows(line, css, room, size * 0.3) }
+    let size = 46 * this.s * this.textSize, css = this.font(size), set = this.rows(line, css, room, size * 0.3)
+    while (set.length > 5 && size > 22 * this.s * this.textSize) { size *= 0.9; css = this.font(size); set = this.rows(line, css, room, size * 0.3) }
     const m = this.metrics(size)
     const rowHeight = Math.ceil(m.ascent + m.descent), pitch = rowHeight + size * 0.12
     const block = this.block(room, set.length * pitch - size * 0.12, this.width / 2, this.height / 2)
@@ -84,9 +84,13 @@ export class SpreadScene extends LyricScene {
 
 interface KaraokeRow { el: HTMLDivElement; sharp: HTMLCanvasElement; soft: HTMLCanvasElement; lit: HTMLElement[] }
 
+/** How long the column stays where the reader scrolled it before it goes back to the line sung. */
+const BROWSE_TIME = 4000
+
 /** A sing-along: the lines in a column gliding up, the one sung large and bright, lit whole as it begins - not word
  *  by word; the others smaller, faint, the near ones softly out of focus. Every word as written, adlibs too, in the
- *  app's lyric size and colors. */
+ *  app's lyric size and colors. The wheel scrolls the column, every line readable while it's away, and a click on a
+ *  line plays the song from it (when the host gives the scene a way to seek). */
 export class KaraokeScene extends LyricScene {
   rows = new Map<number, KaraokeRow>()
   tops: number[] = []
@@ -102,6 +106,11 @@ export class KaraokeScene extends LyricScene {
   rowHeight = 0
   measuredFor = ''
   column: HTMLDivElement
+  /** Where the reader has scrolled the column (its y), null while it follows the line sung. */
+  browse: number | null = null
+  browseTimer = 0
+  /** The move under way is the reader's, so it runs though the song is paused. */
+  byHand = false
 
   /** The note from the start: the column shows no name. */
   get showsTitle(): boolean { return false }
@@ -117,13 +126,33 @@ export class KaraokeScene extends LyricScene {
     this.stage.style.maskImage = 'linear-gradient(to bottom, transparent 0%, black 18%, black 78%, transparent 100%)'
   }
 
-  get size(): number { return 30 * this.s * (this.tune?.size || 1) }
+  get size(): number { return 30 * this.s * this.textSize }
   get boxWidth(): number { return Math.min(this.width, 520 * this.s) }
   get room(): number { return this.boxWidth - 20 * this.s }
   get space(): number { return this.size * 0.28 }
   get rowGap(): number { return this.size * 0.08 }
+  /** The column's x, and its y with the line sung a little above the middle. */
+  get columnX(): number { return (this.width - this.boxWidth) / 2 + 10 * this.s }
+  get followY(): number { return this.height * 0.36 - this.tops[this.anchor] }
 
-  restyle(): void { this.rows.forEach((r) => r.el.remove()); this.rows.clear(); this.tops = [] }
+  restyle(): void {
+    this.rows.forEach((r) => r.el.remove())
+    this.rows.clear()
+    this.tops = []
+    this.stopBrowsing()
+  }
+
+  show(song: StageSong, look: StageLook): void {
+    const could = !!this.seek
+    super.show(song, look)
+    if (could !== !!this.seek) this.rows.forEach((r) => r.el.classList.toggle('can-seek', !!this.seek))
+  }
+
+  animate(el: HTMLElement, frames: Keyframe[], options: { duration: number; delay?: number; easing?: string; hold?: boolean }): Animation {
+    const animation = super.animate(el, frames, options)
+    if (this.byHand) animation.play()
+    return animation
+  }
 
   measure(): void {
     this.css = this.font(this.size)
@@ -149,6 +178,7 @@ export class KaraokeScene extends LyricScene {
       this.rows.forEach((r) => r.el.remove())
       this.rows.clear()
       this.measure()
+      this.stopBrowsing()
     }
     const previous = this.current
     this.opening = 0
@@ -156,19 +186,7 @@ export class KaraokeScene extends LyricScene {
     if (line && line.index >= 0) { this.current = line.index; this.anchor = line.index }
     else { this.current = null; if (!animated) this.anchor = Math.min(this.anchor, Math.max(this.lines.length - 1, 0)) }
     if (!this.lines.length) return
-    const first = Math.max(this.anchor - 4, 0), last = Math.min(this.anchor + 6, this.lines.length - 1)
-    for (const [index, row] of [...this.rows]) {
-      if (index >= first && index <= last) continue
-      if (animated) this.fadeAway(row.el, 0.3); else row.el.remove()
-      this.rows.delete(index)
-    }
-    for (let index = first; index <= last; index++) {
-      if (this.rows.has(index)) continue
-      const row = this.make(index)
-      this.rows.set(index, row)
-      this.column.appendChild(row.el)
-      if (animated) this.animate(row.el, [{ opacity: 0 }, { opacity: row.el.style.opacity || 1 }], { duration: 0.35 })
-    }
+    this.fill(animated)
     // The line that was sung goes back to dim; the one sung now gets its bright words.
     const before = previous != null && previous !== this.current ? this.rows.get(previous) : undefined
     if (before) {
@@ -182,23 +200,74 @@ export class KaraokeScene extends LyricScene {
       if (animated) lit.forEach((el) => this.animate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 0.25 }))
     }
     this.settle(animated)
-    // The column glides so the line sung stands a little above the middle.
-    const x = (this.width - this.boxWidth) / 2 + 10 * this.s, y = this.height * 0.36 - this.tops[this.anchor]
-    const to = `${x}px ${y}px`
+    this.slide(animated)
+    this.shade(animated)
+  }
+
+  /** The rows in the column: those round the line sung, and, while the reader has scrolled away, those round where
+   *  they're looking. A new row comes in faded out, for shade to bring up. */
+  fill(animated: boolean): void {
+    const last = this.lines.length - 1
+    const spans = [[Math.max(this.anchor - 4, 0), Math.min(this.anchor + 6, last)]]
+    if (this.browse != null) {
+      const looked = this.lineNear(this.height * 0.36 - this.browse)
+      spans.push([Math.max(looked - 6, 0), Math.min(looked + 8, last)])
+    }
+    const wanted = (index: number): boolean => spans.some(([from, to]) => index >= from && index <= to)
+    for (const [index, row] of [...this.rows]) {
+      if (wanted(index)) continue
+      if (animated) this.fadeAway(row.el, 0.3); else row.el.remove()
+      this.rows.delete(index)
+    }
+    for (const [from, to] of spans) {
+      for (let index = from; index <= to; index++) {
+        if (this.rows.has(index)) continue
+        const row = this.make(index)
+        if (animated) Object.assign(row.el.style, { opacity: '0', scale: '0.86' })
+        this.rows.set(index, row)
+        this.column.appendChild(row.el)
+      }
+    }
+  }
+
+  /** The line whose top is nearest `y` down the column. */
+  lineNear(y: number): number {
+    let best = 0
+    this.tops.forEach((top, index) => { if (Math.abs(top - y) < Math.abs(this.tops[best] - y)) best = index })
+    return best
+  }
+
+  /** The column to where it stands: at the line sung, or where the reader scrolled it. The note through a break
+   *  goes with it. */
+  slide(animated: boolean, { duration = GLIDE.duration, easing = GLIDE.easing } = {}): void {
+    const y = this.browse ?? this.followY
+    const to = `${this.columnX}px ${y}px`
+    const note = this.browse == null ? '0px 0px' : `0px ${this.browse - this.followY}px`
     if (animated) {
       const from = getComputedStyle(this.column).translate
-      this.animate(this.column, [{ translate: from === 'none' ? to : from }, { translate: to }], { duration: GLIDE.duration, easing: GLIDE.easing })
-    } else this.column.style.translate = to
+      this.animate(this.column, [{ translate: from === 'none' ? to : from }, { translate: to }], { duration, easing })
+      this.animate(this.interlude.el, [{ translate: translateOf(this.interlude.el) }, { translate: note }], { duration, easing })
+    } else {
+      this.column.style.translate = to
+      this.interlude.el.style.translate = note
+    }
+  }
+
+  /** Each row's brightness, size and focus: the line sung bright and full size, the others faint and smaller, the
+   *  near ones out of focus. While the reader has scrolled away, every other line is equally readable and sharp. */
+  shade(animated: boolean): void {
     for (const [index, row] of this.rows) {
       const distance = Math.abs(index - this.anchor), sung = index === this.current
-      const opacity = sung ? 1 : Math.max(0.45 - 0.08 * (Math.max(distance, 1) - 1), 0.12)
+      const opacity = sung ? 1 : this.browse != null ? 0.5 : Math.max(0.45 - 0.08 * (Math.max(distance, 1) - 1), 0.12)
       const scale = sung ? 1 : 0.86
       // Out of focus near the line sung only: further lines are faint enough already.
-      const soft = !sung && distance <= 2 ? 1 : 0
+      const soft = !sung && this.browse == null && distance <= 2 ? 1 : 0
       if (animated) {
-        const now = getComputedStyle(row.el)
-        this.animate(row.el, [{ opacity: now.opacity, scale: now.scale === 'none' ? 1 : now.scale }, { opacity: String(opacity), scale: String(scale) }],
-          { duration: GLIDE.duration, easing: GLIDE.easing })
+        if (row.el.style.opacity !== String(opacity) || row.el.style.scale !== String(scale)) {
+          const now = getComputedStyle(row.el)
+          this.animate(row.el, [{ opacity: now.opacity, scale: now.scale === 'none' ? 1 : now.scale }, { opacity: String(opacity), scale: String(scale) }],
+            { duration: GLIDE.duration, easing: GLIDE.easing })
+        }
         if (String(soft) !== row.soft.style.opacity) {
           this.animate(row.soft, [{ opacity: row.soft.style.opacity || 0 }, { opacity: String(soft) }], { duration: 0.4 })
           this.animate(row.sharp, [{ opacity: row.sharp.style.opacity || 1 }, { opacity: String(1 - soft) }], { duration: 0.4 })
@@ -212,10 +281,65 @@ export class KaraokeScene extends LyricScene {
     }
   }
 
+  /** The reader's wheel: the column scrolls, no further than its first or last line at the mark, and goes back to
+   *  the line sung after a quiet moment. */
+  scrollBy(dy: number): void {
+    if (this.shown == null || !this.lines.length || this.tops.length !== this.lines.length || !dy) return
+    const mark = this.height * 0.36
+    const was = this.browse
+    this.browse = Math.min(Math.max((this.browse ?? this.followY) - dy, mark - this.tops[this.tops.length - 1]), mark - this.tops[0])
+    if (this.browse === was) return
+    this.handMove(() => {
+      this.fill(true)
+      this.slide(true, { duration: 0.3, easing: 'ease' })
+      this.shade(true)
+    })
+    this.waitToFollow()
+  }
+
+  /** Back to the line sung. */
+  follow(): void {
+    window.clearTimeout(this.browseTimer)
+    if (this.browse == null) return
+    this.browse = null
+    if (!this.lines.length || this.tops.length !== this.lines.length) return
+    this.handMove(() => {
+      this.fill(true)
+      this.slide(true)
+      this.shade(true)
+    })
+  }
+
+  waitToFollow(): void {
+    window.clearTimeout(this.browseTimer)
+    this.browseTimer = window.setTimeout(() => this.follow(), BROWSE_TIME)
+  }
+
+  stopBrowsing(): void {
+    window.clearTimeout(this.browseTimer)
+    this.browse = null
+    this.interlude.el.style.translate = ''
+  }
+
+  handMove(move: () => void): void {
+    this.byHand = true
+    try { move() } finally { this.byHand = false }
+  }
+
+  /** A line picked: the song from its first word, the column back with it. */
+  pick(index: number): void {
+    const line = this.lines[index]
+    if (!this.seek || !line) return
+    this.seek(LyricScene.start(line))
+    this.follow()
+  }
+
   /** One line, dim, as a sharp and a soft picture, wrapped as a paragraph, scaled from its left. */
   make(index: number): KaraokeRow {
     const line = this.lines[index], set = this.sets[index], height = this.heights[index]
     const el = document.createElement('div')
+    el.className = 'karaoke-row'
+    el.classList.toggle('can-seek', !!this.seek)
     Object.assign(el.style, { position: 'absolute', left: '0', top: `${this.tops[index]}px`, width: `${this.room}px`, height: `${height}px`, transformOrigin: 'left center' })
     const paint = (blur: number, detail: number): HTMLCanvasElement => {
       const pad = 8 * this.s
@@ -240,8 +364,16 @@ export class KaraokeScene extends LyricScene {
       })
       return canvas
     }
+    // Lit under the pointer, when the line can be picked.
+    const hover = document.createElement('div')
+    hover.className = 'karaoke-hover'
+    Object.assign(hover.style, { left: `${-10 * this.s}px`, top: `${-7 * this.s}px`, width: `${this.boxWidth}px`, height: `${height + 14 * this.s}px`,
+      borderRadius: `${12 * this.s}px` })
     const sharp = paint(0, 1), soft = paint(1.6 * this.s, 0.5)
-    el.append(sharp, soft)
+    el.append(hover, sharp, soft)
+    el.addEventListener('click', () => this.pick(index))
+    // Reading with the pointer on the lines keeps the column where it is.
+    el.addEventListener('pointermove', () => { if (this.browse != null) this.waitToFollow() })
     return { el, sharp, soft, lit: [] }
   }
 
@@ -265,7 +397,7 @@ export class KaraokeScene extends LyricScene {
     this.opening = size.h + 18 * this.s
     this.roomAbove = ahead
     this.settle(animated)
-    const x = (this.width - this.boxWidth) / 2 + 10 * this.s, y = this.height * 0.36 - this.tops[this.anchor]
+    const x = this.columnX, y = this.followY
     const top = y + (ahead ? this.tops[0] : this.tops[this.anchor] + this.heights[this.anchor] + 18 * this.s)
     return { x: x + size.w / 2 - 6 * this.s, y: top + size.h / 2 }
   }
@@ -299,11 +431,12 @@ export class TypewriterScene extends LyricScene {
   present(line: SceneLine | null, animated: boolean): void {
     if (!animated) { this.page.forEach((t) => t.block.remove()); this.page = [] }
     if (!line?.words.length) return
-    let size = 26 * this.s, css: string, set: Wrapped
+    let size = 26 * this.s * this.textSize, css: string, set: Wrapped
+    const most = Math.max(3, Math.round(3 * this.textSize))
     for (;;) {
       css = this.font(size)
       set = wrap(line.words.map((w) => w.text), css, this.room)
-      if (set.rows.length <= 3 || size < 15 * this.s) break
+      if (set.rows.length <= most || size < 15 * this.s * this.textSize) break
       size *= 0.9
     }
     const m = this.metrics(size)

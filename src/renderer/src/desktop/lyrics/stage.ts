@@ -36,6 +36,11 @@ export class LyricStage {
     this.renderer?.stop()
   }
 
+  /** The wheel over the lyrics, for a style that scrolls. */
+  scrollBy(dy: number): void {
+    this.renderer?.scrollBy?.(dy)
+  }
+
   destroy(): void {
     this.renderer?.destroy()
     this.renderer = null

@@ -171,8 +171,9 @@ export default function Sidebar(): JSX.Element {
   const labelCls = `truncate transition-opacity duration-200 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
 
   // Full-width control row for the vertical (left/right) side menu.
-  // Staged changes count alongside in-flight transfers (same as the titlebar
-  // Downloads badge): they still need the user to open the panel and Propose.
+  // Staged changes count alongside in-flight transfers: they still need the
+  // user to open the panel and Propose. The panel itself (DownloadManager)
+  // pops out of this button, found by its data-transfers-anchor attribute.
   const activeUploadCount = downloads.filter((u) => u.state === 'downloading').length + stagedCount
 
   const renderControl = (id: NavControlId): JSX.Element | null => {
@@ -192,7 +193,7 @@ export default function Sidebar(): JSX.Element {
         )
       case 'uploads':
         return (
-          <button key="uploads" onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
+          <button key="uploads" data-transfers-anchor onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
             <span className={`${iconWrap} relative`}>
               <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
               {activeUploadCount > 0 && (
@@ -244,7 +245,7 @@ export default function Sidebar(): JSX.Element {
         )
       case 'uploads':
         return (
-          <button key="uploads" onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title="Transfers" className={`${barIconBtn} relative`}>
+          <button key="uploads" data-transfers-anchor onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title="Transfers" className={`${barIconBtn} relative`}>
             <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
             {activeUploadCount > 0 && (
               <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
@@ -331,9 +332,7 @@ export default function Sidebar(): JSX.Element {
         {/* Bar touches the frameless window's top edge, so it carries the
             drag strip that main's overlay provides in the other layouts.
             ELECTRON_TITLEBAR_CLEARANCE_X keeps the strip clear of the
-            min/max/close buttons (132px) plus the fixed downloads trigger
-            next to them (right: 144px + 36px wide — see DownloadManager) —
-            a drag rect under them would win the draggable-region ordering
+            min/max/close buttons (132px) — a drag rect under them would win the draggable-region ordering
             and swallow their clicks (see WindowControls in App.tsx). */}
         {isElectron && sidebarPosition === 'top' && appMenuPosition !== 'title-bar' && (
           <div className="shrink-0 h-7 select-none" style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties} />
@@ -392,9 +391,8 @@ export default function Sidebar(): JSX.Element {
       className={`app-sidebar hidden md:flex flex-col h-full bg-sidebar shrink-0 ${sidebarPosition === 'right' ? 'border-l' : 'border-r'} border-[var(--border)] transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
     >
       {/* On the right, the sidebar's top edge sits under the window buttons
-          (132px) and the fixed downloads trigger next to them (right: 144px
-          + 36px wide — see DownloadManager) — keep the drag strip out of
-          their 188px corner (same ordering pitfall as the top-bar strip
+          (132px) — keep the drag strip out of that corner
+          (ELECTRON_TITLEBAR_CLEARANCE_X; same ordering pitfall as the top-bar strip
           above), and give the first nav item real clearance below them so
           it doesn't visually run into the buttons when the sidebar is wide
           enough to sit under them (expanded width, or any width once

@@ -699,8 +699,12 @@ function drawLyrics(open: boolean): void {
   stage.use(look)
   const song = songForStage()
   if (!song) return
-  stage.show(song, { clock: live.state.clock ?? null, isSeen: !live.unseen, colors: live.state.colors ?? null, face: lyricFontFor(live.settings?.lyrics.fonts, stage.look), scale: m.s, tune: live.state.lyricTune })
+  stage.show(song, { clock: live.state.clock ?? null, isSeen: !live.unseen, colors: live.state.colors ?? null, face: lyricFontFor(live.settings?.lyrics.fonts, stage.look), scale: m.s, tune: live.state.lyricTune,
+    seek: live.state.fm ? undefined : seekToLine })
 }
+function seekToLine(seconds: number): void { page.command('seek-to', seconds) }
+// The wheel on a line scrolls the lyrics (between the lines, it's the carousel's, which passes it on).
+$('#lyrics').addEventListener('wheel', (event) => stage.scrollBy(event.deltaY), { passive: true })
 
 /** The lyrics are drawn at this point: words (or the note between them, or "No lyrics") in sight there. The lyrics
  *  take no pointer themselves, so what's under them is what's hit; this says the point is theirs all the same. */
@@ -837,7 +841,7 @@ carousel.addEventListener('click', (event) => {
 })
 let scrollDebt = 0
 carousel.addEventListener('wheel', (event) => {
-  if (live.settings?.player.lyricsOpen) return
+  if (live.settings?.player.lyricsOpen) { stage.scrollBy(event.deltaY); return }
   scrollDebt += Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
   if (Math.abs(scrollDebt) < 60) return
   const step = scrollDebt > 0 ? 1 : -1

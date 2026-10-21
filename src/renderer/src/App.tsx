@@ -307,8 +307,7 @@ export default function App(): JSX.Element {
           Rendered before the nav in the DOM: the later of two overlapping
           app-region rects wins, so the pill's no-drag still punches through.
           ELECTRON_TITLEBAR_CLEARANCE_X clears the min/max/close buttons
-          (132px) plus the fixed downloads trigger next to them (right: 144px
-          + 36px wide — see DownloadManager). */}
+          (132px). */}
       {isElectron && appMenuPosition !== 'title-bar' && (
         <div
           className={`fixed top-0 left-0 right-0 h-7 z-20 select-none pointer-events-none ${sidebarPosition === 'top' && navStyle !== 'pill' && !autoHideNav ? 'md:hidden' : ''}`}

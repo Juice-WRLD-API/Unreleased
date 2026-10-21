@@ -2169,7 +2169,9 @@ ipcMain.handle('move-library-file', async (event, filePath) => {
 })
 
 ipcMain.handle('copy-text-to-clipboard', (_, text) => {
-  clipboard.writeText(String(text ?? ''))
+  // Electron writes line breaks as bare \n; plenty of Windows apps then paste only the first line.
+  const s = String(text ?? '')
+  clipboard.writeText(process.platform === 'win32' ? s.replace(/\r?\n/g, '\r\n') : s)
   return { ok: true }
 })
 

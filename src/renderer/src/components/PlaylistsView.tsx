@@ -2700,7 +2700,7 @@ export default function PlaylistsView(): JSX.Element {
                 behind the frameless window's fixed min/max/close buttons; the
                 opaque background is what stops that.
                 The controls sit on the LEFT on purpose. Right-aligned they'd
-                land under those window buttons, which forces the 188px gutter
+                land under those window buttons, which forces the 140px gutter
                 the other toolbars carry — and that gutter is pure dead space
                 next to the controls. Nothing here may share the column row
                 either: anything in that grid steals width from the columns and

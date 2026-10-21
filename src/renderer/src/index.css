@@ -95,13 +95,15 @@
 }
 
 /* ─── Palette cross-fade ─────────────────────────────────────────────────────────
-   Registering the palette vars as typed properties lets Chromium interpolate
-   the variables themselves, so every surface/text/border consuming them fades
-   in lockstep when a skin swap (or the Now Playing skin reacting to a new
-   song's cover art) writes new values onto <html>. The .theme-animate class
-   is added by useThemeEffects one frame after the first palette application,
-   so startup snaps straight to the persisted skin instead of fading in from
-   the first-paint fallback above. */
+   A skin swap (or the Now Playing skin reacting to a new song's cover art)
+   writes the new palette inside a view transition of type 'palette' - see
+   paintPalette in lib/themeEffects.ts. The browser cross-fades a snapshot of
+   the old frame into the live new one, so nothing restyles mid-fade. These
+   vars used to be transitioned directly, which restyled the whole app every
+   frame and made switching laggy.
+   The vars stay registered as typed properties: getComputedStyle readers
+   (syncThemeColorMeta, the visualizer, DesktopPicker) get them back in their
+   computed form. */
 @property --surface { syntax: '<color>'; inherits: true; initial-value: #ffffff; }
 @property --surface-raised { syntax: '<color>'; inherits: true; initial-value: #f5f5f5; }
 @property --surface-overlay { syntax: '<color>'; inherits: true; initial-value: #ebebeb; }
@@ -118,24 +120,12 @@
 @property --accent-rgb { syntax: '<number>+'; inherits: true; initial-value: 29 185 84; }
 @property --accent-hover-rgb { syntax: '<number>+'; inherits: true; initial-value: 30 215 96; }
 
-/* Accent vars fade faster so dragging the custom accent picker stays snappy. */
-html.theme-animate {
-  transition:
-    --surface 700ms ease,
-    --surface-raised 700ms ease,
-    --surface-overlay 700ms ease,
-    --surface-highest 700ms ease,
-    --sidebar 700ms ease,
-    --titlebar 700ms ease,
-    --text-primary 700ms ease,
-    --text-secondary 700ms ease,
-    --text-muted 700ms ease,
-    --border 700ms ease,
-    --scrollbar 700ms ease,
-    --accent 350ms ease,
-    --accent-rgb 350ms ease,
-    --accent-hover 350ms ease,
-    --accent-hover-rgb 350ms ease;
+/* Clicks and hovers pass through to the live page while the snapshot fades. */
+html:active-view-transition-type(palette)::view-transition { pointer-events: none; }
+html:active-view-transition-type(palette)::view-transition-old(root),
+html:active-view-transition-type(palette)::view-transition-new(root) {
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ─── Gradient surfaces ──────────────────────────────────────────────────────────
@@ -811,10 +801,6 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   .rows-cascade > * { animation: none !important; }
   .art-shimmer { animation: none; }
 
-  /* The palette cross-fade (see html.theme-animate above) is a transition, not
-     an animation, so it needs its own opt-out - a skin swap should land on the
-     new colours at once rather than sweeping every surface through 700ms. */
-  html.theme-animate { transition: none; }
   .pl-grid-panel,
   .pl-grid-panel-inner,
   .pl-grid-caret,
