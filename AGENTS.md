@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.8** · updated 2026-10-21. Bump the version and date whenever you
+**Version 1.9** · updated 2026-10-21. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -341,6 +341,19 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-21: `npm run electron:dev` quits at once while the installed app is
+  running: both use the same userData folder and single-instance lock. To run or
+  profile dev beside it, launch `electron . --user-data-dir=<scratch folder>
+  --remote-debugging-port=9223` with a copy of `%APPDATA%\unreleased\Local Storage`
+  in that folder (the dev seed then brings settings and sign-in over), and drive
+  it over CDP. Delete the copy afterwards: it holds the auth token.
+- 2026-10-21: WRLD's widgets are same-origin iframes, so they share the app
+  window's main thread and compositor, and WRLD's own layout stays mounted under
+  them with `display: none`. A per-frame paint in a widget (an opacity or
+  gradient change without its own layer) re-rastered the card and its cover on
+  every frame, and the hidden layout's lyric stages kept drawing. Keep per-frame
+  changes on layers of their own, and stop work in boxes with no size.
 
 - 2026-10-21: on the Linux VM, `unreleased-app/node_modules` is the Windows
   install, so `vite build` fails on missing `@rollup/rollup-linux-x64-gnu` and
