@@ -9,6 +9,7 @@ const { pathToFileURL, fileURLToPath } = require('url')
 const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
+const { registerPasskeyIpc } = require('./passkey')
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -3667,6 +3668,10 @@ ipcMain.handle('open-discord-login', (_, authorizeUrl) => {
     loginWin.on('closed', () => resolve(null))
   })
 })
+
+// Passkey sign-in and setup run in a window of their own that Chromium treats
+// as https://player.juicewrldapi.com (see passkey.js for why and how).
+registerPasskeyIpc({ ipcMain, BrowserWindow, session, getMainWindow: () => mainWindow, iconPath, isDev })
 
 ipcMain.handle('select-image-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

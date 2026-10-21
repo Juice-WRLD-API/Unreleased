@@ -109,6 +109,11 @@ contextBridge.exposeInMainWorld('electron', {
   selectImageFile: ()    => ipcRenderer.invoke('select-image-file'),
   fetchImageAsDataUrl: (url) => ipcRenderer.invoke('fetch-image-as-data-url', url),
   openDiscordLogin: (url) => ipcRenderer.invoke('open-discord-login', url),
+  // Passkeys: whether this OS can show the prompt, and the prompt itself in
+  // its own player.juicewrldapi.com window (see passkey.js). Resolves
+  // { ok, credential } | { cancelled } | { error }.
+  passkeySupport: () => ipcRenderer.invoke('passkey-support'),
+  passkeyCeremony: (req) => ipcRenderer.invoke('passkey-ceremony', req),
 
   // App settings
   getAppSettings:  ()           => ipcRenderer.invoke('get-app-settings'),

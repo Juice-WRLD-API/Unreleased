@@ -58,6 +58,8 @@ const NOT_APPLICABLE = {
   'newsNotifications.checkForNewPosts': 'background poll; the request is fetchNews (news)',
   'newsNotifications.mergeSubscriptionsFromProfile': 'applies the profile’s subscriptions locally (me, news subscribe)',
   'apiFilesShared.findSongByFilename': 'Files-tab lookup over /songs (find)',
+  'donorPlaylistEntries.*': 'one-off move of old donor playlists, and keeping a re-tagged file’s playlist slots; the calls are getPlaylist/createPlaylist/addPlaylistEntry/reorderPlaylistItems (playlist)',
+  'optimisticPlaylist.*':'optimistic UI wrappers over userApi.addToPlaylist/addPlaylistEntry/updatePlaylist (playlist add, playlist public)',
   'compStagedChanges.proposeStagedChanges': 'batch wrapper over createCompProposal (comp new)',
   'compStagedSongChanges.proposeStagedSongChanges': 'batch wrapper over createProposal (proposal new)',
   'coverSuggestions.advanceRotatedCover': 'cover search over third-party catalogs, client-side rotation',

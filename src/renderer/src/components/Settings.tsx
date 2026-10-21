@@ -8,6 +8,7 @@ import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls from './VizControls'
 import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
+import Passkeys from './Passkeys'
 import { useStore, useStorePick, type SidebarPosition, type AppMenuPosition, type PopoutWindowKind } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, effectiveGlobalBinding, comboTokens, eventToCombo, isGloballyRegistrable } from '../lib/hotkeys'
 import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
@@ -106,6 +107,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'account', label: 'Log out' },
@@ -1245,6 +1247,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Passkeys</p>
+                    <Passkeys />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">API keys</p>
                     <ApiKeys />

@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.3** · updated 2026-10-21. Bump the version and date whenever you
+**Version 1.7** · updated 2026-10-21. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -21,7 +21,7 @@ checkout as a sibling.
 
 | Folder | What it is | Branch / repo |
 |---|---|---|
-| `backend/` | Django backend that serves juicewrldapi.com. Its `docs/*.md` is the API reference | separate repo |
+| `backend/` | Django backend that serves juicewrldapi.com. Its `docs/*.md` is the API reference. On the main machine the checkout is named `Chicken-Dinner/` (the user calls it that too) | separate repo |
 | `unreleased-app/` | Unreleased desktop app (Electron + React). Holds the real `.git` for the player repo; the other player folders are worktrees of it | `app` on `Juice-WRLD-API/Unreleased` |
 | `music-player-web/` | Same player as a website, player.juicewrldapi.com. Has the mobile layouts and the social-preview server | `web` |
 | `music-player-android/` | Android build (Capacitor around the web bundle) | `android` |
@@ -132,8 +132,10 @@ public track links. Mixing them up fails silently.
 
 - Header: `Authorization: Token <token>`. Discord OAuth is the main login
   (`/accounts/auth/discord/url/` then `/accounts/auth/discord/exchange/`); there
-  are also username/password, access-code, admin login, 2FA (OTP) and login
-  approval from another device. See `docs/08-accounts.md`.
+  are also username/password, access-code, admin login, 2FA (OTP), login
+  approval from another device and passkeys (`/accounts/auth/passkey/…`; web
+  only, since they are tied to `juicewrldapi.com` origins). See
+  `docs/08-accounts.md`.
 - Two "who am I" endpoints: `/accounts/account/me/` (any user; also holds
   preferences, settings, playlist folders) and `/accounts/me/` (editor/admin
   dashboards).
@@ -338,5 +340,28 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-10-21: on the Linux VM, `unreleased-app/node_modules` is the Windows
+  install, so `vite build` fails on missing `@rollup/rollup-linux-x64-gnu` and
+  esbuild's Linux binary. Don't reinstall the shared folder: install both
+  (matching versions) into a scratch folder and run the build with
+  `NODE_PATH=<scratch>/node_modules ESBUILD_BINARY_PATH=<scratch>/node_modules/@esbuild/linux-x64/bin/esbuild`.
+  Linux-side git also reports every CRLF file as changed; use
+  `git -c core.autocrlf=true diff` to see real changes.
+- 2026-10-21: WebAuthn can't run in the app's own window (file:// origin), and
+  passkeys belong to `juicewrldapi.com`. `electron/passkey.js` runs the prompt in
+  a separate window whose session serves `https://player.juicewrldapi.com/desktop-passkey/`
+  locally. Electron 42 only does this safely on Windows (webauthn.dll); on
+  macOS/Linux a PIN-protected security key crashes the main process
+  (electron#54317, fixed from 43.x), so ceremonies are Windows-only there.
+- 2026-10-21: the backend's "Mixed-source playlists" commit changed the playlist
+  API without touching `docs/05-playlists.md`. When the backend docs and code
+  disagree, read `library/views.py`, `serializers.py` and its tests, then
+  update the doc. Playlist entries can now be songs, comp files, donor files or
+  local files (`song` is null for files); go through `lib/playlistItems.ts`
+  rather than reading `item.song` directly.
+- 2026-10-21: a new backend module `accounts/comp_replace_views.py` was silently
+  left out of `git status`: the backend `.gitignore` rule `comp_*` (meant for comp
+  data folders) matches any file whose name starts with `comp_`. Name new backend
+  source files so they don't start with `comp_`, or check `git check-ignore -v`.
 - 2026-10-21: a Python script got `403` from `/songs/{id}/` because of the
   default `urllib` User-Agent. Send a browser-like User-Agent.

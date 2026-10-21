@@ -19,6 +19,8 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { canEditTags, readMp3Tags, writeMp3Tags } from '../lib/mp3Tags'
 import type { Mp3Tags } from '../lib/mp3Tags'
 import DonorContextMenu from './DonorContextMenu'
+import DonorPlaylistPicker from './DonorPlaylistPicker'
+import { findDonorSlots, restoreDonorSlots } from '../lib/donorPlaylistEntries'
 import type { DonorMenuState } from './DonorContextMenu'
 
 const ACCEPT = DONOR_ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(',')
@@ -59,16 +61,7 @@ export default function DonorFiles(): JSX.Element {
 
   useEffect(() => { void load() }, [load])
 
-  // Playlists resolve their entries against the store's copy of this list.
-  const setDonorFiles = useStore((s) => s.setDonorFiles)
-  const replaceDonorFileId = useStore((s) => s.replaceDonorFileId)
-  const donorPlaylists = useStore((s) => s.donorPlaylists)
-  const createDonorPlaylist = useStore((s) => s.createDonorPlaylist)
-  const addToDonorPlaylist = useStore((s) => s.addToDonorPlaylist)
-  const removeFromDonorPlaylist = useStore((s) => s.removeFromDonorPlaylist)
   const [playlistPicker, setPlaylistPicker] = useState<string | null>(null)
-  const [newPlaylistName, setNewPlaylistName] = useState('')
-  useEffect(() => { if (files) setDonorFiles(files) }, [files, setDonorFiles])
 
   // Playback goes through the normal queue/player rather than a local <audio>
   // element - a local element dies the instant this component unmounts (e.g.
@@ -178,7 +171,8 @@ export default function DonorFiles(): JSX.Element {
       const res = await deleteDonorFile(f.file_id)
       setQuota(res.quota)
       setFiles((prev) => prev?.filter((x) => x.file_id !== f.file_id) ?? prev)
-      replaceDonorFileId(f.file_id, null)
+      // The server drops its playlist entries along with it.
+      void useStore.getState().refreshPlaylists()
       forgetDonorCover(f.file_id)
       if (preview?.id === f.file_id) setPreview(null)
       setConfirmDelete(null)
@@ -227,6 +221,9 @@ export default function DonorFiles(): JSX.Element {
     setNotice(null)
     let original: Blob | null = null
     let deletedOld = false
+    // Deleting the original drops it from every playlist, so note where it
+    // sat first and put the new copy back there.
+    const slots = await findDonorSlots(f.file_id).catch(() => [])
     try {
       original = await fetchDonorFileBlob(f.file_id)
       const tagged = new File([await writeMp3Tags(original, tags)], f.filename, { type: 'audio/mpeg' })
@@ -248,7 +245,7 @@ export default function DonorFiles(): JSX.Element {
       if (f.is_shared) saved = await updateDonorFile(saved.file_id, { is_shared: true }).catch(() => saved)
       setQuota(newQuota)
       setFiles((prev) => [saved, ...(prev ?? []).filter((x) => x.file_id !== f.file_id)])
-      replaceDonorFileId(f.file_id, saved.file_id)
+      void restoreDonorSlots(slots, saved.file_id)
       setTagEdit(null)
       setNotice(f.is_shared ? 'Tags saved. This file has a new share link - the old one no longer works.' : 'Tags saved.')
     } catch (err) {
@@ -258,7 +255,7 @@ export default function DonorFiles(): JSX.Element {
           const restored = await uploadDonorFile(new File([original], f.filename, { type: 'audio/mpeg' }))
           setQuota(restored.quota)
           setFiles((prev) => [restored.file, ...(prev ?? []).filter((x) => x.file_id !== f.file_id)])
-          replaceDonorFileId(f.file_id, restored.file.file_id)
+          void restoreDonorSlots(slots, restored.file.file_id)
           setError(`Could not save tags (${message}). The original file was restored.`)
         } catch {
           setError(`Could not save tags and the original could not be restored: ${message}. Re-upload it from your device.`)
@@ -457,7 +454,7 @@ export default function DonorFiles(): JSX.Element {
                 }`}>
                   <IconBtn label="Download" disabled={isBusy} onClick={() => void download(f)}><Download size={13} /></IconBtn>
                   {isDonorAudio(f) && (
-                    <IconBtn label="Add to playlist" onClick={() => { setPlaylistPicker((c) => (c === f.file_id ? null : f.file_id)); setNewPlaylistName('') }}>
+                    <IconBtn label="Add to playlist" onClick={() => setPlaylistPicker((c) => (c === f.file_id ? null : f.file_id))}>
                       <ListPlus size={13} />
                     </IconBtn>
                   )}
@@ -490,40 +487,7 @@ export default function DonorFiles(): JSX.Element {
                 </div>
               </div>
 
-              {playlistPicker === f.file_id && (
-                <div className="mt-2 ml-[56px] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-2">
-                  {donorPlaylists.length === 0 && <p className="text-text-muted text-[11px] px-1 pb-1">No donor playlists yet.</p>}
-                  {donorPlaylists.map((p) => {
-                    const inList = p.fileIds.includes(f.file_id)
-                    return (
-                      <button
-                        key={p.id}
-                        onClick={() => (inList ? removeFromDonorPlaylist(p.id, f.file_id) : addToDonorPlaylist(p.id, f.file_id))}
-                        className="w-full flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-text-primary hover:bg-[var(--surface-overlay)]"
-                      >
-                        <span className="truncate">{p.name}</span>
-                        {inList && <Check size={13} className="text-accent shrink-0" />}
-                      </button>
-                    )
-                  })}
-                  <div className="flex items-center gap-2 pt-1.5">
-                    <input
-                      value={newPlaylistName}
-                      onChange={(e) => setNewPlaylistName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') }
-                      }}
-                      placeholder="New playlist…"
-                      className="flex-1 min-w-0 bg-[var(--surface-overlay)] rounded px-2 py-1 text-sm text-text-primary focus:outline-none"
-                    />
-                    <button
-                      onClick={() => { if (newPlaylistName.trim()) { createDonorPlaylist(newPlaylistName.trim(), [f.file_id]); setNewPlaylistName('') } }}
-                      disabled={!newPlaylistName.trim()}
-                      className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/25 disabled:opacity-50"
-                    >Create</button>
-                  </div>
-                </div>
-              )}
+              {playlistPicker === f.file_id && <DonorPlaylistPicker fileId={f.file_id} />}
               {tagEdit?.id === f.file_id && (
                 <div className="ml-[56px]">
                   {tagEdit.tags

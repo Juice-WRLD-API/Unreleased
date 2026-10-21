@@ -1,6 +1,6 @@
 import { useStore } from '../../store/useStore'
 import {
-  getPlaylist, getPlaylistCover, getPublicPlaylist, getPublicPlaylistCover, removePlaylistCover, renamePlaylist, reorderPlaylist,
+  getPlaylist, getPlaylistCover, getPublicPlaylist, getPublicPlaylistCover, removePlaylistCover, renamePlaylist, reorderPlaylistItems,
   updatePlaylist, uploadPlaylistCover, type PlaylistSummary,
 } from '../userApi'
 import { pageRows } from './more'
@@ -30,12 +30,13 @@ export async function runPlaylistEdit(sub: string, rest: string, ctx: TermCtx, p
       const items = [...pub.items].sort((a, b) => a.position - b.position)
       ctx.print([
         `${pub.name}${pub.description ? ` - ${oneLine(pub.description)}` : ''}`,
-        items.length ? pageRows(items.length, (n) => `${String(n + 1).padStart(3)}  ${items[n].song.name}`, 80) : '(empty)',
+        items.length ? pageRows(items.length, (n) => `${String(n + 1).padStart(3)}  ${items[n].song?.name ?? `${items[n].title || 'file'}  (file)`}`, 80) : '(empty)',
       ].join('\n'))
       return
     }
     case 'public': case 'private': {
       const pl = await playlistFromArg(rest)
+      if (sub === 'public' && pl.can_be_public === false) fail(`"${pl.name}" holds your own or local files, so it can't be public (remove them first)`)
       await updatePlaylist(pl.id, { is_public: sub === 'public' })
       await refresh()
       ctx.print(`"${pl.name}" is now ${sub}`, 'ok')
@@ -53,18 +54,19 @@ export async function runPlaylistEdit(sub: string, rest: string, ctx: TermCtx, p
       return
     }
     case 'move': {
-      // playlist move <name|N> -- <from> <to>, positions as `playlist show` numbers them.
+      // playlist move <name|N> -- <from> <to>, positions as `playlist show` numbers
+      // them. By entry id, so file entries move too.
       const split = rest.split(/\s+--\s+/)
       const pos = (split[1] ?? '').trim().split(/\s+/).map(Number)
       if (split.length < 2 || pos.length !== 2 || pos.some((n) => !Number.isInteger(n) || n < 1)) fail('usage: playlist move <name|N> -- <from> <to>')
       const pl = await playlistFromArg(split[0])
       const detail = await getPlaylist(pl.id)
-      const ids = [...detail.items].sort((a, b) => a.position - b.position).map((i) => i.song.id)
+      const ids = [...detail.items].sort((a, b) => a.position - b.position).map((i) => i.id)
       const [from, to] = pos
-      if (from > ids.length || to > ids.length) fail(`${pl.name} has ${ids.length} song${ids.length === 1 ? '' : 's'}`)
+      if (from > ids.length || to > ids.length) fail(`${pl.name} has ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'}`)
       const [moved] = ids.splice(from - 1, 1)
       ids.splice(to - 1, 0, moved)
-      await reorderPlaylist(pl.id, ids)
+      await reorderPlaylistItems(pl.id, ids)
       ctx.print(`moved #${from} to #${to} in "${pl.name}"`, 'ok')
       return
     }

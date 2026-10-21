@@ -4,7 +4,7 @@ import {
   Music, Play, Pause, Shuffle, Search, MoreHorizontal,
   ChevronLeft, ChevronRight, LayoutGrid, List, Sparkles, User,
   FolderOpen, Clock, Loader2, GripVertical, ChevronDown, ChevronUp, Link2,
-  CheckSquare2, Square, Pencil, ListPlus, Plus, HardDrive,
+  CheckSquare2, Square, Pencil, ListPlus, Plus, HardDrive, ListMusic,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { LibraryTrack } from '../types'
@@ -16,6 +16,7 @@ import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { AnchoredContextMenu } from './ContextMenu'
+import { addTracksInBackground } from '../lib/optimisticPlaylist'
 
 /* ══════════════════════════════════════════════════════════════════════════════
    Library — local-file browser styled like the rest of the app (solid surfaces,
@@ -640,7 +641,7 @@ function ApiCompareDropdown({ value, onChange, disabled, failed, onRetry }: {
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 export default function LibraryTab(): JSX.Element {
-  const { libraryTracks, libraryScanning, scanLibrary, libraryFolders, loadLibrary, setShowSettings, playTrack, playCollection, shufflePlay, playNext, addToQueue, account, openLocalEditor, likedTrackIds, toggleLike, openUrlImport, openBulkTrackEditor, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStorePick('libraryTracks', 'libraryScanning', 'scanLibrary', 'libraryFolders', 'loadLibrary', 'setShowSettings', 'playTrack', 'playCollection', 'shufflePlay', 'playNext', 'addToQueue', 'account', 'openLocalEditor', 'likedTrackIds', 'toggleLike', 'openUrlImport', 'openBulkTrackEditor', 'localPlaylists', 'addToLocalPlaylist', 'createLocalPlaylist')
+  const { libraryTracks, libraryScanning, scanLibrary, libraryFolders, loadLibrary, setShowSettings, playTrack, playCollection, shufflePlay, playNext, addToQueue, account, openLocalEditor, likedTrackIds, toggleLike, openUrlImport, openBulkTrackEditor, localPlaylists, addToLocalPlaylist, createLocalPlaylist, playlists } = useStorePick('libraryTracks', 'libraryScanning', 'scanLibrary', 'libraryFolders', 'loadLibrary', 'setShowSettings', 'playTrack', 'playCollection', 'shufflePlay', 'playNext', 'addToQueue', 'account', 'openLocalEditor', 'likedTrackIds', 'toggleLike', 'openUrlImport', 'openBulkTrackEditor', 'localPlaylists', 'addToLocalPlaylist', 'createLocalPlaylist', 'playlists')
 
   const [nav, setNav] = useState<Nav>(() => ({ kind: 'lib', key: (localStorage.getItem('library:view') as LibKey) || 'albums' }))
   const [drill, setDrill] = useState<{ kind: 'album'; album: Album } | { kind: 'artist'; name: string } | null>(null)
@@ -732,9 +733,9 @@ export default function LibraryTab(): JSX.Element {
   const selectedTracks = useMemo(() => [...selected.values()], [selected])
 
   // ── Bulk "Add to playlist" ──
-  // Library files are device-only, so local playlists are the only valid
-  // target (a scanned file has no song id to give a synced playlist). The
-  // per-track context menu has always offered this; the bulk bar hadn't.
+  // Either kind of playlist: a synced one holds them as local-file entries
+  // (playable on this device only, and only in a private playlist), a local
+  // one by library id. The per-track context menu offers the same.
   const [showBulkPlaylists, setShowBulkPlaylists] = useState(false)
   const bulkPlBtnRef = useRef<HTMLButtonElement>(null)
   const [bulkNewName, setBulkNewName] = useState('')
@@ -745,6 +746,13 @@ export default function LibraryTab(): JSX.Element {
     selectedTracks.forEach(t => addToLocalPlaylist(playlistId, t.id))
     closeBulkPlaylists()
     exitSelectMode()
+  }
+
+  const bulkAddToSyncedPlaylist = (playlistId: number): void => {
+    const tracks = selectedTracks.map(toQueueTrack)
+    closeBulkPlaylists()
+    exitSelectMode()
+    void addTracksInBackground(playlistId, tracks)
   }
 
   const bulkCreateAndAdd = (): void => {
@@ -985,9 +993,12 @@ export default function LibraryTab(): JSX.Element {
                   title="Add to playlist"
                   onClose={closeBulkPlaylists}
                   className="w-56"
-                  items={localPlaylists.length === 0
+                  items={localPlaylists.length === 0 && (!account || playlists.length === 0)
                     ? [{ label: 'No playlists yet.', disabled: true }]
-                    : localPlaylists.map(p => ({ icon: HardDrive, label: p.name, onSelect: () => bulkAddToLocalPlaylist(p.id) }))}
+                    : [
+                        ...(account ? playlists.map(p => ({ icon: ListMusic, label: p.name, disabled: p.is_public, onSelect: () => bulkAddToSyncedPlaylist(p.id) })) : []),
+                        ...localPlaylists.map((p, i) => ({ icon: HardDrive, label: p.name, separatorBefore: i === 0 && !!account && playlists.length > 0, onSelect: () => bulkAddToLocalPlaylist(p.id) })),
+                      ]}
                   footer={(
                     <div className="flex items-center gap-1.5 p-1">
                       <input

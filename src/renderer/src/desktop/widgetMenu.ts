@@ -64,6 +64,8 @@ export function widgetMenu(which: WidgetWhich, desktop: DesktopSettings, ctx: Wi
     const look = desktop.lyrics.look !== 'classic' ? desktop.lyrics.look : 'fisheye'
     own.push(
       { label: 'Copy lyrics', cmd: 'copy-lyrics', disabled: !ctx.lyrics?.has },
+      // The share card is WRLD's own modal, so only the tab can open it.
+      ...(ctx.where === 'tab' && ctx.lyrics?.has ? [{ label: 'Share lyrics', cmd: 'share-lyrics' }] : []),
       ...(ctx.lyrics?.timed ? [{ label: 'Download synced lyrics', cmd: 'download-lyrics' }] : []),
       'divider',
       { label: 'Style', children: LYRIC_LOOKS.map((l) => ({ label: l.title, radio: true, checked: l.id === look, cmd: 'set', arg: { lyrics: { look: l.id } } })) },

@@ -21,6 +21,27 @@ export function pickLocalFile(accept: string): Promise<File> {
   })
 }
 
+/** A folder pick: every file under the chosen folder, with webkitRelativePath set. */
+export function pickLocalFolder(): Promise<File[]> {
+  return new Promise<File[]>((resolve, reject) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.setAttribute('webkitdirectory', '')
+    input.style.display = 'none'
+    const done = (): void => { input.remove() }
+    input.addEventListener('change', () => {
+      const files = Array.from(input.files ?? [])
+      done()
+      if (files.length) resolve(files)
+      else reject(new Error('cancelled'))
+    })
+    input.addEventListener('cancel', () => { done(); reject(new Error('cancelled')) })
+    document.body.appendChild(input)
+    input.click()
+  })
+}
+
 /** Hands bytes to the browser's download, under the given name. */
 export function saveBlob(blob: Blob, name: string): void {
   const href = URL.createObjectURL(blob)

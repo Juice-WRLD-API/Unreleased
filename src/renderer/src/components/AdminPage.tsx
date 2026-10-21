@@ -18,6 +18,7 @@ import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSe
 import ReportsTab from './ReportsTab'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
+import CompReplaceTab from './CompReplaceTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
@@ -94,7 +95,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     initialTab: effectiveInitialTab ?? 'proposals',
     // No Security tab for managers: it renders a flat "2FA is enabled", which
     // the OTP gate below guarantees for admins and can't guarantee for them.
-    managerNavIds: ['proposals', 'comp-proposals'],
+    managerNavIds: ['proposals', 'comp-proposals', 'comp-replace'],
   })
 
   // No more overview grid - every section already has its own deep link
@@ -166,7 +167,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'security' && (
+        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'security' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -226,6 +227,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('comp-proposals') && (
           <div className={tab === 'comp-proposals' ? 'h-full' : 'hidden'}>
             <CompProposalsTab embedded onChanged={() => refresh()} />
+          </div>
+        )}
+        {visited.has('comp-replace') && (
+          <div className={tab === 'comp-replace' ? 'h-full' : 'hidden'}>
+            <CompReplaceTab />
           </div>
         )}
         {visited.has('applications') && (

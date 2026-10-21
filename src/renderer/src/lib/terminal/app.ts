@@ -23,7 +23,7 @@ const VIEWS: Record<string, ViewType> = {
   albums: 'albums-admin',
 }
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'library', 'app', 'developer', 'feedback', 'about']
-const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'applications', 'reports', 'feedback', 'users', 'stats', 'security', 'channels', 'eras', 'cdn-nodes', 'beta']
+const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'applications', 'reports', 'feedback', 'users', 'stats', 'security', 'channels', 'eras', 'cdn-nodes', 'beta']
 const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'user', 'song']
 // The Admin page is for administrators and chat is for staff, so neither is offered otherwise.
 const offered = (target: string): boolean => {

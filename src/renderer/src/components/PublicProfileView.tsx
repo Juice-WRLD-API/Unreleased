@@ -14,6 +14,7 @@ import {
   adminReviewProposal, adminReviewCompProposal,
 } from '../lib/userApi'
 import type { PublicProfile, PlaylistSummary, PlaylistDetail, NowPlayingState, AdminUser, AccountUser } from '../lib/userApi'
+import { playlistItemsToTracks } from '../lib/playlistItems'
 import { compApproveBlockedReason } from '../lib/compProposalShared'
 import { getSongsByIds, songToTrack, buildImageUrl } from '../lib/juicewrldApi'
 import { Track } from '../types'
@@ -170,7 +171,7 @@ function PlaylistQuickMenu({ state, onClose, onOpenInLibrary }: {
 
   const loadTracks = async (): Promise<Track[]> => {
     const d = await getPublicPlaylist(state.playlist.id)
-    return d.items.map((i) => liteSongToTrack(i.song))
+    return playlistItemsToTracks(d.items).filter((t) => t.path)
   }
 
   const copyLink = async (): Promise<void> => {
@@ -469,7 +470,7 @@ export default function PublicProfileView(): JSX.Element {
     )
   }
 
-  const expandedTracks = expandedDetail ? expandedDetail.items.map(i => liteSongToTrack(i.song)) : []
+  const expandedTracks = expandedDetail ? playlistItemsToTracks(expandedDetail.items) : []
   const wrappedTopTracks = wrappedStats ? wrappedStats.played.slice(0, WRAPPED_TOP_SONGS).map((p) => statsSongToTrack(p.song)) : []
 
   function renderPlaylistRow(p: PlaylistSummary): JSX.Element {
