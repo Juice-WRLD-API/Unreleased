@@ -28,6 +28,7 @@ import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import { CdnDownloadToast } from './CdnDownloadToast'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
+import { playlistSongIds } from '../lib/playlistItems'
 import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { useCanEdit, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { loadRecentlyAddedMap } from '../lib/changesApi'
@@ -2603,7 +2604,7 @@ export default function ApiTrackerView(): JSX.Element {
       playlists.map(p =>
         userApi.getPlaylist(p.id)
           .then(d => {
-            const memberIds = new Set((d.items ?? []).map(it => it.song.id))
+            const memberIds = new Set(playlistSongIds(d.items ?? []))
             return { id: p.id, allIn: ids.every(id => memberIds.has(id)) }
           })
           .catch(() => ({ id: p.id, allIn: false }))

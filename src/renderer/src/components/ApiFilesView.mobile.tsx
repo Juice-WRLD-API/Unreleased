@@ -982,7 +982,7 @@ export default function ApiFilesView(): JSX.Element {
                   icon={ListMusic}
                   label={p.name}
                   trailing={playlistDoneId === p.id ? <Check size={17} className="text-accent shrink-0" /> : undefined}
-                  onClick={() => { if (sheetTrackerId != null) addToPlaylist(p.id, sheetTrackerId) }}
+                  onClick={() => { if (sheetEntry) addToPlaylist(p.id, sheetTrackerId != null ? { songId: sheetTrackerId } : { path: sheetEntry.path, channel: activeChannel || undefined }) }}
                 />
               ))
             )
@@ -992,7 +992,7 @@ export default function ApiFilesView(): JSX.Element {
                 <>
                   <SheetItem icon={Play} label="Play" onClick={() => { handlePlay(sheetEntry); closeSheet() }} />
                   <SheetItem icon={ListPlus} label="Add to queue" onClick={async () => { const e = sheetEntry; closeSheet(); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)); showToast('Added to queue') }} />
-                  {sheetTrackerId != null && (
+                  {sheetIsAudio && (
                     <SheetItem
                       icon={Plus}
                       label="Add to playlist"

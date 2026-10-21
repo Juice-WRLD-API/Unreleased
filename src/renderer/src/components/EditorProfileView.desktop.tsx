@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { accountDisplayName, initial } from '../lib/format'
+import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import ReportsTab from './ReportsTab'
 import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
@@ -544,6 +545,7 @@ export default function EditorProfileView(): JSX.Element {
                           <>
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
+                            {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" value="Open" onClick={() => openAdmin('comp-replace')} />}
                           </>
                         )}
                         {isAdmin && !otpLocked && (

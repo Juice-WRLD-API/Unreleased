@@ -1253,7 +1253,7 @@ export default function ApiFilesView(): JSX.Element {
                 label: 'Add to queue',
                 onSelect: async () => { addToQueue(fileToTrack(entry, (await resolveTrackChannel()) ?? activeChannel)) },
               },
-              isAudio && matched && {
+              isAudio && {
                 icon: Plus,
                 label: 'Add to playlist',
                 childrenEmpty: account ? 'No playlists yet.' : 'Log in to save to playlists.',
@@ -1264,7 +1264,7 @@ export default function ApiFilesView(): JSX.Element {
                   keepOpen: true,
                   onSelect: () => {
                     const songId = trackerMatches.get(entry.path)
-                    if (songId != null) addToPlaylist(p.id, songId)
+                    addToPlaylist(p.id, songId != null ? { songId } : { path: entry.path, channel: activeChannel || undefined })
                   },
                 })) : [],
                 childrenFooter: !account ? (

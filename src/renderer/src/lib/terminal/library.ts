@@ -1,5 +1,13 @@
 import { useStore } from '../../store/useStore'
-import { addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, trackIdToSongId, type PlaylistSummary } from '../userApi'
+import {
+  addPlaylistEntry, addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, removePlaylistEntry, trackIdToSongId,
+  type PlaylistEntryInput, type PlaylistItemEntry, type PlaylistSummary,
+} from '../userApi'
+import { isPrivateEntry, itemSource, playlistItemsToTracks, playlistSongIds, trackToPlaylistEntry } from '../playlistItems'
+import { listDonorFiles } from '../donorFilesApi'
+import { isDonorAudio } from '../donorPlayback'
+import { libraryTrackToTrack } from '../fileTypes'
+import type { Track } from '../../types'
 import { getSongById, getSongsByIds, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { completeSongs, songFromArg } from './player'
 import { PLAYLIST_EDIT_SUBS, runPlaylistEdit } from './playlistEdit'
@@ -27,13 +35,69 @@ async function playlistFromArg(arg: string): Promise<PlaylistSummary> {
   return pickByName(list, (p) => p.name, arg) ?? fail(`no single playlist matches "${arg.trim()}" (try: playlists)`)
 }
 
-async function playlistTracks(id: number): Promise<{ name: string; tracks: ReturnType<typeof songToTrack>[]; songs: JWApiSong[] }> {
+// One row per entry, in playlist order, so row numbers are the positions
+// `move` and `remove -- at N` take. Songs come back in full (for show's field
+// filters); file entries as the Track the player would get.
+interface PlaylistRow { item: PlaylistItemEntry; track: Track; song: JWApiSong | null }
+
+async function playlistRows(id: number): Promise<{ name: string; rows: PlaylistRow[] }> {
   const detail = await getPlaylist(id)
   const ordered = [...detail.items].sort((a, b) => a.position - b.position)
-  const songs = await getSongsByIds(ordered.map((i) => i.song.id))
+  const songs = await getSongsByIds(playlistSongIds(ordered))
   const byId = new Map(songs.map((s) => [s.id, s]))
-  const found = ordered.map((i) => byId.get(i.song.id)).filter((s): s is NonNullable<typeof s> => !!s)
-  return { name: detail.name, tracks: found.map(songToTrack), songs: found }
+  const tracks = playlistItemsToTracks(ordered)
+  const rows = ordered.map((item, i): PlaylistRow => {
+    const song = item.song ? byId.get(item.song.id) ?? null : null
+    return { item, song, track: song ? songToTrack(song) : tracks[i] }
+  })
+  return { name: detail.name, rows }
+}
+
+function rowLabel(r: PlaylistRow): string {
+  if (r.song) return displaySongName(r.song)
+  switch (itemSource(r.item)) {
+    case 'comp': return `${r.track.title}  (file${r.item.channel && r.item.channel !== 'comp' ? `, ${r.item.channel}` : ''})`
+    case 'donor': return `${r.track.title}  (my file)`
+    case 'local': return `${r.track.title}  (local${r.track.path ? '' : ', not on this device'})`
+    default: return r.track.title
+  }
+}
+
+// What add/remove point at: a song, or `file <path>` (in the Files tab's
+// current comp), `myfile <name>` (a donor upload) or `local <name>` (a file in
+// this device's library).
+async function entryFromArg(arg: string): Promise<{ entry: PlaylistEntryInput; label: string }> {
+  const m = /^(file|myfile|local)\s+(.+)$/i.exec(arg)
+  if (!m) {
+    const song = await songFromArg(arg)
+    return { entry: { song_id: song.id }, label: displaySongName(song) }
+  }
+  const what = m[2].trim()
+  switch (m[1].toLowerCase()) {
+    case 'file': {
+      const path = what.replace(/^\/+/, '')
+      const channel = st().activeChannel
+      return { entry: { source: 'comp', path, ...(channel ? { channel } : {}) }, label: path.split('/').pop() ?? path }
+    }
+    case 'myfile': {
+      const { files } = await listDonorFiles()
+      const f = pickByName(files.filter(isDonorAudio), (x) => x.filename, what) ?? fail(`no single audio file of yours matches "${what}" (try: donor ls)`)
+      return { entry: { source: 'donor', file_id: f.file_id }, label: f.filename }
+    }
+    default: {
+      if (st().libraryTracks.length === 0) await st().loadLibrary()
+      const t = pickByName(st().libraryTracks, (x) => x.title, what) ?? fail(`no single library file matches "${what}"`)
+      const entry = trackToPlaylistEntry(libraryTrackToTrack(t)) ?? fail('that file\'s path is too long to store in a playlist')
+      return { entry, label: t.title }
+    }
+  }
+}
+
+function matchesEntry(item: PlaylistItemEntry, entry: PlaylistEntryInput): boolean {
+  if ('song_id' in entry) return item.song?.id === entry.song_id
+  if (entry.source === 'comp') return itemSource(item) === 'comp' && item.filepath === entry.path
+  if (entry.source === 'donor') return item.donor_file?.file_id === entry.file_id
+  return itemSource(item) === 'local' && item.local_id === entry.local_id
 }
 
 const SUBS = ['play', 'shuffle', 'show', 'create', 'delete', 'add', 'remove', 'open', ...PLAYLIST_EDIT_SUBS]
@@ -107,13 +171,14 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
   },
   {
     name: 'playlist', aliases: ['pl'], group: 'Library',
-    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  show <name|N> -- <filter>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
+    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  show <name|N> -- <filter>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song | file <path> | myfile <name> | local <name>>  ·  remove <name|N> -- at <N>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
     covers: [
       'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
-      'userApi.renamePlaylist', 'userApi.updatePlaylist', 'userApi.reorderPlaylist', 'userApi.uploadPlaylistCover', 'userApi.removePlaylistCover',
+      'userApi.addPlaylistEntry', 'userApi.removePlaylistEntry', 'userApi.reorderPlaylistItems',
+      'userApi.renamePlaylist', 'userApi.updatePlaylist', 'userApi.uploadPlaylistCover', 'userApi.removePlaylistCover',
       'userApi.getPlaylistCover', 'userApi.getPublicPlaylist', 'userApi.getPublicPlaylistCover',
     ],
-    description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> or #N a number from playlists, <song> a title or a number from find',
+    description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> or #N a number from playlists, <song> a title or a number from find. Playlists can also hold files: file <path> from the Files tab\'s current comp, myfile <name> from your uploads, local <name> from this device\'s library (the last two only in private playlists)',
     complete: completePlaylistNames,
     run: async (args, ctx) => {
       const [sub = '', ...restWords] = args.trim().split(/\s+/)
@@ -121,7 +186,7 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
       switch (sub.toLowerCase()) {
         case 'play': case 'shuffle': {
           const pl = await playlistFromArg(rest)
-          const { tracks } = await playlistTracks(pl.id)
+          const tracks = (await playlistRows(pl.id)).rows.map((r) => r.track).filter((t) => t.path)
           if (tracks.length === 0) fail(`${pl.name} is empty`)
           st().playCollection(tracks, null, 'playlist')
           if (sub.toLowerCase() === 'shuffle' && !st().shuffle) st().toggleShuffle()
@@ -133,14 +198,17 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
           // match title/artist, field:"value" tokens any Tracker field.
           const [plArg, filter = ''] = rest.split(/\s+--\s+/)
           const pl = await playlistFromArg(plArg)
-          const { songs } = await playlistTracks(pl.id)
+          const { rows } = await playlistRows(pl.id)
           const { freeText, filters } = parseSearchQuery(filter)
           const q = freeText.toLowerCase()
-          const shown = songs
-            .map((song, i) => ({ song, n: i + 1 }))
-            .filter(({ song }) => (!q || displaySongName(song).toLowerCase().includes(q) || song.credited_artists.toLowerCase().includes(q)) && matchesFieldFilters(song, filters))
-          const empty = songs.length ? `nothing in ${pl.name} matches "${filter}"` : '(empty)'
-          ctx.print(`${pl.name}\n${shown.length ? pageRows(shown.length, (i) => `${String(shown[i].n).padStart(3)}  ${displaySongName(shown[i].song)}`, 80) : empty}`)
+          // Field filters need a song, so they leave file entries out.
+          const shown = rows
+            .map((row, i) => ({ row, n: i + 1 }))
+            .filter(({ row: { song, track } }) => song
+              ? (!q || displaySongName(song).toLowerCase().includes(q) || song.credited_artists.toLowerCase().includes(q)) && matchesFieldFilters(song, filters)
+              : !filters.length && (!q || track.title.toLowerCase().includes(q)))
+          const empty = rows.length ? `nothing in ${pl.name} matches "${filter}"` : '(empty)'
+          ctx.print(`${pl.name}\n${shown.length ? pageRows(shown.length, (i) => `${String(shown[i].n).padStart(3)}  ${rowLabel(shown[i].row)}`, 80) : empty}`)
           return
         }
         case 'open': {
@@ -167,13 +235,33 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
         }
         case 'add': case 'remove': {
           const split = rest.split(/\s+--\s+/)
-          if (split.length < 2 || !split[1].trim()) fail(`usage: playlist ${sub.toLowerCase()} <name|N> -- <song>`)
+          if (split.length < 2 || !split[1].trim()) fail(`usage: playlist ${sub.toLowerCase()} <name|N> -- <song | file <path> | myfile <name> | local <name>>${sub.toLowerCase() === 'remove' ? '  ·  remove <name|N> -- at <N>' : ''}`)
           const pl = await playlistFromArg(split[0])
-          const song = await songFromArg(split.slice(1).join(' -- ').trim())
-          if (sub.toLowerCase() === 'add') await addToPlaylist(pl.id, song.id)
-          else await removeFromPlaylist(pl.id, song.id)
+          const target = split.slice(1).join(' -- ').trim()
+          const isAdd = sub.toLowerCase() === 'add'
+          // remove -- at N: any entry, by its number in `playlist show`.
+          const at = !isAdd ? /^at\s+#?(\d+)$/i.exec(target) : null
+          if (at) {
+            const { rows } = await playlistRows(pl.id)
+            const row = rows[Number(at[1]) - 1] ?? fail(`${pl.name} has ${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}`)
+            await removePlaylistEntry(pl.id, row.item.id)
+            await st().refreshPlaylists()
+            ctx.print(`removed ${rowLabel(row)} from "${pl.name}"`, 'ok')
+            return
+          }
+          const { entry, label } = await entryFromArg(target)
+          if (isAdd) {
+            if (isPrivateEntry(entry) && pl.is_public) fail(`"${pl.name}" is public, and your own and local files can only go in private playlists (playlist private ${pl.name})`)
+            if ('song_id' in entry) await addToPlaylist(pl.id, entry.song_id)
+            else await addPlaylistEntry(pl.id, entry)
+          } else if ('song_id' in entry) {
+            await removeFromPlaylist(pl.id, entry.song_id)
+          } else {
+            const item = (await getPlaylist(pl.id)).items.find((i) => matchesEntry(i, entry)) ?? fail(`${label} isn't in "${pl.name}"`)
+            await removePlaylistEntry(pl.id, item.id)
+          }
           await st().refreshPlaylists()
-          ctx.print(`${sub.toLowerCase() === 'add' ? 'added' : 'removed'} ${displaySongName(song)} ${sub.toLowerCase() === 'add' ? 'to' : 'from'} "${pl.name}"`, 'ok')
+          ctx.print(`${isAdd ? 'added' : 'removed'} ${label} ${isAdd ? 'to' : 'from'} "${pl.name}"`, 'ok')
           return
         }
         default:

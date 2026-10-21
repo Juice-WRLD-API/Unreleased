@@ -14,6 +14,7 @@ import { runHotkeyAction } from './hotkeys'
 import { seekAudio, getAudioDuration } from '../components/Player'
 import { apiFetch, buildImageUrl, getSongById, playlistCoverUrl, searchSongs, sizedCoverUrl, smallCoverUrl, songToTrack, type JWApiPaginatedResponse } from './juicewrldApi'
 import * as userApi from './userApi'
+import { playlistItemsToTracks } from './playlistItems'
 import { listEras } from './eras'
 import { libraryTrackToTrack } from './fileTypes'
 import { fxInUse } from './audioEffects'
@@ -142,14 +143,14 @@ function menuSong(s: AppStore): { songId: number | null; track: Track | null } {
 }
 
 /** What the ⋯ menu offers for it, as the app's song menu would (components/SongContextMenu). */
-function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; playlists: { id: number; name: string }[] | null } | null {
+function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; lyrics: boolean; playlists: { id: number; name: string }[] | null } | null {
   const { songId, track } = menuSong(s)
   const title = nowTrack(s)?.title
   if (!title || (songId == null && !track)) return null
   const has = songId != null && songId > 0
   const editor = userApi.isChannelEditor(s.account, s.channels.find((c) => c.is_primary)?.slug, true)
   return {
-    title, info: has, link: has, edit: has && editor,
+    title, info: has, link: has, edit: has && editor, lyrics: !!rawLyrics(s)?.trim(),
     download: !!track?.path && !(songId == null && track.id.startsWith('local-')),
     // Signed in, an API song can go on a playlist.
     playlists: has && s.account ? s.playlists.map((p) => ({ id: p.id, name: p.name })) : null,
@@ -215,7 +216,7 @@ async function listTracks(id: string): Promise<Track[]> {
     tracks = [...api, ...local]
   } else if (id.startsWith('playlist:')) {
     const detail = await userApi.getPlaylist(Number(id.slice('playlist:'.length))).catch(() => null)
-    tracks = detail ? detail.items.map((i) => userApi.liteSongToTrack(i.song)) : []
+    tracks = detail ? playlistItemsToTracks(detail.items).filter((t) => t.path) : []
   }
   tracks = tracks.slice(0, LIST_LIMIT)
   listCache.set(id, tracks)
@@ -273,6 +274,9 @@ async function era(name: string): Promise<{ name: string; about: string; cover: 
 
 const isTrack = (v: unknown): v is Track => !!v && typeof v === 'object' && typeof (v as Track).id === 'string' && typeof (v as Track).title === 'string'
 
+/** Fired on window to open WRLD's lyric share card. */
+export const SHARE_LYRICS_EVENT = 'wrld:share-lyrics'
+
 /** A press on a widget - on the desktop or in the WRLD tab - done as the app's own buttons do it. */
 export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void> {
   const s = useStore.getState()
@@ -298,6 +302,8 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       } catch { showAppToast("Couldn't copy the lyrics", { tone: 'error' }) }
       break
     }
+    // WRLD's lyric share card, opened by the tab (the widgets' stand-in for the hidden song menu's row).
+    case 'share-lyrics': window.dispatchEvent(new Event(SHARE_LYRICS_EVENT)); break
     case 'download-lyrics': {
       const raw = rawLyrics(s)
       const track = nowTrack(s)

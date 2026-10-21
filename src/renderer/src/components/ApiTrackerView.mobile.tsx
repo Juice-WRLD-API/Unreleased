@@ -1,3 +1,4 @@
+import { playlistSongIds } from '../lib/playlistItems'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
   Search, Loader2, Music2, X, Check, ListPlus, ChevronDown, ChevronLeft,
@@ -1280,7 +1281,7 @@ export default function ApiTrackerView(): JSX.Element {
       playlists.map(p =>
         userApi.getPlaylist(p.id)
           .then(d => {
-            const memberIds = new Set((d.items ?? []).map(it => it.song.id))
+            const memberIds = new Set(playlistSongIds(d.items ?? []))
             return { id: p.id, allIn: ids.every(id => memberIds.has(id)) }
           })
           .catch(() => ({ id: p.id, allIn: false }))

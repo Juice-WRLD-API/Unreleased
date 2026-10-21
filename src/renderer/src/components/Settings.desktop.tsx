@@ -12,6 +12,7 @@ import {
 import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls, { Pills, Toggle } from './VizControls'
 import DesktopSettings from './DesktopSettings'
+import Passkeys from './Passkeys'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
 import { SKINS, getSkin } from '../lib/skins'
@@ -88,6 +89,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'account', label: 'Log out' },
@@ -897,6 +899,9 @@ export default function Settings(): JSX.Element {
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Passkeys</p>
+                    <Passkeys />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">API keys</p>
                     <ApiKeys />

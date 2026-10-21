@@ -75,7 +75,7 @@ export function clearDonorPlaybackCache(): void {
   cache.clear()
 }
 
-export function donorFileToTrack(f: DonorFile): Track {
+export function donorFileToTrack(f: Pick<DonorFile, 'file_id' | 'filename'>): Track {
   // Embedded MP3 art, when the row tile has already looked it up. The Player
   // also looks it up itself for a donor track that starts without one.
   const cover = cachedDonorCover(f.file_id)

@@ -7,7 +7,9 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
-import { addSongsInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { addTracksInBackground, addEntriesInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { playlistItemsToTracks, playlistSongIds, playlistItemToEntry } from '../lib/playlistItems'
+import type { PlaylistEntryInput } from '../lib/userApi'
 import { showAppToast } from '../lib/appToast'
 import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
@@ -31,7 +33,6 @@ import { versionsEnabled } from '../lib/versionsApi'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard, { FolderRow } from './PlaylistCard.mobile'
-import { DonorPlaylistDetail, DonorPlaylistsSection } from './DonorPlaylists'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useLongPress } from './mobile/useLongPress'
 import { useDragReorder } from './mobile/useDragReorder'
@@ -336,6 +337,17 @@ type SheetState =
 
 const LS_LAYOUT = 'playlists:layout'
 
+// Entries worth copying into another playlist: songs that can play (not a
+// session or unsurfaced) and every file entry.
+function copyableEntries(detail: PlaylistDetail): PlaylistEntryInput[] {
+  return detail.items
+    .filter(item => !item.song || !['recording_session', 'unsurfaced'].includes(item.song.category))
+    .map(playlistItemToEntry)
+    .filter((e): e is PlaylistEntryInput => e != null)
+}
+
+const trackIsPlayable = (t: Track): boolean => !!t.path
+
 export default function PlaylistsView(): JSX.Element {
   const { account, playlists, refreshPlaylists, playTrack, playCollection, addToQueue, setShowUserAuth, likedTrackIds, toggleLike, setActiveView, setPendingEditorSongId,
     localPlaylists, libraryTracks, libraryArt, loadLibrary, deleteLocalPlaylist, renameLocalPlaylist, updateLocalPlaylist, addToLocalPlaylist, removeFromLocalPlaylist, reorderLocalPlaylist, createLocalPlaylist,
@@ -382,7 +394,6 @@ export default function PlaylistsView(): JSX.Element {
   // multi-select, no bulk actions. Just enough to create, open, rename, and
   // delete one, which is all that's needed while signed out.
   const [guestSelectedId, setGuestSelectedId] = useState<string | null>(null)
-  const [donorSelectedId, setDonorSelectedId] = useState<string | null>(null)
 
   // Context menu for a track row (shared with the Tracker's implementation).
   const [trackMenu, setTrackMenu] = useState<SongContextMenuState | null>(null)
@@ -506,8 +517,13 @@ export default function PlaylistsView(): JSX.Element {
 
   const tracks: Track[] = useMemo(() => {
     if (isLocal) return localLibTracks.map(libTrackToTrack)
-    return detail ? detail.items.map(it => userApi.liteSongToTrack(it.song)) : []
+    return detail ? playlistItemsToTracks(detail.items) : []
   }, [isLocal, localLibTracks, detail])
+  // Track id -> the entry it came from, for removing and reordering by entry.
+  const itemByTrackId = useMemo(
+    () => new Map(detail && !isLocal ? tracks.map((t, i) => [t.id, detail.items[i]] as const) : []),
+    [detail, isLocal, tracks],
+  )
 
   const otherPlaylists = useMemo(() => playlists.filter(p => p.id !== selectedId), [playlists, selectedId])
   const otherLocalPlaylists = useMemo(() => localPlaylists.filter(p => p.id !== localSelectedId), [localPlaylists, localSelectedId])
@@ -569,7 +585,7 @@ export default function PlaylistsView(): JSX.Element {
 
   // Populate membership cache when a detail loads
   useEffect(() => {
-    if (detail) membershipCache.current.set(detail.id, new Set(detail.items.map(i => i.song.id)))
+    if (detail) membershipCache.current.set(detail.id, new Set(playlistSongIds(detail.items)))
   }, [detail])
 
   // Bumped by the invalidation subscriber below so an edit made elsewhere
@@ -713,13 +729,13 @@ export default function PlaylistsView(): JSX.Element {
       if (localPl) removeFromLocalPlaylist(localPl.id, track.id)
       return
     }
-    const songId = track.id ? userApi.trackIdToSongId(track.id) : null
-    if (selectedId == null || songId == null || songId <= 0) return
-    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => i.song.id !== songId) } : null)
-    membershipCache.current.get(selectedId)?.delete(songId)
-    try { await userApi.removeFromPlaylist(selectedId, songId); await refreshPlaylists() }
-    catch { showAppToast("Couldn't remove the song"); await loadDetail(selectedId) }
-  }, [isLocal, localPl, removeFromLocalPlaylist, selectedId, loadDetail, refreshPlaylists])
+    const item = itemByTrackId.get(track.id)
+    if (selectedId == null || !item) return
+    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => i.id !== item.id) } : null)
+    if (item.song) membershipCache.current.get(selectedId)?.delete(item.song.id)
+    try { await userApi.removePlaylistEntry(selectedId, item.id); await refreshPlaylists() }
+    catch { showAppToast("Couldn't remove the track"); await loadDetail(selectedId) }
+  }, [isLocal, localPl, removeFromLocalPlaylist, selectedId, itemByTrackId, loadDetail, refreshPlaylists])
 
   // ── Multi-select bulk actions (tracks) ────────────────────────────────────
   const toggleTrackSelect = useCallback((track: Track) => {
@@ -745,18 +761,18 @@ export default function PlaylistsView(): JSX.Element {
   }, [selectedTrackList, addToQueue, exitSelectMode])
 
   const bulkAddToPlaylist = useCallback(async (targetId: number) => {
+    if (!selectedTrackList.length) return
     const ids = selectedTrackList
       .map(t => (t.id ? userApi.trackIdToSongId(t.id) : null))
       .filter((id): id is number => id != null && id > 0)
-    if (!ids.length) return
     // Optimistic: mark membership and leave select mode now, add in the
     // background, and drop whatever failed back out of the cache.
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
     ids.forEach(id => targetSet.add(id))
     membershipCache.current.set(targetId, targetSet)
     exitSelectMode()
-    const failed = await addSongsInBackground(targetId, ids)
-    failed.forEach(id => membershipCache.current.get(targetId)?.delete(id))
+    const failed = await addTracksInBackground(targetId, selectedTrackList)
+    failed.forEach(t => { const id = userApi.trackIdToSongId(t.id); if (id != null) membershipCache.current.get(targetId)?.delete(id) })
   }, [selectedTrackList, exitSelectMode])
 
   // Local counterpart - device-only playlists hold library track ids, so the
@@ -804,16 +820,16 @@ export default function PlaylistsView(): JSX.Element {
       return
     }
     if (selectedId == null) return
-    const ids = selectedTrackList
-      .map(t => (t.id ? userApi.trackIdToSongId(t.id) : null))
-      .filter((id): id is number => id != null && id > 0)
-    if (!ids.length) return
+    const items = selectedTrackList
+      .map(t => itemByTrackId.get(t.id))
+      .filter((it): it is NonNullable<typeof it> => it != null)
+    if (!items.length) return
     setBulkRemoving(true)
-    const idSet = new Set(ids)
-    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => !idSet.has(i.song.id)) } : null)
-    ids.forEach(id => membershipCache.current.get(selectedId)?.delete(id))
+    const idSet = new Set(items.map(it => it.id))
+    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => !idSet.has(i.id)) } : null)
+    items.forEach(it => { if (it.song) membershipCache.current.get(selectedId)?.delete(it.song.id) })
     try {
-      await Promise.all(ids.map(id => userApi.removeFromPlaylist(selectedId, id)))
+      await Promise.all(items.map(it => userApi.removePlaylistEntry(selectedId, it.id)))
       await refreshPlaylists()
     } catch { await loadDetail(selectedId) }
     setBulkRemoving(false)
@@ -874,7 +890,7 @@ export default function PlaylistsView(): JSX.Element {
     newItems.splice(to, 0, removed)
     setDetail({ ...detail, items: newItems })
     try {
-      const updated = await userApi.reorderPlaylist(selectedId, newItems.map(it => it.song.id))
+      const updated = await userApi.reorderPlaylistItems(selectedId, newItems.map(it => it.id))
       setDetail(updated)
     } catch { showAppToast("Couldn't reorder the playlist"); await loadDetail(selectedId) }
   }, [tracks.length, isLocal, localPl, localLibTracks, reorderLocalPlaylist, detail, selectedId, loadDetail])
@@ -906,27 +922,32 @@ export default function PlaylistsView(): JSX.Element {
   // Optimistic like bulkAddToPlaylist: membership is marked up front and
   // whatever fails comes back out once the background adds settle.
   const handleAddAllTo = useCallback(async (targetId: number, srcDetail: PlaylistDetail) => {
-    const ids = srcDetail.items.filter(item => !['recording_session', 'unsurfaced'].includes(item.song.category)).map(item => item.song.id)
+    const entries = copyableEntries(srcDetail)
+    const ids = entries.flatMap(e => ('song_id' in e ? [e.song_id] : []))
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
     ids.forEach(id => targetSet.add(id))
     membershipCache.current.set(targetId, targetSet)
-    const failed = await addSongsInBackground(targetId, ids)
-    failed.forEach(id => membershipCache.current.get(targetId)?.delete(id))
+    const failed = await addEntriesInBackground(targetId, entries)
+    failed.forEach(e => { if ('song_id' in e) membershipCache.current.get(targetId)?.delete(e.song_id) })
   }, [])
 
   const handleImportPlaylist = useCallback(async () => {
     if (!detail) return
     setImportState('loading')
     try {
-      const allowedIds = detail.items
-        .filter(item => !['recording_session', 'unsurfaced'].includes(item.song.category))
-        .map(item => item.song.id)
+      const entries = copyableEntries(detail)
+      const allowedIds = entries.flatMap(e => ('song_id' in e ? [e.song_id] : []))
 
       // Request 1: create playlist with name + description + song_ids in one shot
       const newPl = await userApi.createPlaylist(detail.name, {
         description: detail.description,
         song_ids: allowedIds,
       })
+      // Files can't go through song_ids, so they follow one by one, after
+      // the songs.
+      for (const e of entries) {
+        if (!('song_id' in e)) await userApi.addPlaylistEntry(newPl.id, e).catch(() => undefined)
+      }
 
       // Request 2 (optional): cover - use existing base64 directly, or fetch from URL
       const b64 = coverData?.cover_image
@@ -1285,8 +1306,6 @@ export default function PlaylistsView(): JSX.Element {
                 {cardContainer(followedPlaylists.map(renderFollowedCard))}
               </>
             )}
-
-            <DonorPlaylistsSection onOpen={setDonorSelectedId} />
 
             {!account && (
               <div className="flex flex-col items-center text-center gap-3 px-8 py-8 mt-4 border-t border-[var(--border)]">
@@ -1840,7 +1859,7 @@ export default function PlaylistsView(): JSX.Element {
             closeSheet()
             if (target.kind === 'local') { const q = localTracksOf(target.playlist); if (q.length) playCollection(q); return }
             const d = await userApi.getPlaylist(target.playlist.id).catch(() => null)
-            const trks = d ? d.items.map(i => userApi.liteSongToTrack(i.song)) : []
+            const trks = d ? playlistItemsToTracks(d.items).filter(t => t.path) : []
             if (trks.length) playCollection(trks)
           }}
         />
@@ -1851,7 +1870,7 @@ export default function PlaylistsView(): JSX.Element {
             closeSheet()
             const q = target.kind === 'local'
               ? localTracksOf(target.playlist)
-              : (await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items.map(i => userApi.liteSongToTrack(i.song)) ?? []
+              : playlistItemsToTracks((await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items ?? []).filter(trackIsPlayable)
             void shufflePlay(q)
           }}
         />
@@ -1862,7 +1881,7 @@ export default function PlaylistsView(): JSX.Element {
             closeSheet()
             const q = target.kind === 'local'
               ? localTracksOf(target.playlist)
-              : (await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items.map(i => userApi.liteSongToTrack(i.song)) ?? []
+              : playlistItemsToTracks((await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items ?? []).filter(trackIsPlayable)
             q.forEach(t => addToQueue(t))
           }}
         />
@@ -1917,7 +1936,7 @@ export default function PlaylistsView(): JSX.Element {
               onClick={() => {
                 closeSheet()
                 const id = (target.playlist as PlaylistSummary).id
-                handleZipDownload(async () => (await userApi.getPlaylist(id)).items.map(i => userApi.liteSongToTrack(i.song)), pl.name)
+                handleZipDownload(async () => playlistItemsToTracks((await userApi.getPlaylist(id)).items), pl.name)
               }}
             />
           </>
@@ -2118,8 +2137,7 @@ export default function PlaylistsView(): JSX.Element {
           </div>
           <LikedSongsView />
         </>
-      ) : donorSelectedId !== null ? <DonorPlaylistDetail id={donorSelectedId} onBack={() => setDonorSelectedId(null)} />
-        : guestSelectedId !== null ? renderGuestDetail()
+      ) : guestSelectedId !== null ? renderGuestDetail()
         : inDetail ? renderDetail()
           : renderLibrary()}
 

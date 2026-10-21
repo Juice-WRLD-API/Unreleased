@@ -11,6 +11,7 @@ import { trackIdToSongId } from '../lib/userApi'
 import { isPrimaryChannelSlug } from './useChannelRoles'
 import { useStore } from '../store/useStore'
 import type { Track } from '../types'
+import { isServerFileTrack } from '../lib/playlistItems'
 
 export function usePlaylistZipDownload(): {
   zipState: 'idle' | 'loading' | 'done' | 'error'
@@ -22,7 +23,7 @@ export function usePlaylistZipDownload(): {
 
   const handleZipDownload = useCallback(async (trackList: Track[] | (() => Promise<Track[]>), name: string) => {
     if (zipState === 'loading') return
-    if (Array.isArray(trackList) && !trackList.some(t => t.path)) return
+    if (Array.isArray(trackList) && !trackList.some(isServerFileTrack)) return
     const target = await openZipTarget(name)
     if (!target) return
     setZipState('loading')
@@ -31,11 +32,12 @@ export function usePlaylistZipDownload(): {
       const { channels, activeChannel } = useStore.getState()
       const useCdn = isPrimaryChannelSlug(channels, activeChannel)
       // A session not yet looked up has no file of its own until it is.
-      const files = await Promise.all(all.filter(t => t.path).map(t =>
+      const files = await Promise.all(all.filter(isServerFileTrack).map(t =>
         resolveTrackFile(t).then(f => ({
           name: f.path.split('/').pop() || t.title,
           url: f.url,
-          cdnPath: useCdn ? f.path : undefined,
+          // A file from another comp's tree isn't what the CDN holds at that path.
+          cdnPath: useCdn && !f.url.includes('&channel=') ? f.path : undefined,
           songId: trackIdToSongId(t.id),
         }), () => null)))
       const items = files.filter(<T,>(f: T | null): f is T => f != null)

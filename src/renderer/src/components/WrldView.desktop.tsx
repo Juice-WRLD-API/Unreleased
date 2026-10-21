@@ -42,6 +42,7 @@ import {
 } from '../hooks/useWrldCore'
 
 // Pulls in html-to-image for the export - only worth downloading once opened.
+import { SHARE_LYRICS_EVENT } from '../lib/desktopBridge'
 const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
 
 // What the desktop side panel is showing. The exit times are kept in sync with
@@ -141,6 +142,11 @@ export default function WrldView(): JSX.Element {
   const activeRef    = useRef<HTMLDivElement>(null)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
   const openShareLyrics = useCallback(() => setShowShareLyrics(true), [])
+  // The Widgets layout hides the song menu this is normally opened from; its own menus send the same ask.
+  useEffect(() => {
+    window.addEventListener(SHARE_LYRICS_EVENT, openShareLyrics)
+    return () => window.removeEventListener(SHARE_LYRICS_EVENT, openShareLyrics)
+  }, [openShareLyrics])
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
 
   const { artSrc, artError, setArtError, coverSongId } = useWrldArt(

@@ -1,14 +1,14 @@
 ﻿import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist } from '../types'
-import { listDonorFiles } from '../lib/donorFilesApi'
-import type { DonorFile } from '../lib/donorFilesApi'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
+import { signInWithPasskey } from '../lib/passkeyApi'
+import { migrateDonorPlaylists } from '../lib/donorPlaylistEntries'
 import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import type { GifResult } from '../lib/gifApi'
 import * as preferencesApi from '../lib/preferencesApi'
@@ -563,7 +563,6 @@ interface AppState {
   // user_settings.donor_playlists. donorFiles is the resolved file list those
   // playlists point into (null until loaded).
   donorPlaylists: DonorPlaylist[]
-  donorFiles: DonorFile[] | null
 
   // Other people's playlists followed from a share link - see FollowedPlaylist.
   // Local-only (localStorage), so this list is per-device.
@@ -844,6 +843,8 @@ interface AppActions {
   completeDiscordLogin: (code: string, state: string) => Promise<void>
   signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
   loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
+  /** Signs in with a passkey. Resolves false if the user cancelled the prompt. */
+  loginWithPasskey: () => Promise<boolean>
   /** Finishes a login another signed-in device approved (the token comes from the approval poll). */
   completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
@@ -897,17 +898,7 @@ interface AppActions {
   // playlist's id so the caller can navigate straight to it.
   createGuestPlaylist: (name: string) => string
   deleteGuestPlaylist: (id: string) => void
-  loadDonorFiles: () => Promise<void>
-  setDonorFiles: (files: DonorFile[]) => void
-  createDonorPlaylist: (name: string, fileIds?: string[]) => string
-  deleteDonorPlaylist: (id: string) => void
-  renameDonorPlaylist: (id: string, name: string) => void
-  addToDonorPlaylist: (playlistId: string, fileId: string) => void
-  removeFromDonorPlaylist: (playlistId: string, fileId: string) => void
-  reorderDonorPlaylist: (playlistId: string, fileIds: string[]) => void
   _setDonorPlaylists: (next: DonorPlaylist[]) => void
-  /** Points playlist entries at a file's new id (tag re-upload), or drops them when newId is null (delete). */
-  replaceDonorFileId: (oldId: string, newId: string | null) => void
   renameGuestPlaylist: (id: string, name: string) => void
   addToGuestPlaylist: (playlistId: string, track: Track) => void
   removeFromGuestPlaylist: (playlistId: string, trackId: string) => void
@@ -2480,6 +2471,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // with local state and push the result back, no extra requests needed.
       const profile = get().account
       await get().syncUserSettings(profile?.user_settings)
+      // Needs the synced donor_playlists from the line above.
+      void migrateDonorPlaylists()
       await get().syncSongPrefs(profile?.user_preferences)
       await get().syncListeningPlays(profile?.listening_plays)
       get()._backfillRecentTracks()
@@ -2545,6 +2538,16 @@ export const useStore = create<AppStore>((set, get, store) => ({
     await get().loadAccount()
   },
 
+  loginWithPasskey: async () => {
+    // Passkey sign-in already counts as two-factor, so there's no OTP step.
+    const res = await signInWithPasskey()
+    if (!res) return false
+    userApi.setToken(res.token)
+    set({ account: res.user })
+    await get().loadAccount()
+    return true
+  },
+
   completeApprovedLogin: async (token, user) => {
     userApi.setToken(token)
     set({ account: user })
@@ -2554,7 +2557,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   logoutAccount: async () => {
     await userApi.logout()
     const localLikes = ls.get<string[]>('likedTrackIds') ?? []
-    set({ account: null, playlists: [], likedTrackIds: localLikes, donorPlaylists: [], donorFiles: null })
+    set({ account: null, playlists: [], likedTrackIds: localLikes, donorPlaylists: [] })
     // Like play history, these belong to the account, not the machine.
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
@@ -2685,7 +2688,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
   activeLocalPlaylistId: null,
   guestPlaylists: ls.get<GuestPlaylist[]>('guestPlaylists') ?? [],
   donorPlaylists: ls.get<DonorPlaylist[]>('donorPlaylists') ?? [],
-  donorFiles: null,
   followedPlaylists: ls.get<FollowedPlaylist[]>('followedPlaylists') ?? [],
 
   setLibraryTracks: (libraryTracks) => set({ libraryTracks }),
@@ -2959,42 +2961,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ guestPlaylists: next })
     ls.set('guestPlaylists', next)
     return id
-  },
-  loadDonorFiles: async () => {
-    if (!get().account?.is_donor) return
-    try {
-      const { files } = await listDonorFiles()
-      get().setDonorFiles(files)
-    } catch { /* keep whatever was loaded; the UI shows its own load error */ }
-  },
-  setDonorFiles: (files) => set({ donorFiles: files }),
-  createDonorPlaylist: (name, fileIds = []) => {
-    const id = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    get()._setDonorPlaylists([...get().donorPlaylists, { id, name, fileIds, createdAt: Date.now() }])
-    return id
-  },
-  deleteDonorPlaylist: (id) => get()._setDonorPlaylists(get().donorPlaylists.filter((p) => p.id !== id)),
-  renameDonorPlaylist: (id, name) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === id ? { ...p, name } : p)),
-  addToDonorPlaylist: (playlistId, fileId) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
-      p.id === playlistId && !p.fileIds.includes(fileId) ? { ...p, fileIds: [...p.fileIds, fileId] } : p)),
-  removeFromDonorPlaylist: (playlistId, fileId) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
-      p.id === playlistId ? { ...p, fileIds: p.fileIds.filter((f) => f !== fileId) } : p)),
-  reorderDonorPlaylist: (playlistId, fileIds) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === playlistId ? { ...p, fileIds } : p)),
-  replaceDonorFileId: (oldId, newId) => {
-    const lists = get().donorPlaylists
-    if (!lists.some((p) => p.fileIds.includes(oldId))) return
-    get()._setDonorPlaylists(lists.map((p) => {
-      if (!p.fileIds.includes(oldId)) return p
-      // Re-uploaded copy (tag edit) keeps its slot; a deleted file just leaves.
-      const ids = newId
-        ? p.fileIds.map((id) => (id === oldId ? newId : id))
-        : p.fileIds.filter((id) => id !== oldId)
-      return { ...p, fileIds: ids }
-    }))
   },
   _setDonorPlaylists: (next) => {
     set({ donorPlaylists: next })

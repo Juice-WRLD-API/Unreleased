@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal, HardDrive,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -16,7 +16,9 @@ import ContextMenu from './ContextMenu'
 import { versionsEnabled } from '../lib/versionsApi'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
-import { addSongsInBackground } from '../lib/optimisticPlaylist'
+import { addSongsInBackground, addTracksInBackground } from '../lib/optimisticPlaylist'
+import { isPrivateEntry, playlistTrackIds, trackToPlaylistEntry } from '../lib/playlistItems'
+import { downloadFileSmart } from '../lib/cdn'
 import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
@@ -156,27 +158,40 @@ export default function SongContextMenu({
   const [zipLoading, setZipLoading] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
 
+  // What this track becomes in a synced playlist: a song, or a comp, donor or
+  // local file entry. Null for anything a playlist can't point at.
+  const entry = songId != null && songId > 0 ? { song_id: songId } : songId == null ? trackToPlaylistEntry(track) : null
+  const entryIsPrivate = !!entry && isPrivateEntry(entry)
+
   useEffect(() => {
-    if (!account || songId == null || playlists.length === 0) return
+    if (!account || !entry || playlists.length === 0) return
     Promise.all(
       playlists.map(p =>
         userApi.getPlaylist(p.id)
-          .then(d => ({ id: p.id, has: (d.items ?? []).some(it => it.song.id === songId) }))
+          .then(d => ({
+            id: p.id,
+            has: songId != null
+              ? (d.items ?? []).some(it => it.song?.id === songId)
+              : playlistTrackIds(d.items ?? []).has(track.id),
+          }))
           .catch(() => ({ id: p.id, has: false }))
       )
     // Merged rather than replaced, so a playlist ticked optimistically while
     // this was in flight doesn't get unticked by the older answer.
     ).then(results => setContained(prev => new Set([...prev, ...results.filter(r => r.has).map(r => r.id)])))
-  }, [playlists, songId, account])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlists, songId, track.id, account])
 
   // Optimistic: tick the row now, send the request in the background, and
   // untick it (with a toast) if the server says no.
   const addTo = (id: number): void => {
-    if (songId == null || contained.has(id)) return
-    const name = playlists.find(p => p.id === id)?.name ?? 'playlist'
+    if (!entry || contained.has(id)) return
     setDoneId(id)
     setContained(prev => new Set([...prev, id]))
-    void addSongsInBackground(id, [songId]).then(failed => {
+    const pending = songId != null
+      ? addSongsInBackground(id, [songId])
+      : addTracksInBackground(id, [track])
+    void pending.then(failed => {
       if (!failed.length) return
       setDoneId(prev => (prev === id ? null : prev))
       setContained(prev => { const next = new Set(prev); next.delete(id); return next })
@@ -186,7 +201,7 @@ export default function SongContextMenu({
   const createAndAdd = async (): Promise<void> => {
     const name = newName.trim()
     if (!name) return
-    if (isLocalOnly) {
+    if (isLocalOnly && !account) {
       createLocalPlaylist(name)
       // createLocalPlaylist sets activeLocalPlaylistId synchronously (zustand
       // set() applies immediately), so it's readable right after the call -
@@ -196,11 +211,11 @@ export default function SongContextMenu({
       onClose()
       return
     }
-    if (songId == null) return
+    if (!entry) return
     setBusyId(-1)
     try {
       const playlist = await userApi.createPlaylist(name)
-      await userApi.addToPlaylist(playlist.id, songId)
+      await userApi.addPlaylistEntry(playlist.id, entry)
       await refreshPlaylists()
       onClose()
     } catch { showAppToast("Couldn't create the playlist") } finally { setBusyId(null) }
@@ -231,10 +246,10 @@ export default function SongContextMenu({
   const hasValidSong = songId != null && songId > 0
   const isUnplayable = track.genre === 'unsurfaced' || (track.genre === 'recording_session' && !track.path)
   // A local library file with no matching API song - it already lives on
-  // disk (so "Download" is meaningless) and can't join a server playlist,
-  // but it can join one of the device-local playlists instead.
+  // disk (so "Download" is meaningless). It can join a synced playlist (as an
+  // entry only this device can play) or one of the device-local playlists.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
-  const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly)
+  const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly || !!entry)
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
   // only for staff, who are the only ones with a chat to share into.
@@ -257,25 +272,30 @@ export default function SongContextMenu({
     return <ShareSongModal track={track} songId={songId as number} onClose={onClose} />
   }
 
-  // "Add to playlist" second level: the account's playlists, or the device-local
-  // ones for a local-only file.
-  const playlistRows = isLocalOnly
-    ? localPlaylists.map(p => ({
+  // "Add to playlist" second level: the account's playlists (any song or file
+  // a playlist can point at), then the device-local ones for a local file.
+  // Donor and local files can't go in a public playlist, so those rows are off.
+  const syncedRows = account && entry
+    ? playlists.map(p => ({
         label: p.name,
         icon: ListMusic,
+        checked: contained.has(p.id) || doneId === p.id,
+        disabled: entryIsPrivate && p.is_public && !contained.has(p.id),
+        keepOpen: true,
+        onSelect: () => addTo(p.id),
+      }))
+    : []
+  const localRows = isLocalOnly
+    ? localPlaylists.map((p, i) => ({
+        label: p.name,
+        icon: HardDrive,
+        separatorBefore: i === 0 && syncedRows.length > 0,
         checked: p.trackIds.includes(track.id) || localDoneId === p.id,
         keepOpen: true,
         onSelect: () => { addToLocalPlaylist(p.id, track.id); setLocalDoneId(p.id) },
       }))
-    : !account
-      ? []
-      : playlists.map(p => ({
-          label: p.name,
-          icon: ListMusic,
-          checked: contained.has(p.id) || doneId === p.id,
-          keepOpen: true,
-          onSelect: () => addTo(p.id),
-        }))
+    : []
+  const playlistRows = [...syncedRows, ...localRows]
 
   const playlistFooter = !isLocalOnly && !account
     ? (

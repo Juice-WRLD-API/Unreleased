@@ -169,8 +169,9 @@ function OverviewTab() {
           <Endpoint method="GET" path="/library/playlists/{id}/" description="Get a personal playlist with tracks" />
           <Endpoint method="PATCH" path="/library/playlists/{id}/" description="Update name, description, cover, visibility, track order" />
           <Endpoint method="DELETE" path="/library/playlists/{id}/" description="Delete a personal playlist" />
-          <Endpoint method="POST" path="/library/playlists/{id}/items/" description="Add a track to a playlist" />
-          <Endpoint method="DELETE" path="/library/playlists/{id}/items/{song_id}/" description="Remove a track from a playlist" />
+          <Endpoint method="POST" path="/library/playlists/{id}/items/" description="Add a song, comp file, donor file or local file to a playlist" />
+          <Endpoint method="DELETE" path="/library/playlists/{id}/items/{song_id}/" description="Remove a song from a playlist" />
+          <Endpoint method="DELETE" path="/library/playlists/{id}/entries/{item_id}/" description="Remove any playlist entry by its id" />
           <Endpoint method="GET" path="/library/playlists/public/{id}/" description="Fetch a playlist marked public (no auth required)" />
         </div>
       </Section>
@@ -708,10 +709,27 @@ function PlaylistsTab() {
             ['GET', '/library/playlists/{id}/', 'Get playlist with full track list'],
             ['PATCH', '/library/playlists/{id}/', 'Update name, description, cover, visibility, or reorder tracks'],
             ['DELETE', '/library/playlists/{id}/', 'Delete a playlist'],
-            ['POST', '/library/playlists/{id}/items/', <>Add a track. Body <Code>{'{ "song_id": 123 }'}</Code>. Returns the updated playlist detail (201), or 200 with <Code>{'{ "detail": "Track already in playlist." }'}</Code> if it is already there (nothing changes)</>],
-            ['DELETE', '/library/playlists/{id}/items/{song_id}/', 'Remove a track'],
+            ['POST', '/library/playlists/{id}/items/', <>Add an entry. Body <Code>{'{ "song_id": 123 }'}</Code> for a song, or a file entry (see Entry sources). Returns the updated playlist detail (201), or 200 with <Code>{'{ "detail": "Track already in playlist." }'}</Code> if it is already there (nothing changes)</>],
+            ['DELETE', '/library/playlists/{id}/items/{song_id}/', 'Remove a song entry by song id'],
+            ['DELETE', '/library/playlists/{id}/entries/{item_id}/', <>Remove any entry by its own <Code>id</Code> (the only way to remove a file entry)</>],
           ]}
         />
+        <p className="text-xs text-text-muted font-semibold mt-3">Entry sources:</p>
+        <Table
+          headers={['source', 'Body', 'Notes']}
+          rows={[
+            ['song', <Code key="b">{'{ "song_id": 123 }'}</Code>, <>A catalogue song, by internal id. <Code>source</Code> can be left out</>],
+            ['comp', <Code key="b">{'{ "source": "comp", "channel": "legacy", "path": "Era/Track.mp3" }'}</Code>, <>A file in any comp channel. <Code>channel</Code> defaults to the primary one. 404 if the file doesn&apos;t exist, 400 for a path outside the channel</>],
+            ['donor', <Code key="b">{'{ "source": "donor", "file_id": "<uuid>" }'}</Code>, 'One of your own donor uploads (anyone else\'s is 404)'],
+            ['local', <Code key="b">{'{ "source": "local", "local_id": "<device id>" }'}</Code>, 'A file on the device that added it. Only the id is stored (max 255 characters), and only that device can play it'],
+          ]}
+        />
+        <p className="text-xs text-text-muted mt-2">
+          Every source takes an optional <Code>title</Code>; the server fills it from the file name. Donor and local files are
+          private: a playlist holding either can&apos;t be made public, they can&apos;t be added to a public playlist (both 400),
+          and the public endpoint never returns them. List and detail responses carry <Code>can_be_public</Code>. Deleting a
+          donor file removes it from every playlist.
+        </p>
         <p className="text-xs text-text-muted mt-2">
           <Code>?omit_cover_image=true</Code> drops the (large, base64) <Code>cover_image</Code> field from the response. Use it for
           list views that only need <Code>cover_image_url</Code>.
@@ -743,18 +761,23 @@ Authorization: Token <token>
   "name": "New name",
   "description": "New description",
   "cover_image": "",         // base64, or "" to clear
-  "is_public": true,         // toggle public sharing (see below)
-  "order": [123, 456, 789]  // song IDs in desired order
+  "is_public": true,         // toggle public sharing (see below); 400 while can_be_public is false
+  "order": [123, 456, 789],  // song IDs in desired order (song entries only)
+  "item_order": [501, 503]   // entry IDs in desired order, any source
 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>item_order</Code> places every source; entries it leaves out keep their order after the listed ones.
+        </p>
         <p className="text-xs text-text-muted font-semibold mt-3">List response, each item:</p>
         <Pre>{`{
   "id": 1,
   "name": "My Playlist",
   "description": "optional",
   "cover_image": "...",
-  "cover_image_url": "...",  // fallback to first track image_url
+  "cover_image_url": "...",  // fallback to the first song entry's image_url
   "track_count": 12,
   "is_public": false,
+  "can_be_public": true,     // false while the playlist holds donor or local files
   "created_at": "...",
   "updated_at": "..."
 }`}</Pre>
@@ -766,6 +789,7 @@ Authorization: Token <token>
   "items": [
     {
       "id": 501,
+      "source": "song",
       "position": 0,
       "added_at": "...",
       "song": {
@@ -776,11 +800,27 @@ Authorization: Token <token>
         "image_url": "/assets/drfl.png",
         "era": { /* era object */ },
         "lyrics": "...", "synced_lyrics": "..."
-      }
+      },
+      "channel": null, "filepath": "", "donor_file": null, "local_id": "", "title": ""
+    },
+    {
+      "id": 502,
+      "source": "comp",
+      "song": null,
+      "channel": "legacy",
+      "filepath": "Era/Track.mp3",
+      "donor_file": null, "local_id": "",
+      "title": "Track",
+      "position": 1, "added_at": "..."
     }
   ]
 }`}</Pre>
-        <p className="text-xs text-text-muted mt-2">The song object in playlist items is a trimmed shape, with no <Code>producers</Code>, <Code>engineers</Code>, or <Code>bitrate</Code>.</p>
+        <p className="text-xs text-text-muted mt-2">
+          Every entry has all the fields; only the ones for its <Code>source</Code> are filled, and <Code>song</Code> is null for
+          file entries. A donor entry carries <Code>donor_file</Code> (<Code>file_id</Code>, <Code>filename</Code>,{' '}
+          <Code>mime_type</Code>, <Code>size</Code>). The song object in playlist items is a trimmed shape, with no{' '}
+          <Code>producers</Code>, <Code>engineers</Code>, or <Code>bitrate</Code>.
+        </p>
       </Section>
 
       <Section title="Public Library Playlists (no auth required)">
