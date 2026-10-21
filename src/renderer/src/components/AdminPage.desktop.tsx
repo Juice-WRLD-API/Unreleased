@@ -1,4 +1,4 @@
-import { useState, memo, useEffect, useMemo } from 'react'
+import { useState, memo, useEffect, useMemo, useRef } from 'react'
 import {
   ChevronLeft, Users, Clock, CheckCircle, XCircle, ShieldCheck, BarChart2,
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
@@ -35,6 +35,7 @@ import RoleBadges from './RoleBadges'
 import { showAppToast } from '../lib/appToast'
 import ThemedSelect from './ThemedSelect'
 import ThemedCheckbox from './ThemedCheckbox'
+import { useContentMotion } from '../hooks/useContentMotion'
 
 type Tab = AdminTab
 
@@ -112,6 +113,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // art) on every single switch, which for a list of any size fired hundreds
   // of redundant image requests for data that hadn't changed.
   const visited = useVisitedTabs(tab)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentMotion(contentRef, tab)
 
   if (!canAccessStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
@@ -196,7 +199,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           filter chips and each tab's local state (selection, draft notes,
           cached song lookups) on every refetch. A translucent overlay signals
           the load without tearing the UI down. */}
-      <div className="flex-1 overflow-hidden relative">
+      <div ref={contentRef} className="flex-1 overflow-hidden relative">
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 backdrop-blur-[1px]">
             <Loader2 size={20} className="animate-spin text-text-muted" />

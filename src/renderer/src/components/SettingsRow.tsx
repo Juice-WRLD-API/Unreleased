@@ -42,11 +42,15 @@ export function Toggle({ on, onClick, locked, lockedReason = 'Locked off while t
 }): JSX.Element {
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={on}
       onClick={onClick}
       disabled={locked}
       title={locked ? lockedReason : undefined}
-      className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+      className={`relative w-10 h-5 rounded-full shrink-0 appearance-none border-0 p-0 leading-none bg-[var(--surface-overlay)] ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
+      <span aria-hidden="true" className={`absolute inset-0 rounded-full bg-accent control-motion ${on ? 'opacity-100' : 'opacity-0'}`} />
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/
           block centering trick) instead of a manual top offset — a fixed
           `top-0.5` still relied on the button having zero padding/border to
@@ -55,7 +59,7 @@ export function Toggle({ on, onClick, locked, lockedReason = 'Locked off while t
           button's own box model. No shadow on the knob either — its default
           downward offset (0 1px 3px) reads as visual weight sitting low,
           making it look off-center even when it's geometrically centered. */}
-      <span className={`absolute inset-y-0 my-auto w-4 h-4 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+      <span aria-hidden="true" className={`absolute inset-y-0 left-0.5 my-auto w-4 h-4 rounded-full bg-white control-motion ${on ? 'translate-x-5' : 'translate-x-0'}`} />
     </button>
   )
 }

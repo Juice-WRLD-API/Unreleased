@@ -715,15 +715,31 @@ input[type='range']:active::-moz-range-thumb {
 .wrld-q-row:nth-child(10)  { animation-delay: 166ms; }
 .wrld-q-row:nth-child(n+11) { animation-delay: 172ms; }
 
-/* Menu / flyout entrance - a quick, subtle scale-fade. The panel sets
-   transform-origin inline (top vs bottom) so it grows out of the trigger
-   whether it opens downward or flips above it (bottom nav bar). */
+/* Menu / flyout entrance, also used by Transfers. A fade keeps text crisp
+   and leaves anchored menus in place, including ones flipped above a trigger. */
 @keyframes menu-pop {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .animate-menu-pop {
-  animation: menu-pop 0.17s cubic-bezier(0.33, 0, 0.15, 1) both;
+  animation: menu-pop 0.45s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+/* Settings disclosures only arrive in response to expanding a section. */
+@keyframes disclosure-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-disclosure-in {
+  animation: disclosure-in 0.48s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+/* Shared switch thumbs, checkmarks, disclosure arrows and transfer progress.
+   Keep their motion off layout: no left/width or transition-all. */
+.control-motion {
+  transition-property: transform, opacity;
+  transition-duration: 0.45s;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Glass menus - the look of the new-style WRLD player's own menu
@@ -810,6 +826,7 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   .wrld-q-row,
   .animate-wordle-shake,
   .animate-menu-pop,
+  .animate-disclosure-in,
   .animate-fade-in,
   .animate-slide-in-right,
   .animate-slide-up,
@@ -834,6 +851,7 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   .pl-grid-panel-inner,
   .pl-grid-caret,
   .nav-indicator,
+  .control-motion,
   .cover-fade { transition: none !important; }
 }
 

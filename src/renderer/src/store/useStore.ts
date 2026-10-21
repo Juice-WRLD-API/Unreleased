@@ -60,6 +60,7 @@ import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
 import { getLastfmSession } from '../lib/lastfm'
 import { useSandboxStore } from '../components/Modal'
 import { runWhenIdle } from '../lib/platform'
+import { isMobileViewport } from '../hooks/useIsMobile'
 import { showAppToast } from '../lib/appToast'
 import { setNotificationsSignedIn } from '../lib/notificationSocket'
 
@@ -225,6 +226,8 @@ interface AppState {
   // "Keyboard shortcuts" → the Shortcuts tab). Settings applies it then clears
   // it back to null. Synced so it also reaches the pop-out Settings window.
   settingsTab: SettingsTab | null
+  /** Desktop Settings modal. Mobile widths still use the 'settings' view. */
+  showSettings: boolean
   showDiagnostics: boolean
   showQueue: boolean
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
@@ -1365,6 +1368,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   activeAdminTab: null,
   showNowPlaying: false,
   settingsTab: null,
+  showSettings: typeof window !== 'undefined' && window.location.pathname === '/settings' && !isMobileViewport(),
   showDiagnostics: false,
   showQueue: false,
   showMoreNav: false,
@@ -1482,11 +1486,20 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setRadioFmMatchedSong: (radioFmMatchedSong) => set({ radioFmMatchedSong }),
   setShowSettings: (show) => {
     const s = get()
+    // Desktop: a modal docked in the sandbox notch (see Modal.tsx), same as
+    // the app. Re-opening while it's already mounted wouldn't re-trigger the
+    // dock/expand in ModalOverlay's mount effect, so expand the notch here.
+    if (!isMobileViewport()) {
+      if (show) useSandboxStore.getState().expand()
+      set({ showSettings: show })
+      // Resized from phone width with the page open: leaving it means
+      // returning to whatever sat underneath.
+      if (!show && s.activeView === 'settings') s.setActiveView(s.previousView && s.previousView !== 'settings' ? s.previousView : 'home')
+      return
+    }
     if (show) { s.setActiveView('settings'); return }
-    // "Close" means go back to whatever was showing before Settings opened -
-    // there's no other view underneath anymore now that Settings is a real
-    // page in the same activeView slot as everything else, not an overlay
-    // sitting on top of it.
+    // Mobile: Settings is a real page in the activeView slot, so "close"
+    // means go back to whatever was showing before it opened.
     const fallback = s.previousView && s.previousView !== 'settings' ? s.previousView : 'api-tracker'
     s.setActiveView(fallback)
   },
@@ -1497,7 +1510,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   toggleSettings: () => {
     const s = get()
-    s.setShowSettings(s.activeView !== 'settings')
+    s.setShowSettings(isMobileViewport() ? s.activeView !== 'settings' : !s.showSettings)
   },
   openProfile: () => {
     // Which profile view depends on the account's roles, not on the caller -

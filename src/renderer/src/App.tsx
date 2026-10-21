@@ -54,7 +54,8 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/statistics') return 'statistics'
   if (pathname === '/download') return 'download'
   if (pathname === '/thank-you') return 'thanks'
-  if (pathname === '/settings') return 'settings'
+  // Desktop shows Settings as a modal over Home (the store opens it from the URL).
+  if (pathname === '/settings') return isMobileViewport() ? 'settings' : 'home'
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
   if (pathname === '/terminal') return 'terminal'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
@@ -114,8 +115,8 @@ const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
   // wherever you were (Spotify-style "now playing" sheet), not a real nav
   // destination, so dragging it down should reveal that page like a curtain
@@ -400,6 +401,11 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       <ErrorBoundary fallback={null}><MoreNavSheet /></ErrorBoundary>
+      {showSettings && !isMobile && (
+        <ErrorBoundary variant="overlay" onDismiss={() => setShowSettings(false)}>
+          <Suspense fallback={null}><Settings /></Suspense>
+        </ErrorBoundary>
+      )}
       {showDiagnostics && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowDiagnostics(false)}>
           <Suspense fallback={null}><DiagnosticsModal /></Suspense>

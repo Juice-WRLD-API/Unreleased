@@ -37,8 +37,10 @@ import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
-import { useSandboxStore } from './Modal'
+import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import { useContentMotion } from '../hooks/useContentMotion'
+import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
 import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
 import { useLastfmConnect } from '../hooks/useLastfmConnect'
@@ -372,10 +374,10 @@ function VizSettings(): JSX.Element {
           <span className="text-text-primary text-sm">WRLD visualizer</span>
           <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → and V work in fullscreen: ← → switches visualizer, V toggles visualizer only</p>
         </div>
-        <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={14} className={`text-text-muted control-motion shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-      <div className="pl-[34px]"><VizControls /></div>
+      <div className="pl-[34px] animate-disclosure-in"><VizControls /></div>
       )}
     </div>
   )
@@ -431,6 +433,8 @@ export default function Settings(): JSX.Element {
   const [savingName, setSavingName] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
+  const aboutAnswerRef = useRef<HTMLDivElement>(null)
+  useContentMotion(aboutAnswerRef, openAbout ?? '')
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
   // otherwise re-expand it - see the matching comment on setShowSettings.
@@ -582,10 +586,9 @@ export default function Settings(): JSX.Element {
   }
 
   const closeSettings = (): void => setShowSettings(false)
-  // setActiveView alone leaves Settings now that it's a real page in the same
-  // slot as every other view - no separate close step, and no extra history
-  // entry from one.
-  const openMainView = (view: ViewType): void => setActiveView(view)
+  // Close the modal first, then navigate - it's an overlay now, not a view
+  // that setActiveView leaves behind on its own.
+  const openMainView = (view: ViewType): void => { setShowSettings(false); setActiveView(view) }
 
   const {
     lastfmBusy, lastfmWaiting, lastfmError, connectLastfm, disconnectLastfm, stopLastfmPoll,
@@ -619,6 +622,9 @@ export default function Settings(): JSX.Element {
   }, [recording, setHotkeyBinding])
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'account')
+  const { containerRef: categoryRef, indicatorRef: categoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
+  const { containerRef: mobileCategoryRef, indicatorRef: mobileCategoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
+  const contentRef = useRef<HTMLDivElement>(null)
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -639,6 +645,7 @@ export default function Settings(): JSX.Element {
   // result never points at a tab that doesn't exist in this build.
   const [settingsQuery, setSettingsQuery] = useState('')
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
+  useContentMotion(contentRef, settingsQueryTrimmed ? 'search' : tab)
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
         (!r.devOnly || developerMode) &&
@@ -666,7 +673,14 @@ export default function Settings(): JSX.Element {
   }
 
   return (
-    <>
+    <ModalOverlay
+      onClose={closeSettings}
+      zIndexClassName="z-50"
+      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[760px] h-[600px] max-h-[85vh]"
+      minWidth={520} minHeight={420}
+    >
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <>
       {/* Custom-skin editor (portals to <body>, so placement here is fine) */}
       {editingSkinId && (
         <SkinEditorModal
@@ -676,12 +690,13 @@ export default function Settings(): JSX.Element {
         />
       )}
       <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 select-none">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 select-none" onMouseDown={onHandleMouseDown}>
           <div className="flex items-center gap-2" >
             <h2 className="text-text-primary font-black text-xl tracking-tight">Settings</h2>
           </div>
           <div className="flex items-center gap-3" >
-            <button onClick={closeSettings} title="Back" className="text-text-muted hover:text-text-primary transition-colors">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={closeSettings} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={20} />
             </button>
           </div>
@@ -715,40 +730,44 @@ export default function Settings(): JSX.Element {
 
         {/* Mobile tab bar - the sidebar collapses below sm, so categories
             move into a horizontal scroller instead. */}
-        <div className="sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
+        <div ref={mobileCategoryRef} className="relative isolate sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.id}
+              data-indicator-key={t.id}
               onClick={() => { setTab(t.id); setSettingsQuery('') }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
-                tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary bg-[var(--surface-overlay)]'
+                tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary bg-[var(--surface-overlay)]'
               }`}
             >
               <t.icon size={13} />
               {t.label}
             </button>
           ))}
+          <div ref={mobileCategoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-full bg-accent/15" />
         </div>
 
         {/* Body - sidebar category list + flat content pane, mirroring
             macOS System Settings / Apple Music's own preferences window. */}
         <div className="flex flex-1 min-h-0">
-          <div className="w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
+          <div ref={categoryRef} className="relative isolate w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
             {tabs.map((t) => (
               <button
                 key={t.id}
+                data-indicator-key={t.id}
                 onClick={() => { setTab(t.id); setSettingsQuery('') }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
-                  tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                  tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
                 }`}
               >
                 <t.icon size={15} className="shrink-0" />
                 {t.label}
               </button>
             ))}
+            <div ref={categoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-lg bg-accent/15" />
           </div>
 
-          <div key={tab} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} ref={contentRef} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -2188,13 +2207,14 @@ export default function Settings(): JSX.Element {
                     <div key={q}>
                       <button
                         onClick={() => setOpenAbout(openAbout === q ? null : q)}
+                        aria-expanded={openAbout === q}
                         className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-[var(--surface-raised)] transition-colors text-left"
                       >
                         <span className="text-text-secondary text-xs font-medium">{q}</span>
-                        <ChevronDown size={12} className={`text-text-muted transition-transform duration-150 shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
+                        <ChevronDown size={12} className={`text-text-muted control-motion shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
                       {openAbout === q && (
-                        <div className="px-3 pb-3 pt-0">
+                        <div ref={aboutAnswerRef} className="px-3 pb-3 pt-0">
                           <p className="text-text-muted text-xs leading-relaxed">{a}</p>
                           {link && (
                             <button
@@ -2215,6 +2235,8 @@ export default function Settings(): JSX.Element {
       </div>
 
       {legalDoc && <LegalModal initialDoc={legalDoc} onClose={() => setLegalDoc(null)} />}
-    </>
+      </>
+      )}
+    </ModalOverlay>
   )
 }

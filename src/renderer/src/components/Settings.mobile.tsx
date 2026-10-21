@@ -38,6 +38,7 @@ import { useDragReorder } from './mobile/useDragReorder'
 import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import EraCoversSection from './EraCoversSection'
+import { useContentMotion } from '../hooks/useContentMotion'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
 import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
 import { useLastfmConnect } from '../hooks/useLastfmConnect'
@@ -538,6 +539,8 @@ export default function Settings(): JSX.Element {
   const [tokenCopied, setTokenCopied] = useState(false)
   const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
+  const aboutAnswerRef = useRef<HTMLDivElement>(null)
+  useContentMotion(aboutAnswerRef, openAbout ?? '')
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   const {
     setShowSettings, setActiveView, openProfile,
@@ -633,6 +636,7 @@ export default function Settings(): JSX.Element {
   // works off the defaults; only the editor for them is desktop-side now.
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
+  const contentRef = useRef<HTMLDivElement>(null)
 
   // Settings is a two-level page: a category list that drills into one section
   // at a time. `inSection` = a section is open.
@@ -648,6 +652,7 @@ export default function Settings(): JSX.Element {
   // so a result never points at a tab that doesn't exist in this build.
   const [settingsQuery, setSettingsQuery] = useState('')
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
+  useContentMotion(contentRef, settingsQueryTrimmed ? 'search' : tab)
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
         (!r.devOnly || developerMode) &&
@@ -971,7 +976,7 @@ export default function Settings(): JSX.Element {
 
         {/* The drilled-into section - one category owns the whole screen. */}
         {inSection && (
-          <div key={tab} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
+          <div key={tab} ref={contentRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
 
             {/* ── Account ── */}
             {tab === 'account' && (
@@ -1867,13 +1872,14 @@ export default function Settings(): JSX.Element {
                     <div key={q} className="border-b border-[var(--border)] last:border-b-0">
                       <button
                         onClick={() => setOpenAbout(openAbout === q ? null : q)}
+                        aria-expanded={openAbout === q}
                         className="flex items-center justify-between gap-3 w-full py-3 min-h-[52px] text-left"
                       >
                         <span className="text-text-primary text-[15px]">{q}</span>
-                        <ChevronDown size={16} className={`text-text-muted transition-transform duration-150 shrink-0 ${openAbout === q ? 'rotate-180' : ''}`} />
+                        <ChevronDown size={16} className={`text-text-muted control-motion shrink-0 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
                       {openAbout === q && (
-                        <div className="pb-3 -mt-1">
+                        <div ref={aboutAnswerRef} className="pb-3 -mt-1">
                           <p className="text-text-muted text-[13px] leading-relaxed">{a}</p>
                           {link && (
                             <button

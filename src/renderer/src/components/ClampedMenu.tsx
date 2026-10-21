@@ -47,8 +47,8 @@ export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
       const el = ownRef.current
       if (!el) return
       const clamp = (): void => {
-        // Layout size, not getBoundingClientRect: a menu mid scale-in animation
-        // would measure small and clamp a few px too far out.
+        // Layout size keeps any caller-supplied entrance transform from
+        // affecting the menu's final clamped position.
         const rect = { width: el.offsetWidth, height: el.offsetHeight }
         const left = Math.round(Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)))
         let top = Math.round(Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)))
