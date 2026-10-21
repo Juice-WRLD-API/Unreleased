@@ -68,7 +68,8 @@ let startedAt = 0
 let entries: DebugEntry[] = []
 let dropped = 0
 // Raw secret values seen while recording, scrubbed from every string on save.
-// Kept in memory only - never parked in sessionStorage.
+// Kept in memory only - never parked in sessionStorage. A reload loses them,
+// so park() scrubs the parked entries with them first.
 const seenSecrets = new Set<string>()
 const listeners = new Set<() => void>()
 
@@ -404,8 +405,12 @@ function stopPerfObserver(): void {
 function park(): void {
   if (!recording) return
   try {
+    // The next page starts with no remembered secrets, so cut the ones known
+    // now out of what it inherits. Account fields stay: anonymous scrubbing
+    // still runs over everything on save.
+    const clean = scrubDeep(entries, scrubber(false, [...knownSecrets()].filter(notBuildId), []), false) as DebugEntry[]
     // Keep the newest entries if the whole buffer won't fit.
-    let slice = entries
+    let slice = clean
     for (;;) {
       try {
         sessionStorage.setItem(SESSION_KEY, JSON.stringify({ startedAt, anonymous, dropped: dropped + (entries.length - slice.length), entries: slice }))
@@ -525,6 +530,9 @@ function harvestIdentity(file: unknown): Set<string> {
   return found
 }
 
+// Never scrub the build's own identifiers out of the log.
+const notBuildId = (v: string): boolean => v !== APP_VERSION && v !== COMMIT_HASH
+
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Secrets are long and random, so they're cut wherever they appear. Account
@@ -640,10 +648,8 @@ export function stopDebugRecording(): { blob: Blob; filename: string; count: num
     environment: environment(anon),
     entries: sorted.map(e => ({ ...e, at: new Date(e.t).toISOString(), sinceStartMs: e.t - startedAt })),
   }
-  // Never scrub the build's own identifiers out of the log.
-  const keep = (v: string): boolean => v !== APP_VERSION && v !== COMMIT_HASH
-  const secrets = [...knownSecrets()].filter(keep)
-  const identity = anon ? [...harvestIdentity(body)].filter(keep) : []
+  const secrets = [...knownSecrets()].filter(notBuildId)
+  const identity = anon ? [...harvestIdentity(body)].filter(notBuildId) : []
   const scrubbed = scrubDeep(body, scrubber(anon, secrets, identity), anon) as typeof body
   const file = {
     format: 'unreleased-debug-log/1',
