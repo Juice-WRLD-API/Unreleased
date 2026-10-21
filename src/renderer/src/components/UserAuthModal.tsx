@@ -30,7 +30,7 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
   const [otpMethod, setOtpMethod] = useState<'code' | 'device'>('code')
   const [approval, setApproval] = useState<{ code: string } | null>(null)
   const pollRef = useRef<number | null>(null)
-  // The passkey button only shows where the app can open the prompt (Windows).
+  // The passkey buttons only show where the prompt can open (Windows app, website).
   const [passkeyReady, setPasskeyReady] = useState(false)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
 
@@ -269,6 +269,18 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               {loading && <Loader2 size={16} className="animate-spin" />}
               {needsOtp ? (otpMethod === 'device' ? (approval ? 'Waiting…' : 'Send request') : 'Verify') : mode === 'signup' ? 'Create account' : 'Log in'}
             </button>
+            {/* A passkey counts as two-factor on the server, so it skips this step. */}
+            {needsOtp && passkeyReady && (
+              <button
+                type="button"
+                onClick={() => void startPasskey()}
+                disabled={loading || passkeyBusy}
+                className="w-full py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-primary text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {passkeyBusy ? <Loader2 size={16} className="animate-spin" /> : <Fingerprint size={17} />}
+                Use a passkey instead
+              </button>
+            )}
             {needsOtp && (
               <button
                 type="button"
