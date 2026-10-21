@@ -1048,7 +1048,9 @@ function myProposalsUrl(channel?: string): string {
 // the request raced a flaky connection.
 export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
   const url = myProposalsUrl(channel)
-  return request(url, { method: 'GET' }, true, url)
+  const data = await request<SongEditProposal[] | { results?: SongEditProposal[] }>(url, { method: 'GET' }, true, url)
+  if (Array.isArray(data)) return data
+  return Array.isArray(data?.results) ? data.results : []
 }
 
 export async function createProposal(payload: {
