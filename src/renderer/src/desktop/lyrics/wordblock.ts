@@ -61,11 +61,11 @@ function paletteOf(colors: AlbumColors | null): Palette {
   return { main: legible(colors.primary), second: Math.min(apart, 1 - apart) > 0.08 ? legible(colors.secondary) : legible(colors.primary, 0.55) }
 }
 
-interface Art { picture: string; blurred: string; size: { width: number; height: number }; baseline: { x: number; y: number } }
+interface Art { picture: string; size: { width: number; height: number }; baseline: { x: number; y: number } }
 
 let penContext: CanvasRenderingContext2D | null = null
 
-/** Words already drawn, the most recently used last. Encoding a word's two pictures is the slow part of a new line, and
+/** Words already drawn, the most recently used last. Encoding a word's picture is the slow part of a new line, and
  *  songs (and the style picker's made-up lines) keep coming back to the same words in the same face, size and color. */
 const drawn = new Map<string, Art>()
 const DRAWN_MOST = 300
@@ -80,7 +80,8 @@ function drawWord(text: string, key: string, size: number, inkColor: RGB, outlin
   return art
 }
 
-/** A word drawn once: its letters with a soft shadow under them, and a blurred copy to come in from. */
+/** A word drawn once: its letters with a soft shadow under them. (The blur a word comes in from is the strips' own
+ *  filter, in enter.) */
 function paintWord(text: string, key: string, size: number, inkColor: RGB, outline: boolean): Art {
   const font = faceCSS(key, size)
   penContext ??= document.createElement('canvas').getContext('2d')!
@@ -91,27 +92,20 @@ function paintWord(text: string, key: string, size: number, inkColor: RGB, outli
   const margin = Math.ceil(0.3 * size)
   const box = { width: Math.ceil(m.width + 2 * margin), height: Math.ceil(ascent + descent + 2 * margin) }
   const scale = Math.min(window.devicePixelRatio || 1, 2)
-  const make = (blur: boolean): string => {
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.ceil(box.width * scale)
-    canvas.height = Math.ceil(box.height * scale)
-    const g = canvas.getContext('2d')!
-    g.scale(scale, scale)
-    g.font = font
-    if (blur) {
-      g.filter = `blur(${(0.08 * size).toFixed(1)}px)`
-      g.fillStyle = cssColor(inkColor, 0.85)
-      g.fillText(text, margin, margin + ascent)
-    } else {
-      g.shadowColor = 'rgba(0, 0, 0, 0.4)'
-      g.shadowBlur = 0.22 * size * scale
-      g.shadowOffsetY = 0.03 * size * scale
-      if (outline) { g.lineWidth = 0.045 * size; g.lineJoin = 'round'; g.strokeStyle = cssColor(inkColor); g.strokeText(text, margin, margin + ascent) }
-      else { g.fillStyle = cssColor(inkColor); g.fillText(text, margin, margin + ascent) }
-    }
-    return canvas.toDataURL()
-  }
-  return { picture: make(false), blurred: make(true), size: box, baseline: { x: margin, y: margin + descent } }
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.ceil(box.width * scale)
+  canvas.height = Math.ceil(box.height * scale)
+  // Drawn on the CPU: the picture is read straight back out, and reading a GPU canvas waits for everything the GPU
+  // has queued - with WRLD's visualizer running, a frame or two.
+  const g = canvas.getContext('2d', { willReadFrequently: true })!
+  g.scale(scale, scale)
+  g.font = font
+  g.shadowColor = 'rgba(0, 0, 0, 0.4)'
+  g.shadowBlur = 0.22 * size * scale
+  g.shadowOffsetY = 0.03 * size * scale
+  if (outline) { g.lineWidth = 0.045 * size; g.lineJoin = 'round'; g.strokeStyle = cssColor(inkColor); g.strokeText(text, margin, margin + ascent) }
+  else { g.fillStyle = cssColor(inkColor); g.fillText(text, margin, margin + ascent) }
+  return { picture: canvas.toDataURL(), size: box, baseline: { x: margin, y: margin + descent } }
 }
 
 // ---- a small repeatable random number source: the same seed, the same numbers ----
@@ -438,9 +432,10 @@ export class WordBlock implements LyricRenderer {
     this.page = -1
     if (!flying && !drifting) { old.forEach((l) => l.remove()); return }
     const duration = drifting ? 800 : 340
-    for (const layer of old) {
-      const fromTransform = getComputedStyle(layer).transform
-      const fromOpacity = getComputedStyle(layer).opacity
+    // Where every strip is, read before any is moved: a read after a move works the page's styles out again, strip by strip.
+    const from = old.map((layer) => { const style = getComputedStyle(layer); return { transform: style.transform, opacity: style.opacity } })
+    old.forEach((layer, index) => {
+      const { transform: fromTransform, opacity: fromOpacity } = from[index]
       const word = layer._word || { x: 0, y: 0 }
       const random = seeded((layer._seed || 0) * 31 + Math.round(word.x))
       let target: string
@@ -456,7 +451,7 @@ export class WordBlock implements LyricRenderer {
       layer.animate([{ transform: fromTransform === 'none' ? layer._final : fromTransform, opacity: fromOpacity }, { transform: target, opacity: 0 }],
         { duration, easing: drifting ? 'cubic-bezier(0.4, 0, 0.2, 1)' : 'cubic-bezier(0.55, 0, 1, 0.5)' })
       window.setTimeout(() => layer.remove(), duration + 20)
-    }
+    })
   }
 
   /** The singing has paused: the block drifts off into the distance, and for a break longer than a breath or two the

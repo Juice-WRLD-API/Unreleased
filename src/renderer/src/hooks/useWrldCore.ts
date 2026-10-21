@@ -3,7 +3,7 @@
 // of the original two files were NOT extracted here because they genuinely
 // diverge in behavior, not just layout - see each hook's own comment for
 // what's covered and what deliberately isn't.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountUser } from '../lib/userApi'
 import type { Track, FullTrack } from '../types'
 import type { RadioTrack, RadioVote } from '../lib/radioLive'
@@ -109,7 +109,9 @@ export function useWrldLyricsSource(
     : (currentTrackFull?.syncedLyrics || currentTrackFull?.lyrics || null)
   const isSynced = rawLyrics ? isLrcFormat(rawLyrics) : false
   const isEditor = !!(account?.is_editor || account?.is_administrator)
-  const syncedLines = rawLyrics && isSynced ? parseLrc(rawLyrics) : []
+  // The same lines until the lyrics change: a new array every render set the lyric styles and the lyrics list going
+  // again each time WRLD re-rendered (every 999 FM broadcast, among others).
+  const syncedLines = useMemo(() => (rawLyrics && isSynced ? parseLrc(rawLyrics) : []), [rawLyrics, isSynced])
   return { rawLyrics, isSynced, isEditor, syncedLines }
 }
 

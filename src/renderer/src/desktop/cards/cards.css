@@ -28,8 +28,10 @@
   gap: calc(2px * var(--s)); padding: 0 calc(12px * var(--s)); text-align: center; }
 .dk-card .title { font-size: calc(17px * var(--s)); font-weight: 600; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dk-card .line { font-size: calc(14.5px * var(--s)); color: rgba(255, 255, 255, 0.62); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dk-card .glare { position: absolute; inset: 0; opacity: 0; }
-.dk-card .dim { position: absolute; inset: 0; background: #000; opacity: 0; }
+/* The glare and the dim change every frame while a card moves or leans: on layers of their own, so the card under them
+   - its cover decoded again each time - isn't painted again with them. */
+.dk-card .glare { position: absolute; inset: 0; opacity: 0; will-change: opacity; }
+.dk-card .dim { position: absolute; inset: 0; background: #000; opacity: 0; will-change: opacity; }
 /* A rim of light brightest at the top-left. */
 .dk-card .rim { position: absolute; inset: 0; border-radius: var(--card-radius); padding: 1px; pointer-events: none;
   background: linear-gradient(135deg, rgba(255, 255, 255, calc(0.35 + 0.5 * var(--glass))) 0%, rgba(255, 255, 255, calc(0.12 + 0.12 * var(--glass))) 45%, rgba(255, 255, 255, calc(0.2 + 0.25 * var(--glass))) 100%);
