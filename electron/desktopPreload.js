@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 const HEARD = new Set([
   'desktop:state', 'desktop:settings', 'desktop:frost', 'desktop:pointer', 'desktop:clear-state', 'desktop:meter',
-  'desktop:hidden', 'desktop:curtain-close', 'desktop:curtain-open', 'desktop:primary',
+  'desktop:hidden', 'desktop:curtain-close', 'desktop:curtain-open', 'desktop:curtain-viz', 'desktop:curtain-frame', 'desktop:primary',
 ])
 
 contextBridge.exposeInMainWorld('desktopPage', {

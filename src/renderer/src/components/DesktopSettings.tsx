@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ElementType, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronDown, Sun, Palette, MicVocal, Disc3, ListMusic, Clock, Monitor, Sparkles, Check, RotateCcw, LayoutGrid } from 'lucide-react'
+import { ChevronDown, Sun, Palette, MicVocal, Disc3, ListMusic, Clock, Monitor, Sparkles, Check, RotateCcw, LayoutGrid, AudioWaveform } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useVizStore, useWrldEdgeLook } from '../store/vizStore'
 import { DESKTOP_DEFAULTS, type DesktopPatch, type DesktopSettings as Settings } from '../store/desktopSlice'
@@ -312,9 +312,14 @@ export default function DesktopSettings({ heading = true }: { heading?: boolean 
       </p>
 
       {windows && (
-        <Row icon={Sparkles} iconColor="#0f766e" label="Clear desk" sub="Hides every other window and the taskbar; any other app coming forward brings it all back">
-          <button onClick={() => desktopApi()?.clearDesk()} className={BUTTON_CLASS}>Clear desk</button>
-        </Row>
+        <>
+          <Row icon={Sparkles} iconColor="#0f766e" label="Clear desk" sub="Hides every other window and the taskbar; any other app coming forward brings it all back">
+            <button onClick={() => desktopApi()?.clearDesk()} className={BUTTON_CLASS}>Clear desk</button>
+          </Row>
+          <Row icon={AudioWaveform} iconColor="#7c3aed" label="Visualizer on the cleared desk" sub="WRLD's visualizer behind the widgets instead of the wallpaper">
+            <Toggle on={desktop.clear.visualizer} onClick={() => set({ clear: { visualizer: !desktop.clear.visualizer } })} />
+          </Row>
+        </>
       )}
 
       <Group id="light" open={open === 'light'} onToggle={toggle} icon={Sun} color="#f59e0b" title={windows ? 'Light' : 'Edge light'}

@@ -62,7 +62,7 @@ import {
 import type { TrackerFieldKey } from '../lib/trackerFields'
 import { reorderField, apiFieldsFor, useTrackerOmit, OPTIONAL_SONG_FIELDS } from '../lib/trackerFields'
 import { useFieldDrag } from '../hooks/useFieldDrag'
-import { AnchoredContextMenu } from './ContextMenu'
+import ContextMenu, { AnchoredContextMenu } from './ContextMenu'
 import ThemedSelect from './ThemedSelect'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel'))
@@ -303,27 +303,9 @@ function FilterPopover({
 interface BulkContextMenuState {
   x: number
   y: number
+  /** The playlists flyout has been opened - only then is each playlist
+   *  fetched to see which already hold the whole selection. */
   showPlaylists: boolean
-}
-
-// Hoisted to module scope - defining this inside SongContextMenu's render body
-// would give it a new function identity every render, causing React to
-// unmount/remount every menu item button (and flicker any :hover state) on
-// each re-render rather than just updating it.
-function MenuItem({ icon, label, onClick, disabled, title }: {
-  icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; title?: string
-}): JSX.Element {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick() }}
-      disabled={disabled}
-      title={title}
-      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary"
-    >
-      {icon}
-      {label}
-    </button>
-  )
 }
 
 function BulkContextMenu({
@@ -332,7 +314,7 @@ function BulkContextMenu({
   count,
   onAddToQueue,
   onDownloadZip,
-  onTogglePlaylists,
+  onPlaylistsOpen,
   playlists,
   account,
   onAddToPlaylist,
@@ -350,7 +332,7 @@ function BulkContextMenu({
   count: number
   onAddToQueue: () => void
   onDownloadZip: () => void
-  onTogglePlaylists: () => void
+  onPlaylistsOpen: () => void
   playlists: userApi.PlaylistSummary[]
   account: userApi.AccountUser | null
   onAddToPlaylist: (id: number) => void
@@ -369,99 +351,46 @@ function BulkContextMenu({
   /** Playlist ids that already contain every eligible selected song. */
   contained: Set<number>
 }): JSX.Element {
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handle = (e: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
-    }
-    const handleKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
-  const menuWidth = 208
-  const menuHeight = state.showPlaylists ? 320 : 160
-  const top = Math.max(8, Math.min(state.y, window.innerHeight - menuHeight - 8))
-  const left = Math.max(8, Math.min(state.x, window.innerWidth - menuWidth - 8))
-
   return (
-    <div
-      ref={menuRef}
-      style={{ position: 'fixed', zIndex: 9999, top, left }}
-      className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-    >
-      <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
-        <p className="text-text-primary text-xs font-semibold truncate">{count} {count === 1 ? 'song' : 'songs'} selected</p>
-      </div>
-
-      {state.showPlaylists ? (
-        <>
-          <button
-            onClick={(e) => { e.stopPropagation(); onTogglePlaylists() }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors"
-          >
-            <ChevronDown size={12} className="rotate-90" /> Back
-          </button>
-          {!account ? (
-            <div className="px-3 pb-2">
+    <ContextMenu
+      x={state.x}
+      y={state.y}
+      onClose={onClose}
+      zIndex={9999}
+      title={`${count} ${count === 1 ? 'song' : 'songs'} selected`}
+      className="w-52"
+      flyoutClassName="w-56"
+      items={[
+        {
+          label: 'Add to queue',
+          icon: ListPlus,
+          disabled: !canAddToQueue,
+          hint: !canAddToQueue ? "Sessions/unsurfaced songs can't be queued" : undefined,
+          onSelect: onAddToQueue,
+        },
+        canAddToPlaylist && {
+          label: 'Add to playlist',
+          icon: Plus,
+          onOpen: onPlaylistsOpen,
+          children: account
+            ? playlists.map(p => ({ label: p.name, icon: ListMusic, checked: contained.has(p.id), onSelect: () => onAddToPlaylist(p.id) }))
+            : [],
+          childrenEmpty: account ? 'No playlists yet.' : undefined,
+          childrenFooter: !account ? (
+            <div className="p-1">
               <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-              <button
-                onClick={(e) => { e.stopPropagation(); onLogin() }}
-                className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
-              >
+              <button onClick={onLogin} className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
                 Log in
               </button>
             </div>
-          ) : (
-            <div className="max-h-44 overflow-y-auto">
-              {playlists.length === 0 && (
-                <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-              )}
-              {playlists.map((p) => {
-                const allIn = contained.has(p.id)
-                return (
-                  <button
-                    key={p.id}
-                    onClick={(e) => { e.stopPropagation(); onAddToPlaylist(p.id) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                  >
-                    <ListMusic size={13} className={`shrink-0 ${allIn ? 'text-accent' : 'text-text-muted'}`} />
-                    <span className="flex-1 truncate text-xs">{p.name}</span>
-                    {allIn && <Check size={12} className="text-accent shrink-0" />}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <MenuItem
-            icon={<ListPlus size={14} />}
-            label="Add to queue"
-            onClick={onAddToQueue}
-            disabled={!canAddToQueue}
-            title={!canAddToQueue ? "Sessions/unsurfaced songs can't be queued" : undefined}
-          />
-          {canAddToPlaylist && (
-            <MenuItem icon={<Plus size={14} />} label="Add to playlist" onClick={onTogglePlaylists} />
-          )}
-          {canLinkVersions && (
-            <MenuItem icon={<Link2 size={14} />} label="Link versions" onClick={onLinkVersions} />
-          )}
-          {canBulkEdit && (
-            <MenuItem icon={<Pencil size={14} />} label="Edit" onClick={onBulkEdit} />
-          )}
-          <div className="my-1 border-t border-[var(--border)]" />
-          <MenuItem icon={<PackageOpen size={14} />} label="Download" onClick={onDownloadZip} />
-        </>
-      )}
-    </div>
+          ) : undefined,
+        },
+        canLinkVersions && { label: 'Link versions', icon: Link2, onSelect: onLinkVersions },
+        canBulkEdit && { label: 'Edit', icon: Pencil, onSelect: onBulkEdit },
+        'divider',
+        { label: 'Download', icon: PackageOpen, onSelect: onDownloadZip },
+      ]}
+    />
   )
 }
 
@@ -3743,7 +3672,7 @@ export default function ApiTrackerView(): JSX.Element {
           count={selected.size}
           onAddToQueue={() => { bulkAddToQueue(); setBulkContextMenu(null) }}
           onDownloadZip={() => { bulkDownloadZip(); setBulkContextMenu(null) }}
-          onTogglePlaylists={() => setBulkContextMenu((prev) => prev ? { ...prev, showPlaylists: !prev.showPlaylists } : null)}
+          onPlaylistsOpen={() => setBulkContextMenu((prev) => prev && !prev.showPlaylists ? { ...prev, showPlaylists: true } : prev)}
           playlists={playlists}
           account={account}
           onAddToPlaylist={(id) => { bulkAddToPlaylist(id); setBulkContextMenu(null) }}

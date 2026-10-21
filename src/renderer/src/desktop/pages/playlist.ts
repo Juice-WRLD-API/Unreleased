@@ -187,6 +187,15 @@ listEl.addEventListener('click', (event) => {
   if (source() === 'queue') page.command('jump', queueFrom + index)
   else page.command('play-list', { id: source(), index })
 })
+// The wheel anywhere on the widget scrolls the list (or the shelf, while it's open): the page is turned in 3D, where the
+// native scroll of a masked list doesn't always find the pointer's row.
+window.addEventListener('wheel', (event) => {
+  const target = shelfOpen ? $('#shelf') : listEl
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? target.clientHeight : 1
+  const before = target.scrollTop
+  target.scrollTop += event.deltaY * unit
+  if (target.scrollTop !== before) event.preventDefault()
+}, { passive: false })
 $('#play-list').addEventListener('click', () => { if (!justDragged()) page.command('play-list', { id: source(), index: 0 }) })
 $('.names .title').addEventListener('click', () => {
   if (justDragged()) return

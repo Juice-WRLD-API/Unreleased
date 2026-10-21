@@ -32,10 +32,13 @@ export interface ClampedMenuProps extends Omit<React.HTMLAttributes<HTMLDivEleme
   // Numeric so dependants (flyouts) can stack relative to it; the z-50 class
   // is the fallback.
   zIndex?: number
+  // The see-through menu pane (.menu-glass in index.css) instead of the
+  // plain surface - for menus, not pickers.
+  glass?: boolean
 }
 
 export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
-  ({ x, y, className = '', children, onClick, onPositioned, anchor, zIndex, ...rest }, forwardedRef) => {
+  ({ x, y, className = '', children, onClick, onPositioned, anchor, zIndex, glass = false, ...rest }, forwardedRef) => {
     const ownRef = useRef<HTMLDivElement>(null)
     const [pos, setPos] = useState({ left: x, top: y })
     const [up, setUp] = useState(false)
@@ -72,7 +75,7 @@ export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
           if (typeof forwardedRef === 'function') forwardedRef(el)
           else if (forwardedRef) (forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = el
         }}
-        className={`fixed z-50 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-y-auto overflow-x-hidden ${className}`}
+        className={`fixed z-50 ${glass ? 'menu-glass' : 'bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1'} overflow-y-auto overflow-x-hidden ${className}`}
         style={{
           left: pos.left,
           top: pos.top,

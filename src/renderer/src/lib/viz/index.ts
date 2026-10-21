@@ -179,6 +179,11 @@ export class Visualizer {
     this.audio.disable();
   }
 
+  /** Draws to frames analysed elsewhere (packFrame) rather than any audio of its own (see AudioEngine.feed). */
+  feedAudio(packed: Float32Array) {
+    this.audio.feed(packed);
+  }
+
   setMode(mode: string) {
     this.mode = normalizeMode(mode);
     this.c2d.reset();
@@ -200,9 +205,8 @@ export class Visualizer {
     this.usePalette = on;
   }
 
-  /** Follows the live --accent (used when artwork colours are off/unavailable). */
-  syncAccent() {
-    const v = getComputedStyle(document.documentElement).getPropertyValue("--accent");
+  /** Follows the live --accent (used when artwork colours are off/unavailable), or the accent given. */
+  syncAccent(v = getComputedStyle(document.documentElement).getPropertyValue("--accent")) {
     if (v) this.accentPal = paletteFromAccent(parseColor(v));
   }
 

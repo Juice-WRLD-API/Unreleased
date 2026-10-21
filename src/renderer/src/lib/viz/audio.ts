@@ -18,6 +18,31 @@ const AGC_TARGET = 0.7;
 const AGC_MAX_GAIN = 6;
 /** Below this the input is treated as silence/noise, and gain is frozen. */
 const AGC_GATE = 0.05;
+/** How long a frame handed in by feed() stands for the audio before the synthetic signal takes over again. */
+const FED_MS = 250;
+
+/**
+ * An AudioFrame flattened into one array, for a page that hears nothing itself
+ * (the cleared desk's visualizer, desktop/deskViz.ts): spec, peaks, wave,
+ * waveL, waveR, notes and chroma in turn, then bass, mid, treble, energy, beat.
+ */
+export const PACKED_LENGTH = BINS * 2 + WAVE_POINTS + SCOPE_POINTS * 2 + NOTE_COUNT + 12 + 5;
+
+const frameParts = (f: AudioFrame): Float32Array[] => [f.spec, f.peaks, f.wave, f.waveL, f.waveR, f.notes, f.chroma];
+
+export function packFrame(f: AudioFrame, out = new Float32Array(PACKED_LENGTH)): Float32Array {
+  let at = 0;
+  for (const part of frameParts(f)) {
+    out.set(part, at);
+    at += part.length;
+  }
+  out[at] = f.bass;
+  out[at + 1] = f.mid;
+  out[at + 2] = f.treble;
+  out[at + 3] = f.energy;
+  out[at + 4] = f.beat;
+  return out;
+}
 
 /**
  * Linear up to 0.8, then compresses smoothly toward 1. A hard clamp flattens
@@ -93,6 +118,7 @@ export class AudioEngine {
   private t = 0;
   private fluxAvg = 0;
   private cooldown = 0;
+  private fedAt = -Infinity;
 
   // Auto-gain state
   private ref = 0.3; // slow-moving estimate of how loud the input runs
@@ -233,6 +259,27 @@ export class AudioEngine {
     this.noteFreq = new Uint8Array(anNotes.frequencyBinCount);
   }
 
+  /**
+   * A frame analysed elsewhere (packFrame), for a page that plays nothing
+   * itself. While they keep coming analyze() hands back the latest as it is;
+   * once they stop, the synthetic signal takes over again.
+   */
+  feed(packed: Float32Array) {
+    if (packed.length !== PACKED_LENGTH) return;
+    const f = this.frame;
+    let at = 0;
+    for (const part of frameParts(f)) {
+      part.set(packed.subarray(at, at + part.length));
+      at += part.length;
+    }
+    f.bass = packed[at];
+    f.mid = packed[at + 1];
+    f.treble = packed[at + 2];
+    f.energy = packed[at + 3];
+    f.beat = packed[at + 4];
+    this.fedAt = performance.now();
+  }
+
   disable() {
     if (this.tapSource) {
       // Borrowed graph: remove only the edges we added. A bare disconnect() on
@@ -262,6 +309,7 @@ export class AudioEngine {
     this.t += dt;
     const f = this.frame;
     const raw = this.raw;
+    if (performance.now() - this.fedAt < FED_MS) return f;
 
     if (this.analyser) {
       this.analyser.getByteFrequencyData(this.freq as any);

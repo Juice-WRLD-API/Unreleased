@@ -1,5 +1,14 @@
-/* The desk cleared: the wallpaper laid over every window like a curtain, the desktop's own windows over it. Every
-   fade is the compositor's. */
+/* The desk cleared: the wallpaper laid over every window like a curtain, the desktop's own windows over it - or WRLD's
+   backdrop in its place, the cover blurred and the visualizer over it. Every fade is the compositor's. */
 #curtain { position: absolute; inset: 0; opacity: 0; background: #000; transition: opacity 0.7s ease-in-out; }
 #curtain.shown { opacity: 1; }
 #curtain img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+#curtain .stage { position: absolute; inset: 0; overflow: hidden; opacity: 0; background: linear-gradient(to bottom right, #111827, #000);
+  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+#curtain.viz .stage { opacity: 1; }
+#curtain .stage.instant { transition: none; }
+/* As WRLD's: blurred so far that the small cover is plenty, and scaled past the blur's soft edges. */
+#curtain .backdrop { filter: blur(60px) brightness(0.22) saturate(2.4); transform: scale(1.2); }
+#curtain .wash { position: absolute; inset: 0; background: linear-gradient(to bottom, rgb(0 0 0 / 0.4), transparent 50%, rgb(0 0 0 / 0.7)); }
+@media (prefers-reduced-motion: reduce) { #curtain .stage { transition-duration: 0.01s; } }

@@ -54,6 +54,7 @@ function status(): string {
     `playlist  ${onOff(d.playlist.isOn)} · ${d.playlist.source} · ${d.playlist.rows} rows · ${d.playlist.side}${d.playlist.locked ? ' · locked' : ''}`,
     `clock     ${onOff(d.clock.isOn)} · size ${percent(d.clock.size)}${d.clock.showDate ? ' · date' : ''}${d.clock.locked ? ' · locked' : ''}`,
     `lyrics    ${lyric}${d.lyrics.look !== 'classic' ? ` · ${lyricFontFor(d.lyrics.fonts, d.lyrics.look)}` : ''}`,
+    `clear     ${d.clear.visualizer ? 'WRLD\'s visualizer behind the widgets' : 'the wallpaper behind the widgets'}`,
   ]
   if (d.hiddenDisplays.length) lines.push(`displays  off: ${d.hiddenDisplays.join(', ')}`)
   if (!desktopWindowsSupported()) {
@@ -96,7 +97,7 @@ function widget(which: 'player' | 'playlist' | 'clock', words: string[]): string
 export const DESKTOP_COMMANDS: TermCommand[] = [
   {
     name: 'desktop', aliases: ['ijwa'], group: 'App',
-    usage: 'desktop [status] · desktop light [on|off|<look>|next] · desktop look <look> · desktop place <all|bottom|top|corners> · desktop motion <flow|music|still> · desktop tune <setting> <0-100%> · desktop colors <artwork|own|one|two> · desktop widgets [on|off] · desktop player|playlist|clock [on|off|<setting> <value>|reset] · desktop clear [on|off] · desktop lyrics [<style>|next] · desktop font <face> · desktop displays [<name> on|off]',
+    usage: 'desktop [status] · desktop light [on|off|<look>|next] · desktop look <look> · desktop place <all|bottom|top|corners> · desktop motion <flow|music|still> · desktop tune <setting> <0-100%> · desktop colors <artwork|own|one|two> · desktop widgets [on|off] · desktop player|playlist|clock [on|off|<setting> <value>|reset] · desktop clear [on|off|viz [on|off]] · desktop lyrics [<style>|next] · desktop font <face> · desktop displays [<name> on|off]',
     description: 'Settings > Desktop: the light round the screens, the desktop widgets, the desk cleared, and the lyric styles for WRLD and the desktop player',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
@@ -111,8 +112,10 @@ export const DESKTOP_COMMANDS: TermCommand[] = [
         if (sub === 'lyrics') return ['classic', 'next', ...LYRIC_LOOKS.map((l) => l.id)].filter((s) => s.startsWith(p))
         if (sub === 'font') return FACES.map((f) => f.key).filter((s) => s.toLowerCase().startsWith(p))
         if (sub === 'player' || sub === 'playlist' || sub === 'clock') return ['on', 'off', 'reset', ...Object.keys(WIDGET_KEYS[sub])].filter((s) => s.startsWith(p))
-        if (sub === 'widgets' || sub === 'clear') return ['on', 'off'].filter((s) => s.startsWith(p))
+        if (sub === 'widgets') return ['on', 'off'].filter((s) => s.startsWith(p))
+        if (sub === 'clear') return ['on', 'off', 'viz'].filter((s) => s.startsWith(p))
       }
+      if (before.length === 2 && sub === 'clear' && before[1].toLowerCase() === 'viz') return ['on', 'off'].filter((s) => s.startsWith(p))
       return []
     },
     run: async (args, ctx) => {
@@ -170,7 +173,18 @@ export const DESKTOP_COMMANDS: TermCommand[] = [
         }
         case 'widgets': needsWindows(); say(actions.setWidgets(rest[0] ? toggle(rest[0], false) : undefined)); return
         case 'player': case 'playlist': case 'clock': say(widget(sub, rest)); return
-        case 'clear': needsWindows(); say(actions.clearDesk(rest[0] ? toggle(rest[0], false) : undefined)); return
+        case 'clear': {
+          needsWindows()
+          // What the cleared desk shows behind the widgets: WRLD's visualizer, or the wallpaper.
+          if (rest[0]?.toLowerCase() === 'viz' || rest[0]?.toLowerCase() === 'visualizer') {
+            const visualizer = toggle(rest[1], d.clear.visualizer)
+            s.setDesktop({ clear: { visualizer } })
+            say(visualizer ? 'Cleared desk: WRLD\'s visualizer behind the widgets' : 'Cleared desk: the wallpaper behind the widgets')
+            return
+          }
+          say(actions.clearDesk(rest[0] ? toggle(rest[0], false) : undefined))
+          return
+        }
         case 'lyrics': {
           const word = rest[0]?.toLowerCase()
           if (!word) { ctx.print(`Lyric style: ${d.lyrics.look === 'classic' ? 'Classic' : lyricLookOf(d.lyrics.look).title}`, 'plain'); return }

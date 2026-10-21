@@ -84,12 +84,18 @@ export interface DesktopLyrics {
   fonts: Record<string, string>
 }
 
+export interface DesktopClear {
+  /** WRLD's visualizer behind the widgets while the desk is clear, in place of the wallpaper. */
+  visualizer: boolean
+}
+
 export interface DesktopSettings {
   light: DesktopLight
   player: DesktopPlayer
   playlist: DesktopPlaylist
   clock: DesktopClock
   lyrics: DesktopLyrics
+  clear: DesktopClear
   /** Displays the light and the widgets keep off, by label. */
   hiddenDisplays: string[]
 }
@@ -97,7 +103,7 @@ export interface DesktopSettings {
 type Groups = Omit<DesktopSettings, 'hiddenDisplays'>
 export type DesktopPatch = { [K in keyof Groups]?: Partial<Groups[K]> } & { hiddenDisplays?: string[] }
 
-const GROUPS = ['light', 'player', 'playlist', 'clock', 'lyrics'] as const
+const GROUPS = ['light', 'player', 'playlist', 'clock', 'lyrics', 'clear'] as const
 
 export const DESKTOP_DEFAULTS: DesktopSettings = {
   light: { ...DEFAULT_LIGHT, isOn: false, onlyOnDesktop: false },
@@ -111,6 +117,7 @@ export const DESKTOP_DEFAULTS: DesktopSettings = {
     locked: false, place: null, tabPlace: null,
   },
   lyrics: { look: 'karaoke', fonts: {} },
+  clear: { visualizer: true },
   hiddenDisplays: [],
 }
 

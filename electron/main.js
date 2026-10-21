@@ -837,6 +837,7 @@ function desktopTrayItems() {
       { label: 'Desktop clock', type: 'checkbox', checked: !!d.clock.isOn, click: (item) => desktop.set({ clock: { isOn: item.checked } }) },
       { type: 'separator' },
       { label: desktop.isClear ? 'Bring everything back' : 'Clear the desk', click: () => desktop.toggleClear() },
+      { label: 'Visualizer on the cleared desk', type: 'checkbox', checked: d.clear?.visualizer !== false, click: (item) => desktop.set({ clear: { visualizer: item.checked } }) },
     ],
   }]
 }

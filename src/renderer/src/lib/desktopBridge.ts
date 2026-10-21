@@ -7,6 +7,7 @@ import { useStore, type AppStore } from '../store/useStore'
 import { desktopApi, desktopWindowsSupported } from '../desktop/api'
 import { watchPlayClock } from '../desktop/playClock'
 import { listenToMeter } from '../desktop/meter'
+import { followDeskViz } from '../desktop/deskViz'
 import { albumColorsFor } from '../desktop/artColors'
 import { timedFromLines, pacedFromText, type TimedLine } from '../desktop/lyrics/timing'
 import { downloadSyncedLyrics, isLrcFormat, parseLrc } from './lyrics'
@@ -603,6 +604,8 @@ export function initDesktopBridge(): void {
   }
   followMeter()
   useStore.subscribe((s, p) => { if (s.desktop !== p.desktop) followMeter() })
+  // WRLD's visualizer behind the widgets while the desk is clear.
+  followDeskViz(api, nowCover)
 
   api.onCommand((cmd, arg) => { void runDesktopCommand(cmd, arg).catch((e) => console.warn('[desktop] command failed', cmd, e)) })
   api.onRequest((id, kind, arg) => {

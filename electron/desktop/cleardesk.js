@@ -1,10 +1,12 @@
 // The desk cleared: the other apps' windows, the desktop's icons and the taskbar go, and only the desktop's own - the
-// player, the playlist, the clock and the light - and the wallpaper stay. Pressed again, all comes back as it was;
-// going to another app (Alt+Tab, the Start menu, a click on the taskbar's last glimpse) brings it all back too.
+// player, the playlist, the clock and the light - and the wallpaper stay, or WRLD's visualizer in its place. Pressed
+// again, all comes back as it was; going to another app (Alt+Tab, the Start menu, a click on the taskbar's last
+// glimpse) brings it all back too.
 //
-// No window is hidden, minimized or moved: the wallpaper is laid over all of them like a curtain, fading in, with the
-// desktop's windows lifted over it, and fades away again. Every window waits under it exactly where it was, the
-// taskbar too, so nothing of Windows itself is ever changed, and nothing is left changed should Unreleased stop.
+// No window is hidden, minimized or moved: the wallpaper (or the visualizer) is laid over all of them like a curtain,
+// fading in, with the desktop's windows lifted over it, and fades away again. Every window waits under it exactly
+// where it was, the taskbar too, so nothing of Windows itself is ever changed, and nothing is left changed should
+// Unreleased stop.
 const { screen } = require('electron')
 const EventEmitter = require('events')
 const { TOOL, openShared } = require('./windows')
@@ -14,7 +16,7 @@ class ClearDesk extends EventEmitter {
   /**
    * @param {{ pageUrl: (name: string) => string, shared: { hostUrl: string, preload: string }, preload: string,
    *   widgets: () => Electron.BrowserWindow[], lights: () => Electron.BrowserWindow[], wallpaper: () => string | null,
-   *   onWindow: (win: Electron.BrowserWindow) => void }} options
+   *   viz: () => unknown, onWindow: (win: Electron.BrowserWindow) => void }} options
    */
   constructor(options) {
     super()
@@ -49,7 +51,7 @@ class ClearDesk extends EventEmitter {
     const turn = ++this.turn
     this.emit('change', true)
     screenWatch.need('cleardesk', true)
-    const look = { picture: this.options.wallpaper() }
+    const look = { picture: this.options.wallpaper(), viz: this.options.viz() }
     for (const display of screen.getAllDisplays()) {
       /** @type {{ win: Electron.BrowserWindow | null, ready: Promise<void> }} */
       const one = { win: null, ready: Promise.resolve() }
@@ -95,6 +97,11 @@ class ClearDesk extends EventEmitter {
       })
     }
     if (!this.curtains.length) this.lower()
+  }
+
+  /** Something for every curtain's page there is: what its visualizer draws, and its frames. */
+  send(channel, value) {
+    for (const one of this.curtains) if (one.win && !one.win.isDestroyed()) one.win.webContents.send(channel, value)
   }
 
   /** The curtain's page said it has opened: its window goes. */

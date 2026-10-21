@@ -7,6 +7,7 @@ import type { AlbumColors, Meter } from '../light/engine'
 import type { LyricTune, StageClock } from '../lyrics/scene'
 import type { TimedLine } from '../lyrics/timing'
 import type { DesktopTrack } from '../../lib/desktopBridge'
+import type { DeskVizLook } from '../deskViz'
 import type { WidgetPart } from '../widgetMenu'
 
 export type { DesktopTrack }
@@ -63,8 +64,13 @@ export interface Bridge {
   on(channel: 'desktop:clear-state', cb: (on: boolean) => void): () => void
   on(channel: 'desktop:meter', cb: (meter: Meter) => void): () => void
   on(channel: 'desktop:hidden', cb: (hidden: boolean) => void): () => void
-  on(channel: 'desktop:curtain-close', cb: (look: { picture: string | null }) => void): () => void
+  /** The curtain comes in, showing the wallpaper, or WRLD's visualizer when there's one to draw (`viz`). */
+  on(channel: 'desktop:curtain-close', cb: (look: { picture: string | null; viz: DeskVizLook | null }) => void): () => void
   on(channel: 'desktop:curtain-open', cb: () => void): () => void
+  /** What the curtain draws changed while it's in. */
+  on(channel: 'desktop:curtain-viz', cb: (viz: DeskVizLook | null) => void): () => void
+  /** One frame of what the app plays, for the curtain's visualizer (lib/viz/audio's packFrame). */
+  on(channel: 'desktop:curtain-frame', cb: (frame: Float32Array) => void): () => void
   on(channel: 'desktop:primary', cb: (bounds: Bounds) => void): () => void
   /** In the WRLD tab: put away (true) while the tab's closed or its old style is showing, the page kept for coming back. */
   on(channel: 'desktop:shelved', cb: (on: boolean) => void): () => void

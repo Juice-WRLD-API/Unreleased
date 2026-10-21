@@ -144,6 +144,10 @@ test('everything Desktop starts off, and saved settings keep defaults added late
   assert.equal(d.playlist.isOn, false)
   assert.equal(d.clock.isOn, false)
   assert.equal(d.lyrics.look, 'karaoke')
+  // The cleared desk shows WRLD's visualizer once there's one to show; settings saved before it get that too.
+  assert.equal(d.clear.visualizer, true)
+  assert.equal(slice.mergeDesktop(d, { light: { look: 'lava' } }).clear.visualizer, true)
+  assert.equal(slice.mergeDesktop(d, { clear: { visualizer: false } }).clear.visualizer, false)
   // Out of the desktop, but all three in WRLD's Widgets layout once that's picked.
   for (const which of ['player', 'playlist', 'clock']) { assert.equal(d[which].inWrld, true); assert.equal(d[which].tabPlace, null) }
   const merged = slice.mergeDesktop(d, { light: { look: 'lava' }, player: { size: 1 }, hiddenDisplays: ['DELL', 3] })
@@ -183,6 +187,8 @@ test('a widget\'s right-click menu hides and shows it where it was clicked, and 
   assert.deepEqual(find(onDesktop, 'Widgets').children.map((w) => w.checked), [false, true, false])
   assert.deepEqual(find(onDesktop, 'Mini player').arg, { player: { mini: true } })
   assert.equal(find(onDesktop, 'Bring everything back').cmd, 'clear')
+  assert.deepEqual(find(onDesktop, 'Visualizer on the cleared desk'), { label: 'Visualizer on the cleared desk', checked: true, cmd: 'set', arg: { clear: { visualizer: false } } })
+  assert.equal(find(inTab, 'Visualizer on the cleared desk'), undefined)
 
   // On the lyrics: theirs in place of the player's own, the widget's place and the rest still after.
   const onLyrics = widgetMenu('player', d, { where: 'tab', desktopToo: true, playlists: [], part: 'lyrics', lyrics: { has: true, timed: false } })
@@ -194,6 +200,24 @@ test('a widget\'s right-click menu hides and shows it where it was clicked, and 
   assert.ok(find(onLyrics, 'Lock position'))
   const noLyrics = widgetMenu('player', d, { where: 'tab', desktopToo: true, playlists: [], part: 'lyrics', lyrics: { has: false, timed: false } })
   assert.equal(find(noLyrics, 'Copy lyrics').disabled, true)
+})
+
+test('a visualizer frame sent to the cleared desk arrives as it was analysed', () => {
+  const audio = loadTs(path.join(RENDERER, 'lib/viz/audio.ts'))
+  const here = new audio.AudioEngine()
+  // The gentle signal of no audio, a few frames in, so every part has moved.
+  let frame
+  for (let i = 0; i < 30; i++) frame = here.analyze(1 / 60, true)
+  const packed = audio.packFrame(frame)
+  assert.equal(packed.length, audio.PACKED_LENGTH)
+  const there = new audio.AudioEngine()
+  there.feed(packed)
+  const got = there.analyze(1 / 60, false)
+  for (const key of ['spec', 'peaks', 'wave', 'waveL', 'waveR', 'notes', 'chroma']) assert.deepEqual(Array.from(got[key]), Array.from(frame[key]), key)
+  for (const key of ['bass', 'mid', 'treble', 'energy', 'beat']) assert.equal(got[key], Math.fround(frame[key]), key)
+  // Anything else is turned away.
+  there.feed(new Float32Array(3))
+  assert.equal(there.frame.spec[0], got.spec[0])
 })
 
 // ---- the main process ----

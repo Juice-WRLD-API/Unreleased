@@ -119,7 +119,10 @@ export function widgetMenu(which: WidgetWhich, desktop: DesktopSettings, ctx: Wi
     widgets,
     ...(elsewhere ? [elsewhere] : []),
     'divider',
-    ...(onDesktop ? [{ label: ctx.isClear ? 'Bring everything back' : 'Clear the desk', cmd: 'clear' }] : []),
+    ...(onDesktop ? [
+      { label: ctx.isClear ? 'Bring everything back' : 'Clear the desk', cmd: 'clear' },
+      { label: 'Visualizer on the cleared desk', checked: desktop.clear.visualizer, cmd: 'set', arg: { clear: { visualizer: !desktop.clear.visualizer } } },
+    ] : []),
     { label: 'Desktop settings…', cmd: 'open-settings' },
   ]
 }

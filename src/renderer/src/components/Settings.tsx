@@ -172,6 +172,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, on the desktop or in WRLD' },
   { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, on the desktop or in WRLD' },
   { tab: 'desktop', label: 'Clear desk', sub: 'Hide every other window and the taskbar', electronOnly: true },
+  { tab: 'desktop', label: 'Visualizer on the cleared desk', sub: 'WRLD’s visualizer behind the widgets in place of the wallpaper', electronOnly: true },
   { tab: 'desktop', label: 'Displays', sub: 'Which screens get the light and the widgets', electronOnly: true },
   { tab: 'app', label: 'Download folder', electronOnly: true },
   { tab: 'app', label: 'Offline songs folder', electronOnly: true },

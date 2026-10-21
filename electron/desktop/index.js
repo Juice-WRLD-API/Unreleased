@@ -38,6 +38,9 @@ function createDesktop(options) {
   let lastPlayingAt = 0
   /** @type {NodeJS.Timeout | undefined} */
   let lingering
+  /** @type {{ mode: string | null } | null} what the cleared desk draws behind the widgets, as the main window last
+   *  told it (src/renderer/src/desktop/deskViz.ts); `mode` null for the wallpaper */
+  let vizLook = null
 
   const main = () => {
     const win = getMainWindow()
@@ -58,7 +61,7 @@ function createDesktop(options) {
       if (win.isDestroyed()) return
       win.webContents.send('desktop:settings', { settings, fit: fitFor(win.webContents) })
       win.webContents.send('desktop:state', state)
-      win.webContents.send('desktop:frost', frost.frostUrl())
+      win.webContents.send('desktop:frost', frostNow())
       win.webContents.send('desktop:primary', screen.getPrimaryDisplay().bounds)
       win.webContents.send('desktop:clear-state', clear.isOn)
       sendHidden()
@@ -90,13 +93,20 @@ function createDesktop(options) {
     widgets: () => /** @type {Electron.BrowserWindow[]} */ (widgetWindows()),
     lights: () => lights.windows,
     wallpaper: () => frost.wallpaperUrl(),
+    viz: () => vizLook,
     onWindow: (win) => roles.set(win.webContents, { which: 'curtain' }),
   })
   clear.on('change', (on) => {
     broadcast('desktop:clear-state', on)
+    broadcast('desktop:frost', frostNow())
     main()?.webContents.send('desktop:clear-state', on)
+    throttleMain()
     options.onChange?.()
   })
+
+  /** The widgets' glass shows the wallpaper behind them, blurred - but over the cleared desk's visualizer, a glass of
+   *  its own, as in the WRLD tab. */
+  const frostNow = () => (clear.isOn && vizLook?.mode ? null : frost.frostUrl())
 
   /** Every desktop window there is now. */
   const pages = () => [...lights.windows, ...widgetWindows()].filter((w) => w && !w.isDestroyed())
@@ -139,14 +149,19 @@ function createDesktop(options) {
 
   // ---- applying the settings ----
 
+  /** The main window drives the desktop's windows and feeds the cleared desk's visualizer, and it's usually hidden
+   *  while they're in use: its timers mustn't be held back meanwhile. */
+  function throttleMain() {
+    const anyWidget = Object.keys(widgets).some((which) => settings?.[which]?.isOn)
+    main()?.webContents.setBackgroundThrottling(!(anyWidget || settings?.light?.isOn || clear.isOn))
+  }
+
   let lastDisplays = ''
   function applyAll() {
     if (!settings) return
     const anyWidget = Object.keys(widgets).some((which) => settings[which]?.isOn)
     if (anyWidget) frost.start()
-    // The main window drives the desktop's windows, and it's usually hidden while they're in use: its timers mustn't
-    // be held back meanwhile.
-    main()?.webContents.setBackgroundThrottling(!(anyWidget || settings.light?.isOn))
+    throttleMain()
     const displays = JSON.stringify(shownDisplays().map((d) => [d.id, d.bounds]))
     if (displays !== lastDisplays) { lastDisplays = displays; lights.rebuild() }
     updateLight()
@@ -161,7 +176,7 @@ function createDesktop(options) {
   screen.on('display-added', onDisplays)
   screen.on('display-removed', onDisplays)
   screen.on('display-metrics-changed', onDisplays)
-  frost.on('change', () => broadcast('desktop:frost', frost.frostUrl()))
+  frost.on('change', () => broadcast('desktop:frost', frostNow()))
   const onPrimary = () => broadcast('desktop:primary', screen.getPrimaryDisplay().bounds)
   screen.on('display-metrics-changed', onPrimary)
 
@@ -235,6 +250,16 @@ function createDesktop(options) {
     'desktop:clear': (event, on) => {
       if (fromMain(event)) clear.set(on === null ? undefined : on)
     },
+    'desktop:viz-look': (event, look) => {
+      if (!fromMain(event) || !look || typeof look !== 'object') return
+      const wasShown = Boolean(vizLook?.mode)
+      vizLook = { ...look, mode: typeof look.mode === 'string' ? look.mode : null }
+      clear.send('desktop:curtain-viz', vizLook)
+      if (clear.isOn && Boolean(vizLook.mode) !== wasShown) broadcast('desktop:frost', frostNow())
+    },
+    'desktop:viz-frame': (event, frame) => {
+      if (fromMain(event) && frame instanceof Float32Array) clear.send('desktop:curtain-frame', frame)
+    },
     'desktop:reply': (event, id, value) => {
       if (fromMain(event)) waiting.get(id)?.(value)
     },
@@ -262,7 +287,7 @@ function createDesktop(options) {
     'desktop:page-hello': (event) => {
       const role = roles.get(event.sender)
       if (!role) return null
-      return { which: role.which, settings, state, fit: fitFor(event.sender), frost: frost.frostUrl(), isClear: clear.isOn,
+      return { which: role.which, settings, state, fit: fitFor(event.sender), frost: frostNow(), isClear: clear.isOn,
         // The frost is the main display's wallpaper: where that display lies, for the glass to line it up.
         primary: screen.getPrimaryDisplay().bounds,
         hidden: Boolean(settings?.light?.onlyOnDesktop) && !screenWatch.desktopInFront() && !clear.isOn }

@@ -12,9 +12,8 @@ import type { NowPlayingState } from '../../lib/userApi'
 import { useOpenModal } from './modalHost'
 import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp, useChatToast, useDismiss } from './ui'
 import { UserCardBody } from './UserCard'
-import { MenuItem } from './SidePanels'
 import { ConfirmDialog } from './MessageItem'
-import ContextMenu from '../ContextMenu'
+import ContextMenu, { AnchoredContextMenu } from '../ContextMenu'
 
 interface RoomMenuItem {
   label: string
@@ -478,9 +477,8 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
   const [catMenu, setCatMenu] = useState<{ category: string; x: number; y: number } | null>(null)
   const [confirmDeleteChannel, setConfirmDeleteChannel] = useState<ChatChannel | null>(null)
   const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<{ category: string; count: number } | null>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const menuBtnRef = useRef<HTMLButtonElement>(null)
   const toast = useChatToast()
-  useDismiss(menu, () => setMenu(false), menuRef)
 
   const groups = useMemo(() => {
     const map = new Map<string, ChatChannel[]>()
@@ -546,8 +544,9 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
 
   return (
     <div className="flex-1 min-h-0 flex flex-col" style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
-      <div ref={menuRef} className="relative shrink-0">
+      <div className="relative shrink-0">
         <button
+          ref={menuBtnRef}
           onClick={() => setMenu((v) => !v)}
           className="w-full h-14 flex items-center gap-2 px-4 border-b border-[var(--border)] text-left hover:bg-surface-raised/50 transition-colors"
         >
@@ -558,13 +557,17 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
           <ChevronDown size={16} className={`text-text-muted transition-transform ${menu ? 'rotate-180' : ''}`} />
         </button>
         {menu && (
-          <div className="chat-pop absolute left-2 right-2 top-full mt-1 z-30 rounded-xl border border-[var(--border)] bg-surface shadow-2xl py-1">
-            {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'add-members', serverId }) }}><span className="inline-flex items-center gap-2"><UserPlus size={14} />Add members</span></MenuItem>}
-            {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'channel', serverId }) }}><span className="inline-flex items-center gap-2"><Plus size={14} />Create channel</span></MenuItem>}
-            {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'create-category', serverId }) }}><span className="inline-flex items-center gap-2"><FolderPlus size={14} />Create category</span></MenuItem>}
-            {canManage && <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'server-settings', serverId }) }}><span className="inline-flex items-center gap-2"><Settings size={14} />Server settings</span></MenuItem>}
-            {!canManage && <p className="px-3 py-2 text-xs text-text-muted">Only owners and admins can manage this server.</p>}
-          </div>
+          <AnchoredContextMenu
+            anchorRef={menuBtnRef}
+            onClose={() => setMenu(false)}
+            items={canManage ? [
+              { label: 'Add members', icon: UserPlus, onSelect: () => openModal({ kind: 'add-members', serverId }) },
+              { label: 'Create channel', icon: Plus, onSelect: () => openModal({ kind: 'channel', serverId }) },
+              { label: 'Create category', icon: FolderPlus, onSelect: () => openModal({ kind: 'create-category', serverId }) },
+              { label: 'Server settings', icon: Settings, onSelect: () => openModal({ kind: 'server-settings', serverId }) },
+            ] : []}
+            body={canManage ? undefined : <p className="px-3 py-2 text-xs text-text-muted">Only owners and admins can manage this server.</p>}
+          />
         )}
       </div>
 

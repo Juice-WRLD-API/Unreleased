@@ -28,6 +28,8 @@ export interface ContextMenuItem {
   onSelect?: () => void
   danger?: boolean
   disabled?: boolean
+  /** Tooltip - for a disabled row, the reason it's disabled. */
+  hint?: string
   /** Accent-tinted - a toggle that's currently on (Like). */
   active?: boolean
   /** Check mark: on the right, or in a left column when the menu has `checkColumn`. */
@@ -47,6 +49,8 @@ export interface ContextMenuItem {
   childrenFooter?: ReactNode
   /** Free-form next level. Only mounted while open. */
   panel?: (ctx: ContextMenuPanelCtx) => ReactNode
+  /** Runs when this item's next level opens - to load what it shows. */
+  onOpen?: () => void
   /** Leave the menu open after selecting - for toggles and copy-confirmations. */
   keepOpen?: boolean
 }
@@ -222,7 +226,7 @@ export default function ContextMenu({
               trailing={hasNext(it)
                 ? <ChevronRight size={16} className="text-text-muted" />
                 : it.checked ? <Check size={16} className="text-accent" /> : it.trailing}
-              onClick={() => (hasNext(it) ? setTrail(t => [...t, i]) : select(it))}
+              onClick={() => (hasNext(it) ? (setTrail(t => [...t, i]), it.onOpen?.()) : select(it))}
             />
           </div>
         ))
@@ -283,6 +287,7 @@ export default function ContextMenu({
       zIndex={zIndex}
       role="menu"
       data-ctx-menu={menuId}
+      glass
       className={`min-w-[200px] max-w-[260px] ${popAnimation ? 'animate-menu-pop' : ''} ${className}`}
       onPositioned={setMenuPos}
       onContextMenu={(e) => e.preventDefault()}
@@ -299,7 +304,7 @@ export default function ContextMenu({
 
       {page ? (
         <>
-          <button onClick={page.onBack} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors">
+          <button onClick={page.onBack} className="menu-glass-row w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors">
             <ChevronLeft size={12} /> Back
           </button>
           {page.note && <p className="px-3 pb-1 text-[10px] text-text-muted">{page.note}</p>}
@@ -357,6 +362,12 @@ function ItemList({ entries, containerRef, depth, cfg, onLeave, focusFirst }: {
     if (focusFirst) rowRefs.current.find(r => r && !r.disabled)?.focus()
   }, [focusFirst])
 
+  useEffect(() => {
+    const it = openSub !== null ? entries[openSub] : undefined
+    if (it && it !== 'divider') it.onOpen?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSub])
+
   // Hover handling with a safe-triangle: moving from "Add to playlist" toward
   // its flyout cuts across the rows below it, and switching to each one as the
   // pointer passes would close the flyout before it arrives. While the pointer
@@ -380,7 +391,10 @@ function ItemList({ entries, containerRef, depth, cfg, onLeave, focusFirst }: {
     const hit = rowRefs.current.findIndex(r => r?.contains(t))
     if (hit < 0) return
     const pt = { x: e.clientX, y: e.clientY }
-    const target = hasNext(entries[hit]) ? hit : null
+    const hitItem = entries[hit]
+    // A disabled row with a hint still gets pointer events (for its tooltip),
+    // but mustn't open its flyout.
+    const target = hasNext(hitItem) && hitItem !== 'divider' && !hitItem.disabled ? hit : null
     if (hit === openSub) { aimRef.current = pt; cancelPending(); return }
     if (target === openSub) { cancelPending(); return }
 
@@ -531,7 +545,7 @@ function Flyout({ rowEl, parentRef, innerRef, z, menuId, className, onEnter, chi
       onClick={e => e.stopPropagation()}
       onMouseEnter={onEnter}
       style={{ position: 'fixed', zIndex: z, top: 0, left: 0, maxHeight: 'calc(100vh - 16px)', ...NO_DRAG }}
-      className={`overflow-y-auto overflow-x-hidden bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 ${className}`}
+      className={`menu-glass overflow-y-auto overflow-x-hidden ${className}`}
     >
       {children}
     </div>,
@@ -561,9 +575,9 @@ function Row({ it, depth, cfg, leftward, column, open, refCb, onClick }: {
         role="menuitem"
         disabled={it.disabled}
         onClick={onClick}
-        title={depth > 0 ? it.label : undefined}
-        className={`w-full flex items-center gap-2.5 px-3 ${dense ? 'py-1.5' : 'py-2'} text-left text-sm transition-colors hover:bg-surface-overlay focus:bg-surface-overlay focus:outline-none disabled:opacity-40 disabled:pointer-events-none ${
-          open ? 'bg-surface-overlay' : ''
+        title={it.hint ?? (depth > 0 ? it.label : undefined)}
+        className={`menu-glass-row w-full flex items-center gap-2.5 px-3 ${dense ? 'py-1.5' : 'py-2'} text-left text-sm transition-colors focus:outline-none disabled:opacity-40 ${it.hint ? '' : 'disabled:pointer-events-none'} ${
+          open ? 'is-open' : ''
         } ${it.danger ? 'text-red-400' : it.active ? 'text-accent' : 'text-text-primary'}`}
       >
         {next && leftward && <ChevronLeft size={13} className="text-text-muted shrink-0" />}

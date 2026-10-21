@@ -147,6 +147,8 @@ contextBridge.exposeInMainWorld('electron', {
     setSettings: (settings) => ipcRenderer.send('desktop:settings', settings),
     setState: (patch) => ipcRenderer.send('desktop:state', patch),
     meter: (value) => ipcRenderer.send('desktop:meter', value),
+    vizLook: (look) => ipcRenderer.send('desktop:viz-look', look),
+    vizFrame: (frame) => ipcRenderer.send('desktop:viz-frame', frame),
     displays: () => ipcRenderer.invoke('desktop:displays'),
     clearDesk: (on) => ipcRenderer.send('desktop:clear', on === undefined ? null : Boolean(on)),
     reply: (id, value) => ipcRenderer.send('desktop:reply', id, value),
