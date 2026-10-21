@@ -35,6 +35,8 @@ const AFTER = 60
 const LIST_LIMIT = 500
 /** At most this often is the meter passed on. */
 const METER_MS = 16
+/** How long a one-off answer (a search, an era) waits at most to know its covers load. */
+const COVER_WAIT_MS = 800
 
 /** A song as the desktop's windows show it. */
 export interface DesktopTrack {
@@ -50,7 +52,59 @@ export interface DesktopTrack {
   track: Track
 }
 
-const coverOf = (track: Track, size = 400): string | null => sizedCoverUrl(track.imageUrl, size) ?? smallCoverUrl(track.imageUrl) ?? null
+// ---- covers ----
+
+// The API's resize endpoint fails on some covers that are fine (in the app, ProgressiveCover steps past it), and a
+// widget's <img> has nothing to fall back on. So a sized cover is tried here as well, and one that won't load goes
+// out as the small one instead, which the API makes another way.
+const coverChecks = new Map<string, Promise<boolean>>()
+const brokenCovers = new Set<string>()
+/** Told when covers turn out not to load, to send what they show again. */
+const coverWatchers = new Set<() => void>()
+let coverNotice = 0
+
+function checkCover(url: string): Promise<boolean> {
+  let check = coverChecks.get(url)
+  if (!check) {
+    check = new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => resolve(true)
+      img.onerror = () => {
+        brokenCovers.add(url)
+        resolve(false)
+        // A list's worth fail together: told once, after they have.
+        if (!coverNotice) coverNotice = window.setTimeout(() => { coverNotice = 0; listsVersion++; coverWatchers.forEach((f) => f()) }, 300)
+      }
+      img.src = url
+    })
+    coverChecks.set(url, check)
+  }
+  return check
+}
+
+/** A cover drawn at `size`: the API's sized one unless it's known not to load, then the small one. */
+function coverAt(url: string | null | undefined, size: number): string | null {
+  const sized = sizedCoverUrl(url, size)
+  const small = smallCoverUrl(url)
+  if (!sized || sized === small) return sized ?? null
+  if (brokenCovers.has(sized)) return small ?? null
+  void checkCover(sized)
+  return sized
+}
+
+const coverOf = (track: Track, size = 400): string | null => coverAt(track.imageUrl, size)
+
+/** `f` called whenever covers turn out not to load, so what was sent for them can be sent again; returns the stop. */
+export function watchCovers(f: () => void): () => void {
+  coverWatchers.add(f)
+  return () => { coverWatchers.delete(f) }
+}
+
+/** A moment's wait at most to know these covers load, so a one-off answer goes out with ones that do. */
+async function coversChecked(urls: (string | null)[]): Promise<void> {
+  const checks = urls.flatMap((url) => { const check = url ? coverChecks.get(url) : undefined; return check ? [check] : [] })
+  if (checks.length) await Promise.race([Promise.all(checks), new Promise((resolve) => setTimeout(resolve, COVER_WAIT_MS))])
+}
 
 function desktopTrack(track: Track, key: string): DesktopTrack {
   return { key, id: track.id, title: track.title, artist: track.artist || track.album || '', album: track.album || '', duration: track.duration || 0, cover: coverOf(track), track }
@@ -73,7 +127,7 @@ function nowTrack(s: AppStore): { id: string; title: string; artist: string; alb
   if (!t) return null
   const full = s.currentTrackFull?.id === t.id ? s.currentTrackFull : null
   const art = full?.albumArt ? buildImageUrl(full.albumArt) ?? full.albumArt : null
-  return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration || 0, cover: sizedCoverUrl(t.imageUrl, 600) ?? art ?? null }
+  return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration || 0, cover: coverAt(t.imageUrl, 600) ?? art ?? null }
 }
 
 /** Anything in the equalizer away from neutral, as the app's EQ button reckons it (components/Player.tsx). */
@@ -190,6 +244,7 @@ function listName(id: string): string {
 
 async function search(query: string): Promise<{ songs: DesktopTrack[]; eras: { name: string; cover: string | null; count: number }[] }> {
   const songs = (await searchSongs(query, 30)).filter((s) => !!s.path).map(songToTrack)
+  await coversChecked(songs.map((t) => coverOf(t)))
   const eras = new Map<string, { name: string; cover: string | null; count: number }>()
   for (const t of songs) {
     if (!t.era) continue
@@ -205,6 +260,7 @@ async function era(name: string): Promise<{ name: string; about: string; cover: 
   if (!data) return null
   const tracks = data.results.filter((s) => !!s.path).map(songToTrack)
   const info = listEras().find((e) => e.name === name)
+  await coversChecked([tracks[0] ? coverOf(tracks[0], 600) : null, ...tracks.map((t) => coverOf(t))])
   return {
     name,
     about: [info?.time_frame, info?.description].filter(Boolean).join(' · '),
@@ -238,7 +294,7 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       try {
         if (el?.copyTextToClipboard) await el.copyTextToClipboard(text)
         else await navigator.clipboard.writeText(text)
-        showAppToast('Lyrics copied')
+        showAppToast('Lyrics copied', { tone: 'info' })
       } catch { showAppToast("Couldn't copy the lyrics", { tone: 'error' }) }
       break
     }
@@ -261,6 +317,12 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       const fraction = Number(arg)
       const duration = getAudioDuration()
       if (Number.isFinite(fraction) && duration > 0) seekAudio(Math.min(Math.max(fraction, 0), 1) * duration)
+      break
+    }
+    // A line of the lyrics picked: the song from where it's sung, in seconds.
+    case 'seek-to': {
+      const seconds = Number(arg)
+      if (Number.isFinite(seconds)) seekAudio(Math.max(seconds, 0))
       break
     }
     case 'volume': {
@@ -400,7 +462,8 @@ export function widgetMenuOf(which: WidgetWhich, where: 'desktop' | 'tab', isCle
 
 // ---- what's playing, told ----
 
-/** Goes up each time the playlists or the liked songs change: a widget showing a list asks for it again. */
+/** Goes up each time the playlists or the liked songs change, or covers in them turn out not to load: a widget showing
+ *  a list asks for it again. */
 let listsVersion = 0
 let listsWatched = false
 function watchLists(): void {
@@ -482,6 +545,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
   }
 
   sendState()
+  const stopCovers = watchCovers(later)
   const stopClock = watchPlayClock((clock) => push({ clock }))
   const unsubscribe = useStore.subscribe((s, p) => {
     if (s.currentTrack !== p.currentTrack || s.currentTrackFull !== p.currentTrackFull || s.isPlaying !== p.isPlaying || s.queue !== p.queue
@@ -492,7 +556,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
       || s.eqBoost !== p.eqBoost || s.skipSilence !== p.skipSilence || s.reverbEnabled !== p.reverbEnabled || s.audioFx !== p.audioFx
       || s.lyricsScale !== p.lyricsScale || s.lyricsColorActive !== p.lyricsColorActive || s.lyricsColorInactive !== p.lyricsColorInactive) later()
   })
-  return () => { stopped = true; stopClock(); unsubscribe() }
+  return () => { stopped = true; stopCovers(); stopClock(); unsubscribe() }
 }
 
 // ---- the bridge ----

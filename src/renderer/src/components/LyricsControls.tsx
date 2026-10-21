@@ -69,9 +69,11 @@ export default function LyricsControls(): JSX.Element {
   )
 
   const classic = useStore((s) => s.desktop.lyrics.look === 'classic')
+  const fisheye = useStore((s) => s.desktop.lyrics.look === 'fisheye')
 
   return (
     <div className="flex flex-col gap-5">
+        {!fisheye && (
         <div>
           <p className="text-text-secondary text-xs mb-2">Text size</p>
           <div className="flex items-center gap-2 flex-wrap">
@@ -93,6 +95,7 @@ export default function LyricsControls(): JSX.Element {
             })}
           </div>
         </div>
+        )}
 
         {classic && (
           <>
@@ -146,6 +149,7 @@ export default function LyricsControls(): JSX.Element {
           </>
         )}
 
+        {!fisheye && (
         <div className="flex flex-col gap-3">
           <p className="text-text-secondary text-xs -mb-1">Colors</p>
           <LyricColorRow
@@ -163,6 +167,7 @@ export default function LyricsControls(): JSX.Element {
             onChange={setLyricsColorInactive}
           />
         </div>
+        )}
     </div>
   )
 }

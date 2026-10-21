@@ -28,8 +28,10 @@ export interface StageLook {
   colors: AlbumColors | null
   face: string
   scale: number
-  /** The app's own lyric settings, for a style that follows them (Karaoke). */
+  /** The app's own lyric settings: the text size for every style, the colors for one that follows them (Karaoke). */
   tune?: LyricTune
+  /** Moves the song to `seconds`, for a style whose lines take a click (Karaoke); none, and they don't. */
+  seek?: (seconds: number) => void
 }
 /** The app's lyric settings (Settings > Lyrics): the text size, and the line sung's and the others' colors (null:
  *  the style's own). */
@@ -40,6 +42,8 @@ export interface LyricRenderer {
   show(song: StageSong, look: StageLook): void
   stop(): void
   destroy(): void
+  /** The reader's wheel over the lyrics, for a style that scrolls (Karaoke). */
+  scrollBy?(dy: number): void
 }
 
 export interface SceneLine { index: number; words: TimedWord[] }
@@ -59,6 +63,7 @@ export class LyricScene implements LyricRenderer {
   face: string | null = null
   colors: AlbumColors | null = null
   tune: LyricTune | null = null
+  seek: ((seconds: number) => void) | null = null
   song: StageSong | null = null
   clock: StageClock | null = null
   isSeen = true
@@ -112,6 +117,9 @@ export class LyricScene implements LyricRenderer {
   /** The style sings the adlibs in the line, as written, rather than leaving them out. */
   get singsAdlibs(): boolean { return false }
 
+  /** The app's lyric text size, 1 at its middle step. */
+  get textSize(): number { return this.tune?.size || 1 }
+
   /** The face at `size`, matched to the standard's capitals, as a CSS font. */
   font(size: number): string { return faceCSS(this.face!, matchedSize(this.face!, size)) }
   metrics(size: number): FaceMetrics { return metricsOf(this.face!, matchedSize(this.face!, size)) }
@@ -151,8 +159,11 @@ export class LyricScene implements LyricRenderer {
   }
 
   /** A line's words set in centered rows `room` wide, the face at `size` made smaller until the line takes `most`
-   *  rows at most: where each word's letters stand in the block (their top left), and the block's size. */
+   *  rows at most: where each word's letters stand in the block (their top left), and the block's size. `size` and
+   *  `most` are for the middle text size; a larger one sets the words larger and lets the line take more rows. */
   centered(line: SceneLine, room: number, size: number, most: number, { leading = 1.1, kern = 0 }: { leading?: number; kern?: number } = {}): Block {
+    size *= this.textSize
+    most = Math.max(most, Math.round(most * this.textSize))
     let css = this.font(size), set = wrap(line.words.map((w) => w.text), css, room, kern)
     while (set.rows.length > most && size > 9 * this.s) {
       size *= 0.9
@@ -184,8 +195,9 @@ export class LyricScene implements LyricRenderer {
 
   // ---- following the song ----
 
-  show(song: StageSong, { clock, isSeen, colors, face, scale, tune: tuned }: StageLook): void {
+  show(song: StageSong, { clock, isSeen, colors, face, scale, tune: tuned, seek }: StageLook): void {
     let redo = false
+    this.seek = seek ?? null
     const tune = tuned ?? null
     const colorsChanged = JSON.stringify(colors) !== JSON.stringify(this.colors)
     const tuneChanged = JSON.stringify(tune) !== JSON.stringify(this.tune)

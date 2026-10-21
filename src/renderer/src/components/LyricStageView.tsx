@@ -6,6 +6,7 @@ import { lyricFontFor } from '../desktop/lyrics/looks'
 import { timedFromLines, pacedFromText } from '../desktop/lyrics/timing'
 import { useAlbumColors } from '../desktop/artColors'
 import { usePlayClock } from '../desktop/playClock'
+import { seekAudio } from './Player'
 import type { SyncedLyricLine } from '../types'
 
 // WRLD's lyrics in one of the iJWA styles (Settings > Desktop > Lyric style): the app's own lyrics, offset and play
@@ -34,6 +35,9 @@ export default function LyricStageView({ look, trackId, title, artist, duration,
   const fonts = useStore((s) => s.desktop.lyrics.fonts)
   // The app's lyric size and colors, for the styles that follow them.
   const tune = useStore(useShallow((s): LyricTune => ({ size: s.lyricsScale, active: s.lyricsColorActive, inactive: s.lyricsColorInactive })))
+  // A line clicked plays the song from it - not on 999 FM, which can't be moved.
+  const radioFmActive = useStore((s) => s.radioFmActive)
+  const seek = useMemo(() => (radioFmActive ? undefined : (seconds: number) => seekAudio(Math.max(seconds, 0))), [radioFmActive])
   const colors = useAlbumColors(artUrl)
   const clock = usePlayClock()
   const [scale, setScale] = useState(1)
@@ -72,11 +76,11 @@ export default function LyricStageView({ look, trackId, title, artist, duration,
     if (!stage) return
     stage.use(look)
     if (!song.lyrics.lines.length || !clock) { stage.stop(); return }
-    stage.show(song, { clock, isSeen: seen, colors, face: lyricFontFor(fonts, stage.look), scale, tune })
-  }, [look, song, clock, seen, colors, fonts, scale, tune])
+    stage.show(song, { clock, isSeen: seen, colors, face: lyricFontFor(fonts, stage.look), scale, tune, seek })
+  }, [look, song, clock, seen, colors, fonts, scale, tune, seek])
 
   return (
-    <div className="relative flex-1 min-h-0">
+    <div className="relative flex-1 min-h-0" onWheel={(e) => stageRef.current?.scrollBy(e.deltaY)}>
       <div ref={hostRef} />
     </div>
   )

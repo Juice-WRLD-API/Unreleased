@@ -12,7 +12,8 @@ import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
-import { FONTS } from '../lib/fonts'
+import { allFonts } from '../lib/fonts'
+import { useCustomFonts } from '../hooks/useCustomFonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
@@ -705,6 +706,8 @@ export default function Settings(): JSX.Element {
   // Each of these is the body of a picker sheet, summarised inline by a
   // PickerRow. The current value drives that row's preview.
   const currentSkin = getSkin(theme)
+  useCustomFonts()
+  const FONTS = allFonts()
   const currentAppFont = FONTS.find((f) => f.id === appFont) ?? FONTS[0]
   const currentLyricsFont = FONTS.find((f) => f.id === lyricsFont) ?? FONTS[0]
 

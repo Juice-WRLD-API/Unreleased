@@ -46,7 +46,7 @@ import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolder
 import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
 import { createDesktopSlice, type DesktopSlice } from './desktopSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
-import { getFont } from '../lib/fonts'
+import { getFont, syncedFontId } from '../lib/fonts'
 import {
   sanitizeFieldKeys, DEFAULT_DETAIL_FIELDS, DEFAULT_MOBILE_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS,
   MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS, OPTIONAL_SONG_FIELDS,
@@ -1934,8 +1934,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
     if (serverSettings.accent_color !== undefined && serverSettings.accent_color !== s.accentColor) s.setAccentColor(serverSettings.accent_color)
     if (serverSettings.app_text_scale !== undefined && serverSettings.app_text_scale !== s.appTextScale) s.setAppTextScale(serverSettings.app_text_scale)
-    if (serverSettings.app_font && serverSettings.app_font !== s.appFont) s.setAppFont(getFont(serverSettings.app_font).id)
-    if (serverSettings.lyrics_font && serverSettings.lyrics_font !== s.lyricsFont) s.setLyricsFont(getFont(serverSettings.lyrics_font).id)
+    // syncedFontId is null for an imported font file this device doesn't have.
+    const syncedApp = serverSettings.app_font ? syncedFontId(serverSettings.app_font) : null
+    const syncedLyrics = serverSettings.lyrics_font ? syncedFontId(serverSettings.lyrics_font) : null
+    if (syncedApp && syncedApp !== s.appFont) s.setAppFont(syncedApp)
+    if (syncedLyrics && syncedLyrics !== s.lyricsFont) s.setLyricsFont(syncedLyrics)
     if (serverSettings.lyrics_scale !== undefined && serverSettings.lyrics_scale !== s.lyricsScale) s.setLyricsScale(serverSettings.lyrics_scale)
     if (serverSettings.lyrics_align && serverSettings.lyrics_align !== s.lyricsAlign) s.setLyricsAlign(serverSettings.lyrics_align)
     if (serverSettings.lyrics_blur !== undefined && serverSettings.lyrics_blur !== s.lyricsBlur) s.setLyricsBlur(serverSettings.lyrics_blur)

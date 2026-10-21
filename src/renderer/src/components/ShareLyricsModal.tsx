@@ -10,7 +10,7 @@ import { getAudioCurrentTime } from './Player'
 import { useStore } from '../store/useStore'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
-import { FONTS, getFont } from '../lib/fonts'
+import { allFonts, getFont } from '../lib/fonts'
 import logo from '../assets/logo.png'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
@@ -530,7 +530,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 </button>
                 {fontMenuOpen && (
                   <div className="mt-1 rounded-lg bg-[var(--surface-highest)] p-1 flex flex-col gap-0.5">
-                    {FONTS.map(f => (
+                    {allFonts().map(f => (
                       <button
                         key={f.id}
                         onClick={() => { setFontId(f.id); setFontMenuOpen(false) }}

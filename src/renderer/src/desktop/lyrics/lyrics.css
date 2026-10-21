@@ -5,3 +5,9 @@
 .lyric-stage .wb-strip { position: absolute; left: 50%; top: 50%; background-repeat: no-repeat; backface-visibility: hidden; will-change: transform, opacity; }
 .lyric-stage .wb-adlibs { position: absolute; inset: 0; }
 .lyric-stage .wb-adlib { position: absolute; white-space: nowrap; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); opacity: 0; }
+
+/* Karaoke's lines, when the host lets one be picked: each takes the pointer, and is lit under it. */
+.lyric-stage .karaoke-row.can-seek { pointer-events: auto; cursor: pointer; }
+.lyric-stage .karaoke-hover { position: absolute; pointer-events: none; background: rgba(255, 255, 255, 0.16); opacity: 0;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.lyric-stage .karaoke-row.can-seek:hover .karaoke-hover { opacity: 1; }

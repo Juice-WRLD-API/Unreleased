@@ -16,7 +16,9 @@ import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
-import { FONTS } from '../lib/fonts'
+import { allFonts, addFontFile, addInstalledFont, FONT_ACCEPT } from '../lib/fonts'
+import { deleteFont } from '../lib/fontActions'
+import { useCustomFonts } from '../hooks/useCustomFonts'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
@@ -97,6 +99,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'appearance', label: 'Lyrics font' },
+  { tab: 'appearance', label: 'Custom fonts' },
   { tab: 'appearance', label: 'App text size' },
   { tab: 'appearance', label: 'Lyrics text size' },
   { tab: 'appearance', label: 'Lyrics alignment' },
@@ -508,6 +511,38 @@ export default function Settings(): JSX.Element {
     sleepMinutes, setSleepMinutes,
     devices,
   } = useSettingsAppearance()
+  // Custom fonts - the hidden file input, the installed-font name being typed,
+  // and the last add error.
+  const customFonts = useCustomFonts()
+  const allFontChoices = allFonts()
+  const fontImportRef = useRef<HTMLInputElement>(null)
+  const [installedFontName, setInstalledFontName] = useState('')
+  const [fontError, setFontError] = useState<string | null>(null)
+  const [fontBusy, setFontBusy] = useState(false)
+
+  const importFontFile = async (file: File): Promise<void> => {
+    setFontBusy(true)
+    setFontError(null)
+    try {
+      const font = await addFontFile(file)
+      setAppFont(font.id)
+    } catch (e) {
+      setFontError(e instanceof Error ? e.message : 'Could not add that font')
+    } finally {
+      setFontBusy(false)
+    }
+  }
+
+  const addInstalled = (): void => {
+    try {
+      const font = addInstalledFont(installedFontName)
+      setInstalledFontName('')
+      setFontError(null)
+      setAppFont(font.id)
+    } catch (e) {
+      setFontError(e instanceof Error ? e.message : 'Could not add that font')
+    }
+  }
   // Drag-to-reorder state for the "Menu order" list - indices into the visible
   // nav list (see shownNav below). null = nothing being dragged / hovered.
   const [navDragIdx, setNavDragIdx] = useState<number | null>(null)
@@ -1114,7 +1149,7 @@ export default function Settings(): JSX.Element {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
-                    {FONTS.map((font) => {
+                    {allFontChoices.map((font) => {
                       const active = appFont === font.id
                       return (
                         <button
@@ -1154,7 +1189,7 @@ export default function Settings(): JSX.Element {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
-                    {FONTS.map((font) => {
+                    {allFontChoices.map((font) => {
                       const active = lyricsFont === font.id
                       return (
                         <button
@@ -1179,6 +1214,79 @@ export default function Settings(): JSX.Element {
                         </button>
                       )
                     })}
+                  </div>
+                </div>
+                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
+                      <Type size={13} className="text-white" strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-text-primary text-sm">Custom fonts</span>
+                      <p className="text-text-muted text-[11px]">Import a font file, or use one already installed on this computer — they show up in both lists above</p>
+                    </div>
+                    <button
+                      onClick={() => fontImportRef.current?.click()}
+                      disabled={fontBusy}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-50"
+                      title="Import a .ttf, .otf, .woff or .woff2 file"
+                    >
+                      {fontBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import file
+                    </button>
+                    <input
+                      ref={fontImportRef}
+                      type="file"
+                      accept={FONT_ACCEPT}
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) void importFontFile(file)
+                        e.target.value = ''
+                      }}
+                    />
+                  </div>
+                  <div className="pl-[34px]">
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={(e) => { e.preventDefault(); addInstalled() }}
+                    >
+                      <input
+                        type="text"
+                        value={installedFontName}
+                        onChange={(e) => { setInstalledFontName(e.target.value); setFontError(null) }}
+                        placeholder="Installed font name, e.g. Comic Sans MS"
+                        maxLength={64}
+                        className="flex-1 min-w-0 h-8 rounded-lg bg-[var(--surface-highest)] text-text-primary text-xs px-2.5 outline-none focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!installedFontName.trim()}
+                        className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-40"
+                      >
+                        <Plus size={13} /> Add
+                      </button>
+                    </form>
+                    {fontError && <p className="text-red-400 text-[11px] mt-2">{fontError}</p>}
+                    {customFonts.length > 0 && (
+                      <div className="mt-2.5 flex flex-col gap-1">
+                        {customFonts.map((font) => (
+                          <div key={font.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border)]">
+                            <span className="flex-1 min-w-0 truncate text-sm text-text-primary" style={{ fontFamily: allFontChoices.find((f) => f.id === font.id)?.stack }}>
+                              {font.name}
+                            </span>
+                            <span className="text-[10px] text-text-muted shrink-0">{font.kind === 'file' ? 'Imported file' : 'Installed'}</span>
+                            <button
+                              onClick={() => void deleteFont(font.id)}
+                              className="p-1 rounded-md text-text-muted hover:text-red-400 hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
+                              title={`Remove ${font.name}`}
+                              aria-label={`Remove ${font.name}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
