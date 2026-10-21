@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
@@ -17,6 +17,7 @@ import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
+import { AnchoredContextMenu } from './ContextMenu'
 
 // Staff-only, and it reads the chat store - loading it lazily keeps the chat
 // client out of Home's chunk for everyone else.
@@ -306,32 +307,36 @@ function Stat({ value, label }: { value: string; label: string }): JSX.Element {
 // see `defaultHidden` in navItems.tsx): still one click away without having
 // to turn them on in Settings first, just like mobile's sheet lets you reach
 // an overflowed tab without adding it to the bar.
-function MoreMenu({ open, onClose, items, onSelect }: {
-  open: boolean
+function MoreMenu({ anchorRef, onClose, items, onSelect }: {
+  anchorRef: React.RefObject<HTMLElement>
   onClose: () => void
   items: { view: ViewType; label: string; icon: React.ReactNode }[]
   onSelect: (view: ViewType) => void
-}): JSX.Element | null {
-  if (!open) return null
+}): JSX.Element {
   return (
-    <>
-      <div className="fixed inset-0 z-10" onClick={onClose} />
-      <div className="absolute right-0 top-full mt-2 z-20 min-w-[190px] rounded-xl border border-[var(--border)] bg-surface py-1 shadow-2xl">
-        {items.length === 0 ? (
-          <p className="px-3.5 py-2.5 text-xs text-text-muted whitespace-nowrap">Nothing else to show</p>
-        ) : items.map((item) => (
-          <button
-            key={item.view}
-            onClick={() => { onSelect(item.view); onClose() }}
-            className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-text-primary transition-colors hover:bg-[var(--surface-overlay)]"
-          >
-            <span className="flex items-center justify-center text-text-muted [&_svg]:w-4 [&_svg]:h-4">{item.icon}</span>
-            <span className="flex-1 truncate">{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </>
+    <AnchoredContextMenu
+      anchorRef={anchorRef}
+      onClose={onClose}
+      className="min-w-[190px]"
+      items={items.map((item) => ({ label: item.label, icon: navMenuIcon(item.view, item.icon), onSelect: () => onSelect(item.view) }))}
+      body={items.length === 0 ? <p className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">Nothing else to show</p> : undefined}
+    />
   )
+}
+
+// The nav registry's icons are elements sized for the side menu; the menu
+// wants a component it sizes and tints itself. One per view, so a row's icon
+// keeps its identity across renders.
+const navMenuIcons = new Map<ViewType, React.ElementType>()
+function navMenuIcon(view: ViewType, node: React.ReactNode): React.ElementType {
+  let icon = navMenuIcons.get(view)
+  if (!icon) {
+    icon = function NavMenuIcon({ className = '' }: { className?: string }): JSX.Element {
+      return <span className={`flex items-center justify-center [&_svg]:w-3.5 [&_svg]:h-3.5 ${className}`}>{node}</span>
+    }
+    navMenuIcons.set(view, icon)
+  }
+  return icon
 }
 
 export default function HomeViewDesktop(): JSX.Element {
@@ -343,6 +348,7 @@ export default function HomeViewDesktop(): JSX.Element {
   const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
   const canEdit = useCanEdit()
   const [showMore, setShowMore] = useState(false)
+  const moreBtnRef = useRef<HTMLButtonElement>(null)
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistContextMenuState | null>(null)
   const [newsMenu, setNewsMenu] = useState<NewsMenuState | null>(null)
@@ -400,6 +406,7 @@ export default function HomeViewDesktop(): JSX.Element {
           </button>
           <div className="relative shrink-0">
             <button
+              ref={moreBtnRef}
               onClick={() => setShowMore((v) => !v)}
               aria-label="More"
               title="More"
@@ -407,12 +414,14 @@ export default function HomeViewDesktop(): JSX.Element {
             >
               <MoreHorizontal size={19} />
             </button>
-            <MoreMenu
-              open={showMore}
-              onClose={() => setShowMore(false)}
-              items={hiddenNavItems}
-              onSelect={setActiveView}
-            />
+            {showMore && (
+              <MoreMenu
+                anchorRef={moreBtnRef}
+                onClose={() => setShowMore(false)}
+                items={hiddenNavItems}
+                onSelect={setActiveView}
+              />
+            )}
           </div>
           {showListening && (
             <div className="ml-auto flex items-center gap-4 min-w-0">

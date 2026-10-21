@@ -726,6 +726,39 @@ input[type='range']:active::-moz-range-thumb {
   animation: menu-pop 0.17s cubic-bezier(0.33, 0, 0.15, 1) both;
 }
 
+/* Glass menus - the look of the new-style WRLD player's own menu
+   (desktop/pages/player.css, #menu): a see-through pane blurring what's
+   behind it, a light rim, and rows as rounded pills inside a padded edge.
+   Mixed from the skin's colors so it reads on every theme. The 4px padding
+   matches placeFlyout's `ir.top - 4`, which lines a flyout's first row up
+   with the row that opened it. Rows take `menu-glass-row`. */
+.menu-glass {
+  --menu-glass-fill: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent),
+    0 10px 28px rgb(0 0 0 / 0.35);
+}
+.menu-glass-row { border-radius: 8px; }
+.menu-glass-row:hover:not(:disabled),
+.menu-glass-row:focus-visible,
+.menu-glass-row.is-open {
+  background: var(--menu-glass-fill);
+  outline: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .menu-glass {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 /* The copy a closing modal or menu leaves behind to animate out on
    (hooks/useExitGhost). Inert, and frozen in the state it closed in: as a
    fresh element its own CSS entrances and transitions would start over - a

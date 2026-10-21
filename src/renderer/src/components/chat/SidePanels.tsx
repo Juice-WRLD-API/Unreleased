@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Crown, Gavel, Loader2, MessageSquare, MicOff, MoreHorizontal, Pin, Shield, ShieldBan, Timer, UserCog, UserMinus, X } from 'lucide-react'
+import { Crown, Gavel, Loader2, MessageSquare, Mic, MicOff, MoreHorizontal, Pin, Shield, ShieldBan, ShieldOff, Timer, UserCog, UserMinus, X } from 'lucide-react'
 import * as api from '../../lib/chatApi'
 import type { ChatMember, ChatMessage } from '../../lib/chatApi'
 import { isTimedOut } from '../../lib/chatApi'
@@ -14,7 +14,8 @@ import { TimeoutBadge } from './Moderation'
 import { useRoomPeople } from './people'
 import { relativeTime } from '../adminShared'
 import { useRoomInfo } from './RoomPane'
-import { ChatAvatar, IconButton, errorText, shortStamp, useChatToast, useDismiss } from './ui'
+import { ChatAvatar, IconButton, errorText, shortStamp, useChatToast } from './ui'
+import { AnchoredContextMenu } from '../ContextMenu'
 import { useOpenUserCard } from './UserCard'
 import { SafetyNumber } from './ChatTrust'
 import { anchorOf, clickable } from '../../lib/a11y'
@@ -139,8 +140,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
   const toast = useChatToast()
   const [menu, setMenu] = useState(false)
   const [confirm, setConfirm] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useDismiss(menu, () => setMenu(false), ref)
+  const menuBtnRef = useRef<HTMLButtonElement>(null)
   const isOwner = member.user.id === ownerId
   const isMe = member.user.id === meId
   // The API refuses every moderation action against the owner and against
@@ -168,7 +168,7 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
   }
 
   return (
-    <div ref={ref} className="group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
+    <div className="group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-surface-raised/60">
       <ChatAvatar user={member.user} size={32} presence listening={listening} onClick={openProfile} />
       <div className="flex-1 min-w-0 cursor-pointer" {...clickable((el) => openProfile(anchorOf(el)))}>
         <p className={`text-sm truncate flex items-center gap-1 hover:underline ${member.muted ? 'text-text-muted line-through' : 'text-text-primary'}`}>
@@ -194,7 +194,10 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
         </button>
       )}
       {hasMenu && !isOwner && (
-        <button onClick={() => setMenu((v) => !v)} title="Manage" className="w-7 h-7 rounded-lg flex md:hidden md:group-hover:flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay">
+        // Stays shown while its menu is open: the menu is portalled, so the
+        // pointer on it isn't hovering this row, and the menu is placed off
+        // this button.
+        <button ref={menuBtnRef} onClick={() => setMenu((v) => !v)} title="Manage" className={`w-7 h-7 rounded-lg flex ${menu ? '' : 'md:hidden md:group-hover:flex'} items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay`}>
           <MoreHorizontal size={15} />
         </button>
       )}
@@ -204,44 +207,29 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
         </button>
       )}
       {menu && (
-        <div className="chat-pop absolute right-2 top-full z-20 mt-1 w-48 rounded-xl border border-[var(--border)] bg-surface shadow-2xl py-1">
-          {canManageRoles && (
-            <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'member-roles', serverId, member }) }}>
-              <span className="inline-flex items-center gap-2"><UserCog size={14} />Manage roles</span>
-            </MenuItem>
-          )}
-          {canManage && (
-            <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { server_role: member.server_role === 'admin' ? 'member' : 'admin' }), 'Role updated')}>
-              {member.server_role === 'admin' ? 'Remove admin' : 'Make admin'}
-            </MenuItem>
-          )}
-          {canManage && !isProtected && (
-            <MenuItem onClick={() => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted', member.muted ? 'unmute' : 'mute')}>
-              {member.muted ? 'Unmute' : 'Mute'}
-            </MenuItem>
-          )}
-          {canKick && !isProtected && !isMe && (
-            timedOut
-              ? (
-                <MenuItem onClick={() => act(() => api.clearMemberTimeout(serverId, member.user.id), 'Timeout removed', 'untimeout')}>
-                  <span className="inline-flex items-center gap-2"><Timer size={14} />Remove timeout</span>
-                </MenuItem>
-              )
-              : (
-                <MenuItem onClick={() => { setMenu(false); openModal({ kind: 'timeout-member', serverId, member }) }}>
-                  <span className="inline-flex items-center gap-2"><Timer size={14} />Time out…</span>
-                </MenuItem>
-              )
-          )}
-          {(canManage || canKick) && (isMe || !isProtected) && (
-            <MenuItem danger onClick={() => { setMenu(false); setConfirm(true) }}>{isMe ? 'Leave server' : 'Kick from server'}</MenuItem>
-          )}
-          {canBan && !isProtected && !isMe && (
-            <MenuItem danger onClick={() => { setMenu(false); openModal({ kind: 'ban-member', serverId, user: member.user }) }}>
-              <span className="inline-flex items-center gap-2"><Gavel size={14} />Ban…</span>
-            </MenuItem>
-          )}
-        </div>
+        <AnchoredContextMenu
+          anchorRef={menuBtnRef}
+          onClose={() => setMenu(false)}
+          items={[
+            canManageRoles && { label: 'Manage roles', icon: UserCog, onSelect: () => openModal({ kind: 'member-roles', serverId, member }) },
+            canManage && {
+              label: member.server_role === 'admin' ? 'Remove admin' : 'Make admin',
+              icon: member.server_role === 'admin' ? ShieldOff : Shield,
+              onSelect: () => act(() => api.updateMember(serverId, member.user.id, { server_role: member.server_role === 'admin' ? 'member' : 'admin' }), 'Role updated'),
+            },
+            canManage && !isProtected && {
+              label: member.muted ? 'Unmute' : 'Mute',
+              icon: member.muted ? Mic : MicOff,
+              onSelect: () => act(() => api.updateMember(serverId, member.user.id, { muted: !member.muted }), member.muted ? 'Unmuted' : 'Muted', member.muted ? 'unmute' : 'mute'),
+            },
+            canKick && !isProtected && !isMe && (timedOut
+              ? { label: 'Remove timeout', icon: Timer, onSelect: () => act(() => api.clearMemberTimeout(serverId, member.user.id), 'Timeout removed', 'untimeout') }
+              : { label: 'Time out…', icon: Timer, onSelect: () => openModal({ kind: 'timeout-member', serverId, member }) }),
+            'divider',
+            (canManage || canKick) && (isMe || !isProtected) && { label: isMe ? 'Leave server' : 'Kick from server', icon: UserMinus, danger: true, onSelect: () => setConfirm(true) },
+            canBan && !isProtected && !isMe && { label: 'Ban…', icon: Gavel, danger: true, onSelect: () => openModal({ kind: 'ban-member', serverId, user: member.user }) },
+          ]}
+        />
       )}
       {confirm && (
         <ConfirmDialog
@@ -259,14 +247,6 @@ function MemberRow({ member, serverId, canManage, canManageRoles, canKick, canBa
         />
       )}
     </div>
-  )
-}
-
-export function MenuItem({ onClick, children, danger }: { onClick: () => void; children: React.ReactNode; danger?: boolean }): JSX.Element {
-  return (
-    <button onClick={onClick} className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-surface-overlay ${danger ? 'text-red-400' : 'text-text-primary'}`}>
-      {children}
-    </button>
   )
 }
 
