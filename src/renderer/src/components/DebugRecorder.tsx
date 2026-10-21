@@ -6,17 +6,25 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Circle, FolderOpen, Square } from 'lucide-react'
 import {
-  isDebugRecording, debugRecordingStartedAt, debugRecordingCount,
+  isDebugRecording, isDebugRecordingAnonymous, debugRecordingStartedAt, debugRecordingCount,
   subscribeDebugRecorder, startDebugRecording, stopAndDownloadDebugRecording,
+  getDebugAnonymousPref, setDebugAnonymousPref,
 } from '../lib/debugRecorder'
 import { openDebugLogBlob, openDebugLogFile } from '../lib/debugLog'
 import { showAppToast } from '../lib/appToast'
+import { Toggle } from './SettingsRow'
 
-export function useDebugRecorder(): { recording: boolean; elapsed: number; count: number } {
+export function useDebugRecorder(): { recording: boolean; anonymous: boolean; anonymousPref: boolean; elapsed: number; count: number } {
   const [recording, setRecording] = useState(isDebugRecording)
+  const [anonymous, setAnonymous] = useState(isDebugRecordingAnonymous)
+  const [anonymousPref, setAnonymousPref] = useState(getDebugAnonymousPref)
   const [, tick] = useState(0)
-  // Listeners fire on every captured entry; only the on/off flip re-renders.
-  useEffect(() => subscribeDebugRecorder(() => setRecording(isDebugRecording())), [])
+  // Listeners fire on every captured entry; only the on/off flips re-render.
+  useEffect(() => subscribeDebugRecorder(() => {
+    setRecording(isDebugRecording())
+    setAnonymous(isDebugRecordingAnonymous())
+    setAnonymousPref(getDebugAnonymousPref())
+  }), [])
   useEffect(() => {
     if (!recording) return
     const id = setInterval(() => tick(n => n + 1), 1000)
@@ -24,9 +32,25 @@ export function useDebugRecorder(): { recording: boolean; elapsed: number; count
   }, [recording])
   return {
     recording,
+    anonymous,
+    anonymousPref,
     elapsed: recording ? Math.max(0, Math.floor((Date.now() - debugRecordingStartedAt()) / 1000)) : 0,
     count: recording ? debugRecordingCount() : 0,
   }
+}
+
+// Settings' "Anonymous" switch. Applies to the next recording, so it's locked
+// while one runs and shows the mode that recording started with.
+export function DebugAnonymousToggle(): JSX.Element {
+  const { recording, anonymous, anonymousPref } = useDebugRecorder()
+  return (
+    <Toggle
+      on={recording ? anonymous : anonymousPref}
+      onClick={() => setDebugAnonymousPref(!anonymousPref)}
+      locked={recording}
+      lockedReason="Stop the current recording to change this"
+    />
+  )
 }
 
 export function formatElapsed(sec: number): string {
@@ -80,7 +104,7 @@ export function DebugRecordButton({ size = 'sm' }: { size?: 'sm' | 'lg' }): JSX.
 }
 
 export default function DebugRecordingPill(): JSX.Element | null {
-  const { recording, elapsed, count } = useDebugRecorder()
+  const { recording, anonymous, elapsed, count } = useDebugRecorder()
   if (!recording) return null
   return createPortal(
     <button
@@ -95,7 +119,7 @@ export default function DebugRecordingPill(): JSX.Element | null {
         <span className="absolute inset-0 rounded-full bg-red-500 animate-ping opacity-60" />
         <span className="relative w-2.5 h-2.5 rounded-full bg-red-500" />
       </span>
-      <span className="font-medium">Recording debug log</span>
+      <span className="font-medium">Recording debug log{anonymous ? ' (anonymous)' : ''}</span>
       <span className="tabular-nums text-text-muted">{formatElapsed(elapsed)} · {count} events</span>
       <span className="flex items-center gap-1 text-red-400 font-medium"><Square size={10} className="fill-current" /> Stop &amp; save</span>
     </button>,

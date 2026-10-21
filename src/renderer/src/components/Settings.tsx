@@ -4,7 +4,7 @@ import {
   X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud, FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical, PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2, ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload, ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal, Bell, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, LogIn,
   Activity, Lightbulb,
 } from 'lucide-react'
-import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
+import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls from './VizControls'
 import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
@@ -2941,6 +2941,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       <DebugLogOpenButton />
                       <DebugRecordButton />
                     </div>
+                  </Row>
+                  <Row
+                    icon={EyeOff}
+                    iconColor="#6b7280"
+                    label="Anonymous"
+                    sub="Leaves out device and browser details, and scrubs your username, email, IP and folder paths from the log"
+                  >
+                    <DebugAnonymousToggle />
                   </Row>
                 </div>
 
