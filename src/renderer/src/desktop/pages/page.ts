@@ -66,6 +66,8 @@ export interface Bridge {
   on(channel: 'desktop:curtain-close', cb: (look: { picture: string | null }) => void): () => void
   on(channel: 'desktop:curtain-open', cb: () => void): () => void
   on(channel: 'desktop:primary', cb: (bounds: Bounds) => void): () => void
+  /** In the WRLD tab: put away (true) while the tab's closed or its old style is showing, the page kept for coming back. */
+  on(channel: 'desktop:shelved', cb: (on: boolean) => void): () => void
   command(cmd: string, arg?: unknown): void
   request<T = unknown>(kind: string, arg?: unknown): Promise<T | null>
   solid(on: boolean): void
@@ -92,8 +94,13 @@ export class Live {
   primary: Bounds | null = null
   /** In a frame in the WRLD tab: no desk to clear, no app to open. The page's root has the in-tab class too. */
   inTab = false
+  /** In the WRLD tab, put away until the widgets show again: nothing hears it, so nothing moves. */
+  shelved = false
   meter: Meter = { decibels: -120, punch: 0 }
-  private listeners = new Set<(what: 'state' | 'settings' | 'frost' | 'clear' | 'hidden', patch?: DesktopState) => void>()
+  private listeners = new Set<(what: 'state' | 'settings' | 'frost' | 'clear' | 'hidden' | 'shelved', patch?: DesktopState) => void>()
+
+  /** Out of sight: the window's hidden, or the frame's put away. */
+  get unseen(): boolean { return document.hidden || this.shelved }
 
   async start(): Promise<Hello | null> {
     page.on('desktop:state', (patch) => { this.state = { ...this.state, ...patch }; this.emit('state', patch) })
@@ -103,6 +110,7 @@ export class Live {
     page.on('desktop:hidden', (hidden) => { this.hidden = hidden; this.emit('hidden') })
     page.on('desktop:meter', (meter) => { this.meter = meter })
     page.on('desktop:primary', (bounds) => { this.primary = bounds; this.emit('frost') })
+    page.on('desktop:shelved', (on) => { this.shelved = on; this.emit('shelved') })
     const hello = await page.hello()
     if (hello) {
       this.state = { ...hello.state, ...this.state }
@@ -120,8 +128,8 @@ export class Live {
     return hello
   }
 
-  on(fn: (what: 'state' | 'settings' | 'frost' | 'clear' | 'hidden', patch?: DesktopState) => void): void { this.listeners.add(fn) }
-  private emit(what: 'state' | 'settings' | 'frost' | 'clear' | 'hidden', patch?: DesktopState): void { for (const fn of this.listeners) fn(what, patch) }
+  on(fn: (what: 'state' | 'settings' | 'frost' | 'clear' | 'hidden' | 'shelved', patch?: DesktopState) => void): void { this.listeners.add(fn) }
+  private emit(what: 'state' | 'settings' | 'frost' | 'clear' | 'hidden' | 'shelved', patch?: DesktopState): void { for (const fn of this.listeners) fn(what, patch) }
 }
 
 /** A window clear but where its widget is: clicks on the clear parts go through to the desktop. Told where the pointer

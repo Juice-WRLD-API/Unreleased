@@ -16,8 +16,10 @@ function screenFit(): number {
   return Math.min(1, Math.max(0.55, Math.min(window.screen.availWidth / 1440, window.screen.availHeight / 900)))
 }
 
-export default function WrldEdgeLight({ look, onUnsupported }: {
+export default function WrldEdgeLight({ look, held, onUnsupported }: {
   look: string
+  /** Covered by a picker: the light holds still. */
+  held: boolean
   /** WebGL2 isn't there: the tab leaves the light out. */
   onUnsupported: () => void
 }): JSX.Element {
@@ -68,6 +70,7 @@ export default function WrldEdgeLight({ look, onUnsupported }: {
   }, [])
 
   useEffect(() => { lightRef.current?.wake() }, [light, look])
+  useEffect(() => { lightRef.current?.setHeld(held) }, [held])
   useEffect(() => {
     const edge = lightRef.current
     if (!edge) return

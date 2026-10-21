@@ -317,7 +317,7 @@ class Bar {
     if (this.scrub != null) return
     const fraction = this.placeLine()
     const duration = live.state.track?.duration || 0
-    if (!live.state.clock?.running || !(duration > 0) || fraction >= 1 || document.hidden) return
+    if (!live.state.clock?.running || !(duration > 0) || fraction >= 1 || live.unseen) return
     const pixels = Math.max(this.progress.clientWidth * devicePixelRatio, 1)
     const interval = Math.min(Math.max(duration / pixels, 0.25), 1) * 1000
     const tick = (): void => { if (this.placeLine() < 1) this.ticker = window.setTimeout(tick, interval) }
@@ -699,7 +699,7 @@ function drawLyrics(open: boolean): void {
   stage.use(look)
   const song = songForStage()
   if (!song) return
-  stage.show(song, { clock: live.state.clock ?? null, isSeen: !document.hidden, colors: live.state.colors ?? null, face: lyricFontFor(live.settings?.lyrics.fonts, stage.look), scale: m.s, tune: live.state.lyricTune })
+  stage.show(song, { clock: live.state.clock ?? null, isSeen: !live.unseen, colors: live.state.colors ?? null, face: lyricFontFor(live.settings?.lyrics.fonts, stage.look), scale: m.s, tune: live.state.lyricTune })
 }
 
 /** The lyrics are drawn at this point: words (or the note between them, or "No lyrics") in sight there. The lyrics
@@ -799,9 +799,9 @@ function render(): void {
   } else {
     const absolute = (live.state.cards?.from ?? 0) + focus
     const entries = placements(list, focus, lyricsOut ? null : hoveredKey, p?.sideCards ?? 2, p?.tilt ?? 0.5, m)
-    cards.show(entries, { m, turn: absolute, hoveredKey: lyricsOut ? null : hoveredKey, receded: cardsGone, focusedKey: lyricsCard, floating: beside && !document.hidden, folded })
+    cards.show(entries, { m, turn: absolute, hoveredKey: lyricsOut ? null : hoveredKey, receded: cardsGone, focusedKey: lyricsCard, floating: beside && !live.unseen, folded })
     // The song playing comes alive in the middle; beside the lyrics the card only floats.
-    aura.update(lightColors(), !!live.state.playing && focus === home && !cardsGone && !lyricsOut && !document.hidden,
+    aura.update(lightColors(), !!live.state.playing && focus === home && !cardsGone && !lyricsOut && !live.unseen,
       { width: m.cardWidth, height: m.cardHeight, radius: m.cardRadius })
   }
   drawLyrics(lyricsOut)

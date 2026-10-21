@@ -127,12 +127,13 @@ export default function WrldVisualizer({
   const lyricsOverride = useStore((s) => s.lyricsOverride)
   // The screen light's look, while WRLD's Edge light is on.
   const vizEdgeOverlay = useWrldEdgeLook()
-  const { activeMode, vizQuality, vizUseArtwork, vizBoost, wrldWidgets } = useVizStore(useShallow((s) => ({
+  const { activeMode, vizQuality, vizUseArtwork, vizBoost, wrldWidgets, covered } = useVizStore(useShallow((s) => ({
     activeMode: s.activeMode,
     vizQuality: s.vizQuality,
     vizUseArtwork: s.vizUseArtwork,
     vizBoost: s.vizBoost,
     wrldWidgets: s.wrldWidgets,
+    covered: s.vizCovered > 0,
   })))
 
   const hostRef = useRef<HTMLDivElement>(null)
@@ -186,6 +187,8 @@ export default function WrldVisualizer({
     }
   }, [rootRef, off])
 
+  // Still under a picker: its own screens draw instead.
+  useEffect(() => { vizRef.current?.setHeld(covered) }, [covered, off])
   useEffect(() => { vizRef.current?.setQuality(vizQuality) }, [vizQuality, off])
   useEffect(() => { vizRef.current?.setBoost(vizBoost) }, [vizBoost, off])
   useEffect(() => { vizRef.current?.setUsePalette(vizUseArtwork) }, [vizUseArtwork, off])
@@ -438,9 +441,10 @@ export default function WrldVisualizer({
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
       {shownEdge !== null && (
         <div className="absolute inset-0 pointer-events-none" aria-hidden>
+          {/* One light whatever the look: a new one per look meant a new WebGL context and its programs built again. */}
           <WrldEdgeLight
-            key={shownEdge}
             look={shownEdge}
+            held={covered}
             onUnsupported={() => setOverlayFailed(true)}
           />
         </div>

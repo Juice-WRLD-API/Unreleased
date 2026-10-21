@@ -85,6 +85,8 @@ export class Visualizer {
   private quality: Quality = "medium";
   private playing = false;
   private running = false;
+  /** Covered (a picker open over WRLD): nothing drawn, the last frame left up. */
+  private held = false;
   private raf = 0;
   private lastFrame = 0;
   private time = 0;
@@ -104,6 +106,14 @@ export class Visualizer {
   private layoutProvider: (() => VizLayout) | null = null;
   private layout: VizLayout = { focus: null, protect: [], intensity: 1 };
   private layoutAt = 0;
+  /**
+   * The canvases' box: where it is, read with the layout, and its size, told by
+   * a ResizeObserver. Reading either every frame forced the page to lay itself
+   * out early whenever something else had changed it.
+   */
+  private box: DOMRect | null = null;
+  private size = { w: 0, h: 0 };
+  private sizer: ResizeObserver | null = null;
 
   private prevBeat = 0;
   private drops: { born: number; angle: number; dist: number; strength: number }[] = [];
@@ -113,6 +123,16 @@ export class Visualizer {
     this.c2d = new Canvas2DRenderer(canvas2d);
     this.gl = new GLRenderer(canvasGl);
     this.showEngine(null);
+    // Both canvases fill the host.
+    const host = canvas2d.parentElement;
+    if (host) {
+      this.size = { w: host.clientWidth, h: host.clientHeight };
+      this.sizer = new ResizeObserver(([entry]) => {
+        this.size = { w: entry.contentRect.width, h: entry.contentRect.height };
+        this.box = null;
+      });
+      this.sizer.observe(host);
+    }
   }
 
   get glSupported(): boolean {
@@ -142,7 +162,7 @@ export class Visualizer {
    * would freeze at whatever they were last time.
    */
   pumpAudio(dt: number) {
-    if (this.running && !document.hidden && this.mode !== "none") return; // loop is doing it
+    if (this.running && !this.held && !document.hidden && this.mode !== "none") return; // loop is doing it
     if (this.audio.active) this.audio.analyze(dt, this.playing);
   }
 
@@ -204,6 +224,16 @@ export class Visualizer {
     this.running = true;
     this.lastFrame = performance.now();
     this.layoutAt = 0;
+    if (!this.held) this.raf = requestAnimationFrame(this.loop);
+  }
+
+  /** Holds the picture still while something covers it, and lets it go on again. */
+  setHeld(held: boolean) {
+    if (held === this.held) return;
+    this.held = held;
+    cancelAnimationFrame(this.raf);
+    if (held || !this.running) return;
+    this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.loop);
   }
 
@@ -220,6 +250,7 @@ export class Visualizer {
     this.stop();
     this.audio.disable();
     this.layoutProvider = null;
+    this.sizer?.disconnect();
     this.gl.dispose();
   }
 
@@ -250,7 +281,7 @@ export class Visualizer {
   }
 
   private loop = (now: number) => {
-    if (!this.running) return;
+    if (!this.running || this.held) return;
     this.raf = requestAnimationFrame(this.loop);
 
     const q = QUALITY[this.quality];
@@ -266,25 +297,31 @@ export class Visualizer {
     this.trackRipples(frame);
     this.stepPalette(dt);
 
-    if (this.layoutProvider && now - this.layoutAt > LAYOUT_REFRESH_MS) {
-      this.layout = this.layoutProvider();
+    const host = this.c2d.canvas.parentElement;
+    if (!host) return;
+    if (now - this.layoutAt > LAYOUT_REFRESH_MS) {
+      if (this.layoutProvider) this.layout = this.layoutProvider();
+      this.box = host.getBoundingClientRect();
       this.layoutAt = now;
     }
+    const box = (this.box ??= host.getBoundingClientRect());
 
     const opt = VISUALIZERS.find((v) => v.id === this.mode)!;
     // If the browser hasn't restored a lost context, replace the canvas: a
     // lost context is dead for good, but a fresh <canvas> gets a new one.
     if (this.gl.lostAt && now - this.gl.lostAt > GL_RESTORE_TIMEOUT_MS) this.recreateGl();
-    const useGl = opt.engine === "gl" && this.gl.supports(this.mode);
-    const host = this.c2d.canvas.parentElement;
-    if (!host) return;
-    const box = host.getBoundingClientRect();
+    const program = opt.engine === "gl" ? this.gl.status(this.mode) : "failed";
+    // A shader still building: the last frame stays up until it can draw,
+    // rather than a fallback flashing in for a moment.
+    if (program === "building") return;
+    // One that failed draws Aurora instead (below).
+    const useGl = program === "ready";
     const dpr = window.devicePixelRatio || 1;
 
     if (useGl) {
       this.showEngine("gl");
       const scale = Math.min(dpr, 2) * q.glScale;
-      if (!this.gl.resize(scale)) return;
+      if (!this.gl.resize(this.size.w, this.size.h, scale)) return;
       const H = this.gl.canvas.height;
       const focus = this.focusPx(box, scale, this.gl.canvas.width, H);
       this.gl.render({
@@ -306,7 +343,7 @@ export class Visualizer {
     } else {
       this.showEngine("2d");
       const scale = Math.min(dpr, q.dpr);
-      if (!this.c2d.resize(scale)) return;
+      if (!this.c2d.resize(this.size.w, this.size.h, scale)) return;
       this.c2d.render({
         // A shader mode whose program failed falls back to something that works.
         mode: opt.engine === "gl" ? "aurora" : this.mode,

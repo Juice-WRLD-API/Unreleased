@@ -32,7 +32,36 @@ const SCREEN: [number, number] = [1920, 1080]
 const TILE_W = 220, TILE_H = 124
 const PIXELS = 2
 
-interface Tile { look: Look & { number: number }; el: HTMLDivElement; paint: CanvasRenderingContext2D | null; seen: boolean; drops: { born: number; at: number }[] }
+/** The one WebGL canvas the screens take turns on, `w` × `h`. Offscreen where the browser can draw WebGL there: each
+ *  screen's picture is then handed over whole (transferToImageBitmap), with no copy and no wait for the GPU. Copying it
+ *  in with drawImage, the way left where it can't, waits for the GPU to finish every screen, every frame. `make` gives
+ *  null when it can't draw on the canvas it's given. */
+function sharedCanvas<R>(w: number, h: number, make: (canvas: HTMLCanvasElement | OffscreenCanvas) => R | null): { canvas: HTMLCanvasElement | OffscreenCanvas; renderer: R | null } {
+  if (typeof OffscreenCanvas !== 'undefined' && typeof ImageBitmapRenderingContext !== 'undefined') {
+    const canvas = new OffscreenCanvas(w, h)
+    const renderer = make(canvas)
+    if (renderer) return { canvas, renderer }
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  return { canvas, renderer: make(canvas) }
+}
+
+type Screen = ImageBitmapRenderingContext | CanvasRenderingContext2D | null
+
+/** A screen, taking its pictures from `from` the way it can: handed over, or copied. */
+const screenFor = (canvas: HTMLCanvasElement, from: HTMLCanvasElement | OffscreenCanvas): Screen =>
+  from instanceof HTMLCanvasElement ? canvas.getContext('2d') : canvas.getContext('bitmaprenderer')
+
+/** The picture just drawn on `from`, onto a screen. */
+function present(from: HTMLCanvasElement | OffscreenCanvas, to: Screen): void {
+  if (!to) return
+  if ('transferFromImageBitmap' in to) to.transferFromImageBitmap((from as OffscreenCanvas).transferToImageBitmap())
+  else { to.clearRect(0, 0, to.canvas.width, to.canvas.height); to.drawImage(from, 0, 0) }
+}
+
+interface Tile { look: Look & { number: number }; el: HTMLDivElement; screen: Screen; seen: boolean; drops: { born: number; at: number }[] }
 
 function LightGrid({ chosen, onPick, colors }: { chosen: string; onPick: (id: string) => void; colors: AlbumColors | null }): JSX.Element {
   const gridRef = useRef<HTMLDivElement>(null)
@@ -46,19 +75,19 @@ function LightGrid({ chosen, onPick, colors }: { chosen: string; onPick: (id: st
     const grid = gridRef.current
     if (!grid) return
     const W = TILE_W * PIXELS, H = TILE_H * PIXELS
-    const glCanvas = document.createElement('canvas')
-    glCanvas.width = W
-    glCanvas.height = H
-    let renderer: EdgeRenderer
-    try {
-      renderer = new EdgeRenderer(glCanvas, { preserveDrawingBuffer: true })
-    } catch (e) {
-      console.warn('[picker] no WebGL2', e)
-      return
-    }
+    const { canvas: glCanvas, renderer } = sharedCanvas(W, H, (canvas) => {
+      try {
+        // Copied from after each screen's drawn, a canvas on the page has to keep what it drew till then.
+        return new EdgeRenderer(canvas, { preserveDrawingBuffer: canvas instanceof HTMLCanvasElement })
+      } catch (e) {
+        console.warn('[picker] no WebGL2', e)
+        return null
+      }
+    })
+    if (!renderer) return
     const tiles: Tile[] = [...grid.querySelectorAll<HTMLDivElement>('[data-look]')].map((el) => {
       const canvas = el.querySelector('canvas')!
-      return { look: lookOf(el.dataset.look!), el, paint: canvas.getContext('2d'), seen: false, drops: [] }
+      return { look: lookOf(el.dataset.look!), el, screen: screenFor(canvas, glCanvas), seen: false, drops: [] }
     })
     const sight = new IntersectionObserver((entries) => {
       for (const entry of entries) { const t = tiles.find((x) => x.el === entry.target); if (t) t.seen = entry.isIntersecting }
@@ -104,9 +133,8 @@ function LightGrid({ chosen, onPick, colors }: { chosen: string; onPick: (id: st
         strip: [wordsWidth, tickerHeight(style.thickness), (now * 90) % Math.max(wordsWidth, 1), 0],
         look: look.number, fn: look.fn, drift, beat: kick, place: placeNumber(style.place),
       }
-      renderer.draw(u, W, H, words)
-      t.paint?.clearRect(0, 0, W, H)
-      t.paint?.drawImage(glCanvas, 0, 0)
+      // A light whose program is still building keeps its screen as it was.
+      if (renderer.draw(u, W, H, words)) present(glCanvas, t.screen)
     }
 
     let raf = 0
@@ -124,7 +152,6 @@ function LightGrid({ chosen, onPick, colors }: { chosen: string; onPick: (id: st
       cancelAnimationFrame(raf)
       sight.disconnect()
       renderer.dispose()
-      renderer.gl.getExtension('WEBGL_lose_context')?.loseContext()
     }
   }, [])
 
@@ -175,16 +202,19 @@ function LyricGrid({ chosen, onPick, colors }: { chosen: string; onPick: (id: st
     const grid = gridRef.current
     if (!grid) return
     const started = epochNow()
-    const tiles = [...grid.querySelectorAll<HTMLDivElement>('[data-lyric]')].map((el) => {
+    const screens = [...grid.querySelectorAll<HTMLDivElement>('[data-lyric]')]
+    const tiles = screens.map((el, index) => {
       const stage = new LyricStage(el.querySelector<HTMLDivElement>('[data-screen]')!)
       stage.use(el.dataset.lyric!)
-      return { id: el.dataset.lyric!, el, stage, seen: false }
+      // Each screen a little ahead of the one before: a line is drawn into pictures as it starts, and all of them
+      // starting together made one long frame each time.
+      return { id: el.dataset.lyric!, el, stage, seen: false, from: started - index * (EACH / screens.length), timer: 0 }
     })
     /** One screen, from the top of the lines this time round: a new clock each round, so the lines start again. */
     const sing = (t: (typeof tiles)[number]): void => {
       const now = epochNow()
-      const round = Math.floor((now - started) / PERIOD)
-      const clock = { seconds: 0, at: started + round * PERIOD, running: true }
+      const round = Math.floor((now - t.from) / PERIOD)
+      const clock = { seconds: 0, at: t.from + round * PERIOD, running: true }
       t.stage.show({ id: `preview-${round}`, lyrics: PREVIEW_LYRICS, title: 'Unreleased', artist: '' },
         { clock, isSeen: t.seen, colors: colorsRef.current, face: lyricFontFor(fontsRef.current, t.id), scale: SCALE })
     }
@@ -194,14 +224,13 @@ function LyricGrid({ chosen, onPick, colors }: { chosen: string; onPick: (id: st
       for (const entry of entries) { const t = tiles.find((x) => x.el === entry.target); if (t) { t.seen = entry.isIntersecting; sing(t) } }
     }, { root: grid })
     tiles.forEach((t) => sight.observe(t.el))
-    let timer = 0
-    const nextRound = (): void => {
-      const wait = PERIOD - ((epochNow() - started) % PERIOD)
-      timer = window.setTimeout(() => { singAll(); nextRound() }, wait * 1000 + 5)
+    const nextRound = (t: (typeof tiles)[number]): void => {
+      const wait = PERIOD - ((epochNow() - t.from) % PERIOD)
+      t.timer = window.setTimeout(() => { sing(t); nextRound(t) }, wait * 1000 + 5)
     }
-    nextRound()
+    tiles.forEach(nextRound)
     return () => {
-      window.clearTimeout(timer)
+      tiles.forEach((t) => window.clearTimeout(t.timer))
       sight.disconnect()
       tiles.forEach((t) => t.stage.destroy())
     }
@@ -322,16 +351,16 @@ function VizGrid({ chosen, onPick, cover }: { chosen: string; onPick: (id: strin
     const root = rootRef.current
     if (!root) return
     const W = TILE_W * PIXELS, H = TILE_H * PIXELS
-    const glCanvas = document.createElement('canvas')
-    glCanvas.width = W
-    glCanvas.height = H
-    const gl = new GLRenderer(glCanvas)
+    const { canvas: glCanvas, renderer: gl } = sharedCanvas(W, H, (canvas) => {
+      const made = new GLRenderer<HTMLCanvasElement | OffscreenCanvas>(canvas)
+      return made.ok ? made : null
+    })
     const tiles = [...root.querySelectorAll<HTMLDivElement>('[data-viz-mode]')].map((el) => {
       const canvas = el.querySelector('canvas')!
       const id = el.dataset.vizMode!
       const shader = SHADERS.some((v) => v.id === id)
       // A classic draws straight into its own screen; the shaders take turns on the one WebGL canvas.
-      return { id, el, shader, flat: shader ? null : new Canvas2DRenderer(canvas), paint: shader ? canvas.getContext('2d') : null, seen: false, ready: !shader }
+      return { id, el, flat: shader ? null : new Canvas2DRenderer(canvas), screen: shader ? screenFor(canvas, glCanvas) : null, seen: false }
     })
     const sight = new IntersectionObserver((entries) => {
       for (const entry of entries) { const t = tiles.find((x) => x.el === entry.target); if (t) t.seen = entry.isIntersecting }
@@ -349,11 +378,8 @@ function VizGrid({ chosen, onPick, cover }: { chosen: string; onPick: (id: strin
       last = now
       song.play(seconds)
       const { audio, ripples, clock: { time, flow } } = song
-      // One new shader compiled a frame, so opening the picker doesn't stall on all of them at once.
-      const fresh = gl.ok ? tiles.find((t) => t.seen && !t.ready) : undefined
-      if (fresh) { fresh.ready = true; gl.supports(fresh.id) }
       for (const t of tiles) {
-        if (!t.seen || !t.ready) continue
+        if (!t.seen) continue
         if (t.flat) {
           t.flat.render({
             mode: t.id, frame: audio, pal: palRef.current, focus, protect: [], feather: 0,
@@ -361,16 +387,18 @@ function VizGrid({ chosen, onPick, cover }: { chosen: string; onPick: (id: strin
           })
           continue
         }
-        gl.render({ mode: t.id, frame: audio, pal: palRef.current, time, flow, focus, protect: [], feather: 0, intensity: 1, octaves: 4, ripples })
-        t.paint?.clearRect(0, 0, W, H)
-        t.paint?.drawImage(glCanvas, 0, 0)
+        // Every shader in sight builds at once, on the GPU's side, and its screen joins in once it's ready.
+        if (gl?.status(t.id) !== 'ready') continue
+        if (gl.render({ mode: t.id, frame: audio, pal: palRef.current, time, flow, focus, protect: [], feather: 0, intensity: 1, octaves: 4, ripples })) {
+          present(glCanvas, t.screen)
+        }
       }
     }
     raf = requestAnimationFrame(frame)
     return () => {
       cancelAnimationFrame(raf)
       sight.disconnect()
-      gl.dispose()
+      gl?.dispose()
     }
   }, [])
 
@@ -417,6 +445,12 @@ export default function DesktopPicker({ kind, onClose, onPicked }: {
   const title = { light: 'Lights', lyrics: 'Lyric styles', viz: 'Visualizers', overlay: 'Edge light' }[kind]
   const cover = useStore((s) => s.currentTrack?.imageUrl || (s.currentTrackFull?.id === s.currentTrack?.id ? s.currentTrackFull?.albumArt : null) || null)
   const colors = useAlbumColors(cover)
+  // WRLD holds still underneath while this is open.
+  useEffect(() => {
+    const { coverViz } = useVizStore.getState()
+    coverViz(true)
+    return () => coverViz(false)
+  }, [])
 
   return (
     <ModalOverlay
