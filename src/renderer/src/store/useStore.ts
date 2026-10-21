@@ -2544,7 +2544,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (!res) return false
     userApi.setToken(res.token)
     set({ account: res.user })
-    await get().loadAccount()
+    // Signed in as of now: the modal closes on this return, while the likes,
+    // playlists and settings sync keeps running behind it.
+    void get().loadAccount()
     return true
   },
 
