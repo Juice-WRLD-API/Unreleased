@@ -20,8 +20,8 @@ function where(p: Passkey): string {
 }
 
 // Settings > Account: the account's passkeys. Listing, renaming and removing
-// work everywhere; adding one needs the prompt, which the desktop app can only
-// show on Windows (see electron/passkey.js).
+// work everywhere; adding one needs the prompt, which only the website and the
+// Windows desktop app can show (see lib/passkeyApi.ts).
 export default function Passkeys(): JSX.Element {
   const [passkeys, setPasskeys] = useState<Passkey[] | null>(null)
   const [support, setSupport] = useState<PasskeySupport | null>(null)

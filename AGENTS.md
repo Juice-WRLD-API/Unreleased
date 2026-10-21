@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.7** · updated 2026-10-21. Bump the version and date whenever you
+**Version 1.8** · updated 2026-10-21. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -133,8 +133,10 @@ public track links. Mixing them up fails silently.
 - Header: `Authorization: Token <token>`. Discord OAuth is the main login
   (`/accounts/auth/discord/url/` then `/accounts/auth/discord/exchange/`); there
   are also username/password, access-code, admin login, 2FA (OTP), login
-  approval from another device and passkeys (`/accounts/auth/passkey/…`; web
-  only, since they are tied to `juicewrldapi.com` origins). See
+  approval from another device and passkeys (`/accounts/auth/passkey/…`). Passkeys
+  are tied to the `juicewrldapi.com` origins: the website runs the browser prompt
+  in the page, the Windows desktop app uses a helper window, and the mobile builds
+  and the CLI can only list, rename and remove them. See `lib/passkeyApi.ts` and
   `docs/08-accounts.md`.
 - Two "who am I" endpoints: `/accounts/account/me/` (any user; also holds
   preferences, settings, playlist folders) and `/accounts/me/` (editor/admin

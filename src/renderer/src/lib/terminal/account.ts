@@ -49,10 +49,17 @@ async function passwordSignIn(username: string, ctx: TermCtx): Promise<void> {
     await st().loginWithPassword(username, password)
   } catch (err) {
     if (!/otp/i.test((err as Error)?.message ?? '')) throw err
-    // Staff accounts have a second factor: a code, or a nod from another device.
-    const answer = (await ctx.ask('2FA code (or "approve" to approve it on another device): ')).trim()
+    // Staff accounts have a second factor: a code, or a nod from another
+    // device. A passkey counts as two-factor on its own, so it skips this step.
+    const passkey = (await getPasskeySupport()).ceremonies
+    const answer = (await ctx.ask(passkey
+      ? '2FA code ("approve" to approve it on another device, "passkey" to use a passkey instead): '
+      : '2FA code (or "approve" to approve it on another device): ')).trim()
     if (answer.toLowerCase() === 'approve') await loginByApproval(username, password, ctx)
-    else await st().loginWithPassword(username, password, answer)
+    else if (passkey && answer.toLowerCase() === 'passkey') {
+      ctx.print('Opening the passkey prompt…', 'dim')
+      if (!(await st().loginWithPasskey())) fail('cancelled')
+    } else await st().loginWithPassword(username, password, answer)
   }
 }
 
@@ -124,7 +131,7 @@ const PRIVACY_KEYS: Record<string, 'public_play_history' | 'public_playlists' | 
 export const ACCOUNT_COMMANDS: TermCommand[] = [
   {
     name: 'login', aliases: ['signin'], group: 'Account', usage: 'login [username] | login discord [pasted callback url] | login passkey',
-    description: 'Sign in (asks for the password, then a 2FA code or a nod from another device if the account needs one). `login discord` opens Discord sign-in; `login passkey` opens the passkey prompt (Windows app)',
+    description: 'Sign in (asks for the password, then a 2FA code or a nod from another device if the account needs one). `login discord` opens Discord sign-in; `login passkey` opens the passkey prompt (website or Windows app)',
     covers: ['userApi.passwordLogin', 'userApi.requestLoginApproval', 'userApi.pollLoginApproval', 'userApi.getDiscordAuthUrl', 'userApi.exchangeDiscord', 'userApi.discordRedirectUri', 'userApi.setToken', 'passkeyApi.signInWithPasskey', 'passkeyApi.startPasskeySignIn', 'passkeyApi.finishPasskeySignIn'],
     complete: (before, partial) => (before.length === 0 ? ['discord', 'passkey'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
@@ -350,7 +357,7 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
   {
     name: 'passkeys', aliases: ['passkey'], group: 'Account',
     usage: 'passkeys [ls] [--json] | add [name] | rename <passkey> <name> | rm <passkey> [-y]',
-    description: 'Passkeys for signing in without a password. `add` opens the passkey prompt (Windows app only). <passkey> is an id, id prefix or name',
+    description: 'Passkeys for signing in without a password. `add` opens the passkey prompt (website or Windows app). <passkey> is an id, id prefix or name',
     covers: ['passkeyApi.listPasskeys', 'passkeyApi.addPasskey', 'passkeyApi.startPasskeyRegistration', 'passkeyApi.finishPasskeyRegistration', 'passkeyApi.renamePasskey', 'passkeyApi.deletePasskey'],
     complete: (before, partial) => (before.length === 0 ? ['ls', 'add', 'rename', 'rm'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
