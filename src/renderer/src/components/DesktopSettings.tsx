@@ -313,7 +313,7 @@ export default function DesktopSettings({ heading = true }: { heading?: boolean 
 
       {windows && (
         <>
-          <Row icon={Sparkles} iconColor="#0f766e" label="Clear desk" sub="Hides every other window and the taskbar; any other app coming forward brings it all back">
+          <Row icon={Sparkles} iconColor="#0f766e" label="Clear desk" sub="Covers each display showing the desktop, its icons and taskbar too; a display with an app open is left as it is, and an app coming forward under it brings it all back">
             <button onClick={() => desktopApi()?.clearDesk()} className={BUTTON_CLASS}>Clear desk</button>
           </Row>
           <Row icon={AudioWaveform} iconColor="#7c3aed" label="Visualizer on the cleared desk" sub="WRLD's visualizer behind the widgets instead of the wallpaper">

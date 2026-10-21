@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   Plus, Trash2, Save, Check, X, Search, Loader2, ChevronLeft, ChevronUp, ChevronDown,
-  Music, Shield, AlertCircle,
+  Music, Shield, AlertCircle, FolderSearch,
 } from 'lucide-react'
-import { apiFetch, buildImageUrl, loadAllSongs } from '../lib/juicewrldApi'
+import { apiFetch, buildImageUrl, loadAllSongs, toSiteRelativeImageUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album, Artist, AlbumSongEntry } from '../lib/albumsApi'
@@ -11,6 +11,7 @@ import { useStorePick } from '../store/useStore'
 import { errorMessage } from '../lib/format'
 import ThemedSelect from './ThemedSelect'
 import ThemedDatePicker from './ThemedDatePicker'
+import FilePickerModal from './FilePickerModal'
 
 // Admin UI for the real Album catalog (GET/POST/PATCH/DELETE
 // /accounts/admin/albums/), replacing the old client-side wrlddata.json
@@ -35,6 +36,12 @@ function trackLabel(path: string, song: JWApiSong | undefined): string {
   if (song) return song.name
   const base = path.split('/').pop() ?? path
   return base.replace(/\.[^.]+$/, '')
+}
+
+/** The album's own cover when it has one, else the lead track's art. */
+function adminCoverUrl(coverUrl: string | undefined, songs: AlbumSongEntry[], pathIndex: Map<string, JWApiSong>): string | undefined {
+  const lead = [...songs].sort((a, b) => a.order - b.order)[0]?.path
+  return buildImageUrl(coverUrl) ?? buildImageUrl(lead ? pathIndex.get(lead)?.image_url : undefined)
 }
 
 // ── Song search autocomplete ───────────────────────────────────────────────
@@ -234,6 +241,8 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
   const [releaseDate, setReleaseDate] = useState(album.release_date ?? '')
   const [description, setDescription] = useState(album.description ?? '')
   const [playCount, setPlayCount] = useState(String(album.play_count ?? 0))
+  const [cover, setCover] = useState(album.cover_url ?? '')
+  const [pickingCover, setPickingCover] = useState(false)
   const [songs, setSongs] = useState<AlbumSongEntry[]>([...album.songs].sort((a, b) => a.order - b.order))
   const [addingSong, setAddingSong] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -248,6 +257,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
     setReleaseDate(album.release_date ?? '')
     setDescription(album.description ?? '')
     setPlayCount(String(album.play_count ?? 0))
+    setCover(album.cover_url ?? '')
     setSongs([...album.songs].sort((a, b) => a.order - b.order))
     setError(null)
   }, [album])
@@ -255,11 +265,11 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
   const initialSongsKey = useMemo(() => [...album.songs].sort((a, b) => a.order - b.order).map(s => s.path).join('|'), [album])
   const dirty = title !== album.title || type !== (album.type ?? '') || artistId !== String(album.artist?.id ?? '')
     || releaseDate !== (album.release_date ?? '') || description !== (album.description ?? '')
-    || playCount !== String(album.play_count ?? 0) || songs.map(s => s.path).join('|') !== initialSongsKey
+    || playCount !== String(album.play_count ?? 0) || cover.trim() !== (album.cover_url ?? '')
+    || songs.map(s => s.path).join('|') !== initialSongsKey
 
-  const coverPath = songs[0]?.path
-  const coverSong = coverPath ? pathIndex.get(coverPath) : undefined
-  const coverUrl = buildImageUrl(coverSong?.image_url)
+  const coverUrl = adminCoverUrl(cover.trim(), songs, pathIndex)
+  useEffect(() => { setImgError(false) }, [coverUrl])
 
   const moveSong = (i: number, dir: -1 | 1): void => {
     const j = i + dir
@@ -287,6 +297,7 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
         release_date: releaseDate,
         description,
         play_count: Number(playCount) || 0,
+        cover_url: cover.trim(),
         songs: songs.map((s, i) => ({ order: i + 1, path: s.path })),
       })
       onSaved(updated)
@@ -383,6 +394,23 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
               <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Optional"
                 className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent)]/40" />
             </label>
+            <div className="block">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1 block">Cover</span>
+              <div className="flex items-center gap-2">
+                <input value={cover} onChange={e => setCover(e.target.value)} placeholder="Empty uses the first track's art · https://… or Compilation/…/cover.png"
+                  className="flex-1 min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]/40" />
+                <button onClick={() => setPickingCover(true)}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border)] text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-overlay)] transition-colors">
+                  <FolderSearch size={13} /> Browse
+                </button>
+                {cover && (
+                  <button onClick={() => setCover('')} title="Use the first track's art"
+                    className="shrink-0 w-8 h-8 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 flex items-center justify-center transition-colors">
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            </div>
             {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
           </div>
         </div>
@@ -424,6 +452,14 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
           )}
         </div>
       </div>
+
+      {pickingCover && (
+        <FilePickerModal
+          songTitle={title}
+          onClose={() => setPickingCover(false)}
+          onSelect={p => { setCover(toSiteRelativeImageUrl(p)); setPickingCover(false) }}
+        />
+      )}
     </div>
   )
 }
@@ -512,14 +548,11 @@ export default function AlbumsAdminView(): JSX.Element {
 
       <div className="flex-1 overflow-y-auto px-6 md:px-8 py-6">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5 md:gap-6">
-          {albums.map(album => {
-            const firstPath = [...album.songs].sort((a, b) => a.order - b.order)[0]?.path
-            const song = firstPath ? pathIndex.get(firstPath) : undefined
-            return (
+          {albums.map(album => (
               <AlbumCard
                 key={album.id}
                 album={album}
-                coverUrl={buildImageUrl(song?.image_url)}
+                coverUrl={adminCoverUrl(album.cover_url, album.songs, pathIndex)}
                 onClick={() => setSelectedId(album.id)}
                 onDelete={async () => {
                   if (!confirm(`Delete "${album.title}"? This can't be undone.`)) return
@@ -531,8 +564,7 @@ export default function AlbumsAdminView(): JSX.Element {
                   }
                 }}
               />
-            )
-          })}
+          ))}
 
           <CreatePanel artists={artists} onCreated={album => { setAlbums(prev => [...prev, album]); setSelectedId(album.id) }} />
         </div>

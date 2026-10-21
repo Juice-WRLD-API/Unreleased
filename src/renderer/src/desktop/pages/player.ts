@@ -896,4 +896,5 @@ live.on((what, patch) => {
   render()
 })
 document.addEventListener('visibilitychange', render)
+page.on('desktop:notice', ({ title, detail }) => notice(title, detail))
 void live.start().then(() => { applyMetrics(); render() })

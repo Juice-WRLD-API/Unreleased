@@ -246,6 +246,25 @@ test('the widgets in the WRLD tab are measured as the desktop\'s windows are', (
   assert.equal(tab.fitOf(1080, 900), 0.75)
 })
 
+test('the desk clears only the displays no app is on', () => {
+  const { freeDisplays } = require('./desktop/cleardesk')
+  const { parseWindows } = require('./desktop/screenwatch')
+  const left = { id: 1, bounds: { x: -1440, y: 172, width: 1440, height: 900 } }
+  const main = { id: 2, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }
+  const right = { id: 3, bounds: { x: 1920, y: -392, width: 1920, height: 1080 } }
+  const all = [left, main, right]
+  assert.deepEqual(freeDisplays(all, null), all)
+  assert.deepEqual(freeDisplays(all, []), all)
+  // A window filling the main display, and one only an edge of which reaches over to the right.
+  const windows = parseWindows('48812,0,0,1920,1032,Chrome_WidgetWin_1;9,1900,100,1950,700,Notepad;')
+  assert.deepEqual(windows[0], { pid: 48812, className: 'Chrome_WidgetWin_1', rect: { x: 0, y: 0, width: 1920, height: 1032 } })
+  assert.deepEqual(freeDisplays(all, windows.map((w) => w.rect)).map((d) => d.id), [1, 3])
+  assert.deepEqual(freeDisplays(all, [{ x: -1000, y: 300, width: 2500, height: 400 }]).map((d) => d.id), [3])
+  assert.deepEqual(parseWindows(''), [])
+  assert.deepEqual(parseWindows('7,10,10,5,5,Bad;x;'), [])
+  assert.equal(parseWindows('7,0,0,10,10,Odd,Name')[0].className, 'Odd,Name')
+})
+
 test('another app in front ends the clear desk; the desktop, the taskbar and our own windows don\'t', () => {
   const { ScreenWatch, SCRIPT } = require('./desktop/screenwatch')
   assert.equal(ScreenWatch.isOtherApp({ pid: 4242, className: 'Chrome_WidgetWin_1' }), true)

@@ -40,6 +40,8 @@ import ThemedSelect from './ThemedSelect'
 import ThemedColorPicker from './ThemedColorPicker'
 import { Row, Toggle } from './SettingsRow'
 import DesktopSettings from './DesktopSettings'
+import { useContentMotion } from '../hooks/useContentMotion'
+import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -171,7 +173,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'desktop', label: 'Mini player widget' },
   { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, on the desktop or in WRLD' },
   { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, on the desktop or in WRLD' },
-  { tab: 'desktop', label: 'Clear desk', sub: 'Hide every other window and the taskbar', electronOnly: true },
+  { tab: 'desktop', label: 'Clear desk', sub: 'Cover the displays showing the desktop, taskbar too', electronOnly: true },
   { tab: 'desktop', label: 'Visualizer on the cleared desk', sub: 'WRLD’s visualizer behind the widgets in place of the wallpaper', electronOnly: true },
   { tab: 'desktop', label: 'Displays', sub: 'Which screens get the light and the widgets', electronOnly: true },
   { tab: 'app', label: 'Download folder', electronOnly: true },
@@ -281,10 +283,10 @@ function VizSettings(): JSX.Element {
           <span className="text-text-primary text-sm">WRLD visualizer</span>
           <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → switches visualizer in fullscreen</p>
         </div>
-        <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={14} className={`text-text-muted control-motion shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-      <div className="pl-[34px]"><VizControls /></div>
+      <div className="pl-[34px] animate-disclosure-in"><VizControls /></div>
       )}
     </div>
   )
@@ -469,6 +471,8 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   const [tokenCopied, setTokenCopied] = useState(false)
   const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
+  const aboutAnswerRef = useRef<HTMLDivElement>(null)
+  useContentMotion(aboutAnswerRef, openAbout ?? '')
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
   // otherwise re-expand it — see the matching comment on setShowSettings.
@@ -771,6 +775,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   }, [recording, setHotkeyBinding, setGlobalHotkeyBinding])
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
+  const { containerRef: categoryRef, indicatorRef: categoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
+  const { containerRef: mobileCategoryRef, indicatorRef: mobileCategoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
+  const contentRef = useRef<HTMLDivElement>(null)
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -794,6 +801,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   // so a result never points at a tab that doesn't exist in this build.
   const [settingsQuery, setSettingsQuery] = useState('')
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
+  useContentMotion(contentRef, settingsQueryTrimmed ? 'search' : tab)
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
         (!r.electronOnly || isElectron) &&
@@ -1064,40 +1072,44 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
 
         {/* Mobile tab bar — the sidebar collapses below sm, so categories
             move into a horizontal scroller instead. */}
-        <div className="sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
+        <div ref={mobileCategoryRef} className="relative isolate sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.id}
+              data-indicator-key={t.id}
               onClick={() => { setTab(t.id); setSettingsQuery('') }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
-                tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary bg-[var(--surface-overlay)]'
+                tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary bg-[var(--surface-overlay)]'
               }`}
             >
               <t.icon size={13} />
               {t.label}
             </button>
           ))}
+          <div ref={mobileCategoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-full bg-accent/15" />
         </div>
 
         {/* Body — sidebar category list + flat content pane, mirroring
             macOS System Settings / Apple Music's own preferences window. */}
         <div className="flex flex-1 min-h-0">
-          <div className="w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
+          <div ref={categoryRef} className="relative isolate w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
             {tabs.map((t) => (
               <button
                 key={t.id}
+                data-indicator-key={t.id}
                 onClick={() => { setTab(t.id); setSettingsQuery('') }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
-                  tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                  tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
                 }`}
               >
                 <t.icon size={15} className="shrink-0" />
                 {t.label}
               </button>
             ))}
+            <div ref={categoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-lg bg-accent/15" />
           </div>
 
-          <div key={tab} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} ref={contentRef} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -3001,13 +3013,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     <div key={q}>
                       <button
                         onClick={() => setOpenAbout(openAbout === q ? null : q)}
+                        aria-expanded={openAbout === q}
                         className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-[var(--surface-raised)] transition-colors text-left"
                       >
                         <span className="text-text-secondary text-xs font-medium">{q}</span>
-                        <ChevronDown size={12} className={`text-text-muted transition-transform duration-150 shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
+                        <ChevronDown size={12} className={`text-text-muted control-motion shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
                       {openAbout === q && (
-                        <div className="px-3 pb-3 pt-0">
+                        <div ref={aboutAnswerRef} className="px-3 pb-3 pt-0">
                           <p className="text-text-muted text-xs leading-relaxed">{a}</p>
                           {link && (
                             <button

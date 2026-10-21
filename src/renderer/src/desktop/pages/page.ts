@@ -74,6 +74,8 @@ export interface Bridge {
   on(channel: 'desktop:primary', cb: (bounds: Bounds) => void): () => void
   /** In the WRLD tab: put away (true) while the tab's closed or its old style is showing, the page kept for coming back. */
   on(channel: 'desktop:shelved', cb: (on: boolean) => void): () => void
+  /** A word from the desktop itself, for the player to show (the desk not cleared). */
+  on(channel: 'desktop:notice', cb: (note: { title: string; detail: string }) => void): () => void
   command(cmd: string, arg?: unknown): void
   request<T = unknown>(kind: string, arg?: unknown): Promise<T | null>
   solid(on: boolean): void

@@ -1,9 +1,9 @@
 import { RefObject, useLayoutEffect, useRef } from 'react'
 
-// The close for menus and popovers: a quick fade as it settles back toward
-// where it opened (the counterpart of .animate-menu-pop).
+// The close for menus and popovers: fade in place without scaling their text
+// (the counterpart of .animate-menu-pop).
 export const popOut = (ghost: HTMLElement): Animation =>
-  ghost.animate([{ opacity: 0, transform: 'scale(0.97)' }], { duration: 130, easing: 'cubic-bezier(0.4, 0, 1, 1)', fill: 'forwards' })
+  ghost.animate([{ opacity: 0 }], { duration: 240, easing: 'cubic-bezier(0.4, 0, 0.6, 1)', fill: 'forwards' })
 
 // Lets something that closes by unmounting - a modal, a menu - still animate
 // out. React drops its DOM the moment the owner stops rendering it, so on
@@ -34,6 +34,9 @@ export function useExitGhost(
     // reads every scrollTop as 0.
     const next = el.nextSibling
     const ghost = el.cloneNode(true) as HTMLElement
+    // Closing during the entrance must continue from its current opacity,
+    // rather than flashing fully visible when .exit-ghost disables that CSS.
+    ghost.style.opacity = getComputedStyle(el).opacity
     const from = [el, ...el.querySelectorAll('*')]
     const scrolls: [number, number, number][] = []
     const canvases: number[] = []

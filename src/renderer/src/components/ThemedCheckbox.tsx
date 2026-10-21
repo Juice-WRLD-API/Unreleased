@@ -32,11 +32,10 @@ export default function ThemedCheckbox({
       {variant === 'switch' ? (
         <span
           aria-hidden="true"
-          className={`relative w-8 h-[18px] rounded-full transition-colors pointer-events-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent/50 ${
-            checked ? 'bg-accent' : 'bg-[var(--surface-highest)]'
-          }`}
+          className="relative w-8 h-[18px] rounded-full bg-[var(--surface-highest)] pointer-events-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent/50"
         >
-          <span className={`absolute inset-y-0 my-auto w-3.5 h-3.5 rounded-full bg-white transition-all ${checked ? 'left-[16px]' : 'left-0.5'}`} />
+          <span className={`absolute inset-0 rounded-full bg-accent control-motion ${checked ? 'opacity-100' : 'opacity-0'}`} />
+          <span className={`absolute inset-y-0 left-0.5 my-auto w-3.5 h-3.5 rounded-full bg-white control-motion ${checked ? 'translate-x-3.5' : 'translate-x-0'}`} />
         </span>
       ) : (
         <span
@@ -46,7 +45,7 @@ export default function ThemedCheckbox({
             checked ? 'bg-accent border-accent text-white' : 'bg-surface-overlay border-[var(--text-muted)]'
           }`}
         >
-          {checked && <Check size={Math.round(size * 0.75)} strokeWidth={3.25} />}
+          <Check size={Math.round(size * 0.75)} strokeWidth={3.25} className={`control-motion ${checked ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}`} />
         </span>
       )}
     </span>

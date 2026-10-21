@@ -9,6 +9,9 @@ import { cancelChatUpload, cancelAllChatUploads, isChatUploadId } from '../lib/c
 import { cancelZipTask, isZipTaskId } from '../lib/clientZip'
 import { proposeStagedChanges, stagedChangeLabel } from '../lib/compStagedChanges'
 import { proposeStagedSongChanges, stagedSongChangeLabel } from '../lib/compStagedSongChanges'
+import { PopLayer } from './PopLayer'
+import { useListMotion } from '../hooks/useListMotion'
+import { useContentMotion } from '../hooks/useContentMotion'
 
 export default function DownloadManager(): JSX.Element | null {
   const { downloads, showDownloadManager, setShowDownloadManager, addDownload, updateDownload, clearCompletedDownloads, setUpdateStatus, wrldFullscreen, stagedFileChanges, stagedSongChanges } = useStorePick('downloads', 'showDownloadManager', 'setShowDownloadManager', 'addDownload', 'updateDownload', 'clearCompletedDownloads', 'setUpdateStatus', 'wrldFullscreen', 'stagedFileChanges', 'stagedSongChanges')
@@ -19,6 +22,8 @@ export default function DownloadManager(): JSX.Element | null {
   const [proposeResult, setProposeResult] = useState<string | null>(null)
   const el = (window as any).electron
   const panelRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  useListMotion(listRef)
   // Per-download last-sample (bytes, timestamp) used to derive a live
   // bytes/sec speed reading from the raw received-byte progress events.
   const speedSamples = useRef<Record<string, { bytes: number; time: number }>>({})
@@ -107,7 +112,7 @@ export default function DownloadManager(): JSX.Element | null {
   const activeUploads = downloads.filter((d) => d.type === 'upload' && d.state === 'downloading').length
 
   return (
-    <div ref={panelRef} className="fixed z-[9990]" style={panelPos}>
+    <PopLayer ref={panelRef} className="fixed z-[9990] animate-menu-pop" style={panelPos}>
       <div className="w-[320px] rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-overlay)] border-b border-[var(--border)]">
@@ -148,17 +153,15 @@ export default function DownloadManager(): JSX.Element | null {
               </button>
             </div>
           )}
-          {downloads.length === 0 ? (
-            stagedFileChanges.length === 0 && stagedSongChanges.length === 0 && !proposeResult &&
+          <div ref={listRef} className="relative divide-y divide-[var(--border)]/40">
+            {downloads.length === 0 && stagedFileChanges.length === 0 && stagedSongChanges.length === 0 && !proposeResult && (
               <p className="text-[var(--text-muted)] text-xs text-center py-6">No downloads</p>
-          ) : (
-            <div className="divide-y divide-[var(--border)]/40">
-              {downloads.map((item) => <DownloadRow key={item.id} item={item} />)}
-            </div>
-          )}
+            )}
+            {downloads.map((item) => <DownloadRow key={item.id} item={item} />)}
+          </div>
         </div>
       </div>
-    </div>
+    </PopLayer>
   )
 }
 
@@ -469,6 +472,8 @@ function StagedSongRow({ change, disabled }: { change: StagedSongChange; disable
 }
 
 function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
+  const statusRef = useRef<HTMLDivElement>(null)
+  useContentMotion(statusRef, item.state)
   const el = (window as any).electron
   const isDone = item.state === 'done'
   const isError = item.state === 'error' || item.state === 'cancelled'
@@ -492,11 +497,12 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
 
   return (
     <div
+      data-flip-key={item.id}
       className={`px-3 py-2.5 hover:bg-[var(--surface-overlay)] transition-colors${canOpen ? ' cursor-pointer' : ''}`}
       onClick={canOpen ? () => el.openPath(item.savePath!) : undefined}
     >
       <div className="flex items-start gap-2">
-        <div className="mt-0.5 shrink-0">
+        <div ref={statusRef} className="mt-0.5 shrink-0">
           {isDone ? <CheckCircle2 size={13} className="text-emerald-400" />
             : isError ? <AlertCircle size={13} className="text-red-400" />
             : item.type === 'update' ? <RefreshCw size={13} className="text-[var(--accent)] animate-spin" />
@@ -515,7 +521,7 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
           {isError && item.error && <p className="text-red-400 text-[10px] mt-0.5 truncate">{item.error}</p>}
           {isActive && (
             <div className="mt-1.5 h-1 bg-[var(--surface-overlay)] rounded-full overflow-hidden">
-              <div className="h-full bg-[var(--accent)] rounded-full transition-all duration-200" style={{ width: `${item.percent}%` }} />
+              <div className="h-full bg-[var(--accent)] rounded-full origin-left control-motion" style={{ transform: `scaleX(${Math.max(0, Math.min(100, item.percent)) / 100})` }} />
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.9** · updated 2026-10-21. Bump the version and date whenever you
+**Version 1.10** · updated 2026-10-22. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -342,6 +342,12 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-10-22: internal tab changes need their own motion, but a mount animation
+  on the tab body also plays inside the dialog/view's entrance. Use
+  `useContentMotion` for changes after the first render; it fades without
+  remounting content or shifting nested fixed menus. Keep notification/list
+  containers mounted while empty so `useListMotion` can animate the first
+  arrival and the last dismissal.
 - 2026-10-21: `npm run electron:dev` quits at once while the installed app is
   running: both use the same userData folder and single-instance lock. To run or
   profile dev beside it, launch `electron . --user-data-dir=<scratch folder>

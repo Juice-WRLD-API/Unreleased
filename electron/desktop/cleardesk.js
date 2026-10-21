@@ -1,6 +1,7 @@
-// The desk cleared: the other apps' windows, the desktop's icons and the taskbar go, and only the desktop's own - the
-// player, the playlist, the clock and the light - and the wallpaper stay, or WRLD's visualizer in its place. Pressed
-// again, all comes back as it was; going to another app (Alt+Tab, the Start menu, a click on the taskbar's last
+// The desk cleared: on every display showing the desktop, its icons and the taskbar go, and only the desktop's own -
+// the player, the playlist, the clock and the light - and the wallpaper stay, or WRLD's visualizer in its place. A
+// display with another app's window on it is left as it is, and with an app on every one, nothing is cleared. Pressed
+// again, all comes back as it was; going to an app under it (Alt+Tab, the Start menu, a click on the taskbar's last
 // glimpse) brings it all back too.
 //
 // No window is hidden, minimized or moved: the wallpaper (or the visualizer) is laid over all of them like a curtain,
@@ -12,6 +13,26 @@ const EventEmitter = require('events')
 const { TOOL, openShared } = require('./windows')
 const { ScreenWatch, screenWatch } = require('./screenwatch')
 
+/** How long a press waits to be told where the apps' windows are (the helper starting): then every display is cleared. */
+const WINDOWS_WAIT_MS = 2500
+/** How far into a display an app's window reaches before the display is the app's: a window's edge over the line isn't. */
+const MIN_OVERLAP = 48
+
+const overlaps = (a, b) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) >= MIN_OVERLAP
+  && Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) >= MIN_OVERLAP
+
+/** The displays no app's window is on. `rects` are the windows' places in the displays' own coordinates; null when
+ *  they aren't known, and then every display.
+ *  @template {{ bounds: Electron.Rectangle }} D
+ *  @param {D[]} displays @param {Electron.Rectangle[] | null} rects @returns {D[]} */
+function freeDisplays(displays, rects) {
+  if (!rects) return displays
+  return displays.filter((d) => !rects.some((r) => overlaps(d.bounds, r)))
+}
+
+/** A window's place in real pixels, in Electron's own coordinates. */
+const toDip = (rect) => (process.platform === 'win32' ? screen.screenToDipRect(null, rect) : rect)
+
 class ClearDesk extends EventEmitter {
   /**
    * @param {{ pageUrl: (name: string) => string, shared: { hostUrl: string, preload: string }, preload: string,
@@ -22,6 +43,10 @@ class ClearDesk extends EventEmitter {
     super()
     this.options = options
     this.isOn = false
+    /** Pressed, and finding out which displays are free. */
+    this.starting = false
+    /** @type {Electron.Rectangle[]} the displays the curtains cover */
+    this.covered = []
     /** The desktop's windows held over the curtain: from the press until the curtain has opened again. */
     this.holding = false
     /** @type {{ win: Electron.BrowserWindow | null, ready: Promise<void> }[]} */
@@ -30,8 +55,10 @@ class ClearDesk extends EventEmitter {
     this.since = 0
     this.onFront = (front) => {
       if (!this.isOn) return
-      // Pressing the button itself brings the player's own window or the desktop forward a moment: let be.
+      // Pressing the button itself brings the player's own window or the desktop forward a moment: let be. And an
+      // app on a display left uncleared is just that app in use.
       if (Date.now() - this.since < 1500 || !ScreenWatch.isOtherApp(front)) return
+      if (front.rect && !this.covered.some((c) => overlaps(c, toDip(front.rect)))) return
       this.end()
     }
     screenWatch.on('front', this.onFront)
@@ -39,20 +66,39 @@ class ClearDesk extends EventEmitter {
 
   /** Clears the desk, or brings it all back; undefined turns it over. */
   set(on) {
-    const want = on === undefined ? !this.isOn : Boolean(on)
-    if (want === this.isOn) return
-    if (want) this.begin(); else this.end()
+    const now = this.isOn || this.starting
+    const want = on === undefined ? !now : Boolean(on)
+    if (want === now) return
+    if (want) { void this.begin(); return }
+    if (this.isOn) { this.end(); return }
+    // Pressed again before anything was cleared.
+    this.starting = false
+    ++this.turn
+    screenWatch.need('cleardesk', false)
   }
 
-  begin() {
+  async begin() {
+    this.starting = true
+    const turn = ++this.turn
+    screenWatch.need('cleardesk', true)
+    const windows = await screenWatch.windowsSoon(WINDOWS_WAIT_MS)
+    if (turn !== this.turn) return
+    this.starting = false
+    // Unreleased's own windows go under the curtain with the rest, as when the press is in the app's settings.
+    const rects = windows && windows.filter((w) => ScreenWatch.isOtherApp(w)).map((w) => toDip(w.rect))
+    const displays = freeDisplays(screen.getAllDisplays(), rects)
+    if (!displays.length) {
+      screenWatch.need('cleardesk', false)
+      this.emit('refused')
+      return
+    }
     this.isOn = true
     this.holding = true
     this.since = Date.now()
-    const turn = ++this.turn
+    this.covered = displays.map((d) => d.bounds)
     this.emit('change', true)
-    screenWatch.need('cleardesk', true)
     const look = { picture: this.options.wallpaper(), viz: this.options.viz() }
-    for (const display of screen.getAllDisplays()) {
+    for (const display of displays) {
       /** @type {{ win: Electron.BrowserWindow | null, ready: Promise<void> }} */
       const one = { win: null, ready: Promise.resolve() }
       one.ready = new Promise((done) => {
@@ -85,6 +131,7 @@ class ClearDesk extends EventEmitter {
   /** Everything back: the curtain opens, then the desktop's windows go back down among the others. */
   end() {
     this.isOn = false
+    this.covered = []
     ++this.turn
     this.emit('change', false)
     screenWatch.need('cleardesk', false)
@@ -117,8 +164,13 @@ class ClearDesk extends EventEmitter {
     if (!this.curtains.length && !this.isOn) this.lower()
   }
 
+  /** Whether `win` is on a display the curtains cover: a widget on a display left as it was stays among the apps. */
+  over(win) {
+    return this.covered.some((c) => overlaps(c, win.getBounds()))
+  }
+
   lift() {
-    for (const win of [...this.options.widgets(), ...this.options.lights()].filter((w) => w && !w.isDestroyed())) {
+    for (const win of [...this.options.widgets(), ...this.options.lights()].filter((w) => w && !w.isDestroyed() && this.over(w))) {
       win.setAlwaysOnTop(true, 'screen-saver')
       win.moveTop()
     }
@@ -134,7 +186,7 @@ class ClearDesk extends EventEmitter {
 
   /** A desktop window made while the desk is clear: over the curtain too. */
   adopt(win) {
-    if (!this.holding || !win || win.isDestroyed()) return
+    if (!this.holding || !win || win.isDestroyed() || !this.over(win)) return
     win.setAlwaysOnTop(true, 'screen-saver')
     win.moveTop()
   }
@@ -147,4 +199,4 @@ class ClearDesk extends EventEmitter {
   }
 }
 
-module.exports = { ClearDesk }
+module.exports = { ClearDesk, freeDisplays }

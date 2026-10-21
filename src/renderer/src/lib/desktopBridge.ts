@@ -355,6 +355,8 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       break
     }
     case 'fm': toggleRadioFm(); break
+    // A word from the desktop itself (the desk not cleared, an app on every display).
+    case 'notice': if (typeof arg === 'string') showAppToast(arg, { tone: 'info' }); break
     // The ⋯ menu's rows that open the app: song info and the editor (the main process brings the window forward).
     case 'song-info': {
       const { songId } = menuSong(s)

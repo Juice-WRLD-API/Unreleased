@@ -103,6 +103,15 @@ function createDesktop(options) {
     throttleMain()
     options.onChange?.()
   })
+  // An app on every display: nothing to clear. Said on the player, and in the app should the press have been there.
+  clear.on('refused', () => {
+    const title = 'Nothing to clear'
+    const detail = screen.getAllDisplays().length > 1 ? 'Every display has an app open on it' : 'An app is open on the display'
+    const player = widgets.player.window
+    if (player && !player.isDestroyed()) player.webContents.send('desktop:notice', { title, detail })
+    const win = main()
+    if (win?.isVisible() && !win.isMinimized()) win.webContents.send('desktop:command', 'notice', `${title}: ${detail.toLowerCase()}`)
+  })
 
   /** The widgets' glass shows the wallpaper behind them, blurred - but over the cleared desk's visualizer, a glass of
    *  its own, as in the WRLD tab. */
@@ -161,6 +170,8 @@ function createDesktop(options) {
     if (!settings) return
     const anyWidget = Object.keys(widgets).some((which) => settings[which]?.isOn)
     if (anyWidget) frost.start()
+    // Where the apps' windows are, known before the widgets' clear button is pressed: the desk then clears at once.
+    screenWatch.need('widgets', anyWidget)
     throttleMain()
     const displays = JSON.stringify(shownDisplays().map((d) => [d.id, d.bounds]))
     if (displays !== lastDisplays) { lastDisplays = displays; lights.rebuild() }
@@ -314,6 +325,7 @@ function createDesktop(options) {
       for (const widget of Object.values(widgets)) widget.hide()
       clear.dispose()
       screenWatch.need('light', false)
+      screenWatch.need('widgets', false)
       closeHost()
     },
     /** Clears the desk, or brings it all back (the tray, the hotkeys); undefined turns it over. */
