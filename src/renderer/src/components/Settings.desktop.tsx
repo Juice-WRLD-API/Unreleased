@@ -9,7 +9,7 @@ import {
   AudioLines, SlidersHorizontal, LogIn,
   Activity, Lightbulb,
 } from 'lucide-react'
-import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
+import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls, { Pills, Toggle } from './VizControls'
 import DesktopSettings from './DesktopSettings'
 import Passkeys from './Passkeys'
@@ -2129,6 +2129,14 @@ export default function Settings(): JSX.Element {
                       <DebugLogOpenButton />
                       <DebugRecordButton />
                     </div>
+                  </Row>
+                  <Row
+                    icon={EyeOff}
+                    iconColor="#6b7280"
+                    label="Anonymous"
+                    sub="Leaves out device and browser details, and scrubs your username, email, IP and folder paths from the log"
+                  >
+                    <DebugAnonymousToggle />
                   </Row>
                 </div>
 

@@ -19,7 +19,7 @@ import { LOOKS } from '../../desktop/light/looks'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
 import type { AudioFx } from '../audioEffects'
-import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, isDebugRecording, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
+import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, getDebugAnonymousPref, isDebugRecording, isDebugRecordingAnonymous, setDebugAnonymousPref, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
 import { describeEntry, describeLog, formatOffset, isProblem, openDebugLogBlob, openDebugLogFile, type DebugLog } from '../debugLog'
 import { asJson, fail, oneLine, parseArgs, parseBool, pickByName, type TermCommand, type TermCtx } from './types'
 
@@ -416,13 +416,24 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start|stop [--view]|discard|open [--all] [--json]]',
-    description: 'Record console messages and network requests, then save them to a file to send us; open reads a saved log back - prints its summary and problems (--all: every event) and shows it in the viewer (same as Settings > About > Record debug log / Open log)',
-    complete: (before, partial) => before.length === 0 ? ['start', 'stop', 'discard', 'open'].filter((v) => v.startsWith(partial.toLowerCase())) : [],
+    name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start [--anon|--no-anon]|stop [--view]|discard|open [--all] [--json]|anon [on|off]]',
+    description: 'Record console messages and network requests, then save them to a file to send us; open reads a saved log back - prints its summary and problems (--all: every event) and shows it in the viewer. Anonymous mode (anon on, or start --anon) leaves out device details and scrubs your username, email, IP and folder paths (same as Settings > About > Record debug log / Open log / Anonymous)',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return ['start', 'stop', 'discard', 'open', 'anon'].filter((v) => v.startsWith(p))
+      return before.length === 1 && before[0].toLowerCase() === 'anon' ? ['on', 'off'].filter((v) => v.startsWith(p)) : []
+    },
     run: async (args, ctx) => {
       const { rest, bool } = parseArgs(args)
       const verb = (rest[0] ?? '').toLowerCase()
       const on = isDebugRecording()
+      if (verb === 'anon' || verb === 'anonymous') {
+        const want = (rest[1] ?? '').toLowerCase()
+        if (want && !['on', 'off'].includes(want)) fail('usage: debuglog anon [on|off]')
+        if (want) setDebugAnonymousPref(want === 'on')
+        ctx.print(`anonymous mode ${getDebugAnonymousPref() ? 'on' : 'off'} for the next recording${on ? ` (this one is ${isDebugRecordingAnonymous() ? 'anonymous' : 'not anonymous'})` : ''}`, want ? 'ok' : undefined)
+        return
+      }
       if (verb === 'open' || verb === 'view') {
         // The picker has to open straight off the keypress, before any await.
         const log = await openDebugLogFile()
@@ -431,19 +442,21 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
         return
       }
       if (!verb || verb === 'status') {
-        ctx.print(on ? `recording - ${Math.round((Date.now() - debugRecordingStartedAt()) / 1000)}s, ${debugRecordingCount()} events (debuglog stop saves it)` : 'not recording (debuglog start)', on ? 'ok' : 'dim')
+        ctx.print(on ? `recording${isDebugRecordingAnonymous() ? ' (anonymous)' : ''} - ${Math.round((Date.now() - debugRecordingStartedAt()) / 1000)}s, ${debugRecordingCount()} events (debuglog stop saves it)` : 'not recording (debuglog start)', on ? 'ok' : 'dim')
         return
       }
       if (verb === 'start') {
         if (on) { ctx.print('already recording', 'dim'); return }
-        startDebugRecording()
-        ctx.print('recording console and network activity - reproduce the problem, then run debuglog stop', 'ok')
+        const anonymous = bool.has('anon') || bool.has('anonymous') ? true : bool.has('no-anon') ? false : undefined
+        startDebugRecording({ anonymous })
+        ctx.print(`recording console and network activity${isDebugRecordingAnonymous() ? ' (anonymous)' : ''} - reproduce the problem, then run debuglog stop`, 'ok')
         return
       }
       if (verb === 'stop' || verb === 'save') {
         if (!on) fail('debuglog: not recording')
+        const anonymous = isDebugRecordingAnonymous()
         const { blob, filename, count } = stopAndDownloadDebugRecording()
-        ctx.print(`saved debug log (${count} events) - ${filename}`, 'ok')
+        ctx.print(`saved ${anonymous ? 'anonymous ' : ''}debug log (${count} events) - ${filename}`, 'ok')
         if (bool.has('view') || bool.has('open')) printDebugLog(ctx, await openDebugLogBlob(blob, filename), bool.has('all'), bool.has('json'))
         return
       }
@@ -453,7 +466,7 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
         ctx.print('recording discarded', 'ok')
         return
       }
-      fail('usage: debuglog [start|stop [--view]|discard|open [--all] [--json]]')
+      fail('usage: debuglog [start [--anon|--no-anon]|stop [--view]|discard|open [--all] [--json]|anon [on|off]]')
     },
   },
   {

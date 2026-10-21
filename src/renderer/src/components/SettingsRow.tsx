@@ -37,12 +37,14 @@ export function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }:
   )
 }
 
-export function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => void; locked?: boolean }): JSX.Element {
+export function Toggle({ on, onClick, locked, lockedReason = 'Locked off while the Pill navigation style is selected' }: {
+  on: boolean; onClick: () => void; locked?: boolean; lockedReason?: string
+}): JSX.Element {
   return (
     <button
       onClick={onClick}
       disabled={locked}
-      title={locked ? 'Locked off while the Pill navigation style is selected' : undefined}
+      title={locked ? lockedReason : undefined}
       className={`relative w-10 h-5 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       {/* Vertically centered with inset-y-0 + my-auto (an auto-margin flex/

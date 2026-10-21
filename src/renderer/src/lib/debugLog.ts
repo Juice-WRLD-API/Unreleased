@@ -17,6 +17,8 @@ export interface DebugLog {
   startedAt: number
   stoppedAt: number
   environment: Record<string, unknown>
+  /** Recorded in anonymous mode (no device details, account fields scrubbed). */
+  anonymous: boolean
   /** Recomputed from the entries, not read from the file. */
   summary: DebugSummary
   problems: number
@@ -132,6 +134,7 @@ export function parseDebugLog(text: string, fileName = 'debug log'): DebugLog {
 
   return {
     fileName, startedAt, stoppedAt, environment,
+    anonymous: root.anonymous === true,
     summary: summarizeDebugEntries(list, dropped),
     problems: list.filter(isProblem).length,
     entries: list.map((e, id) => ({ ...e, id, sinceStartMs: e.t - startedAt })),
@@ -238,7 +241,7 @@ export function prettyText(text: string): string {
   try { return JSON.stringify(JSON.parse(t), null, 2) } catch { return text }
 }
 
-/** "v2.4.18 (abc1234) · 2m 13s · 20/10/2026, 14:03:12" */
+/** "v2.4.18 (abc1234) · 2m 13s · 20/10/2026, 14:03:12 · anonymous" */
 export function describeLog(log: DebugLog): string {
   const env = log.environment
   const version = str(env.version)
@@ -247,6 +250,7 @@ export function describeLog(log: DebugLog): string {
     version ? `v${version}${commit ? ` (${commit.slice(0, 7)})` : ''}` : '',
     formatDuration((log.stoppedAt - log.startedAt) / 1000),
     log.startedAt ? new Date(log.startedAt).toLocaleString() : '',
+    log.anonymous ? 'anonymous' : '',
   ].filter(Boolean).join(' · ')
 }
 

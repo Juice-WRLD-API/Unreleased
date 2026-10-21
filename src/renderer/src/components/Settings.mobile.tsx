@@ -8,7 +8,7 @@ import {
   ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Wrench, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
   Activity,
 } from 'lucide-react'
-import { DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
+import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
@@ -1813,6 +1813,14 @@ export default function Settings(): JSX.Element {
                       <DebugLogOpenButton />
                       <DebugRecordButton size="lg" />
                     </div>
+                  </Row>
+                  <Row
+                    icon={EyeOff}
+                    iconColor="#6b7280"
+                    label="Anonymous"
+                    sub="Leaves out device and browser details, and scrubs your username, email, IP and folder paths from the log"
+                  >
+                    <DebugAnonymousToggle />
                   </Row>
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
