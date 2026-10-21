@@ -48,6 +48,9 @@ interface VizState {
   wrldWidgets: boolean
   /** The Edge light (its look's id) drawn round the edges: over the visualizer, or on its own with it Off; null for none. */
   vizEdgeOverlay: string | null
+  /** How many pickers are open over the page (not saved). WRLD's visualizer and Edge light hold still under them:
+   *  drawn every frame, they'd fight the picker's own screens, and the dialog's blur would have to follow them. */
+  vizCovered: number
 
   selectMode: (id: string, persist: boolean) => void
   setVizQuality: (q: Quality) => void
@@ -56,6 +59,8 @@ interface VizState {
   setVizCycle: (c: VizCycle) => void
   setWrldWidgets: (on: boolean) => void
   setVizEdgeOverlay: (look: string | null) => void
+  /** A picker opened (true) or closed (false). */
+  coverViz: (on: boolean) => void
 }
 
 export const useVizStore = create<VizState>((set) => ({
@@ -68,6 +73,7 @@ export const useVizStore = create<VizState>((set) => ({
   // The default. Someone who had the retired visualizer-only layout gets the widgets, where hiding all three is the same.
   wrldWidgets: ls.get<boolean>('immMinimal') ? true : (ls.get<boolean>('wrldWidgets') ?? true),
   vizEdgeOverlay: edgeLook(ls.get('vizEdgeOverlay')),
+  vizCovered: 0,
 
   selectMode: (id, persist) => {
     const mode = normalizeMode(id)
@@ -94,6 +100,7 @@ export const useVizStore = create<VizState>((set) => ({
     ls.set('vizEdgeOverlay', vizEdgeOverlay)
     if (vizEdgeOverlay) useStore.getState().setDesktop({ light: { look: vizEdgeOverlay } })
   },
+  coverViz: (on) => set((s) => ({ vizCovered: Math.max(0, s.vizCovered + (on ? 1 : -1)) })),
 }))
 
 // WRLD's Edge light draws the screen light's look; vizEdgeOverlay only says whether it's on. Read through these, not

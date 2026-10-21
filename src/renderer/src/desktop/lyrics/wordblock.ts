@@ -65,8 +65,23 @@ interface Art { picture: string; blurred: string; size: { width: number; height:
 
 let penContext: CanvasRenderingContext2D | null = null
 
-/** A word drawn once: its letters with a soft shadow under them, and a blurred copy to come in from. */
+/** Words already drawn, the most recently used last. Encoding a word's two pictures is the slow part of a new line, and
+ *  songs (and the style picker's made-up lines) keep coming back to the same words in the same face, size and color. */
+const drawn = new Map<string, Art>()
+const DRAWN_MOST = 300
+
 function drawWord(text: string, key: string, size: number, inkColor: RGB, outline: boolean): Art {
+  const id = JSON.stringify([text, key, size, inkColor, outline, window.devicePixelRatio || 1])
+  let art = drawn.get(id)
+  if (art) drawn.delete(id)
+  else art = paintWord(text, key, size, inkColor, outline)
+  drawn.set(id, art)
+  if (drawn.size > DRAWN_MOST) drawn.delete(drawn.keys().next().value!)
+  return art
+}
+
+/** A word drawn once: its letters with a soft shadow under them, and a blurred copy to come in from. */
+function paintWord(text: string, key: string, size: number, inkColor: RGB, outline: boolean): Art {
   const font = faceCSS(key, size)
   penContext ??= document.createElement('canvas').getContext('2d')!
   penContext.font = font

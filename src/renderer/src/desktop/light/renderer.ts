@@ -5,10 +5,21 @@ import { LightEngine, type LightFrame, type LightStyle, type Meter } from './eng
 import { lookOf, tickerHeight } from './looks'
 
 interface Program { p: WebGLProgram; uniforms: Record<string, WebGLUniformLocation | null> }
+/** A look's program on its way: compiled and linked, not yet asked how that went. */
+interface Build { p: WebGLProgram; fragment: WebGLShader; at: number }
+
+/** Without KHR_parallel_shader_compile, how long a look's build is left before it's asked how it went: the compile runs
+ *  in the browser's GPU process meanwhile, so asking later waits for less of it. */
+const BUILD_GRACE_MS = 50
 
 export class EdgeRenderer {
   gl: WebGL2RenderingContext
-  looks = new Map<string, Program>()
+  /** Each look's program once built; null for one that failed. */
+  looks = new Map<string, Program | null>()
+  builds = new Map<string, Build>()
+  /** The vertex shader every look shares, compiled once. */
+  rimVertex: WebGLShader | null = null
+  parallel: KHR_parallel_shader_compile | null
   sparks: Program
   vao: WebGLVertexArrayObject | null
   words: WebGLTexture | null = null
@@ -23,16 +34,23 @@ export class EdgeRenderer {
     }) as WebGL2RenderingContext | null
     if (!gl) throw new Error('WebGL2 is unavailable')
     this.gl = gl
+    this.parallel = gl.getExtension('KHR_parallel_shader_compile')
     this.sparks = this.program(SPARK_VERTEX, SPARK_FRAGMENT, 'sparks')
     // No attributes: the vertices come from gl_VertexID.
     this.vao = gl.createVertexArray()
   }
 
-  compile(type: number, source: string, name: string): WebGLShader {
+  shader(type: number, source: string): WebGLShader {
     const gl = this.gl
     const shader = gl.createShader(type)!
     gl.shaderSource(shader, source)
     gl.compileShader(shader)
+    return shader
+  }
+
+  compile(type: number, source: string, name: string): WebGLShader {
+    const gl = this.gl
+    const shader = this.shader(type, source)
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
       const log = gl.getShaderInfoLog(shader)
       console.error(`[light] shader ${name} failed:\n${log}`)
@@ -41,15 +59,15 @@ export class EdgeRenderer {
     return shader
   }
 
-  program(vertex: string, fragment: string, name: string): Program {
+  /** A linked program's uniforms, or null with the reason logged when it didn't link. */
+  finish(p: WebGLProgram, shaders: WebGLShader[], name: string): Program | null {
     const gl = this.gl
-    const p = gl.createProgram()!
-    gl.attachShader(p, this.compile(gl.VERTEX_SHADER, vertex, `${name} vertex`))
-    gl.attachShader(p, this.compile(gl.FRAGMENT_SHADER, fragment, `${name} fragment`))
-    gl.linkProgram(p)
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      console.error(`[light] program ${name} failed to link:\n${gl.getProgramInfoLog(p)}`)
-      throw new Error(`Program ${name} failed`)
+      const broken = shaders.find((shader) => !gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+      if (broken) console.error(`[light] shader ${name} failed:\n${gl.getShaderInfoLog(broken)}`)
+      else console.error(`[light] program ${name} failed to link:\n${gl.getProgramInfoLog(p)}`)
+      gl.deleteProgram(p)
+      return null
     }
     const uniforms: Program['uniforms'] = {}
     const count = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS) as number
@@ -60,15 +78,49 @@ export class EdgeRenderer {
     return { p, uniforms }
   }
 
-  /** Each light's program, made the first time it's drawn: lights nobody picks cost nothing. */
-  lookProgram(fn: string): Program {
-    let found = this.looks.get(fn)
-    if (!found) {
-      found = this.program(RIM_VERTEX, lookFragment(fn), fn)
-      this.looks.set(fn, found)
-    }
+  /** Built at once, throwing if it doesn't: the sparks, small, and the test of whether the light can show at all. */
+  program(vertex: string, fragment: string, name: string): Program {
+    const gl = this.gl
+    const p = gl.createProgram()!
+    const shaders = [this.compile(gl.VERTEX_SHADER, vertex, `${name} vertex`), this.compile(gl.FRAGMENT_SHADER, fragment, `${name} fragment`)]
+    for (const shader of shaders) gl.attachShader(p, shader)
+    gl.linkProgram(p)
+    const found = this.finish(p, shaders, name)
+    if (!found) throw new Error(`Program ${name} failed`)
     return found
   }
+
+  /** Each light's program, built the first time it's asked for (lights nobody picks cost nothing), null until it's
+   *  ready. Nothing waits on the build: every light's program holds every light's code, a long compile, so it runs on
+   *  the GPU's side while frames go on and is only asked how it went once it's done. */
+  lookProgram(fn: string): Program | null {
+    const found = this.looks.get(fn)
+    if (found !== undefined) return found
+    const gl = this.gl
+    let build = this.builds.get(fn)
+    if (!build) {
+      this.rimVertex ??= this.shader(gl.VERTEX_SHADER, RIM_VERTEX)
+      const fragment = this.shader(gl.FRAGMENT_SHADER, lookFragment(fn))
+      const p = gl.createProgram()!
+      gl.attachShader(p, this.rimVertex)
+      gl.attachShader(p, fragment)
+      gl.linkProgram(p)
+      build = { p, fragment, at: performance.now() }
+      this.builds.set(fn, build)
+    }
+    const done = this.parallel
+      ? gl.getProgramParameter(build.p, this.parallel.COMPLETION_STATUS_KHR) as boolean
+      : performance.now() - build.at >= BUILD_GRACE_MS
+    if (!done) return null
+    this.builds.delete(fn)
+    const program = this.finish(build.p, [this.rimVertex!, build.fragment], fn)
+    gl.deleteShader(build.fragment)
+    this.looks.set(fn, program)
+    return program
+  }
+
+  /** A look's program still building. */
+  get building(): boolean { return this.builds.size > 0 }
 
   /** The ticker's line, in white on black, two pixels a point; its strip's width in points, with a gap so a
    *  repeated line doesn't run into the next. Returns that width. */
@@ -129,15 +181,17 @@ export class EdgeRenderer {
     return 2 * Math.max(Math.floor(total / 48), 3) + 2
   }
 
-  /** One frame into a viewport `width` × `height` device pixels (the whole canvas unless told). */
-  draw(u: LightFrame, width: number, height: number, words: boolean): void {
+  /** One frame into a viewport `width` × `height` device pixels (the whole canvas unless told). False, the canvas left
+   *  as it was, while the look's program is still building. */
+  draw(u: LightFrame, width: number, height: number, words: boolean): boolean {
     const gl = this.gl
+    const rim = this.lookProgram(u.fn)
+    if (!rim) return false
     gl.viewport(0, 0, width, height)
     gl.disable(gl.BLEND)
     gl.clearColor(0, 0, 0, 0)
     gl.clear(gl.COLOR_BUFFER_BIT)
     gl.bindVertexArray(this.vao)
-    const rim = this.lookProgram(u.fn)
     gl.useProgram(rim.p)
     if (this.words && words) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.words) }
     this.setUniforms(rim, u)
@@ -149,15 +203,22 @@ export class EdgeRenderer {
       this.setUniforms(this.sparks, u)
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, EdgeRenderer.sparkInstances(u.size))
     }
+    return true
   }
 
+  /** Lets go of the context too: a browser keeps only so many (~16), and once another is asked for it drops the oldest -
+   *  which can be WRLD's visualizer's. */
   dispose(): void {
     const gl = this.gl
-    for (const { p } of this.looks.values()) gl.deleteProgram(p)
+    for (const found of this.looks.values()) if (found) gl.deleteProgram(found.p)
+    for (const { p, fragment } of this.builds.values()) { gl.deleteProgram(p); gl.deleteShader(fragment) }
     gl.deleteProgram(this.sparks.p)
+    if (this.rimVertex) gl.deleteShader(this.rimVertex)
     if (this.words) gl.deleteTexture(this.words)
     if (this.vao) gl.deleteVertexArray(this.vao)
     this.looks.clear()
+    this.builds.clear()
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
   }
 }
 
@@ -185,6 +246,8 @@ export class EdgeLight {
   lastDraw = 0
   t0 = performance.now()
   disposed = false
+  /** Covered (a picker open over WRLD): nothing drawn, the last frame left up. */
+  held = false
 
   constructor(canvas: HTMLCanvasElement, feed: LightFeed) {
     this.canvas = canvas
@@ -221,24 +284,31 @@ export class EdgeLight {
     const words = !!lookOf(style.look).words
     if (words) this.engine.tickerWidth = this.renderer.setWords(this.feed.ticker?.() || 'Unreleased', style.thickness)
     const u = this.engine.step(now, this.feed.meter(), this.feed.playing(), style, size, ratio * fit)
-    this.renderer.draw(u, this.canvas.width, this.canvas.height, words)
-    this.lastDraw = now
+    if (this.renderer.draw(u, this.canvas.width, this.canvas.height, words)) this.lastDraw = now
   }
 
   loop = (): void => {
     this.timer = 0
-    if (this.disposed) return
+    if (this.disposed || this.held) return
     const now = this.now
     const style = this.feed.style()
     const playing = this.feed.playing()
     const rate = this.engine.frameRate(style, playing, now)
     if (now - this.lastDraw >= 1 / (rate || 60) - 0.004 || rate === 0) this.draw(now)
-    if (this.engine.frameRate(style, playing, now) > 0) this.timer = requestAnimationFrame(this.loop)
+    // On while it moves, and while a look's program builds, to draw it once it's ready.
+    if (this.engine.frameRate(style, playing, now) > 0 || this.renderer.building) this.timer = requestAnimationFrame(this.loop)
   }
 
   /** Something changed: draw again, and keep going while the light moves. */
   wake(): void {
-    if (!this.timer && !this.disposed && !this.renderer.gl.isContextLost()) this.timer = requestAnimationFrame(this.loop)
+    if (!this.timer && !this.disposed && !this.held && !this.renderer.gl.isContextLost()) this.timer = requestAnimationFrame(this.loop)
+  }
+
+  /** Holds the light still while something covers it, and lets it go on again. */
+  setHeld(held: boolean): void {
+    this.held = held
+    if (held) this.stopLoop()
+    else this.wake()
   }
 
   stopLoop(): void {

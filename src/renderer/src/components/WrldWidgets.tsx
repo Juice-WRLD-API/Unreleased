@@ -26,6 +26,67 @@ const CLOCK_SIZE = { width: 400, height: 420 }
 /** A widget's page, beside the app's own: over file:// in the desktop build, from the site's root on the web. */
 const pageUrl = (which: Which): string => new URL(`desktop/${which}.html`, document.baseURI).href
 
+// ---- the frames, kept between visits ----
+// A frame taken out of the page unloads, so leaving the tab or switching to the old style used to mean every page
+// loading again on the way back: a couple of seconds with no widgets. Instead the frames wait on a shelf out of sight
+// and are put back with moveBefore, which moves a frame without reloading it. Where there's no moveBefore they're
+// made again each time.
+
+const canKeep = typeof Element !== 'undefined' && 'moveBefore' in Element.prototype
+/** Moves a frame already in the page to the end of `parent`, its page kept. (TypeScript's DOM types lack moveBefore.) */
+const moveInto = (parent: Element, frame: HTMLIFrameElement): void =>
+  (parent as unknown as { moveBefore(node: Node, child: Node | null): void }).moveBefore(frame, null)
+/** The frames, standing in the tab or on the shelf. */
+const kept: Partial<Record<Which, HTMLIFrameElement>> = {}
+/** Frames whose page said hello and was answered. One left before then would wait out its hello on the shelf and start
+ *  without knowing it's in the tab, so it isn't kept. */
+const greeted = new WeakSet<HTMLIFrameElement>()
+/** The clock's last measure: a kept clock has no reason to say it again. */
+let keptClockSize = CLOCK_SIZE
+let shelf: HTMLDivElement | null = null
+
+const postTo = (frame: HTMLIFrameElement | undefined, message: ToFrame): void => {
+  try {
+    frame?.contentWindow?.postMessage({ ...message, [FRAME_MARK]: true }, '*')
+  } catch (e) {
+    console.warn('[wrld widgets] message not sent', message.type, e)
+  }
+}
+
+function makeFrame(which: Which): HTMLIFrameElement {
+  const frame = document.createElement('iframe')
+  frame.src = pageUrl(which)
+  frame.title = WIDGET_TITLES[which]
+  frame.className = 'absolute border-0 bg-transparent'
+  // The pages are drawn dark: a frame whose color scheme differed from its page's would get an opaque backdrop.
+  frame.style.colorScheme = 'dark'
+  // Back to front, whatever order they're put back in.
+  frame.style.zIndex = String(WIDGETS.indexOf(which))
+  // The player starts letting clicks through; its page says when the pointer is over something solid.
+  frame.style.pointerEvents = which === 'player' ? 'none' : 'auto'
+  return frame
+}
+
+/** Put away still in the page, which a frame needs to keep its page: hidden, out of the way, and told so it rests. */
+function shelve(which: Which, frame: HTMLIFrameElement): void {
+  if (!shelf) {
+    shelf = document.createElement('div')
+    shelf.inert = true
+    shelf.setAttribute('aria-hidden', 'true')
+    Object.assign(shelf.style, { position: 'fixed', left: '0', top: '0', width: '0', height: '0', overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none' })
+    document.body.appendChild(shelf)
+  }
+  // The app's keys aren't left with a frame no one can see.
+  if (document.activeElement === frame) frame.blur()
+  // The clicks come back to the tab and the page hears the pointer's gone, so the two agree when it's put back.
+  if (which === 'player') {
+    frame.style.pointerEvents = 'none'
+    postTo(frame, { type: 'event', channel: 'desktop:pointer', value: null })
+  }
+  postTo(frame, { type: 'event', channel: 'desktop:shelved', value: true })
+  moveInto(shelf, frame)
+}
+
 /** A widget's menu, as the app's own menu has it: each row sends its command as the widget's presses do. */
 const menuItems = (entries: WidgetMenuEntry[]): ContextMenuEntry[] => entries.map((e) => e === 'divider' ? e : {
   label: e.label,
@@ -37,14 +98,13 @@ const menuItems = (entries: WidgetMenuEntry[]): ContextMenuEntry[] => entries.ma
 
 export default function WrldWidgets(): JSX.Element {
   const desktop = useStore((s) => s.desktop)
+  /** The frames stand in here, put in and taken out by hand: React renders nothing inside it. */
   const layerRef = useRef<HTMLDivElement>(null)
-  const frames = useRef<Partial<Record<Which, HTMLIFrameElement | null>>>({})
   const [area, setArea] = useState({ width: 0, height: 0 })
-  const [clockSize, setClockSize] = useState(CLOCK_SIZE)
+  const [clockSize, setClockSize] = useState(keptClockSize)
   /** A widget being dragged: its center in the layer, followed until it's let go. */
   const [moving, setMoving] = useState<{ which: Which; x: number; y: number } | null>(null)
-  /** The player's frame takes clicks (the pointer is over something solid), and whether the pointer is over it. */
-  const playerSolid = useRef(false)
+  /** Whether the pointer is over the player's frame. */
   const pointerIn = useRef(false)
   /** A widget right-clicked: its menu, at that point in the tab's window. */
   const [menu, setMenu] = useState<{ which: Which; x: number; y: number; part?: WidgetPart } | null>(null)
@@ -92,16 +152,43 @@ export default function WrldWidgets(): JSX.Element {
   const live = useRef({ desktop, fit, frameOf, area })
   live.current = { desktop, fit, frameOf, area }
 
-  const post = (which: Which, message: ToFrame): void => {
-    try {
-      frames.current[which]?.contentWindow?.postMessage({ ...message, [FRAME_MARK]: true }, '*')
-    } catch (e) {
-      console.warn('[wrld widgets] message not sent', message.type, e)
-    }
-  }
+  const post = (which: Which, message: ToFrame): void => postTo(kept[which], message)
   const tell = (channel: string, value: unknown, only?: Which): void => {
     for (const which of only ? [only] : WIDGETS) post(which, { type: 'event', channel, value })
   }
+
+  // The frames: made, or put back from the shelf, and stood in place - every render, so a dragged one follows.
+  useLayoutEffect(() => {
+    const layer = layerRef.current
+    if (!layer || !area.width) return
+    for (const which of WIDGETS) {
+      let frame = kept[which]
+      if (!desktop[which].inWrld) {
+        frame?.remove()
+        delete kept[which]
+        continue
+      }
+      if (!frame) {
+        frame = kept[which] = makeFrame(which)
+        layer.appendChild(frame)
+      } else if (frame.parentNode !== layer) {
+        moveInto(layer, frame)
+        post(which, { type: 'event', channel: 'desktop:shelved', value: false })
+      }
+      const f = frameOf(which)
+      Object.assign(frame.style, { left: `${f.left}px`, top: `${f.top}px`, width: `${f.width}px`, height: `${f.height}px` })
+    }
+  })
+
+  // Leaving: onto the shelf while the layer's still in the page, or gone where they can't be kept.
+  useLayoutEffect(() => () => {
+    for (const which of WIDGETS) {
+      const frame = kept[which]
+      if (!frame) continue
+      if (canKeep && greeted.has(frame)) shelve(which, frame)
+      else { frame.remove(); delete kept[which] }
+    }
+  }, [])
 
   // The settings, again whenever they or the tab's size change.
   useEffect(() => { tell('desktop:settings', { settings: desktop, fit }) }, [desktop, fit])
@@ -123,15 +210,15 @@ export default function WrldWidgets(): JSX.Element {
 
     // ---- the player's clear parts let clicks through ----
     // Its frame takes no clicks until its page, told where the pointer is, says it's over something solid; then the
-    // page hears the pointer itself, and gives the clicks back once it's off the solid parts.
+    // page hears the pointer itself, and gives the clicks back once it's off the solid parts. Which of the two it is
+    // stays with the frame, kept or not.
     const setSolid = (on: boolean): void => {
-      playerSolid.current = on
-      const frame = frames.current.player
+      const frame = kept.player
       if (frame) frame.style.pointerEvents = on ? 'auto' : 'none'
     }
     const onPointer = (event: PointerEvent): void => {
-      const frame = frames.current.player
-      if (playerSolid.current || !frame) return
+      const frame = kept.player
+      if (!frame || frame.style.pointerEvents !== 'none') return
       const r = frame.getBoundingClientRect()
       const inside = event.clientX >= r.left && event.clientX < r.right && event.clientY >= r.top && event.clientY < r.bottom
       if (!inside && !pointerIn.current) return
@@ -152,7 +239,7 @@ export default function WrldWidgets(): JSX.Element {
       setMoving(null)
     }
 
-    const whichOf = (source: MessageEventSource | null): Which | null => WIDGETS.find((w) => !!source && frames.current[w]?.contentWindow === source) ?? null
+    const whichOf = (source: MessageEventSource | null): Which | null => WIDGETS.find((w) => !!source && kept[w]?.contentWindow === source) ?? null
     const onMessage = (event: MessageEvent): void => {
       const which = whichOf(event.source)
       if (!which || !isOurs<FromFrame>(event.data)) return
@@ -161,6 +248,7 @@ export default function WrldWidgets(): JSX.Element {
       switch (message.type) {
         case 'hello':
           post(which, { type: 'reply', id: message.id, value: { which, settings, state, fit: scale, frost: null, isClear: false, hidden: false, primary: null, where: 'tab' } })
+          greeted.add(kept[which]!)
           break
         case 'request':
           void answerDesktopRequest(message.kind, message.arg).then(
@@ -173,7 +261,7 @@ export default function WrldWidgets(): JSX.Element {
           if (message.cmd === 'clear' || message.cmd === 'open-app') break
           // The app's own equalizer, over the tab, beside the button pressed.
           if (message.cmd === 'equalizer') {
-            const r = frames.current[which]?.getBoundingClientRect()
+            const r = kept[which]?.getBoundingClientRect()
             const b = message.arg as { x?: number; y?: number; width?: number; height?: number } | null
             if (r && b && [b.x, b.y, b.width, b.height].every((v) => Number.isFinite(v))) {
               const at = new DOMRect(r.left + b.x!, r.top + b.y!, b.width, b.height)
@@ -204,18 +292,22 @@ export default function WrldWidgets(): JSX.Element {
         }
         case 'size':
           if (which === 'clock' && message.width > 0 && message.height > 0) {
-            setClockSize((was) => (was.width === Math.ceil(message.width) && was.height === Math.ceil(message.height) ? was : { width: Math.ceil(message.width), height: Math.ceil(message.height) }))
+            const size = { width: Math.ceil(message.width), height: Math.ceil(message.height) }
+            if (size.width !== keptClockSize.width || size.height !== keptClockSize.height) {
+              keptClockSize = size
+              setClockSize(size)
+            }
           }
           break
         case 'menu': {
-          const r = frames.current[which]?.getBoundingClientRect()
+          const r = kept[which]?.getBoundingClientRect()
           if (r) setMenu({ which, x: r.left + message.x, y: r.top + message.y, part: message.part === 'lyrics' ? 'lyrics' : undefined })
           break
         }
         case 'key': {
           // As if pressed in the app: its hotkeys (and WRLD's own keys) hear it.
           const { key, code, ctrlKey, shiftKey, altKey, metaKey } = message
-          frames.current[which]?.dispatchEvent(new KeyboardEvent('keydown', { key, code, ctrlKey, shiftKey, altKey, metaKey, bubbles: true, cancelable: true }))
+          kept[which]?.dispatchEvent(new KeyboardEvent('keydown', { key, code, ctrlKey, shiftKey, altKey, metaKey, bubbles: true, cancelable: true }))
           break
         }
       }
@@ -232,29 +324,7 @@ export default function WrldWidgets(): JSX.Element {
 
   return (
     <div ref={layerRef} className="absolute inset-0 z-10 overflow-hidden pointer-events-none">
-      {area.width > 0 && WIDGETS.filter((which) => desktop[which].inWrld).map((which) => {
-        const f = frameOf(which)
-        return (
-          <iframe
-            key={which}
-            ref={(el) => {
-              frames.current[which] = el
-              // The player starts letting clicks through; its page says when the pointer is over something solid.
-              if (el && which === 'player' && !el.dataset.ready) {
-                el.dataset.ready = '1'
-                el.style.pointerEvents = 'none'
-                playerSolid.current = false
-                pointerIn.current = false
-              }
-            }}
-            src={pageUrl(which)}
-            title={WIDGET_TITLES[which]}
-            className="absolute border-0 bg-transparent"
-            // The pages are drawn dark: a frame whose color scheme differed from its page's would get an opaque backdrop.
-            style={{ left: f.left, top: f.top, width: f.width, height: f.height, colorScheme: 'dark', ...(which === 'player' ? {} : { pointerEvents: 'auto' }) }}
-          />
-        )
-      })}
+      {/* The menu draws itself over the window, so nothing of React's is in here beside the frames. */}
       {menu && desktop[menu.which].inWrld && (
         <ContextMenu
           x={menu.x}
