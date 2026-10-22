@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal, HardDrive,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal, HardDrive, Sparkles,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -253,6 +253,10 @@ export default function SongContextMenu({
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
   // only for staff, who are the only ones with a chat to share into.
+  // Donors can have Whisper transcribe or time any song whose audio the app
+  // can load (stream or donor file).
+  const canGenerateLyrics = !!account?.is_donor && !isUnplayable && !!track.streamUrl
+    && (!!track.path || isDonorStreamUrl(track.streamUrl))
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
 
   const handleCopyLink = async (): Promise<void> => {
@@ -373,6 +377,7 @@ export default function SongContextMenu({
         },
         canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
         onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
+        canGenerateLyrics && { icon: Sparkles, label: 'Generate lyrics', onSelect: () => useStore.getState().openLyricsGen({ track, songId }) },
         hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },

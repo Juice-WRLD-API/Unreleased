@@ -73,6 +73,16 @@ export interface LibraryTrack {
   albumArt?: string | null    // base64 data URL
 }
 
+// What the "Generate lyrics" dialog opened on: a song to offer as the audio
+// (its stream, or its local file), and the tab to show first. Both optional -
+// opened from a menu with nothing playing, it starts empty.
+export interface LyricsGenTarget {
+  track?: Pick<Track, 'id' | 'title' | 'artist' | 'path' | 'streamUrl' | 'imageUrl'>
+  /** The API song behind `track`, whose lyrics can seed a sync job. */
+  songId?: number | null
+  tab?: 'create' | 'jobs' | 'admin'
+}
+
 export interface LocalPlaylist {
   id: string
   name: string

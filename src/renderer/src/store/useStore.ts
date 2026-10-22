@@ -1,6 +1,6 @@
 ﻿import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist } from '../types'
+import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, LyricsGenTarget } from '../types'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
@@ -453,6 +453,9 @@ interface AppState {
   // `reportModal` is the open report dialog's target (null = closed).
   pendingReports: PendingReport[]
   reportModal: ReportTarget | null
+  // The open "Generate lyrics" dialog (null = closed) and the song it was
+  // opened on. See components/LyricsGenModal.
+  lyricsGenModal: LyricsGenTarget | null
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
@@ -868,6 +871,9 @@ interface AppActions {
   // submits one update proposal per song.
   openBulkEditor: (songs: JWApiSong[]) => void
   closeBulkEditor: () => void
+  /** Opens / closes the donor "Generate lyrics" dialog, optionally on a song. */
+  openLyricsGen: (target?: LyricsGenTarget) => void
+  closeLyricsGen: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -1199,6 +1205,9 @@ function commitM3uImport(
 }
 
 setActiveChannelCache(ls.get<string>('activeChannel') || '')
+
+// Pop-outs are an Electron feature; the web build never has one.
+export const IS_FLOAT_WINDOW = false
 
 export const useStore = create<AppStore>((set, get, store) => ({
   // ── Queue slice (all queue + playback logic) ───────────────────────────────
@@ -2680,6 +2689,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
   bulkEdit: null,
   openBulkEditor: (songs) => set({ bulkEdit: songs.length ? { kind: 'api', songs } : null }),
   closeBulkEditor: () => set({ bulkEdit: null }),
+  lyricsGenModal: null,
+  openLyricsGen: (target = {}) => {
+    useSandboxStore.getState().expand()
+    set({ lyricsGenModal: target })
+  },
+  closeLyricsGen: () => set({ lyricsGenModal: null }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {
