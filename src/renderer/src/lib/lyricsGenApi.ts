@@ -40,14 +40,18 @@ export interface LyricsGenOptions {
   preview_required: boolean
 }
 
-export interface LyricsWordTiming { start: number; end: number; word: string }
-export interface LyricsSegment { start: number; end: number; text: string; words?: LyricsWordTiming[] }
+/** `estimated`: the aligner lost this word or line, so its time was spread between aligned neighbours. Absent on older jobs. */
+export interface LyricsWordTiming { start: number; end: number; word: string; estimated?: boolean }
+export interface LyricsSegment { start: number; end: number; text: string; words?: LyricsWordTiming[]; estimated?: boolean }
 
 export interface LyricsGenResult {
   plain_lyrics: string
   synced_lyrics: string
   word_synced_lyrics: string
   segments: LyricsSegment[]
+  /** How many lines / words have estimated timings (sync modes; absent on older jobs). */
+  unaligned_lines?: number
+  unaligned_words?: number
 }
 
 export interface LyricsGenJob {
