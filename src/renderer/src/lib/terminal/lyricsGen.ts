@@ -2,7 +2,9 @@ import { relativeTime } from '../../components/adminShared'
 import { formatBytes } from '../format'
 import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from '../donorFilesApi'
 import {
-  createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, getAdminLyricsJob, listAdminLyricsJobs, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob,  isFinished, listLyricsJobs, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
+  cancelAdminLyricsJob, createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput,
+  getAdminLyricsJob, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob, isFinished, listAdminLyricsJobs,
+  listLyricsJobs, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
   type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
 } from '../lyricsGenApi'
 import { isAbortError } from '../apiClient'
@@ -95,6 +97,7 @@ async function follow(ctx: TermCtx, id: string): Promise<LyricsGenJob | null> {
 
 function printResult(ctx: TermCtx, job: LyricsGenJob, n: number | null): void {
   const ref = n ?? job.id.slice(0, 8)
+  if (job.status === 'cancelled') { ctx.print(job.error || 'cancelled', 'dim'); return }
   if (job.status === 'failed') { ctx.print(`failed: ${job.error || 'no reason given'}`, 'error'); return }
   if (job.status !== 'completed') { ctx.print(`${job.status} - lyricsgen wait ${ref}`, 'dim'); return }
   const r = job.result
@@ -200,7 +203,7 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
   if (done) printResult(ctx, done, 1)
 }
 
-const JOB_STATUSES = ['active', 'queued', 'processing', 'completed', 'failed']
+const JOB_STATUSES = ['active', 'queued', 'processing', 'completed', 'failed', 'cancelled']
 const JOBS_PAGE = 25
 
 // The numbers in the last `lyricsjobs` listing, so `show 3` means row 3.
@@ -219,7 +222,17 @@ function adminRef(arg: string | undefined): string {
 async function runAdminJobs(args: string, ctx: TermCtx): Promise<void> {
   const [, first, rest] = /^(\S*)\s*([\s\S]*)$/.exec(args.trim())!
   const sub = first.toLowerCase()
-  const { rest: words, bool, value } = parseArgs(sub === 'show' || sub === 'get' || sub === 'wait' ? rest : args, ['user', 'page'])
+  const { rest: words, bool, value } = parseArgs(['show', 'get', 'cancel', 'stop'].includes(sub) ? rest : args, ['user', 'page'])
+  if (sub === 'cancel' || sub === 'stop') {
+    const id = adminRef(words[0])
+    const row = adminRows.find((j) => j.id === id)
+    if (!confirmAction(ctx, `Cancel ${row ? `${row.user.username}'s ${row.filename}` : 'this lyrics job'}?`, bool.has('y'))) return
+    const job = await cancelAdminLyricsJob(id)
+    ctx.print(`cancelled ${job.filename} (${job.user.username})`, 'ok')
+    if (row) row.status = job.status
+    ctx.print('if Whisper had already started on it, it runs to the end and the result is thrown away', 'dim')
+    return
+  }
   if (sub === 'show' || sub === 'get') {
     const id = adminRef(words[0])
     if (sub === 'show') {
@@ -324,12 +337,12 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'lyricsjobs', group: 'Admin', usage: 'lyricsjobs [active|queued|processing|completed|failed] [--user name] [--page n] [--json] · show|get <row|id> [txt|lrc|enhanced]',
-    description: "Every user's lyrics generation jobs: what is running or waiting, and the history. show prints a job's lyrics, get downloads them. Row numbers are from the last list",
-    covers: ['lyricsGenApi.listAdminLyricsJobs', 'lyricsGenApi.getAdminLyricsJob', 'lyricsGenApi.fetchAdminLyricsJobOutput'],
+    name: 'lyricsjobs', group: 'Admin', usage: 'lyricsjobs [active|queued|processing|completed|failed|cancelled] [--user name] [--page n] [--json] · show|get|cancel <row|id> [txt|lrc|enhanced]',
+    description: "Every user's lyrics generation jobs: what is running or waiting, and the history. show prints a job's lyrics, get downloads them, cancel stops a queued or running job. Row numbers are from the last list",
+    covers: ['lyricsGenApi.listAdminLyricsJobs', 'lyricsGenApi.getAdminLyricsJob', 'lyricsGenApi.fetchAdminLyricsJobOutput', 'lyricsGenApi.cancelAdminLyricsJob'],
     complete: (before, partial) => {
       const p = partial.toLowerCase()
-      if (before.length === 0) return [...JOB_STATUSES, 'show', 'get'].filter((v) => v.startsWith(p))
+      if (before.length === 0) return [...JOB_STATUSES, 'show', 'get', 'cancel'].filter((v) => v.startsWith(p))
       if (before[0] === 'get' && before.length === 2) return ['txt', 'lrc', 'enhanced'].filter((v) => v.startsWith(p))
       return []
     },
