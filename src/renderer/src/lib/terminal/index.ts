@@ -12,6 +12,7 @@ import { CATALOG_COMMANDS } from './catalog'
 import { CHAT_KEY_COMMANDS } from './chatKeys'
 import { CHAT_MANAGE_COMMANDS } from './chatManage'
 import { DONOR_COMMANDS } from './donor'
+import { LYRICS_GEN_COMMANDS } from './lyricsGen'
 import { GAME_COMMANDS } from './games'
 import { INTEGRATION_COMMANDS } from './integrations'
 import { COMMUNITY_COMMANDS } from './community'
@@ -57,7 +58,7 @@ const LOOKUP: TermCommand = {
     ]
     const playlists = useStore.getState().playlists.filter((p) => norm(p.name).includes(ql)).map((p) => `${p.name}  (${p.track_count})   → playlist play ${p.name}`)
     const settings = searchSettings(q).map((s) => `${s.key} = ${s.value}   → set ${s.key} <value>`)
-    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...BETA_COMMANDS, ...APP_COMMANDS, ...DESKTOP_COMMANDS, ...HTTP_COMMANDS, ...ACCOUNT_COMMANDS, ...EDITING_COMMANDS, ...VERSION_COMMANDS, ...NEWS_COMMANDS, ...CATALOG_COMMANDS, ...COMMUNITY_COMMANDS, ...GAME_COMMANDS, ...DONOR_COMMANDS, ...INTEGRATION_COMMANDS, ...ADMIN_EXTRA_COMMANDS, ...CHAT_MANAGE_COMMANDS, ...CHAT_KEY_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
+    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...BETA_COMMANDS, ...APP_COMMANDS, ...DESKTOP_COMMANDS, ...HTTP_COMMANDS, ...ACCOUNT_COMMANDS, ...EDITING_COMMANDS, ...VERSION_COMMANDS, ...NEWS_COMMANDS, ...CATALOG_COMMANDS, ...COMMUNITY_COMMANDS, ...GAME_COMMANDS, ...DONOR_COMMANDS, ...LYRICS_GEN_COMMANDS, ...INTEGRATION_COMMANDS, ...ADMIN_EXTRA_COMMANDS, ...CHAT_MANAGE_COMMANDS, ...CHAT_KEY_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
     const commands = [
       ...chatCommandsFor().filter((c) => c.name.includes(ql) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
       ...all.filter((c) => c.name.includes(ql) || c.aliases?.some((a) => a.includes(ql)) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
@@ -100,6 +101,7 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...COMMUNITY_COMMANDS,
   ...GAME_COMMANDS,
   ...DONOR_COMMANDS,
+  ...LYRICS_GEN_COMMANDS,
   ...INTEGRATION_COMMANDS,
   ...ADMIN_EXTRA_COMMANDS,
   ...CHAT_MANAGE_COMMANDS,
