@@ -1,4 +1,5 @@
 import { useCascade } from '../hooks/useCascade'
+import { useContentMotion } from '../hooks/useContentMotion'
 import { MotionOverlay } from './MotionOverlay'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
@@ -1222,6 +1223,9 @@ const SongCard = memo(function SongCard({
   const canPlay = !!song.path
   const longPress = useLongPress()
 
+  const detailsRef = useRef<HTMLDivElement>(null)
+  useContentMotion(detailsRef, [...expandedSections].sort().join(','))
+
   // The site's status line: leak type, then the release/leak date after it.
   const statusDate = song.release_date
     ? `Released ${displayDate(song.release_date)}`
@@ -1316,13 +1320,14 @@ const SongCard = memo(function SongCard({
         </div>
 
         {/* Collapsible detail sections */}
-        <div className="mt-2 flex flex-col gap-1 shrink-0">
+        <div ref={detailsRef} className="mt-2 flex flex-col gap-1 shrink-0">
           {CARD_SECTIONS.map((section) => {
             const open = expandedSections.has(section.key)
             return (
               <div key={section.key}>
                 <button
                   onClick={(e) => { e.stopPropagation(); onToggleSection(song.id, section.key) }}
+                  aria-expanded={open}
                   className={`w-full flex items-center gap-2 px-2 rounded-md border text-text-secondary text-[0.6875rem] transition-colors outline-none focus-visible:border-accent ${
                     open
                       ? 'bg-surface-raised border-accent/40 text-text-primary'
@@ -1332,7 +1337,7 @@ const SongCard = memo(function SongCard({
                 >
                   <span className="shrink-0 text-text-muted">{section.icon}</span>
                   <span className="truncate min-w-0 text-left flex-1">{section.label}</span>
-                  <ChevronDown size={m.iconSize} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+                  <ChevronDown size={m.iconSize} className={`shrink-0 text-text-muted control-motion ${open ? 'rotate-180' : ''}`} />
                 </button>
                 {open && (
                   // Fixed-height scroller: keeps the card's height a pure

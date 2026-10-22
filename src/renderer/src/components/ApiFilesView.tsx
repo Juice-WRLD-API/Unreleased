@@ -1,8 +1,9 @@
 import { Cloud } from 'lucide-react'
-import { Suspense, useState } from 'react'
+import { Suspense, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { lazyView } from '../lib/lazyView'
 import ApiFilesBrowser from './ApiFilesBrowser'
+import { useContentMotion } from '../hooks/useContentMotion'
 
 // Donor-only, so everyone else never downloads it.
 const DonorFiles = lazyView(() => import('./DonorFiles'))
@@ -13,6 +14,8 @@ const DonorFiles = lazyView(() => import('./DonorFiles'))
 export default function ApiFilesView(): JSX.Element {
   const isDonor = useStore((s) => !!s.account?.is_donor)
   const [mine, setMine] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentMotion(contentRef, mine ? 'mine' : 'channels')
   if (!isDonor) return <ApiFilesBrowser />
 
   return (
@@ -28,15 +31,17 @@ export default function ApiFilesView(): JSX.Element {
           ))}
         </div>
       </div>
-      {mine ? (
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-8">
-          <div className="flex items-center gap-2.5 pt-5 pb-3">
-            <Cloud size={18} className="text-text-muted shrink-0" />
-            <h1 className="text-text-primary text-xl font-bold">My files</h1>
+      <div ref={contentRef} className="flex flex-col flex-1 min-h-0 min-w-0">
+        {mine ? (
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-8">
+            <div className="flex items-center gap-2.5 pt-5 pb-3">
+              <Cloud size={18} className="text-text-muted shrink-0" />
+              <h1 className="text-text-primary text-xl font-bold">My files</h1>
+            </div>
+            <Suspense fallback={null}><DonorFiles /></Suspense>
           </div>
-          <Suspense fallback={null}><DonorFiles /></Suspense>
-        </div>
-      ) : <ApiFilesBrowser />}
+        ) : <ApiFilesBrowser />}
+      </div>
     </div>
   )
 }

@@ -1,4 +1,6 @@
 import { MotionOverlay } from './MotionOverlay'
+import { PopLayer } from './PopLayer'
+import { useContentMotion } from '../hooks/useContentMotion'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
@@ -367,6 +369,11 @@ export default function ApiFilesBrowser(): JSX.Element {
   const [typeFilter, setTypeFilterState] = useState<MediaFilter>(
     () => (localStorage.getItem(LS_TYPE_FILTER) as MediaFilter) || 'all'
   )
+  const listingRef = useRef<HTMLDivElement>(null)
+  useContentMotion(listingRef, JSON.stringify([
+    localMode ? ['local', localPath] : ['channel', activeChannel, currentPath, isSearching],
+    viewMode, typeFilter,
+  ]), localMode ? !localLoading : !loading)
 
   const setViewMode = (v: ViewMode): void => { setViewModeState(v); localStorage.setItem(LS_VIEW_MODE, v) }
   const setSortBy = (v: SortBy): void => { setSortByState(v); localStorage.setItem(LS_SORT_BY, v) }
@@ -960,6 +967,7 @@ export default function ApiFilesBrowser(): JSX.Element {
         {/* Local files browser */}
         {localMode && (
           <div
+            ref={listingRef}
             className="flex-1 overflow-y-auto px-5 pb-4"
             // Entry rows stop propagation and open their own menu, so anything
             // reaching here is genuinely the background. Needs a folder open —
@@ -1178,6 +1186,7 @@ export default function ApiFilesBrowser(): JSX.Element {
         )}
         {/* Content */}
         {!localMode && <div
+          ref={listingRef}
           className={`flex-1 overflow-y-auto px-5 pb-4 transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
           // Dropping OS files/folders on empty space uploads into the folder
           // being browsed; folder rows handle drops onto themselves.
@@ -1564,16 +1573,16 @@ export default function ApiFilesBrowser(): JSX.Element {
       </div>
 
       {copiedPath && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+        <PopLayer className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
           <Check size={13} className="text-accent" /> {copiedKind === 'path' ? 'Path copied' : 'Link copied'}
-        </div>
+        </PopLayer>
       )}
 
       {/* Folder-download progress toast — the selection bar above already
           shows zip status while selectMode is active, so this only covers
           the single-folder "Download folder" context-menu action. */}
       {!selectMode && zipStatus !== 'idle' && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+        <PopLayer className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
             <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting ZIP…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Zipping folder…'}</>
           ) : zipStatus === 'done' ? (
@@ -1581,13 +1590,13 @@ export default function ApiFilesBrowser(): JSX.Element {
           ) : (
             <><X size={13} className="text-red-400" /> ZIP failed</>
           )}
-        </div>
+        </PopLayer>
       )}
 
       {boostToast && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+        <PopLayer className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
           <Heart size={13} className="text-pink-400" fill="currentColor" /> Priority routing active
-        </div>
+        </PopLayer>
       )}
 
       {/* Single-file CDN download progress, above the folder toast when both show. */}

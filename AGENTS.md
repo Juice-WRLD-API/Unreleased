@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.10** · updated 2026-10-22. Bump the version and date whenever you
+**Version 1.11** · updated 2026-10-23. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -342,6 +342,12 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-10-23: Tracker card row offsets include only the open detail sections.
+  Keeping a closed section mounted for an exit would overflow the computed
+  row height. Fade detail changes with `useContentMotion`; use
+  `MotionDisclosure` for ordinary flow layouts. A sliding nav highlight must
+  observe the natural-height content, not only its fixed-height scroller, to
+  follow disclosures that finish closing after the parent render.
 - 2026-10-22: internal tab changes need their own motion, but a mount animation
   on the tab body also plays inside the dialog/view's entrance. Use
   `useContentMotion` for changes after the first render; it fades without

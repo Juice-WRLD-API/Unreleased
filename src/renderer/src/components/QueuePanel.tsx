@@ -10,6 +10,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
 import { trackIdToSongId } from '../lib/userApi'
 import { SearchHelpButton } from './SearchHelpPopover'
+import { MotionDisclosure } from './MotionDisclosure'
 
 const MAX_HISTORY_SHOWN = 10
 const MAX_UPCOMING_SHOWN = 60
@@ -173,6 +174,7 @@ export default function QueuePanel(): JSX.Element {
             <div className="px-4 pt-4 pb-2">
               <button
                 onClick={() => setHistoryOpen((o) => !o)}
+                aria-expanded={historyOpen}
                 className="flex items-center gap-1.5 px-1 mb-2 text-text-muted hover:text-text-secondary transition-colors w-full text-left"
               >
                 <History size={11} />
@@ -181,10 +183,11 @@ export default function QueuePanel(): JSX.Element {
                 </span>
                 <ChevronDown
                   size={12}
-                  className={`transition-transform ${historyOpen ? 'rotate-180' : ''}`}
+                  className={`control-motion ${historyOpen ? 'rotate-180' : ''}`}
                 />
               </button>
-              {historyOpen && (() => {
+              <MotionDisclosure open={historyOpen}>
+              {(() => {
                 const filtered = query ? history.filter(matchesQuery) : history
                 const shown = query ? filtered : filtered.slice(0, MAX_HISTORY_SHOWN)
                 return (
@@ -211,6 +214,7 @@ export default function QueuePanel(): JSX.Element {
                   </div>
                 )
               })()}
+              </MotionDisclosure>
             </div>
           )}
 
