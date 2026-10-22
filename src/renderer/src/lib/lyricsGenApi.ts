@@ -10,6 +10,7 @@ import { getToken } from './userApi'
 
 const BASE = routeUrl('/accounts/donor/lyrics')
 const ADMIN_URL = routeUrl('/accounts/admin/lyrics/settings/')
+const ADMIN_JOBS = routeUrl('/accounts/admin/lyrics/jobs')
 
 export const LYRICS_MAX_FILE_SIZE = 100 * 1024 * 1024
 export const LYRICS_MAX_TEXT = 30_000
@@ -57,6 +58,9 @@ export interface LyricsGenJob {
   created_at: string
   updated_at: string
 }
+
+/** A job as the list returns it: no lyrics, those come from `getLyricsJob`. */
+export type LyricsGenJobSummary = Pick<LyricsGenJob, 'id' | 'mode' | 'status' | 'filename' | 'language' | 'error' | 'created_at' | 'updated_at'>
 
 export interface LyricsGenRequest {
   mode: LyricsGenMode
@@ -120,6 +124,12 @@ export function createLyricsJob(
   })
 }
 
+/** The caller's jobs, newest first. */
+export async function listLyricsJobs(signal?: AbortSignal): Promise<LyricsGenJobSummary[]> {
+  const page = await authedRequest<{ results: LyricsGenJobSummary[] }>(`${BASE}/jobs/`, { signal }, getToken())
+  return page.results
+}
+
 export function getLyricsJob(id: string, signal?: AbortSignal): Promise<LyricsGenJob> {
   return authedRequest(`${BASE}/jobs/${encodeURIComponent(id)}/`, { signal }, getToken())
 }
@@ -146,4 +156,44 @@ export function getLyricsAdminSettings(signal?: AbortSignal): Promise<LyricsAdmi
 /** `''` reverts to the server's default model. */
 export function setLyricsWhisperModel(model: string): Promise<LyricsAdminSettings> {
   return authedRequest(ADMIN_URL, { method: 'PUT', body: JSON.stringify({ whisper_model: model }) }, getToken())
+}
+
+export interface LyricsAdminJobSummary extends LyricsGenJobSummary { user: { id: number; username: string } }
+export type LyricsAdminJob = LyricsGenJob & Pick<LyricsAdminJobSummary, 'user'>
+
+export interface LyricsAdminJobPage {
+  count: number
+  /** Queued + processing jobs across all users, whatever the filter. */
+  active: number
+  results: LyricsAdminJobSummary[]
+}
+
+export interface LyricsAdminJobQuery {
+  /** A job status, or `active` for queued + processing. */
+  status?: string
+  user?: string
+  limit?: number
+  offset?: number
+}
+
+/** Every user's jobs, newest first (administrators). */
+export function listAdminLyricsJobs(query: LyricsAdminJobQuery = {}, signal?: AbortSignal): Promise<LyricsAdminJobPage> {
+  const params = new URLSearchParams()
+  for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== '') params.set(k, String(v))
+  const qs = params.toString()
+  return authedRequest(`${ADMIN_JOBS}/${qs ? `?${qs}` : ''}`, { signal }, getToken())
+}
+
+export function getAdminLyricsJob(id: string, signal?: AbortSignal): Promise<LyricsAdminJob> {
+  return authedRequest(`${ADMIN_JOBS}/${encodeURIComponent(id)}/`, { signal }, getToken())
+}
+
+export async function fetchAdminLyricsJobOutput(id: string, output: LyricsOutput, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(`${ADMIN_JOBS}/${encodeURIComponent(id)}/?output=${output}`, { headers: authHeaders(getToken()), signal })
+  if (!res.ok) {
+    let msg = `Could not load the lyrics (${res.status})`
+    try { const d = await res.json(); if (d?.detail) msg = String(d.detail) } catch {}
+    throw new Error(msg)
+  }
+  return res.text()
 }

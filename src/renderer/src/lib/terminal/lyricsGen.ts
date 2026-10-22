@@ -2,9 +2,8 @@ import { relativeTime } from '../../components/adminShared'
 import { formatBytes } from '../format'
 import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from '../donorFilesApi'
 import {
-  createLyricsJob, deleteLyricsJob, fetchLyricsJobOutput, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob,
-  isFinished, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
-  type LyricsGenJob, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
+  createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, getAdminLyricsJob, listAdminLyricsJobs, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob,  isFinished, listLyricsJobs, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
+  type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
 } from '../lyricsGenApi'
 import { isAbortError } from '../apiClient'
 import { ls } from '../persist'
@@ -15,8 +14,10 @@ import { asJson, confirmAction, fail, parseArgs, table, type TermCommand, type T
 // Donor lyrics generation: Whisper on the server transcribes a song's audio
 // (plain), or lines the user's own text up with it (synced, per-word). The
 // result is a preview to read and download; nothing reaches the library. The
-// API has no "list my jobs", so the terminal remembers the ids it started, per
-// account, newest first.
+// server lists the account's jobs (newest first); the terminal keeps that list,
+// per account, so a job can be named by its number in `lyricsgen ls`. If the
+// list can't be fetched (offline, older server) it falls back to the ids this
+// device started.
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
 const POLL_MS = 3000
@@ -37,6 +38,21 @@ let lastAudio: File | null = null
 const storeKey = (): string => `lyricsJobs:${st().account?.id ?? 0}`
 const remembered = (): Remembered[] => ls.get<Remembered[]>(storeKey()) ?? []
 const remember = (list: Remembered[]): void => ls.set(storeKey(), list.slice(0, REMEMBER))
+
+let summaries = new Map<string, LyricsGenJobSummary>()
+
+/** Pulls the account's jobs from the server so numbers and `ls` agree on every
+ *  device. Quietly keeps the saved list when the server can't be reached. */
+async function refreshJobs(signal: AbortSignal): Promise<void> {
+  try {
+    const jobs = await listLyricsJobs(signal)
+    summaries = new Map(jobs.map((j) => [j.id, j]))
+    remember(jobs.map((j) => ({ id: j.id, mode: j.mode, filename: j.filename, created_at: j.created_at })))
+  } catch (err) {
+    if (isAbortError(err) || signal.aborted) throw err
+    summaries = new Map()
+  }
+}
 
 /** A job by its number in `lyricsgen ls` (1 = newest), the start of its id, or
  *  "last". Nothing typed means the newest. */
@@ -184,12 +200,64 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
   if (done) printResult(ctx, done, 1)
 }
 
+const JOB_STATUSES = ['active', 'queued', 'processing', 'completed', 'failed']
+const JOBS_PAGE = 25
+
+// The numbers in the last `lyricsjobs` listing, so `show 3` means row 3.
+let adminRows: LyricsAdminJobSummary[] = []
+
+function adminRef(arg: string | undefined): string {
+  const q = (arg ?? '').trim().toLowerCase().replace(/^#/, '')
+  if (!q) fail('lyricsjobs show|get <number from the list, or a job id>')
+  if (/^\d+$/.test(q)) return adminRows[Number(q) - 1]?.id ?? fail(adminRows.length ? `no row ${q} in the last list` : 'run lyricsjobs first to number the jobs')
+  const hits = adminRows.filter((j) => j.id.toLowerCase().startsWith(q))
+  if (hits.length === 1) return hits[0].id
+  if (/^[0-9a-f-]{36}$/.test(q)) return q
+  return fail(hits.length ? `${hits.length} jobs match "${q}" - type more of the id` : `no job "${q}" in the last list - use the full id`)
+}
+
+async function runAdminJobs(args: string, ctx: TermCtx): Promise<void> {
+  const [, first, rest] = /^(\S*)\s*([\s\S]*)$/.exec(args.trim())!
+  const sub = first.toLowerCase()
+  const { rest: words, bool, value } = parseArgs(sub === 'show' || sub === 'get' || sub === 'wait' ? rest : args, ['user', 'page'])
+  if (sub === 'show' || sub === 'get') {
+    const id = adminRef(words[0])
+    if (sub === 'show') {
+      const job = await getAdminLyricsJob(id, ctx.signal)
+      if (asJson(ctx, bool.has('json'), job)) return
+      ctx.print(`${job.user.username} · ${MODE_NAME[job.mode]} · ${job.filename}${job.language ? ` · ${job.language}` : ''} · ${job.status} · ${relativeTime(job.created_at)}`, 'dim')
+      printResult(ctx, job, null)
+      return
+    }
+    const job = await getAdminLyricsJob(id, ctx.signal)
+    if (job.status !== 'completed') fail(`that job is ${job.status}${job.error ? `: ${job.error}` : ''}`)
+    const want = words[1]?.toLowerCase()
+    const output = want ? OUTPUTS[want] ?? fail('get <job> txt | lrc | enhanced') : job.mode === 'plain' ? 'txt' : job.mode === 'synced' ? 'lrc' : 'enhanced_lrc'
+    const text = await fetchAdminLyricsJobOutput(job.id, output, ctx.signal)
+    const base = (job.filename || 'lyrics').replace(/\.[^.]+$/, '')
+    const name = output === 'txt' ? `${base}.txt` : output === 'lrc' ? `${base}.lrc` : `${base}.words.lrc`
+    saveBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), name)
+    ctx.print(`saved ${name} to your downloads`, 'ok')
+    return
+  }
+  const status = (sub && sub !== 'ls' && !sub.startsWith('-') ? sub : '') || (bool.has('active') ? 'active' : '')
+  if (status && !JOB_STATUSES.includes(status)) fail(`status is one of: ${JOB_STATUSES.join(', ')}`)
+  const page = Math.max(1, Number(value.get('page') ?? 1) || 1)
+  const data = await listAdminLyricsJobs({ status, user: value.get('user'), limit: JOBS_PAGE, offset: (page - 1) * JOBS_PAGE }, ctx.signal)
+  adminRows = data.results
+  if (asJson(ctx, bool.has('json'), data)) return
+  ctx.print(`${data.active} running or waiting now · ${data.count} job${data.count === 1 ? '' : 's'}${status || value.get('user') ? ' match' : ''}`, 'dim')
+  if (!data.results.length) { ctx.print('no jobs', 'dim'); return }
+  ctx.print(table(data.results.map((j, i) => [String(i + 1), j.user.username, MODE_NAME[j.mode], j.status, j.filename, relativeTime(j.created_at)])))
+  if (data.count > page * JOBS_PAGE) ctx.print(`page ${page} of ${Math.ceil(data.count / JOBS_PAGE)} - lyricsjobs --page ${page + 1}`, 'dim')
+}
+
 export const LYRICS_GEN_COMMANDS: TermCommand[] = [
   {
     name: 'lyricsgen', aliases: ['lyricgen'], group: 'Account',
     usage: 'lyricsgen [ls] · status · plain [--now] · sync|words [<job> | --file] [--now] · show|wait|get|rm <job>',
     description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). --lang en, --audio picks new audio. get <job> txt|lrc|enhanced downloads',
-    covers: ['lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob'],
+    covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob'],
     complete: (before, partial) => {
       const p = partial.toLowerCase()
       if (before.length === 0) return SUBCOMMANDS.filter((v) => v.startsWith(p))
@@ -201,14 +269,21 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
       if (account.is_donor === false) fail('lyrics generation is for donors')
       const [, first, rest] = /^(\S*)\s*([\s\S]*)$/.exec(args.trim())!
       const sub = (first || 'ls').toLowerCase()
-      if (Object.prototype.hasOwnProperty.call(MODES, sub)) { await start(MODES[sub], rest, ctx); return }
+      if (Object.prototype.hasOwnProperty.call(MODES, sub)) {
+        if (rest.trim() && !rest.trim().startsWith('-')) await refreshJobs(ctx.signal)
+        await start(MODES[sub], rest, ctx)
+        return
+      }
       const { rest: words, bool } = parseArgs(rest)
+      if (sub !== 'status' && sub !== 'options') await refreshJobs(ctx.signal)
       if (sub === 'ls' || sub === 'list' || sub === '--json') {
         const json = bool.has('json') || sub === '--json'
         const list = remembered()
         if (!list.length) { ctx.print('no lyrics jobs yet (lyricsgen plain)', 'dim'); return }
         const shown = list.slice(0, 20)
-        const jobs = await Promise.all(shown.map((j) => getLyricsJob(j.id, ctx.signal).catch((err: Error) => (/not found/i.test(err.message) ? null : err))))
+        // Rows the server listed carry their status; a saved id the list lacks
+        // (server unreachable) is asked for one by one.
+        const jobs = await Promise.all(shown.map((j) => summaries.get(j.id) ?? (summaries.size ? null : getLyricsJob(j.id, ctx.signal).catch((err: Error) => (/not found/i.test(err.message) ? null : err)))))
         const gone = new Set(shown.filter((_, i) => jobs[i] === null).map((j) => j.id))
         if (gone.size) remember(list.filter((j) => !gone.has(j.id)))
         const kept = shown.map((j, i) => ({ j, r: jobs[i] })).filter((x) => x.r !== null)
@@ -247,6 +322,18 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
         ctx.print(`deleted ${ref.filename || ref.id}`, 'ok')
       } else fail('usage: lyricsgen [ls | status | plain | sync | words | show | wait | get | rm]')
     },
+  },
+  {
+    name: 'lyricsjobs', group: 'Admin', usage: 'lyricsjobs [active|queued|processing|completed|failed] [--user name] [--page n] [--json] · show|get <row|id> [txt|lrc|enhanced]',
+    description: "Every user's lyrics generation jobs: what is running or waiting, and the history. show prints a job's lyrics, get downloads them. Row numbers are from the last list",
+    covers: ['lyricsGenApi.listAdminLyricsJobs', 'lyricsGenApi.getAdminLyricsJob', 'lyricsGenApi.fetchAdminLyricsJobOutput'],
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return [...JOB_STATUSES, 'show', 'get'].filter((v) => v.startsWith(p))
+      if (before[0] === 'get' && before.length === 2) return ['txt', 'lrc', 'enhanced'].filter((v) => v.startsWith(p))
+      return []
+    },
+    run: runAdminJobs,
   },
   {
     name: 'lyricsmodel', group: 'Admin', usage: 'lyricsmodel [<model> | default] [--json]',
