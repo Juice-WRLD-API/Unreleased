@@ -5,7 +5,7 @@ import {
 import { useStore } from '../store/useStore'
 import type { LyricsGenTarget } from '../types'
 import {
-  createLyricsJob, fetchTrackAudio, getLyricsGenOptions, getLyricsJob, isFinished, listLyricsJobs, looksLikeLrc,
+  createLyricsJob, fetchTrackAudio, getLyricsGenOptions, getLyricsJob, isFinished, listLyricsJobs, looksLikeLrc, lyricsForMode,
   LYRICS_AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT,
   type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenOptions,
 } from '../lib/lyricsGenApi'
@@ -183,15 +183,40 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   }
 
   // ── Lyrics sources for the sync modes ──
+  // Text filled from a song or a job keeps both its versions: line sync gets
+  // the plain words, word sync the LRC (see lyricsForMode). Switching between
+  // the two swaps it for the other version, unless it has been edited since.
+  const [filled, setFilled] = useState<{ plain: string; lrc: string; text: string } | null>(null)
+  const fill = (plain: string, lrc: string): boolean => {
+    const t = lyricsForMode(mode, plain, lrc)
+    if (!t) return false
+    setText(t)
+    setFilled({ plain, lrc, text: t })
+    setFormError(null)
+    return true
+  }
+  const pickMode = (m: LyricsGenMode): void => {
+    setMode(m)
+    setModePicked(true)
+    setFormError(null)
+    if (filled && m !== 'plain' && text.trim() === filled.text) {
+      const t = lyricsForMode(m, filled.plain, filled.lrc)
+      setText(t)
+      setFilled({ ...filled, text: t })
+    }
+  }
+
   const fillFromSong = async (): Promise<void> => {
     if (!lyricsTrack) return
     const full = currentTrackFull && currentTrackFull.id === lyricsTrack.id && !currentTrackFull.lyricsPending ? currentTrackFull : null
-    let own = full ? (full.syncedLyrics?.trim() || full.lyrics?.trim() || '') : ''
-    if (!own && lyricsSongId) {
+    let plain = full?.lyrics ?? ''
+    let lrc = full?.syncedLyrics ?? ''
+    if (!plain.trim() && !lrc.trim() && lyricsSongId) {
       setTextBusy(true)
       try {
         const song = await getSongById(lyricsSongId)
-        own = song.synced_lyrics?.trim() || song.lyrics?.trim() || ''
+        plain = song.lyrics ?? ''
+        lrc = song.synced_lyrics ?? ''
       } catch (e) {
         setFormError(errorMessage(e, `Couldn't load ${lyricsTrack.title}'s lyrics`))
         return
@@ -199,15 +224,14 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
         setTextBusy(false)
       }
     }
-    if (own) { setText(own); setFormError(null) } else setFormError(`${lyricsTrack.title} has no lyrics yet. Transcribe it first, then sync the result`)
+    if (!fill(plain, lrc)) setFormError(`${lyricsTrack.title} has no lyrics yet. Transcribe it first, then sync the result`)
   }
   const fillFromJob = async (id: string): Promise<void> => {
     setTextBusy(true)
     try {
       const job = await getLyricsJob(id)
-      setText((job.mode === 'plain' ? job.result.plain_lyrics : job.result.synced_lyrics)?.trim() ?? '')
+      if (!fill(job.result.plain_lyrics || job.plain_lyrics || '', job.result.synced_lyrics ?? '')) setFormError('That job has no lyrics in it')
       setExpectedAudio(job.filename)
-      setFormError(null)
     } catch (e) {
       setFormError(errorMessage(e, 'Could not load that job'))
     } finally {
@@ -215,7 +239,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     }
   }
   const fillFromFile = (): void => {
-    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then((t) => { setText(t.trim()); setFormError(null) }, () => {})
+    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then((t) => { setText(t.trim()); setFilled(null); setFormError(null) }, () => {})
   }
 
   // Follow-ups from a job: back to the form with its text, same audio.
@@ -223,6 +247,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     setMode(nextMode)
     setModePicked(false)
     setText(nextText.trim())
+    setFilled(null)
     if (lang !== undefined) setLanguage(lang)
     setExpectedAudio(job.filename)
     setFormError(null)
@@ -461,7 +486,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                       return (
                         <button
                           key={m}
-                          onClick={() => { setMode(m); setModePicked(true); setFormError(null) }}
+                          onClick={() => pickMode(m)}
                           disabled={off || uploading !== null}
                           title={off ? opt?.unavailable_reason || 'Unavailable' : undefined}
                           className={`relative flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl border p-3 text-left transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${

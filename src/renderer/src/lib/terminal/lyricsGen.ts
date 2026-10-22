@@ -4,7 +4,7 @@ import { extensionOf } from '../donorFilesApi'
 import {
   cancelAdminLyricsJob, createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, fetchTrackAudio,
   getAdminLyricsJob, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob, isFinished, listAdminLyricsJobs,
-  listLyricsJobs, looksLikeLrc, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
+  listLyricsJobs, looksLikeLrc, lyricsForMode, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
   type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
 } from '../lyricsGenApi'
 import { isAbortError } from '../apiClient'
@@ -157,12 +157,12 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
     if (fromArg) {
       from = await getLyricsJob(jobRef(fromArg).id, ctx.signal)
       if (from.status !== 'completed') fail(`that job is ${from.status}${from.error ? `: ${from.error}` : ''}`)
-      text = from.mode === 'plain' ? lyricsBody(from.result.plain_lyrics ?? '', 'that job') : lyricsBody(from.result.synced_lyrics ?? '', 'that job')
+      text = lyricsBody(lyricsForMode(mode, from.result.plain_lyrics || from.plain_lyrics || '', from.result.synced_lyrics ?? ''), 'that job')
     } else if (!bool.has('file') && !bool.has('f') && now) {
       const track = st().currentTrack ?? fail('nothing is playing')
       const full = st().currentTrackFull
       const loaded = full && full.id === track.id && !full.lyricsPending ? full : fail(`${track.title}'s lyrics are still loading - try again in a moment`)
-      const own = loaded.syncedLyrics?.trim() || loaded.lyrics?.trim() || fail(`${track.title} has no lyrics - run lyricsgen plain --now first, or add --file`)
+      const own = lyricsForMode(mode, loaded.lyrics ?? '', loaded.syncedLyrics ?? '') || fail(`${track.title} has no lyrics - run lyricsgen plain --now first, or add --file`)
       text = lyricsBody(own, `${track.title}'s lyrics`)
     } else pickLyrics = true
   }

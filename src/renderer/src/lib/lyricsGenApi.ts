@@ -92,6 +92,26 @@ export const isFinished = (job: Pick<LyricsGenJob, 'status'>): boolean => job.st
 /** Text with LRC timestamps goes up as `synced_lyrics`, anything else as `plain_lyrics`. */
 export const looksLikeLrc = (text: string): boolean => /^\s*\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/m.test(text)
 
+/** LRC down to its words: no line or word times, no [ar:]-style tags, no empty timed lines. */
+export function lrcToPlain(lrc: string): string {
+  return lrc.split(/\r?\n/)
+    .filter((l) => !/^\s*\[[a-z]+:[^\]]*\]\s*$/i.test(l))
+    .map((l) => l.replace(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/g, '').replace(/<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '').trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** Which of a song's (or job's) lyrics a sync mode should send. Line sync
+ *  times the plain text, so LRC is cut down to its words; word sync takes the
+ *  LRC when there is one, since its line times keep each word inside its line.
+ *  Some songs keep LRC in the plain field, so both are checked. */
+export function lyricsForMode(mode: LyricsGenMode, plain: string, lrc: string): string {
+  const p = plain.trim()
+  const l = lrc.trim() || (looksLikeLrc(p) ? p : '')
+  const text = p && !looksLikeLrc(p) ? p : lrcToPlain(l)
+  return mode === 'word_synced' && l ? l : text
+}
+
 const AUDIO_TYPE_EXTENSION: Record<string, string> = {
   'audio/flac': 'flac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/ogg': 'ogg', 'audio/opus': 'opus',
 }
