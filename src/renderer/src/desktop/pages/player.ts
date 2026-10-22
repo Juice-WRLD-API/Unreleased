@@ -27,7 +27,7 @@ document.body.innerHTML = `<div id="player" data-clear>
     <div id="notice-slot" data-clear></div>
     <button class="circle" data-tool="fm" aria-label="999 FM"></button>
     <button class="circle away" data-tool="versions" data-menu-button aria-label="Other versions" title="Other versions"></button>
-    <button class="circle" data-tool="settings" aria-label="Desktop settings" title="Desktop settings"></button>
+    <button class="circle" data-tool="more" data-menu-button aria-label="More options" title="More options"></button>
     <div id="searchbar" class="circle"><span class="mag"></span><input type="text" placeholder="Search songs and eras" spellcheck="false" aria-label="Search"><span class="spin"></span><button class="clear" aria-label="Clear"></button></div>
     <button class="circle" data-tool="mini" aria-label="Make the player small" title="Make the player small"></button>
   </div>
@@ -597,7 +597,10 @@ interface SongMenu { title: string; info: boolean; link: boolean; download: bool
 let songMenu: SongMenu | null = null
 const songMenuOpen = (): boolean => menuOpen('song')
 
-async function openSongMenu(): Promise<void> {
+let songMenuAnchor: HTMLElement | null = null
+
+async function openSongMenu(anchor: HTMLElement | null = null): Promise<void> {
+  songMenuAnchor = anchor
   const turn = ++songMenuTurn
   const answer = await page.request<SongMenu>('song-menu')
   if (turn !== songMenuTurn || !answer) return
@@ -621,7 +624,7 @@ function paintSongMenu(playlists: boolean): void {
       m.download && row('download', 'Download'), m.edit && row('edit', 'Edit')].filter(Boolean).join('')
     html = `<div class="menu-title">${escapeText(m.title)}</div>${rows || '<div class="menu-note">Nothing more for this song</div>'}`
   }
-  showMenu('song', html, $<HTMLElement>('[data-action="more"]'))
+  showMenu('song', html, songMenuAnchor ?? $<HTMLElement>('[data-action="more"]'))
 }
 
 /** A row picked. The quick ones show done at once, and say so if the app couldn't. */
@@ -742,6 +745,7 @@ const cards = new CardStack($('#stage'))
 const aura = new Aura($('#aura'), { meter: () => live.meter, style: () => ({ ...DEFAULT_LIGHT, ...(live.settings?.light ?? {}) }) })
 let hoveredKey: string | null = null
 let browseKey: string | null = null
+let closedByCover = false
 let returnHome = 0
 
 function cardList(): { list: Card[]; items: DesktopTrack[]; home: number } {
@@ -765,6 +769,7 @@ function render(): void {
   const p = settings?.player
   const mini = !!p?.mini
   const lyricsOut = !!p?.lyricsOpen && !mini
+  if (lyricsOut) closedByCover = false
   const { list, home } = cardList()
   const lyricsCard = lyricsOut && home >= 0 ? list[home]?.key ?? null : null
   const folded = !!p?.hidesLyricsCard && lyricsCard != null
@@ -828,13 +833,18 @@ carousel.addEventListener('click', (event) => {
   // A click on the lyrics themselves is theirs (their menu is a right-click), not the cards'.
   if (justDragged() || onLyrics(event.clientX, event.clientY)) return
   // The lyrics open: a click on the cards goes back to them.
-  if (live.settings?.player.lyricsOpen) { page.command('set', { player: { lyricsOpen: false } }); return }
+  if (live.settings?.player.lyricsOpen) { page.command('set', { player: { lyricsOpen: false } }); closedByCover = true; return }
   const hit = cards.hit(event.clientX, event.clientY)
   if (!hit) return
   const { items, home } = cardList()
   const index = items.findIndex((t) => t.key === hit.key)
   if (index < 0) return
-  if (index === home) { page.command('toggle'); browseKey = null; render(); return }
+  if (index === home) {
+    // The cover that just closed the lyrics brings them back.
+    if (closedByCover) { closedByCover = false; page.command('set', { player: { lyricsOpen: true } }); return }
+    page.command('toggle'); browseKey = null; render(); return
+  }
+  closedByCover = false
   // Played where it is in the queue: the queue is kept.
   page.command('jump', (live.state.cards?.from ?? 0) + index)
   browseKey = null
@@ -860,13 +870,13 @@ $('#tools').addEventListener('click', (event) => {
   if (!tool || justDragged()) return
   if (tool === 'mini') page.command('set', { player: { mini: true } })
   if (tool === 'lyricsCard') page.command('set', { player: { hidesLyricsCard: !live.settings?.player.hidesLyricsCard } })
-  if (tool === 'settings') page.command('open-settings')
+  if (tool === 'more') { if (songMenuOpen()) closeMenu(); else void openSongMenu($<HTMLElement>('[data-tool="more"]')) }
   if (tool === 'versions') { if (versionsOpen()) closeMenu(); else openVersions() }
   if (tool === 'fm') page.command('fm')
 })
 $('[data-tool="fm"]').innerHTML = icons.radio
 $('[data-tool="versions"]').innerHTML = icons.stack
-$('[data-tool="settings"]').innerHTML = icons.gear
+$('[data-tool="more"]').innerHTML = icons.ellipsis
 $('[data-tool="mini"]').innerHTML = icons.mini
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && search.isOpen) search.close() })
 window.addEventListener('blur', () => { if (search.isOpen && !search.query) search.close() })

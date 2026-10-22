@@ -16,7 +16,7 @@ export const LYRICS_MAX_FILE_SIZE = 100 * 1024 * 1024
 export const LYRICS_MAX_TEXT = 30_000
 
 export type LyricsGenMode = 'plain' | 'synced' | 'word_synced'
-export type LyricsJobStatus = 'queued' | 'processing' | 'completed' | 'failed'
+export type LyricsJobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
 export type LyricsOutput = 'txt' | 'lrc' | 'enhanced_lrc'
 
 export interface LyricsGenModeOption {
@@ -82,7 +82,7 @@ export interface LyricsAdminSettings {
   updated_at: string | null
 }
 
-export const isFinished = (job: Pick<LyricsGenJob, 'status'>): boolean => job.status === 'completed' || job.status === 'failed'
+export const isFinished = (job: Pick<LyricsGenJob, 'status'>): boolean => job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
 
 export function getLyricsGenOptions(signal?: AbortSignal): Promise<LyricsGenOptions> {
   return authedRequest(`${BASE}/options/`, { signal }, getToken())
@@ -196,4 +196,9 @@ export async function fetchAdminLyricsJobOutput(id: string, output: LyricsOutput
     throw new Error(msg)
   }
   return res.text()
+}
+
+/** Stops a queued or processing job. One already inside Whisper runs to the end and its result is discarded. */
+export function cancelAdminLyricsJob(id: string): Promise<LyricsAdminJob> {
+  return authedRequest(`${ADMIN_JOBS}/${encodeURIComponent(id)}/cancel/`, { method: 'POST' }, getToken())
 }
