@@ -1,10 +1,10 @@
 import { relativeTime } from '../../components/adminShared'
 import { formatBytes } from '../format'
-import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from '../donorFilesApi'
+import { extensionOf } from '../donorFilesApi'
 import {
-  cancelAdminLyricsJob, createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput,
+  cancelAdminLyricsJob, createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, fetchTrackAudio,
   getAdminLyricsJob, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob, isFinished, listAdminLyricsJobs,
-  listLyricsJobs, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
+  listLyricsJobs, looksLikeLrc, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
   type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
 } from '../lyricsGenApi'
 import { isAbortError } from '../apiClient'
@@ -27,7 +27,6 @@ const REMEMBER = 100
 const MODES: Record<string, LyricsGenMode> = { plain: 'plain', sync: 'synced', synced: 'synced', words: 'word_synced', word: 'word_synced', word_synced: 'word_synced' }
 const MODE_NAME: Record<LyricsGenMode, string> = { plain: 'plain', synced: 'sync', word_synced: 'words' }
 const OUTPUTS: Record<string, LyricsOutput> = { txt: 'txt', text: 'txt', plain: 'txt', lrc: 'lrc', enhanced: 'enhanced_lrc', enhanced_lrc: 'enhanced_lrc', words: 'enhanced_lrc' }
-const AUDIO_EXTENSIONS = DONOR_ALLOWED_EXTENSIONS.filter((e) => !isImageFile({ filename: `x.${e}`, mime_type: '' }))
 const SUBCOMMANDS = ['ls', 'status', 'plain', 'sync', 'words', 'show', 'wait', 'get', 'rm']
 
 interface Remembered { id: string; mode: LyricsGenMode; filename: string; created_at: string }
@@ -116,13 +115,12 @@ async function nowPlayingAudio(ctx: TermCtx): Promise<File> {
   const track = st().currentTrack ?? fail('nothing is playing')
   if (!track.streamUrl) fail(`${track.title} plays from this computer - drop --now and pick its file`)
   ctx.print(`fetching ${track.title}…`, 'dim')
-  const res = await fetch(track.streamUrl!, { signal: ctx.signal })
-  if (!res.ok) fail(`couldn't load ${track.title} (HTTP ${res.status})`)
-  const blob = await res.blob()
-  const fromPath = track.path.split('/').pop() ?? ''
-  const type = blob.type.split(';')[0]
-  const ext = AUDIO_EXTENSIONS.includes(extensionOf(fromPath)) ? '' : ({ 'audio/flac': 'flac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/ogg': 'ogg', 'audio/opus': 'opus' }[type] ?? 'mp3')
-  return new File([blob], ext ? `${track.title.replace(/[\\/:*?"<>|]/g, '_')}.${ext}` : fromPath, { type: blob.type })
+  try {
+    return await fetchTrackAudio(track, undefined, ctx.signal)
+  } catch (err) {
+    if (isAbortError(err)) throw err
+    return fail((err as Error).message)
+  }
 }
 
 function checkAudio(file: File, max: number): File {
@@ -131,8 +129,6 @@ function checkAudio(file: File, max: number): File {
   if (file.size > max) fail(`${file.name} is ${formatBytes(file.size)}; the limit is ${formatBytes(max)}`)
   return file
 }
-
-const looksLikeLrc = (text: string): boolean => /^\s*\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/m.test(text)
 
 function lyricsBody(text: string, source: string): Pick<LyricsGenRequest, 'plainLyrics' | 'syncedLyrics'> {
   const t = text.trim()
@@ -270,7 +266,7 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
     name: 'lyricsgen', aliases: ['lyricgen'], group: 'Account',
     usage: 'lyricsgen [ls] · status · plain [--now] · sync|words [<job> | --file] [--now] · show|wait|get|rm <job>',
     description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). --lang en, --audio picks new audio. get <job> txt|lrc|enhanced downloads',
-    covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob'],
+    covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob', 'lyricsGenApi.fetchTrackAudio'],
     complete: (before, partial) => {
       const p = partial.toLowerCase()
       if (before.length === 0) return SUBCOMMANDS.filter((v) => v.startsWith(p))

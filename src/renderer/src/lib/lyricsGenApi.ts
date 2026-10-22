@@ -7,6 +7,9 @@
 import { routeUrl } from './apiServers'
 import { authedRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
+import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from './donorFilesApi'
+import { ensureDonorUrl, isDonorStreamUrl } from './donorPlayback'
+import type { Track } from '../types'
 
 const BASE = routeUrl('/accounts/donor/lyrics')
 const ADMIN_URL = routeUrl('/accounts/admin/lyrics/settings/')
@@ -14,6 +17,8 @@ const ADMIN_JOBS = routeUrl('/accounts/admin/lyrics/jobs')
 
 export const LYRICS_MAX_FILE_SIZE = 100 * 1024 * 1024
 export const LYRICS_MAX_TEXT = 30_000
+/** Audio the server takes: the donor upload types, less the images. */
+export const LYRICS_AUDIO_EXTENSIONS = DONOR_ALLOWED_EXTENSIONS.filter((e) => !isImageFile({ filename: `x.${e}`, mime_type: '' }))
 
 export type LyricsGenMode = 'plain' | 'synced' | 'word_synced'
 export type LyricsJobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
@@ -83,6 +88,46 @@ export interface LyricsAdminSettings {
 }
 
 export const isFinished = (job: Pick<LyricsGenJob, 'status'>): boolean => job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
+
+/** Text with LRC timestamps goes up as `synced_lyrics`, anything else as `plain_lyrics`. */
+export const looksLikeLrc = (text: string): boolean => /^\s*\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]/m.test(text)
+
+const AUDIO_TYPE_EXTENSION: Record<string, string> = {
+  'audio/flac': 'flac', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/ogg': 'ogg', 'audio/opus': 'opus',
+}
+
+/** A song's audio as a file to upload: its stream, its local file, or its
+ *  donor blob. Named after the file when the path has an audio extension,
+ *  otherwise after the title with one taken from the response type. */
+export async function fetchTrackAudio(
+  track: Pick<Track, 'title' | 'path' | 'streamUrl'>,
+  onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
+): Promise<File> {
+  if (!track.streamUrl) throw new Error(`${track.title} has no audio to load`)
+  const url = isDonorStreamUrl(track.streamUrl) ? await ensureDonorUrl(track.streamUrl) : track.streamUrl
+  const res = await fetch(url, { signal })
+  if (!res.ok) throw new Error(`Couldn't load ${track.title} (HTTP ${res.status})`)
+  const total = Number(res.headers.get('content-length')) || 0
+  let blob: Blob
+  if (res.body && total && onProgress) {
+    const reader = res.body.getReader()
+    const chunks: Uint8Array<ArrayBuffer>[] = []
+    let loaded = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value as Uint8Array<ArrayBuffer>)
+      loaded += value.length
+      onProgress(Math.min(loaded / total, 1))
+    }
+    blob = new Blob(chunks, { type: res.headers.get('content-type') ?? '' })
+  } else blob = await res.blob()
+  const fromPath = track.path.split(/[\\/]/).pop() ?? ''
+  if (LYRICS_AUDIO_EXTENSIONS.includes(extensionOf(fromPath))) return new File([blob], fromPath, { type: blob.type })
+  const ext = AUDIO_TYPE_EXTENSION[blob.type.split(';')[0]] ?? 'mp3'
+  return new File([blob], `${track.title.replace(/[\\/:*?"<>|]/g, '_')}.${ext}`, { type: blob.type })
+}
 
 export function getLyricsGenOptions(signal?: AbortSignal): Promise<LyricsGenOptions> {
   return authedRequest(`${BASE}/options/`, { signal }, getToken())

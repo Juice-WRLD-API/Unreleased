@@ -97,7 +97,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     globalHotkeysEnabled, setGlobalHotkeysEnabled,
     developerMode, setDeveloperMode,
     addLibraryFolder, libraryScanning, libraryAutoRefresh, setLibraryAutoRefresh,
-    syncOfflinePlaylists, openReport,
+    syncOfflinePlaylists, openReport, openLyricsGen,
     hotkeyBindings, navOrder,
   } = useStorePick(
     'account', 'logoutAccount', 'setShowUserAuth',
@@ -117,7 +117,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     'globalHotkeysEnabled', 'setGlobalHotkeysEnabled',
     'developerMode', 'setDeveloperMode',
     'addLibraryFolder', 'libraryScanning', 'libraryAutoRefresh', 'setLibraryAutoRefresh',
-    'syncOfflinePlaylists', 'openReport',
+    'syncOfflinePlaylists', 'openReport', 'openLyricsGen',
     'hotkeyBindings', 'navOrder',
   )
 
@@ -339,6 +339,11 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
       id: 'tools', label: 'Tools',
       entries: [
         { kind: 'item', label: 'Convert current song…', onClick: run(() => { if (canConvert && currentTrack) openConvert({ id: currentTrack.id, path: currentTrack.path, title: currentTrack.title }) }), disabled: !canConvert },
+        // Lyrics generation is a donor feature; administrators also see
+        // everyone's jobs and the model setting there.
+        ...(account?.is_donor || account?.is_administrator
+          ? [{ kind: 'item' as const, label: 'Generate lyrics…', onClick: run(() => openLyricsGen()) }]
+          : []),
         { kind: 'sep' },
         { kind: 'item', label: 'Mini player', hotkey: 'mini-player', onClick: hk('mini-player') },
         { kind: 'item', label: 'Close pop-out windows', hotkey: 'close-float-windows', onClick: hk('close-float-windows') },

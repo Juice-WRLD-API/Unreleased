@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, OfflineTrackMeta, OfflinePlaylistEntry, ConvertTarget } from '../types'
+import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, OfflineTrackMeta, OfflinePlaylistEntry, ConvertTarget, LyricsGenTarget } from '../types'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -487,6 +487,10 @@ interface AppState {
   // components/UrlImportModal.
   urlImportModal: boolean
 
+  // The open "Generate lyrics" dialog (null = closed) and the song it was
+  // opened on. See components/LyricsGenModal.
+  lyricsGenModal: LyricsGenTarget | null
+
   // Playlist folders � a local-first grouping over both synced and local
   // playlists (keyed by "api:<id>"/"local:<id>"). Persisted to localStorage and
   // usable logged out; synced-playlist membership syncs to the account once the
@@ -855,6 +859,9 @@ interface AppActions {
   /** Opens / closes the "Import from URL" dialog. */
   openUrlImport: () => void
   closeUrlImport: () => void
+  /** Opens / closes the donor "Generate lyrics" dialog, optionally on a song. */
+  openLyricsGen: (target?: LyricsGenTarget) => void
+  closeLyricsGen: () => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. Resolves once that
    *  delivery attempt settles: `true` if it actually reached the server this
@@ -2284,6 +2291,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   reportModal: null,
   convertModal: null,
   urlImportModal: false,
+  lyricsGenModal: null,
 
   openReport: (target) => set({ reportModal: target }),
   closeReport: () => set({ reportModal: null }),
@@ -2305,6 +2313,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   closeConvert: () => set({ convertModal: null }),
   openUrlImport: () => set({ urlImportModal: true }),
   closeUrlImport: () => set({ urlImportModal: false }),
+  openLyricsGen: (target = {}) => {
+    useSandboxStore.getState().expand()
+    set({ lyricsGenModal: target })
+  },
+  closeLyricsGen: () => set({ lyricsGenModal: null }),
 
   _enqueueReport: async (report: PendingReport) => {
     const next = [...get().pendingReports, report]

@@ -2,9 +2,9 @@ import { copyText } from '../lib/clipboard'
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2, Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2, Layers, MicVocal,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2, Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2, Layers, MicVocal, Sparkles,
 } from 'lucide-react'
-import { useStore } from '../store/useStore'
+import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
@@ -256,6 +256,11 @@ export default function SongContextMenu({
   // real API songs (not local-only files, which nobody else can reach) and
   // only for staff, who are the only ones with a chat to share into.
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
+  // Donors can have Whisper transcribe or time any song whose audio the app
+  // can load (stream, local file or donor file). The dialog lives in the main
+  // window only.
+  const canGenerateLyrics = !!account?.is_donor && !IS_FLOAT_WINDOW && !isUnplayable && !!track.streamUrl
+    && (!!track.path || isDonorStreamUrl(track.streamUrl))
 
   const handleCopyLink = async (): Promise<void> => {
     if (!hasValidSong) return
@@ -375,6 +380,7 @@ export default function SongContextMenu({
         },
         canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
         onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
+        canGenerateLyrics && { icon: Sparkles, label: 'Generate lyrics', onSelect: () => useStore.getState().openLyricsGen({ track, songId }) },
         hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },

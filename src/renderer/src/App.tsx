@@ -4,7 +4,7 @@ import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, ELECTRON_TITLEBAR_CLEARANCE_X } from './lib/platform'
 import { applySeo } from './lib/seo'
-import { lazyView } from './lib/lazyView'
+import { lazyOverlay, lazyView } from './lib/lazyView'
 import { preloadAllViews } from './lib/lazyViews'
 import { ViewType } from './types'
 import ViewFade from './components/ViewFade'
@@ -98,6 +98,8 @@ const HeardleView = lazyView(() => import('./components/HeardleView'))
 const WordleView = lazyView(() => import('./components/WordleView'))
 const TierlistView = lazyView(() => import('./components/TierlistView'))
 const StatsView = lazyView(() => import('./components/StatsView'))
+// Donors and administrators only - fetched the first time it opens.
+const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
 const StatisticsView = lazyView(() => import('./components/StatisticsView'))
 const PublicProfileView = lazyView(() => import('./components/PublicProfileView'))
 const ChatView = lazyView(() => import('./components/ChatView'))
@@ -158,6 +160,7 @@ export default function App(): JSX.Element {
   const heldView = heldViewRef.current
   const isMobile = useIsMobile()
   const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
+  const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
   useThemeEffects()
   useChatBootstrap()
 
@@ -421,6 +424,11 @@ export default function App(): JSX.Element {
       <ErrorBoundary variant="overlay"><ConvertFormatModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><UrlImportModal /></ErrorBoundary>
+      {lyricsGenOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeLyricsGen()}>
+          <LyricsGenModal />
+        </ErrorBoundary>
+      )}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>
