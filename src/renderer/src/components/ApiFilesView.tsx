@@ -1,8 +1,9 @@
 import { Cloud } from 'lucide-react'
-import { Suspense, useState } from 'react'
+import { Suspense, useRef, useState } from 'react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useStore } from '../store/useStore'
 import { lazyView, responsiveView } from '../lib/lazyView'
+import { useContentMotion } from '../hooks/useContentMotion'
 
 const ChannelBrowser = responsiveView(() => import('./ApiFilesView.desktop'), () => import('./ApiFilesView.mobile'))
 // Donor-only, so everyone else never downloads it.
@@ -15,6 +16,8 @@ export default function ApiFilesView(): JSX.Element {
   const isMobile = useIsMobile()
   const isDonor = useStore((s) => !!s.account?.is_donor)
   const [mine, setMine] = useState(false)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentMotion(contentRef, mine ? 'mine' : 'channels')
   const browser = <ChannelBrowser />
   if (!isDonor) return browser
 
@@ -33,15 +36,17 @@ export default function ApiFilesView(): JSX.Element {
       </div>
       {/* Full width, matching the channel browser (ApiFilesView.desktop/mobile) -
           this used to be capped to a narrow settings-style column. */}
-      {mine ? (
-        <div className={`flex-1 min-h-0 overflow-y-auto ${isMobile ? 'px-4 pb-6' : 'px-5 pb-8'}`}>
-          <div className="flex items-center gap-2.5 pt-5 pb-3">
-            <Cloud size={18} className="text-text-muted shrink-0" />
-            <h1 className="text-text-primary text-xl font-bold">My files</h1>
+      <div ref={contentRef} className="flex flex-col flex-1 min-h-0 min-w-0">
+        {mine ? (
+          <div className={`flex-1 min-h-0 overflow-y-auto ${isMobile ? 'px-4 pb-6' : 'px-5 pb-8'}`}>
+            <div className="flex items-center gap-2.5 pt-5 pb-3">
+              <Cloud size={18} className="text-text-muted shrink-0" />
+              <h1 className="text-text-primary text-xl font-bold">My files</h1>
+            </div>
+            <Suspense fallback={null}><DonorFiles /></Suspense>
           </div>
-          <Suspense fallback={null}><DonorFiles /></Suspense>
-        </div>
-      ) : browser}
+        ) : browser}
+      </div>
     </div>
   )
 }

@@ -40,6 +40,7 @@ import LegalModal, { type LegalDoc } from './LegalModal'
 import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
 import { useContentMotion } from '../hooks/useContentMotion'
+import { MotionDisclosure } from './MotionDisclosure'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
 import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
@@ -365,7 +366,7 @@ function VizSettings(): JSX.Element {
       <button
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className={`flex items-center gap-2.5 w-full text-left ${open ? 'mb-2.5' : ''}`}
+        className="flex items-center gap-2.5 w-full text-left"
       >
         <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
           <AudioLines size={13} className="text-white" strokeWidth={2.25} />
@@ -376,9 +377,7 @@ function VizSettings(): JSX.Element {
         </div>
         <ChevronDown size={14} className={`text-text-muted control-motion shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
-      <div className="pl-[34px] animate-disclosure-in"><VizControls /></div>
-      )}
+      <MotionDisclosure open={open} className="pl-[34px] pt-2.5"><VizControls /></MotionDisclosure>
     </div>
   )
 }
@@ -433,8 +432,6 @@ export default function Settings(): JSX.Element {
   const [savingName, setSavingName] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
-  const aboutAnswerRef = useRef<HTMLDivElement>(null)
-  useContentMotion(aboutAnswerRef, openAbout ?? '')
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
   // otherwise re-expand it - see the matching comment on setShowSettings.
@@ -2213,18 +2210,16 @@ export default function Settings(): JSX.Element {
                         <span className="text-text-secondary text-xs font-medium">{q}</span>
                         <ChevronDown size={12} className={`text-text-muted control-motion shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
-                      {openAbout === q && (
-                        <div ref={aboutAnswerRef} className="px-3 pb-3 pt-0">
-                          <p className="text-text-muted text-xs leading-relaxed">{a}</p>
-                          {link && (
-                            <button
-                              onClick={() => openMainView('docs')}
-                              className="mt-1.5 inline-block text-xs text-accent hover:underline">
-                              {link.text}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      <MotionDisclosure open={openAbout === q} className="px-3 pb-3 pt-0">
+                        <p className="text-text-muted text-xs leading-relaxed">{a}</p>
+                        {link && (
+                          <button
+                            onClick={() => openMainView('docs')}
+                            className="mt-1.5 inline-block text-xs text-accent hover:underline">
+                            {link.text}
+                          </button>
+                        )}
+                      </MotionDisclosure>
                     </div>
                   ))}
                 </div>

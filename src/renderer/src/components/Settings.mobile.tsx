@@ -39,6 +39,7 @@ import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import EraCoversSection from './EraCoversSection'
 import { useContentMotion } from '../hooks/useContentMotion'
+import { MotionDisclosure } from './MotionDisclosure'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
 import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
 import { useLastfmConnect } from '../hooks/useLastfmConnect'
@@ -539,8 +540,6 @@ export default function Settings(): JSX.Element {
   const [tokenCopied, setTokenCopied] = useState(false)
   const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
-  const aboutAnswerRef = useRef<HTMLDivElement>(null)
-  useContentMotion(aboutAnswerRef, openAbout ?? '')
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   const {
     setShowSettings, setActiveView, openProfile,
@@ -1878,18 +1877,16 @@ export default function Settings(): JSX.Element {
                         <span className="text-text-primary text-[15px]">{q}</span>
                         <ChevronDown size={16} className={`text-text-muted control-motion shrink-0 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
-                      {openAbout === q && (
-                        <div ref={aboutAnswerRef} className="pb-3 -mt-1">
-                          <p className="text-text-muted text-[13px] leading-relaxed">{a}</p>
-                          {link && (
-                            <button
-                              onClick={() => openMainView('docs')}
-                              className="mt-2 inline-block text-[13px] text-accent">
-                              {link.text}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      <MotionDisclosure open={openAbout === q} className="pb-3 -mt-1">
+                        <p className="text-text-muted text-[13px] leading-relaxed">{a}</p>
+                        {link && (
+                          <button
+                            onClick={() => openMainView('docs')}
+                            className="mt-2 inline-block text-[13px] text-accent">
+                            {link.text}
+                          </button>
+                        )}
+                      </MotionDisclosure>
                     </div>
                   ))}
                 </SettingsCard>

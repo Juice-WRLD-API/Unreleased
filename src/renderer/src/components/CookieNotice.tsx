@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Cookie } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { useSandboxStore } from './Modal'
+import { PopLayer } from './PopLayer'
+import { POP_EXIT_MS } from '../hooks/useExitGhost'
 
 // The full policy text - only fetched if someone opens it from the notice.
 const LegalModal = lazyOverlay(() => import('./LegalModal'))
@@ -29,7 +31,9 @@ export default function CookieNotice(): JSX.Element | null {
     } catch {
       // best effort - dismiss for this session regardless
     }
-    window.dispatchEvent(new Event(COOKIE_NOTICE_ACK_EVENT))
+    // The donation notice occupies the same spot; reveal it after this fade.
+    const delay = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : POP_EXIT_MS
+    window.setTimeout(() => window.dispatchEvent(new Event(COOKIE_NOTICE_ACK_EVENT)), delay)
     setAck(true)
   }
 
@@ -37,7 +41,7 @@ export default function CookieNotice(): JSX.Element | null {
 
   return (
     <>
-      <div className="fixed inset-x-0 bottom-0 z-[9500] flex justify-center px-3 pb-3 pointer-events-none">
+      <PopLayer className="fixed inset-x-0 bottom-0 z-[9500] flex justify-center px-3 pb-3 pointer-events-none animate-menu-pop">
         <div className="pointer-events-auto w-full max-w-[560px] rounded-2xl border border-[var(--border)] bg-surface shadow-2xl px-4 py-3.5 flex items-start gap-3">
           <div className="shrink-0 mt-0.5 text-accent">
             <Cookie size={18} />
@@ -62,7 +66,7 @@ export default function CookieNotice(): JSX.Element | null {
             Got it
           </button>
         </div>
-      </div>
+      </PopLayer>
 
       {showPrivacy && <LegalModal initialDoc="privacy" onClose={() => setShowPrivacy(false)} />}
     </>

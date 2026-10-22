@@ -2,8 +2,9 @@ import { RefObject, useLayoutEffect, useRef } from 'react'
 
 // The close for menus and popovers: fade in place without scaling their text
 // (the counterpart of .animate-menu-pop).
+export const POP_EXIT_MS = 240
 export const popOut = (ghost: HTMLElement): Animation =>
-  ghost.animate([{ opacity: 0 }], { duration: 240, easing: 'cubic-bezier(0.4, 0, 0.6, 1)', fill: 'forwards' })
+  ghost.animate([{ opacity: 0 }], { duration: POP_EXIT_MS, easing: 'cubic-bezier(0.4, 0, 0.6, 1)', fill: 'forwards' })
 
 // Lets something that closes by unmounting - a modal, a menu - still animate
 // out. React drops its DOM the moment the owner stops rendering it, so on

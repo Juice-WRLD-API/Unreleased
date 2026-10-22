@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react'
-import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, Upload, Info, Check, EyeOff } from 'lucide-react'
+import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, Download, Upload, Info, Check, EyeOff } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
@@ -13,6 +13,7 @@ import ContextMenu from './ContextMenu'
 import NavPillGrip from './NavPillGrip'
 import { accountDisplayName, initial } from '../lib/format'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
+import { MotionDisclosure } from './MotionDisclosure'
 
 // Right-click only - fetched on first open rather than with the app shell.
 const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
@@ -378,7 +379,10 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       {/* Nav items */}
-      <nav ref={navRef} className="relative isolate space-y-1 flex-1 min-h-0 overflow-y-auto px-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3">
+        {/* Natural height lets the highlight's ResizeObserver follow a
+            disclosure finishing its close, even without a sidebar render. */}
+        <nav ref={navRef} className="relative isolate space-y-1">
         {items.map(({ icon, label, view }, idx) => (
           <div
             key={view}
@@ -417,16 +421,17 @@ export default function Sidebar(): JSX.Element {
               {view === 'playlists' && showExpanded && playlists.length > 0 && (
                 <button
                   onClick={togglePlaylistsExpanded}
+                  aria-expanded={playlistsExpanded}
                   title={playlistsExpanded ? 'Hide playlists' : 'Show playlists'}
                   className="p-2 pr-3 text-text-muted hover:text-text-primary transition-colors shrink-0"
                 >
-                  {playlistsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  <ChevronDown size={14} className={`control-motion ${playlistsExpanded ? 'rotate-180' : ''}`} />
                 </button>
               )}
             </div>
 
-            {view === 'playlists' && showExpanded && playlistsExpanded && playlists.length > 0 && (
-              <div className="mt-0.5 ml-[26px] space-y-0.5 border-l border-[var(--border)] pl-2 max-h-64 overflow-y-auto">
+            {view === 'playlists' && showExpanded && playlists.length > 0 && (
+              <MotionDisclosure open={playlistsExpanded} className="mt-0.5 ml-[26px] space-y-0.5 border-l border-[var(--border)] pl-2 max-h-64 overflow-y-auto">
                 {playlists.map((pl) => (
                   <button
                     key={pl.id}
@@ -438,12 +443,13 @@ export default function Sidebar(): JSX.Element {
                     <span className="truncate">{pl.name}</span>
                   </button>
                 ))}
-              </div>
+              </MotionDisclosure>
             )}
           </div>
         ))}
         <div ref={navIndicatorRef} className="nav-indicator rounded bg-surface-raised" aria-hidden />
-      </nav>
+        </nav>
+      </div>
 
       {/* Bottom section - Log in stays pinned (never hideable); the rest are
           user-ordered/hideable controls (Settings → Appearance → Menu controls). */}
