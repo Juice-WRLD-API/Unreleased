@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertCircle, AlignLeft, Ban, Check, ChevronLeft, CircleStop, Copy, Download, FileAudio, Hourglass, Loader2, Pause, PencilLine, Play,
+  AlertCircle, AlignLeft, Ban, Check, ChevronLeft, CircleStop, Copy, Download, FileAudio, Hourglass, Info, Loader2, Pause, PencilLine, Play,
   RotateCcw, Trash2, WholeWord,
 } from 'lucide-react'
 import {
@@ -340,6 +340,7 @@ function SyncedResult({ job, admin, audio, onContinue }: {
   const [copied, copy] = useCopied()
   const [downloading, download] = useDownload(job, admin)
   const reviewText = (job.result.plain_lyrics || job.plain_lyrics || '').trim()
+  const estimated = estimatedNote(job.result.unaligned_lines ?? 0, words ? job.result.unaligned_words ?? 0 : 0)
 
   return (
     <>
@@ -362,12 +363,26 @@ function SyncedResult({ job, admin, audio, onContinue }: {
             </span>
           )}
         </div>
+        {estimated && (
+          <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-text-muted">
+            <Info size={12} className="mt-[3px] shrink-0" />
+            <span>
+              {estimated} Their timing is estimated and marked below. A misspelled or missing lyric is the usual cause
+              {!admin && reviewText
+                ? <>: <button onClick={() => onContinue(job.mode, reviewText)} className="font-semibold text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors">edit the text and sync again</button>.</>
+                : '.'}
+            </span>
+          </p>
+        )}
         {view === 'preview'
           ? <PlayAlong lines={lines} words={words} audio={audio} filename={job.filename} />
           : (
-            <pre className="h-[380px] overflow-auto rounded-2xl border border-[var(--border)] bg-surface-overlay/30 px-4 py-3 text-xs leading-relaxed font-mono text-text-secondary whitespace-pre-wrap break-words select-text">
-              {lrc}
-            </pre>
+            <>
+              <pre className="h-[380px] overflow-auto rounded-2xl border border-[var(--border)] bg-surface-overlay/30 px-4 py-3 text-xs leading-relaxed font-mono text-text-secondary whitespace-pre-wrap break-words select-text">
+                {lrc}
+              </pre>
+              {estimated && <p className="text-[11px] text-text-muted">The file includes the estimated timings. LRC has no way to mark them.</p>}
+            </>
           )}
         <div className="flex flex-wrap items-center gap-2">
           {outputsFor(job.mode).map((o) => (
@@ -399,6 +414,17 @@ function SyncedResult({ job, admin, audio, onContinue }: {
     </>
   )
 }
+
+/** "3 words couldn't be matched to the audio." or null when everything aligned. */
+function estimatedNote(lines: number, words: number): string | null {
+  const parts = [
+    lines > 0 && `${lines} line${lines === 1 ? '' : 's'}`,
+    words > 0 && `${words} word${words === 1 ? '' : 's'}`,
+  ].filter(Boolean)
+  return parts.length ? `${parts.join(' and ')} couldn't be matched to the audio.` : null
+}
+
+const ESTIMATED_MARK = 'underline decoration-dotted decoration-text-muted underline-offset-[5px]'
 
 /** The line lit at `t`: the last one that has started. */
 function lineAt(lines: LyricsSegment[], t: number): number {
@@ -509,17 +535,21 @@ function PlayAlong({ lines, words, audio, filename }: {
               className="group relative w-full flex items-baseline gap-3 px-3 py-1.5 rounded-lg text-left enabled:hover:bg-surface-overlay/70 transition-colors disabled:cursor-default"
             >
               <span className={`absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-accent transition-opacity duration-300 ${now ? 'opacity-100' : 'opacity-0'}`} />
-              <span className={`w-[52px] shrink-0 text-[10px] font-mono tabular-nums transition-colors ${now ? 'text-accent' : `text-text-muted/70 ${src ? 'group-hover:text-accent' : ''}`}`}>
-                {lrcTime(l.start)}
+              <span
+                title={l.estimated ? 'Estimated timing' : undefined}
+                className={`w-[52px] shrink-0 text-[10px] font-mono tabular-nums transition-colors ${l.estimated ? 'italic' : ''} ${now ? 'text-accent' : `text-text-muted/70 ${src ? 'group-hover:text-accent' : ''}`}`}
+              >
+                {l.estimated && '~'}{lrcTime(l.start)}
               </span>
               <span className={`flex-1 min-w-0 text-[15px] font-medium leading-snug transition-colors duration-300 ${tone}`}>
                 {words && l.words?.length
                   ? l.words.map((w, j) => (
                     <span key={j} className={`transition-colors duration-200 ${now ? (j <= lit.word ? 'text-accent' : 'text-text-muted') : ''}`}>
-                      {w.word.trim()}{j < l.words!.length - 1 ? ' ' : ''}
+                      <span title={w.estimated ? 'Estimated timing' : undefined} className={w.estimated ? ESTIMATED_MARK : undefined}>{w.word.trim()}</span>
+                      {j < l.words!.length - 1 ? ' ' : ''}
                     </span>
                   ))
-                  : l.text || '♪'}
+                  : <span title={l.estimated ? 'Estimated timing' : undefined} className={l.estimated && l.text ? ESTIMATED_MARK : undefined}>{l.text || '♪'}</span>}
               </span>
             </button>
           )

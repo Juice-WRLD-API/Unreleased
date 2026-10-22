@@ -102,6 +102,13 @@ function printResult(ctx: TermCtx, job: LyricsGenJob, n: number | null): void {
   const r = job.result
   const text = job.mode === 'plain' ? r.plain_lyrics : r.synced_lyrics
   ctx.print(text?.trim() || '(no lyrics came back)')
+  const lost = [
+    r.unaligned_lines && `${r.unaligned_lines} line${r.unaligned_lines === 1 ? '' : 's'}`,
+    job.mode === 'word_synced' && r.unaligned_words && `${r.unaligned_words} word${r.unaligned_words === 1 ? '' : 's'}`,
+  ].filter(Boolean)
+  if (job.mode !== 'plain' && lost.length) {
+    ctx.print(`${lost.join(' and ')} couldn't be matched to the audio, so their timing is estimated. A misspelled or missing lyric is the usual cause: fix the text and sync again.`, 'dim')
+  }
   const next = job.mode === 'plain'
     ? `get it: lyricsgen get ${ref} txt · sync this text: lyricsgen sync ${ref} (or words ${ref}) · to fix lines first, edit the .txt and run lyricsgen sync --file`
     : job.mode === 'synced'
