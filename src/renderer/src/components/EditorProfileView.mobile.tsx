@@ -501,7 +501,7 @@ export default function EditorProfileView(): JSX.Element {
                     group at all and Queues just takes the full width on its
                     own. Admins get one button per queue their nav actually
                     opens into, plus Channels and Eras (free). Admins without
-                    2FA only see the Security box (highlighted) so they can
+                    2FA only see the 2FA box (highlighted) so they can
                     find and turn it on - every other number/button here is
                     an account-wide admin surface and stays gated until then. */}
                 <div className="flex-1 min-w-0">
@@ -527,13 +527,11 @@ export default function EditorProfileView(): JSX.Element {
                         <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                       </>
                     )}
-                    {isAdmin && (
-                      <AdminStatBox
-                        label="Security"
-                        value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
-                        highlight={adminPreview?.otpEnabled === false}
-                        onClick={() => openAdminTab('security')}
-                      />
+                    {/* The 2FA status lives in Settings → Account; this box
+                        only appears while it's off. Admin opens on its
+                        setup gate. */}
+                    {otpLocked && (
+                      <AdminStatBox label="2FA" value="OFF" highlight onClick={() => openAdminTab('proposals')} />
                     )}
                   </div>
                   {otpLocked && (

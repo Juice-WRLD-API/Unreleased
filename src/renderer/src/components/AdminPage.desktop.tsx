@@ -90,8 +90,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     gateNonProposalTabs: true,
     activeChannel,
     initialTab: effectiveInitialTab ?? 'proposals',
-    // No Security tab for managers: it renders a flat "2FA is enabled", which
-    // the OTP gate below guarantees for admins and can't guarantee for them.
     managerNavIds: ['proposals', 'comp-proposals', 'comp-replace'],
   })
 
@@ -165,7 +163,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && tab !== 'security' && (
+        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -289,11 +287,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('logs') && (
           <div className={tab === 'logs' ? 'h-full' : 'hidden'}>
             <LogsTab active={tab === 'logs'} />
-          </div>
-        )}
-        {visited.has('security') && (
-          <div className={tab === 'security' ? 'h-full' : 'hidden'}>
-            <SecurityTab />
           </div>
         )}
       </div>
@@ -1225,24 +1218,6 @@ function StatsTab({ applications, proposals, users }: {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Security ──────────────────────────────────────────────────────────────────
-
-function SecurityTab(): JSX.Element {
-  return (
-    <div className="p-6 max-w-md">
-      <div className="flex items-start gap-4 px-5 py-5 rounded-2xl bg-emerald-500/8 border border-emerald-500/20">
-        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-          <Check size={18} className="text-emerald-400" />
-        </div>
-        <div>
-          <p className="text-text-primary font-semibold">Two-factor authentication enabled</p>
-          <p className="text-text-muted text-sm mt-1">Your account is protected with 2FA.</p>
-        </div>
-      </div>
     </div>
   )
 }

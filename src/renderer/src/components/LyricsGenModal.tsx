@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   AlertCircle, AudioLines, Check, Clock, FileText, Heart, ListChecks, Loader2, LogIn, MicVocal, Music2, Plus, ShieldCheck, Sparkles, Upload, X,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { LyricsGenTarget } from '../types'
 import {
-  createLyricsJob, fetchTrackAudio, getLyricsGenOptions, getLyricsJob, isFinished, listLyricsJobs, looksLikeLrc, lyricsForMode,
-  LYRICS_AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT,
+  createLyricsJob, fetchTrackAudio, findAdlibs, getLyricsGenOptions, getLyricsJob, isFinished, listLyricsJobs, looksLikeLrc, lyricsToTime,
+  removeAdlibs, textForMode, LYRICS_AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT,
   type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenOptions,
 } from '../lib/lyricsGenApi'
 import { getSongById } from '../lib/juicewrldApi'
@@ -15,15 +15,18 @@ import { extensionOf } from '../lib/donorFilesApi'
 import { isAbortError } from '../lib/apiClient'
 import { errorMessage, formatBytes } from '../lib/format'
 import { isDonorStreamUrl } from '../lib/donorPlayback'
+import { ls } from '../lib/persist'
 import { pickLocalFile } from '../lib/terminal/pick'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { useContentMotion } from '../hooks/useContentMotion'
 import { ModalOverlay, LockToggle } from './Modal'
 import ThemedSelect from './ThemedSelect'
+import { Toggle } from './SettingsRow'
 import { relativeTime } from './adminShared'
 import { MODE_INFO } from './lyricsGenShared'
 import LyricsGenJobView from './LyricsGenJobView'
 import { AdminJobs, MyJobs } from './LyricsGenJobLists'
+import LyricsGenTextInput, { shiftOffsets } from './LyricsGenTextInput'
 
 // "Generate lyrics": the donor lyrics generation (Whisper on the server) as a
 // dialog, the same jobs the terminal's lyricsgen / lyricsjobs / lyricsmodel
@@ -40,6 +43,7 @@ type Tab = 'create' | 'jobs' | 'admin'
 type SourceTrack = NonNullable<LyricsGenTarget['track']>
 
 const JOBS_POLL_MS = 5000
+const DROP_ADLIBS_KEY = 'lyricsGen:dropAdlibs'
 const LANGUAGES = [
   { value: '', label: 'Detect it' },
   { value: 'en', label: 'English' },
@@ -89,7 +93,11 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const [modePicked, setModePicked] = useState(false)
   const [text, setText] = useState('')
   const [textBusy, setTextBusy] = useState(false)
-  const [language, setLanguage] = useState('')
+  // Remove adlibs: every "(…)" is left out of the text sent, except the ones
+  // clicked back in, which are held by where they start in `text`.
+  const [dropAdlibs, setDropAdlibs] = useState(() => ls.get<boolean>(DROP_ADLIBS_KEY) ?? false)
+  const [keptAdlibs, setKeptAdlibs] = useState<ReadonlySet<number>>(() => new Set())
+  const [language, setLanguage] = useState('en')
   // The file a follow-up or retry should run on, when it isn't the one held.
   const [expectedAudio, setExpectedAudio] = useState<string | null>(null)
   const [options, setOptions] = useState<LyricsGenOptions | null>(null)
@@ -183,15 +191,32 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   }
 
   // ── Lyrics sources for the sync modes ──
-  // Text filled from a song or a job keeps both its versions: line sync gets
-  // the plain words, word sync the LRC (see lyricsForMode). Switching between
-  // the two swaps it for the other version, unless it has been edited since.
-  const [filled, setFilled] = useState<{ plain: string; lrc: string; text: string } | null>(null)
+  // Text filled from a song or a job is its plain words for both modes (see
+  // lyricsToTime). New text starts with every adlib left out again; an edit
+  // moves the kept ones along with it.
+  const replaceText = (t: string): void => {
+    setText(t.replace(/\r\n?/g, '\n'))
+    setKeptAdlibs(new Set())
+  }
+  const editText = (next: string): void => {
+    setKeptAdlibs((k) => shiftOffsets(k, text, next))
+    setText(next)
+  }
+  const toggleAdlib = (start: number): void => {
+    setKeptAdlibs((k) => {
+      const next = new Set(k)
+      if (!next.delete(start)) next.add(start)
+      return next
+    })
+  }
+  const toggleDropAdlibs = (): void => {
+    ls.set(DROP_ADLIBS_KEY, !dropAdlibs)
+    setDropAdlibs(!dropAdlibs)
+  }
   const fill = (plain: string, lrc: string): boolean => {
-    const t = lyricsForMode(mode, plain, lrc)
+    const t = lyricsToTime(plain, lrc)
     if (!t) return false
-    setText(t)
-    setFilled({ plain, lrc, text: t })
+    replaceText(t)
     setFormError(null)
     return true
   }
@@ -199,11 +224,6 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     setMode(m)
     setModePicked(true)
     setFormError(null)
-    if (filled && m !== 'plain' && text.trim() === filled.text) {
-      const t = lyricsForMode(m, filled.plain, filled.lrc)
-      setText(t)
-      setFilled({ ...filled, text: t })
-    }
   }
 
   const fillFromSong = async (): Promise<void> => {
@@ -239,15 +259,14 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     }
   }
   const fillFromFile = (): void => {
-    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then((t) => { setText(t.trim()); setFilled(null); setFormError(null) }, () => {})
+    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then((t) => { replaceText(t.trim()); setFormError(null) }, () => {})
   }
 
   // Follow-ups from a job: back to the form with its text, same audio.
   const continueFrom = (job: Pick<LyricsGenJob, 'filename'>, nextMode: LyricsGenMode, nextText: string, lang?: string): void => {
     setMode(nextMode)
     setModePicked(false)
-    setText(nextText.trim())
-    setFilled(null)
+    replaceText(nextText.trim())
     if (lang !== undefined) setLanguage(lang)
     setExpectedAudio(job.filename)
     setFormError(null)
@@ -257,14 +276,33 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
 
   const trimmed = text.trim()
   const needsText = mode !== 'plain'
+  const adlibs = useMemo(() => (needsText && dropAdlibs ? findAdlibs(text) : []), [needsText, dropAdlibs, text])
+  const adlibsLeftOut = adlibs.filter((a) => !keptAdlibs.has(a.start)).length
+  // What goes up: the text less its left-out adlibs, and for word sync no LRC times.
+  const sendText = useMemo(
+    () => (needsText ? textForMode(mode, dropAdlibs ? removeAdlibs(text, keptAdlibs) : text) : ''),
+    [needsText, mode, dropAdlibs, text, keptAdlibs],
+  )
   const modeOption = options?.options.find((o) => o.mode === mode)
   const blocked = !options ? (optionsError ? 'Lyrics generation is out of reach right now' : 'Checking the server…')
     : !options.available ? `Lyrics generation is off: ${options.unavailable_reason || 'unavailable'}`
     : modeOption && !modeOption.available ? `${MODE_INFO[mode].title} is off: ${modeOption.unavailable_reason || 'unavailable'}`
     : !audio ? 'Choose the audio first'
     : needsText && !trimmed ? 'Add the lyrics to time'
-    : needsText && trimmed.length > LYRICS_MAX_TEXT ? `The lyrics are over ${LYRICS_MAX_TEXT.toLocaleString()} characters`
+    : needsText && !sendText ? 'Nothing is left once the adlibs are out. Click some to send them'
+    : needsText && sendText.length > LYRICS_MAX_TEXT ? `The lyrics are over ${LYRICS_MAX_TEXT.toLocaleString()} characters`
     : null
+
+  const lrcNote = trimmed && looksLikeLrc(trimmed)
+    ? mode === 'word_synced' ? 'LRC times found. Word sync leaves them out and times the words alone' : 'LRC times found. Each line is timed within its own window'
+    : null
+  const adlibNote = !adlibs.length ? null
+    : adlibsLeftOut ? `${adlibsLeftOut} of ${adlibs.length} adlib${adlibs.length === 1 ? '' : 's'} left out. Click a grey one to send it`
+    : `${adlibs.length === 1 ? 'The adlib is' : `All ${adlibs.length} adlibs are`} sent. Click one to leave it out`
+  const sentLines = sendText.split('\n').filter((l) => l.trim()).length
+  const textNote = [adlibNote, lrcNote].filter(Boolean).join(' · ')
+    || (trimmed ? `${sentLines} line${sentLines === 1 ? '' : 's'}`
+      : dropAdlibs ? 'Your text is kept as written, less the adlibs in ( )' : 'Your text is kept exactly as written')
 
   const submit = async (): Promise<void> => {
     if (blocked || !audio || uploading !== null) return
@@ -273,7 +311,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     setFormError(null)
     setUploading(0)
     try {
-      const lyrics = needsText ? (looksLikeLrc(trimmed) ? { syncedLyrics: trimmed } : { plainLyrics: trimmed }) : {}
+      const lyrics = needsText ? (looksLikeLrc(sendText) ? { syncedLyrics: sendText } : { plainLyrics: sendText }) : {}
       const job = await createLyricsJob(audio, { mode, language: language || undefined, ...lyrics }, setUploading, ac.signal)
       setJobs((js) => [job, ...(js ?? []).filter((j) => j.id !== job.id)])
       setExpectedAudio(null)
@@ -511,7 +549,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
 
                 {/* 3. Lyrics (sync modes) */}
                 {needsText && (
-                  <Step n={3} title="Lyrics to time" done={!!trimmed && trimmed.length <= LYRICS_MAX_TEXT} className={modePicked ? 'animate-disclosure-in' : ''}>
+                  <Step n={3} title="Lyrics to time" done={!!sendText && sendText.length <= LYRICS_MAX_TEXT} className={modePicked ? 'animate-disclosure-in' : ''}>
                     <div className="flex flex-wrap items-center gap-1.5 mb-2">
                       {lyricsTrack && (lyricsSongId || currentTrackFull?.id === lyricsTrack.id) && (
                         <button onClick={() => void fillFromSong()} disabled={textBusy} className={CHIP}>
@@ -531,23 +569,30 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                       )}
                       <button onClick={fillFromFile} disabled={textBusy} className={CHIP}><FileText size={12} /> Open .txt or .lrc</button>
                       {textBusy && <Loader2 size={13} className="animate-spin text-text-muted" />}
+                      <label
+                        title="Leave out everything in ( ). Click an adlib in the text to send it anyway"
+                        className="ml-auto inline-flex items-center gap-2 h-7 text-[11px] font-semibold text-text-secondary cursor-pointer select-none"
+                      >
+                        Remove adlibs
+                        <Toggle on={dropAdlibs} onClick={toggleDropAdlibs} locked={uploading !== null} lockedReason="Uploading" />
+                      </label>
                     </div>
-                    <textarea
+                    <LyricsGenTextInput
                       value={text}
-                      onChange={(e) => setText(e.target.value)}
+                      onChange={editText}
                       disabled={uploading !== null}
-                      spellCheck={false}
-                      placeholder={'One lyric line per line, exactly as sung.\nPaste an LRC to keep its line times as guides.'}
-                      className="w-full h-44 resize-y rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-4 py-3 text-sm leading-relaxed text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:border-accent/60 transition-colors"
+                      placeholder={mode === 'word_synced'
+                        ? 'One lyric line per line, exactly as sung.'
+                        : 'One lyric line per line, exactly as sung.\nPaste an LRC to keep its line times as guides.'}
+                      adlibs={dropAdlibs ? { kept: keptAdlibs, onToggle: toggleAdlib } : null}
                     />
                     <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
                       <span className="text-text-muted flex items-center gap-1.5 min-w-0">
-                        {trimmed && looksLikeLrc(trimmed)
-                          ? <><Clock size={11} className="text-accent shrink-0" /> <span className="truncate">LRC times found. Each line is timed within its own window</span></>
-                          : trimmed ? `${trimmed.split('\n').filter((l) => l.trim()).length} lines` : 'Your text is kept exactly as written'}
+                        {lrcNote && <Clock size={11} className="text-accent shrink-0" />}
+                        <span className="truncate" title={textNote}>{textNote}</span>
                       </span>
-                      <span className={`tabular-nums shrink-0 ${trimmed.length > LYRICS_MAX_TEXT ? 'text-red-300' : 'text-text-muted'}`}>
-                        {trimmed.length.toLocaleString()} / {LYRICS_MAX_TEXT.toLocaleString()}
+                      <span className={`tabular-nums shrink-0 ${sendText.length > LYRICS_MAX_TEXT ? 'text-red-300' : 'text-text-muted'}`}>
+                        {sendText.length.toLocaleString()} / {LYRICS_MAX_TEXT.toLocaleString()}
                       </span>
                     </div>
                   </Step>
@@ -564,7 +609,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                       className="h-9 px-3 rounded-xl bg-surface-overlay border border-[var(--border)] text-sm text-text-primary min-w-[150px]"
                     />
                     <p className="flex-1 min-w-[180px] text-[11px] text-text-muted leading-snug">
-                      Whisper detects it from the start of the song. Set it for songs with a long intro.
+                      English unless you pick another. Detect it guesses from the start of the song, which can go wrong on a long intro.
                     </p>
                   </div>
                 </Step>

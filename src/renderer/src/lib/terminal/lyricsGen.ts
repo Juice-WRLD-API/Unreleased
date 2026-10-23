@@ -4,7 +4,7 @@ import { extensionOf } from '../donorFilesApi'
 import {
   cancelAdminLyricsJob, createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, fetchTrackAudio,
   getAdminLyricsJob, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob, isFinished, listAdminLyricsJobs,
-  listLyricsJobs, looksLikeLrc, lyricsForMode, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
+  listLyricsJobs, looksLikeLrc, lyricsToTime, removeAdlibs, textForMode, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
   type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
 } from '../lyricsGenApi'
 import { isAbortError } from '../apiClient'
@@ -112,7 +112,7 @@ function printResult(ctx: TermCtx, job: LyricsGenJob, n: number | null): void {
   const next = job.mode === 'plain'
     ? `get it: lyricsgen get ${ref} txt · sync this text: lyricsgen sync ${ref} (or words ${ref}) · to fix lines first, edit the .txt and run lyricsgen sync --file`
     : job.mode === 'synced'
-      ? `get it: lyricsgen get ${ref} lrc · per-word timing from these lines: lyricsgen words ${ref}`
+      ? `get it: lyricsgen get ${ref} lrc · word sync the same lyrics: lyricsgen words ${ref}`
       : `get it: lyricsgen get ${ref} enhanced (per word) or lrc (per line)`
   ctx.print(`preview only, nothing was saved to the song. ${next}`, 'dim')
 }
@@ -137,9 +137,14 @@ function checkAudio(file: File, max: number): File {
   return file
 }
 
-function lyricsBody(text: string, source: string): Pick<LyricsGenRequest, 'plainLyrics' | 'syncedLyrics'> {
-  const t = text.trim()
-  if (!t) fail(`${source} has no lyrics`)
+// Word sync always gets plain text; --no-adlibs leaves out everything in ( ).
+function lyricsBody(text: string, source: string, mode: LyricsGenMode, ctx: TermCtx, dropAdlibs: boolean): Pick<LyricsGenRequest, 'plainLyrics' | 'syncedLyrics'> {
+  const raw = text.replace(/\r\n?/g, '\n').trim()
+  if (!raw) fail(`${source} has no lyrics`)
+  if (mode === 'word_synced' && looksLikeLrc(raw)) ctx.print('word sync times the words alone - the LRC times are left out', 'dim')
+  const t = textForMode(mode, dropAdlibs ? removeAdlibs(raw) : raw)
+  if (dropAdlibs && t !== textForMode(mode, raw)) ctx.print('adlibs in ( ) left out', 'dim')
+  if (!t) fail(`${source} is nothing but adlibs - drop --no-adlibs`)
   if (t.length > LYRICS_MAX_TEXT) fail(`${source} is ${t.length.toLocaleString()} characters; the limit is ${LYRICS_MAX_TEXT.toLocaleString()}`)
   return looksLikeLrc(t) ? { syncedLyrics: t } : { plainLyrics: t }
 }
@@ -149,11 +154,14 @@ function lyricsBody(text: string, source: string): Pick<LyricsGenRequest, 'plain
 // and a second pick waits for Enter.
 async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<void> {
   const { rest, bool, value } = parseArgs(args, ['lang', 'language'])
-  const language = (value.get('lang') ?? value.get('language') ?? '').toLowerCase()
-  if (language && !/^[a-z]{2,3}$/.test(language)) fail('--lang takes a two or three letter code, like en')
+  // English unless told otherwise; --lang auto lets Whisper detect it.
+  const lang = (value.get('lang') ?? value.get('language') ?? 'en').toLowerCase()
+  const language = lang === 'auto' || lang === 'detect' ? '' : lang
+  if (language && !/^[a-z]{2,3}$/.test(language)) fail('--lang takes a two or three letter code like en, or auto to detect it')
   const now = bool.has('now')
   const fromArg = rest[0]
-  if (mode === 'plain' && (fromArg || bool.has('file') || bool.has('f'))) fail('plain transcribes the audio alone - it takes no lyrics')
+  if (mode === 'plain' && (fromArg || bool.has('file') || bool.has('f') || bool.has('no-adlibs'))) fail('plain transcribes the audio alone - it takes no lyrics')
+  const dropAdlibs = bool.has('no-adlibs')
 
   // Where the text comes from (sync modes): an earlier job, a file, or the
   // playing song's own lyrics.
@@ -164,13 +172,13 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
     if (fromArg) {
       from = await getLyricsJob(jobRef(fromArg).id, ctx.signal)
       if (from.status !== 'completed') fail(`that job is ${from.status}${from.error ? `: ${from.error}` : ''}`)
-      text = lyricsBody(lyricsForMode(mode, from.result.plain_lyrics || from.plain_lyrics || '', from.result.synced_lyrics ?? ''), 'that job')
+      text = lyricsBody(lyricsToTime(from.result.plain_lyrics || from.plain_lyrics || '', from.result.synced_lyrics ?? ''), 'that job', mode, ctx, dropAdlibs)
     } else if (!bool.has('file') && !bool.has('f') && now) {
       const track = st().currentTrack ?? fail('nothing is playing')
       const full = st().currentTrackFull
       const loaded = full && full.id === track.id && !full.lyricsPending ? full : fail(`${track.title}'s lyrics are still loading - try again in a moment`)
-      const own = lyricsForMode(mode, loaded.lyrics ?? '', loaded.syncedLyrics ?? '') || fail(`${track.title} has no lyrics - run lyricsgen plain --now first, or add --file`)
-      text = lyricsBody(own, `${track.title}'s lyrics`)
+      const own = lyricsToTime(loaded.lyrics ?? '', loaded.syncedLyrics ?? '') || fail(`${track.title} has no lyrics - run lyricsgen plain --now first, or add --file`)
+      text = lyricsBody(own, `${track.title}'s lyrics`, mode, ctx, dropAdlibs)
     } else pickLyrics = true
   }
 
@@ -182,7 +190,7 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
   if (pickLyrics) {
     if (pickAudio) await ctx.ask('press Enter to choose the lyrics (.txt or .lrc) ')
     const file = await pickLocalFile('.txt,.lrc,text/plain')
-    text = lyricsBody(await file.text(), file.name)
+    text = lyricsBody(await file.text(), file.name, mode, ctx, dropAdlibs)
   }
 
   const options = await getLyricsGenOptions(ctx.signal)
@@ -271,8 +279,8 @@ async function runAdminJobs(args: string, ctx: TermCtx): Promise<void> {
 export const LYRICS_GEN_COMMANDS: TermCommand[] = [
   {
     name: 'lyricsgen', aliases: ['lyricgen'], group: 'Account',
-    usage: 'lyricsgen [ls] · status · plain [--now] · sync|words [<job> | --file] [--now] · show|wait|get|rm <job>',
-    description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). --lang en, --audio picks new audio. get <job> txt|lrc|enhanced downloads',
+    usage: 'lyricsgen [ls] · status · plain [--now] · sync|words [<job> | --file] [--now] [--no-adlibs] · show|wait|get|rm <job>',
+    description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). Word sync always sends plain text; --no-adlibs leaves out everything in ( ). Language is English unless --lang es (or --lang auto to detect). --audio picks new audio. get <job> txt|lrc|enhanced downloads',
     covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob', 'lyricsGenApi.fetchTrackAudio'],
     complete: (before, partial) => {
       const p = partial.toLowerCase()

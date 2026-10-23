@@ -172,6 +172,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
@@ -1108,6 +1109,27 @@ export default function Settings(): JSX.Element {
                     )}
                     <SettingsCard title="My CDN nodes">
                       <MyCdnNodes />
+                    </SettingsCard>
+                    {/* Setup is admin-only on the server (GET otp/setup/ answers
+                        "Administrator access required."), and Admin already
+                        parks an admin without 2FA on its setup panel. */}
+                    <SettingsCard title="Security">
+                      <Row
+                        icon={ShieldCheck}
+                        iconColor={account.otp_enabled ? '#059669' : '#6b7280'}
+                        label="Two-factor authentication"
+                        sub={account.otp_enabled
+                          ? 'Sign-ins ask for a code from your authenticator app'
+                          : account.is_administrator ? 'Required for admin tools' : 'Not turned on for this account'}
+                      >
+                        {account.otp_enabled ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-emerald-500">On</span>
+                        ) : account.is_administrator ? (
+                          <button onClick={() => openMainView('admin')} className="shrink-0 text-[11px] font-semibold text-accent hover:underline">Set up</button>
+                        ) : (
+                          <span className="shrink-0 text-[11px] font-semibold text-text-muted">Off</span>
+                        )}
+                      </Row>
                     </SettingsCard>
                     <SettingsCard title="Passkeys">
                       <Passkeys />

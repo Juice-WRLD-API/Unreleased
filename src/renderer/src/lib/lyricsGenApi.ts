@@ -105,15 +105,63 @@ export function lrcToPlain(lrc: string): string {
     .join('\n')
 }
 
-/** Which of a song's (or job's) lyrics a sync mode should send. Line sync
- *  times the plain text, so LRC is cut down to its words; word sync takes the
- *  LRC when there is one, since its line times keep each word inside its line.
- *  Some songs keep LRC in the plain field, so both are checked. */
-export function lyricsForMode(mode: LyricsGenMode, plain: string, lrc: string): string {
+/** The words of a song's (or job's) lyrics for either sync mode: the plain
+ *  text, or the LRC cut down to its words when that's all there is. Some songs
+ *  keep LRC in the plain field, so both are checked. */
+export function lyricsToTime(plain: string, lrc: string): string {
   const p = plain.trim()
-  const l = lrc.trim() || (looksLikeLrc(p) ? p : '')
-  const text = p && !looksLikeLrc(p) ? p : lrcToPlain(l)
-  return mode === 'word_synced' && l ? l : text
+  return p && !looksLikeLrc(p) ? p : lrcToPlain(lrc.trim() || p)
+}
+
+/** What a sync job sends: word sync always gets plain text, so LRC typed or
+ *  opened for it loses its times. */
+export const textForMode = (mode: LyricsGenMode, text: string): string =>
+  (mode === 'word_synced' && looksLikeLrc(text) ? lrcToPlain(text) : text).trim()
+
+export interface AdlibSpan { start: number; end: number }
+
+/** Adlibs: the parenthesised asides in a lyric line, "(yeah)" or "(What?)".
+ *  One span per outermost pair on a line. An unclosed one isn't an adlib, and
+ *  brackets are skipped, so "[Chorus (x2)]" and "[ti:Song (Remix)]" stay. */
+export function findAdlibs(text: string): AdlibSpan[] {
+  const out: AdlibSpan[] = []
+  let depth = 0
+  let square = 0
+  let open = 0
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (c === '\n') { depth = 0; square = 0 }
+    else if (c === '[') square++
+    else if (c === ']') square = Math.max(0, square - 1)
+    else if (square) continue
+    else if (c === '(') { if (depth++ === 0) open = i }
+    else if (c === ')' && depth && --depth === 0) out.push({ start: open, end: i + 1 })
+  }
+  return out
+}
+
+const CUT = '\u0000'
+
+/** The text without its adlibs, except those starting at an offset in `keep`.
+ *  The spaces around a removed adlib close up, and a line left with no words
+ *  (only an adlib, or an adlib and its LRC times) goes. */
+export function removeAdlibs(text: string, keep: ReadonlySet<number> = new Set()): string {
+  const spans = findAdlibs(text).filter((a) => !keep.has(a.start))
+  if (!spans.length) return text
+  let marked = ''
+  let at = 0
+  for (const s of spans) { marked += text.slice(at, s.start) + CUT; at = s.end }
+  marked += text.slice(at)
+  return marked.split('\n').flatMap((line) => {
+    if (!line.includes(CUT)) return [line]
+    const joined = line.replace(/[ \t]*\u0000(?:[ \t]*\u0000)*[ \t]*/g, (m, offset: number) => {
+      const before = line.slice(0, offset)
+      const after = line.slice(offset + m.length)
+      if (!before.trim() || !after || /^[,.!?;:)\]]/.test(after)) return ''
+      return /[ \t]/.test(m) ? ' ' : ''
+    }).trim()
+    return joined.replace(/\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]|<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '').trim() ? [joined] : []
+  }).join('\n')
 }
 
 const AUDIO_TYPE_EXTENSION: Record<string, string> = {
