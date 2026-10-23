@@ -23,7 +23,8 @@ export const STATUS_INFO: Record<LyricsJobStatus, { label: string; className: st
   cancelled: { label: 'Cancelled', className: 'text-text-muted bg-surface-overlay border-[var(--border)]' },
 }
 
-export function StatusPill({ status }: { status: LyricsJobStatus }): JSX.Element {
+/** `progress` shows next to "Working" once the server reports any. */
+export function StatusPill({ status, progress }: { status: LyricsJobStatus; progress?: number }): JSX.Element {
   const s = STATUS_INFO[status]
   return (
     <span className={`inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${s.className}`}>
@@ -33,6 +34,7 @@ export function StatusPill({ status }: { status: LyricsJobStatus }): JSX.Element
       {status === 'failed' && <X size={10} strokeWidth={3} />}
       {status === 'cancelled' && <Ban size={10} />}
       {s.label}
+      {status === 'processing' && !!progress && <span className="tabular-nums">{progress}%</span>}
     </span>
   )
 }
@@ -102,6 +104,10 @@ export async function downloadJobOutput(job: Pick<LyricsGenJob, 'id' | 'filename
   const text = admin ? await fetchAdminLyricsJobOutput(job.id, output) : await fetchLyricsJobOutput(job.id, output)
   saveText(text, outputName(job.filename, output))
 }
+
+/** Hover text for a job's name: where on the server its audio is, if it is. */
+export const sourceHint = (job: Pick<LyricsGenJob, 'filename' | 'source'>): string =>
+  job.source ? `${job.source.channel ? `${job.source.channel}: ` : ''}${job.source.path}` : job.filename
 
 export function saveText(text: string, name: string): void {
   saveBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), name)

@@ -2,10 +2,10 @@ import { relativeTime } from '../../components/adminShared'
 import { formatBytes } from '../format'
 import { extensionOf } from '../donorFilesApi'
 import {
-  cancelAdminLyricsJob, createLyricsJob, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, fetchTrackAudio,
-  getAdminLyricsJob, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob, isFinished, listAdminLyricsJobs,
-  listLyricsJobs, looksLikeLrc, lyricsToTime, removeAdlibs, textForMode, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
-  type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput,
+  cancelAdminLyricsJob, createLyricsJob, createLyricsJobFromServer, deleteLyricsJob, fetchAdminLyricsJobOutput, fetchLyricsJobOutput, fetchTrackAudio,
+  getAdminLyricsJob, getLyricsAdminSettings, getLyricsGenOptions, getLyricsJob, isFinished, jobServerAudio, jobTitle, listAdminLyricsJobs,
+  listLyricsJobs, looksLikeLrc, lyricsToTime, removeAdlibs, textForMode, trackServerAudio, LYRICS_AUDIO_EXTENSIONS as AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT, setLyricsWhisperModel,
+  type LyricsAdminJobSummary, type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenRequest, type LyricsOutput, type LyricsServerAudio,
 } from '../lyricsGenApi'
 import { isAbortError } from '../apiClient'
 import { ls } from '../persist'
@@ -14,7 +14,9 @@ import { pickLocalFile, saveBlob } from './pick'
 import { asJson, confirmAction, fail, parseArgs, table, type TermCommand, type TermCtx } from './types'
 
 // Donor lyrics generation: Whisper on the server transcribes a song's audio
-// (plain), or lines the user's own text up with it (synced, per-word). The
+// (plain), or lines the user's own text up with it (synced, per-word). Audio
+// the server has (the playing song, --song, --path) is named rather than
+// uploaded, and a follow-up on such a job names it again. The
 // result is a preview to read and download; nothing reaches the library. The
 // server lists the account's jobs (newest first); the terminal keeps that list,
 // per account, so a job can be named by its number in `lyricsgen ls`. If the
@@ -31,10 +33,12 @@ const SUBCOMMANDS = ['ls', 'status', 'plain', 'sync', 'words', 'show', 'wait', '
 
 interface Remembered { id: string; mode: LyricsGenMode; filename: string; created_at: string }
 
-// The audio the last job was made from. The server deletes it after every job,
-// so a follow-up (sync the text you just reviewed) uploads this again rather
-// than asking for the file a second time. Kept for this run of the app only.
+// The audio the last job was made from. The server deletes uploads after every
+// job, so a follow-up (sync the text you just reviewed) uploads this again
+// rather than asking for the file a second time; server audio is just named
+// again. Kept for this run of the app only.
 let lastAudio: File | null = null
+let lastServer: { audio: LyricsServerAudio; name: string } | null = null
 
 const storeKey = (): string => `lyricsJobs:${st().account?.id ?? 0}`
 const remembered = (): Remembered[] => ls.get<Remembered[]>(storeKey()) ?? []
@@ -48,7 +52,7 @@ async function refreshJobs(signal: AbortSignal): Promise<void> {
   try {
     const jobs = await listLyricsJobs(signal)
     summaries = new Map(jobs.map((j) => [j.id, j]))
-    remember(jobs.map((j) => ({ id: j.id, mode: j.mode, filename: j.filename, created_at: j.created_at })))
+    remember(jobs.map((j) => ({ id: j.id, mode: j.mode, filename: jobTitle(j), created_at: j.created_at })))
   } catch (err) {
     if (isAbortError(err) || signal.aborted) throw err
     summaries = new Map()
@@ -80,11 +84,15 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
 async function follow(ctx: TermCtx, id: string): Promise<LyricsGenJob | null> {
   const signal = ctx.signal
   let seen = ''
+  let quarter = 0
   try {
     for (;;) {
       const job = await getLyricsJob(id, signal)
       if (isFinished(job)) return job
       if (job.status !== seen) { seen = job.status; ctx.print(`${job.status}… (Ctrl+C stops waiting; the job keeps going)`, 'dim') }
+      // Progress once per quarter, so a long job shows it's moving.
+      const q = Math.floor((job.progress ?? 0) / 25)
+      if (job.status === 'processing' && q > quarter && q < 4) { quarter = q; ctx.print(`${job.progress}%`, 'dim') }
       await sleep(POLL_MS, signal)
     }
   } catch (err) {
@@ -117,7 +125,15 @@ function printResult(ctx: TermCtx, job: LyricsGenJob, n: number | null): void {
   ctx.print(`preview only, nothing was saved to the song. ${next}`, 'dim')
 }
 
-/** The playing song's audio, fetched from its stream. */
+/** A job's status, with its progress while it runs. */
+const statusText = (job: Pick<LyricsGenJob, 'status' | 'progress'>): string =>
+  job.status === 'processing' && job.progress ? `processing ${job.progress}%` : job.status
+
+/** " · from <channel>: <path>" for a job on server audio. */
+const fromText = (job: Pick<LyricsGenJob, 'source'>): string =>
+  job.source ? ` · from ${job.source.channel ? `${job.source.channel}: ` : ''}${job.source.path}` : ''
+
+/** The playing song's audio, fetched from its stream (when the server doesn't have it). */
 async function nowPlayingAudio(ctx: TermCtx): Promise<File> {
   const track = st().currentTrack ?? fail('nothing is playing')
   if (!track.streamUrl) fail(`${track.title} plays from this computer - drop --now and pick its file`)
@@ -153,12 +169,21 @@ function lyricsBody(text: string, source: string, mode: LyricsGenMode, ctx: Term
 // keypress, so whichever file has to be picked first is picked first thing,
 // and a second pick waits for Enter.
 async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<void> {
-  const { rest, bool, value } = parseArgs(args, ['lang', 'language'])
+  const { rest, bool, value } = parseArgs(args, ['lang', 'language', 'song', 'path', 'channel'])
   // English unless told otherwise; --lang auto lets Whisper detect it.
   const lang = (value.get('lang') ?? value.get('language') ?? 'en').toLowerCase()
   const language = lang === 'auto' || lang === 'detect' ? '' : lang
   if (language && !/^[a-z]{2,3}$/.test(language)) fail('--lang takes a two or three letter code like en, or auto to detect it')
   const now = bool.has('now')
+  const songArg = value.get('song')
+  const pathArg = value.get('path')
+  const channel = value.get('channel')
+  if ([now, songArg, pathArg].filter(Boolean).length > 1) fail('one audio source at a time: --now, --song or --path')
+  if (channel && !pathArg) fail('--channel goes with --path')
+  // Audio the server has: named, never uploaded.
+  let server: { audio: LyricsServerAudio; name: string } | null = songArg
+    ? { audio: { songId: /^\d+$/.test(songArg) ? Number(songArg) : fail('--song takes a song id (or its public number)'), path: '' }, name: `song ${songArg}` }
+    : pathArg ? { audio: { path: pathArg.replace(/\\/g, '/').replace(/^\/+/, ''), channel: channel || null }, name: pathArg } : null
   const fromArg = rest[0]
   if (mode === 'plain' && (fromArg || bool.has('file') || bool.has('f') || bool.has('no-adlibs'))) fail('plain transcribes the audio alone - it takes no lyrics')
   const dropAdlibs = bool.has('no-adlibs')
@@ -182,10 +207,21 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
     } else pickLyrics = true
   }
 
-  // The audio: the playing song, the file the last job used (same song), or a pick.
-  const sameSong = lastAudio && !bool.has('audio') && (!from || from.filename === lastAudio.name)
-  let audio: File | null = now ? null : sameSong ? lastAudio : null
-  const pickAudio = !now && !audio
+  // The audio: --song/--path, the playing song, the job's own server audio,
+  // the audio the last job used (same song), or a pick.
+  const fresh = !bool.has('audio') && !now && !server
+  const fromServer = from && jobServerAudio(from)
+  if (fresh && from && fromServer) server = { audio: fromServer, name: jobTitle(from) }
+  else if (fresh && !from && lastServer) server = lastServer
+  const reused = !!server && server === lastServer
+  if (now) {
+    const track = st().currentTrack ?? fail('nothing is playing')
+    const own = trackServerAudio(track)
+    if (own) server = { audio: own, name: track.title }
+  }
+  const sameSong = fresh && !server && lastAudio && (!from || from.filename === lastAudio.name)
+  let audio: File | null = sameSong ? lastAudio : null
+  const pickAudio = !now && !server && !audio
   if (pickAudio) audio = await pickLocalFile('audio/*')
   if (pickLyrics) {
     if (pickAudio) await ctx.ask('press Enter to choose the lyrics (.txt or .lrc) ')
@@ -197,19 +233,30 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
   const opt = options.options.find((o) => o.mode === mode)
   if (!options.available) fail(`lyrics generation is off: ${options.unavailable_reason || 'unavailable'}`)
   if (opt && !opt.available) fail(`${MODE_NAME[mode]} isn't available: ${opt.unavailable_reason || 'unavailable'}`)
-  if (now) audio = await nowPlayingAudio(ctx)
-  const file = checkAudio(audio!, options.max_file_size || LYRICS_MAX_FILE_SIZE)
-  if (!pickAudio && !now) ctx.print(`using ${file.name} again (--audio picks another)`, 'dim')
-  lastAudio = file
+  const req = { mode, language: language || undefined, ...text }
 
-  ctx.print(`uploading ${file.name} (${formatBytes(file.size)})…`, 'dim')
-  let shown = 0
-  const job = await createLyricsJob(file, { mode, language: language || undefined, ...text }, (f) => {
-    const pct = Math.floor(f * 4) * 25
-    if (pct > shown && pct < 100) { shown = pct; ctx.print(`${file.name} ${pct}%`, 'dim') }
-  }, ctx.signal)
-  remember([{ id: job.id, mode: job.mode, filename: job.filename || file.name, created_at: job.created_at }, ...remembered().filter((j) => j.id !== job.id)])
-  ctx.print(`started ${MODE_NAME[mode]} job 1 (${job.id.slice(0, 8)}) for ${file.name}`, 'ok')
+  let job: LyricsGenJob
+  if (server) {
+    if (reused) ctx.print(`using ${server.name} again (--audio picks another)`, 'dim')
+    ctx.print(`starting on ${server.name} (on the server, nothing to upload)…`, 'dim')
+    job = await createLyricsJobFromServer(server.audio, req, ctx.signal)
+    lastServer = server
+    lastAudio = null
+  } else {
+    if (now) audio = await nowPlayingAudio(ctx)
+    const file = checkAudio(audio!, options.max_file_size || LYRICS_MAX_FILE_SIZE)
+    if (!pickAudio && !now) ctx.print(`using ${file.name} again (--audio picks another)`, 'dim')
+    lastAudio = file
+    lastServer = null
+    ctx.print(`uploading ${file.name} (${formatBytes(file.size)})…`, 'dim')
+    let shown = 0
+    job = await createLyricsJob(file, req, (f) => {
+      const pct = Math.floor(f * 4) * 25
+      if (pct > shown && pct < 100) { shown = pct; ctx.print(`${file.name} ${pct}%`, 'dim') }
+    }, ctx.signal)
+  }
+  remember([{ id: job.id, mode: job.mode, filename: jobTitle(job) || audio?.name || '', created_at: job.created_at }, ...remembered().filter((j) => j.id !== job.id)])
+  ctx.print(`started ${MODE_NAME[mode]} job 1 (${job.id.slice(0, 8)}) for ${jobTitle(job)}`, 'ok')
   const done = await follow(ctx, job.id)
   if (done) printResult(ctx, done, 1)
 }
@@ -249,7 +296,7 @@ async function runAdminJobs(args: string, ctx: TermCtx): Promise<void> {
     if (sub === 'show') {
       const job = await getAdminLyricsJob(id, ctx.signal)
       if (asJson(ctx, bool.has('json'), job)) return
-      ctx.print(`${job.user.username} · ${MODE_NAME[job.mode]} · ${job.filename}${job.language ? ` · ${job.language}` : ''} · ${job.status} · ${relativeTime(job.created_at)}`, 'dim')
+      ctx.print(`${job.user.username} · ${MODE_NAME[job.mode]} · ${jobTitle(job)}${job.language ? ` · ${job.language}` : ''} · ${statusText(job)} · ${relativeTime(job.created_at)}${fromText(job)}`, 'dim')
       printResult(ctx, job, null)
       return
     }
@@ -272,16 +319,16 @@ async function runAdminJobs(args: string, ctx: TermCtx): Promise<void> {
   if (asJson(ctx, bool.has('json'), data)) return
   ctx.print(`${data.active} running or waiting now · ${data.count} job${data.count === 1 ? '' : 's'}${status || value.get('user') ? ' match' : ''}`, 'dim')
   if (!data.results.length) { ctx.print('no jobs', 'dim'); return }
-  ctx.print(table(data.results.map((j, i) => [String(i + 1), j.user.username, MODE_NAME[j.mode], j.status, j.filename, relativeTime(j.created_at)])))
+  ctx.print(table(data.results.map((j, i) => [String(i + 1), j.user.username, MODE_NAME[j.mode], statusText(j), jobTitle(j), relativeTime(j.created_at)])))
   if (data.count > page * JOBS_PAGE) ctx.print(`page ${page} of ${Math.ceil(data.count / JOBS_PAGE)} - lyricsjobs --page ${page + 1}`, 'dim')
 }
 
 export const LYRICS_GEN_COMMANDS: TermCommand[] = [
   {
     name: 'lyricsgen', aliases: ['lyricgen'], group: 'Account',
-    usage: 'lyricsgen [ls] · status · plain [--now] · sync|words [<job> | --file] [--now] [--no-adlibs] · show|wait|get|rm <job>',
-    description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). Word sync always sends plain text; --no-adlibs leaves out everything in ( ). Language is English unless --lang es (or --lang auto to detect). --audio picks new audio. get <job> txt|lrc|enhanced downloads',
-    covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob', 'lyricsGenApi.fetchTrackAudio'],
+    usage: 'lyricsgen [ls] · status · plain [--now | --song <id> | --path <file> [--channel c]] · sync|words [<job> | --file] [--now | --song | --path] [--no-adlibs] · show|wait|get|rm <job>',
+    description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). Audio the server has is named, not uploaded: --now on an API song, --song <id>, or --path <comp file> (--channel for another comp); a follow-up on such a job uses it again. Word sync always sends plain text; --no-adlibs leaves out everything in ( ). Language is English unless --lang es (or --lang auto to detect). --audio picks new audio. get <job> txt|lrc|enhanced downloads',
+    covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.createLyricsJobFromServer', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob', 'lyricsGenApi.fetchTrackAudio'],
     complete: (before, partial) => {
       const p = partial.toLowerCase()
       if (before.length === 0) return SUBCOMMANDS.filter((v) => v.startsWith(p))
@@ -313,7 +360,7 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
         const kept = shown.map((j, i) => ({ j, r: jobs[i] })).filter((x) => x.r !== null)
         if (asJson(ctx, json, kept.map((x) => (x.r instanceof Error ? { id: x.j.id, error: x.r.message } : x.r)))) return
         if (!kept.length) { ctx.print('no lyrics jobs left (previews expire after 7 days)', 'dim'); return }
-        ctx.print(table(kept.map(({ j, r }, i) => [String(i + 1), MODE_NAME[j.mode], r instanceof Error ? `? ${r.message}` : r!.status, j.filename, j.created_at ? relativeTime(j.created_at) : ''])))
+        ctx.print(table(kept.map(({ j, r }, i) => [String(i + 1), MODE_NAME[j.mode], r instanceof Error ? `? ${r.message}` : statusText(r!), r instanceof Error ? j.filename : jobTitle(r!), j.created_at ? relativeTime(j.created_at) : ''])))
       } else if (sub === 'status' || sub === 'options') {
         const o = await getLyricsGenOptions(ctx.signal)
         if (asJson(ctx, bool.has('json'), o)) return
@@ -325,7 +372,7 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
         const n = remembered().findIndex((j) => j.id === ref.id)
         const job = sub === 'wait' ? await follow(ctx, ref.id) : await getLyricsJob(ref.id, ctx.signal)
         if (!job || asJson(ctx, bool.has('json'), job)) return
-        ctx.print(`${MODE_NAME[job.mode]} · ${job.filename}${job.language ? ` · ${job.language}` : ''} · ${job.status} · ${relativeTime(job.created_at)}`, 'dim')
+        ctx.print(`${MODE_NAME[job.mode]} · ${jobTitle(job)}${job.language ? ` · ${job.language}` : ''} · ${statusText(job)} · ${relativeTime(job.created_at)}${fromText(job)}`, 'dim')
         printResult(ctx, job, n >= 0 ? n + 1 : null)
       } else if (sub === 'get' || sub === 'download') {
         const ref = jobRef(words[0])

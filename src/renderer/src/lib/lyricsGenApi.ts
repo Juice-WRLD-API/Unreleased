@@ -1,12 +1,14 @@
-// Donor lyrics generation (Whisper on the server): upload a song's audio, get
-// back plain lyrics, line-synced LRC or per-word LRC to review. Nothing is
-// written to the library; the result is a preview the user downloads or applies
-// themselves. Routes live under /accounts/donor/lyrics/, and the administrator's
-// model choice under /accounts/admin/lyrics/settings/. See
-// backend docs/20-lyrics-generation.md.
+// Donor lyrics generation (Whisper on the server): a song's audio in, plain
+// lyrics, line-synced LRC or per-word LRC out to review. Audio already on the
+// server (a catalogue song, a comp file) is named by id or path; anything else
+// is uploaded. Nothing is written to the library; the result is a preview the
+// user downloads or applies themselves. Routes live under
+// /accounts/donor/lyrics/, and the administrator's model choice under
+// /accounts/admin/lyrics/settings/. See backend docs/20-lyrics-generation.md.
 import { routeUrl } from './apiServers'
 import { authedRequest, authHeaders } from './apiClient'
-import { getToken } from './userApi'
+import { getToken, trackIdToSongId } from './userApi'
+import { buildStreamUrl } from './juicewrldApi'
 import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from './donorFilesApi'
 import { ensureDonorUrl, isDonorStreamUrl } from './donorPlayback'
 import type { Track } from '../types'
@@ -54,11 +56,24 @@ export interface LyricsGenResult {
   unaligned_words?: number
 }
 
+/** Where a job's audio sits on the server. `song` is null for a comp file named by path. */
+export interface LyricsJobSource {
+  channel: string | null
+  path: string
+  song: { id: number; public_id: number | null; name: string } | null
+}
+
 export interface LyricsGenJob {
   id: string
   mode: LyricsGenMode
   status: LyricsJobStatus
+  /** Whole percent: 0-99 while processing (0 while the audio decodes and the
+   *  model loads), 100 once completed, the last value after a failure. Absent
+   *  on older servers. */
+  progress?: number
   filename: string
+  /** Null for an upload. Absent on older servers. */
+  source?: LyricsJobSource | null
   plain_lyrics: string
   language: string
   /** Empty (`{}`) until the job completes. */
@@ -69,7 +84,46 @@ export interface LyricsGenJob {
 }
 
 /** A job as the list returns it: no lyrics, those come from `getLyricsJob`. */
-export type LyricsGenJobSummary = Pick<LyricsGenJob, 'id' | 'mode' | 'status' | 'filename' | 'language' | 'error' | 'created_at' | 'updated_at'>
+export type LyricsGenJobSummary = Pick<LyricsGenJob, 'id' | 'mode' | 'status' | 'progress' | 'filename' | 'source' | 'language' | 'error' | 'created_at' | 'updated_at'>
+
+/** Audio the server already has, so nothing is uploaded. With `songId` the
+ *  job names the song (its `path` is in the primary comp); without it, the
+ *  comp file at `path` in `channel` (empty: the primary comp). */
+export interface LyricsServerAudio {
+  songId?: number | null
+  path: string
+  channel?: string | null
+}
+
+/** What a job lists itself as: the song's name, else the file's. */
+export const jobTitle = (job: Pick<LyricsGenJob, 'filename' | 'source'>): string => job.source?.song?.name || job.filename
+
+/** A job's server audio, to run a follow-up on the same file. */
+export function jobServerAudio(job: Pick<LyricsGenJob, 'source'>): LyricsServerAudio | null {
+  const s = job.source
+  return s ? { songId: s.song?.id ?? null, path: s.path, channel: s.channel } : null
+}
+
+/** The stream for server audio, for playing a result against it. */
+export const serverAudioUrl = (a: LyricsServerAudio): string => buildStreamUrl(a.path, a.channel || undefined)
+
+/** Same file? A missing channel is the primary comp, which a job names by slug,
+ *  so only two channels that are both set are compared. */
+export const sameServerAudio = (a: LyricsServerAudio, b: LyricsServerAudio): boolean =>
+  a.path === b.path && (!a.channel || !b.channel || a.channel === b.channel)
+
+/** A track that streams from a comp (`/files/download/?path=`), as server
+ *  audio: by song when it is a catalogue song, else by path and channel. Null
+ *  for local, donor and other audio, which has to be uploaded. */
+export function trackServerAudio(track: Pick<Track, 'id' | 'streamUrl'>): LyricsServerAudio | null {
+  const url = track.streamUrl ?? ''
+  const route = [routeUrl('/files/download/'), routeUrl('/files/download-compressed/')].find((r) => url.startsWith(`${r}?`))
+  if (!route) return null
+  const params = new URLSearchParams(url.slice(route.length + 1))
+  const path = params.get('path')
+  if (!path || !LYRICS_AUDIO_EXTENSIONS.includes(extensionOf(path))) return null
+  return { songId: trackIdToSongId(track.id), path, channel: params.get('channel') }
+}
 
 export interface LyricsGenRequest {
   mode: LyricsGenMode
@@ -205,7 +259,26 @@ export function getLyricsGenOptions(signal?: AbortSignal): Promise<LyricsGenOpti
   return authedRequest(`${BASE}/options/`, { signal }, getToken())
 }
 
-/** Starts a job. XHR rather than fetch so a 100 MB upload can report progress. */
+function requestFields(req: LyricsGenRequest): Record<string, string> {
+  const out: Record<string, string> = { mode: req.mode }
+  if (req.plainLyrics) out.plain_lyrics = req.plainLyrics
+  else if (req.syncedLyrics) out.synced_lyrics = req.syncedLyrics
+  if (req.language) out.language = req.language
+  return out
+}
+
+/** Starts a job on audio the server already has: read in place, so there is
+ *  no upload and no size limit (the 30-minute one still applies). A song goes
+ *  as `song_id`: the server tries public ids first, but internal ids (94000
+ *  and up) sit far above every public id, and most songs have no public id. */
+export function createLyricsJobFromServer(audio: LyricsServerAudio, req: LyricsGenRequest, signal?: AbortSignal): Promise<LyricsGenJob> {
+  const source = audio.songId
+    ? { song_id: audio.songId }
+    : { file_path: audio.path, ...(audio.channel ? { channel: audio.channel } : {}) }
+  return authedRequest(`${BASE}/jobs/`, { method: 'POST', body: JSON.stringify({ ...source, ...requestFields(req) }), signal }, getToken())
+}
+
+/** Starts a job on an upload. XHR rather than fetch so a 100 MB upload can report progress. */
 export function createLyricsJob(
   file: File,
   req: LyricsGenRequest,
@@ -214,10 +287,7 @@ export function createLyricsJob(
 ): Promise<LyricsGenJob> {
   const body = new FormData()
   body.append('file', file)
-  body.append('mode', req.mode)
-  if (req.plainLyrics) body.append('plain_lyrics', req.plainLyrics)
-  else if (req.syncedLyrics) body.append('synced_lyrics', req.syncedLyrics)
-  if (req.language) body.append('language', req.language)
+  for (const [k, v] of Object.entries(requestFields(req))) body.append(k, v)
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${BASE}/jobs/`)

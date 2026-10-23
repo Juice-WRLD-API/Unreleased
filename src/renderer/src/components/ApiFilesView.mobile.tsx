@@ -4,7 +4,7 @@ import {
   ImageIcon, Video, Download, ArrowUp, ArrowDown, Link, Check, Info, ListPlus,
   Heart, X, Pencil, PackageOpen, Search, Filter, MoreVertical, Clipboard, Plus,
   ListMusic, Replace, Trash2, LayoutGrid, LayoutList, FileQuestion, Home,
-  CheckCircle2, Circle, SlidersHorizontal, Radio,
+  CheckCircle2, Circle, SlidersHorizontal, Radio, Sparkles,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -1006,6 +1006,15 @@ export default function ApiFilesView(): JSX.Element {
                     disabled={!channelsReady}
                     onClick={() => { toggleApiFileLike(sheetEntry.path); closeSheet() }}
                   />
+                  {account?.is_donor && (
+                    <SheetItem icon={Sparkles} label="Generate lyrics" onClick={async () => {
+                      const entry = sheetEntry
+                      const songId = sheetTrackerId ?? null
+                      closeSheet()
+                      const channel = (await resolveTrackChannel()) ?? activeChannel
+                      useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId })
+                    }} />
+                  )}
                   {sheetTrackerId != null && (
                     <SheetItem icon={Info} label="Find in Tracker" onClick={() => { openSongInfo(sheetEntry); closeSheet() }} />
                   )}

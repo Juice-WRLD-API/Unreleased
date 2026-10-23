@@ -5,7 +5,7 @@ import {
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload, Sparkles,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import type { StagedFileChange } from '../store/useStore'
@@ -1292,6 +1292,14 @@ export default function ApiFilesView(): JSX.Element {
                     const id = data.results[0]?.id
                     if (id) useStore.getState().openSongEditor(id)
                   } catch {}
+                },
+              },
+              isAudio && account?.is_donor && {
+                icon: Sparkles,
+                label: 'Generate lyrics',
+                onSelect: async () => {
+                  const channel = (await resolveTrackChannel()) ?? activeChannel
+                  useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId: trackerMatches.get(entry.path) ?? null })
                 },
               },
               isAudio && 'divider',
