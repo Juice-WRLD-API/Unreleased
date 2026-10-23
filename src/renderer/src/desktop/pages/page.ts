@@ -28,7 +28,8 @@ export interface DesktopState {
   /** Anything in the equalizer set away from neutral: its button lights up, as the app's does. */
   eq?: boolean
   /** The song's other versions that can be played (WRLD's version notch's list), labeled by version alone. */
-  versions?: { songId: number; label: string | null }[]
+  versions?: { songId: number; label: string | null; version: string | null }[]
+  versionPrefs?: { preferred: string[]; excluded: string[] }
   fm?: boolean
   /** Whether 999 FM is on the air (null: not known yet). */
   fmLive?: boolean | null

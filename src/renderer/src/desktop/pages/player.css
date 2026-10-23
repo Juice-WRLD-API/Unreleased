@@ -258,3 +258,11 @@
 /* In the WRLD tab: no desk to clear, and the app it would open is the one it's in. */
 .in-tab [data-action="clear"], .in-tab .cover-arrow { display: none; }
 .in-tab .cover-button { pointer-events: none; }
+
+#menu .version-row { display: flex; align-items: center; }
+#menu .version-row [data-version] { flex: 1; min-width: 0; }
+#menu .version-pref { flex: 0 0 auto; width: calc(28px * var(--s)); padding: calc(6px * var(--s)); display: flex; justify-content: center; color: rgba(255, 255, 255, 0.5); }
+#menu .version-pref svg { width: calc(14px * var(--s)); height: calc(14px * var(--s)); }
+#menu [data-pref="prefer"][aria-pressed="true"] { color: #facc15; }
+#menu [data-pref="prefer"][aria-pressed="true"] svg { fill: currentColor; }
+#menu [data-pref="exclude"][aria-pressed="true"] { color: #f87171; }

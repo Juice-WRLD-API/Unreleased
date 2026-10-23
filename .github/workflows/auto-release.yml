@@ -1,0 +1,85 @@
+name: Auto release on push
+
+# Every push to app bumps the patch version (2.5.14 -> 2.5.15), commits it,
+# tags it, creates the GitHub release and starts the three platform builds.
+# Releases made with GITHUB_TOKEN don't fire `release: published`, so the
+# builds are started with workflow_dispatch instead.
+#
+# scripts/release.bat pushes its own "vX.Y.Z" commit; that one is skipped so
+# a manual release isn't bumped twice.
+
+on:
+  push:
+    branches: [app]
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: app
+          fetch-depth: 0
+
+      - name: Skip version-bump commits
+        id: skip
+        shell: bash
+        run: |
+          msg="$(git log -1 --pretty=%s)"
+          if [[ "$msg" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump patch version
+        if: steps.skip.outputs.skip != 'true'
+        id: bump
+        shell: bash
+        run: |
+          cur=$(node -p "require('./package.json').version")
+          base="${cur%%-*}"
+          IFS=. read -r maj min pat <<< "$base"
+          new="$maj.$min.$((pat + 1))"
+          sed -i -E "0,/(\"version\"[[:space:]]*:[[:space:]]*)\"[^\"]+\"/s//\1\"$new\"/" package.json
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "tag=v$new" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push bump
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        run: |
+          git config user.name "leanwrldd"
+          git config user.email "leanwrldd@gmail.com"
+          git add package.json
+          git commit -m "${{ steps.bump.outputs.tag }}"
+          git pull --rebase origin app
+          git push origin app
+
+      - name: Create release
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.bump.outputs.tag }}"
+          prev=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            notes=$(git log "$prev"..HEAD~1 --pretty='- %s' --no-merges)
+          fi
+          gh release create "$tag" --target app --title "$tag" --notes "${notes:-Release $tag}"
+
+      - name: Start platform builds
+        if: steps.skip.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for wf in build-windows.yml build-mac.yml build-linux.yml; do
+            gh workflow run "$wf" --ref app -f tag="${{ steps.bump.outputs.tag }}"
+          done

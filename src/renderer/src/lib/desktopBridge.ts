@@ -20,7 +20,7 @@ import { listEras } from './eras'
 import { libraryTrackToTrack } from './fileTypes'
 import { fxInUse } from './audioEffects'
 import { loadVersionEntries } from './songVersions'
-import { prefLabel } from './versionPrefs'
+import { memberVersionPrefs, prefLabel, versionPrefToggles } from './versionPrefs'
 import { showAppToast } from './appToast'
 import { copyText } from './clipboard'
 import { trackShareUrl } from './platform'
@@ -95,7 +95,7 @@ function coverAt(url: string | null | undefined, size: number): string | null {
   return sized
 }
 
-const coverOf = (track: Track, size = 400): string | null => coverAt(track.imageUrl, size)
+const coverOf = (track: Track, size = 1024): string | null => coverAt(track.imageUrl, size)
 
 /** `f` called whenever covers turn out not to load, so what was sent for them can be sent again; returns the stop. */
 export function watchCovers(f: () => void): () => void {
@@ -130,7 +130,7 @@ function nowTrack(s: AppStore): { id: string; title: string; artist: string; alb
   if (!t) return null
   const full = s.currentTrackFull?.id === t.id ? s.currentTrackFull : null
   const art = full?.albumArt ? buildImageUrl(full.albumArt) ?? full.albumArt : null
-  return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration || 0, cover: coverAt(t.imageUrl, 600) ?? art ?? null }
+  return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration || 0, cover: coverOf(t) ?? art ?? null }
 }
 
 /** Anything in the equalizer away from neutral, as the app's EQ button reckons it (components/Player.tsx). */
@@ -159,10 +159,14 @@ function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; d
   }
 }
 
+const loadedVersions = new Map<number, { songId: number; label: string | null; version: string | null }[]>()
+
 /** The song's other versions that can be played, as WRLD's version notch lists them (hooks/useSongVersions). */
-async function versionsOf(songId: number): Promise<{ songId: number; label: string | null }[]> {
+async function versionsOf(songId: number): Promise<{ songId: number; label: string | null; version: string | null }[]> {
   const entries = await loadVersionEntries(songId).catch(() => [])
-  return entries.filter((e) => e.playable).map(({ song, meta }) => ({ songId: song.id, label: prefLabel(meta) ?? meta.versionTitle }))
+  const versions = entries.filter((e) => e.playable).map(({ song, meta }) => ({ songId: song.id, label: prefLabel(meta) ?? meta.versionTitle, version: prefLabel(meta) }))
+  loadedVersions.set(songId, versions)
+  return versions
 }
 
 function queueWindow(s: AppStore): { from: number; current: number; items: DesktopTrack[] } {
@@ -373,7 +377,24 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       if (track?.path) downloadTrack(track, songId)
       break
     }
-    // Another version of the song playing, swapped in where it is so the queue is kept (as WRLD's version notch does).
+    case 'prefer-version':
+    case 'exclude-version': {
+      const anchor = s.currentTrack && !s.radioFmActive ? userApi.trackIdToSongId(s.currentTrack.id) : null
+      if (anchor == null || !Number.isInteger(arg)) break
+      const versions = loadedVersions.get(anchor) ?? await versionsOf(anchor)
+      const current = useStore.getState()
+      if (current.currentTrack?.id !== s.currentTrack?.id || current.radioFmActive) break
+      const member = versions.find(v => v.songId === arg)
+      if (!member?.version) break
+      const members = [{ songId: anchor, version: null }, ...versions]
+      const toggles = versionPrefToggles(members, current.songPrefs, {
+        setDefault: current.setSongDefaultVersion, setExcluded: current.setSongExcludedVersions,
+      })
+      if (cmd === 'prefer-version') toggles.togglePreferred(member)
+      else toggles.toggleExcluded(member)
+      break
+    }
+    // Swap the version in place, keeping the queue.
     case 'play-version': {
       const songId = Number(arg)
       if (!Number.isInteger(songId)) break
@@ -512,6 +533,12 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
 
   let colorsFor: string | null | undefined
   let versionsFor: number | null | undefined
+  let versions: Awaited<ReturnType<typeof versionsOf>> = []
+  const sendVersionPrefs = (): void => {
+    const members = versionsFor == null ? [] : [{ songId: versionsFor, version: null }, ...versions]
+    const { preferred, excluded } = memberVersionPrefs(members, useStore.getState().songPrefs)
+    push({ versionPrefs: { preferred: [...preferred], excluded: [...excluded] } })
+  }
   const sendState = (): void => {
     const s = useStore.getState()
     const track = nowTrack(s)
@@ -540,9 +567,13 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     const songId = !s.radioFmActive && s.currentTrack ? userApi.trackIdToSongId(s.currentTrack.id) : null
     if (songId !== versionsFor) {
       versionsFor = songId
-      push({ versions: [] })
-      if (songId != null) void versionsOf(songId).then((versions) => { if (versionsFor === songId) push({ versions }) })
+      versions = []
+      push({ versions })
+      if (songId != null) void versionsOf(songId).then((loaded) => {
+        if (versionsFor === songId) { versions = loaded; push({ versions }); sendVersionPrefs() }
+      })
     }
+    sendVersionPrefs()
   }
 
   // Changes made together (a track change sets several keys) go out together - on a microtask, not a timer: the main
@@ -558,7 +589,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
   const stopCovers = watchCovers(later)
   const stopClock = watchPlayClock((clock) => push({ clock }))
   const unsubscribe = useStore.subscribe((s, p) => {
-    if (s.currentTrack !== p.currentTrack || s.currentTrackFull !== p.currentTrackFull || s.isPlaying !== p.isPlaying || s.queue !== p.queue
+    if (s.songPrefs !== p.songPrefs || s.currentTrack !== p.currentTrack || s.currentTrackFull !== p.currentTrackFull || s.isPlaying !== p.isPlaying || s.queue !== p.queue
       || s.queueIndex !== p.queueIndex || s.likedTrackIds !== p.likedTrackIds || s.volume !== p.volume || s.repeat !== p.repeat
       || s.shuffle !== p.shuffle || s.lyricsOffset !== p.lyricsOffset || s.radioFmActive !== p.radioFmActive || s.radioFmNowPlaying !== p.radioFmNowPlaying
       || s.radioFmMatchedSong !== p.radioFmMatchedSong || s.playlists !== p.playlists || s.radioFmIsLive !== p.radioFmIsLive

@@ -588,7 +588,22 @@ function openVersions(): void {
   if (!versions.length) return
   menuFor = null
   showMenu('versions', `<div class="menu-title">Other versions</div>${versions.map((v, i) =>
-    `<button data-version="${v.songId}">${escapeText(v.label ?? `Version ${i + 1}`)}</button>`).join('')}`, $<HTMLElement>('[data-tool="versions"]'))
+    `<div class="version-row"><button data-version="${v.songId}">${escapeText(v.label ?? `Version ${i + 1}`)}</button>${v.version ? `
+      <button class="version-pref" data-pref="prefer" data-song="${v.songId}">${icons.star}</button>
+      <button class="version-pref" data-pref="exclude" data-song="${v.songId}">${icons.ban}</button>` : ''}</div>`).join('')}`, $<HTMLElement>('[data-tool="versions"]'))
+  paintVersionPrefs()
+}
+
+function paintVersionPrefs(): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>('#menu [data-pref]')) {
+    const version = live.state.versions?.find(v => v.songId === Number(button.dataset.song))?.version
+    const prefer = button.dataset.pref === 'prefer'
+    const active = !!version && !!live.state.versionPrefs?.[prefer ? 'preferred' : 'excluded'].includes(version.trim().toLowerCase())
+    button.setAttribute('aria-pressed', String(active))
+    button.title = active ? (prefer ? 'Preferred - click to unset' : 'Excluded - click to allow again')
+      : (prefer ? `Prefer "${version}" (several preferred = one picked at random)` : `Never auto-pick "${version}"`)
+    button.setAttribute('aria-label', button.title)
+  }
 }
 
 // ---- the song playing's own menu (the ⋯ by the heart): what of the app's song menu a widget can do ----
@@ -651,6 +666,8 @@ function addToPlaylist(id: number): void {
 
 $('#menu').addEventListener('click', (event) => {
   const target = event.target as Element
+  const pref = target.closest<HTMLButtonElement>('[data-pref]')
+  if (pref) { page.command(`${pref.dataset.pref}-version`, Number(pref.dataset.song)); return }
   const more = target.closest<HTMLElement>('[data-more]')?.dataset.more
   if (more) { songMenuPick(more); return }
   const playlist = target.closest<HTMLElement>('[data-playlist]')?.dataset.playlist
@@ -900,6 +917,7 @@ live.on((what, patch) => {
   if (what === 'state' && patch && 'track' in patch) { browseKey = null }
   // A new song's versions: the list open was the last song's.
   if (what === 'state' && patch && 'versions' in patch && versionsOpen()) closeMenu()
+  if (what === 'state' && patch && 'versionPrefs' in patch && versionsOpen()) paintVersionPrefs()
   // And the ⋯ menu open was about the song before.
   if (what === 'state' && patch && 'track' in patch && songMenuOpen()) closeMenu()
   if (what === 'state' && search.isOpen && patch && 'track' in patch) search.paint()

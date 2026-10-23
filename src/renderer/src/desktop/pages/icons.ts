@@ -4,6 +4,8 @@ const svg = (body: string, { fill = 'currentColor', stroke = 'none', width = 0 }
 const line = (body: string, width = 2): string => svg(body, { fill: 'none', stroke: 'currentColor', width })
 
 export const icons: Record<string, string> = {
+  star: line('<path d="m12 3 2.8 5.7 6.3.9-4.5 4.4 1 6.2-5.6-3-5.6 3 1-6.2L2.9 9.6l6.3-.9z"/>'),
+  ban: line('<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>'),
   play: svg('<path d="M7 4.6c0-1.1 1.2-1.8 2.2-1.2l11 6.9c.9.6.9 1.9 0 2.5l-11 6.9C8.2 20.3 7 19.6 7 18.5z"/>'),
   pause: svg('<rect x="5.5" y="3.5" width="4.6" height="17" rx="1.4"/><rect x="13.9" y="3.5" width="4.6" height="17" rx="1.4"/>'),
   backward: svg('<path d="M11.4 6.2c0-.9-1-1.4-1.7-.9L1.9 11.1c-.6.4-.6 1.3 0 1.8l7.8 5.8c.7.5 1.7 0 1.7-.9z"/><path d="M22.6 6.2c0-.9-1-1.4-1.7-.9l-7.8 5.8c-.6.4-.6 1.3 0 1.8l7.8 5.8c.7.5 1.7 0 1.7-.9z"/>'),

@@ -16,10 +16,11 @@ Prompts are asked up front, then everything else runs unattended:
      rejected at step 7 and rolled back. Runs before the version bump,
      while the tree is still clean.
   2. Pick a version (bump patch / minor / major, or keep / custom)
-  3. Enter a commit message (only if the tree is dirty)
+  3. (no prompt) the commit message is just the version
   4. Enter release notes (blank = auto-generate from commits)
   ── nothing left to answer past this point ──
-  5. Commit all changes to the desktop branch (app)
+  5. Commit ONLY the package.json version bump to the desktop branch (app);
+     other uncommitted changes are left alone
   6. Beta only: build the renderer + Electron installer locally (needed
      right here, since step 9's beta publish uploads the .exe this
      produces). Stable builds are NOT done locally anymore — see step 9.
@@ -459,13 +460,19 @@ def prompt_version():
 def prompt_commit_message(version):
     section(3, TOTAL, f"Commit message")
 
-    if is_dirty():
-        info("Uncommitted changes:")
-        for line in capture("git status --short").splitlines():
-            detail(line)
-        return ask("Commit message", default=f"v{version}")
-    else:
-        ok("Nothing to commit — tree is clean")
+    # Only package.json's version bump is committed; other uncommitted work
+    # stays in the working tree untouched.
+    if version != load_version_head():
+        ok(f"Version bump only: v{version}")
+        return f"v{version}"
+    ok("Version unchanged — nothing to commit")
+    return None
+
+
+def load_version_head():
+    try:
+        return json.loads(capture("git show HEAD:package.json"))["version"]
+    except Exception:
         return None
 
 
@@ -564,10 +571,10 @@ def step_commit(version, msg, state):
     state["pre_commit_sha"] = capture("git rev-parse HEAD")
 
     if msg is not None:
-        run("git add -A")
-        run(f'git commit -m "{msg}"')
+        # `-- package.json` commits that path only, whatever else is staged.
+        run(f'git commit -m "{msg}" -- package.json')
         state["committed"] = True
-        ok(f"Committed: {msg}")
+        ok(f"Committed package.json: {msg}")
     else:
         ok("Nothing to commit — tree is clean")
 
@@ -788,19 +795,12 @@ def rollback(state):
         detail(f"To undo manually: git reset --hard {state.get('pre_commit_sha')} && "
                f"git push --force origin {APP_BRANCH}")
     elif state.get("committed") and state.get("pre_commit_sha"):
-        # `reset --hard` throws away the commit we just made *and* anything
-        # uncommitted alongside it. Park a branch on it first so recovering is
-        # `git cherry-pick <branch>` rather than digging through the reflog —
-        # this rollback has eaten real work more than once.
-        doomed = capture("git rev-parse --short HEAD")
-        backup = f"backup/{state.get('tag') or 'release'}-{time.strftime('%Y%m%d-%H%M%S')}"
-        if capture(f"git branch {backup} 2>&1") == "":
-            ok(f"Saved the discarded commit ({doomed}) on branch {_c(backup, WHT, BOLD)}")
-            detail(f"Recover with: git cherry-pick {backup}")
-        else:
-            warn(f"Could not create backup branch — recover {doomed} via `git reflog`")
-        run(f"git reset --hard {state['pre_commit_sha']}", check=False)
-        ok(f"Reverted local commit (and version bump) on {APP_BRANCH}")
+        # Soft reset: the working tree may hold the user's uncommitted work,
+        # which a hard reset would destroy. Only package.json is ours to undo.
+        run(f"git reset --soft {state['pre_commit_sha']}", check=False)
+        run("git restore --staged package.json", check=False)
+        set_version(state["original_version"])
+        ok(f"Reverted local version commit on {APP_BRANCH}")
     elif state.get("version_changed") and state.get("original_version"):
         set_version(state["original_version"])
         ok(f"Reverted package.json version to {state['original_version']}")
