@@ -1,19 +1,24 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore } from '../store/useStore'
+import { useCanEdit } from '../hooks/useChannelRoles'
+import * as userApi from '../lib/userApi'
+import type { Track } from '../types'
 import { FRAME_MARK, isOurs, type FromFrame, type ToFrame } from '../desktop/frame'
 import { DEFAULT_PLACES, fitOf, playerMetrics, playlistMetrics } from '../desktop/metrics'
 import { listenToMeter } from '../desktop/meter'
-import { answerDesktopRequest, runDesktopCommand, watchDesktopState, widgetMenuOf } from '../lib/desktopBridge'
+import { SHARE_LYRICS_EVENT, answerDesktopRequest, runDesktopCommand, watchDesktopState, widgetMenuOf } from '../lib/desktopBridge'
 import { WIDGET_TITLES, type WidgetMenuEntry, type WidgetPart } from '../desktop/widgetMenu'
 import { setEqAnchor } from '../lib/eqAnchor'
 import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
+import SongContextMenu from './SongContextMenu'
 
 // WRLD's Widgets layout: the desktop's player, playlist and clock (Settings > Desktop) standing in the tab instead of on
 // the desktop, for the web and for anyone who'd rather keep them in the app. They're the very pages the desktop's
 // windows show, each in a frame, and this answers them as the main process answers a window: it tells them the
 // settings, what's playing and the music, does what they press with the app's own code, lets clicks through the
 // player's clear parts, moves them when they're dragged, keeps where they were left, and shows a widget's menu when
-// it's right-clicked.
+// it's right-clicked - or, on one of the player's cards, the app's menu for that card's song.
 
 type Which = 'player' | 'playlist' | 'clock'
 /** Back to front. */
@@ -96,6 +101,28 @@ const menuItems = (entries: WidgetMenuEntry[]): ContextMenuEntry[] => entries.ma
   onSelect: e.cmd ? () => void runDesktopCommand(e.cmd!, e.arg).catch((err) => console.warn('[wrld widgets] menu command failed', e.cmd, err)) : undefined,
 })
 
+/** A card's song, for the app's song menu: the song at that place in the queue, or the one playing (999 FM's on the
+ *  air, which has no queue of ours). `place` is null for the song playing, which has no Play of its own. */
+interface CardSong { track: Track; songId: number | null; place: number | null; fm: boolean; x: number; y: number }
+
+function cardSong(place: number, id: string, x: number, y: number): CardSong | null {
+  const s = useStore.getState()
+  if (s.radioFmActive) {
+    const r = s.radioFmNowPlaying
+    const songId = r?.song_id ?? s.radioFmMatchedSong?.songId ?? null
+    if (songId == null) return null
+    // FM gives only the title, artist and album: a track of its own, as WRLD's ⋯ menu makes it.
+    const track: Track = { id: `fm-${songId}`, path: '', title: r?.title ?? '', artist: r?.artist ?? '', album: r?.album ?? '',
+      albumArtist: '', year: null, trackNumber: null, duration: 0, genre: '', hasAlbumArt: false }
+    return { track, songId, place: null, fm: true, x, y }
+  }
+  const track = s.queue.length ? s.queue[place] : place === 0 ? s.currentTrack : null
+  // The queue moved since the card was drawn.
+  if (!track || track.id !== id) return null
+  const playing = s.queue.length ? place === s.queueIndex : true
+  return { track, songId: userApi.trackIdToSongId(track.id), place: playing ? null : place, fm: false, x, y }
+}
+
 export default function WrldWidgets(): JSX.Element {
   const desktop = useStore((s) => s.desktop)
   /** The frames stand in here, put in and taken out by hand: React renders nothing inside it. */
@@ -108,14 +135,18 @@ export default function WrldWidgets(): JSX.Element {
   const pointerIn = useRef(false)
   /** A widget right-clicked: its menu, at that point in the tab's window. */
   const [menu, setMenu] = useState<{ which: Which; x: number; y: number; part?: WidgetPart } | null>(null)
+  /** A card of the player's right-clicked: the app's menu for its song. */
+  const [songMenu, setSongMenu] = useState<CardSong | null>(null)
+  const likedTrackIds = useStore((s) => s.likedTrackIds)
+  const canEdit = useCanEdit()
 
   // A click in a frame doesn't reach the menu's outside-click check, but the window loses the focus to the frame.
   useEffect(() => {
-    if (!menu) return
-    const close = (): void => setMenu(null)
+    if (!menu && !songMenu) return
+    const close = (): void => { setMenu(null); setSongMenu(null) }
     window.addEventListener('blur', close)
     return () => window.removeEventListener('blur', close)
-  }, [menu])
+  }, [menu, songMenu])
 
   useLayoutEffect(() => {
     const layer = layerRef.current
@@ -301,7 +332,14 @@ export default function WrldWidgets(): JSX.Element {
           break
         case 'menu': {
           const r = kept[which]?.getBoundingClientRect()
-          if (r) setMenu({ which, x: r.left + message.x, y: r.top + message.y, part: message.part === 'lyrics' ? 'lyrics' : undefined })
+          if (r) { setSongMenu(null); setMenu({ which, x: r.left + message.x, y: r.top + message.y, part: message.part === 'lyrics' ? 'lyrics' : undefined }) }
+          break
+        }
+        case 'song-menu': {
+          const r = kept[which]?.getBoundingClientRect()
+          const song = r && which === 'player' && Number.isInteger(message.place) ? cardSong(message.place, message.id, r.left + message.x, r.top + message.y) : null
+          setMenu(null)
+          setSongMenu(song)
           break
         }
         case 'key': {
@@ -334,6 +372,23 @@ export default function WrldWidgets(): JSX.Element {
           checkColumn="auto"
           onClose={() => setMenu(null)}
         />
+      )}
+      {songMenu && desktop.player.inWrld && createPortal(
+        <SongContextMenu
+          state={{ track: songMenu.track, songId: songMenu.songId, x: songMenu.x, y: songMenu.y }}
+          onClose={() => setSongMenu(null)}
+          canEdit={canEdit}
+          onInfo={() => { if (songMenu.songId != null) useStore.getState().setInfoSongId(songMenu.songId) }}
+          // A card of the queue plays where it is in it; the song playing and 999 FM's have no Play.
+          onPlay={songMenu.place != null ? () => void runDesktopCommand('jump', songMenu.place) : undefined}
+          onPlayNext={songMenu.fm ? undefined : () => useStore.getState().playNext(songMenu.track)}
+          onAddToQueue={songMenu.fm ? undefined : () => useStore.getState().addToQueue(songMenu.track)}
+          liked={likedTrackIds.includes(songMenu.fm ? `jw-${songMenu.songId}` : songMenu.track.id)}
+          onToggleLike={() => useStore.getState().toggleLike(songMenu.fm ? `jw-${songMenu.songId}` : songMenu.track.id)}
+          disableChangeVersion={songMenu.fm}
+          onShareLyrics={songMenu.place == null ? () => window.dispatchEvent(new Event(SHARE_LYRICS_EVENT)) : undefined}
+        />,
+        document.body,
       )}
     </div>
   )
