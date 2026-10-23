@@ -4,7 +4,7 @@ import { Empty, QueueSearch } from './adminShared'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
 import CdnBinaryUpload from './CdnBinaryUpload'
 import CdnWorldMap from './CdnWorldMap'
-import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnNodeEventHistory, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
 
 // Admin-only roster of distributed-CDN nodes (the volunteer machines running
 // jwa-cdn-node). Nodes register anonymously and serve nothing until approved
@@ -130,6 +130,10 @@ export default function CdnNodesTab(): JSX.Element {
               <hr className="border-[var(--border)]" />
 
               <CdnNodeFacts node={selected} columns="grid-cols-3" />
+
+              <hr className="border-[var(--border)]" />
+
+              <CdnNodeEventHistory nodeId={selected.node_id} />
             </div>
           )}
         </div>
