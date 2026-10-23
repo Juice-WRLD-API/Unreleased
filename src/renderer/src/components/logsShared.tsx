@@ -10,6 +10,7 @@ import {
   Search, X as XIcon, SlidersHorizontal, Copy, Check, Filter, type LucideIcon,
 } from 'lucide-react'
 import { BASE_LOG_FIELDS, LOG_EVENTS, LOG_LEVELS, type LogCategory, type LogEntry, type LogFilters, type LogLevel } from '../lib/adminLogsApi'
+import { useStore } from '../store/useStore'
 import { MotionDisclosure } from './MotionDisclosure'
 import ThemedSelect from './ThemedSelect'
 
@@ -386,6 +387,14 @@ export function LogFilterBar({ filters, onSet, onClear, levels = LOG_LEVELS, cat
   }
   const advanced = MORE_FIELDS.filter((f) => (filters[f.key] ?? '').trim())
   const anySet = Object.values(filters).some((v) => (v ?? '').trim())
+  // One comp at a time here; the terminal's --channel takes a list.
+  const channels = useStore((s) => s.channels)
+  const comp = filters.channel ?? ''
+  const compOptions = useMemo(() => [
+    { value: '', label: 'Any comp' },
+    ...channels.map((c) => ({ value: c.slug, label: c.name || c.slug })),
+    ...(comp && !channels.some((c) => c.slug === comp) ? [{ value: comp, label: comp }] : []),
+  ], [channels, comp])
 
   return (
     <div className="space-y-2">
@@ -397,6 +406,16 @@ export function LogFilterBar({ filters, onSet, onClear, levels = LOG_LEVELS, cat
           options={levelOptions(levels)}
           className="shrink-0 w-[150px] h-8 bg-surface-overlay text-text-primary text-[11px] px-2.5 rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/40"
         />
+        {compOptions.length > 2 && (
+          <ThemedSelect
+            value={comp}
+            onChange={(v) => set('channel', v)}
+            options={compOptions}
+            className={`shrink-0 w-[150px] h-8 text-[11px] px-2.5 rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/40 ${
+              comp ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-primary'
+            }`}
+          />
+        )}
         <button onClick={() => setMore((m) => !m)} aria-expanded={more}
           className={`shrink-0 h-8 flex items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-semibold transition-colors ${
             more || advanced.length ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-primary'
