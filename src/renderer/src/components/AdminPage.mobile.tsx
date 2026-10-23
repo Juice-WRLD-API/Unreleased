@@ -23,6 +23,7 @@ import CompProposalsTab from './CompProposalsTab.mobile'
 import ChannelsTab from './ChannelsTab.mobile'
 import EraTab from './EraTab.mobile'
 import CdnNodesTab from './CdnNodesTab.mobile'
+import LogsTab from './LogsTab'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
@@ -163,7 +164,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'logs' && tab !== 'security' && (
             <button onClick={() => refresh()} disabled={loading} title="Refresh"
               className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-accent active:bg-surface-overlay transition-colors disabled:opacity-40">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -254,6 +255,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('cdn-nodes') && (
           <div className={tab === 'cdn-nodes' ? 'h-full' : 'hidden'}>
             <CdnNodesTab />
+          </div>
+        )}
+        {visited.has('logs') && (
+          <div className={tab === 'logs' ? 'h-full' : 'hidden'}>
+            <LogsTab active={tab === 'logs'} />
           </div>
         )}
         {visited.has('security') && (
