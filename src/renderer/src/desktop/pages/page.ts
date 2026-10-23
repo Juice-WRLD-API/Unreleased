@@ -88,6 +88,9 @@ export interface Bridge {
   curtainOpened(): void
   /** Right-clicked at this point: the widget's menu, from the app - the lyrics' own when it was on them (`part`). */
   menu?(x: number, y: number, part?: WidgetPart): void
+  /** In the WRLD tab: a card right-clicked, for the app's own menu of its song (the one at `place` in the queue). A
+   *  window on the desktop has no app beside it, so there the page shows a song menu itself. */
+  songMenu?(x: number, y: number, place: number, id: string): void
 }
 
 export const page = (window as unknown as { desktopPage?: Bridge }).desktopPage ?? frameBridge()

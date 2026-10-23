@@ -1,6 +1,6 @@
 // The desktop player: the queue as a row of glass cards curving away to both sides of the song playing - played
 // songs to the left, what's next to the right - with a glass control bar beneath. Clicking a card plays it, the queue
-// kept; scrolling turns the cards and, after a quiet moment, they turn back to the song playing; hovering lifts a card.
+// kept, and the song playing's opens its lyrics; scrolling turns the cards and, after a quiet moment, they turn back to the song playing; hovering lifts a card.
 // The lyrics open beside the playing card, in the iJWA style picked; search lays the catalog's songs and eras over the
 // cards, an era opening into its own page. Every press goes to the app, which does it as its own buttons do.
 import './base.css'
@@ -552,7 +552,8 @@ type MenuKind = 'result' | 'versions' | 'song'
 let menuKind: MenuKind | null = null
 /** Goes up as the ⋯ menu is asked for or any menu closes: an answer for a menu since closed is dropped. */
 let songMenuTurn = 0
-let menuFor: { song: DesktopTrack; list: DesktopTrack[] } | null = null
+/** The song a result's menu is for; `place` when it's a card, played where it is in the queue. */
+let menuFor: { song: DesktopTrack; list: DesktopTrack[]; place?: number } | null = null
 const menuOpen = (kind: MenuKind): boolean => menuKind === kind
 
 /** The menu filled and shown as `kind`: the result's at the pointer, the others over their buttons. */
@@ -574,9 +575,9 @@ function showMenu(kind: MenuKind, html: string, at: { x: number; y: number } | H
   }
 }
 
-function openMenu(x: number, y: number, song: DesktopTrack, list: DesktopTrack[]): void {
-  menuFor = { song, list }
-  showMenu('result', `<button data-menu="play">Play</button><button data-menu="next">Play next</button><button data-menu="queue">Add to queue</button>`, { x, y })
+function openMenu(x: number, y: number, song: DesktopTrack, list: DesktopTrack[], place?: number): void {
+  menuFor = { song, list, place }
+  showMenu('result', `${place != null ? `<div class="menu-title">${escapeText(song.title)}</div>` : ''}<button data-menu="play">Play</button><button data-menu="next">Play next</button><button data-menu="queue">Add to queue</button>`, { x, y })
 }
 function closeMenu(): void { $('#menu').classList.add('hidden'); menuKind = null; menuFor = null; songMenuTurn++ }
 
@@ -612,9 +613,10 @@ interface SongMenu { title: string; info: boolean; link: boolean; download: bool
 let songMenu: SongMenu | null = null
 const songMenuOpen = (): boolean => menuOpen('song')
 
-let songMenuAnchor: HTMLElement | null = null
+/** Where the ⋯ menu opens: over its button, or at the pointer (the playing card right-clicked on the desktop). */
+let songMenuAnchor: HTMLElement | { x: number; y: number } | null = null
 
-async function openSongMenu(anchor: HTMLElement | null = null): Promise<void> {
+async function openSongMenu(anchor: HTMLElement | { x: number; y: number } | null = null): Promise<void> {
   songMenuAnchor = anchor
   const turn = ++songMenuTurn
   const answer = await page.request<SongMenu>('song-menu')
@@ -678,7 +680,7 @@ $('#menu').addEventListener('click', (event) => {
   const chosen = menuFor
   closeMenu()
   if (!what || !chosen) return
-  if (what === 'play') play(chosen.song, chosen.list)
+  if (what === 'play') { if (chosen.place != null) page.command('jump', chosen.place); else play(chosen.song, chosen.list) }
   if (what === 'next') { page.command('play-next', chosen.song.track); notice('Playing next', chosen.song.title) }
   if (what === 'queue') { page.command('add-to-queue', chosen.song.track); notice('Added to queue', chosen.song.title) }
 })
@@ -762,7 +764,6 @@ const cards = new CardStack($('#stage'))
 const aura = new Aura($('#aura'), { meter: () => live.meter, style: () => ({ ...DEFAULT_LIGHT, ...(live.settings?.light ?? {}) }) })
 let hoveredKey: string | null = null
 let browseKey: string | null = null
-let closedByCover = false
 let returnHome = 0
 
 function cardList(): { list: Card[]; items: DesktopTrack[]; home: number } {
@@ -786,7 +787,6 @@ function render(): void {
   const p = settings?.player
   const mini = !!p?.mini
   const lyricsOut = !!p?.lyricsOpen && !mini
-  if (lyricsOut) closedByCover = false
   const { list, home } = cardList()
   const lyricsCard = lyricsOut && home >= 0 ? list[home]?.key ?? null : null
   const folded = !!p?.hidesLyricsCard && lyricsCard != null
@@ -850,22 +850,34 @@ carousel.addEventListener('click', (event) => {
   // A click on the lyrics themselves is theirs (their menu is a right-click), not the cards'.
   if (justDragged() || onLyrics(event.clientX, event.clientY)) return
   // The lyrics open: a click on the cards goes back to them.
-  if (live.settings?.player.lyricsOpen) { page.command('set', { player: { lyricsOpen: false } }); closedByCover = true; return }
+  if (live.settings?.player.lyricsOpen) { page.command('set', { player: { lyricsOpen: false } }); return }
   const hit = cards.hit(event.clientX, event.clientY)
   if (!hit) return
   const { items, home } = cardList()
   const index = items.findIndex((t) => t.key === hit.key)
   if (index < 0) return
-  if (index === home) {
-    // The cover that just closed the lyrics brings them back.
-    if (closedByCover) { closedByCover = false; page.command('set', { player: { lyricsOpen: true } }); return }
-    page.command('toggle'); browseKey = null; render(); return
-  }
-  closedByCover = false
+  // The song playing's card opens its lyrics (playing and pausing are the bar's).
+  if (index === home) { page.command('set', { player: { lyricsOpen: true } }); browseKey = null; render(); return }
   // Played where it is in the queue: the queue is kept.
   page.command('jump', (live.state.cards?.from ?? 0) + index)
   browseKey = null
   render()
+})
+// A card right-clicked: its song's menu, not the player's (that's the bar's). In the WRLD tab it's the app's own song
+// menu; on the desktop the page's: the ⋯ menu for the song playing, play/next/queue for the others.
+carousel.addEventListener('contextmenu', (event) => {
+  const { clientX: x, clientY: y } = event
+  if (onLyrics(x, y) || $('#stage').style.pointerEvents === 'none') return
+  const hit = cards.hit(x, y)
+  if (!hit) return
+  const { items, home } = cardList()
+  const index = items.findIndex((t) => t.key === hit.key)
+  if (index < 0) return
+  event.preventDefault()
+  const place = (live.state.cards?.from ?? 0) + index
+  if (page.songMenu) page.songMenu(x, y, place, items[index].id)
+  else if (index === home) void openSongMenu({ x, y })
+  else openMenu(x, y, items[index], items, place)
 })
 let scrollDebt = 0
 carousel.addEventListener('wheel', (event) => {
