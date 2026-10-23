@@ -23,6 +23,7 @@ import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
 import BetaTab from './BetaTab'
 import LogsTab from './LogsTab'
+import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
@@ -164,7 +165,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'logs' && tab !== 'security' && (
+        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && tab !== 'security' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -278,6 +279,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('beta') && (
           <div className={tab === 'beta' ? 'h-full' : 'hidden'}>
             <BetaTab />
+          </div>
+        )}
+        {visited.has('lyrics') && (
+          <div className={tab === 'lyrics' ? 'h-full' : 'hidden'}>
+            <LyricsGenAdminTab />
           </div>
         )}
         {visited.has('logs') && (

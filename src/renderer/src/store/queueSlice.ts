@@ -32,6 +32,7 @@ import { ls } from '../lib/persist'
 import { hasPlayableSessionEdit } from '../lib/sessionEditsApi'
 import { trackIdToSongId } from '../lib/userApi'
 import { resolveQueueContext } from './queueContext'
+import { clearQueueSession, loadQueueSession, watchQueueSession } from './queuePersistence'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,8 @@ export interface QueueSlice {
   isPlaying: boolean
   progress: number
   currentTime: number
+  /** Device-local: restore this queue and position, paused, on reopening. */
+  rememberQueue: boolean
   shuffle: boolean
   repeat: 'none' | 'all' | 'one'
 
@@ -94,8 +97,8 @@ export interface QueueSlice {
    * Unlike the queue's own played portion this survives the queue being
    * replaced (playing something from the Tracker, starting radio...), so it
    * reflects what the user listened to rather than where they are in the
-   * current list. Session-only, one entry per song (a replay moves it to the
-   * front), capped at PLAY_HISTORY_LIMIT.
+   * current list. Saved with the queue when enabled; one entry per song (a
+   * replay moves it to the front), capped at PLAY_HISTORY_LIMIT.
    */
   playHistory: Track[]
 
@@ -180,6 +183,7 @@ export interface QueueSlice {
   setIsPlaying: (playing: boolean) => void
   setProgress: (progress: number) => void
   setCurrentTime: (time: number) => void
+  setRememberQueue: (enabled: boolean) => void
 
   // Queue editing
   addToQueue: (track: Track) => void
@@ -337,6 +341,9 @@ function preferredVersionOf(track: Track, preferOg: boolean): Promise<Track | nu
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get, api) => {
+  const isFloat = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('float')
+  const rememberQueue = ls.get<boolean>('rememberQueue') === true
+  const restored = rememberQueue && !isFloat ? loadQueueSession() : null
   // Moving within the queue can land back on the song that's already playing
   // (a one-song repeat-all queue, skipping back at index 0). Clearing its
   // FullTrack there made the cover/backdrop drop to the bare imageUrl and the
@@ -373,6 +380,18 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       .catch(() => {})
   })
 
+  if (!isFloat && typeof window !== 'undefined') {
+    if (!rememberQueue) clearQueueSession()
+    watchQueueSession(api)
+    // Continue any pending page/radio preparation after the store is created.
+    // Playback itself stays paused until the user presses Play or Next.
+    if (restored) queueMicrotask(() => {
+      if (get().queue !== restored.queue) return
+      if (get().radioMode && !get().radioNext) get()._prefetchRadioTrack()
+      else get()._loadMore()
+    })
+  }
+
   return {
   // ── Initial state ──────────────────────────────────────────────────────────
   queue: [],
@@ -381,11 +400,8 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   isPlaying: false,
   progress: 0,
   currentTime: 0,
-  // Playback *modes* persist across restarts (the queue itself doesn't - it's
-  // rebuilt from whatever the user plays next). radioMode deliberately stays
-  // off on load even when shuffle was on: radio is started by toggling shuffle
-  // from a tracker context, so it's a property of the live session, and
-  // restoring it would resume fetching random songs nobody asked for.
+  rememberQueue,
+  // Modes persist independently of the optional saved queue.
   shuffle: ls.get<boolean>('shuffle') ?? false,
   repeat: ls.get<'none' | 'all' | 'one'>('repeat') ?? 'none',
   queueFilter: null,
@@ -397,11 +413,17 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   _radioWaiting: false,
   radioFilter: null,
   playHistory: [],
+  ...restored,
 
   // ── Simple setters ─────────────────────────────────────────────────────────
   setIsPlaying: (isPlaying) => set({ isPlaying }),
   setProgress: (progress) => set({ progress }),
   setCurrentTime: (currentTime) => set({ currentTime }),
+  setRememberQueue: (enabled) => {
+    ls.set('rememberQueue', enabled)
+    if (!enabled) clearQueueSession()
+    set({ rememberQueue: enabled })
+  },
 
   // ── playTrack ──────────────────────────────────────────────────────────────
   playTrack: (track, context?, filter = null, source = null, opts = {}) => {
@@ -746,9 +768,13 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   clearQueue: () =>
     set((s: QueueSlice) => ({
       queue: s.currentTrack ? [s.currentTrack] : [],
-      queueIndex: 0,
+      queueIndex: s.currentTrack ? 0 : -1,
+      queueFilter: null,
+      queueSource: null,
+      queueSongPool: null,
       radioMode: false,
       radioNext: null,
+      radioFilter: null,
       _radioWaiting: false,
     })),
 

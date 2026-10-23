@@ -21,7 +21,7 @@ import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
-import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible, hasHomeTools } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
@@ -148,6 +148,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
+  { tab: 'playback', label: 'Remember queue and now playing', sub: 'Restore your queue, current track and position on this device when you reopen. Playback stays paused.' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
   { tab: 'playback', label: 'Crossfade' },
   // Smooth fade when pausing is iOS-excluded further down (Safari ignores
@@ -554,6 +555,7 @@ export default function Settings(): JSX.Element {
     audioOutput, setAudioOutput,
     crossfadeEnabled, crossfadeDuration, setCrossfade,
     pauseFadeEnabled, setPauseFade,
+    rememberQueue, setRememberQueue,
     preferOgVersion, setPreferOgVersion,
     rotateSuggestedCovers, setRotateSuggestedCovers,
     mediaOverlayEnabled, setMediaOverlayEnabled,
@@ -577,7 +579,7 @@ export default function Settings(): JSX.Element {
     fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
     embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
-  } = useStorePick('setShowSettings', 'setActiveView', 'openProfile', 'account', 'setShowUserAuth', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
+  } = useStorePick('setShowSettings', 'setActiveView', 'openProfile', 'account', 'setShowUserAuth', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const {
@@ -1520,7 +1522,7 @@ export default function Settings(): JSX.Element {
                     ) : undefined}
                   >
                     <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
-                      {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
+                      {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account)) && (!section.donorOnly || hasHomeTools(account))).map((section) => {
                         const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                         return (
                           <div
@@ -1594,6 +1596,14 @@ export default function Settings(): JSX.Element {
                       <Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} />
                     </Row>
                   )}
+                  <Row
+                    icon={ListOrdered}
+                    iconColor="#7c3aed"
+                    label="Remember queue and now playing"
+                    sub="Restore your queue, current track and position on this device when you reopen. Playback stays paused."
+                  >
+                    <Toggle on={rememberQueue} onClick={() => setRememberQueue(!rememberQueue)} />
+                  </Row>
                   <Row icon={FileText} iconColor="#059669" label="Prefer OG version">
                     <Toggle on={preferOgVersion} onClick={() => setPreferOgVersion(!preferOgVersion)} />
                   </Row>

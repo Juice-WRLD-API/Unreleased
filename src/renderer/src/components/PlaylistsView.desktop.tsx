@@ -5,6 +5,8 @@ import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '.
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
 import { useClosingValue } from '../hooks/usePresence'
 import { useCascade } from '../hooks/useCascade'
+import { useContentMotion } from '../hooks/useContentMotion'
+import { useListMotion } from '../hooks/useListMotion'
 import { createPortal } from 'react-dom'
 import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft,
@@ -252,9 +254,7 @@ function LocalPlaylistMosaic({ trackIds, className = '' }: {
 // ── PlaylistExpandPanel ───────────────────────────────────────────────────────
 // The inline "quick view" that opens below a clicked card's row, spanning the
 // full grid width - layoutGridEntries puts it in a GridPanelSlot, which does
-// the row placement and the open/close animation. The panel's own entrance
-// (animate-pl-panel-swap) is for switching cards within an open row, where
-// the slot stays put and only this content changes.
+// the row placement and the open/close animation, including same-row swaps.
 function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, onPlayTrack, onOpenFull, onTrackContextMenu }: {
   name: string
   subtitle: string
@@ -275,7 +275,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
 
   return (
     <div
-      className="rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6 animate-pl-panel-swap"
+      className="rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6"
       onClick={e => e.stopPropagation()}
     >
       <button
@@ -323,12 +323,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
                     key={t.id}
                     {...clickable(() => onPlayTrack(t))}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onTrackContextMenu(t, e) }}
-                    className={`${i < 24 ? 'pl-track-in ' : ''}flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-surface-overlay text-left group/track transition-colors cursor-pointer`}
-                    // Both columns cascade down together, the delay capped so a
-                    // long list's tail doesn't trail in after the panel has
-                    // settled. Rows past the first couple dozen are well below
-                    // the fold - not worth hundreds of simultaneous animations.
-                    style={i < 24 ? { animationDelay: `${60 + Math.min(i, 14) * 22}ms` } : undefined}
+                    className="flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-surface-overlay text-left group/track transition-colors cursor-pointer"
                   >
                     <span className={`w-5 text-xs tabular-nums text-right shrink-0 ${isActive ? 'text-accent' : 'text-text-muted'}`}>
                       {isActive ? '▶' : colIdx * mid + i + 1}
@@ -385,6 +380,7 @@ type GridEntry = {
 // silently stay stuck at the default column count forever.
 function useGridColumnCount(el: HTMLDivElement | null): number {
   const [cols, setCols] = useState(1)
+  useListMotion({ current: el })
   useEffect(() => {
     if (!el) return
     const measure = (): void => {
@@ -414,10 +410,10 @@ function layoutGridEntries(entries: GridEntry[], columns: number): JSX.Element[]
   })
   const out: JSX.Element[] = []
   entries.forEach((e, i) => {
-    out.push(e.tile)
+    out.push(<div key={e.key} data-flip-key={e.key} className="min-w-0 [&>*]:w-full">{e.tile}</div>)
     const slot = slotAtRowEnd.get(i)
     if (slot) out.push(
-      <GridPanelSlot key={`panel-row-${i}`} closing={!!slot.entry.closing} col={slot.col} columns={columns} caretClass={slot.entry.caretClass}>
+      <GridPanelSlot key={`panel-row-${i}`} contentKey={slot.entry.key} closing={!!slot.entry.closing} col={slot.col} columns={columns} caretClass={slot.entry.caretClass}>
         {slot.entry.panel}
       </GridPanelSlot>
     )
@@ -426,17 +422,14 @@ function layoutGridEntries(entries: GridEntry[], columns: number): JSX.Element[]
 }
 
 // ── GridPanelSlot ──────────────────────────────────────────────────────────────
-// Animates a quick-view panel's grid row. It grows open from nothing, easing
-// the rows below down instead of snapping them, follows the panel's height as
-// it changes (tracks loading in, a switch to a longer playlist), and shrinks
-// shut when `closing`. The caret points up at the card the panel belongs to and
-// glides to the new one on a same-row switch. Row spacing in a .pl-grid is
-// each item's own bottom margin rather than row-gap (see index.css) - a gap
-// would still sit on both sides of the empty row, so opening jumped the rows
-// below by a gap before the panel had grown at all.
-const SLOT_CLOSE_MS = 340 // .pl-grid-panel.is-closing's transition, plus a frame
+// Reserve the final height once, then fade the panel and slide the displaced
+// cards with useListMotion. Animating height laid out the whole grid each frame.
+// Closing holds that space until the fade finishes; same-row switches only
+// fade the content. The caret moves on its own full-width transform layer.
+const SLOT_CLOSE_MS = 280 // the 240ms exit, plus a frame
 
-function GridPanelSlot({ closing, col, columns, caretClass = 'bg-surface-raised', children }: {
+function GridPanelSlot({ contentKey, closing, col, columns, caretClass = 'bg-surface-raised', children }: {
+  contentKey: string
   closing: boolean
   col: number
   columns: number
@@ -444,33 +437,12 @@ function GridPanelSlot({ closing, col, columns, caretClass = 'bg-surface-raised'
   children: React.ReactNode
 }): JSX.Element {
   const innerRef = useRef<HTMLDivElement>(null)
-  const [height, setHeight] = useState(0)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentMotion(contentRef, contentKey)
   const [entered, setEntered] = useState(false)
-  // A height change from the grid itself resizing (the window, the sidebar)
-  // snaps rather than easing, or the panel visibly lags behind the drag.
-  const [snap, setSnap] = useState(false)
   useLayoutEffect(() => {
-    const inner = innerRef.current
-    if (!inner) return
-    let lastWidth = inner.offsetWidth
-    const measure = (): void => {
-      const w = inner.offsetWidth
-      if (w !== lastWidth) setSnap(true)
-      lastWidth = w
-      setHeight(inner.offsetHeight)
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(inner)
-    return () => ro.disconnect()
-  }, [])
-  useEffect(() => {
-    if (!snap) return
-    const raf = requestAnimationFrame(() => setSnap(false))
-    return () => cancelAnimationFrame(raf)
-  }, [snap])
-  // Mounted at zero height (the measure above lays that out), then opened a
-  // frame later so there's a starting point to transition from.
+    if (innerRef.current) innerRef.current.inert = closing
+  }, [closing])
   useEffect(() => {
     const raf = requestAnimationFrame(() => setEntered(true))
     return () => cancelAnimationFrame(raf)
@@ -481,11 +453,13 @@ function GridPanelSlot({ closing, col, columns, caretClass = 'bg-surface-raised'
   return (
     <div
       className={`pl-grid-panel col-span-full ${closing ? 'is-closing' : ''}`}
-      style={{ height: open ? height : 0, marginBottom: open ? 'var(--pl-row-gap)' : 0, ...(snap ? { transition: 'none' } : null) }}
+      aria-hidden={closing || undefined}
     >
       <div ref={innerRef} className={`pl-grid-panel-inner ${open ? 'is-open' : ''}`}>
-        <span className={`pl-grid-caret ${caretClass}`} style={{ left: caretLeft }} />
-        {children}
+        <div className="pl-grid-caret-track" style={{ transform: `translateX(${caretLeft})` }}>
+          <span className={`pl-grid-caret ${caretClass}`} />
+        </div>
+        <div ref={contentRef}>{children}</div>
       </div>
     </div>
   )
@@ -1816,7 +1790,7 @@ export default function PlaylistsView(): JSX.Element {
       const panel = isOpen || isClosing ? (
         <div
           key={`panel-folder-${f.id}`}
-          className="relative rounded-2xl bg-surface-overlay border border-[var(--border)] p-4 animate-pl-panel-swap"
+          className="relative rounded-2xl bg-surface-overlay border border-[var(--border)] p-4"
           onClick={e => e.stopPropagation()}
           // Dropping a member back onto its own folder's empty background
           // (rather than dragging it out to the main grid) should leave it

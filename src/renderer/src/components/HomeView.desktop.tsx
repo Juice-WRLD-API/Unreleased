@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, Sparkles } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -15,6 +15,7 @@ import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
+import { hasHomeTools } from '../lib/homeSections'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
 import { AnchoredContextMenu } from './ContextMenu'
@@ -281,6 +282,30 @@ function GamesCard({ games, onOpen }: {
   )
 }
 
+// ─── Main column foot: Tools ─────────────────────────────────────────────────
+
+interface HomeTool {
+  id: string
+  icon: JSX.Element
+  title: string
+  subtitle: string
+  onClick: () => void
+}
+
+// Shortcuts into the app's tool dialogs. Cards keep a readable width and wrap
+// onto more rows as tools are added, rather than stretching one across the page.
+function ToolsTile({ tools, span }: { tools: HomeTool[]; span: string }): JSX.Element {
+  return (
+    <Tile title="Tools" icon={<Wrench size={15} />} span={span}>
+      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+        {tools.map((tool) => (
+          <ShortcutCard key={tool.id} icon={tool.icon} title={tool.title} subtitle={tool.subtitle} onClick={tool.onClick} />
+        ))}
+      </div>
+    </Tile>
+  )
+}
+
 // ─── Hero ────────────────────────────────────────────────────────────────────
 
 function greeting(): string {
@@ -367,8 +392,18 @@ export default function HomeViewDesktop(): JSX.Element {
   const showGames = showSection('games')
   const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
+  const tools: HomeTool[] = hasHomeTools(account)
+    ? [{
+        id: 'lyrics-gen',
+        icon: <Sparkles size={18} className="text-accent" />,
+        title: 'Generate lyrics',
+        subtitle: 'Transcribe a song, or time its lyrics',
+        onClick: () => useStore.getState().openLyricsGen(),
+      }]
+    : []
+  const showTools = showSection('tools') && tools.length > 0
 
-  const mainShown = showRecent || showPlaylists || showAlbums
+  const mainShown = showRecent || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames
 
   return (
@@ -456,7 +491,7 @@ export default function HomeViewDesktop(): JSX.Element {
           )}
         </div>
 
-        {/* ── Main: recently played + playlists stacked, full width ──
+        {/* ── Main: recently played + playlists (+ tools) stacked, full width ──
             ── Side rail: news, 999 FM, liked, games - compact, narrow ── */}
         {(mainShown || sideShown) && (
           <div className="flex-1 min-h-0 flex gap-4">
@@ -485,6 +520,7 @@ export default function HomeViewDesktop(): JSX.Element {
                     span="shrink-0"
                   />
                 )}
+                {showTools && <ToolsTile tools={tools} span="shrink-0" />}
               </div>
             )}
 

@@ -106,6 +106,7 @@ const SETTINGS: Setting[] = [
   bool('crossfade', 'Crossfade between tracks', () => st().crossfadeEnabled, (v) => st().setCrossfade(v, st().crossfadeDuration)),
   num('crossfade-seconds', 'Crossfade length', 1, 12, () => st().crossfadeDuration, (v) => st().setCrossfade(st().crossfadeEnabled, v), 's'),
   bool('pause-fade', 'Fade out on pause', () => st().pauseFadeEnabled, (v) => st().setPauseFade(v)),
+  bool('remember-queue', 'Restore the queue, current track and position on this device (paused)', () => st().rememberQueue, (v) => st().setRememberQueue(v)),
   bool('skip-silence', 'Skip silence', () => st().skipSilence, (v) => st().setSkipSilence(v)),
   bool('eq', 'Equalizer on', () => st().eqEnabled, (v) => st().setEqEnabled(v)),
   bool('mono', 'Mono output', () => st().eqMono, (v) => st().setEqMono(v)),

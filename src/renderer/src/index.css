@@ -632,6 +632,7 @@ input[type='range']:active::-moz-range-thumb {
    below by a gap before the panel had grown at all. The grid's negative margin
    takes back the last row's, leaving the spacing after the grid as it was. */
 .pl-grid {
+  position: relative;
   --pl-col-gap: 1rem;
   --pl-row-gap: 1.5rem;
   column-gap: var(--pl-col-gap);
@@ -640,34 +641,35 @@ input[type='range']:active::-moz-range-thumb {
 }
 .pl-grid > * { margin-bottom: var(--pl-row-gap); }
 
-/* GridPanelSlot: height and bottom margin are set inline (0 while shut, the
-   measured content height and the row spacing while open) and transition
-   here. The negative top margin tucks the caret up into the spacing under the
-   card row; it stays inside the slot, so nothing is clipped. SLOT_CLOSE_MS in
-   PlaylistsView covers the closing duration. */
+/* GridPanelSlot uses its natural height. Displaced tiles slide with
+   useListMotion; the panel itself only fades. */
 .pl-grid-panel {
   overflow: hidden;
   margin-top: calc(var(--pl-row-gap) * -0.5);
-  transition: height 0.42s cubic-bezier(0.32, 0.72, 0, 1), margin-bottom 0.42s cubic-bezier(0.32, 0.72, 0, 1);
-}
-.pl-grid-panel.is-closing {
-  transition-duration: 0.3s;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 .pl-grid-panel-inner {
   position: relative;
   padding-top: 0.625rem;
   opacity: 0;
-  transform: translateY(-10px) scale(0.985);
-  transform-origin: top center;
-  transition: opacity 0.26s ease, transform 0.42s cubic-bezier(0.32, 0.72, 0, 1);
+  transition: opacity 0.48s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.pl-grid-panel-inner.is-open { opacity: 1; transform: none; }
+.pl-grid-panel-inner.is-open { opacity: 1; }
+.pl-grid-panel.is-closing .pl-grid-panel-inner { transition-duration: 0.24s; }
+.pl-grid-caret-track {
+  position: absolute;
+  z-index: 1;
+  top: calc(0.625rem - 7px);
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  transition: transform 0.48s cubic-bezier(0.4, 0, 0.2, 1);
+}
 /* A rotated square on top of the panel's top border: its own top/left borders
    draw the notch and its fill hides the border line underneath. */
 .pl-grid-caret {
   position: absolute;
-  top: calc(0.625rem - 7px);
+  top: 0;
+  left: 0;
   width: 14px;
   height: 14px;
   margin-left: -7px;
@@ -676,24 +678,7 @@ input[type='range']:active::-moz-range-thumb {
   border-top: 1px solid var(--border);
   border-left: 1px solid var(--border);
   border-top-left-radius: 3px;
-  transition: left 0.42s cubic-bezier(0.32, 0.72, 0, 1);
 }
-
-/* A panel's content arriving: on open (under the slot's own fade) and when a
-   same-row switch swaps it in place. */
-@keyframes pl-panel-swap {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
-}
-.animate-pl-panel-swap { animation: pl-panel-swap 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
-
-/* Track rows cascade in (delays inline). `backwards` so nothing lingers once
-   it's done. */
-@keyframes pl-track-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
-}
-.pl-track-in { animation: pl-track-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
 
 /* Per-row reveal, staggered - layered on top of the panel entrance so the
    list cascades in. `backwards` (not `both`) so the fill state is dropped
@@ -821,8 +806,6 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   .animate-wrld-view-in,
   .animate-wrld-view-out,
   .animate-wrld-icon-swap,
-  .animate-pl-panel-swap,
-  .pl-track-in,
   .wrld-q-row,
   .animate-wordle-shake,
   .animate-menu-pop,
@@ -849,7 +832,7 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
 
   .pl-grid-panel,
   .pl-grid-panel-inner,
-  .pl-grid-caret,
+  .pl-grid-caret-track,
   .nav-indicator,
   .control-motion,
   .cover-fade { transition: none !important; }
