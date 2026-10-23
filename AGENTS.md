@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.14** · updated 2026-10-23. Bump the version and date whenever you
+**Version 1.15** · updated 2026-10-23. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -342,6 +342,11 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-23: Deployed lyrics job endpoints can reject JSON with HTTP 415 even
+  though the local backend accepts it. Send server audio references as FormData
+  through `apiRequest` with auth headers; let fetch set the multipart boundary.
+  Keep the song/path reference so existing audio is not uploaded again.
 
 - 2026-10-23: WRLD and terminal unmount cleanup must hand fullscreen to each
   other instead of exiting the native window. WRLD reads the current native

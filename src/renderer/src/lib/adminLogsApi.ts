@@ -63,7 +63,8 @@ export const LOG_EVENTS = [
   'comp_proposal.', 'comp_proposal.submitted', 'comp_proposal.edited', 'comp_proposal.withdrawn', 'comp_proposal.reviewed',
   'comp_proposal.reversed', 'comp_proposal.apply_failed', 'comp_proposal.reverse_failed',
   'comp_proposal.batch_submitted', 'comp_proposal.batch_reviewed', 'comp_proposal.batch_reversed', 'comp_proposal.batch_withdrawn',
-  'comp.', 'comp.replaced', 'comp.replace_failed', 'comp.replace_preview', 'comp.replace_locked', 'comp.replace_invalid',
+  'comp.', 'comp.replace_started', 'comp.replace_progress', 'comp.replaced', 'comp.replace_failed', 'comp.replace_preview',
+  'comp.replace_locked', 'comp.replace_invalid',
   'comp_upload.', 'comp_upload.started', 'comp_upload.expired', 'comp_upload.rejected', 'comp_upload.purged',
   'lyrics.', 'lyrics.job_created', 'lyrics.job_started', 'lyrics.job_progress', 'lyrics.inference', 'lyrics.job_completed',
   'lyrics.job_failed', 'lyrics.job_cancelled', 'lyrics.job_discarded', 'lyrics.job_skipped', 'lyrics.job_deleted',
@@ -92,11 +93,15 @@ export interface LogFilters {
   status?: string
   /** Substring of the request path. */
   path?: string
+  /** Comp slug(s): entries about that comp (browsing, file errors, proposals,
+   *  uploads, replacements, lyrics jobs). The primary comp's slug also
+   *  matches the file views' `channel: null`. */
+  channel?: string
   /** Text in msg and exc. */
   q?: string
 }
 
-export const LOG_FILTER_KEYS: (keyof LogFilters)[] = ['level', 'category', 'event', 'user', 'ip', 'method', 'logger', 'status', 'path', 'q']
+export const LOG_FILTER_KEYS: (keyof LogFilters)[] = ['level', 'category', 'event', 'user', 'ip', 'method', 'logger', 'status', 'path', 'channel', 'q']
 
 export interface LogSearchParams extends LogFilters {
   /** ISO time, or a window back from now: `15m`, `2h`, `7d`. */

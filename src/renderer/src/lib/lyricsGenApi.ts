@@ -6,7 +6,7 @@
 // /accounts/donor/lyrics/, and the administrator's model choice under
 // /accounts/admin/lyrics/settings/. See backend docs/20-lyrics-generation.md.
 import { routeUrl } from './apiServers'
-import { authedRequest, authHeaders } from './apiClient'
+import { apiRequest, authedRequest, authHeaders } from './apiClient'
 import { getToken, trackIdToSongId } from './userApi'
 import { buildStreamUrl } from './juicewrldApi'
 import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from './donorFilesApi'
@@ -275,7 +275,10 @@ export function createLyricsJobFromServer(audio: LyricsServerAudio, req: LyricsG
   const source = audio.songId
     ? { song_id: audio.songId }
     : { file_path: audio.path, ...(audio.channel ? { channel: audio.channel } : {}) }
-  return authedRequest(`${BASE}/jobs/`, { method: 'POST', body: JSON.stringify({ ...source, ...requestFields(req) }), signal }, getToken())
+  // Some deployed servers only accept form data here, including for server audio.
+  const body = new FormData()
+  for (const [key, value] of Object.entries({ ...source, ...requestFields(req) })) body.append(key, String(value))
+  return apiRequest(`${BASE}/jobs/`, { method: 'POST', body, headers: authHeaders(getToken()), signal })
 }
 
 /** Starts a job on an upload. XHR rather than fetch so a 100 MB upload can report progress. */
