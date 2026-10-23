@@ -9,7 +9,7 @@ import {
   X, Pencil, PackageOpen, CheckSquare2, Square, MonitorSmartphone, Globe, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
   FolderPlus, FilePlus, ExternalLink, FileText, RefreshCw, Upload,
-  FolderInput, CornerLeftUp,
+  FolderInput, CornerLeftUp, Sparkles,
 } from 'lucide-react'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { useStore, useStorePick, StagedFileChange } from '../store/useStore'
@@ -1740,6 +1740,14 @@ export default function ApiFilesBrowser(): JSX.Element {
                     else showAppToast(`No song found for "${title}"`)
                   } catch { showAppToast("Couldn't look up the song") }
                 },
+              },
+              // Donors: the server reads the file in place (file_path + channel),
+              // so nothing is downloaded or uploaded. A Tracker match lets the
+              // dialog offer that song's lyrics for a sync.
+              isAudio && account?.is_donor && {
+                icon: Sparkles,
+                label: 'Generate lyrics',
+                onSelect: () => useStore.getState().openLyricsGen({ track: fileToTrack(entry, activeChannel), songId: trackerMatches.get(entry.path) ?? null }),
               },
               isAudio && 'divider',
               getMediaType(entry.name) === 'text' && { icon: FileText, label: 'View', onSelect: () => openApiText(entry) },

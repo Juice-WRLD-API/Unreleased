@@ -38,6 +38,7 @@ import WrldWidgets from './WrldWidgets'
 import LyricStageView from './LyricStageView'
 import LyricsControls from './LyricsControls'
 import { useVizStore } from '../store/vizStore'
+import { setTermFullscreen } from '../lib/terminal/fullscreenStore'
 import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
   usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
@@ -248,10 +249,19 @@ export default function WrldView(): JSX.Element {
   // gestures, or the browser's native Escape-exits-fullscreen behavior (web).
   useEffect(() => {
     if (isElectronApp) {
-      const off = elFullscreen?.onFullscreenChange?.((v: boolean) => setFullscreen(v))
-      return off
+      let pending = true
+      const off = elFullscreen?.onFullscreenChange?.((v: boolean) => {
+        pending = false
+        setFullscreen(v)
+      })
+      // The terminal can hand back a window that's already fullscreen.
+      void elFullscreen?.isFullscreen?.().then((v: boolean) => {
+        if (pending) setFullscreen(v)
+      }).catch(() => {})
+      return () => { pending = false; off?.() }
     }
     const onChange = (): void => setFullscreen(!!document.fullscreenElement)
+    onChange()
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [isElectronApp])
@@ -275,11 +285,13 @@ export default function WrldView(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [fullscreen, isElectronApp])
 
-  // If this page unmounts (navigating away) while still fullscreen, leave
-  // real OS/browser fullscreen too - otherwise the window would be stuck
-  // fullscreen with no obvious way back once the WRLD-specific toggle is gone.
+  // The terminal takes over fullscreen; other destinations leave it.
   useEffect(() => () => {
     if (!fullscreenRef.current) return
+    if (useStore.getState().activeView === 'terminal') {
+      setTermFullscreen(true)
+      return
+    }
     if (isElectronApp) elFullscreen?.setFullscreen?.(false)
     else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
   }, [])

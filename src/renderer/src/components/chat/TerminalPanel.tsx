@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { X } from 'lucide-react'
 import { IS_ELECTRON, ELECTRON_TITLEBAR_CLEARANCE_X } from '../../lib/platform'
 import { findChatCommand } from '../../lib/chatHelp'
 import { hasChatAccess } from '../../lib/chatAccess'
@@ -1093,15 +1092,12 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       <header className="h-9 shrink-0 flex items-center gap-3 px-3 bg-[var(--t-bar)] border-b border-[color:var(--t-border)] text-[11px] text-[color:var(--t-dim)]"
         // The desktop window controls (and downloads button) float over the top-right corner.
         style={IS_ELECTRON ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
-        <span className="flex gap-1.5" aria-hidden>
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
-          <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
-        </span>
-        <span className="flex-1 min-w-0 truncate text-center">{user}@unreleased: {path}</span>
-        <button onClick={onClose} title="Close terminal (exit)" aria-label="Close terminal" className="w-6 h-6 rounded flex items-center justify-center text-[color:var(--t-dim)] hover:text-[color:var(--t-fg)] hover:bg-[var(--t-border)]">
-          <X size={14} />
+        <button type="button" onClick={onClose} title="Close terminal (exit)" aria-label="Close terminal" className="h-6 flex items-center gap-1.5 rounded transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--t-fg)]">
+          <span aria-hidden className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
+          <span aria-hidden className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+          <span aria-hidden className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
         </button>
+        <span className="flex-1 min-w-0 truncate text-center">{user}@unreleased: {path}</span>
       </header>
 
       {screen ? (

@@ -6,7 +6,7 @@
 // login names). Everything here renders it as React text, never as HTML.
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  Globe, ScrollText, ShieldAlert, KeyRound, Gauge, FolderOpen, Cpu, MessageSquare, Server, Box,
+  Globe, ScrollText, ShieldAlert, KeyRound, Gauge, FolderOpen, Archive, MicVocal, Cpu, MessageSquare, Server, Box,
   Search, X as XIcon, SlidersHorizontal, Copy, Check, Filter, type LucideIcon,
 } from 'lucide-react'
 import { BASE_LOG_FIELDS, LOG_EVENTS, LOG_LEVELS, type LogCategory, type LogEntry, type LogFilters, type LogLevel } from '../lib/adminLogsApi'
@@ -37,7 +37,7 @@ export function LevelBadge({ level }: { level: string }): JSX.Element {
 
 export const CATEGORY_ICON: Record<LogCategory, LucideIcon> = {
   request: Globe, audit: ScrollText, security: ShieldAlert, auth: KeyRound, performance: Gauge,
-  files: FolderOpen, tasks: Cpu, chat: MessageSquare, cdn: Server, app: Box,
+  files: FolderOpen, comp: Archive, lyrics: MicVocal, tasks: Cpu, chat: MessageSquare, cdn: Server, app: Box,
 }
 
 export function CategoryLabel({ category }: { category: string }): JSX.Element {

@@ -4,7 +4,7 @@ import {
   RotateCcw, Trash2, WholeWord,
 } from 'lucide-react'
 import {
-  cancelAdminLyricsJob, deleteLyricsJob, getAdminLyricsJob, getLyricsJob, isFinished, lrcToPlain,
+  cancelAdminLyricsJob, deleteLyricsJob, getAdminLyricsJob, getLyricsJob, isFinished, jobServerAudio, jobTitle, lrcToPlain, serverAudioUrl,
   type LyricsAdminJob, type LyricsGenJob, type LyricsGenMode, type LyricsOutput, type LyricsSegment,
 } from '../lib/lyricsGenApi'
 import { isAbortError } from '../lib/apiClient'
@@ -14,7 +14,7 @@ import { showAppToast } from '../lib/appToast'
 import { pickLocalFile } from '../lib/terminal/pick'
 import { relativeTime } from './adminShared'
 import {
-  ConfirmButton, MODE_INFO, ModeTile, OUTPUT_LABEL, StatusPill, downloadJobOutput, lrcTime, outputName, outputsFor, saveText, timedLines,
+  ConfirmButton, MODE_INFO, ModeTile, OUTPUT_LABEL, StatusPill, downloadJobOutput, lrcTime, outputName, outputsFor, saveText, sourceHint, timedLines,
 } from './lyricsGenShared'
 
 // One lyrics job in the "Generate lyrics" dialog: followed live while it waits
@@ -32,7 +32,8 @@ export default function LyricsGenJobView({ jobId, admin, audio, backLabel, onBac
   jobId: string
   /** Read (and cancel) through the administrator routes. */
   admin: boolean
-  /** The audio the dialog holds; used for the play-along when it's this job's file. */
+  /** The audio file the dialog holds; used for the play-along when it's this
+   *  job's upload. A job on server audio plays along with its stream. */
   audio: File | null
   backLabel: string
   onBack: () => void
@@ -98,7 +99,9 @@ export default function LyricsGenJobView({ jobId, admin, audio, backLabel, onBac
   }
 
   const user = job && 'user' in job ? job.user.username : null
-  const playAlongAudio = audio && job && audio.name === job.filename ? audio : null
+  const server = job ? jobServerAudio(job) : null
+  const playAlongAudio = audio && job && !server && audio.name === job.filename ? audio : null
+  const playAlongUrl = server ? serverAudioUrl(server) : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -131,7 +134,7 @@ export default function LyricsGenJobView({ jobId, admin, audio, backLabel, onBac
           <div className="flex items-center gap-3 min-w-0">
             <ModeTile mode={job.mode} status={job.status} size={42} />
             <div className="flex-1 min-w-0">
-              <p className="text-text-primary text-sm font-semibold truncate" title={job.filename}>{job.filename || 'Untitled audio'}</p>
+              <p className="text-text-primary text-sm font-semibold truncate" title={sourceHint(job)}>{jobTitle(job) || 'Untitled audio'}</p>
               <p className="text-text-muted text-xs truncate">
                 {MODE_INFO[job.mode].title}
                 {job.language && <> · <span className="uppercase">{job.language}</span></>}
@@ -139,7 +142,7 @@ export default function LyricsGenJobView({ jobId, admin, audio, backLabel, onBac
                 {user && <> · by <span className="text-text-secondary">{user}</span></>}
               </p>
             </div>
-            <StatusPill status={job.status} />
+            <StatusPill status={job.status} progress={job.progress} />
           </div>
 
           {(job.status === 'queued' || job.status === 'processing') && (
@@ -169,7 +172,7 @@ export default function LyricsGenJobView({ jobId, admin, audio, backLabel, onBac
 
           {job.status === 'completed' && (job.mode === 'plain'
             ? <Transcript job={job} admin={admin} onContinue={(m, t) => onContinue(job, m, t)} />
-            : <SyncedResult job={job} admin={admin} audio={playAlongAudio} onContinue={(m, t) => onContinue(job, m, t)} />)}
+            : <SyncedResult job={job} admin={admin} audio={playAlongAudio} audioUrl={playAlongUrl} onContinue={(m, t) => onContinue(job, m, t)} />)}
         </>
       )}
     </div>
@@ -211,6 +214,19 @@ function Working({ job, admin, cancelling, onCancel }: {
       </div>
       <p className="relative mt-5 text-text-primary text-[15px] font-semibold">{title}</p>
       <p className="relative mt-1.5 text-text-muted text-xs leading-relaxed max-w-[340px]">{blurb}</p>
+      {!queued && job.progress !== undefined && (
+        <div className="relative mt-5 w-full max-w-[300px]">
+          <div className="h-1.5 rounded-full bg-surface-highest overflow-hidden">
+            <div
+              className="h-full w-full origin-left bg-accent transition-transform duration-[600ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none"
+              style={{ transform: `scaleX(${Math.min(job.progress, 100) / 100})` }}
+            />
+          </div>
+          <p className="mt-1.5 text-[11px] tabular-nums text-text-muted">
+            {job.progress ? `${job.progress}%` : 'Loading the audio and the model. After a restart this can take a while.'}
+          </p>
+        </div>
+      )}
       <p className="relative mt-5 text-[11px] text-text-muted/80">
         {admin ? `Started ${relativeTime(job.created_at)}.` : 'You can close this window. The job keeps going and waits under Your jobs.'}
       </p>
@@ -328,10 +344,11 @@ function NextStep({ title, blurb, children }: { title: string; blurb: string; ch
 }
 
 // A synced job: its lines with times, playable against the audio, or the raw LRC.
-function SyncedResult({ job, admin, audio, onContinue }: {
+function SyncedResult({ job, admin, audio, audioUrl, onContinue }: {
   job: LyricsGenJob
   admin: boolean
   audio: File | null
+  audioUrl: string | null
   onContinue: (mode: LyricsGenMode, text: string) => void
 }): JSX.Element {
   const [view, setView] = useState<'preview' | 'lrc'>('preview')
@@ -376,7 +393,7 @@ function SyncedResult({ job, admin, audio, onContinue }: {
           </p>
         )}
         {view === 'preview'
-          ? <PlayAlong lines={lines} words={words} audio={audio} filename={job.filename} />
+          ? <PlayAlong lines={lines} words={words} audio={audio} audioUrl={audioUrl} filename={job.filename} />
           : (
             <>
               <pre className="h-[380px] overflow-auto rounded-2xl border border-[var(--border)] bg-surface-overlay/30 px-4 py-3 text-xs leading-relaxed font-mono text-text-secondary whitespace-pre-wrap break-words select-text">
@@ -436,18 +453,21 @@ function lineAt(lines: LyricsSegment[], t: number): number {
 
 // The synced lines against the audio: the sung line lights up and stays in
 // view, and in word mode its words fill in as they're sung. Clicking a line
-// jumps there. Without the job's audio in hand, the lines show with their
-// times and the audio can be picked here (it isn't uploaded).
-function PlayAlong({ lines, words, audio, filename }: {
+// jumps there. A job on server audio streams it; otherwise, without the job's
+// audio in hand, the lines show with their times and the audio can be picked
+// here (it isn't uploaded).
+function PlayAlong({ lines, words, audio, audioUrl, filename }: {
   lines: LyricsSegment[]
   words: boolean
   audio: File | null
+  audioUrl: string | null
   filename: string
 }): JSX.Element {
   const [picked, setPicked] = useState<File | null>(null)
   const file = picked ?? audio
-  const src = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
-  useEffect(() => () => { if (src) URL.revokeObjectURL(src) }, [src])
+  const fileSrc = useMemo(() => (file ? URL.createObjectURL(file) : null), [file])
+  useEffect(() => () => { if (fileSrc) URL.revokeObjectURL(fileSrc) }, [fileSrc])
+  const src = fileSrc ?? audioUrl
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const listRef = useRef<HTMLDivElement>(null)

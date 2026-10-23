@@ -6,6 +6,7 @@ import Composer from './chat/Composer'
 import { useRoomPeople } from './chat/people'
 import TerminalPanel from './chat/TerminalPanel'
 import { getTermFullscreen, setTermFullscreen, syncBrowserFullscreen, useTermFullscreen } from '../lib/terminal/fullscreenStore'
+import { hasEscapeLayer } from '../hooks/useEscapeToClose'
 
 // Stands in when no chat room exists yet: everything that doesn't need a room
 // (playback, settings, files, the review queues...) still works.
@@ -29,15 +30,31 @@ export default function TerminalPage(): JSX.Element {
   const people = useRoomPeople(active)
   const full = useTermFullscreen()
 
-  // Closing the terminal leaves fullscreen so the rest of the site isn't stuck
-  // in it; the flag stays set, so reopening re-enters it (the hotkey that
-  // reopens the page is the gesture the browser needs).
+  // WRLD can take over fullscreen on return. Other destinations leave it;
+  // the terminal preference stays set for the next open.
   useEffect(() => {
     if (getTermFullscreen()) syncBrowserFullscreen(true)
-    return () => syncBrowserFullscreen(false)
+    return () => {
+      if (useStore.getState().activeView === 'wrld' && getTermFullscreen()) return
+      syncBrowserFullscreen(false)
+    }
   }, [])
-  // Esc (or F11) leaving browser fullscreen should drop the in-page one too.
+  // Leaving native or browser fullscreen should drop the in-page one too.
   useEffect(() => {
+    const electron = (window as unknown as { electron?: { onFullscreenChange?: (cb: (value: boolean) => void) => () => void } }).electron
+    if (electron?.onFullscreenChange) {
+      const unsubscribe = electron.onFullscreenChange((value) => { if (!value) setTermFullscreen(false) })
+      // Electron's native fullscreen has no built-in Escape binding.
+      const onKey = (e: KeyboardEvent): void => {
+        if (e.key !== 'Escape' || e.defaultPrevented || hasEscapeLayer() || !getTermFullscreen()) return
+        setTermFullscreen(false)
+      }
+      window.addEventListener('keydown', onKey)
+      return () => {
+        unsubscribe()
+        window.removeEventListener('keydown', onKey)
+      }
+    }
     const onChange = (): void => { if (!document.fullscreenElement) setTermFullscreen(false) }
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)

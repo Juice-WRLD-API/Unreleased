@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.13** · updated 2026-10-23. Bump the version and date whenever you
+**Version 1.14** · updated 2026-10-23. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -343,6 +343,10 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-10-23: WRLD and terminal unmount cleanup must hand fullscreen to each
+  other instead of exiting the native window. WRLD reads the current native
+  fullscreen state on mount; terminal uses Electron's bridge, not just the
+  browser Fullscreen API. Other destinations still exit fullscreen.
 - 2026-10-23: Publishing raw scroll pixels rerendered virtual lists even when
   their rows stayed the same, and Tracker cards scanned every row on scroll.
   Use the shared range hooks in `useVirtualWindow`, including the binary-search

@@ -6,11 +6,16 @@ import { useSyncExternalStore } from 'react'
 let on = false
 const listeners = new Set<() => void>()
 
-/** Browser (real) fullscreen, matched to `want`. Needs a user gesture to enter:
+/** Native or browser fullscreen, matched to `want`. Browsers need a user gesture to enter:
  *  the command's keypress, or the shortcut that reopens the page. Failures
  *  (iframe, denied, unsupported) just leave the in-page version. */
 export function syncBrowserFullscreen(want: boolean): void {
   try {
+    const electron = (window as unknown as { electron?: { setFullscreen?: (value: boolean) => Promise<void> } }).electron
+    if (electron?.setFullscreen) {
+      void electron.setFullscreen(want).catch(() => {})
+      return
+    }
     if (want && !document.fullscreenElement) void document.documentElement.requestFullscreen?.().catch(() => {})
     else if (!want && document.fullscreenElement) void document.exitFullscreen().catch(() => {})
   } catch { /* in-page fullscreen still applies */ }

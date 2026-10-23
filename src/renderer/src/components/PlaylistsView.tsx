@@ -631,6 +631,9 @@ export default function PlaylistsView(): JSX.Element {
   const [showHeroMenu, setShowHeroMenu] = useState(false)
   const heroMenuRef = useRef<HTMLDivElement>(null)
   const heroBtnRef = useRef<HTMLButtonElement>(null)
+  const [libraryActionMenu, setLibraryActionMenu] = useState<'import' | 'new' | null>(null)
+  const importBtnRef = useRef<HTMLButtonElement>(null)
+  const newBtnRef = useRef<HTMLButtonElement>(null)
 
   // Drag-to-reorder
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -3198,20 +3201,38 @@ export default function PlaylistsView(): JSX.Element {
             <div className="flex items-center gap-2">
               {isElectron && (
                 <>
-                  <button onClick={handleImportM3u} disabled={m3uImporting} title="Import an .m3u/.m3u8 playlist into your library" className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold border border-[var(--border)] hover:bg-surface-raised active:scale-[0.97] transition-all disabled:opacity-50">
-                    {m3uImporting ? <Loader2 size={16} className="animate-spin" /> : <FileUp size={16} strokeWidth={2.2} />} Import M3U
+                  <button ref={importBtnRef} onClick={() => setLibraryActionMenu(v => v === 'import' ? null : 'import')} aria-haspopup="menu" aria-expanded={libraryActionMenu === 'import'} className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold border border-[var(--border)] hover:bg-surface-raised active:scale-[0.97] transition-all">
+                    {m3uImporting || titlesImport?.state === 'loading' ? <Loader2 size={16} className="animate-spin" /> : <FileUp size={16} strokeWidth={2.2} />} Import
                   </button>
-                  <button onClick={handleImportTitles} disabled={titlesImport?.state === 'loading'} title="Import a text file of song titles as a synced playlist" className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold border border-[var(--border)] hover:bg-surface-raised active:scale-[0.97] transition-all disabled:opacity-50">
-                    {titlesImport?.state === 'loading' ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} strokeWidth={2.2} />} Import Titles
-                  </button>
+                  {libraryActionMenu === 'import' && (
+                    <AnchoredContextMenu
+                      anchorRef={importBtnRef}
+                      title="Import"
+                      onClose={() => setLibraryActionMenu(null)}
+                      className="w-48"
+                      items={[
+                        { icon: FileUp, label: 'M3U', hint: 'Import an .m3u/.m3u8 playlist into your library', onSelect: handleImportM3u, disabled: m3uImporting, loading: m3uImporting },
+                        { icon: FileText, label: 'Titles', hint: 'Import a text file of song titles as a synced playlist', onSelect: handleImportTitles, disabled: titlesImport?.state === 'loading', loading: titlesImport?.state === 'loading' },
+                      ]}
+                    />
+                  )}
                 </>
               )}
-              <button onClick={() => { setCreatingFolder(true); setNewFolderName('') }} title="New folder" className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold border border-[var(--border)] hover:bg-surface-raised active:scale-[0.97] transition-all">
-                <FolderPlus size={16} strokeWidth={2.2} /> New Folder
+              <button ref={newBtnRef} onClick={() => setLibraryActionMenu(v => v === 'new' ? null : 'new')} aria-haspopup="menu" aria-expanded={libraryActionMenu === 'new'} className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-accent text-black text-sm font-semibold shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.97] transition-all">
+                <Plus size={16} strokeWidth={2.5} /> New
               </button>
-              <button onClick={() => setCreating(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-accent text-black text-sm font-semibold shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.97] transition-all">
-                <Plus size={16} strokeWidth={2.5} /> New Playlist
-              </button>
+              {libraryActionMenu === 'new' && (
+                <AnchoredContextMenu
+                  anchorRef={newBtnRef}
+                  title="New"
+                  onClose={() => setLibraryActionMenu(null)}
+                  className="w-48"
+                  items={[
+                    { icon: ListMusic, label: 'Playlist', onSelect: () => setCreating(true) },
+                    { icon: FolderPlus, label: 'Folder', onSelect: () => { setCreatingFolder(true); setNewFolderName('') } },
+                  ]}
+                />
+              )}
             </div>
           )}
         </div>
@@ -3337,7 +3358,7 @@ export default function PlaylistsView(): JSX.Element {
           ], mainGridCols)}
 
           {playlists.length === 0 && (
-            <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet — click "New Playlist" to create one.</p>
+            <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet — choose Playlist from the "New" menu to create one.</p>
           )}
         </div>
 
