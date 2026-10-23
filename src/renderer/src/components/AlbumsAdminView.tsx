@@ -506,11 +506,11 @@ export default function AlbumsAdminView(): JSX.Element {
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
       <Shield size={28} className="text-text-muted" />
       <p className="text-text-primary font-semibold text-sm">Two-factor authentication required</p>
-      <p className="text-xs text-text-muted max-w-xs">Album management needs 2FA enabled on your account. Set it up from Admin → Security.</p>
+      <p className="text-xs text-text-muted max-w-xs">Album management needs 2FA enabled on your account. Opening Admin walks you through setting it up.</p>
       <button
-        onClick={() => { setActiveAdminTab('security'); setActiveView('admin') }}
+        onClick={() => { setActiveAdminTab('proposals'); setActiveView('admin') }}
         className="text-xs text-accent hover:underline"
-      >Go to Security</button>
+      >Set up 2FA</button>
     </div>
   )
 

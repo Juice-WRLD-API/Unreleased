@@ -4,7 +4,7 @@ import {
   RotateCcw, Trash2, WholeWord,
 } from 'lucide-react'
 import {
-  cancelAdminLyricsJob, deleteLyricsJob, getAdminLyricsJob, getLyricsJob, isFinished,
+  cancelAdminLyricsJob, deleteLyricsJob, getAdminLyricsJob, getLyricsJob, isFinished, lrcToPlain,
   type LyricsAdminJob, type LyricsGenJob, type LyricsGenMode, type LyricsOutput, type LyricsSegment,
 } from '../lib/lyricsGenApi'
 import { isAbortError } from '../lib/apiClient'
@@ -398,8 +398,8 @@ function SyncedResult({ job, admin, audio, onContinue }: {
       </section>
 
       {!admin && job.mode === 'synced' && (
-        <NextStep title="Time every word" blurb="Upgrade to per-word timing. These line times are kept as guides, so each word stays inside its line.">
-          <button onClick={() => onContinue('word_synced', job.result.synced_lyrics ?? '')} className={NEXT_BTN}>
+        <NextStep title="Time every word" blurb="Upgrade to per-word timing. Word sync gets these lyrics as plain text, without the line times.">
+          <button onClick={() => onContinue('word_synced', reviewText || lrcToPlain(job.result.synced_lyrics ?? ''))} className={NEXT_BTN}>
             <WholeWord size={15} /> Word sync
           </button>
         </NextStep>

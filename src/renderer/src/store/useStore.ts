@@ -1596,7 +1596,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Returning to Playlists with a playlist already open (it stays selected
     // across tab switches - see playlistsSelectedId above) should restore its
     // ?id= too, not just land on the bare list. Same idea for Admin: land
-    // back on whichever section (Users, Security, ...) was last open there
+    // back on whichever section (Users, Logs, ...) was last open there
     // instead of always resetting to the base /admin.
     const selectedPlaylistId = get().playlistsSelectedId
     const activeAdminTab = get().activeAdminTab

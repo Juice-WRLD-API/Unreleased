@@ -314,7 +314,7 @@ export function useEditorProfileView(): {
   }, [canReviewStaff, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
 
   // Admins without 2FA get everything in the Admin tile hidden except the
-  // Security box itself, so a compromised (password-only) admin account
+  // 2FA box itself, so a compromised (password-only) admin account
   // can't be used to browse or act on admin-only data from this dashboard.
   const otpLocked = isAdmin && adminPreview?.otpEnabled === false
   const canReviewProposals = canReviewStaff && !otpLocked

@@ -25,7 +25,7 @@ import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/report
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -47,7 +47,6 @@ export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   beta: '/beta',
   lyrics: '/lyrics-gen',
   logs: '/logs',
-  security: '/security',
 }
 
 // Reverse of the above, for turning a URL back into a tab on load/back-forward.
@@ -61,7 +60,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs' | 'security'
+  iconKey: 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
   badge?: number
 }
 
@@ -208,7 +207,6 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     { id: 'beta',         label: 'Beta',         iconKey: 'beta' },
     { id: 'lyrics',       label: 'Lyrics',       iconKey: 'lyrics' },
     { id: 'logs',         label: 'Logs',         iconKey: 'logs' },
-    { id: 'security',     label: 'Security',     iconKey: 'security' },
   ]
   const nav = isFullAdmin ? fullNav : fullNav.filter(n => managerNavIds.includes(n.id))
 

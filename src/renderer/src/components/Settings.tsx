@@ -110,6 +110,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
@@ -1259,6 +1260,27 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Security</p>
+                    {/* Setup is admin-only on the server (GET otp/setup/ answers
+                        "Administrator access required."), and Admin already
+                        parks an admin without 2FA on its setup panel. */}
+                    <Row
+                      icon={ShieldCheck}
+                      iconColor={account.otp_enabled ? '#059669' : '#6b7280'}
+                      label="Two-factor authentication"
+                      sub={account.otp_enabled
+                        ? 'Sign-ins ask for a code from your authenticator app'
+                        : account.is_administrator ? 'Required for admin tools' : 'Not turned on for this account'}
+                    >
+                      {account.otp_enabled ? (
+                        <span className="shrink-0 text-[11px] font-semibold text-emerald-500">On</span>
+                      ) : account.is_administrator ? (
+                        <button onClick={() => openMainView('admin')} className="shrink-0 text-[11px] font-semibold text-accent hover:underline">Set up</button>
+                      ) : (
+                        <span className="shrink-0 text-[11px] font-semibold text-text-muted">Off</span>
+                      )}
+                    </Row>
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Passkeys</p>
                     <Passkeys />
