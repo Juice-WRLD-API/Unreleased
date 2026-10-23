@@ -17,7 +17,7 @@ const SYNC_KEYS = [
   'navControlOrder', 'navControlVisibility', 'settingsTab',
   'appTextScale', 'lyricsScale', 'lyricsAlign', 'lyricsBlur', 'appFont', 'lyricsFont', 'gradientsEnabled', 'surfaceGradientsEnabled',
   'lyricsColorActive', 'lyricsColorInactive', 'lyricsBlurAmount', 'lyricsOverride', 'fullEraNames',
-  'crossfadeEnabled', 'crossfadeDuration', 'pauseFadeEnabled', 'preferOgVersion',
+  'crossfadeEnabled', 'crossfadeDuration', 'pauseFadeEnabled', 'preferOgVersion', 'rememberQueue',
   // Last.fm connect/disconnect can happen in the pop-out Settings window; the
   // session itself is in shared localStorage, but the scrobbler (main window
   // only) keys off these store fields, so they must be mirrored.

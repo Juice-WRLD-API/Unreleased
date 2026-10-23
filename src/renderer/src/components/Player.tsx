@@ -273,6 +273,18 @@ export default function Player(): JSX.Element {
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
     const audio = e.currentTarget
     applyRate(audio)
+    if (audio === getActive() && resumeTrackId.current) {
+      const state = useStore.getState()
+      if (state.currentTrack?.id === resumeTrackId.current) {
+        const duration = Number.isFinite(audio.duration) ? audio.duration : state.currentTrack.duration
+        const time = duration > 0 ? Math.min(state.currentTime, Math.max(0, duration - 0.1)) : state.currentTime
+        try { audio.currentTime = time } catch { return }
+        recoveryResumeAt.current = time
+        setCurrentTime(time)
+        if (duration > 0) setProgress(time / duration)
+      }
+      resumeTrackId.current = null
+    }
     // Both slots share this handler - only the active slot finishing its
     // load means the current track is ready (a preload landing on the
     // inactive slot doesn't unblock preloading the track after it).
@@ -368,6 +380,9 @@ export default function Player(): JSX.Element {
   // metadata is ready. Remember which recovery owns that reload so the native
   // reset cannot overwrite the user's live resume intent.
   const recoveryLoading = useRef<{ audio: HTMLAudioElement; generation: number } | null>(null)
+  // Restored tracks load paused with preload="none". Keep their position
+  // through load's zero-time events, then seek when metadata becomes ready.
+  const resumeTrackId = useRef(useStore.getState().currentTime > 0 ? currentTrack?.id ?? null : null)
 
   const getActive = (): HTMLAudioElement | null =>
     activeSlot.current === 'A' ? slotA.current : slotB.current
@@ -527,7 +542,7 @@ export default function Player(): JSX.Element {
       if (audio.duration) setProgress(target / audio.duration)
     }
     _getAudioDuration = () => getActive()?.duration ?? 0
-    _getAudioCurrentTime = () => getActive()?.currentTime ?? 0
+    _getAudioCurrentTime = () => resumeTrackId.current ? useStore.getState().currentTime : getActive()?.currentTime ?? 0
     return () => { _seek = null; _getAudioDuration = null; _getAudioCurrentTime = null }
   }, []) // stable — only depends on refs
 
@@ -635,6 +650,7 @@ export default function Player(): JSX.Element {
   // Load audio into active slot when track changes
   useEffect(() => {
     const audio = getActive()
+    if (resumeTrackId.current !== currentTrack?.id) resumeTrackId.current = null
     if (!audio || !currentTrack) return
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
 
@@ -1291,7 +1307,7 @@ export default function Player(): JSX.Element {
     // The media load algorithm resets currentTime to zero and emits timeupdate
     // before loadedmetadata. That is transport noise, not a user seek or real
     // playback progress, so keep both the UI and recovery intent unchanged.
-    if (recoveryLoading.current?.audio === audio) return
+    if (recoveryLoading.current?.audio === audio || resumeTrackId.current === useStore.getState().currentTrack?.id) return
 
     // Liveness signal for the stall detector. Compared for *any* change, not
     // just forward motion, so a seek backwards doesn't look like a frozen
@@ -1318,7 +1334,7 @@ export default function Player(): JSX.Element {
     const dur = isFinite(audio.duration) ? audio.duration : (currentTrack?.duration || 0)
     if (dur > 0) setProgress(audio.currentTime / dur)
 
-    creditPlayIfListened(audio.currentTime, dur)
+    if (!audio.paused) creditPlayIfListened(audio.currentTime, dur)
 
     // Sleep timer
     if (sleepTimerEnd && Date.now() >= sleepTimerEnd) {
@@ -1479,6 +1495,8 @@ export default function Player(): JSX.Element {
           currentTrack: track,
           currentTrackFull: isSameTrack ? useStore.getState().currentTrackFull : null,
           isPlaying: wasPlaying,
+          currentTime: na?.currentTime ?? 0,
+          progress: na && Number.isFinite(na.duration) && na.duration > 0 ? na.currentTime / na.duration : 0,
         })
         // This setState bypasses nextTrack(), which is what normally tops up a
         // lazily-loaded queue and applies the preferred-version swap — without
@@ -1540,7 +1558,7 @@ export default function Player(): JSX.Element {
       restartCurrentTrack()
       return
     }
-    if (audio && audio.currentTime > 3) {
+    if (audio && getAudioCurrentTime() > 3) {
       restartCurrentTrack()
       return
     }

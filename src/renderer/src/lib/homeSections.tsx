@@ -1,5 +1,6 @@
-import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album, MessagesSquare } from 'lucide-react'
+import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album, MessagesSquare, Wrench } from 'lucide-react'
 import type { ReactNode } from 'react'
+import type { AccountUser } from './userApi'
 
 // The Home dashboard's sections - each independently shown/hidden from
 // Settings → Appearance → Home screen. `id` is the stable key persisted in
@@ -11,6 +12,8 @@ export interface HomeSectionDef {
   icon: ReactNode
   /** Only offered to managers/administrators. */
   staffOnly?: boolean
+  /** Only offered to donors and administrators. */
+  donorOnly?: boolean
 }
 
 export const HOME_SECTIONS: HomeSectionDef[] = [
@@ -23,7 +26,15 @@ export const HOME_SECTIONS: HomeSectionDef[] = [
   { id: 'radio', label: '999 FM', icon: <Radio size={18} /> },
   { id: 'listening', label: 'Your listening', icon: <Music2 size={18} /> },
   { id: 'liked', label: 'Liked songs shortcut', icon: <Heart size={18} /> },
+  { id: 'tools', label: 'Tools', icon: <Wrench size={18} />, donorOnly: true },
 ]
+
+// The Tools section's only tool so far is lyrics generation, a donor feature
+// that administrators also reach (everyone's jobs, the model setting) - the
+// same check as the Tools menu's "Generate lyrics…".
+export function hasHomeTools(account: AccountUser | null): boolean {
+  return !!(account?.is_donor || account?.is_administrator)
+}
 
 // Everything ships on - a user opts out rather than in.
 export const DEFAULT_HOME_SECTION_VISIBILITY: Record<string, boolean> = Object.fromEntries(

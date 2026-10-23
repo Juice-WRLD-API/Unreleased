@@ -238,7 +238,7 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       runHotkeyAction('pause')
       useStore.setState({
         isPlaying: false, currentTrack: null, currentTrackFull: null, queue: [], queueIndex: -1, progress: 0, currentTime: 0,
-        queueFilter: null, queueSource: null, queueSongPool: null, radioMode: false, radioNext: null, _radioWaiting: false,
+        queueOriginal: null, queueFilter: null, queueSource: null, queueSongPool: null, radioMode: false, radioNext: null, radioFilter: null, _radioWaiting: false,
       })
       ctx.print('⏹ stopped', 'ok')
     },

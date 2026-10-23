@@ -38,7 +38,7 @@ import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTit
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { CompactGroup } from '../lib/compactGroups'
-import { useVirtualWindow } from '../hooks/useVirtualWindow'
+import { useVirtualWindow, useVariableVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
 import { formatDuration, displayDate, dateSortValue, compareDates } from '../lib/format'
 import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
@@ -1533,36 +1533,11 @@ function VirtualSongGrid({
     return { offsets: out, totalHeight: Math.max(0, y - GRID_GAP) }
   }, [rowCount, cols, songs, openSections, baseCardH, m])
 
-  // Windowing against the shared scroller. Uniform-stride binary search isn't
-  // needed - offsets is already materialized, so the visible range is a scan
-  // over it (cheap: it's one entry per row, and it's already in memory).
-  const [scrollTop, setScrollTop] = useState(0)
-  const [clientH, setClientH] = useState(0)
-  const [offsetTop, setOffsetTop] = useState(0)
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const onScroll = (): void => setScrollTop(el.scrollTop)
-    const measure = (): void => {
-      setClientH(el.clientHeight)
-      setScrollTop(el.scrollTop)
-      setOffsetTop(contentRef.current ? contentRef.current.offsetTop : 0)
-    }
-    measure()
-    el.addEventListener('scroll', onScroll, { passive: true })
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    if (contentRef.current) ro.observe(contentRef.current)
-    return () => { el.removeEventListener('scroll', onScroll); ro.disconnect() }
-  }, [scrollRef])
-
-  const viewTop = Math.max(0, scrollTop - offsetTop) - clientH   // one viewport of overscan
-  const viewBottom = Math.max(0, scrollTop - offsetTop) + clientH * 2
+  const { start, end } = useVariableVirtualWindow(scrollRef, contentRef, offsets, totalHeight)
 
   return (
     <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
-      {width > 0 && Array.from({ length: rowCount }, (_, r) => r)
-        .filter((r) => offsets[r + 1] >= viewTop && offsets[r] <= viewBottom)
+      {width > 0 && Array.from({ length: end - start }, (_, r) => start + r)
         .map((r) => songs.slice(r * cols, r * cols + cols).map((song, c) => {
           const open = openSections.get(song.id)
           return (

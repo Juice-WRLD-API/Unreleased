@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.11** · updated 2026-10-23. Bump the version and date whenever you
+**Version 1.13** · updated 2026-10-23. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -292,6 +292,7 @@ marked pre-release.
 | Main-process tests | `npm run test:electron` |
 | Smoke test | `npm run electron:smoke` |
 | Terminal coverage | `npm run terminal:check-coverage` |
+| Virtual list regression tests | `node --test scripts/renderer-virtual-window.test.cjs` |
 | Package installer | `npm run electron:build` (long, use a visible window) |
 | Release | `scripts\release.bat` (stable: bump, push, GitHub release, CI builds; beta: local build to the gated beta channel) |
 
@@ -342,6 +343,17 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-10-23: Publishing raw scroll pixels rerendered virtual lists even when
+  their rows stayed the same, and Tracker cards scanned every row on scroll.
+  Use the shared range hooks in `useVirtualWindow`, including the binary-search
+  variant for expanded cards. Keep ranges clamped when filtering shrinks a
+  list. Playlist quick views use natural height, card transforms and one fade;
+  don't restore per-frame height animation or nested row entrances.
+- 2026-10-23: Remember queue is device-local and restores paused. Only the main
+  renderer may save it; pop-outs hold incomplete queue mirrors. Keep embedded
+  art/lyrics out of snapshots and save position separately. Audio loading emits
+  zero-time events before metadata: preserve the restored position until the
+  active slot can seek, including donor/session-edit files that resolve later.
 - 2026-10-23: Tracker card row offsets include only the open detail sections.
   Keeping a closed section mounted for an exit would overflow the computed
   row height. Fade detail changes with `useContentMotion`; use
