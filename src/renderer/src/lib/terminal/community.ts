@@ -2,7 +2,7 @@ import { relativeTime } from '../../components/adminShared'
 import { APP_VERSION } from '../appVersion'
 import { fetchRecentBroadcasts } from '../broadcastApi'
 import { getSongsByIds } from '../juicewrldApi'
-import { FEEDBACK_CATEGORIES, newReportId, SONG_ISSUE_TYPES, type FeedbackCategory, type SongIssueType } from '../reports'
+import { FEEDBACK_CATEGORIES, newReportId, REPORT_LYRICS_MAX, SONG_ISSUE_TYPES, type FeedbackCategory, type SongIssueType } from '../reports'
 import { dedupeAutomatedFeedback, listFeedback, listSongReports, reviewSongReport, submitFeedback, submitSongReport, type SongReportStatus } from '../reportsApi'
 import { createTierlist, deleteTierlist, getPublicTierlist, listTierlists, updateTierlist, type ServerTierlist, type TierlistData } from '../tierlistApi'
 import { useStore } from '../../store/useStore'
@@ -126,21 +126,26 @@ const feedbackCommand: TermCommand = {
 
 const reportCommand: TermCommand = {
   name: 'report', group: 'Content',
-  usage: 'report song <song> --issues wrong_info,missing_lyrics -- <message> [--contact how] · ls [pending|resolved] · review <id> [--status pending|resolved] [--note text]',
+  usage: 'report song <song> --issues wrong_info,missing_lyrics -- <message> [--lyrics "text" | --paste] [--contact how] · ls [pending|resolved] · review <id> [--status pending|resolved] [--note text]',
   description: `Report a problem with a song (issues: ${SONG_ISSUE_TYPES.join(', ')}), or (editors) list and review reports`,
   covers: ['reportsApi.submitSongReport', 'reportsApi.listSongReports', 'reportsApi.reviewSongReport'],
   complete: (before, partial) => (before.length === 0 ? ['song', 'ls', 'review'].filter((v) => v.startsWith(partial.toLowerCase())) : before[0] === 'song' ? completeSongs(before.slice(1).filter((w) => w !== '--'), partial) : []),
   run: async (args, ctx) => {
     const dash = args.split(/\s+--\s+/)
-    const { rest, bool, value } = parseArgs(dash[0], ['issues', 'contact', 'status', 'note'])
+    const { rest, bool, value } = parseArgs(dash[0], ['issues', 'contact', 'status', 'note', 'lyrics'])
     const message = dash.slice(1).join(' -- ').trim()
     const sub = (rest.shift() ?? '').toLowerCase()
     if (sub === 'song') {
+      let lyrics = value.get('lyrics') ?? ''
+      if (bool.has('paste')) {
+        try { lyrics = await navigator.clipboard.readText() } catch { fail('the clipboard is not available here (try: --lyrics "text")') }
+      }
+      if (lyrics.length > REPORT_LYRICS_MAX) fail(`lyrics are limited to ${REPORT_LYRICS_MAX} characters`)
       const song = await songFromArg(rest.join(' '))
       const issues = (value.get('issues') ?? 'other').split(',').map((s) => s.trim()).filter(Boolean) as SongIssueType[]
       const bad = issues.find((i) => !SONG_ISSUE_TYPES.includes(i))
       if (bad) fail(`unknown issue "${bad}" (${SONG_ISSUE_TYPES.join(', ')})`)
-      await submitSongReport({ kind: 'song', id: newReportId(), songId: song.id, songName: song.name, issues, message, appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0 }, value.get('contact'))
+      await submitSongReport({ kind: 'song', id: newReportId(), songId: song.id, songName: song.name, issues, message, ...(lyrics.trim() ? { lyrics: lyrics.trim() } : {}), appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0 }, value.get('contact'))
       ctx.print(`reported ${song.name} - thank you`, 'ok')
     } else if (sub === 'ls') {
       signedIn()
