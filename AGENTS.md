@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.18** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.19** · updated 2026-10-24. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -249,8 +249,9 @@ Goal: every API request the UI can make can also be made from the terminal.
   explicit not-applicable entry with a reason in
   `scripts/check-terminal-coverage.mjs`.
 - New commands must not reuse a chat slash command name (`role`, `feedback`, `broadcast`, `np`…).
-- `unreleased-cli/` compiles in some site modules through `npm run sync` (copied
-  from `../music-player-web`, recorded in `site/SYNCED_FROM.json`). New site
+- `unreleased-cli/` compiles in some app modules through `npm run sync` (copied
+  from `../unreleased-app`, recorded in `site/SYNCED_FROM.json`; pass another
+  checkout explicitly to sync from it). New app
   terminal commands are separate ports into the CLI's `src/`.
 
 ---
@@ -358,6 +359,12 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-24: shared CLI uploads used the app's browser token lookup, so their
+  XHR requests could be sent unsigned even after CLI login. Its file-backed
+  localStorage now delegates `unreleased:authToken` to the CLI config/environment;
+  keep that bridge when adding shared API clients. `npm test` checks uploads,
+  comp replacement, lyrics, mixed playlists and live logs with isolated data.
 
 - 2026-10-24: Library artist details silently stopped at 60 songs, and Play
   ignored the visible album/artist search results. Use the shared virtual song
