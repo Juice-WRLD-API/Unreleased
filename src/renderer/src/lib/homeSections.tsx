@@ -1,4 +1,4 @@
-import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album, MessagesSquare, Wrench } from 'lucide-react'
+import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album, MessagesSquare, Wrench, CalendarDays } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { AccountUser } from './userApi'
 
@@ -19,6 +19,7 @@ export interface HomeSectionDef {
 export const HOME_SECTIONS: HomeSectionDef[] = [
   { id: 'chat', label: 'Staff chat', icon: <MessagesSquare size={18} />, staffOnly: true },
   { id: 'recent', label: 'Recently played', icon: <Disc3 size={18} /> },
+  { id: 'onthisday', label: 'On this day', icon: <CalendarDays size={18} /> },
   { id: 'news', label: 'News', icon: <Newspaper size={18} /> },
   { id: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
   { id: 'albums', label: 'Albums', icon: <Album size={18} /> },

@@ -7,6 +7,7 @@ import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
 import { hasChatAccess } from '../lib/chatAccess'
 import { hasHomeTools } from '../lib/homeSections'
+import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
 
@@ -139,6 +140,12 @@ export default function HomeViewMobile(): JSX.Element {
             ))}
           </div>
         </Section>
+      )}
+
+      {showSection('onthisday') && (
+        <div className="px-4">
+          <OnThisDayTile onContextMenu={() => {}} span="shrink-0" />
+        </div>
       )}
 
       {showSection('news') && newsItems.length > 0 && (

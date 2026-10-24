@@ -22,6 +22,11 @@ function currentTrack(): NonNullable<ReturnType<typeof st>['currentTrack']> {
 // number - the same shortcut a shell gives you with a numbered menu.
 let lastFind: JWApiSong[] = []
 
+/** Lets another command's numbered listing (onthisday) answer `play N` too. */
+export function rememberFind(songs: JWApiSong[]): void {
+  lastFind = songs
+}
+
 export async function songFromArg(arg: string): Promise<JWApiSong> {
   const n = /^\d+$/.test(arg) ? Number(arg) : 0
   if (n && lastFind.length > 0) return lastFind[n - 1] ?? fail(`pick a number from 1 to ${lastFind.length}`)

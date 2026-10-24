@@ -16,6 +16,7 @@ import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 import { hasHomeTools } from '../lib/homeSections'
+import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
 import { AnchoredContextMenu } from './ContextMenu'
@@ -383,6 +384,7 @@ export default function HomeViewDesktop(): JSX.Element {
   )
 
   const showRecent = showSection('recent') && recent.length > 0
+  const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
   // TEMP: albums hidden on the home page
@@ -403,7 +405,7 @@ export default function HomeViewDesktop(): JSX.Element {
     : []
   const showTools = showSection('tools') && tools.length > 0
 
-  const mainShown = showRecent || showPlaylists || showAlbums || showTools
+  const mainShown = showRecent || showOnThisDay || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames
 
   return (
@@ -501,6 +503,12 @@ export default function HomeViewDesktop(): JSX.Element {
                   <RecentTile
                     tracks={recent}
                     onPlay={openTrack}
+                    onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
+                    span="shrink-0"
+                  />
+                )}
+                {showOnThisDay && (
+                  <OnThisDayTile
                     onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
                     span="shrink-0"
                   />

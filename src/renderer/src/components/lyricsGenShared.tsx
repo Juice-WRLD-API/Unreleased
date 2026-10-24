@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlignLeft, Ban, Check, Loader2, Type, WholeWord, X, type LucideIcon } from 'lucide-react'
 import {
   fetchAdminLyricsJobOutput, fetchLyricsJobOutput,
-  type LyricsGenJob, type LyricsGenMode, type LyricsJobStatus, type LyricsOutput, type LyricsSegment,
+  type LyricsGenJob, type LyricsGenMode, type LyricsJobStatus, type LyricsOutput,
 } from '../lib/lyricsGenApi'
 import { saveBlob } from '../lib/terminal/pick'
 
@@ -111,26 +111,4 @@ export const sourceHint = (job: Pick<LyricsGenJob, 'filename' | 'source'>): stri
 
 export function saveText(text: string, name: string): void {
   saveBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), name)
-}
-
-/** Lines with start times, from the job's segments or, failing that, its LRC. */
-export function timedLines(job: LyricsGenJob): LyricsSegment[] {
-  const segs = job.result.segments
-  if (segs?.length) return segs
-  const out: LyricsSegment[] = []
-  for (const raw of (job.result.synced_lyrics ?? '').split(/\r?\n/)) {
-    const m = /^\s*\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\](.*)$/.exec(raw)
-    if (!m) continue
-    const start = Number(m[1]) * 60 + Number(m[2].replace(':', '.'))
-    out.push({ start, end: start, text: m[3].replace(/<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>/g, '').trim() })
-  }
-  for (let i = 0; i < out.length; i++) out[i].end = out[i + 1]?.start ?? out[i].start + 4
-  return out
-}
-
-/** 83.4 -> "1:23.40", the way LRC writes it. */
-export function lrcTime(sec: number): string {
-  const m = Math.floor(sec / 60)
-  const s = sec - m * 60
-  return `${m}:${s.toFixed(2).padStart(5, '0')}`
 }
