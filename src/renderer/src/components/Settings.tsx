@@ -2037,7 +2037,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     )}
                   </div>
                   <div className="pl-[34px] space-y-1.5">
-                    {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account)) && (!section.donorOnly || hasHomeTools(account))).map((section) => {
+                    {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account)) && (!section.toolsOnly || hasHomeTools(account))).map((section) => {
                       const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                       return (
                         <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">

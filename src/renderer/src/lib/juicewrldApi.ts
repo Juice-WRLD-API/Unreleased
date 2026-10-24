@@ -361,6 +361,27 @@ export function getSongById(id: number, signal?: AbortSignal): Promise<JWApiSong
   return entry.promise
 }
 
+// Sync's reads (lib/catalogSync): full rows, lyrics included, for the songs it
+// saves offline. Never written to the offline cache: hundreds of song pages
+// would push everything else out of it (apiCache's MAX_ENTRIES), and a saved
+// song carries its own copy of what's here. The bulk one is for a pass with
+// many songs to get - one request instead of one per song.
+export function fetchCatalogWithLyrics(signal?: AbortSignal): Promise<JWApiSong[]> {
+  return apiRequest<JWApiSong[]>(apiUrl('/songs/', { all: 'true', omit: 'groupbuy_info' }), {
+    signal,
+    cache: 'no-cache',
+    parseError: async (res) => `JW API error ${res.status}`,
+  })
+}
+
+export function fetchSongUncached(id: number, signal?: AbortSignal): Promise<JWApiSong> {
+  return apiRequest<JWApiSong>(apiUrl(`/songs/${id}/`), {
+    signal,
+    cache: 'no-cache',
+    parseError: async (res) => `JW API error ${res.status}`,
+  })
+}
+
 // ─── Batch fetch (GET /songs/?ids=...) ─────────────────────────────────────
 // The docs page (and this comment, formerly) claimed `ids=` filters by
 // internal `id` and replies with CSV. Neither is true any more: live probes

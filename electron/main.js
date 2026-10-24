@@ -224,21 +224,32 @@ process.on('unhandledRejection', (reason) => {
 // re-download of a changed track, destroy the old good copy with partial data.
 // `headers` go on the first request only: a redirect may leave the host, and
 // the one caller that passes any (the beta build download) sends a secret.
-function downloadFile(url, dest, onProgress, headers) {
+// Aborting `signal` (Sync's pause) drops the request and its `.part` file.
+function downloadFile(url, dest, onProgress, headers, signal) {
   const tmp = dest + '.part'
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('Cancelled'))
+    let req = null
+    const onAbort = () => req?.destroy(new Error('Cancelled'))
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const settle = (fn) => (value) => {
+      signal?.removeEventListener('abort', onAbort)
+      fn(value)
+    }
+    const ok = settle(resolve)
+    const ko = settle(reject)
     function doGet(u, extra) {
       const opts = new URL(u)
-      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App', ...extra } }, (res) => {
-        if (res.statusCode === 302 || res.statusCode === 301) return doGet(res.headers.location, null)
-        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+      req = https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App', ...extra } }, (res) => {
+        if (res.statusCode === 302 || res.statusCode === 301) { res.resume(); return doGet(res.headers.location, null) }
+        if (res.statusCode !== 200) { res.resume(); return ko(new Error(`HTTP ${res.statusCode}`)) }
         const total = parseInt(res.headers['content-length'] || '0', 10)
         let received = 0
         const out = fs.createWriteStream(tmp)
         const fail = (err) => {
           out.destroy()
           try { fs.unlinkSync(tmp) } catch {}
-          reject(err)
+          ko(err)
         }
         res.on('data', chunk => {
           received += chunk.length
@@ -248,11 +259,14 @@ function downloadFile(url, dest, onProgress, headers) {
         out.on('finish', () => {
           if (total > 0 && received !== total) return fail(new Error(`Truncated download: got ${received} of ${total} bytes`))
           try { fs.renameSync(tmp, dest) } catch (e) { return fail(e) }
-          resolve()
+          ok()
         })
         out.on('error', fail)
         res.on('error', fail)
-      }).on('error', reject)
+        // An abort mid-body may surface on the request alone.
+        req.on('error', fail)
+      })
+      req.on('error', ko)
     }
     doGet(url, headers)
   })
@@ -2359,7 +2373,37 @@ function isAllowedLibraryDownloadHost(url) {
   }
 }
 
-ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: songPath, meta }) => {
+// Track downloads in flight, by id. A second request for a track that is
+// already downloading (a playlist sync and Sync both wanting it) waits for
+// the first rather than writing the same `.part` file, and Sync's pause
+// aborts its downloads through the controllers here.
+const offlineDownloadsInFlight = new Map()
+
+function downloadOfflineTrackOnce(payload) {
+  const running = offlineDownloadsInFlight.get(payload?.id)
+  if (running) {
+    // A cancelled run belonged to whoever paused it; this caller still wants the track.
+    return running.promise.then((r) => (r?.cancelled ? downloadOfflineTrackOnce(payload) : r?.error ? r : { ...r, skipped: true }))
+  }
+  const controller = new AbortController()
+  const promise = downloadOfflineTrack(payload, controller.signal)
+    .finally(() => { if (offlineDownloadsInFlight.get(payload?.id)?.promise === promise) offlineDownloadsInFlight.delete(payload?.id) })
+  offlineDownloadsInFlight.set(payload?.id, { promise, controller })
+  return promise
+}
+
+ipcMain.handle('offline-download-track', (event, payload) => downloadOfflineTrackOnce(payload))
+
+// Stops the given tracks' downloads (all of them with no list). Each one's
+// offline-download-track call resolves { cancelled: true }.
+ipcMain.handle('offline-cancel-downloads', (_, ids) => {
+  for (const [id, { controller }] of offlineDownloadsInFlight) {
+    if (!Array.isArray(ids) || ids.includes(id)) controller.abort()
+  }
+  return true
+})
+
+async function downloadOfflineTrack({ id, url, ext, path: songPath, meta }, signal) {
   if (!isAllowedLibraryDownloadHost(url)) return { error: 'Download blocked: untrusted host' }
   const existing = loadOfflineLibrary().tracks[id]
   const localPath = path.join(getOfflineAudioDir(), `${id}.${ext || 'mp3'}`)
@@ -2380,8 +2424,9 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
   try {
     await downloadFile(url, localPath, (percent, received, total) => {
       mainWindow?.webContents.send('offline-download-progress', { id, percent, received, total })
-    })
+    }, undefined, signal)
   } catch (e) {
+    if (signal?.aborted) return { error: 'Cancelled', cancelled: true }
     return { error: 'Download failed: ' + e.message }
   }
 
@@ -2389,9 +2434,38 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
   updateOfflineLibrary((library) => {
     library.tracks[id] = { ...meta, ...cover, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
   })
+  // The song's audio moved to a file of another type: the old copy is no
+  // longer anyone's.
+  if (existing?.localPath && existing.localPath !== localPath) { try { fs.unlinkSync(existing.localPath) } catch {} }
   let size = 0
   try { size = fs.statSync(localPath).size } catch {}
   return { localPath, size, ...cover }
+}
+
+// On-disk size of every offline track, by id, so Sync can say how much of
+// the library is its own. Missing files are left out.
+ipcMain.handle('offline-get-track-sizes', async () => {
+  const entries = Object.entries(loadOfflineLibrary().tracks)
+  const sizes = {}
+  await Promise.all(entries.map(async ([id, track]) => {
+    try { sizes[id] = (await fs.promises.stat(track.localPath)).size } catch {}
+  }))
+  return sizes
+})
+
+// Free and total space on the drive holding the offline songs folder. The
+// folder itself may not exist before the first download, so this measures
+// its nearest existing parent.
+ipcMain.handle('offline-get-disk-space', async () => {
+  const folder = getOfflineAudioDir()
+  let dir = folder
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir)
+  try {
+    const s = await fs.promises.statfs(dir)
+    return { path: folder, free: s.bavail * s.bsize, total: s.blocks * s.bsize }
+  } catch (e) {
+    return { path: folder, error: e instanceof Error ? e.message : String(e) }
+  }
 })
 
 // Personalization changed (custom name/cover set or cleared) on a track that's
@@ -2466,26 +2540,32 @@ ipcMain.handle('offline-set-library-path', async (_, newPath) => {
     return { error: 'Could not create folder: ' + e.message }
   }
 
+  // One file at a time without blocking the main process: with Sync keeping
+  // the whole catalogue, a move to another drive copies gigabytes. The index
+  // is repointed in one write at the end, for the files that made it.
   const failed = []
-  updateOfflineLibrary((library) => {
-    for (const trackId of Object.keys(library.tracks)) {
-      const track = library.tracks[trackId]
-      const oldFile = track.localPath
-      if (!oldFile || !fs.existsSync(oldFile)) continue
-      const newFile = path.join(newPath, path.basename(oldFile))
+  const moved = {}
+  for (const [trackId, track] of Object.entries(loadOfflineLibrary().tracks)) {
+    const oldFile = track.localPath
+    if (!oldFile || !fs.existsSync(oldFile)) continue
+    const newFile = path.join(newPath, path.basename(oldFile))
+    try {
+      await fs.promises.rename(oldFile, newFile)
+      moved[trackId] = newFile
+    } catch (e) {
+      // Cross-device moves can fail with EXDEV — fall back to copy + delete.
       try {
-        fs.renameSync(oldFile, newFile)
-        track.localPath = newFile
-      } catch (e) {
-        // Cross-device moves can fail with EXDEV — fall back to copy + delete.
-        try {
-          fs.copyFileSync(oldFile, newFile)
-          fs.unlinkSync(oldFile)
-          track.localPath = newFile
-        } catch (e2) {
-          failed.push(trackId)
-        }
+        await fs.promises.copyFile(oldFile, newFile)
+        await fs.promises.unlink(oldFile)
+        moved[trackId] = newFile
+      } catch (e2) {
+        failed.push(trackId)
       }
+    }
+  }
+  updateOfflineLibrary((library) => {
+    for (const [trackId, newFile] of Object.entries(moved)) {
+      if (library.tracks[trackId]) library.tracks[trackId].localPath = newFile
     }
   })
 

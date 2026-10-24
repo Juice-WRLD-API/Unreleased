@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, Menu, Check, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
+import { useCatalogSync } from '../store/catalogSyncStore'
 import { effectiveBinding, comboTokens, runHotkeyAction } from '../lib/hotkeys'
 import { trackIdToSongId } from '../lib/userApi'
 import { orderedNavItems } from '../lib/navItems'
@@ -344,6 +345,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         ...(account?.is_donor || account?.is_administrator
           ? [{ kind: 'item' as const, label: 'Generate lyrics…', onClick: run(() => openLyricsGen()) }]
           : []),
+        { kind: 'item', label: 'Sync…', onClick: run(() => useCatalogSync.getState().setOpen(true)) },
         { kind: 'sep' },
         { kind: 'item', label: 'Mini player', hotkey: 'mini-player', onClick: hk('mini-player') },
         { kind: 'item', label: 'Close pop-out windows', hotkey: 'close-float-windows', onClick: hk('close-float-windows') },

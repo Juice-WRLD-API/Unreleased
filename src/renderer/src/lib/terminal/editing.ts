@@ -1,7 +1,7 @@
 import { relativeTime } from '../../components/adminShared'
 import { fetchCompChanges, fetchTrackerChanges } from '../changesApi'
 import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from '../compChunkedUpload'
-import { existingCompPaths } from '../compStagedChanges'
+import { existingCompPaths } from '../compFileChanges'
 import { loadLiveComp, localCompFiles, planCompReplace, runCompReplace } from '../compReplace'
 import { loadSessionEditFiles, loadSessionEditLinks } from '../sessionEditsApi'
 import { useStore } from '../../store/useStore'

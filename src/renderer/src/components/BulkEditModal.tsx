@@ -24,10 +24,9 @@ import ThemedCheckbox from './ThemedCheckbox'
 // Bulk editor - one dialog, two sources:
 //
 //   • API songs, from the Tracker's multi-select "Edit". The API has no bulk
-//     endpoint, so this stages one ordinary update proposal per song, exactly
-//     like EditorPage does for a single song - nothing is actually proposed
-//     until the Uploads panel's Propose is used; from there review, admin
-//     auto-approve and My Proposals all behave the same.
+//     endpoint, so this files one ordinary update proposal per song, exactly
+//     like EditorPage does for a single song; review, admin auto-approve and
+//     My Proposals all behave the same.
 //   • Local library files, from the Library's multi-select "Edit tags". These
 //     write ID3 frames straight to disk through the writeTrackMetadata
 //     channel, then mirror the change into the in-memory library index.
@@ -399,16 +398,15 @@ export default function BulkEditModal(): JSX.Element | null {
       keyOf: s => String(s.id),
       titleOf: s => s.name,
       noun: ['song', 'songs'],
-      subtitle: 'Stages one edit proposal per song - review and propose them from the Uploads panel.',
+      subtitle: 'Files one edit proposal per song.',
       notePlaceholder: 'Editor notes (shared by every proposal)…',
       unavailable: canEdit ? undefined : 'Only editors can propose changes.',
-      actionLabel: n => `Stage ${n} proposal${n === 1 ? '' : 's'}`,
-      doneLabel: n => `${n} proposal${n === 1 ? '' : 's'} staged`,
+      actionLabel: n => `Submit ${n} proposal${n === 1 ? '' : 's'}`,
+      doneLabel: n => `${n} proposal${n === 1 ? '' : 's'} submitted`,
       commit: async (song, patch, note) => {
         // Version titles are written straight to the /versions/ table rather
         // than proposed for review (same as the single-song editor), so they
-        // never belong in proposed_data and are never staged - they go out
-        // immediately. setOwnVersionTitle re-reads the song's row itself
+        // never belong in proposed_data. setOwnVersionTitle re-reads the song's row itself
         // before deciding what to do, so it's correct even if the prefetch
         // above failed or is stale - the groupId passed here is only a hint
         // it uses when the song has no row at all yet.
@@ -423,14 +421,14 @@ export default function BulkEditModal(): JSX.Element | null {
         for (const [key, value] of Object.entries(rest)) {
           proposed[key] = key === 'era_id' ? (value ? Number(value) : null) : (value === '' ? null : value)
         }
-        useStore.getState().stageSongChanges([{
-          songId: song.id,
-          changeType: 'update',
+        await userApi.createProposal({
+          song: song.id,
+          change_type: 'update',
           title: song.name,
-          proposedData: proposed,
-          editorNotes: note,
+          proposed_data: proposed,
+          editor_notes: note,
           channel: activeChannel,
-        }])
+        })
       },
     }
   }, [target, songs, canEdit, eras, versionMeta, fetchVersionMeta, activeChannel])

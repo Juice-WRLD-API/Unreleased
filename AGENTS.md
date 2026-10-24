@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.15** · updated 2026-10-23. Bump the version and date whenever you
+**Version 1.18** · updated 2026-10-24. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -120,6 +120,13 @@ docs and the server disagree, the backend code in `backend/` wins.
   "Compilation"), `redemptionz`, `legacy`. Non-primary files need
   `&channel=<slug>` on file URLs.
 - **`/health/`** returns `{"status":"ok"}`, useful as a liveness check.
+- **Song date fields are free text with labels**, not dates: `record_dates`,
+  `preview_date`, `date_leaked`, `release_date` and `dates` hold lines like
+  `"Recorded\nAugust 1-2, 2016."`, `"Juice's Vocals\nMay 5, 2018."` or
+  `"Surfaced January 25th 2026"`, sometimes several per field, and `[?]` for an
+  unknown day. The label decides the event (a `File Exported` line in
+  `record_dates` is not a recording). `songDates` in `lib/onThisDay.ts` reads
+  them; reuse it. 2,690 of 2,751 songs had an exact date on 2026-10-24.
 
 ### Ids
 
@@ -259,6 +266,15 @@ under the app CSP: no inline `style` attributes or `<style>` tags. Don't bring
 back WRLD's Cover Flow layout or iJWA's live wallpaper, artwork tray icon or
 energy rules.
 
+**Sync** (Home → Tools, `app` only, off by default) keeps every released and
+unreleased song with audio offline. It is one more entry in the offline
+library (`catalog-sync`), registered with the whole chosen catalogue before
+anything downloads, so playlist syncs' prune can't delete synced songs and
+re-registering drops what left the catalogue. Engine: `lib/catalogSync.ts`;
+state: `store/catalogSyncStore.ts`; terminal: `offline`. Main dedupes
+concurrent downloads of one track and aborts them on pause
+(`offline-cancel-downloads`).
+
 **Web (`web`)**: same renderer plus mobile layouts (`IS_MOBILE`), PWA install,
 and `server/social-preview.mjs` for link previews (nginx setup in
 `docs/17-nginx-social-preview.md`). Dev server on port 5173.
@@ -342,6 +358,11 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-24: Library artist details silently stopped at 60 songs, and Play
+  ignored the visible album/artist search results. Use the shared virtual song
+  list for details and build collection playback from the active view's filtered,
+  ordered results. Scale virtual card geometry with `appTextScale`, like song rows.
 
 - 2026-10-23: Deployed lyrics job endpoints can reject JSON with HTTP 415 even
   though the local backend accepts it. Send server audio references as FormData

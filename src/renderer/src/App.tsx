@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
+import { useCatalogSync } from './store/catalogSyncStore'
+import { initCatalogSync } from './lib/catalogSync'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, ELECTRON_TITLEBAR_CLEARANCE_X } from './lib/platform'
@@ -100,6 +102,8 @@ const TierlistView = lazyView(() => import('./components/TierlistView'))
 const StatsView = lazyView(() => import('./components/StatsView'))
 // Donors and administrators only - fetched the first time it opens.
 const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
+// Desktop only - fetched the first time Sync is opened.
+const SyncModal = lazyOverlay(() => import('./components/SyncModal'))
 const StatisticsView = lazyView(() => import('./components/StatisticsView'))
 const PublicProfileView = lazyView(() => import('./components/PublicProfileView'))
 const ChatView = lazyView(() => import('./components/ChatView'))
@@ -161,6 +165,7 @@ export default function App(): JSX.Element {
   const isMobile = useIsMobile()
   const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
+  const syncOpen = useCatalogSync((s) => s.open)
   useThemeEffects()
   useChatBootstrap()
 
@@ -225,6 +230,9 @@ export default function App(): JSX.Element {
     const interval = setInterval(() => syncOfflinePlaylists(), 15 * 60 * 1000)
     return () => { window.removeEventListener('focus', onFocus); clearInterval(interval) }
   }, [loadOfflineLibrary, syncOfflinePlaylists])
+
+  // Sync (Home → Tools): while it's on, keeps the whole catalogue offline.
+  useEffect(() => initCatalogSync(), [])
 
   // Re-fetch playlists on window focus — playlist edits made elsewhere (the
   // web player, another device, or a playlist saved from a shared link) don't
@@ -427,6 +435,11 @@ export default function App(): JSX.Element {
       {lyricsGenOpen && (
         <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeLyricsGen()}>
           <LyricsGenModal />
+        </ErrorBoundary>
+      )}
+      {syncOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useCatalogSync.getState().setOpen(false)}>
+          <SyncModal />
         </ErrorBoundary>
       )}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>

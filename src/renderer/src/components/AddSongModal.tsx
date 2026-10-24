@@ -166,9 +166,9 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
             {submitState === 'submitting' && <Loader2 size={14} className="animate-spin" />}
             {submitState === 'submitted'  && <Check size={14} />}
             {submitState === 'error'      && <AlertCircle size={14} />}
-            {submitState === 'idle'       && 'Stage proposal'}
-            {submitState === 'submitting' && 'Staging…'}
-            {submitState === 'submitted'  && 'Staged!'}
+            {submitState === 'idle'       && 'Submit proposal'}
+            {submitState === 'submitting' && 'Submitting…'}
+            {submitState === 'submitted'  && 'Submitted!'}
             {submitState === 'error'      && 'Try again'}
           </button>
         </div>

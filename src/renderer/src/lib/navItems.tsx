@@ -216,7 +216,7 @@ export interface NavControlCtx { account: boolean; isElectron: boolean; develope
 // Whether a control applies to the current session at all (regardless of the
 // user's show/hide choice): profile needs an account, download is web only,
 // diagnostics needs developer mode, uploads needs something to show (an
-// active transfer, this session's history, or staged proposals) - otherwise it's a button that
+// active transfer or this session's history) - otherwise it's a button that
 // opens an empty panel - settings is always available.
 export function isNavControlAvailable(id: NavControlId, ctx: NavControlCtx): boolean {
   switch (id) {

@@ -269,6 +269,9 @@ contextBridge.exposeInMainWorld('electron', {
   offlineSetPlaylist:   (key, songIds, name)        => ipcRenderer.invoke('offline-set-playlist', key, songIds, name),
   offlineRemovePlaylist: (key)                     => ipcRenderer.invoke('offline-remove-playlist', key),
   offlineSetLibraryPath: (newPath)                 => ipcRenderer.invoke('offline-set-library-path', newPath),
+  offlineCancelDownloads: (ids)                    => ipcRenderer.invoke('offline-cancel-downloads', ids),
+  offlineGetTrackSizes: ()                         => ipcRenderer.invoke('offline-get-track-sizes'),
+  offlineGetDiskSpace:  ()                         => ipcRenderer.invoke('offline-get-disk-space'),
   onOfflineDownloadProgress: (cb) => {
     const fn = (_, d) => cb(d)
     ipcRenderer.on('offline-download-progress', fn)

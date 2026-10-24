@@ -60,8 +60,7 @@ const NOT_APPLICABLE = {
   'apiFilesShared.findSongByFilename': 'Files-tab lookup over /songs (find)',
   'donorPlaylistEntries.*': 'one-off move of old donor playlists, and keeping a re-tagged file’s playlist slots; the calls are getPlaylist/createPlaylist/addPlaylistEntry/reorderPlaylistItems (playlist)',
   'optimisticPlaylist.*':'optimistic UI wrappers over userApi.addToPlaylist/addPlaylistEntry/updatePlaylist (playlist add, playlist public)',
-  'compStagedChanges.proposeStagedChanges': 'batch wrapper over createCompProposal (comp new)',
-  'compStagedSongChanges.proposeStagedSongChanges': 'batch wrapper over createProposal (proposal new)',
+  'compFileChanges.proposeFileChanges': 'batch wrapper over createCompProposal (comp new)',
   'coverSuggestions.advanceRotatedCover': 'cover search over third-party catalogs, client-side rotation',
   'eras.loadEraFullNames': 'era name loader (era ls)',
   'fieldSuggestions.suggestFieldValues': 'autocomplete data derived from /songs (find)',
@@ -69,6 +68,7 @@ const NOT_APPLICABLE = {
   'heardle.*': 'pool loaders behind the practice game (heardle)',
   'tierlistSync.fullSync': 'syncs the tier list page’s local copy through a React hook; the same endpoints are reached by the tierlist command',
   'tierlistSync.pushChanges': 'as fullSync',
+  'catalogSync.initCatalogSync': 'startup hook that runs the same Sync passes as `offline now`',
 }
 
 // Bare fetch() calls outside lib/ that are not calls to the app's API.

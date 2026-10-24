@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, Sparkles } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, Sparkles, RefreshCw } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
+import OnThisDayTile from './OnThisDayTile'
 import { useHomeData, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
@@ -15,7 +16,9 @@ import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
-import { hasHomeTools } from '../lib/homeSections'
+import { hasLyricsGenTool } from '../lib/homeSections'
+import { IS_ELECTRON } from '../lib/platform'
+import { useCatalogSync, catalogSyncSummary } from '../store/catalogSyncStore'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
 import { AnchoredContextMenu } from './ContextMenu'
@@ -217,18 +220,28 @@ function NewsTile({ items, onOpen, onContextMenu, onAll, span }: {
 
 // ─── Row B side + row C: the compact shortcut tiles ──────────────────────────
 
-function ShortcutCard({ icon, title, subtitle, tone = 'accent', onClick }: {
+function ShortcutCard({ icon, title, subtitle, tone = 'accent', progress = null, onClick }: {
   icon: JSX.Element
   title: React.ReactNode
   subtitle: React.ReactNode
   tone?: 'accent' | 'live'
+  /** 0-1: a thin bar along the card's foot (Sync's progress). */
+  progress?: number | null
   onClick: () => void
 }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      className="group shrink-0 w-full flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3.5 py-3 text-left hover:border-[var(--accent)] hover:bg-surface-highest transition-colors"
+      className="group relative overflow-hidden shrink-0 w-full flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3.5 py-3 text-left hover:border-[var(--accent)] hover:bg-surface-highest transition-colors"
     >
+      {progress !== null && (
+        <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-[3px] bg-accent/15">
+          <span
+            className="block h-full bg-accent origin-left transition-transform duration-[600ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none"
+            style={{ transform: `scaleX(${progress})` }}
+          />
+        </span>
+      )}
       <span className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${tone === 'live' ? 'bg-red-600/15' : 'bg-accent/15'}`}>
         {icon}
       </span>
@@ -274,25 +287,34 @@ function GamesCard({ games, onOpen }: {
 
 // ─── Main column foot: Tools ─────────────────────────────────────────────────
 
-interface HomeTool {
-  id: string
-  icon: JSX.Element
-  title: string
-  subtitle: string
-  onClick: () => void
-}
-
 // Shortcuts into the app's tool dialogs. Cards keep a readable width and wrap
 // onto more rows as tools are added, rather than stretching one across the page.
-function ToolsTile({ tools, span }: { tools: HomeTool[]; span: string }): JSX.Element {
+function ToolsTile({ children, span }: { children: React.ReactNode; span: string }): JSX.Element {
   return (
     <Tile title="Tools" icon={<Wrench size={15} />} span={span}>
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        {tools.map((tool) => (
-          <ShortcutCard key={tool.id} icon={tool.icon} title={tool.title} subtitle={tool.subtitle} onClick={tool.onClick} />
-        ))}
+        {children}
       </div>
     </Tile>
+  )
+}
+
+// Its own component so Sync's progress re-renders this card, not Home.
+function SyncToolCard(): JSX.Element {
+  const phase = useCatalogSync((s) => s.phase)
+  const have = useCatalogSync((s) => s.have)
+  const target = useCatalogSync((s) => s.target)
+  const failures = useCatalogSync((s) => s.failures)
+  const working = phase === 'syncing' || phase === 'checking'
+  const showProgress = phase !== 'off' && target > 0 && have < target
+  return (
+    <ShortcutCard
+      icon={<RefreshCw size={18} className={`text-accent ${working ? 'motion-safe:animate-[spin_2.4s_linear_infinite]' : ''}`} />}
+      title="Sync"
+      subtitle={catalogSyncSummary({ phase, have, target, failures })}
+      progress={showProgress ? have / target : null}
+      onClick={() => useCatalogSync.getState().setOpen(true)}
+    />
   )
 }
 
@@ -369,6 +391,7 @@ export default function HomeView(): JSX.Element {
   )
 
   const showRecent = showSection('recent') && recent.length > 0
+  const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
   // TEMP: albums hidden on the home page
@@ -378,18 +401,10 @@ export default function HomeView(): JSX.Element {
   const showGames = showSection('games')
   const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
-  const tools: HomeTool[] = hasHomeTools(account)
-    ? [{
-        id: 'lyrics-gen',
-        icon: <Sparkles size={18} className="text-accent" />,
-        title: 'Generate lyrics',
-        subtitle: 'Transcribe a song, or time its lyrics',
-        onClick: () => useStore.getState().openLyricsGen(),
-      }]
-    : []
-  const showTools = showSection('tools') && tools.length > 0
+  const showLyricsGenTool = hasLyricsGenTool(account)
+  const showTools = showSection('tools') && (IS_ELECTRON || showLyricsGenTool)
 
-  const mainShown = showRecent || showPlaylists || showAlbums || showTools
+  const mainShown = showRecent || showOnThisDay || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames
 
   return (
@@ -491,6 +506,12 @@ export default function HomeView(): JSX.Element {
                     span="shrink-0"
                   />
                 )}
+                {showOnThisDay && (
+                  <OnThisDayTile
+                    onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
+                    span="shrink-0"
+                  />
+                )}
                 {showPlaylists && (
                   <PlaylistsTile
                     playlists={playlistRow}
@@ -506,7 +527,19 @@ export default function HomeView(): JSX.Element {
                     span="shrink-0"
                   />
                 )}
-                {showTools && <ToolsTile tools={tools} span="shrink-0" />}
+                {showTools && (
+                  <ToolsTile span="shrink-0">
+                    {IS_ELECTRON && <SyncToolCard />}
+                    {showLyricsGenTool && (
+                      <ShortcutCard
+                        icon={<Sparkles size={18} className="text-accent" />}
+                        title="Generate lyrics"
+                        subtitle="Transcribe a song, or time its lyrics"
+                        onClick={() => useStore.getState().openLyricsGen()}
+                      />
+                    )}
+                  </ToolsTile>
+                )}
               </div>
             )}
 

@@ -11,6 +11,7 @@ import { getToken, trackIdToSongId } from './userApi'
 import { buildStreamUrl } from './juicewrldApi'
 import { DONOR_ALLOWED_EXTENSIONS, extensionOf, isImageFile } from './donorFilesApi'
 import { ensureDonorUrl, isDonorStreamUrl } from './donorPlayback'
+import { saveTimingDraft } from './lyricsTiming'
 import type { Track } from '../types'
 
 const BASE = routeUrl('/accounts/donor/lyrics')
@@ -335,8 +336,10 @@ export async function fetchLyricsJobOutput(id: string, output: LyricsOutput, sig
   return res.text()
 }
 
-export function deleteLyricsJob(id: string): Promise<void> {
-  return authedRequest(`${BASE}/jobs/${encodeURIComponent(id)}/`, { method: 'DELETE' }, getToken())
+/** Also forgets any timing this device tuned for the job. */
+export async function deleteLyricsJob(id: string): Promise<void> {
+  await authedRequest(`${BASE}/jobs/${encodeURIComponent(id)}/`, { method: 'DELETE' }, getToken())
+  saveTimingDraft(id, null)
 }
 
 export function getLyricsAdminSettings(signal?: AbortSignal): Promise<LyricsAdminSettings> {

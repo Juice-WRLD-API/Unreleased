@@ -125,65 +125,6 @@ export interface DownloadItem {
   speedBps?: number
 }
 
-// --- Staged file change (in-session) -------------------------------------------
-//
-// A contributor dragging rows around in ApiFilesView doesn't propose anything
-// on drop: the intended move/folder-create is parked here, the Downloads panel
-// lists what's queued, and one "Propose" there submits the lot (see
-// lib/compStagedChanges). Dragging is cheap to do by accident, and a reorganize
-// is usually several drags that only make sense together, so proposing each
-// one the instant it lands would spam reviewers with half a move.
-export interface StagedFileChange {
-  id: string
-  /** The subset of comp proposal change types drag-and-drop can produce. */
-  changeType: 'move' | 'move_folder' | 'create_folder' | 'upload'
-  /** Source path - the file/folder being moved, the folder to create, or
-   *  where an uploaded file will land. */
-  path: string
-  /** Full destination path; only for moves. */
-  destination?: string
-  /** The local file body, for an upload dropped in from the OS. Staged
-   *  changes live in memory only, so holding the File here is fine. */
-  file?: File
-  /** Uploads only: flags the proposal as a new leak. */
-  isNewLeak?: boolean
-  /** Sent as the proposal's contributor_notes. */
-  notes?: string
-  /** Channel slug the change belongs to, since the Files tab can switch
-   *  channels with changes still queued and each proposal carries its own. */
-  channel: string
-  /** Set when a propose attempt failed, so the row can show why and stay
-   *  queued for a retry. Cleared on the next attempt. */
-  error?: string
-}
-
-// ─── Staged song edit proposal (in-session) ──────────────────
-//
-// Same idea as StagedFileChange, applied to the Tracker's song editor, bulk
-// editor and "propose new song" modal: editing a song's metadata, proposing
-// its deletion, or proposing a brand new song doesn't submit anything on its
-// own - it parks the proposal here, the Uploads panel lists what's queued,
-// and one "Propose" there sends the lot (see lib/compStagedSongChanges).
-// Editing an *already-submitted* pending proposal (editingPropId set in
-// EditorPage) is a different action - that proposal already exists
-// server-side, so it's still updated immediately.
-export interface StagedSongChange {
-  id: string
-  /** Null for a 'create' change - a new song has no id yet. */
-  songId: number | null
-  changeType: 'update' | 'delete' | 'create'
-  /** Song title, for the queue row - not sent as part of proposed_data. */
-  title: string
-  proposedData: Record<string, unknown>
-  editorNotes: string
-  /** Channel slug the proposal belongs to. Absent lets the server pick a
-   *  default (the AddSongModal can be opened without one). */
-  channel?: string
-  /** Set when a propose attempt failed, so the row can show why and stay
-   *  queued for a retry. Cleared on the next attempt. */
-  error?: string
-}
-
 // Where the desktop nav menu sits � classic left sidebar, mirrored right, or a
 // horizontal bar above/below the content. Mobile always uses the bottom tab bar.
 export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
@@ -611,7 +552,6 @@ interface AppState {
   showDownloadManager: boolean
   updateStatus: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null
 
-  stagedFileChanges: StagedFileChange[]
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
   // not in the nav bar itself, so the open/close state has to live somewhere
   // both can reach.
@@ -645,9 +585,6 @@ interface AppState {
   // localStorage, so unlike localPlaylists these aren't tied to scanned
   // library tracks and work identically on every platform.
   guestPlaylists: GuestPlaylist[]
-  // Song edit/delete proposals staged by the Tracker's editors, proposed as a
-  // batch from the Uploads panel (see lib/compStagedSongChanges).
-  stagedSongChanges: StagedSongChange[]
 }
 
 interface AppActions {
@@ -1010,12 +947,6 @@ interface AppActions {
   setShowDownloadManager: (show: boolean) => void
   setUpdateStatus: (status: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null) => void
 
-  /** Queues drag-and-drop file changes; ids are assigned here. Returns nothing
-   *  - the Downloads panel is where they're reviewed and proposed. */
-  stageFileChanges: (changes: Omit<StagedFileChange, 'id'>[]) => void
-  updateStagedFileChange: (id: string, updates: Partial<StagedFileChange>) => void
-  unstageFileChange: (id: string) => void
-  clearStagedFileChanges: () => void
   setShowMoreNav: (show: boolean) => void
   setHeroBleedTop: (heroBleedTop: boolean) => void
   // Writes to playlistHeroEnabledDark or ...Light, whichever matches the
@@ -1032,10 +963,6 @@ interface AppActions {
   addToGuestPlaylist: (playlistId: string, track: Track) => void
   removeFromGuestPlaylist: (playlistId: string, trackId: string) => void
   reorderGuestPlaylist: (playlistId: string, tracks: Track[]) => void
-  stageSongChanges: (changes: Omit<StagedSongChange, 'id'>[]) => void
-  updateStagedSongChange: (id: string, updates: Partial<StagedSongChange>) => void
-  unstageSongChange: (id: string) => void
-  clearStagedSongChanges: () => void
 }
 
 export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
@@ -3541,23 +3468,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setShowDownloadManager: (show) => set({ showDownloadManager: show }),
   setUpdateStatus: (updateStatus) => set({ updateStatus }),
 
-  stagedFileChanges: [],
-  // One queued change per path: dragging an already-queued file somewhere else
-  // is a correction, not a second move, and proposing both would ask reviewers
-  // to send the same file to two places.
-  stageFileChanges: (changes) => set((s) => ({
-    stagedFileChanges: [
-      ...s.stagedFileChanges.filter((c) => !changes.some((n) => n.path === c.path && n.channel === c.channel)),
-      ...changes.map((c, i) => ({ ...c, id: `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
-    ],
-  })),
-  updateStagedFileChange: (id, updates) => set((s) => ({
-    stagedFileChanges: s.stagedFileChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
-  })),
-  unstageFileChange: (id) => set((s) => ({
-    stagedFileChanges: s.stagedFileChanges.filter((c) => c.id !== id),
-  })),
-  clearStagedFileChanges: () => set({ stagedFileChanges: [] }),
   showMoreNav: false,
   heroBleedTop: false,
   setShowMoreNav: (showMoreNav) => set({ showMoreNav }),
@@ -3717,25 +3627,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ guestPlaylists: next })
     ls.set('guestPlaylists', next)
   },
-  stagedSongChanges: [],
-  // One queued change per song/channel/type: editing a song again before it's
-  // proposed replaces the queued patch rather than piling up duplicates. A
-  // 'create' has no song id to key off of - each new-song draft is its own
-  // proposal, so those never collapse into each other.,
-  stageSongChanges: (changes) => set((s) => ({
-    stagedSongChanges: [
-      ...s.stagedSongChanges.filter((c) => !changes.some((n) =>
-        n.songId != null && n.songId === c.songId && n.channel === c.channel && n.changeType === c.changeType)),
-      ...changes.map((c, i) => ({ ...c, id: `staged-song-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
-    ],
-  })),
-  updateStagedSongChange: (id, updates) => set((s) => ({
-    stagedSongChanges: s.stagedSongChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
-  })),
-  unstageSongChange: (id) => set((s) => ({
-    stagedSongChanges: s.stagedSongChanges.filter((c) => c.id !== id),
-  })),
-  clearStagedSongChanges: () => set({ stagedSongChanges: [] })
 }))
 
 // Notification-socket tickets wait for a confirmed account, not just a stored token.
