@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.23** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.25** · updated 2026-10-25. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -35,8 +35,8 @@ checkout as a sibling.
 | `iJWA/` | Retired. Its features now live in the app as **Desktop** (see section 6) | `Juice-WRLD-API/iJWA` |
 
 Branches in the player repo **do not sync automatically**. Each one has its own
-version number (desktop 2.5.x, web 2.3.x, android/ios 2.0.x, beta 3.0.x-beta as of
-2026-10-21) and its own history. Work moves between them by hand ("porting" or
+version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as of
+2026-10-25) and its own history. Work moves between them by hand ("porting" or
 "relaying"), see section 2.
 
 ---
@@ -377,6 +377,12 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-25: Android offline playlist downloads take catalogue song ids, but
+  mixed playlists include entries with `song: null`. Use `playlistSongIds`
+  from `lib/playlistItems.ts` for both manual download and background sync.
+  When porting web ZIP/download helpers, await Android's `saveFile` or
+  `triggerDownload` so completion reflects the native write and failures surface.
 
 - 2026-10-24: `GET /accounts/editor/proposals/` (My proposals) now returns
   paginated summaries (`count`, 50 per page by default, 200 max) without
