@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.22** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.23** · updated 2026-10-24. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -377,6 +377,14 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-24: `GET /accounts/editor/proposals/` (My proposals) now returns
+  paginated summaries (`count`, 50 per page by default, 200 max) without
+  `proposed_data`/`original_snapshot`, only `changed_fields`. Editing a
+  proposal from the list crashed the editor (`'name' in undefined`), and
+  resubmit would have sent an empty proposal. Read data from
+  `getProposal`/`withProposalData` in `lib/userApi.ts`; the admin queue
+  still returns full rows.
 
 - 2026-10-24: `terminal:check-coverage` follows calls by bare name across all
   of `lib/`, so a local helper called `run` inside `syncedLyrics.nudgeTarget`

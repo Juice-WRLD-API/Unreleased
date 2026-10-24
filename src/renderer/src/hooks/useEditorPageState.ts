@@ -412,7 +412,8 @@ export function useEditorPageState(initialSongId: number | null = null) {
   useEffect(() => {
     if (!pendingEditProposal || !canEdit) return
     manualLoadRef.current = true
-    const { id, songId, proposedData: d, editorNotes } = pendingEditProposal
+    const { id, songId, editorNotes } = pendingEditProposal
+    const d = pendingEditProposal.proposedData ?? {}
     setPendingEditProposal(null)
     setEditingPropId(id)
 

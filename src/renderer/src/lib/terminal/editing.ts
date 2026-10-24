@@ -7,7 +7,7 @@ import { loadSessionEditFiles, loadSessionEditLinks } from '../sessionEditsApi'
 import { useStore } from '../../store/useStore'
 import {
   adminCompFileHistory, adminFetchCompProposalStaging, compChangeTypeLabel, createCompProposal, createCompProposalUpload, createProposal,
-  getLeaderboard, getMyApplication, getMyCompProposals, getMyProposals, resubmitProposal, submitApplication, updateCompProposal,
+  getLeaderboard, getMyApplication, getMyCompProposals, getMyProposals, getProposal, resubmitProposal, submitApplication, updateCompProposal,
   updateProposal, withdrawCompProposal, withdrawProposal, type ApplicationType, type CompProposalChangeType, type ProposalChangeType,
 } from '../userApi'
 import { pickLocalFile, pickLocalFolder, saveBlob } from './pick'
@@ -38,12 +38,12 @@ const NEEDS_DESTINATION = new Set<CompProposalChangeType>(['move', 'rename_folde
 
 const proposalCommand: TermCommand = {
   name: 'proposal', aliases: ['edits'], group: 'Editor',
-  usage: 'proposal [ls] · new <create|update|delete> [song] [{json}] [--title t] [--note n] · edit <id> [{json}] [--title t] [--note n] · withdraw <id> · resubmit <id>   (--channel c)',
-  description: 'Your song-edit proposals: list, create, change, withdraw or resubmit one. The JSON body is the fields you propose, e.g. proposal new update <song> {"name":"New title"}',
-  covers: ['userApi.getMyProposals', 'userApi.createProposal', 'userApi.updateProposal', 'userApi.withdrawProposal', 'userApi.resubmitProposal'],
+  usage: 'proposal [ls] · show <id> · new <create|update|delete> [song] [{json}] [--title t] [--note n] · edit <id> [{json}] [--title t] [--note n] · withdraw <id> · resubmit <id>   (--channel c)',
+  description: 'Your song-edit proposals: list, show, create, change, withdraw or resubmit one. The JSON body is the fields you propose, e.g. proposal new update <song> {"name":"New title"}',
+  covers: ['userApi.getMyProposals', 'userApi.getProposal', 'userApi.withProposalData', 'userApi.createProposal', 'userApi.updateProposal', 'userApi.withdrawProposal', 'userApi.resubmitProposal'],
   complete: (before, partial) => {
     const p = partial.toLowerCase()
-    if (before.length === 0) return ['ls', 'new', 'edit', 'withdraw', 'resubmit'].filter((v) => v.startsWith(p))
+    if (before.length === 0) return ['ls', 'show', 'new', 'edit', 'withdraw', 'resubmit'].filter((v) => v.startsWith(p))
     if (before[0] === 'new' && before.length === 1) return PROPOSAL_TYPES.filter((v) => v.startsWith(p))
     if (before[0] === 'new' && before[1] !== 'create') return completeSongs(before.slice(2), partial)
     return []
@@ -60,6 +60,16 @@ const proposalCommand: TermCommand = {
       if (asJson(ctx, bool.has('json'), list)) return
       if (list.length === 0) { ctx.print('no proposals yet', 'dim'); return }
       ctx.print(`${table(list.map((p) => [`#${p.id}`, p.status, p.change_type, p.title, relativeTime(p.created_at)]))}\n${list.length} proposal${list.length === 1 ? '' : 's'}`)
+    } else if (sub === 'show') {
+      const p = await getProposal(idArg(rest[0], 'proposal show <id>'))
+      if (asJson(ctx, bool.has('json'), p)) return
+      ctx.print([
+        `#${p.id} ${p.change_type} · ${p.status} · ${p.title}`,
+        `${relativeTime(p.created_at)}${p.reviewer_username ? ` · reviewed by ${p.reviewer_username}` : ''}${p.edit_count ? ` · edited ${p.edit_count}×` : ''}`,
+        ...(p.editor_notes ? [`notes: ${oneLine(p.editor_notes, 300)}`] : []),
+        ...(p.review_notes ? [`review: ${oneLine(p.review_notes, 300)}`] : []),
+        `changes: ${oneLine(JSON.stringify(p.proposed_data ?? {}), 600)}`,
+      ].join('\n'))
     } else if (sub === 'new') {
       const type = (rest.shift() ?? '').toLowerCase() as ProposalChangeType
       if (!PROPOSAL_TYPES.includes(type)) fail('usage: proposal new <create|update|delete> [song] [{json}]')
@@ -91,7 +101,7 @@ const proposalCommand: TermCommand = {
       if (!confirmAction(ctx, `Withdraw #${id} and send it again as a new proposal?`, bool.has('y'))) return
       const made = await resubmitProposal(mine)
       ctx.print(`#${id} resubmitted as #${made.id}`, 'ok')
-    } else fail('usage: proposal [ls | new | edit | withdraw | resubmit] …')
+    } else fail('usage: proposal [ls | show | new | edit | withdraw | resubmit] …')
   },
 }
 

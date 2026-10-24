@@ -996,11 +996,14 @@ export interface SongEditProposal {
   song_public_id: number | null
   change_type: ProposalChangeType
   title: string
-  proposed_data: Record<string, unknown>
-  original_proposed_data: Record<string, unknown>
-  applied_data: Record<string, unknown>
+  // The four data fields are missing from the "my proposals" list, which
+  // returns summaries with changed_fields instead. getProposal has them all.
+  proposed_data?: Record<string, unknown>
+  original_proposed_data?: Record<string, unknown>
+  applied_data?: Record<string, unknown>
   revised_by_admin: boolean
-  original_snapshot: Record<string, unknown>
+  original_snapshot?: Record<string, unknown>
+  changed_fields?: string[]
   editor_notes: string
   status: ProposalStatus
   reviewer_username: string | null
@@ -1106,20 +1109,44 @@ export async function submitApplication(payload: {
   })
 }
 
-function myProposalsUrl(channel?: string): string {
+function myProposalsUrl(channel?: string, offset = 0): string {
   const url = new URL(`${ACCOUNT_BASE}/editor/proposals/`)
   if (channel) url.searchParams.set('channel', channel)
+  if (offset) url.searchParams.set('offset', String(offset))
   return url.toString()
 }
 
+const MY_PROPOSALS_PAGE = 200
+
 // Cached (offline-fallback) like the other "list my stuff" reads - this is
 // the tab a signed-in editor lands on, and it shouldn't go blank just because
-// the request raced a flaky connection.
+// the request raced a flaky connection. The server pages this list (50 by
+// default, 200 at most) and returns summaries without proposed_data, so walk
+// every page and fetch one with getProposal before reading its data.
 export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
-  const url = myProposalsUrl(channel)
-  const data = await request<SongEditProposal[] | { results?: SongEditProposal[] }>(url, { method: 'GET' }, true, url)
-  if (Array.isArray(data)) return data
-  return Array.isArray(data?.results) ? data.results : []
+  const all: SongEditProposal[] = []
+  for (;;) {
+    // The cache key leaves out limit so withdrawProposal's cacheDelete still matches.
+    const key = myProposalsUrl(channel, all.length)
+    const url = new URL(key)
+    url.searchParams.set('limit', String(MY_PROPOSALS_PAGE))
+    const data = await request<SongEditProposal[] | { count?: number; results?: SongEditProposal[] }>(url.toString(), { method: 'GET' }, true, key)
+    if (Array.isArray(data)) return data
+    const page = Array.isArray(data?.results) ? data.results : []
+    all.push(...page)
+    if (page.length === 0 || all.length >= (data?.count ?? 0)) return all
+  }
+}
+
+/** One of your proposals in full, with proposed_data and original_snapshot. */
+export async function getProposal(id: number): Promise<SongEditProposal> {
+  return request(`${ACCOUNT_BASE}/editor/proposals/${id}/`, { method: 'GET' })
+}
+
+/** `p` itself when it already carries proposed_data, otherwise the full proposal. */
+export async function withProposalData(p: SongEditProposal): Promise<SongEditProposal & { proposed_data: Record<string, unknown> }> {
+  const full = p.proposed_data ? p : await getProposal(p.id)
+  return { ...full, proposed_data: full.proposed_data ?? {} }
 }
 
 export async function createProposal(payload: {
@@ -1156,14 +1183,17 @@ export async function withdrawProposal(id: number): Promise<void> {
 
 // Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
+// Reads the full proposal before withdrawing: a list row is a summary, and
+// resubmitting it as-is would send an empty proposed_data.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
+  const full = await withProposalData(p)
   await withdrawProposal(p.id)
   return createProposal({
-    song: p.song,
-    change_type: p.change_type,
-    title: p.title,
-    proposed_data: p.proposed_data,
-    editor_notes: p.editor_notes,
+    song: full.song,
+    change_type: full.change_type,
+    title: full.title,
+    proposed_data: full.proposed_data,
+    editor_notes: full.editor_notes,
   })
 }
 
