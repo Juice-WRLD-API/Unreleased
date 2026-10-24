@@ -21,6 +21,7 @@ import cdnService from './cdn'
 import { embedForDownload, embedSafe } from './downloadEmbed'
 import { triggerDownload } from './apiFilesShared'
 import { errorMessage } from './format'
+import { showAppToast } from './appToast'
 import { useStore } from '../store/useStore'
 import { isMobileViewport } from '../hooks/useIsMobile'
 
@@ -285,6 +286,8 @@ export async function saveItems(
     return result
   } catch (err) {
     if (err instanceof ZipTooLargeError) {
+      // The panel line above is easy to miss, and mobile never opens it.
+      showAppToast(`ZIP too big - ${fileCount === 1 ? 'the file' : `the ${fileCount} files`} will download individually`, { tone: 'info' })
       updateUpload(id, { state: 'downloading', percent: 0, speedBps: undefined, detail: 'Too big to zip here - downloading files separately' })
       await downloadItemsIndividually(items)
       updateUpload(id, { state: 'done', percent: 100, detail: `${fileCount} separate download${fileCount === 1 ? '' : 's'}` })

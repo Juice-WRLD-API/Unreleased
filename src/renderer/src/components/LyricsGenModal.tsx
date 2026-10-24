@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
-  AlertCircle, AudioLines, Check, Clock, Copy, Download, FileText, Heart, ListChecks, Loader2, LogIn, MicVocal, Music2, Plus, ShieldCheck, Sparkles,
+  AlertCircle, AudioLines, Check, Clock, Copy, Download, FileText, Heart, ListChecks, Loader2, LogIn, Maximize2, MicVocal, Minimize2, Music2, Plus,
+  ShieldCheck, Sparkles,
   Upload, X,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -66,6 +67,9 @@ type Expected = { name: string; server: LyricsServerAudio | null }
 const JOBS_POLL_MS = 5000
 const DROP_ADLIBS_KEY = 'lyricsGen:dropAdlibs'
 const SYNC_DRAFT_KEY = 'syncedLyrics:draft'
+/** Whether the dialog fills the window, for Sync and for the other tabs. */
+const SIZE_KEY = 'syncedLyrics:big'
+type BigSizes = { sync: boolean; other: boolean }
 const LANGUAGES = [
   { value: '', label: 'Detect it' },
   { value: 'en', label: 'English' },
@@ -143,6 +147,9 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   // The lyrics being timed, kept on this device until they're cleared, so
   // closing the dialog doesn't lose a half-done sync. The audio is the form's.
   const [syncLrc, setSyncLrc] = useState(() => ls.get<string>(SYNC_DRAFT_KEY) ?? '')
+  // Sync opens big, with room for the lines; the forms and job lists don't
+  // need it. The header's toggle changes either, and it's remembered.
+  const [big, setBig] = useState<BigSizes>(() => ({ sync: true, other: false, ...ls.get<Partial<BigSizes>>(SIZE_KEY) }))
   useEffect(() => { if (syncLrc) ls.set(SYNC_DRAFT_KEY, syncLrc); else ls.remove(SYNC_DRAFT_KEY) }, [syncLrc])
   const syncLines = useMemo(() => parseSyncedLyrics(syncLrc), [syncLrc])
   const [syncMode, setSyncMode] = useSyncMode(hasWordTiming(syncLines))
@@ -392,9 +399,15 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const syncFromFile = (): void => {
     pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then(takeSyncText, () => {})
   }
-  // A Whisper result, timing and all, to change its lines here.
+  // A Whisper result, timing and all, to fix by hand here. Whatever Sync held
+  // before can be brought back from the toast.
   const openInSync = (job: LyricsGenJob, lrc: string): void => {
-    setSyncLrc(lrc.trim())
+    const before = syncLrc
+    const next = lrc.trim()
+    setSyncLrc(next)
+    if (before.trim() && before.trim() !== next) {
+      showAppToast('Opened in Sync, in place of the lyrics that were there', { tone: 'info', action: { label: 'Undo', onClick: () => setSyncLrc(before) } })
+    }
     expectAudioOf(job, true)
     setOpenJob(null)
     setTab('sync')
@@ -567,6 +580,13 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     </p>
   ) : null)
 
+  const expanded = showSync ? big.sync : big.other
+  const toggleBig = (): void => {
+    const next = { ...big, [showSync ? 'sync' : 'other']: !expanded }
+    ls.set(SIZE_KEY, next)
+    setBig(next)
+  }
+
   const copySync = (): void => {
     navigator.clipboard.writeText(syncLrc).then(() => showAppToast('Copied the LRC', { tone: 'info' }), () => showAppToast('Could not copy'))
   }
@@ -577,6 +597,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
       zIndexClassName="z-[60]"
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-[600px] h-[90svh] md:h-[740px] max-h-[92svh]"
       minWidth={420} minHeight={480}
+      expanded={expanded}
     >
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
         <div className="bg-surface w-full h-full flex flex-col min-h-0">
@@ -598,6 +619,14 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                 </p>
               </div>
               <div className="flex items-center gap-1">
+                <button
+                  onClick={toggleBig}
+                  title={expanded ? 'Smaller window' : 'Bigger window'}
+                  aria-pressed={expanded}
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+                >
+                  {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
                 {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
                 <button onClick={close} title="Close" className="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
                   <X size={17} />

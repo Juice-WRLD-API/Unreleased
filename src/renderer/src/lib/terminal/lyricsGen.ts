@@ -237,12 +237,17 @@ async function runTiming(ctx: TermCtx, words: string[], json: boolean): Promise<
     return
   }
   const wanted = timingGoal(arg, targetStart(lines, t))
+  const before = lines
   lines = setTimingStart(lines, t, wanted)
   keep()
   const now = targetStart(lines, t)
   ctx.print(`${label(t)} now starts at ${shown(t)}`, 'ok')
+  // Whatever it ran into moved along with it.
+  const own = t.word === null ? Math.max(lines[t.line].words?.length ?? 0, 1) : 1
+  const pushed = countTimingEdits(before, lines) - (Math.abs(now - targetStart(before, t)) >= 0.005 ? own : 0)
+  if (pushed > 0) ctx.print(`pushed ${pushed} ${pushed === 1 ? 'word or line' : 'words or lines'} ${wanted > targetStart(before, t) ? 'after' : 'before'} it along`, 'dim')
   if (wanted > 0 && Math.abs(now - wanted) > 0.005) {
-    ctx.print(`stopped short: it can't pass the ${wanted > now ? 'next' : 'previous'} ${t.word === null ? 'line' : 'word'}. Move that one first.`, 'dim')
+    ctx.print('stopped short: everything before it is up against the start of the song', 'dim')
   }
 }
 
@@ -433,7 +438,7 @@ export const LYRICS_GEN_COMMANDS: TermCommand[] = [
   {
     name: 'lyricsgen', aliases: ['lyricgen'], group: 'Account',
     usage: 'lyricsgen [ls] · status · plain [--now | --song <id> | --path <file> [--channel c]] · sync|words [<job> | --file] [--now | --song | --path] [--no-adlibs] · show|wait|get|rm <job> · timing <job> [<line>[.<word>] [+0.2 | -0.05 | 1:13.40] | reset [<line>[.<word>]]]',
-    description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). Audio the server has is named, not uploaded: --now on an API song, --song <id>, or --path <comp file> (--channel for another comp); a follow-up on such a job uses it again. Word sync always sends plain text; --no-adlibs leaves out everything in ( ). Language is English unless --lang es (or --lang auto to detect). --audio picks new audio. get <job> txt|lrc|enhanced downloads. timing <job> lists the lines of a sync and timing <job> 12 the words of line 12; timing <job> 12.3 +0.2 starts its third word 0.2s later (-0.05 earlier, 1:13.40 at that time), timing <job> 12 -0.5 moves the whole line, and timing <job> reset puts it all back. As with the Synced lyrics tool on a job in the dialog, the changes stay on this device and get uses them (--original for the timing as the server made it)',
+    description: 'Donors: generate lyrics with Whisper. plain transcribes a song; sync and words time your lyrics to it (from an earlier job, a .txt/.lrc file, or with --now the playing song and its lyrics). Audio the server has is named, not uploaded: --now on an API song, --song <id>, or --path <comp file> (--channel for another comp); a follow-up on such a job uses it again. Word sync always sends plain text; --no-adlibs leaves out everything in ( ). Language is English unless --lang es (or --lang auto to detect). --audio picks new audio. get <job> txt|lrc|enhanced downloads. timing <job> lists the lines of a sync and timing <job> 12 the words of line 12; timing <job> 12.3 +0.2 starts its third word 0.2s later (-0.05 earlier, 1:13.40 at that time), timing <job> 12 -0.5 moves the whole line (anything in the way is pushed along with it), and timing <job> reset puts it all back. As with the Synced lyrics tool on a job in the dialog, the changes stay on this device and get uses them (--original for the timing as the server made it)',
     covers: ['lyricsGenApi.listLyricsJobs', 'lyricsGenApi.getLyricsGenOptions', 'lyricsGenApi.createLyricsJob', 'lyricsGenApi.createLyricsJobFromServer', 'lyricsGenApi.getLyricsJob', 'lyricsGenApi.fetchLyricsJobOutput', 'lyricsGenApi.deleteLyricsJob', 'lyricsGenApi.fetchTrackAudio'],
     complete: (before, partial) => {
       const p = partial.toLowerCase()

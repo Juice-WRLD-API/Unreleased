@@ -1,13 +1,15 @@
-// Hand-tuned timing for a finished sync job. In the Synced lyrics tool on the
-// job's result (or with `lyricsgen timing`) a word or a whole line is moved earlier or later,
-// or set to where the audio is, and the LRC downloads are rebuilt from the
-// tuned lines in the server's own format. The server keeps its result: the
-// changes are a draft kept on this device, per job, until the preview expires.
+// Hand-tuned timing for a finished sync job. With `lyricsgen timing` a word
+// or a whole line is moved earlier or later, or set to a time, and the LRC
+// downloads (and the dialog's preview) are rebuilt from the tuned lines in the
+// server's own format. The server keeps its result: the changes are a draft
+// kept on this device, per job, until the preview expires.
 //
-// Starts stay in order. A word can't pass its neighbours, and a line's first
-// word can't go before the previous line's last one, or the preview would
-// light a line before the one above it had finished.
+// Starts stay in order. A move pushes whatever it runs into along with it,
+// the way the Synced lyrics tool's nudge does (it's the same code), so the
+// preview never lights a line before the one above it has finished. Putting
+// a line back slides it as one piece if a neighbour has moved into its place.
 import type { LyricsGenJob, LyricsOutput, LyricsSegment } from './lyricsGenApi'
+import { linesFromSegments, nudgeTarget, segmentsFromLines } from './syncedLyrics'
 import { ls } from './persist'
 
 /** A word of a line, or (`word` null) the whole line. Indexes from 0. */
@@ -80,44 +82,22 @@ function place(lines: LyricsSegment[], i: number, line: LyricsSegment): LyricsSe
   return out
 }
 
-/** Moves a word, or a whole line with its words, by `delta` seconds, as far
- *  as its neighbours allow. A line's start follows its first word when the
- *  two started together, or when the word moves ahead of it. */
+/** Moves a word, or a whole line with its words, by `delta` seconds, pushing
+ *  whatever it runs into along with it. A line's start follows its first word
+ *  when the two started together. Only the start of the song stops it. */
 export function shiftTiming(lines: LyricsSegment[], t: TimingTarget, delta: number): LyricsSegment[] {
-  const l = lines[t.line]
-  const next = lines[t.line + 1]
-  const { floor, ceiling } = lineRoom(lines, t.line)
-
-  if (t.word === null) {
-    const d = round(clamp(delta, floor - l.start, ceiling - lastStart(l)))
-    return d ? place(lines, t.line, { ...moveLine(l, d, next), estimated: false }) : lines
-  }
-  const ws = l.words!
-  const j = t.word
-  const w = ws[j]
-  const last = j === ws.length - 1
-  const start = round(clamp(w.start + delta, j > 0 ? ws[j - 1].start + GAP : floor, last ? ceiling : ws[j + 1].start - GAP))
-  if (start === w.start) return lines
-  const end = round(Math.max(start, Math.min(w.end + start - w.start, last ? (next ? next.start : Infinity) : ws[j + 1].start)))
-  const words = ws.map((x, k) =>
-    k === j ? { ...x, start, end, estimated: false }
-    : k === j - 1 && x.end > start ? { ...x, end: start }
-    : x)
-  const tied = j === 0 && Math.abs(l.start - w.start) < 0.0005
-  return place(lines, t.line, {
-    ...l,
-    words,
-    start: j === 0 && (tied || start < l.start) ? start : l.start,
-    end: last ? round(Math.max(l.end, end)) : l.end,
-  })
+  const before = linesFromSegments(lines, true)
+  const after = nudgeTarget(before, t, delta).lines
+  return after === before ? lines : segmentsFromLines(after, lines)
 }
 
-/** Moves a target so it starts at `time` (or as near as its neighbours allow). */
+/** Moves a target so it starts at `time`, pushing what's in the way. */
 export const setTimingStart = (lines: LyricsSegment[], t: TimingTarget, time: number): LyricsSegment[] =>
   shiftTiming(lines, t, time - targetStart(lines, t))
 
-/** Puts a target back where the server had it: a word to its start, a line
- *  with all its words. Neighbours moved in the meantime still bound it. */
+/** Puts a target back where the server had it: a word to its start (pushing
+ *  what's in the way), a line with all its words (slid as one piece if a
+ *  neighbour has moved into its place). */
 export function resetTiming(lines: LyricsSegment[], original: LyricsSegment[], t: TimingTarget): LyricsSegment[] {
   const o = original[t.line]
   const { floor, ceiling } = lineRoom(lines, t.line)

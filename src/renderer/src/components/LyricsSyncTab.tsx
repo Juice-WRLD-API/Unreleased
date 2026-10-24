@@ -36,7 +36,7 @@ export default function LyricsSyncTab({ lines, onLines, mode, onMode, clock, aud
   const empty = !lines.some((l) => !l.hidden)
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 min-h-full">
       <div>
         {audioField}
         {audioHint}
@@ -88,7 +88,9 @@ export default function LyricsSyncTab({ lines, onLines, mode, onMode, clock, aud
           clock={clock}
           mode={mode}
           onModeChange={onMode}
-          listClassName="h-[280px]"
+          // Grows with the dialog: the bigger it is, the more lines show.
+          fill
+          className="flex-1 min-h-[460px]"
           noAudio={<p className="flex-1 text-xs text-text-muted">Choose the audio above to start stamping.</p>}
           footer={(
             <ConfirmButton icon={RotateCcw} label="Start over" confirmLabel="Clear these lyrics?" onConfirm={() => onLines('')} />

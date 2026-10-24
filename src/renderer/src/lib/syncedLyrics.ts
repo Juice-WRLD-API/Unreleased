@@ -1,7 +1,7 @@
 // The Synced lyrics tool's model of an LRC: lines with an optional start, and
 // in word mode the words of each line with optional starts of their own. The
-// song editor's Sync, the Synced lyrics dialog and a generated sync's preview
-// all edit through it.
+// song editor's Sync and the Synced lyrics dialog's Sync tab edit through it,
+// and a Whisper result's preview plays along with it.
 //
 // Reading keeps each line as it was, so a line nothing touched is written back
 // exactly as read; a stamped or moved one is rewritten as `[m:ss.xx] text`, or
@@ -10,8 +10,9 @@
 // the line ends.
 //
 // Stamping sets a time wherever the audio is, even out of order (the tool
-// marks those). Nudging keeps the order: a word can't pass its stamped
-// neighbours, and a line's first word can't go before the line above ends.
+// marks those). Nudging keeps the order by pushing: a word moved into the
+// next one pushes it along, and that one the next, on into the lines below
+// (or back up, moving earlier).
 import type { LyricsSegment } from './lyricsGenApi'
 
 export interface SyncWord { text: string; start: number | null; estimated?: boolean }
@@ -282,43 +283,97 @@ export function stampTarget(lines: SyncLine[], t: SyncTarget, time: number): Syn
   return put(lines, t.line, touch(l, { words, start, end: l.end !== null && l.end <= last ? null : l.end }))
 }
 
-/** The stamps either side of a target that a nudge can't pass. */
-function bounds(lines: SyncLine[], t: SyncTarget): { floor: number; ceiling: number } {
-  const l = lines[t.line]
-  let floor = -Infinity
-  let ceiling = Infinity
-  const ws = wordsOf(l)
-  if (t.word !== null) {
-    for (let j = t.word - 1; j >= 0 && floor === -Infinity; j--) if (ws[j].start !== null) floor = ws[j].start! + GAP
-    for (let j = t.word + 1; j < ws.length && ceiling === Infinity; j++) if (ws[j].start !== null) ceiling = ws[j].start! - GAP
-  }
-  if (floor === -Infinity) {
-    for (let i = t.line - 1; i >= 0; i--) {
-      const s = visible(lines[i]) ? lastStart(lines[i]) : null
-      if (s !== null) { floor = s + GAP; break }
-    }
-  }
-  if (ceiling === Infinity) {
-    for (let i = t.line + 1; i < lines.length; i++) {
-      const s = visible(lines[i]) ? lineStart(lines[i]) : null
-      if (s !== null) { ceiling = s - GAP; break }
-    }
-    // A whole line has to fit its last word in before the next line.
-    if (t.word === null && ceiling !== Infinity) ceiling -= (lastStart(l) ?? 0) - (lineStart(l) ?? 0)
-  }
-  return { floor: Math.max(floor, 0), ceiling }
+/** One time in the lyrics: a line's own start, or a word's. */
+interface Slot { line: number; word: number | null }
+
+/** Every time, in order: each shown line's own start, then its timed words. */
+function slotsOf(lines: SyncLine[]): { slots: Slot[]; times: number[] } {
+  const slots: Slot[] = []
+  const times: number[] = []
+  lines.forEach((l, i) => {
+    if (!visible(l)) return
+    if (l.start !== null) { slots.push({ line: i, word: null }); times.push(l.start) }
+    l.words?.forEach((w, j) => { if (w.start !== null) { slots.push({ line: i, word: j }); times.push(w.start) } })
+  })
+  return { slots, times }
 }
 
-/** Moves a timed target by `delta` seconds, as far as its neighbours allow.
- *  `stopped` says a neighbour cut it short. One already out of order moves freely. */
+/** The gap kept between two times in a row: none between a line's start and its own words. */
+const gapAfter = (a: Slot, b: Slot): number => (a.word === null && b.line === a.line ? 0 : GAP)
+
+/** Moves a timed target by `delta` seconds. Whatever it runs into is pushed
+ *  along to keep the order (the next word, then the one after that, on into
+ *  the lines below; or the same way back when it moves earlier), a
+ *  centisecond apart. A neighbour that was already out of order is left
+ *  where it is. `stopped` says it was held short so nothing goes before the
+ *  start of the song. */
 export function nudgeTarget(lines: SyncLine[], t: SyncTarget, delta: number): { lines: SyncLine[]; stopped: boolean } {
-  const from = targetStart(lines, t)
-  if (from === null) return { lines, stopped: false }
-  const { floor, ceiling } = bounds(lines, t)
-  const inside = from >= floor - 0.0005 && from <= ceiling + 0.0005 && floor <= ceiling
-  const to = cs(inside ? Math.min(Math.max(from + delta, floor), ceiling) : from + delta)
-  if (Math.abs(to - from) < 0.005) return { lines, stopped: Math.abs(delta) > 0 }
-  return { lines: stampTarget(lines, t, to), stopped: Math.abs(to - from - delta) > 0.005 }
+  const l = lines[t.line]
+  if (!l || targetStart(lines, t) === null || !delta) return { lines, stopped: false }
+  const { slots, times } = slotsOf(lines)
+  // What moves by `delta`: the word (with the line's start when the two are
+  // tied and it's the line's first timed word), or the whole line.
+  const firstTimed = l.words?.findIndex((w) => w.start !== null) ?? -1
+  const tied = t.word !== null && t.word === firstTimed && l.start !== null && Math.abs(l.start - l.words![t.word].start!) < 0.005
+  const moving = slots.flatMap((s, k) =>
+    s.line === t.line && (t.word === null || s.word === t.word || (tied && s.word === null)) ? [k] : [])
+  if (!moving.length) return { lines, stopped: false }
+  const first = moving[0]
+  const last = moving[moving.length - 1]
+
+  // Rounded but not held at 0 yet: a line moved too early would squash its
+  // words together. The shortfall below holds everything back at once.
+  const r2 = (x: number): number => Math.round(x * 100) / 100
+  const timesAfter = (d: number): number[] => {
+    const next = times.slice()
+    for (const k of moving) next[k] = r2(times[k] + d)
+    if (d > 0) {
+      for (let k = last + 1; k < slots.length; k++) {
+        if (times[k] < times[k - 1] - 0.005) break
+        const need = next[k - 1] + gapAfter(slots[k - 1], slots[k])
+        if (next[k] >= need - 0.0005) break
+        next[k] = r2(need)
+      }
+    } else {
+      for (let k = first - 1; k >= 0; k--) {
+        if (times[k] > times[k + 1] + 0.005) break
+        const need = next[k + 1] - gapAfter(slots[k], slots[k + 1])
+        if (next[k] <= need + 0.0005) break
+        next[k] = r2(need)
+      }
+    }
+    return next
+  }
+
+  let next = timesAfter(delta)
+  const low = Math.min(...next)
+  const stopped = low < -0.0005
+  if (stopped) next = timesAfter(r2(delta - low))
+  if (next.every((x, k) => Math.abs(x - times[k]) < 0.005)) return { lines, stopped }
+
+  // Write the new times back, line by line. A line's closing stamp moves
+  // with its last word.
+  const out = lines.slice()
+  const changed = new Map<number, number[]>()
+  next.forEach((x, k) => {
+    if (Math.abs(x - times[k]) >= 0.005) changed.set(slots[k].line, [...(changed.get(slots[k].line) ?? []), k])
+  })
+  for (const [i, ks] of changed) {
+    const line = lines[i]
+    let start = line.start
+    const words = line.words?.slice() ?? null
+    for (const k of ks) {
+      const s = slots[k]
+      const at = Math.max(0, next[k])
+      if (s.word === null) start = at
+      else words![s.word] = { ...words![s.word], start: at, estimated: false }
+    }
+    const lastBefore = lastStart(line)
+    const lastAfter = Math.max(start ?? -Infinity, ...(words ?? []).map((w) => w.start ?? -Infinity))
+    const end = line.end === null || lastBefore === null ? line.end : Math.max(cs(line.end + lastAfter - lastBefore), lastAfter)
+    out[i] = touch(line, { start, words, end, estimated: false })
+  }
+  return { lines: out, stopped }
 }
 
 /** Takes a target's time away: a line loses its own and its words'. */
@@ -405,7 +460,7 @@ export function linesFromSegments(segs: LyricsSegment[], words: boolean): SyncLi
   }))
 }
 
-/** `base` with the tool's starts, for a sync's timing draft. Every word keeps
+/** `base` with the tool's times, for a sync's timing draft. Every word keeps
  *  its length, cut short where the next one starts. */
 export function segmentsFromLines(lines: SyncLine[], base: LyricsSegment[]): LyricsSegment[] {
   const starts = base.map((b, i) => lineStart(lines[i]) ?? b.start)
