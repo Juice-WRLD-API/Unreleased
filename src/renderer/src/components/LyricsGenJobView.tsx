@@ -8,7 +8,7 @@ import {
   type LyricsAdminJob, type LyricsGenJob, type LyricsGenMode, type LyricsOutput, type LyricsSegment,
 } from '../lib/lyricsGenApi'
 import { countTimingEdits, loadTimingDraft, lrcTime, saveTimingDraft, timedLines, timingOutput } from '../lib/lyricsTiming'
-import { linesFromSegments, segmentsFromLines } from '../lib/syncedLyrics'
+import { linesFromSegments } from '../lib/syncedLyrics'
 import { buildStreamUrl, searchSongs } from '../lib/juicewrldApi'
 import { isAbortError } from '../lib/apiClient'
 import { errorMessage } from '../lib/format'
@@ -395,10 +395,11 @@ function NextStep({ title, blurb, children }: { title: string; blurb: string; ch
   )
 }
 
-/// A synced job: its lines with times, in the Synced lyrics tool against the
-// audio, or the raw LRC. Timing moved in the tool is kept on this device, and
-// Copy, the LRC downloads and the next steps are built from it in place of
-// the server's.
+// A synced job: its lines with times, playing along with the audio, or the
+// raw LRC. It's a preview; the timing is changed by hand in Sync, which Edit
+// in Sync opens it in. Timing moved with `lyricsgen timing` is kept on this
+// device, and Copy, the LRC downloads and the next steps are built from it in
+// place of the server's.
 function SyncedResult({ job, admin, audio, audioUrl, onContinue, onEdit, apply }: {
   job: LyricsGenJob
   admin: boolean
@@ -455,12 +456,24 @@ function SyncedResult({ job, admin, audio, audioUrl, onContinue, onEdit, apply }
               {!admin && reviewText
                 ? <>: <button onClick={() => onContinue(job.mode, reviewText)} className="font-semibold text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors">edit the text and sync again</button>.</>
                 : '.'}
-              {' '}If the text is right, pick them below and move them by ear.
+              {' '}If the text is right,{' '}
+              {!admin && onEdit && lrc
+                ? <button onClick={() => onEdit(lrc)} className="font-semibold text-text-secondary hover:text-text-primary underline underline-offset-2 transition-colors">move them by ear in Sync</button>
+                : 'move them by ear in Sync'}.
             </span>
           </p>
         )}
         {view === 'preview'
-          ? <JobTiming lines={lines} original={original} onChange={setLines} words={words} audio={audio} audioUrl={audioUrl} filename={job.filename} />
+          ? (
+            <JobPreview
+              lines={lines}
+              words={words}
+              audio={audio}
+              audioUrl={audioUrl}
+              filename={job.filename}
+              onEdit={!admin && onEdit && lrc ? () => onEdit(lrc) : undefined}
+            />
+          )
           : (
             <>
               <pre className="h-[380px] overflow-auto rounded-2xl border border-[var(--border)] bg-surface-overlay/30 px-4 py-3 text-xs leading-relaxed font-mono text-text-secondary whitespace-pre-wrap break-words select-text">
@@ -503,26 +516,13 @@ function SyncedResult({ job, admin, audio, audioUrl, onContinue, onEdit, apply }
           </button>
         </NextStep>
       )}
-      {!admin && (reviewText || (onEdit && lrc)) && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {reviewText && (
-            <button
-              onClick={() => onContinue(job.mode, reviewText)}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-text-muted hover:text-text-primary transition-colors"
-            >
-              <PencilLine size={13} /> Edit the text and sync again
-            </button>
-          )}
-          {onEdit && lrc && (
-            <button
-              onClick={() => onEdit(lrc)}
-              title="Open these lines, times and all, in Sync: add, remove or retype lines and stamp them by hand"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-text-muted hover:text-text-primary transition-colors"
-            >
-              <Clock size={13} /> Change lines in Sync
-            </button>
-          )}
-        </div>
+      {!admin && reviewText && (
+        <button
+          onClick={() => onContinue(job.mode, reviewText)}
+          className="self-start inline-flex items-center gap-1.5 text-xs font-semibold text-text-muted hover:text-text-primary transition-colors"
+        >
+          <PencilLine size={13} /> Edit the text and sync again
+        </button>
       )}
     </>
   )
@@ -537,20 +537,18 @@ function estimatedNote(lines: number, words: number): string | null {
   return parts.length ? `${parts.join(' and ')} couldn't be matched to the audio.` : null
 }
 
-// The synced lines in the Synced lyrics tool, against the job's audio. A job
-// on server audio streams it; otherwise, without the job's audio in hand, the
+// The synced lines playing along with the job's audio: the Synced lyrics
+// tool as a preview, where a click plays from that line or word. A job on
+// server audio streams it; otherwise, without the job's audio in hand, the
 // lines show with their times and the audio can be picked here (it isn't
-// uploaded). The tool works on the job's segments through the timing draft,
-// so its lines and words stay the server's: only their times move.
-function JobTiming({ lines, original, onChange, words, audio, audioUrl, filename }: {
+// uploaded). Changing anything is Edit in Sync.
+function JobPreview({ lines, words, audio, audioUrl, filename, onEdit }: {
   lines: LyricsSegment[]
-  /** The server's timing: what "moved" and Reset compare against. */
-  original: LyricsSegment[]
-  onChange: (lines: LyricsSegment[]) => void
   words: boolean
   audio: File | null
   audioUrl: string | null
   filename: string
+  onEdit?: () => void
 }): JSX.Element {
   const [picked, setPicked] = useState<File | null>(null)
   const file = picked ?? audio
@@ -558,7 +556,6 @@ function JobTiming({ lines, original, onChange, words, audio, audioUrl, filename
   useEffect(() => () => { if (fileSrc) URL.revokeObjectURL(fileSrc) }, [fileSrc])
   const { clock, element } = useAudioClock(fileSrc ?? audioUrl)
   const toolLines = useMemo(() => linesFromSegments(lines, words), [lines, words])
-  const toolOriginal = useMemo(() => linesFromSegments(original, words), [original, words])
   const pick = (): void => {
     pickLocalFile('audio/*').then(setPicked, () => {})
   }
@@ -568,11 +565,10 @@ function JobTiming({ lines, original, onChange, words, audio, audioUrl, filename
       {element}
       <SyncedLyricsTool
         lines={toolLines}
-        onChange={(next) => onChange(segmentsFromLines(next, lines))}
+        onChange={() => {}}
         clock={clock}
         mode={words ? 'words' : 'lines'}
-        original={toolOriginal}
-        editText={false}
+        readOnly
         noAudio={(
           <>
             <FileAudio size={15} className="text-text-muted shrink-0" />
@@ -580,6 +576,18 @@ function JobTiming({ lines, original, onChange, words, audio, audioUrl, filename
               Play along with <span className="text-text-secondary">{filename || 'the audio'}</span> to check the timing
             </span>
             <button onClick={pick} className={SMALL_BTN}>Choose audio</button>
+          </>
+        )}
+        footer={onEdit && (
+          <>
+            <span className="text-[11px] text-text-muted">Something early or late?</span>
+            <button
+              onClick={onEdit}
+              title="Open these lines, times and all, in Sync, to move them by ear, retype them or stamp them again"
+              className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-bold bg-accent text-white hover:bg-accent/90 transition-colors"
+            >
+              <Clock size={13} /> Edit in Sync
+            </button>
           </>
         )}
       />

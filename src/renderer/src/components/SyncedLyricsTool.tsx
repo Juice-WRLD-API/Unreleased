@@ -184,27 +184,33 @@ function Segmented<T extends string | number>({ options, value, onChange, label 
 const offsetText = (sec: number): string => `${sec < 0 ? '-' : '+'}${Math.abs(sec).toFixed(2)}s`
 
 export default function SyncedLyricsTool({
-  lines, onChange, clock, mode, onModeChange, original = null, editText = true, plainLyrics = '', noAudio, footer, listClassName = 'h-[300px]',
+  lines, onChange, clock, mode, onModeChange, original = null, readOnly = false, plainLyrics = '', noAudio, footer, listClassName = 'h-[300px]', fill = false, className = '',
 }: {
   lines: SyncLine[]
   onChange: (lines: SyncLine[]) => void
   clock: SyncClock
   mode: SyncMode
-  /** Absent: the mode is fixed (a generated sync keeps its own). */
+  /** Absent: the mode is fixed. */
   onModeChange?: (mode: SyncMode) => void
   /** The timing this started from: what "moved" and Reset compare against. */
   original?: SyncLine[] | null
-  /** Lines can be typed, added, removed and have their times taken away. Off
-   *  for a generated sync, whose timing draft has to keep its lines. */
-  editText?: boolean
+  /** A preview: the lines play along and a click seeks there, but nothing
+   *  can be stamped, moved or typed. Space plays and pauses. */
+  readOnly?: boolean
   /** Fills an empty list. */
   plainLyrics?: string
   /** In place of the transport while there's no audio to sync against. */
   noAudio?: ReactNode
   /** Extra actions under the lines. */
   footer?: ReactNode
+  /** The list's height, when it doesn't `fill`. */
   listClassName?: string
+  /** The list takes whatever height the tool is given (by `className`, in a
+   *  flex column), instead of `listClassName`'s. */
+  fill?: boolean
+  className?: string
 }): JSX.Element {
+  const editText = !readOnly
   const [rawSel, setSel] = useState<SyncTarget | null>(null)
   const [lit, setLit] = useState({ line: -1, word: -1 })
   const [follow, setFollow] = useState(true)
@@ -237,7 +243,7 @@ export default function SyncedLyricsTool({
     return rawSel.word < wordsOf(l).length ? rawSel : null
   }, [rawSel, lines, mode])
   // What Space stamps: the pick, else the first line or word without a time.
-  const cursor = sel ?? firstTarget(lines, mode)
+  const cursor = readOnly ? null : sel ?? firstTarget(lines, mode)
   const order = useMemo(() => outOfOrder(lines), [lines])
   const marks = useMemo(() => lines.map((_, i) => rowMarks(lines, i, order, original, mode)), [lines, order, original, mode])
   const progress = syncProgress(lines, mode)
@@ -292,6 +298,12 @@ export default function SyncedLyricsTool({
     clock.setPlaying(true)
   }
   const pick = (t: SyncTarget, listen = true): void => {
+    if (readOnly) {
+      // A preview just plays from there.
+      const s = targetStart(lines, t)
+      if (clock.ready && s !== null) { clock.seek(s); clock.setPlaying(true) }
+      return
+    }
     setSel(t)
     if (listen) hear(t)
   }
@@ -304,13 +316,15 @@ export default function SyncedLyricsTool({
     if (advance) setSel(stepTarget(lines, t, 1, mode))
   }
 
+  // A nudge pushes whatever it runs into along with it; it only stops at the
+  // start of the song.
   const lastStopToast = useRef(0)
   const nudge = (by: number): void => {
     if (!sel) return
     const r = nudgeTarget(lines, sel, by)
     if (r.stopped && Date.now() - lastStopToast.current > 2500) {
       lastStopToast.current = Date.now()
-      showAppToast(`It can't pass the ${by > 0 ? 'next' : 'previous'} ${sel.word === null ? 'line' : 'word'}. Move that one first.`, { tone: 'info' })
+      showAppToast('That\'s as early as it goes: everything before it is up against the start of the song.', { tone: 'info' })
     }
     if (r.lines !== lines) onChange(r.lines)
   }
@@ -364,11 +378,12 @@ export default function SyncedLyricsTool({
     if (keyOwners[keyOwners.length - 1] !== me.current) return
     if (!clock.ready || isTyping(e.target) || e.altKey || e.metaKey) return
     if (e.ctrlKey && e.key !== ' ') return
+    if (readOnly && e.key !== ' ' && !/^[jl]$/i.test(e.key)) return
     const claim = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
     switch (e.key) {
       case ' ':
         claim()
-        if (e.ctrlKey) clock.setPlaying(!clock.playing)
+        if (e.ctrlKey || readOnly) clock.setPlaying(!clock.playing)
         else if (!e.repeat) stamp(true)
         break
       case 'ArrowUp':
@@ -456,12 +471,13 @@ export default function SyncedLyricsTool({
 
   return (
     <div
-      className="rounded-2xl border border-[var(--border)] bg-surface-overlay/30 overflow-hidden"
+      className={`rounded-2xl border border-[var(--border)] bg-surface-overlay/30 overflow-hidden ${fill ? 'flex flex-col' : ''} ${className}`}
       // Buttons never take focus, so Space after a click still stamps
       // instead of pressing the last button again.
       onMouseDown={(e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault() }}
     >
       {/* Mode, progress, shift all */}
+      {!readOnly && (
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-[var(--border)] bg-surface/40">
         {onModeChange ? (
           <Segmented
@@ -513,8 +529,9 @@ export default function SyncedLyricsTool({
           <Keyboard size={14} />
         </button>
       </div>
+      )}
 
-      {showKeys && (
+      {showKeys && !readOnly && (
         <div className="animate-disclosure-in px-4 py-3 border-b border-[var(--border)] bg-surface/30 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
           {KEYS.map(([k, d]) => (
             <div key={k} className="contents text-[11px]">
@@ -526,12 +543,12 @@ export default function SyncedLyricsTool({
       )}
 
       {/* The lines */}
-      <div className="relative">
+      <div className={`relative ${fill ? 'flex-1 min-h-[160px]' : ''}`}>
         <div
           ref={listRef}
           onWheel={() => setFollow(false)}
           onTouchMove={() => setFollow(false)}
-          className={`relative overflow-y-auto px-2 py-8 ${listClassName}`}
+          className={`${fill ? 'absolute inset-0' : `relative ${listClassName}`} overflow-y-auto px-2 py-8`}
           style={{ maskImage: LIST_MASK, WebkitMaskImage: LIST_MASK }}
         >
           {!hasLines && (
@@ -568,6 +585,7 @@ export default function SyncedLyricsTool({
                 marks={marks[i]}
                 editing={editing?.line === i ? editing.kind : null}
                 editText={editText}
+                readOnly={readOnly}
                 canSeek={clock.ready}
                 actions={rowActions}
               />
@@ -585,7 +603,7 @@ export default function SyncedLyricsTool({
       </div>
 
       {/* The picked line or word, and what to do with it */}
-      {hasLines && (
+      {hasLines && !readOnly && (
         <div className="flex flex-col gap-2 px-3 py-2.5 border-t border-[var(--border)] bg-surface/40">
           <div className="flex items-center gap-2 min-w-0 h-7">
             {sel ? (
@@ -768,7 +786,7 @@ interface RowActions {
   remove: (line: number) => void
 }
 
-const Row = memo(function Row({ line: l, index: i, words, now, past, started, litWord, sel, cursor, flash, marks, editing, editText, canSeek, actions }: {
+const Row = memo(function Row({ line: l, index: i, words, now, past, started, litWord, sel, cursor, flash, marks, editing, editText, readOnly, canSeek, actions }: {
   line: SyncLine
   index: number
   words: boolean
@@ -783,6 +801,8 @@ const Row = memo(function Row({ line: l, index: i, words, now, past, started, li
   marks: RowMarks
   editing: 'time' | 'text' | null
   editText: boolean
+  /** A preview: clicks seek, nothing opens for typing. */
+  readOnly: boolean
   canSeek: boolean
   actions: RowActions
 }): JSX.Element {
@@ -812,8 +832,9 @@ const Row = memo(function Row({ line: l, index: i, words, now, past, started, li
       ) : (
         <span
           data-chip
-          onDoubleClick={(e) => { e.stopPropagation(); actions.editTime(i) }}
-          title={marks.lineOut ? 'Starts before a line above it' : l.estimated ? 'Estimated timing. Double-click to type a time' : 'Double-click to type a time'}
+          onDoubleClick={(e) => { e.stopPropagation(); if (!readOnly) actions.editTime(i) }}
+          title={marks.lineOut ? 'Starts before a line above it' : readOnly ? (l.estimated ? 'Estimated timing' : undefined)
+            : l.estimated ? 'Estimated timing. Double-click to type a time' : 'Double-click to type a time'}
           className={`w-[62px] shrink-0 font-mono text-[11px] tabular-nums transition-colors ${l.estimated ? 'italic' : ''} ${
             marks.lineOut ? `text-amber-300 ${ORDER_MARK}` : now ? 'text-accent' : start === null ? 'text-text-muted/50' : `text-text-muted ${canSeek ? 'group-hover:text-accent' : ''}`
           } ${marks.lineMoved && !marks.lineOut ? MOVED_MARK : ''}`}

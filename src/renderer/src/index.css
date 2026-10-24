@@ -128,6 +128,14 @@ html:active-view-transition-type(palette)::view-transition-new(root) {
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* A dialog growing or shrinking (ModalOverlay's `expanded`) cross-fades the same way. */
+html:active-view-transition-type(panel-resize)::view-transition { pointer-events: none; }
+html:active-view-transition-type(panel-resize)::view-transition-old(root),
+html:active-view-transition-type(panel-resize)::view-transition-new(root) {
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 /* ─── Gradient surfaces ──────────────────────────────────────────────────────────
    Two independent opt-ins, both toggled by useThemeEffects:
      .gradients          → Settings → Appearance → "App gradients"
