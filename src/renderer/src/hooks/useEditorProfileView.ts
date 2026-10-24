@@ -5,8 +5,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store/useStore'
 import {
   SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications,
-  adminListUsers, updateDisplayName, updateAvatar, compressImageFile,
+  adminListUsers, updateDisplayName, updateAvatar, compressImageFile, withProposalData,
 } from '../lib/userApi'
+import { showAppToast } from '../lib/appToast'
 import { accountDisplayName } from '../lib/format'
 import * as reportsApi from '../lib/reportsApi'
 import { fetchEraList } from '../lib/erasApi'
@@ -319,11 +320,21 @@ export function useEditorProfileView(): {
   const otpLocked = isAdmin && adminPreview?.otpEnabled === false
   const canReviewProposals = canReviewStaff && !otpLocked
 
-  const handleEdit = (p: SongEditProposal): void => {
+  const handleEdit = async (p: SongEditProposal): Promise<void> => {
+    // List rows are summaries without proposed_data, so read the proposal
+    // in full before handing it to the editor.
+    let full: Awaited<ReturnType<typeof withProposalData>>
+    try {
+      full = await withProposalData(p)
+    } catch (e) {
+      console.error('load proposal failed:', e)
+      showAppToast("Couldn't open the proposal")
+      return
+    }
     // p.song is null for 'create' proposals (new song, no backing record yet) -
     // EditorPage handles that case, so don't block it here.
-    setPendingEditProposal({ id: p.id, songId: p.song, proposedData: p.proposed_data, editorNotes: p.editor_notes || '' })
-    setPendingEditorSongId(p.song)
+    setPendingEditProposal({ id: full.id, songId: full.song, proposedData: full.proposed_data, editorNotes: full.editor_notes || '' })
+    setPendingEditorSongId(full.song)
     setActiveView('editor')
   }
 
