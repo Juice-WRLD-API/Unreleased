@@ -26,7 +26,7 @@ import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
-import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible, hasHomeTools } from '../lib/homeSections'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
@@ -1679,7 +1679,7 @@ export default function Settings(): JSX.Element {
                     )}
                   </div>
                   <div className="pl-[34px] space-y-1.5">
-                    {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account)) && (!section.donorOnly || hasHomeTools(account))).map((section) => {
+                    {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account))).map((section) => {
                       const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                       return (
                         <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">

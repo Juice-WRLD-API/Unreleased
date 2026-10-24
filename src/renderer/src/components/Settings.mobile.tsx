@@ -21,7 +21,7 @@ import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
-import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible, hasHomeTools } from '../lib/homeSections'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
@@ -1544,7 +1544,7 @@ export default function Settings(): JSX.Element {
                     ) : undefined}
                   >
                     <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
-                      {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account)) && (!section.donorOnly || hasHomeTools(account))).map((section) => {
+                      {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account))).map((section) => {
                         const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                         return (
                           <div

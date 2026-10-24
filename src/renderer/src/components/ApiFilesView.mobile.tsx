@@ -1006,13 +1006,13 @@ export default function ApiFilesView(): JSX.Element {
                     disabled={!channelsReady}
                     onClick={() => { toggleApiFileLike(sheetEntry.path); closeSheet() }}
                   />
-                  {account?.is_donor && (
-                    <SheetItem icon={Sparkles} label="Generate lyrics" onClick={async () => {
+                  {(
+                    <SheetItem icon={Sparkles} label="Synced lyrics" onClick={async () => {
                       const entry = sheetEntry
                       const songId = sheetTrackerId ?? null
                       closeSheet()
                       const channel = (await resolveTrackChannel()) ?? activeChannel
-                      useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId })
+                      useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId, tab: account?.is_donor ? 'create' : 'sync' })
                     }} />
                   )}
                   {sheetTrackerId != null && (

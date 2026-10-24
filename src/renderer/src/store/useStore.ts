@@ -394,7 +394,7 @@ interface AppState {
   // `reportModal` is the open report dialog's target (null = closed).
   pendingReports: PendingReport[]
   reportModal: ReportTarget | null
-  // The open "Generate lyrics" dialog (null = closed) and the song it was
+  // The open "Synced lyrics" dialog (null = closed) and the song it was
   // opened on. See components/LyricsGenModal.
   lyricsGenModal: LyricsGenTarget | null
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
@@ -806,7 +806,7 @@ interface AppActions {
   // submits one update proposal per song.
   openBulkEditor: (songs: JWApiSong[]) => void
   closeBulkEditor: () => void
-  /** Opens / closes the donor "Generate lyrics" dialog, optionally on a song. */
+  /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
 

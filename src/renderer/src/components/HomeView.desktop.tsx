@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, Sparkles } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -15,7 +15,6 @@ import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
-import { hasHomeTools } from '../lib/homeSections'
 import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
@@ -394,16 +393,14 @@ export default function HomeViewDesktop(): JSX.Element {
   const showGames = showSection('games')
   const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
-  const tools: HomeTool[] = hasHomeTools(account)
-    ? [{
-        id: 'lyrics-gen',
-        icon: <Sparkles size={18} className="text-accent" />,
-        title: 'Generate lyrics',
-        subtitle: 'Transcribe a song, or time its lyrics',
-        onClick: () => useStore.getState().openLyricsGen(),
-      }]
-    : []
-  const showTools = showSection('tools') && tools.length > 0
+  const tools: HomeTool[] = [{
+    id: 'lyrics-gen',
+    icon: <MicVocal size={18} className="text-accent" />,
+    title: 'Synced lyrics',
+    subtitle: "Time a song's lyrics by the line or the word",
+    onClick: () => useStore.getState().openLyricsGen(),
+  }]
+  const showTools = showSection('tools')
 
   const mainShown = showRecent || showOnThisDay || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames

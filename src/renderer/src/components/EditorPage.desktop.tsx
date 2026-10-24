@@ -6,7 +6,8 @@ import {
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import ThemedSelect from './ThemedSelect'
-import { buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { useStore } from '../store/useStore'
+import { buildImageUrl, toSiteRelativeImageUrl, songToTrack, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication } from '../lib/userApi'
 import { versionsEnabled } from '../lib/versionsApi'
@@ -19,7 +20,9 @@ import {
 import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
 import { useEditorPageState, type LyricsTab } from '../hooks/useEditorPageState'
 import { clickable } from '../lib/a11y'
-import LyricsSyncTool from './LyricsSyncTool'
+import { SongSyncedLyricsTool } from './SyncedLyricsTool'
+import { lyricsToTime } from '../lib/lyricsGenApi'
+import type { SyncMode } from '../lib/syncedLyrics'
 
 /* ── Card - grouped section container ─────────────────────────────────────── */
 export function Card({ title, icon, action, children, className = '', overflowVisible = false }: {
@@ -415,6 +418,32 @@ export default function EditorPage({ initialSongId = null }: {
   // display mode, so it stays local rather than in the shared hook.
   const [basicView, setBasicView] = useState(() => localStorage.getItem('editor:view') === 'basic')
 
+  // Sync's "Auto-sync with Whisper": lyrics generation on this song, with
+  // these lyrics, its result handed back to this field. Only while the editor
+  // is still on the song the job was started from.
+  const songRef = useRef(song)
+  songRef.current = song
+  const openWhisper = (mode: SyncMode): void => {
+    if (!song) return
+    const id = song.id
+    useStore.getState().openLyricsGen({
+      track: songToTrack(song),
+      songId: id,
+      tab: 'create',
+      prefill: { mode: mode === 'words' ? 'word_synced' : 'synced', text: lyricsToTime(lyrics, synced) },
+      apply: {
+        label: 'Use in the song editor',
+        onApply: (lrc) => {
+          if (songRef.current?.id !== id) return false
+          setSynced(lrc)
+          setLyricsTab('synced')
+          setSyncTool(true)
+          return true
+        },
+      },
+    })
+  }
+
   /* ── Guards ──────────────────────────────────────────────────────────────── */
   if (!account) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
@@ -599,7 +628,7 @@ export default function EditorPage({ initialSongId = null }: {
                         {showSynced && (
                           <button
                             onClick={() => setSyncTool(v => !v)}
-                            title="Stamp each line's time while the song plays"
+                            title="The synced lyrics tool: time each line or word while the song plays"
                             className={`px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
                           >
                             Sync
@@ -631,7 +660,7 @@ export default function EditorPage({ initialSongId = null }: {
                         })}
                       </div>
                       {showSynced && syncTool ? (
-                        <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
+                        <SongSyncedLyricsTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} saved={String(base.synced_lyrics || '')} onWhisper={openWhisper} />
                       ) : showSynced && syncedTable ? (
                         <SyncedLyricsTable value={synced} onChange={setSynced} />
                       ) : (
@@ -987,7 +1016,7 @@ export default function EditorPage({ initialSongId = null }: {
                       {lyricsTab === 'synced' && (
                         <button
                           onClick={() => setSyncTool(v => !v)}
-                          title="Stamp each line's time while the song plays"
+                          title="The synced lyrics tool: time each line or word while the song plays"
                           className={`px-2 py-1 rounded-lg text-[11px] font-semibold transition-all ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
                         >
                           Sync
@@ -1045,7 +1074,7 @@ export default function EditorPage({ initialSongId = null }: {
                       )}
                     </div>
                   ) : syncTool ? (
-                    <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
+                    <SongSyncedLyricsTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} saved={String(base.synced_lyrics || '')} onWhisper={openWhisper} />
                   ) : syncedTable ? (
                     <SyncedLyricsTable value={synced} onChange={setSynced} />
                   ) : (

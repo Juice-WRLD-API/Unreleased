@@ -1246,12 +1246,12 @@ export default function ApiFilesView(): JSX.Element {
                   } catch {}
                 },
               },
-              isAudio && account?.is_donor && {
+              isAudio && {
                 icon: Sparkles,
-                label: 'Generate lyrics',
+                label: 'Synced lyrics',
                 onSelect: async () => {
                   const channel = (await resolveTrackChannel()) ?? activeChannel
-                  useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId: trackerMatches.get(entry.path) ?? null })
+                  useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId: trackerMatches.get(entry.path) ?? null, tab: account?.is_donor ? 'create' : 'sync' })
                 },
               },
               isAudio && 'divider',

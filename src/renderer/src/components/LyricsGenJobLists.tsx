@@ -12,7 +12,7 @@ import ThemedSelect from './ThemedSelect'
 import { relativeTime } from './adminShared'
 import { ConfirmButton, MODE_INFO, ModeTile, StatusPill, sourceHint } from './lyricsGenShared'
 
-// The "Your jobs" and "All jobs" tabs of the Generate lyrics dialog. Rows open
+// The "Your jobs" and "All jobs" tabs of the Synced lyrics dialog. Rows open
 // the job in the dialog's job view; finished jobs can be deleted from here,
 // and administrators can cancel anyone's running job.
 

@@ -253,9 +253,10 @@ export default function SongContextMenu({
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
   // only for staff, who are the only ones with a chat to share into.
-  // Donors can have Whisper transcribe or time any song whose audio the app
-  // can load (stream or donor file).
-  const canGenerateLyrics = !!account?.is_donor && !isUnplayable && !!track.streamUrl
+  // Anyone can time a song's lyrics by hand in Synced lyrics, and donors can
+  // have Whisper do it, for any song whose audio the app can load (stream or
+  // donor file).
+  const canSyncLyrics = !isUnplayable && !!track.streamUrl
     && (!!track.path || isDonorStreamUrl(track.streamUrl))
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
   // Sharing, lyrics and reporting share one flyout, so the top level stays
@@ -263,11 +264,15 @@ export default function SongContextMenu({
   const moreRows = ([
     canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
     onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
-    canGenerateLyrics && { icon: Sparkles, label: 'Generate lyrics', onSelect: () => useStore.getState().openLyricsGen({ track, songId }) },
+    canSyncLyrics && {
+      icon: Sparkles,
+      label: 'Synced lyrics',
+      onSelect: () => useStore.getState().openLyricsGen({ track, songId, tab: account?.is_donor ? 'create' : 'sync' }),
+    },
     hasValidSong && {
       icon: Flag,
       label: 'Report issue',
-      separatorBefore: !!(canShareToChat || onShareLyrics || canGenerateLyrics),
+      separatorBefore: !!(canShareToChat || onShareLyrics || canSyncLyrics),
       onSelect: () => useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }),
     },
   ] satisfies ContextMenuEntry[]).filter((r): r is Exclude<typeof r, false | undefined | null> => !!r)
