@@ -2341,8 +2341,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   // ── Account ───────────────────────────────────────────────────────────────
-  account: null,
-  playlists: [],
+  // Painted from the offline cache so a returning user doesn't boot into the
+  // signed-out view; loadAccount() swaps in the server's copy once it answers.
+  account: userApi.peekCachedAccount(),
+  playlists: userApi.peekCachedPlaylists(),
   showUserAuth: false,
   pendingPlaylistId: null,
   setPendingPlaylistId: (id) => set({ pendingPlaylistId: id }),

@@ -15,6 +15,8 @@ import type { AudioFx, EqPreset } from './audioEffects'
 
 const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
+const ME_URL = `${ACCOUNT_BASE}/account/me/`
+const PLAYLISTS_URL = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
 const TOKEN_KEY = 'unreleased:authToken'
 
 export interface AccountUser {
@@ -336,6 +338,10 @@ export function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
   } catch {}
+  // The cached profile and playlists belong to that token: drop them so the
+  // next boot can't paint them for a different account (see peekCachedAccount).
+  cacheDelete(ME_URL)
+  cacheDelete(PLAYLISTS_URL)
 }
 
 // `cacheKey` opts a GET call into the offline fallback cache - pass it only
@@ -484,8 +490,22 @@ export async function logout(): Promise<void> {
 }
 
 export async function getMe(): Promise<AccountUser> {
-  const url = `${ACCOUNT_BASE}/account/me/`
-  return request(url, { method: 'GET' }, true, url)
+  return request(ME_URL, { method: 'GET' }, true, ME_URL)
+}
+
+// The last profile and playlists getMe()/getPlaylists() saw, read from the
+// offline cache so a cold boot can show the signed-in state at once.
+// loadAccount() then confirms the token and replaces them (or signs out on a
+// 401). Nothing without a token.
+export function peekCachedAccount(): AccountUser | null {
+  if (!getToken()) return null
+  return cacheGet<AccountUser>(ME_URL) ?? null
+}
+
+export function peekCachedPlaylists(): PlaylistSummary[] {
+  if (!getToken()) return []
+  const rows = cacheGet<PlaylistRow[]>(PLAYLISTS_URL)
+  return Array.isArray(rows) ? seedPlaylistRows(rows) : []
 }
 
 export async function updateDisplayName(displayName: string): Promise<AccountUser> {
@@ -617,8 +637,13 @@ export async function removeFavorite(songId: number): Promise<void> {
 // Servers without include_items just return plain summaries (no items), in
 // which case nothing is seeded and callers fall back to per-playlist fetches.
 export async function getPlaylists(): Promise<PlaylistSummary[]> {
-  const url = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
-  const rows = await request<Array<PlaylistSummary & { items?: PlaylistItemEntry[] }>>(url, { method: 'GET' }, true, url)
+  const rows = await request<PlaylistRow[]>(PLAYLISTS_URL, { method: 'GET' }, true, PLAYLISTS_URL)
+  return seedPlaylistRows(rows)
+}
+
+type PlaylistRow = PlaylistSummary & { items?: PlaylistItemEntry[] }
+
+function seedPlaylistRows(rows: PlaylistRow[]): PlaylistSummary[] {
   return rows.map((row) => {
     const { items, ...summary } = row
     if (Array.isArray(items)) {
