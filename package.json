@@ -113,6 +113,11 @@
     "mac": {
       "icon": "resources/icon-512.png",
       "category": "public.app-category.music",
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Identify songs from a short microphone recording when you choose Listen."
+      },
       "target": [
         {
           "target": "dmg",

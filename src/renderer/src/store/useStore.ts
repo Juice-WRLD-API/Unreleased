@@ -223,6 +223,7 @@ interface AppState {
   // it back to null. Synced so it also reaches the pop-out Settings window.
   settingsTab: SettingsTab | null
   showDiagnostics: boolean
+  showRecognition: boolean
   showQueue: boolean
   // Equalizer popover visibility. Store-level (not Player-local) so the WRLD
   // tab's button and the 'equalizer' hotkey can open it from anywhere � the
@@ -669,6 +670,7 @@ interface AppActions {
   favoriteGifs: GifResult[]
   toggleFavoriteGif: (gif: GifResult) => void
   setShowDiagnostics: (show: boolean) => void
+  setShowRecognition: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
   setOpenFloatViews: (views: string[]) => void
@@ -1442,6 +1444,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   showSettings: false,
   settingsTab: null,
   showDiagnostics: false,
+  showRecognition: false,
   showQueue: false,
   showEqPanel: false,
   openFloatViews: [],
@@ -1704,6 +1707,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
+  setShowRecognition: (showRecognition) => set({ showRecognition }),
   setShowQueue: (showQueue) => set({ showQueue }),
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
   setOpenFloatViews: (openFloatViews) => {

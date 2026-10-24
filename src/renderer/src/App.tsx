@@ -114,6 +114,7 @@ const ContributorProfileView = lazyView(() => import('./components/ContributorPr
 const Settings = lazyView(() => import('./components/Settings'))
 const DiagnosticsModal = lazyView(() => import('./components/DiagnosticsModal'))
 const DebugLogViewer = lazyView(() => import('./components/DebugLogViewer'))
+const RecognitionModal = lazyView(() => import('./components/RecognitionModal'))
 const TerminalPage = lazyView(() => import('./components/TerminalPage'))
 const TrackView = lazyView(() => import('./components/TrackView'))
 const ThankYouView = lazyView(() => import('./components/ThankYouView'))
@@ -148,6 +149,7 @@ function WindowControls(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
+  const showRecognition = useStore((s) => s.showRecognition)
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav } = useStorePick(
     'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav')
   // Opening the terminal from a view that holds unsaved local state (the song
@@ -442,6 +444,7 @@ export default function App(): JSX.Element {
           <SyncModal />
         </ErrorBoundary>
       )}
+      {showRecognition && <ErrorBoundary variant="overlay"><Suspense fallback={null}><RecognitionModal /></Suspense></ErrorBoundary>}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>

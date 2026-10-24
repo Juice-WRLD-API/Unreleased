@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, shell, dialog, Menu, Tray, ipcMain, nativeImage, protocol, net, globalShortcut, screen, clipboard, session, powerMonitor } = require('electron')
+﻿const { app, BrowserWindow, shell, dialog, Menu, Tray, ipcMain, nativeImage, protocol, net, globalShortcut, screen, clipboard, session, powerMonitor, desktopCapturer } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { loadOfflineLibraryFile, updateOfflineLibraryFile } = require('./offlineLibrary')
 const { spawn } = require('child_process')
@@ -10,6 +10,7 @@ const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
 const { registerPasskeyIpc } = require('./passkey')
+const { canRequestMicrophone, canCaptureSystemAudio } = require('./microphonePermission')
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -3788,11 +3789,75 @@ ipcMain.handle('fetch-image-as-data-url', async (_, url) => {
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   // Deny every permission request by default. Nothing in this app needs
-  // notifications/media/geolocation/etc. granted to loaded web content, and
+  // notifications/geolocation/etc. granted to loaded web content, and
   // Electron's built-in default handler grants most of them — this closes
   // that gap explicitly rather than relying on the default.
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+  // The exceptions are audio-only access from the main app frame:
+  // recognition requests a microphone only on Listen, and on Windows can
+  // record device audio (loopback) instead.
+  const appDocumentUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).href
+  const microphoneAllowed = (webContents, url, isMainFrame, mediaTypes) => canRequestMicrophone({
+    url, mainUrl: webContents?.getURL() || '', appUrl: appDocumentUrl, isDev,
+    isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
+    isMainFrame, mediaTypes,
+  })
+  const systemAudioAllowed = (webContents, url, isMainFrame) => canCaptureSystemAudio({
+    url, mainUrl: webContents?.getURL() || '', appUrl: appDocumentUrl, isDev,
+    isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
+    isMainFrame, audioRequested: true, platform: process.platform,
+  })
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    return permission === 'media' && details.mediaType === 'audio'
+      && microphoneAllowed(webContents, details.requestingUrl || '', details.isMainFrame, ['audio'])
+  })
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    // The display-media handler below asks the user and picks the streams.
+    if (permission === 'display-capture') {
+      callback(systemAudioAllowed(webContents, details.requestingUrl, details.isMainFrame))
+      return
+    }
+    if (permission === 'media' && 'mediaTypes' in details
+      && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)) {
+      const requestingWindow = mainWindow
+      void dialog.showMessageBox(requestingWindow, {
+        type: 'question', title: 'Allow microphone access?',
+        message: 'Allow Unreleased to use your microphone?',
+        detail: 'Song recognition records a short clip when you choose Listen. You can cancel recording at any time.',
+        buttons: ['Cancel', 'Allow microphone'], defaultId: 0, cancelId: 0,
+      }).then(({ response }) => callback(response === 1 && !webContents.isDestroyed()
+        && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)))
+        .catch(() => callback(false))
+      return
+    }
     callback(false)
+  })
+  // Grants system audio plus a throwaway screen track (getDisplayMedia cannot
+  // be audio-only); the renderer stops the video as soon as it arrives.
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    const deny = () => { try { callback({}) } catch {} }
+    const allowed = () => {
+      const webContents = mainWindow?.webContents
+      const frame = request.frame
+      if (!webContents || webContents.isDestroyed() || !frame) return false
+      const main = webContents.mainFrame
+      const isMainFrame = frame.processId === main.processId && frame.routingId === main.routingId
+      return canCaptureSystemAudio({
+        url: frame.url, mainUrl: webContents.getURL() || '', appUrl: appDocumentUrl, isDev,
+        isMainWindow: isMainFrame, isMainFrame, audioRequested: request.audioRequested, platform: process.platform,
+      })
+    }
+    if (!allowed()) { deny(); return }
+    void dialog.showMessageBox(mainWindow, {
+      type: 'question', title: 'Record device audio?',
+      message: 'Let Unreleased listen to what your computer is playing?',
+      detail: 'Song recognition records 10 seconds of your device audio when you choose Listen. Nothing else on your screen is recorded.',
+      buttons: ['Cancel', 'Allow'], defaultId: 1, cancelId: 0,
+    }).then(async ({ response }) => {
+      if (response !== 1 || !allowed()) { deny(); return }
+      const [screenSource] = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+      if (!screenSource || !allowed()) { deny(); return }
+      callback({ video: screenSource, audio: 'loopback' })
+    }).catch(deny)
   })
 
   // Sweep partial downloads left by a crash mid-transfer: downloadFile writes

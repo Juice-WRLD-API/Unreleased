@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, Menu, Check, RefreshCw, AlertTriangle } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
+import { useStore, useStorePick } from '../store/useStore'
 import { useCatalogSync } from '../store/catalogSyncStore'
 import { effectiveBinding, comboTokens, runHotkeyAction } from '../lib/hotkeys'
 import { trackIdToSongId } from '../lib/userApi'
@@ -339,6 +339,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     {
       id: 'tools', label: 'Tools',
       entries: [
+        { kind: 'item', label: 'Identify song…', onClick: () => useStore.getState().setShowRecognition(true) },
         { kind: 'item', label: 'Convert current song…', onClick: run(() => { if (canConvert && currentTrack) openConvert({ id: currentTrack.id, path: currentTrack.path, title: currentTrack.title }) }), disabled: !canConvert },
         // Timing lyrics by hand is for everyone; its Whisper side is a donor
         // feature, and administrators also see everyone's jobs there.
