@@ -233,8 +233,8 @@ function ImportPanel({ userId }: { userId: number }): JSX.Element {
   )
 }
 
-// Only one device per person is keyed automatically, so this is how your other
-// browsers get in: export on the device that has the keys, import here. Once
+// Devices are only sent a conversation's current key, so this is how another
+// browser gets older history: export on the device that has the keys, import here. Once
 // device linking is on (E2E v2), linking replaces export and this stays only
 // for importing an old v1 blob.
 export default function ChatKeyTransfer({ userId }: { userId: number }): JSX.Element {

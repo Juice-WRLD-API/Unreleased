@@ -30,19 +30,19 @@ async function confirmSas(ctx: TermCtx, c: LinkCandidate): Promise<void> {
   }
 }
 
-const SUBS = ['status', 'devices', 'revoke', 'link', 'pending', 'approve', 'backup', 'export', 'import', 'trust', 'safety', 'share', 'request', 'sync', 'reset']
+const SUBS = ['status', 'devices', 'revoke', 'link', 'pending', 'approve', 'backup', 'export', 'import', 'trust', 'safety', 'share', 'request', 'ask', 'rekey', 'sync', 'reset']
 
 const keysCommand: TermCommand = {
   name: 'keys', group: 'People', chat: true,
-  usage: 'keys [status] · devices · revoke <deviceId> · link · pending · approve <code|qr | deviceId> · backup [setup|change|restore] · export · import · trust <user> · safety <user> · share <conversationId> <user> · request <conversationId> <version> · sync · reset',
-  description: 'Chat encryption: this device’s identity and status, your other devices, linking a new device, the recovery-code backup, exporting and importing keys, who you trust, and safety numbers',
+  usage: 'keys [status] · devices · revoke <deviceId> · link · pending · approve <code|qr | deviceId> · backup [setup|change|restore] · export · import · trust <user> · safety <user> · share <conversationId> <user> · request <conversationId> <version> · ask <conversationId> · rekey <conversationId> · sync · reset',
+  description: 'Chat encryption: this device’s identity and status, your other devices, linking a new device, the recovery-code backup, exporting and importing keys, asking for a missing conversation key or resetting it, who you trust, and safety numbers',
   covers: [
     'chatApi.listMyDevices', 'chatApi.getE2EFeatures', 'chatApi.revokeDevice', 'chatApi.registerDevice', 'chatApi.putIdentity', 'chatApi.putDeviceList',
     'chatApi.createLinkSession', 'chatApi.getLinkSession', 'chatApi.getUserKeys', 'chatApi.getUsersKeys', 'chatApi.getBackup', 'chatApi.putBackup',
     'chatApi.postBackupEntries', 'chatApi.listBackupEntries', 'chatApi.sendToDevice', 'chatApi.fetchToDevice', 'chatApi.ackToDevice',
     'chatApi.establishKey', 'chatApi.rotateKey', 'chatApi.postEnvelopes', 'chatApi.listEnvelopes', 'chatApi.listConversationDevices',
     'chatE2E.ensureDevice', 'chatE2E.identityStatus', 'chatE2E.localDeviceId', 'chatE2E.shareKeyWithUser', 'chatE2E.storeRoomKey', 'chatE2E.fetchRoomKey',
-    'chatE2E.establishRoomKey', 'chatE2E.resolveRoomKey', 'chatE2E.onDevicesUpdated',
+    'chatE2E.establishRoomKey', 'chatE2E.resolveRoomKey', 'chatE2E.onDevicesUpdated', 'chatE2E.askForRoomKeys', 'chatE2E.resetRoomKey',
     'chatIdentity.getFeatures', 'chatIdentity.loadUserTrust', 'chatIdentity.loadUsersTrust', 'chatIdentity.ensureIdentity', 'chatIdentity.publishDeviceList',
     'chatIdentity.resetOwnIdentity', 'chatIdentity.safetyNumber',
     'chatLinking.startLink', 'chatLinking.ownDeviceSas', 'chatLinking.lookupLink', 'chatLinking.pendingDevices', 'chatLinking.approveLink', 'chatLinking.revokeLinkedDevice',
@@ -150,6 +150,19 @@ const keysCommand: TermCommand = {
     } else if (sub === 'request') {
       await requestRoomKey(id, idArg(rest[0], 'keys request <conversationId> <version>'), idArg(rest[1], 'keys request <conversationId> <version>'))
       ctx.print('asked your other devices for that room key', 'ok')
+    } else if (sub === 'ask' || sub === 'rekey') {
+      const convId = idArg(rest[0], `keys ${sub} <conversationId>`)
+      if (!cs().conversations.some((c) => c.id === convId)) fail(`#${convId} isn’t one of your conversations (convo ls)`)
+      if (sub === 'ask') {
+        await cs().askForKeys(convId)
+        ctx.print(cs().keyState[convId] === 'ready'
+          ? `#${convId} has its key`
+          : 'asked the others in your conversations for their keys; they arrive once someone who has them is online', 'ok')
+        return
+      }
+      if (!confirmAction(ctx, `Reset the key of #${convId}? Everyone gets a new key for new messages; older ones stay unreadable on devices that never had the old key.`, bool.has('y'))) return
+      await cs().resetKey(convId)
+      ctx.print(cs().keyState[convId] === 'ready' ? `#${convId} is on a new key` : 'someone else reset it at the same time; their key arrives shortly', 'ok')
     } else if (sub === 'sync') {
       await processInbox(id)
       await cs().refreshIdentity()

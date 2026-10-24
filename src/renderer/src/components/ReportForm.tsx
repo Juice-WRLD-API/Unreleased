@@ -4,6 +4,7 @@ import { useStore } from '../store/useStore'
 import {
   FEEDBACK_CATEGORIES, FEEDBACK_CATEGORY_LABELS,
   SONG_ISSUE_TYPES, SONG_ISSUE_LABELS,
+  REPORT_NOTE_MAX, REPORT_LYRICS_MAX,
   FeedbackCategory, SongIssueType,
 } from '../lib/reports'
 
@@ -39,6 +40,7 @@ export default function ReportForm({ mode, onDone }: {
   const [category, setCategory] = useState<FeedbackCategory>('bug')
   const [issues, setIssues] = useState<SongIssueType[]>([])
   const [message, setMessage] = useState('')
+  const [lyrics, setLyrics] = useState('')
   const [contact, setContact] = useState('')
   const [status, setStatus] = useState<SubmitStatus>('idle')
 
@@ -49,14 +51,15 @@ export default function ReportForm({ mode, onDone }: {
   // issue (the message is optional detail there).
   const canSubmit = mode.kind === 'feedback'
     ? message.trim().length > 0
-    : issues.length > 0 || message.trim().length > 0
+    : issues.length > 0 || message.trim().length > 0 || lyrics.trim().length > 0
+  const wantsLyrics = mode.kind === 'song' && (issues.includes('missing_lyrics') || issues.includes('wrong_lyrics') || lyrics.length > 0)
 
   const submit = async (): Promise<void> => {
     if (!canSubmit || status === 'sending') return
     setStatus('sending')
     const delivered = mode.kind === 'feedback'
       ? await submitFeedback(category, message, contact)
-      : await reportSong(mode.songId, mode.songName, issues, message, contact)
+      : await reportSong(mode.songId, mode.songName, issues, message, contact, lyrics)
     setStatus(delivered ? 'delivered' : 'queued')
     // Only auto-close on a confirmed delivery - if it's still just queued,
     // leave the dialog open so the "hasn't sent yet" message is actually seen.
@@ -66,6 +69,7 @@ export default function ReportForm({ mode, onDone }: {
   const reset = (): void => {
     setStatus('idle')
     setMessage('')
+    setLyrics('')
     setContact('')
     setIssues([])
     setCategory('bug')
@@ -156,16 +160,33 @@ export default function ReportForm({ mode, onDone }: {
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           rows={mode.kind === 'feedback' ? 5 : 4}
-          maxLength={2000}
+          maxLength={REPORT_NOTE_MAX}
           placeholder={mode.kind === 'feedback'
             ? "What's on your mind? Bugs, ideas, anything…"
-            : 'Add details - the correct info, or what the lyrics should say (optional)'}
+            : 'Add details - what is wrong or missing, and the correct info (optional)'}
           className="w-full resize-none bg-surface border border-[var(--border)] rounded-lg px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent/50 leading-relaxed"
         />
         <div className="flex items-center justify-between mt-1">
-          <span className="text-[10px] text-text-muted/60">{message.length}/2000</span>
+          <span className="text-[10px] text-text-muted/60">{message.length}/{REPORT_NOTE_MAX}</span>
         </div>
       </div>
+
+      {wantsLyrics && (
+        <div>
+          <p className="text-[11px] font-medium text-text-secondary mb-1.5">Paste the lyrics (optional)</p>
+          <textarea
+            value={lyrics}
+            onChange={(e) => setLyrics(e.target.value)}
+            rows={8}
+            maxLength={REPORT_LYRICS_MAX}
+            placeholder="Paste the full lyrics here, one line per line"
+            className="w-full resize-y bg-surface border border-[var(--border)] rounded-lg px-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent/50 leading-relaxed"
+          />
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[10px] text-text-muted/60">{lyrics.length}/{REPORT_LYRICS_MAX}</span>
+          </div>
+        </div>
+      )}
 
       {/* The endpoints accept an optional contact string. Logged-in users can
           leave it blank - their Discord username rides along automatically. */}

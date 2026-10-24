@@ -808,7 +808,7 @@ interface AppActions {
   /** Queues a song issue report (wrong/missing info or lyrics) and tries to
    *  deliver it. `issues` is the set of checked problem types. Same delivered
    *  vs. still-queued resolution as `submitFeedback`. */
-  reportSong: (songId: number, songName: string, issues: SongIssueType[], message: string, contact?: string) => Promise<boolean>
+  reportSong: (songId: number, songName: string, issues: SongIssueType[], message: string, contact?: string, lyrics?: string) => Promise<boolean>
   /** Drops a queued report from the outbox (e.g. one stuck failing). */
   dismissReport: (id: string) => void
   /** Internal � appends a report to the outbox, kicks off delivery, and
@@ -2272,14 +2272,15 @@ export const useStore = create<AppStore>((set, get, store) => ({
       appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0,
     })
   },
-  reportSong: async (songId, songName, issues, message, contact) => {
-    // A report needs at least a flagged issue or a written note to be worth
-    // sending � the form enforces this too, but guard here so no empty report
-    // can reach the outbox.
-    if (issues.length === 0 && !message.trim()) return false
+  reportSong: async (songId, songName, issues, message, contact, lyrics) => {
+    // A report needs at least a flagged issue, a written note or pasted lyrics
+    // to be worth sending - the form enforces this too, but guard here so no
+    // empty report can reach the outbox.
+    if (issues.length === 0 && !message.trim() && !lyrics?.trim()) return false
     return get()._enqueueReport({
       id: newReportId(), kind: 'song', songId, songName,
       issues, message: message.trim(),
+      ...(lyrics?.trim() ? { lyrics: lyrics.trim() } : {}),
       contact: contact?.trim() || undefined,
       appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0,
     })

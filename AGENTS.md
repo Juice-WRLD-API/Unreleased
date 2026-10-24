@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.21** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.22** · updated 2026-10-24. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -187,6 +187,11 @@ up as `attachment.bin` / `application/octet-stream` with the plaintext `size`;
 reactions are shortcode names (`fire`), not emoji glyphs. Code:
 `lib/chatCrypto.ts`, `lib/chatE2E.ts`, `lib/chatV2Crypto.ts`. If you change the
 format, change every client.
+
+Room keys go to every active device of each participant, not just their oldest
+(that rule left newer devices waiting forever). A device missing a key asks by
+re-registering (`askForRoomKeys`, which re-sends `device.added`), and **Reset
+key** in a DM starts a new key version for everyone (`resetRoomKey`).
 
 ---
 
