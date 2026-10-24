@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.23** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.24** · updated 2026-10-25. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -339,6 +339,35 @@ Node 22.
 
 ---
 
+## Cursor Cloud specific instructions
+
+A Cloud Agent checkout of this repo is the `app` branch on its own (Electron +
+Vite). Node 22 is already on the image, and GTK, NSS, and Xvfb are already
+installed. The Windows `node_modules` scratch-folder note in section 10 is for
+a Linux VM that mounts the Windows install. A fresh `npm ci` here installs the
+Linux Rollup and esbuild binaries.
+
+- Install with `YOUTUBE_DL_SKIP_DOWNLOAD=1 npm ci`, then
+  `node node_modules/electron/install.js`. Electron 42 has no postinstall
+  script, so `npm ci` leaves `node_modules/electron/dist` empty until that
+  command. The app downloads yt-dlp itself when a URL import needs it; skipping
+  the postinstall matches CI and avoids the GitHub rate limit.
+- `npm run dev` serves the renderer on port 3018. The public catalogue at
+  juicewrldapi.com loads with no token. Create `.env.local` from
+  `.env.local.example` only for a saved API token, Last.fm keys, or release
+  publishing.
+- After `npm run build`, the Linux smoke check is
+  `npm run electron:smoke -- --ozone-platform=x11 --no-sandbox`. DBus errors in
+  that log are non-fatal. Success is the line `[smoke] renderer mounted`.
+- `npm run build`, `npm run test:electron`, and
+  `node --test scripts/renderer-virtual-window.test.cjs` pass on current `app`.
+  `npm run typecheck:electron` fails for the existing `electron/main.js` errors
+  in section 10. `npm run terminal:check-coverage` exits 1 while it still lists
+  request functions the terminal cannot reach; that text is the coverage gap
+  report.
+
+---
+
 ## 8. UX conventions
 
 - **Optimistic updates** for quick, low-risk actions (like, follow, toggles, add
@@ -377,6 +406,15 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-25: Electron 42.11 has no npm postinstall, so `npm ci` does not download
+  the binary. Run `node node_modules/electron/install.js` before smoke tests
+  (the first `electron` command downloads it too). `npm run typecheck:electron`
+  fails on current `app` with existing errors in `electron/main.js` (a `linux`
+  comparison after a Windows branch, node-id3 `Tags`, `ffmpeg-static` typed as
+  a module, and `fetch` `BodyInit`). The desktop workflow runs `npm run build`
+  and `npm run test:electron`. Treat that typecheck failure as a repo error,
+  and keep going with those two checks.
 
 - 2026-10-24: `GET /accounts/editor/proposals/` (My proposals) now returns
   paginated summaries (`count`, 50 per page by default, 200 max) without
