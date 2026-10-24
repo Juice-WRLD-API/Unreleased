@@ -6,7 +6,7 @@ import {
 } from '../lib/lyricsGenApi'
 import { saveBlob } from '../lib/terminal/pick'
 
-// Pieces the "Generate lyrics" dialog's tabs share: what each mode and status
+// Pieces the Synced lyrics dialog's Whisper tabs share: what each mode and status
 // is called and looks like, and how a finished job's text is saved.
 
 export const MODE_INFO: Record<LyricsGenMode, { title: string; blurb: string; icon: LucideIcon }> = {

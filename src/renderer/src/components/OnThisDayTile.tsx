@@ -18,6 +18,9 @@ import type { Track } from '../types'
 
 // Rows shown before "Show all": a typical day has about 14, the busiest 90.
 const COLLAPSED = 8
+// Width a row asks for and the gap between rows in a year (gap-x-4).
+const ROW_WIDTH = 190
+const ROW_GAP = 16
 
 const isSession = (s: JWApiSong): boolean => s.category === 'recording_session'
 
@@ -92,27 +95,37 @@ export default function OnThisDayTile({ onContextMenu, span }: {
     )
   }
 
-  // Rows grouped under their year. `continues` is the year the rows before
-  // these ended on: the hidden half of a split year doesn't repeat its heading.
-  const renderYears = (list: Row[], continues: number | null): JSX.Element[] => {
+  // Rows grouped under their year. Each group is only as wide as its rows, so
+  // years with a song or two sit side by side instead of each taking a line.
+  // `continues` is the year the rows before these ended on: the hidden half of
+  // a split year doesn't repeat its heading.
+  const renderYears = (list: Row[], continues: number | null): JSX.Element => {
     const groups: Row[][] = []
     for (const row of list) {
       const last = groups[groups.length - 1]
       if (last && last[0].year === row.year) last.push(row)
       else groups.push([row])
     }
-    return groups.map((group, i) => (
-      <div key={group[0].year} className={i > 0 ? 'mt-3' : continues === null ? '' : continues === group[0].year ? 'mt-2.5' : 'mt-3'}>
-        {!(i === 0 && continues === group[0].year) && (
-          <p className="text-text-muted text-[11px] font-semibold uppercase tracking-wider mb-2">
-            <span className="text-text-secondary">{group[0].year}</span> · {yearsSince(group[0].year, otd.isToday, now)}
-          </p>
-        )}
-        <div className="grid gap-x-4 gap-y-2.5 grid-cols-[repeat(auto-fill,minmax(210px,1fr))]">
-          {group.map(renderRow)}
-        </div>
+    return (
+      <div className={`flex flex-wrap gap-x-8 gap-y-3 ${continues === null ? '' : 'mt-3'}`}>
+        {groups.map((group, i) => (
+          <div
+            key={group[0].year}
+            className="min-w-0 max-w-full"
+            style={{ flex: `0 1 ${group.length * ROW_WIDTH + (group.length - 1) * ROW_GAP}px` }}
+          >
+            {i === 0 && continues === group[0].year ? null : (
+              <p className="text-text-muted text-[11px] font-semibold uppercase tracking-wider mb-2">
+                <span className="text-text-secondary">{group[0].year}</span> · {yearsSince(group[0].year, otd.isToday, now)}
+              </p>
+            )}
+            <div className="grid gap-x-4 gap-y-2.5 grid-cols-[repeat(auto-fill,minmax(190px,1fr))]">
+              {group.map(renderRow)}
+            </div>
+          </div>
+        ))}
       </div>
-    ))
+    )
   }
 
   const shown = rows.slice(0, COLLAPSED)

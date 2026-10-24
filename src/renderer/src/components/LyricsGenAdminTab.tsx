@@ -4,7 +4,7 @@ import LyricsGenJobView from './LyricsGenJobView'
 import { AdminJobs } from './LyricsGenJobLists'
 
 // Admin tab for lyrics generation: the Whisper model and everyone's jobs, the
-// same as the Generate lyrics dialog's All jobs tab. A row opens the job in
+// same as the Synced lyrics dialog's All jobs tab. A row opens the job in
 // place, read and cancelled through the admin routes. The list stays mounted
 // under an open job, so its filters are still set on the way back.
 

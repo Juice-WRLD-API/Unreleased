@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.19** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.20** · updated 2026-10-24. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -275,6 +275,17 @@ re-registering drops what left the catalogue. Engine: `lib/catalogSync.ts`;
 state: `store/catalogSyncStore.ts`; terminal: `offline`. Main dedupes
 concurrent downloads of one track and aborts them on pause
 (`offline-cancel-downloads`).
+
+**Synced lyrics** (Tools menu, Home → Tools, a song's or comp file's menu) is
+one tool for timing lyrics by the line or the word. Model:
+`lib/syncedLyrics.ts` (untouched lines are written back byte for byte); UI:
+`components/SyncedLyricsTool.tsx`, used by the song editor's Sync (on the
+app's player), the dialog's Sync tab (on its own `<audio>`, for anyone) and a
+Whisper job's result (through the job's timing draft, so `lyricsgen timing`
+sees the same moves). Whisper stays donor-only, under Generate. Word timing
+is written as enhanced LRC (`[0:06.88] <0:06.88>No, <0:07.20>no<0:08.10>`)
+into the song's `synced_lyrics`; a player that doesn't read word tags shows
+them as text.
 
 **Web (`web`)**: same renderer plus mobile layouts (`IS_MOBILE`), PWA install,
 and `server/social-preview.mjs` for link previews (nginx setup in

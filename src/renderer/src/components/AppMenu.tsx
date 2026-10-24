@@ -340,11 +340,9 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
       id: 'tools', label: 'Tools',
       entries: [
         { kind: 'item', label: 'Convert current song…', onClick: run(() => { if (canConvert && currentTrack) openConvert({ id: currentTrack.id, path: currentTrack.path, title: currentTrack.title }) }), disabled: !canConvert },
-        // Lyrics generation is a donor feature; administrators also see
-        // everyone's jobs and the model setting there.
-        ...(account?.is_donor || account?.is_administrator
-          ? [{ kind: 'item' as const, label: 'Generate lyrics…', onClick: run(() => openLyricsGen()) }]
-          : []),
+        // Timing lyrics by hand is for everyone; its Whisper side is a donor
+        // feature, and administrators also see everyone's jobs there.
+        { kind: 'item', label: 'Synced lyrics…', onClick: run(() => openLyricsGen()) },
         { kind: 'item', label: 'Sync…', onClick: run(() => useCatalogSync.getState().setOpen(true)) },
         { kind: 'sep' },
         { kind: 'item', label: 'Mini player', hotkey: 'mini-player', onClick: hk('mini-player') },

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, Sparkles, RefreshCw } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, RefreshCw } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -16,7 +16,6 @@ import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
-import { hasLyricsGenTool } from '../lib/homeSections'
 import { IS_ELECTRON } from '../lib/platform'
 import { useCatalogSync, catalogSyncSummary } from '../store/catalogSyncStore'
 import { lazyOverlay } from '../lib/lazyView'
@@ -401,8 +400,7 @@ export default function HomeView(): JSX.Element {
   const showGames = showSection('games')
   const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
-  const showLyricsGenTool = hasLyricsGenTool(account)
-  const showTools = showSection('tools') && (IS_ELECTRON || showLyricsGenTool)
+  const showTools = showSection('tools')
 
   const mainShown = showRecent || showOnThisDay || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames
@@ -530,14 +528,13 @@ export default function HomeView(): JSX.Element {
                 {showTools && (
                   <ToolsTile span="shrink-0">
                     {IS_ELECTRON && <SyncToolCard />}
-                    {showLyricsGenTool && (
-                      <ShortcutCard
-                        icon={<Sparkles size={18} className="text-accent" />}
-                        title="Generate lyrics"
-                        subtitle="Transcribe a song, or time its lyrics"
-                        onClick={() => useStore.getState().openLyricsGen()}
-                      />
-                    )}
+                    <ShortcutCard
+                      icon={<MicVocal size={18} className="text-accent" />}
+                      title="Synced lyrics"
+                      subtitle="Time a song's lyrics by the line or the word"
+                      onClick={() => useStore.getState().openLyricsGen()}
+                    />
+
                   </ToolsTile>
                 )}
               </div>

@@ -428,7 +428,7 @@ interface AppState {
   // components/UrlImportModal.
   urlImportModal: boolean
 
-  // The open "Generate lyrics" dialog (null = closed) and the song it was
+  // The open "Synced lyrics" dialog (null = closed) and the song it was
   // opened on. See components/LyricsGenModal.
   lyricsGenModal: LyricsGenTarget | null
 
@@ -796,7 +796,7 @@ interface AppActions {
   /** Opens / closes the "Import from URL" dialog. */
   openUrlImport: () => void
   closeUrlImport: () => void
-  /** Opens / closes the donor "Generate lyrics" dialog, optionally on a song. */
+  /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
   /** Queues a general feedback report and tries to deliver it. `contact` is

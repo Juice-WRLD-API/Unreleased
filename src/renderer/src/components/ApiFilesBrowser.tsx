@@ -1694,13 +1694,18 @@ export default function ApiFilesBrowser(): JSX.Element {
                   } catch { showAppToast("Couldn't look up the song") }
                 },
               },
-              // Donors: the server reads the file in place (file_path + channel),
-              // so nothing is downloaded or uploaded. A Tracker match lets the
-              // dialog offer that song's lyrics for a sync.
-              isAudio && account?.is_donor && {
+              // Synced lyrics on this file: timed by hand, or for donors by
+              // Whisper, where the server reads the file in place (file_path +
+              // channel), so nothing is downloaded or uploaded. A Tracker match
+              // lets the dialog offer that song's lyrics.
+              isAudio && {
                 icon: Sparkles,
-                label: 'Generate lyrics',
-                onSelect: () => useStore.getState().openLyricsGen({ track: fileToTrack(entry, activeChannel), songId: trackerMatches.get(entry.path) ?? null }),
+                label: 'Synced lyrics',
+                onSelect: () => useStore.getState().openLyricsGen({
+                  track: fileToTrack(entry, activeChannel),
+                  songId: trackerMatches.get(entry.path) ?? null,
+                  tab: account?.is_donor ? 'create' : 'sync',
+                }),
               },
               isAudio && 'divider',
               getMediaType(entry.name) === 'text' && { icon: FileText, label: 'View', onSelect: () => openApiText(entry) },

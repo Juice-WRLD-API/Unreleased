@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { findAdlibs } from '../lib/lyricsGenApi'
 
-// The "Lyrics to time" box in the Generate lyrics dialog. With adlib removal
+// The "Lyrics to time" box in the Synced lyrics dialog's Generate tab. With adlib removal
 // on, a copy of the text is drawn over the textarea (whose own text is then
 // transparent) so each adlib can be shown and clicked: grey ones are left
 // out, clicking one keeps it, clicking it again leaves it out. Everything

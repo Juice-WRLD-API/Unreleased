@@ -1,5 +1,5 @@
-// Hand-tuned timing for a finished sync job. In the Play-along preview (or
-// with `lyricsgen timing`) a word or a whole line is moved earlier or later,
+// Hand-tuned timing for a finished sync job. In the Synced lyrics tool on the
+// job's result (or with `lyricsgen timing`) a word or a whole line is moved earlier or later,
 // or set to where the audio is, and the LRC downloads are rebuilt from the
 // tuned lines in the server's own format. The server keeps its result: the
 // changes are a draft kept on this device, per job, until the preview expires.
