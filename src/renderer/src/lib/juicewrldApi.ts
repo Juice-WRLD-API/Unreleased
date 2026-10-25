@@ -209,6 +209,27 @@ export function titleVariants(title: string): string[] {
   return noHearts && noHearts !== title ? [title, noHearts] : [title]
 }
 
+/** The file searches that look for a song's cover: its title first, then its
+ *  other names (versions, alt titles), cleaned and without hearts. A name
+ *  that only repeats words of a longer one is left out - "Classic Trap"'s alt
+ *  names "Classic" and "Trap" would otherwise pull in every unrelated
+ *  "Trap House.png". Empty when there's no title to search. */
+export function coverSearchQueries(title: string, otherNames: string[] = []): string[] {
+  // Hearts dropped up front: file names can't hold them, and "X </3" would
+  // otherwise count as the longer name and push plain "X" out.
+  const all = [title, ...otherNames].map((t) => { const v = titleVariants(t); return cleanTitleForSearch(v[v.length - 1]) })
+  const primary = all[0]
+  const seen = new Set<string>()
+  const unique = all.filter((q) => {
+    const key = normalizeForSearch(q)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const keys = unique.map((q) => ` ${normalizeForSearch(q)} `)
+  return unique.filter((q, i) => q === primary || !keys.some((k, j) => j !== i && k.length > keys[i].length && k.includes(keys[i])))
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

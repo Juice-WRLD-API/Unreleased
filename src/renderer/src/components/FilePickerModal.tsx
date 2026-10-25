@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Folder, FolderOpen, ArrowLeft, Home, ChevronRight, Loader2, ImageIcon, Search, Check, Music2, File, FolderCheck, FolderPlus } from 'lucide-react'
 import {
-  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, titleVariants, filterSearchResults, searchFiles,
+  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, coverSearchQueries, filterSearchResults, searchFiles,
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
@@ -104,9 +104,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
   const initialQuery = songTitle ? cleanTitleForSearch(songTitle) : ''
   // Alt titles searched alongside the primary one on mount (deduped, and never
   // repeating a name the primary search already covers).
-  const altQueries = [...(songTitle ? titleVariants(songTitle).slice(1) : []), ...altTitles.flatMap(titleVariants)]
-    .map(cleanTitleForSearch)
-    .filter((q, i, arr) => q && q.toLowerCase() !== initialQuery.toLowerCase() && arr.indexOf(q) === i)
+  const altQueries = songTitle ? coverSearchQueries(songTitle, altTitles).filter((q) => q.toLowerCase() !== initialQuery.toLowerCase()) : []
   const [currentPath, setCurrentPath] = useState('')
   const [entries, setEntries] = useState<JWApiFileEntry[]>([])
   const [loading, setLoading] = useState(!initialQuery)
