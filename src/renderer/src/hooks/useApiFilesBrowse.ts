@@ -6,7 +6,7 @@ import {
   apiFetch, apiPeek, searchFiles, JWApiBrowseResponse, JWApiFileEntry, parseBrowseEntries as parseEntries,
 } from '../lib/juicewrldApi'
 import { parentFolder, pathToUrl, urlToPath } from '../lib/apiFilesShared'
-import { hasQuery, loadFileIndex, parseFileQuery, searchFileIndex, type FileSearchResult } from '../lib/fileSearch'
+import { folderFromIndex, hasQuery, loadFileIndex, parseFileQuery, peekFileIndex, searchFileIndex, type FileSearchResult } from '../lib/fileSearch'
 import type { JWApiChannel } from '../lib/juicewrldApi'
 import { errorMessage } from '../lib/format'
 
@@ -30,6 +30,8 @@ export function useApiFilesBrowse(opts: {
   history: string[]
   setHistory: React.Dispatch<React.SetStateAction<string[]>>
   navigate: (path: string, pushHistory?: boolean) => Promise<void>
+  /** Warm a folder's listing ahead of a click (folder hover). */
+  prefetchFolder: (path: string) => void
   goBack: () => void
   goHome: () => void
   onChannelChange: (slug: string) => void
@@ -84,38 +86,68 @@ export function useApiFilesBrowse(opts: {
     // clobbering the view with stale/wrong-channel data.
     const requestId = ++navigateRequestId.current
     // Stale-while-revalidate: if this folder is already in the offline cache,
-    // paint it instantly (no spinner) and refresh silently in the background.
-    // Only show the loading state when there's nothing cached to fall back on.
-    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
-    if (cached) {
-      setEntries(parseEntries(cached))
+    // or in the channel's full file index, paint it instantly (no spinner) and
+    // refresh silently in the background. Only show the loading state when
+    // there's nothing to fall back on.
+    let painted = false
+    const paint = (items: JWApiFileEntry[]): void => {
+      if (!painted && pushHistory) {
+        setHistory((h) => [...h, currentPath])
+        window.history.pushState({ view: 'api-files', folderPath: path }, '', pathToUrl(path))
+      }
+      painted = true
+      setEntries(items)
       setCurrentPath(path)
       setError(null)
       setLoading(false)
-    } else {
+    }
+    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    const instant = cached ? parseEntries(cached) : folderFromIndex(activeChannel, path)
+    if (instant) paint(instant)
+    else {
       setLoading(true)
       setError(null)
+      // The index may land before this folder's own listing does.
+      void loadFileIndex(activeChannel).then(() => {
+        if (painted || requestId !== navigateRequestId.current) return
+        const fromIndex = folderFromIndex(activeChannel, path)
+        if (fromIndex) paint(fromIndex)
+      })
     }
     onNavigateStart?.()
     try {
       const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', browseParams(path))
       if (requestId !== navigateRequestId.current) return
-      const items = parseEntries(data)
-      if (pushHistory) {
-        setHistory((h) => [...h, currentPath])
-        window.history.pushState({ view: 'api-files', folderPath: path }, '', pathToUrl(path))
-      }
-      setCurrentPath(path)
-      setEntries(items)
+      paint(parseEntries(data))
     } catch (err) {
       if (requestId !== navigateRequestId.current) return
-      // Keep the cached listing visible on a network failure - only surface the
-      // error when we had nothing to show in the first place.
-      if (!cached) setError(errorMessage(err, 'Failed to load'))
+      // Keep the instant listing visible on a network failure - only surface
+      // the error when we had nothing to show in the first place.
+      if (!painted) setError(errorMessage(err, 'Failed to load'))
     } finally {
       if (requestId === navigateRequestId.current) setLoading(false)
     }
-  }, [currentPath, browseParams, onNavigateStart])
+  }, [currentPath, browseParams, activeChannel, onNavigateStart])
+
+  // Hovering a folder starts fetching its listing, so the click usually lands
+  // on a cached one. Not needed once the index is in: that already has it.
+  const prefetchFolder = useCallback((path: string): void => {
+    if (folderFromIndex(activeChannel, path) || apiPeek('/files/browse/', browseParams(path))) return
+    apiFetch<JWApiBrowseResponse>('/files/browse/', browseParams(path)).catch(() => {})
+  }, [activeChannel, browseParams])
+
+  // Pull the channel's full file index in once the tab is idle, so every
+  // folder (and search) is instant from then on.
+  useEffect(() => {
+    if (peekFileIndex(activeChannel)) return
+    const load = (): void => { void loadFileIndex(activeChannel) }
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(load, { timeout: 3000 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const t = setTimeout(load, 1000)
+    return () => clearTimeout(t)
+  }, [activeChannel])
 
   // Keep a ref to navigate so popstate/back listeners always have the latest
   // version.
@@ -222,7 +254,7 @@ export function useApiFilesBrowse(opts: {
   const goHome = (): void => { setHistory([]); navigate('', true) }
 
   return {
-    currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
+    currentPath, entries, loading, error, history, setHistory, navigate, prefetchFolder, goBack, goHome, onChannelChange,
     search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
     searchLoading, isSearching, searchInFolder, setSearchInFolder,
   }

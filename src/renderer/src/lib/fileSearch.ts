@@ -131,17 +131,32 @@ interface Prepared {
   kind: string
 }
 
-export interface FileIndex { items: Prepared[]; vocab: string[] }
+export interface FileIndex {
+  items: Prepared[]
+  vocab: string[]
+  /** Every folder's direct children, keyed by folder path ('' is the root).
+   *  Same entries /files/browse/ lists, minus `modified`/`duration`. */
+  folders: Map<string, JWApiFileEntry[]>
+}
 
 const INDEX_TTL_MS = 5 * 60_000
 const indexes = new Map<string, { at: number; index: Promise<FileIndex | null> }>()
+// The last index that loaded per channel, kept past its TTL: a few minutes
+// stale is fine for painting a folder at once, since /files/browse/ still
+// refreshes it.
+const readyIndexes = new Map<string, FileIndex>()
 
 export function prepareFileIndex(raw: JWApiFileEntry[]): FileIndex {
   const folderCache = new Map<string, { text: string; compact: string; parts: string[] }>()
   const vocab = new Set<string>()
+  const folders = new Map<string, JWApiFileEntry[]>([['', []]])
   const items = raw.map((entry): Prepared => {
     const slash = entry.path.lastIndexOf('/')
     const folderPath = slash > 0 ? entry.path.slice(0, slash) : ''
+    const siblings = folders.get(folderPath)
+    if (siblings) siblings.push(entry)
+    else folders.set(folderPath, [entry])
+    if (entry.type === 'directory' && !folders.has(entry.path)) folders.set(entry.path, [])
     let folder = folderCache.get(folderPath)
     if (!folder) {
       const parts = folderPath ? folderPath.split('/').map(normalizeForSearch) : []
@@ -156,7 +171,7 @@ export function prepareFileIndex(raw: JWApiFileEntry[]): FileIndex {
     const kind = entry.type === 'directory' ? 'folder' : ARCHIVE_EXTS.has(ext) ? 'archive' : getMediaType(entry.name)
     return { entry, name, nameCompact: compact(name), folder: folder.text, folderCompact: folder.compact, folderParts: folder.parts, words, ext, kind }
   })
-  return { items, vocab: [...vocab] }
+  return { items, vocab: [...vocab], folders }
 }
 
 /** The channel's whole file tree, prepared for searching. Null while the
@@ -171,9 +186,45 @@ export function loadFileIndex(channel: string): Promise<FileIndex | null> {
   const index = apiRequest<{ items?: JWApiFileEntry[]; building?: boolean }>(apiUrl('/files/list-all/', { channel: channel || undefined }), { cache: 'no-cache' })
     .then((data) => (data.building && !data.items?.length ? null : prepareFileIndex(data.items ?? [])))
     .catch(() => null)
-  index.then((r) => { if (!r) indexes.delete(channel) })
+  index.then((r) => { if (r) readyIndexes.set(channel, r); else indexes.delete(channel) })
   indexes.set(channel, { at: Date.now(), index })
   return index
+}
+
+/** The channel's index if one has already loaded, without fetching. */
+export function peekFileIndex(channel: string): FileIndex | null {
+  return readyIndexes.get(channel) ?? null
+}
+
+/** A folder's listing straight from the loaded index, so a folder never opened
+ *  before can show at once. Null when no index is in or the folder isn't in it. */
+export function folderFromIndex(channel: string, path: string): JWApiFileEntry[] | null {
+  return readyIndexes.get(channel)?.folders.get(path) ?? null
+}
+
+/** Folders matching a query, for jumping straight to one: the Files search
+ *  syntax limited to folders, best matches first (every word in the folder's
+ *  own name, then a name that starts with the first word, then shallower).
+ *  A typed path that exists comes first. */
+export function findFolders(index: FileIndex, raw: string, limit = 50): JWApiFileEntry[] {
+  const typed = raw.trim().replace(/^\/+|\/+$/g, '')
+  const exact = typed.includes('/') ? index.items.find((p) => p.entry.type === 'directory' && p.entry.path.toLowerCase() === typed.toLowerCase())?.entry : undefined
+  const q = parseFileQuery(raw)
+  if (!hasQuery(q)) return exact ? [exact] : []
+  const folderOnly: Filter = { key: 'type', values: ['folder'], negate: false }
+  const hits = searchFileIndex(index.items, { ...q, filters: [...q.filters, folderOnly] }, { vocab: index.vocab }).entries
+  const positives = q.terms.filter((t) => !t.negate)
+  const first = positives[0]
+  const rank = (e: JWApiFileEntry): number => {
+    const name = normalizeForSearch(e.name)
+    const nameCompact = compact(name)
+    let r = positives.every((t) => textHas(name, nameCompact, t)) ? 0 : 2
+    if (first && !name.startsWith(first.text)) r += 1
+    return r * 1000 + e.path.split('/').length
+  }
+  const ranked = hits.map((e) => ({ e, r: rank(e) })).sort((a, b) => a.r - b.r || a.e.path.localeCompare(b.e.path)).map((x) => x.e)
+  const out = exact ? [exact, ...ranked.filter((e) => e !== exact)] : ranked
+  return out.slice(0, limit)
 }
 
 // ─── Matching ─────────────────────────────────────────────────────────────────
