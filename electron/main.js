@@ -131,6 +131,10 @@ function log(...args) {
 // exits before showing anything and leaves a watcher that starts the app once
 // the installer process is gone, i.e. on the new build.
 const updateInstallingMarkerPath = path.join(app.getPath('userData'), 'update-installing')
+// The version an update install just tried and failed to move us to, if the
+// marker says so. Installs then show the installer's own window this session,
+// and the launch doesn't install by itself (see updateBeforeLaunch).
+let updateInstallDidNotTake = null
 
 function handOffToRunningUpdateInstall() {
   let marker
@@ -153,6 +157,7 @@ function handOffToRunningUpdateInstall() {
   // No installer running: it finished without updating us or never started.
   // Carry on as a normal launch (which will offer the update again).
   if (!pids.length) {
+    updateInstallDidNotTake = marker.version
     clear()
     return false
   }
@@ -3809,14 +3814,15 @@ ipcMain.handle('fetch-image-as-data-url', async (_, url) => {
 // usual "Update ready" prompt.
 const LAUNCH_CHECK_TIMEOUT_MS = 10 * 1000
 const LAUNCH_STALL_TIMEOUT_MS = 30 * 1000
-const LAUNCH_INSTALL_TIMEOUT_MS = 60 * 1000
+const LAUNCH_INSTALL_TIMEOUT_MS = 20 * 1000
 let updatingWindow = null
 // The gate while a launch waits on the update check (createLaunchGate), else null.
 let launchGate = null
 
 // Resolves once the window has painted, so the user sees every step, or after
-// 2 s so a page that never paints can't hold the launch.
-function showUpdatingWindow() {
+// 2 s so a page that never paints can't hold the launch. `status` opens it in
+// that update-status state instead of "Checking for updates".
+function showUpdatingWindow({ status = '' } = {}) {
   const win = updatingWindow = new BrowserWindow({
     width: 300, height: 360,
     resizable: false, maximizable: false, fullscreenable: false,
@@ -3827,13 +3833,15 @@ function showUpdatingWindow() {
       preload: path.join(__dirname, 'updatingPreload.js'),
       nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
       spellcheck: false, devTools: false,
+      // Keeps painting when covered, for the stand-in's capture of it.
+      backgroundThrottling: false,
     },
   })
   win.on('closed', () => { if (updatingWindow === win) updatingWindow = null })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e) => e.preventDefault())
   win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show() })
-  win.loadFile(path.join(__dirname, 'updating', 'index.html'), { query: { version: app.getVersion() } })
+  win.loadFile(path.join(__dirname, 'updating', 'index.html'), { query: { version: app.getVersion(), ...(status ? { status } : {}) } })
   return new Promise((resolve) => {
     win.once('ready-to-show', () => resolve())
     setTimeout(() => resolve(), 2000)
@@ -3848,7 +3856,16 @@ function closeUpdatingWindow() {
 // updates itself, false when it skipped the check.
 async function updateBeforeLaunch() {
   if (isDev || isSmokeTest || !appSettings.autoDownload) return false
+  // The last update install didn't take (it failed, or its UAC prompt was
+  // turned down). Open the app and leave the update to its prompt this time,
+  // instead of failing out of sight at every launch.
+  if (updateInstallDidNotTake) {
+    log(`Update to ${updateInstallDidNotTake} didn't install last time; opening the app first`)
+    return false
+  }
   await showUpdatingWindow()
+  // This is the new version on screen, if an update just installed.
+  releaseInstallStandIn()
   const gate = launchGate = createLaunchGate({
     check: async () => {
       log('Checking for updates (launch)...')
@@ -3883,7 +3900,10 @@ function launchApp(checkedForUpdates) {
   // Closing the updating window while it waited quits the app.
   if (isQuitting) return
   createWindow()
-  mainWindow.once('ready-to-show', closeUpdatingWindow)
+  mainWindow.once('ready-to-show', () => {
+    closeUpdatingWindow()
+    releaseInstallStandIn()
+  })
   if (isSmokeTest) return
   startDesktop()
   createTray()
@@ -4147,7 +4167,118 @@ if (gotSingleInstanceLock) {
   try { fs.rmSync(relaunchMarkerPath, { force: true }) } catch {}
 }
 
-function installUpdateAndRestart() {
+// ── Install stand-in ──────────────────────────────────────────────────────────
+// The installer replaces the app's own files, so the app has to quit before it
+// runs, and the updating window goes with it. So the update still reads as one
+// window, a small PowerShell/WPF window (updating/standin.ps1) takes its place
+// first: a capture of the updating window at the same spot, with the sweep
+// drawn live over the captured bar. The installer then runs silently, and the
+// new version deletes the hold file once its own updating window is up
+// (releaseInstallStandIn), which closes the stand-in. Windows only.
+const standInHoldPath = path.join(app.getPath('userData'), 'update-standin')
+// From asking for the stand-in to it being on screen, updating window included.
+const STANDIN_TIMEOUT_MS = 8000
+// How long the app may still be here after handing off to the installer.
+const INSTALL_HANDOFF_TIMEOUT_MS = 15000
+// Windows hidden for an install started from inside the app, to bring back if
+// the handoff never happens.
+let hiddenForInstall = []
+
+function releaseInstallStandIn() {
+  try { fs.rmSync(standInHoldPath, { force: true }) } catch {}
+}
+
+// Resolves true once the stand-in is on screen. False when it couldn't come up
+// in time; the caller then lets the installer show its own window.
+async function showInstallStandIn() {
+  let cancelled = false
+  const giveUp = new Promise((resolve) => setTimeout(() => resolve(false), STANDIN_TIMEOUT_MS))
+  const shown = await Promise.race([startInstallStandIn(() => cancelled), giveUp])
+    .catch((err) => { log('Install stand-in failed:', err.message); return false })
+  if (!shown) {
+    cancelled = true
+    // A stand-in that comes up late sees this and leaves at once.
+    releaseInstallStandIn()
+    log('Install stand-in did not come up; showing the installer instead')
+  }
+  return shown
+}
+
+/** @param {() => boolean} isCancelled */
+async function startInstallStandIn(isCancelled) {
+  if (!updatingWindow || updatingWindow.isDestroyed()) {
+    // Started from inside the app ("Restart now"): put the updating window up
+    // in its installing state, with the rest of the app out of the way.
+    hiddenForInstall = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible())
+    for (const w of hiddenForInstall) w.hide()
+    await showUpdatingWindow({ status: 'downloaded' })
+  }
+  const win = updatingWindow
+  if (!win || win.isDestroyed()) return false
+  const page = await win.webContents.executeJavaScript('describeForStandIn()')
+  const capture = await win.webContents.capturePage()
+  if (capture.isEmpty() || isCancelled()) return false
+
+  // The page measures in CSS pixels (DIPs); the stand-in places itself in
+  // physical ones.
+  const bounds = win.getBounds()
+  const rect = screen.dipToScreenRect(win, bounds)
+  const px = (n) => Math.round(n * (rect.width / bounds.width))
+  const dir = path.join(app.getPath('temp'), `unreleased-update-standin-${Date.now()}`)
+  fs.mkdirSync(dir, { recursive: true })
+  const script = path.join(dir, 'standin.ps1')
+  const config = path.join(dir, 'standin.json')
+  const ready = path.join(dir, 'ready')
+  // PowerShell can't read inside app.asar, so the script runs from the copy.
+  fs.writeFileSync(script, fs.readFileSync(path.join(__dirname, 'updating', 'standin.ps1')))
+  fs.writeFileSync(path.join(dir, 'capture.png'), capture.toPNG())
+  fs.writeFileSync(config, JSON.stringify({
+    image: path.join(dir, 'capture.png'),
+    ready,
+    hold: standInHoldPath,
+    appPid: process.pid,
+    // The installer's process name, to tell when it's done.
+    installer: pendingUpdate?.installer ? path.basename(pendingUpdate.installer, '.exe') : null,
+    x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+    bar: { x: px(page.bar.x), y: px(page.bar.y), width: px(page.bar.width), height: px(page.bar.height), radius: px(page.bar.radius) },
+    sweep: { ...page.sweep, width: px(page.sweep.width) },
+    colors: page.colors,
+    // The new version usually opens within seconds of the installer finishing;
+    // five minutes is the most it stands in for anything.
+    limits: { reopenSeconds: 30, maxSeconds: 300 },
+  }))
+  if (isCancelled()) return false
+  fs.writeFileSync(standInHoldPath, String(Date.now()))
+
+  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const child = spawn(powershell, [
+    '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+    '-File', script, '-Config', config,
+  ], { cwd: dir, detached: true, stdio: 'ignore', windowsHide: true })
+  child.on('error', (err) => log('Install stand-in did not start:', err.message))
+  child.unref()
+
+  while (!isCancelled()) {
+    if (fs.existsSync(ready)) return true
+    if (child.exitCode !== null) return false
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
+}
+
+// The handoff didn't quit the app (the installer failed to start): don't leave
+// it hidden behind the updating window and the stand-in.
+function recoverFromStuckInstall() {
+  log('The app is still running after handing off to the installer')
+  releaseInstallStandIn()
+  // At launch the gate opens the app itself (launchUpdate.js).
+  if (launchGate?.active) return
+  closeUpdatingWindow()
+  for (const w of hiddenForInstall) if (!w.isDestroyed()) w.show()
+  hiddenForInstall = []
+}
+
+async function installUpdateAndRestart() {
   // Startup install, the "Restart now" prompt and the renderer's install
   // button can race; a second handoff would start a second installer.
   if (installingUpdate) return
@@ -4162,16 +4293,20 @@ function installUpdateAndRestart() {
   } catch (e) {
     log('Failed to write relaunch marker:', e.message)
   }
-  // Not silent: with --updated the installer skips every page but its
-  // progress bar (customFinishPage / SetAutoClose in build/installer.nsh), so
-  // the user sees the install happening instead of the app just vanishing.
-  // A plain quit with an update pending (autoInstallOnAppQuit) stays silent.
+  // Silent behind the stand-in. Without it, or when the last install didn't
+  // take, the installer shows its own window: with --updated it skips every
+  // page but its progress bar (customFinishPage / SetAutoClose in
+  // build/installer.nsh), so the user sees the install happening, and any
+  // error it hits, instead of the app just vanishing. A plain quit with an
+  // update pending (autoInstallOnAppQuit) is always silent.
+  const silent = !updateInstallDidNotTake && await showInstallStandIn()
+  setTimeout(recoverFromStuckInstall, INSTALL_HANDOFF_TIMEOUT_MS)
   if (betaInstallerPath) {
     // Run it the way electron-updater would: --updated marks it as an update
     // (so the installer skips its first-run pages).
     log('Running installer:', betaInstallerPath)
     try {
-      spawn(betaInstallerPath, ['--updated'], { detached: true, stdio: 'ignore' }).unref()
+      spawn(betaInstallerPath, silent ? ['--updated', '/S'] : ['--updated'], { detached: true, stdio: 'ignore' }).unref()
     } catch (e) {
       log('Installer spawn failed, opening it instead:', e.message)
       shell.openPath(betaInstallerPath)
@@ -4179,7 +4314,7 @@ function installUpdateAndRestart() {
     app.quit()
     return
   }
-  autoUpdater.quitAndInstall(false, false)
+  autoUpdater.quitAndInstall(silent, false)
 }
 
 autoUpdater.on('update-downloaded', (info) => {
@@ -4207,8 +4342,8 @@ autoUpdater.on('update-downloaded', (info) => {
     buttons: ['Restart now', 'Later'],
     defaultId: 0,
   }).then(({ response }) => {
-    // The installer shows only its progress bar for updates and relaunches
-    // the app itself — see installUpdateAndRestart.
+    // The installer runs behind the stand-in window and relaunches the app
+    // itself — see installUpdateAndRestart.
     if (response === 0) installUpdateAndRestart()
   })
 })

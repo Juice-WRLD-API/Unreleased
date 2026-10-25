@@ -12,7 +12,8 @@
   const fillEl = /** @type {HTMLElement} */ (document.getElementById('fill'))
   const versionEl = /** @type {HTMLElement} */ (document.getElementById('version'))
 
-  const current = new URLSearchParams(location.search).get('version')
+  const params = new URLSearchParams(location.search)
+  const current = params.get('version')
   if (current) versionEl.textContent = `v${current}`
 
   // The version being downloaded: 'available' names it, progress events don't.
@@ -56,4 +57,39 @@
   }
 
   bridge?.onStatus(onStatus)
+  // Opened straight into a state: an install started from inside the app.
+  const initial = params.get('status')
+  if (initial) onStatus({ type: initial })
+
+  /** @param {string} color computed rgb()/rgba() */
+  const hex = (color) => '#' + (color.match(/\d+/g) || []).slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('')
+
+  // What main.js needs to draw the install stand-in over a capture of this
+  // window (showInstallStandIn in ../main.js): where the bar is, how the sweep
+  // is moving and the colours, in CSS pixels. Resolves once the current state
+  // has painted.
+  const host = /** @type {any} */ (window)
+  host.describeForStandIn = () => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const sweepEl = /** @type {HTMLElement} */ (barEl.querySelector('.sweep'))
+      const box = barEl.getBoundingClientRect()
+      const anim = sweepEl.getAnimations()[0]
+      const period = Number(anim?.effect?.getTiming().duration) || 1600
+      resolve({
+        bar: { x: box.left, y: box.top, width: box.width, height: box.height, radius: parseFloat(getComputedStyle(barEl).borderTopLeftRadius) || 0 },
+        sweep: {
+          width: sweepEl.offsetWidth,
+          period,
+          phase: anim ? Number(anim.currentTime) % period : 0,
+          at: Date.now(),
+          reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        },
+        colors: {
+          background: hex(getComputedStyle(document.body).backgroundColor),
+          track: hex(getComputedStyle(barEl).backgroundColor),
+          accent: hex(getComputedStyle(sweepEl).backgroundColor),
+        },
+      })
+    }))
+  })
 })()

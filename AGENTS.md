@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.26** · updated 2026-10-25. Bump the version and date whenever you
+**Version 1.29** · updated 2026-10-25. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -278,7 +278,11 @@ nothing to install. A newer build is downloaded and installed right there,
 with no prompt, and the installer reopens the app. Timeouts that open the app
 anyway live in `electron/launchUpdate.js`. Once the app is open, a background
 download still asks with "Restart now / Later". Auto-download off skips the
-launch check.
+launch check. On Windows every install from the app runs the NSIS installer
+silently behind a stand-in (`electron/updating/standin.ps1`, PowerShell + WPF):
+a capture of the updating window with a live sweep, kept up until the new
+version deletes `update-standin` in userData. If the stand-in can't start, or
+the last install didn't take, the installer shows its own progress window.
 
 **Sync** (Home → Tools, `app` only, off by default) keeps every released and
 unreleased song with audio offline. It is one more entry in the offline
@@ -385,6 +389,18 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-25: Remote iOS Siri changes referenced `SiriRadioDonation` and
+  `PlayMediaIntentHandler` without their definitions, breaking the Xcode archive.
+  Both live in the already-compiled `SiriIntents.swift`; the media handler returns
+  `continueInApp` with the activity handled by the app/scene delegates. JS bridge
+  tests do not compile Swift; only a macOS Xcode archive confirms native builds.
+
+- 2026-10-25: The iOS release script fast-forwards `origin/ios` before building.
+  A web port left local URL-shortcut edits overlapping a remote Siri fix, so
+  release stopped at that first step. Reconcile incoming commits before handing
+  off a port: preserve local edits, fast-forward, and merge both the URL-context
+  and Siri user-activity handlers in `SceneDelegate.swift`.
 
 - 2026-10-25: Android offline playlist downloads take catalogue song ids, but
   mixed playlists include entries with `song: null`. Use `playlistSongIds`
