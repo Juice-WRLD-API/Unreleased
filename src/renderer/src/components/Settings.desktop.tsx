@@ -10,6 +10,7 @@ import {
   Activity, Lightbulb,
 } from 'lucide-react'
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
+import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
 import VizControls, { Pills, Toggle } from './VizControls'
 import DesktopSettings from './DesktopSettings'
 import Passkeys from './Passkeys'
@@ -2195,6 +2196,16 @@ export default function Settings(): JSX.Element {
                   <Heart size={15} />
                   Thank You
                 </button>
+
+                <div className="mt-2 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
+                  <p className="flex items-center gap-2 text-text-secondary text-xs mb-2">
+                    <Heart size={13} className="text-accent shrink-0" />
+                    Enjoying the app? Donations help keep it running.
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {DONATION_ADDRESSES.map(a => <DonationAddressRow key={a.label} label={a.label} value={a.value} />)}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <button

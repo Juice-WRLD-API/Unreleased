@@ -11,6 +11,7 @@ import {
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
+import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
 import SkinEditorModal from './SkinEditorModal'
 import { allFonts } from '../lib/fonts'
 import { useCustomFonts } from '../hooks/useCustomFonts'
@@ -1860,6 +1861,16 @@ export default function Settings(): JSX.Element {
                   </Row>
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
+
+                <div className="mt-3 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
+                  <p className="flex items-center gap-2 text-text-secondary text-xs mb-2">
+                    <Heart size={13} className="text-accent shrink-0" />
+                    Enjoying the app? Donations help keep it running.
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {DONATION_ADDRESSES.map(a => <DonationAddressRow key={a.label} label={a.label} value={a.value} />)}
+                  </div>
+                </div>
 
                 {/* Only shown to accounts that aren't already one - these are
                     the application pages, not a status display. */}
