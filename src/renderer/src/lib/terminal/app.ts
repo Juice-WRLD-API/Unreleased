@@ -6,10 +6,13 @@ import type { ViewType } from '../../types'
 import { APP_VERSION, COMMIT_HASH, fetchRunningCommit } from '../appVersion'
 import { cancelZipTask, isZipTaskId } from '../clientZip'
 import { formatBytes } from '../format'
+import { clearNotifications, getNotifications, markNotificationsRead, removeNotification, type NotificationKind } from '../notificationHistory'
+import { openNotificationTarget } from '../openNotification'
 import { getToken } from '../userApi'
+import { relativeTime } from '../../components/adminShared'
 import { termAccess } from './access'
 import { completeSongs } from './player'
-import { confirmAction, fail, pickByName, type TermCommand } from './types'
+import { asJson, confirmAction, fail, oneLine, parseArgs, pickByName, table, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -24,7 +27,12 @@ const VIEWS: Record<string, ViewType> = {
 }
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'library', 'app', 'developer', 'feedback', 'about']
 const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']
-const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'user', 'song']
+const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'notifications', 'user', 'song']
+// `notifications` filters, by the names the notification area shows.
+const NOTIFY_KINDS: Record<string, NotificationKind> = { chat: 'chat', news: 'news', announcements: 'broadcast', app: 'app' }
+const NOTIFY_SUBS = ['ls', 'show', 'open', 'rm', 'read', 'clear']
+const notifyKind = (word: string | undefined): NotificationKind | undefined =>
+  word ? NOTIFY_KINDS[word.toLowerCase()] ?? fail(`kinds: ${Object.keys(NOTIFY_KINDS).join(', ')}`) : undefined
 // The Admin page is for administrators and chat is for staff, so neither is offered otherwise.
 const offered = (target: string): boolean => {
   const a = termAccess()
@@ -34,7 +42,7 @@ const offered = (target: string): boolean => {
 export const APP_COMMANDS: TermCommand[] = [
   {
     name: 'open', aliases: ['go', 'goto'], group: 'Navigation',
-    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics` },
+    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics|notifications` },
     description: 'Go to any page, as if you had clicked it. The terminal keeps its place for when you return (Ctrl+` or the Terminal button)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
@@ -48,7 +56,7 @@ export const APP_COMMANDS: TermCommand[] = [
       const [target = '', ...restWords] = args.trim().split(/\s+/)
       const rest = restWords.join(' ')
       const key = target.toLowerCase()
-      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics>`)
+      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics|notifications>`)
       if (!offered(key)) fail(`no page "${target}" (try: open home)`)
       const s = st()
       if (key === 'settings') {
@@ -66,6 +74,7 @@ export const APP_COMMANDS: TermCommand[] = [
       if (key === 'queue') { s.setShowQueue(true); ctx.print('queue panel opened', 'ok'); return }
       if (key === 'eq') { s.setShowEqPanel(true); ctx.print('equalizer opened', 'ok'); return }
       if (key === 'diagnostics' || key === 'diag') { s.setShowDiagnostics(true); ctx.print('diagnostics opened', 'ok'); return }
+      if (key === 'notifications') { s.setShowNotifications(true); ctx.print('notification area opened', 'ok'); return }
       if (key === 'user') {
         if (!/^\d+$/.test(rest)) fail('usage: open user <numeric id>')
         s.openPublicProfile(Number(rest))
@@ -126,6 +135,52 @@ token show prints it in full · token copy puts it on the clipboard`)
         const size = u.total ? `${formatBytes(u.bytesReceived ?? u.received ?? 0)} / ${formatBytes(u.total)}` : u.bytesReceived ? formatBytes(u.bytesReceived) : ''
         return `${String(i + 1).padStart(3)}  ${u.state.padEnd(11)}${String(u.percent).padStart(3)}%  ${u.filename}${u.detail ? `  ${u.detail}` : ''}${size ? `  ${size}` : ''}${u.error && u.state === 'error' ? `  (${u.error})` : ''}`
       }).join('\n'))
+    },
+  },
+  {
+    name: 'notifications', aliases: ['notifs', 'inbox'], group: 'App',
+    usage: 'notifications [ls [chat|news|announcements|app]] · show · open N · rm N · read · clear [kind]',
+    description: 'The notification area: past chat, news and announcement notifications and app notices on this device. show opens the panel; open N goes where entry N points (or prints all of it)',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return [...NOTIFY_SUBS, ...Object.keys(NOTIFY_KINDS)].filter((w) => w.startsWith(p))
+      if (before.length === 1 && ['ls', 'clear'].includes(before[0].toLowerCase())) return Object.keys(NOTIFY_KINDS).filter((w) => w.startsWith(p))
+      return []
+    },
+    run: (args, ctx) => {
+      const { rest, bool } = parseArgs(args)
+      const first = (rest[0] ?? 'ls').toLowerCase()
+      // A bare kind lists it: `notifications chat`.
+      const sub = NOTIFY_SUBS.includes(first) ? (rest.shift(), first) : 'ls'
+      const all = getNotifications()
+      if (sub === 'show') { st().setShowNotifications(true); ctx.print('notification area opened', 'ok'); return }
+      if (sub === 'read') { markNotificationsRead(); ctx.print('marked every notification read', 'ok'); return }
+      if (sub === 'clear') {
+        const kind = notifyKind(rest[0])
+        clearNotifications(kind ? [kind] : undefined)
+        ctx.print(kind ? `cleared the ${rest[0].toLowerCase()} notifications` : 'cleared the notification area', 'ok')
+        return
+      }
+      if (sub === 'open' || sub === 'rm') {
+        if (all.length === 0) fail('no notifications')
+        const entry = all[Number(rest[0]) - 1] ?? fail(`${sub} which? 1-${all.length} (numbers from notifications ls)`)
+        if (sub === 'rm') { removeNotification(entry.id); ctx.print(`removed "${oneLine(entry.title, 50)}"`, 'ok'); return }
+        markNotificationsRead([entry.id])
+        if (entry.target) { openNotificationTarget(entry.target); return }
+        ctx.print(`${entry.title}${entry.count && entry.count > 1 ? `  (×${entry.count})` : ''}\n${relativeTime(new Date(entry.at).toISOString())}${entry.body ? `\n\n${entry.body}` : ''}`)
+        return
+      }
+      const kind = notifyKind(rest[0])
+      // Numbered across the whole list, so `open N` means the same entry
+      // whatever the filter.
+      const rows = all.map((e, i) => ({ e, n: i + 1 })).filter(({ e }) => !kind || e.kind === kind)
+      if (asJson(ctx, bool.has('json'), rows.map(({ e }) => e))) return
+      if (rows.length === 0) { ctx.print(kind ? `no ${rest[0].toLowerCase()} notifications` : 'no notifications yet', 'dim'); return }
+      const label = Object.fromEntries(Object.entries(NOTIFY_KINDS).map(([k, v]) => [v, k])) as Record<NotificationKind, string>
+      ctx.print(`${table(rows.map(({ e, n }) => [
+        String(n).padStart(3), e.read ? ' ' : '•', relativeTime(new Date(e.at).toISOString()), label[e.kind],
+        `${oneLine(e.title, 60)}${e.count && e.count > 1 ? ` ×${e.count}` : ''}${e.body ? `  ${oneLine(e.body, 80)}` : ''}`,
+      ]))}\n${rows.length} notification${rows.length === 1 ? '' : 's'} · • unread · open N to go there`)
     },
   },
   {

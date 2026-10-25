@@ -8,6 +8,7 @@ import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import { signInWithPasskey } from '../lib/passkeyApi'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
+import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
@@ -60,6 +61,7 @@ import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
 import { showAppToast } from '../lib/appToast'
+import { clearNotifications } from '../lib/notificationHistory'
 import { setNotificationsSignedIn } from '../lib/notificationSocket'
 import { migrateDonorPlaylists } from '../lib/donorPlaylistEntries'
 
@@ -550,6 +552,9 @@ interface AppState {
   // Downloads (Electron only)
   downloads: DownloadItem[]
   showDownloadManager: boolean
+  // The notification area (NotificationCenter); its entries live in
+  // lib/notificationHistory, not here.
+  showNotifications: boolean
   updateStatus: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null
 
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
@@ -945,6 +950,7 @@ interface AppActions {
   removeDownload: (id: string) => void
   clearCompletedDownloads: () => void
   setShowDownloadManager: (show: boolean) => void
+  setShowNotifications: (show: boolean) => void
   setUpdateStatus: (status: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null) => void
 
   setShowMoreNav: (show: boolean) => void
@@ -2652,6 +2658,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
@@ -2661,6 +2668,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // to sign in on this machine would merge it in and push it to their own
     // profile. The server copy is authoritative from the next login anyway.
     get()._setListeningPlays([])
+    // Chat notifications quote the account's messages; the rest of the
+    // notification area (news, announcements, toasts) isn't anyone's.
+    clearNotifications(['chat'])
   },
   refreshPlaylists: async () => {
     if (!get().account) return
@@ -3468,7 +3478,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   clearCompletedDownloads: () => set((s) => ({
     downloads: s.downloads.filter((d) => d.state === 'downloading'),
   })),
-  setShowDownloadManager: (show) => set({ showDownloadManager: show }),
+  // Both panels hang off the top-right corner, so only one is open at a time.
+  setShowDownloadManager: (show) => set(show ? { showDownloadManager: true, showNotifications: false } : { showDownloadManager: false }),
+
+  showNotifications: false,
+  setShowNotifications: (show) => set(show ? { showNotifications: true, showDownloadManager: false } : { showNotifications: false }),
   setUpdateStatus: (updateStatus) => set({ updateStatus }),
 
   showMoreNav: false,

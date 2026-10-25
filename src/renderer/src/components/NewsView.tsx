@@ -26,6 +26,7 @@ import NewsContextMenu, { type NewsMenuState } from './NewsContextMenu'
 import { lazyOverlay } from '../lib/lazyView'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
+import { LazyImg } from './LazyImg'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
@@ -114,10 +115,9 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu
       >
         {item.image_url ? (
           <div className="relative aspect-[16/7] w-full overflow-hidden bg-[var(--surface-overlay)]">
-            <img
+            <LazyImg
               src={ensureHttpsMediaUrl(item.image_url) ?? undefined}
               alt=""
-              loading="lazy"
               className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
@@ -158,10 +158,9 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: 
       >
         {item.image_url && (
           <div className="w-full aspect-[16/9] shrink-0 overflow-hidden bg-[var(--surface-overlay)]">
-            <img
+            <LazyImg
               src={ensureHttpsMediaUrl(item.image_url) ?? undefined}
               alt=""
-              loading="lazy"
               className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             />
           </div>
@@ -269,7 +268,7 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {images.map((a, i) => (
             <a key={i} href={ensureHttpsMediaUrl(a.url) ?? a.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-overlay)] hover:border-accent/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
-              <img src={ensureHttpsMediaUrl(a.url) ?? undefined} alt={a.name} loading="lazy" className="w-full aspect-square object-cover" />
+              <LazyImg src={ensureHttpsMediaUrl(a.url) ?? undefined} alt={a.name} className="w-full aspect-square object-cover" />
             </a>
           ))}
         </div>

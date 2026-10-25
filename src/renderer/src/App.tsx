@@ -104,6 +104,7 @@ const StatsView = lazyView(() => import('./components/StatsView'))
 const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
 // Desktop only - fetched the first time Sync is opened.
 const SyncModal = lazyOverlay(() => import('./components/SyncModal'))
+const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
 const StatisticsView = lazyView(() => import('./components/StatisticsView'))
 const PublicProfileView = lazyView(() => import('./components/PublicProfileView'))
 const ChatView = lazyView(() => import('./components/ChatView'))
@@ -148,8 +149,8 @@ function WindowControls(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav, showNotifications, setShowNotifications } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav', 'showNotifications', 'setShowNotifications')
   // Opening the terminal from a view that holds unsaved local state (the song
   // editor's draft, a half-filled submission, an open playlist...) must not
   // unmount it - closing the terminal would otherwise remount it empty. Derived
@@ -447,6 +448,11 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><GlobalSongInfoHost /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DownloadManager /></ErrorBoundary>
+      {showNotifications && (
+        <ErrorBoundary variant="overlay" onDismiss={() => setShowNotifications(false)}>
+          <NotificationCenter />
+        </ErrorBoundary>
+      )}
       {/* Rendered last on purpose: Chromium builds the frameless window's
           draggable region in DOM order (drag rects unite, no-drag rects
           subtract, later entries win). The buttons' no-drag carve-out must

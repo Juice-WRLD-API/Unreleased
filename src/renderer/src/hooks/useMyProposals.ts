@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { getMyProposals, withdrawProposal, resubmitProposal, adminReviewProposal } from '../lib/userApi'
 import type { SongEditProposal } from '../lib/userApi'
 import { proposalSearchText, type ProposalFilterTab } from '../lib/proposalSearch'
@@ -19,11 +19,24 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [resubmittingId, setResubmittingId] = useState<number | null>(null)
   const [reviewingId, setReviewingId] = useState<number | null>(null)
+  // Channel whose full list `proposals` holds, once one has finished loading.
+  const shownChannel = useRef<string | null>(null)
 
   useStrictModeSafeEffect((isCancelled) => {
     setRefreshing(true)
-    getMyProposals(activeChannel)
-      .then((data) => { if (!isCancelled()) setProposals(data) })
+    // On a first load (or a channel switch) the first page shows as soon as it
+    // lands; `refreshing` stays on until the rest have come in too. A plain
+    // refresh keeps the full list up instead of shrinking it to one page.
+    getMyProposals(activeChannel, (page) => {
+      if (isCancelled() || shownChannel.current === activeChannel) return
+      setProposals(page)
+      setLoading(false)
+    })
+      .then((data) => {
+        if (isCancelled()) return
+        shownChannel.current = activeChannel
+        setProposals(data)
+      })
       .catch(() => {})
       .finally(() => {
         if (isCancelled()) return

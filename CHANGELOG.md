@@ -8,6 +8,7 @@ All notable changes to this project are documented here.
 
 ## [2.5.0] — 2026-10-20
 
+- **New** **Notifications**: a notification area that keeps the chat messages, news posts, announcements, device alerts and app notices that popped up, grouped by day, with a badge for new ones. Click one to go to its chat room or post. Opens from the Notifications button in the side menu (it can be moved or hidden like the others) or the terminal's `notifications` command. Kept on this device for 30 days; signing out clears the chat ones
 - **New** **Desktop**, in Settings → Desktop: iJWA's light and widgets built into the app, following what Unreleased plays. Everything starts off
   - **Screen-edge light** (Windows): a glow round your screens in 22 looks (Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow…), all round or at the bottom, top or corners, moving with the music or flowing on its own, in your colors or the cover's. It can show only while the desktop is in front, and you choose which displays get it
   - **Desktop player, playlist and clock** (Windows): your queue as glass cards on the desktop with a glass control bar, lyrics beside the playing card, and catalog search with era pages; a tilted see-through list of your queue, liked songs or a playlist; tall glass digits tinted by the cover. Drag them anywhere, lock them, or make the player small

@@ -5,6 +5,9 @@
 // glitch. Rendered by AppToastHost, mounted once in App.tsx. Plain module
 // state rather than the store, so lib code and the store itself can call it.
 // An 'info' toast can carry one action button (e.g. "queue ended - start radio").
+// Every toast is also logged to the notification area (lib/notificationHistory),
+// already read, since it answers something the user just did.
+import { recordNotification } from './notificationHistory'
 
 export interface AppToastAction { label: string; onClick: () => void }
 export interface AppToast { id: number; text: string; tone: 'error' | 'info'; action?: AppToastAction }
@@ -30,6 +33,7 @@ export function showAppToast(text: string, opts?: { tone?: 'error' | 'info'; act
   // keep the one toast instead of stacking copies.
   toasts = [...toasts.filter(t => t.text !== text).slice(-2), { id, text, tone: opts?.tone ?? 'error', action: opts?.action }]
   emit()
+  recordNotification({ kind: 'app', title: text, level: opts?.tone === 'info' ? 'info' : 'error', read: true })
   // A toast with a button stays up a bit longer so there's time to reach it.
   setTimeout(() => dismissAppToast(id), opts?.action ? 6500 : 4200)
 }
