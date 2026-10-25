@@ -1,4 +1,20 @@
 import AppIntents
+import Foundation
+import Intents
+
+// Shared with the app/scene delegates that receive a Siri radio launch.
+enum SiriRadioDonation {
+    static let activityType = "com.juicewrldapi.player.play999fm"
+}
+
+final class PlayMediaIntentHandler: NSObject, INPlayMediaIntentHandling {
+    func handle(intent: INPlayMediaIntent, completion: @escaping (INPlayMediaIntentResponse) -> Void) {
+        // The WebView needs a live scene to start the radio. The delegates
+        // consume this activity and queue play999Fm once that scene exists.
+        let activity = NSUserActivity(activityType: SiriRadioDonation.activityType)
+        completion(INPlayMediaIntentResponse(code: .continueInApp, userActivity: activity))
+    }
+}
 
 // Siri / Shortcuts actions. Each one only queues a command for the renderer
 // (SiriCommandCenter); playback lives in the WebView, so these have to run in
