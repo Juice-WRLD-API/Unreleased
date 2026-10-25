@@ -10,6 +10,7 @@ const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
 const { registerPasskeyIpc } = require('./passkey')
+const { createLaunchGate } = require('./launchUpdate')
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -411,6 +412,7 @@ async function checkBetaUpdate({ force = false } = {}) {
   if (!newest || compareVersions(newest, app.getVersion()) <= 0) return false
 
   log('Newer beta available:', newest)
+  launchGate?.progress()
   broadcastToWindows('update-status', { type: 'available', version: newest })
   if (!appSettings.autoDownload && !force) return true
 
@@ -419,7 +421,10 @@ async function checkBetaUpdate({ force = false } = {}) {
     broadcastToWindows('update-status', { type: 'downloading', percent: 0, version: newest })
     await downloadFile(
       `${BETA_API_BASE}/download?version=${encodeURIComponent(newest)}`, dest,
-      (percent) => broadcastToWindows('update-status', { type: 'downloading', percent, version: newest }),
+      (percent) => {
+        launchGate?.progress()
+        broadcastToWindows('update-status', { type: 'downloading', percent, version: newest })
+      },
       { 'X-Beta-Code': code },
     )
   } catch (err) {
@@ -434,8 +439,14 @@ async function checkBetaUpdate({ force = false } = {}) {
   log('Beta installer ready:', dest)
   broadcastToWindows('update-status', { type: 'downloaded', version: newest })
 
-  // Same rule as a stable download: never restart without asking — a launch
-  // download can finish well after the user has started listening.
+  // Same rules as a stable download: at launch, before the app is open,
+  // install straight away (see updateBeforeLaunch). Once it is open, never
+  // restart without asking: a background download can finish well after the
+  // user has started listening.
+  if (launchGate?.active) {
+    launchGate.install()
+    return true
+  }
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update ready',
@@ -3785,6 +3796,110 @@ ipcMain.handle('fetch-image-as-data-url', async (_, url) => {
   }
 })
 
+// ── Update before launch ──────────────────────────────────────────────────────
+// The app the user sees is always the latest build. A packaged launch shows a
+// small updating window (electron/updating/) instead of the app, checks the
+// feed, and when there is a newer build downloads it and runs its installer
+// right there; the installer reopens the app on the new version (see
+// installUpdateAndRestart). The main window is only created once there is
+// nothing to install. With auto-download off none of this runs: the app opens
+// at once and offers the update the old way. A check that takes too long, a
+// stalled download or an installer that never takes over opens the app
+// anyway (launchUpdate.js), and the work finishes in the background with the
+// usual "Update ready" prompt.
+const LAUNCH_CHECK_TIMEOUT_MS = 10 * 1000
+const LAUNCH_STALL_TIMEOUT_MS = 30 * 1000
+const LAUNCH_INSTALL_TIMEOUT_MS = 60 * 1000
+let updatingWindow = null
+// The gate while a launch waits on the update check (createLaunchGate), else null.
+let launchGate = null
+
+// Resolves once the window has painted, so the user sees every step, or after
+// 2 s so a page that never paints can't hold the launch.
+function showUpdatingWindow() {
+  const win = updatingWindow = new BrowserWindow({
+    width: 300, height: 360,
+    resizable: false, maximizable: false, fullscreenable: false,
+    title: 'Unreleased',
+    backgroundColor: '#0a0a0a', icon: iconPath, frame: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'updatingPreload.js'),
+      nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
+      spellcheck: false, devTools: false,
+    },
+  })
+  win.on('closed', () => { if (updatingWindow === win) updatingWindow = null })
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (e) => e.preventDefault())
+  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show() })
+  win.loadFile(path.join(__dirname, 'updating', 'index.html'), { query: { version: app.getVersion() } })
+  return new Promise((resolve) => {
+    win.once('ready-to-show', () => resolve())
+    setTimeout(() => resolve(), 2000)
+  })
+}
+
+function closeUpdatingWindow() {
+  if (updatingWindow && !updatingWindow.isDestroyed()) updatingWindow.close()
+}
+
+// Resolves when the main window may open: true when this launch checked for
+// updates itself, false when it skipped the check.
+async function updateBeforeLaunch() {
+  if (isDev || isSmokeTest || !appSettings.autoDownload) return false
+  await showUpdatingWindow()
+  const gate = launchGate = createLaunchGate({
+    check: async () => {
+      log('Checking for updates (launch)...')
+      updateCheckInProgress = true
+      try {
+        // Same order as runUpdateCheck: a beta user's gated list comes first.
+        if (await checkBetaUpdate()) return
+        const result = await autoUpdater.checkForUpdates()
+        // update-downloaded fires before this resolves and hands off to the
+        // installer through launchGate.install().
+        if (result?.downloadPromise) await result.downloadPromise
+      } finally {
+        updateCheckInProgress = false
+      }
+    },
+    install: installUpdateAndRestart,
+    log,
+    checkTimeoutMs: LAUNCH_CHECK_TIMEOUT_MS,
+    stallTimeoutMs: LAUNCH_STALL_TIMEOUT_MS,
+    installTimeoutMs: LAUNCH_INSTALL_TIMEOUT_MS,
+  })
+  await gate.opened
+  if (launchGate === gate) launchGate = null
+  // It stays up as a splash until the app is on screen (launchApp).
+  if (updatingWindow && !updatingWindow.isDestroyed()) updatingWindow.webContents.send('update-status', { type: 'starting' })
+  return true
+}
+
+// The app itself: main window, Desktop, tray, Discord and the background update
+// checks.
+function launchApp(checkedForUpdates) {
+  // Closing the updating window while it waited quits the app.
+  if (isQuitting) return
+  createWindow()
+  mainWindow.once('ready-to-show', closeUpdatingWindow)
+  if (isSmokeTest) return
+  startDesktop()
+  createTray()
+  discordRpc.setEnabled(appSettings.discordRpcEnabled !== false)
+
+  if (!isDev) {
+    if (!checkedForUpdates) mainWindow.once('ready-to-show', () => runUpdateCheck('startup'))
+    // Covers the app being left open for a long session (periodic) and a
+    // laptop waking from sleep after the interval would've otherwise elapsed
+    // unnoticed in the background — resume fires even if the OS suspended
+    // the interval timer along with everything else while asleep.
+    setInterval(() => runUpdateCheck('periodic'), UPDATE_CHECK_INTERVAL_MS)
+    powerMonitor.on('resume', () => runUpdateCheck('resume from sleep'))
+  }
+}
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   // Deny every permission request by default. Nothing in this app needs
@@ -3923,24 +4038,13 @@ app.whenReady().then(() => {
   )
 
   if (isDev && process.env.UNRELEASED_DEV_SEED !== '0') devStorageSeedReady = readInstalledLocalStorage()
-  createWindow()
-  if (isSmokeTest) return
-  startDesktop()
-  createTray()
-  discordRpc.setEnabled(appSettings.discordRpcEnabled !== false)
-
-  if (!isDev) {
-    mainWindow.once('ready-to-show', () => runUpdateCheck('startup'))
-    // Covers the app being left open for a long session (periodic) and a
-    // laptop waking from sleep after the interval would've otherwise elapsed
-    // unnoticed in the background — resume fires even if the OS suspended
-    // the interval timer along with everything else while asleep.
-    setInterval(() => runUpdateCheck('periodic'), UPDATE_CHECK_INTERVAL_MS)
-    powerMonitor.on('resume', () => runUpdateCheck('resume from sleep'))
-  }
+  // A bug in the update gate must never keep the app from opening.
+  updateBeforeLaunch()
+    .catch((err) => { log('Launch update failed:', err.message); return false })
+    .then(launchApp)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0 && !launchGate) createWindow()
   })
 })
 
@@ -3949,6 +4053,10 @@ app.on('second-instance', () => {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+  } else if (updatingWindow && !updatingWindow.isDestroyed()) {
+    // Still updating: bring that window forward instead.
+    if (updatingWindow.isMinimized()) updatingWindow.restore()
+    updatingWindow.focus()
   }
 })
 
@@ -3996,6 +4104,7 @@ autoUpdater.on('checking-for-update', () => {
 
 autoUpdater.on('update-available', (info) => {
   log('Update available:', info.version)
+  launchGate?.progress()
   broadcastToWindows('update-status', { type: 'available', version: info.version })
 })
 
@@ -4006,6 +4115,7 @@ autoUpdater.on('update-not-available', (info) => {
 
 autoUpdater.on('download-progress', (p) => {
   log(`Downloading update: ${Math.round(p.percent)}%`)
+  launchGate?.progress()
   broadcastToWindows('update-status', {
     type: 'downloading',
     percent: Math.round(p.percent),
@@ -4079,10 +4189,16 @@ autoUpdater.on('update-downloaded', (info) => {
   betaInstallerPath = null
   broadcastToWindows('update-status', { type: 'downloaded', version: info.version })
 
-  // Always ask, even at launch: the launch check's download can finish
-  // minutes in, mid-playback, and restarting then looked like the app
-  // updating on its own. "Later" leaves it to autoInstallOnAppQuit, which
-  // installs quietly on the next quit without reopening the app.
+  // At launch the app isn't open yet and nothing is playing: install straight
+  // away (see updateBeforeLaunch).
+  if (launchGate?.active) {
+    launchGate.install()
+    return
+  }
+  // Once it's open, always ask: a background download can finish minutes in,
+  // mid-playback, and restarting then looked like the app updating on its
+  // own. "Later" leaves it to autoInstallOnAppQuit, which installs quietly on
+  // the next quit without reopening the app.
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update ready',

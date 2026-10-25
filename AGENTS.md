@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.25** · updated 2026-10-25. Bump the version and date whenever you
+**Version 1.26** · updated 2026-10-25. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -271,6 +271,14 @@ styles and Edge-light visualizers run on every desktop OS. Desktop pages run
 under the app CSP: no inline `style` attributes or `<style>` tags. Don't bring
 back WRLD's Cover Flow layout or iJWA's live wallpaper, artwork tray icon or
 energy rules.
+
+**Updates at launch** (`app`): a packaged launch shows the updating window
+(`electron/updating/`) first and only creates the main window once there is
+nothing to install. A newer build is downloaded and installed right there,
+with no prompt, and the installer reopens the app. Timeouts that open the app
+anyway live in `electron/launchUpdate.js`. Once the app is open, a background
+download still asks with "Restart now / Later". Auto-download off skips the
+launch check.
 
 **Sync** (Home → Tools, `app` only, off by default) keeps every released and
 unreleased song with audio offline. It is one more entry in the offline
