@@ -478,7 +478,10 @@ input[type='range']:active::-moz-range-thumb {
    edge while the scrim fades. The entrance class is *removed* once it finishes
    (see Sheet.tsx): with fill-mode `both` the animation's final transform would
    outrank the inline one the drag-to-dismiss gesture writes.
-   Sheet.tsx's EXIT_MS is kept in sync with the sheet-out duration below. */
+   Sheet.tsx's EXIT_MS is kept in sync with the sheet-out duration below.
+   sheet-out composites (`add`) onto that inline offset instead of replacing
+   it, so a sheet swiped away carries on down from where the finger let go
+   rather than jumping back up to its resting spot first. */
 @keyframes sheet-in {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
@@ -492,7 +495,7 @@ input[type='range']:active::-moz-range-thumb {
   to   { opacity: 1; }
 }
 .animate-sheet-in  { animation: sheet-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-sheet-out { animation: sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; }
+.animate-sheet-out { animation: sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; animation-composition: add; }
 .animate-scrim-in  { animation: scrim-in 0.2s ease both; }
 .animate-scrim-out { animation: scrim-in 0.18s ease reverse both; }
 

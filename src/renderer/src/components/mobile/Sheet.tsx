@@ -72,6 +72,8 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
     threshold: 90,
     rubberBand: true,
     transition: 'transform 220ms cubic-bezier(0.16,1,0.3,1)',
+    // Slide out from where the finger let go, not from the resting spot.
+    holdOnDismiss: true,
   })
 
   return createPortal(
