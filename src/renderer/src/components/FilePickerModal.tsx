@@ -6,7 +6,7 @@ import {
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
-import { loadFileIndex, runFileSearch } from '../lib/fileSearch'
+import { folderFromIndex, loadFileIndex, runFileSearch } from '../lib/fileSearch'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { breadcrumbs, parentFolder } from '../lib/apiFilesShared'
 import { useStore } from '../store/useStore'
@@ -138,9 +138,11 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
 
   const navigate = useCallback(async (path: string, pushHistory = true, resetSearch = true) => {
     if (resetSearch) { setSearch(''); setDebouncedSearch('') }
-    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    // Cached listing, else the channel's file index if search already loaded it.
+    const peeked = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    const cached = peeked ? parseBrowseEntries(peeked) : folderFromIndex(activeChannel, path)
     if (cached) {
-      setEntries(parseBrowseEntries(cached))
+      setEntries(cached)
       setCurrentPath(path)
       setError(null)
       if (resetSearch) setLoading(false)
@@ -158,7 +160,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     } finally {
       if (resetSearch) setLoading(false)
     }
-  }, [currentPath, browseParams])
+  }, [currentPath, browseParams, activeChannel])
 
   // Always prefetch the root listing (silently, without touching the search
   // box) so clearing the initial title search drops straight into a populated

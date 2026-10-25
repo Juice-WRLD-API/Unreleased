@@ -9,8 +9,9 @@ import {
   X, Pencil, PackageOpen, CheckSquare2, Square, MonitorSmartphone, Globe, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
   FolderPlus, FilePlus, ExternalLink, FileText, RefreshCw, Upload,
-  FolderInput, CornerLeftUp, Sparkles,
+  FolderInput, CornerLeftUp, Sparkles, FolderSearch,
 } from 'lucide-react'
+import { FolderJumpBox } from './FolderJumpBox'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { useStore, useStorePick } from '../store/useStore'
 import {
@@ -173,13 +174,26 @@ export default function ApiFilesBrowser(): JSX.Element {
   }
 
   const {
-    currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
+    currentPath, entries, loading, error, history, setHistory, navigate, prefetchFolder, goBack, goHome, onChannelChange,
     search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
     searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
   })
+  const [jumpOpen, setJumpOpen] = useState(false)
+  // Resting the mouse on a folder for a moment fetches its listing ahead of
+  // the click (prefetchFolder skips it once the file index has it anyway).
+  const folderHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const folderHoverProps = (entry: JWApiFileEntry): React.HTMLAttributes<HTMLDivElement> => entry.type !== 'directory' ? {} : {
+    onPointerEnter: (e) => {
+      if (e.pointerType !== 'mouse') return
+      if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current)
+      folderHoverTimer.current = setTimeout(() => prefetchFolder(entry.path), 120)
+    },
+    onPointerLeave: () => { if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current) },
+  }
+  useEffect(() => () => { if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current) }, [])
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [textFile, setTextFile] = useState<TextFileSource | null>(null)
@@ -230,6 +244,22 @@ export default function ApiFilesBrowser(): JSX.Element {
   const [nameDraft, setNameDraft] = useState('')
   const [nameError, setNameError] = useState<string | null>(null)
   const [nameBusy, setNameBusy] = useState(false)
+
+  // Ctrl+L opens the jump box, as it focuses the address bar in Explorer.
+  useEffect(() => {
+    if (localMode) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'l' || e.altKey || e.shiftKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
+      e.preventDefault()
+      setSearch(''); setDebouncedSearch('')
+      setJumpOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [localMode, setSearch, setDebouncedSearch])
+  useEffect(() => { if (isSearching) setJumpOpen(false) }, [isSearching])
 
   const browseLocal = async (dirPath: string): Promise<void> => {
     const el = (window as any).electron
@@ -898,7 +928,16 @@ export default function ApiFilesBrowser(): JSX.Element {
                 <button onClick={goHome} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors" title="Root">
                   <Home size={15} className="text-text-muted" />
                 </button>
-                <div className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0">
+                {jumpOpen ? (
+                  <FolderJumpBox channel={activeChannel} onJump={(p) => navigate(p)} onClose={() => setJumpOpen(false)} />
+                ) : (
+                <div
+                  className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0 self-stretch cursor-text"
+                  // The empty space after the crumbs turns the bar into the
+                  // jump box, like clicking an address bar.
+                  onClick={(e) => { if (e.target === e.currentTarget) setJumpOpen(true) }}
+                  title="Click to go to a folder (Ctrl+L)"
+                >
                   <button
                     onClick={goHome}
                     className={`text-xs px-1.5 py-0.5 rounded transition-colors shrink-0 ${
@@ -918,6 +957,12 @@ export default function ApiFilesBrowser(): JSX.Element {
                     </div>
                   ))}
                 </div>
+                )}
+                {!jumpOpen && (
+                  <button onClick={() => setJumpOpen(true)} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors shrink-0" title="Go to folder (Ctrl+L)">
+                    <FolderSearch size={15} className="text-text-muted" />
+                  </button>
+                )}
               </div>
             )
           )}
@@ -1216,6 +1261,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                   <div key={entry.path}
                     {...dragSourceProps(entry)}
                     {...dropTargetProps(entry)}
+                    {...folderHoverProps(entry)}
                     className={`group flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-default ${
                       isDropTarget ? 'bg-accent/15 ring-2 ring-accent/50'
                         : isSelected ? 'bg-accent/10 hover:bg-accent/15'
@@ -1341,6 +1387,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                   <div key={entry.path}
                     {...dragSourceProps(entry)}
                     {...dropTargetProps(entry)}
+                    {...folderHoverProps(entry)}
                     className={`group flex flex-col rounded-xl overflow-hidden transition-colors cursor-default ${
                       isDropTarget ? 'bg-accent/15 ring-2 ring-accent/60'
                         : isSelected ? 'bg-accent/10 ring-2 ring-accent/40'
