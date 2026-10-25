@@ -33,6 +33,7 @@ import { useLongPress } from './mobile/useLongPress'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
+import { useExitGhost } from '../hooks/useExitGhost'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
 import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
@@ -41,6 +42,14 @@ import {
 
 // Pulls in html-to-image for the export - only worth downloading once opened.
 const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
+
+// Swipe-down release / chevron: how long WRLD takes to finish sliding
+// off-screen before it collapses (see useDragToDismiss's slideOutMs).
+const WRLD_SLIDE_OUT_MS = 380
+// Opening: the rise up from the mini bar.
+const WRLD_SLIDE_IN_MS = 420
+// LyricsScreen's close - the reverse of its .animate-sheet-in entrance.
+const LYRICS_SLIDE_OUT_MS = 300
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WRLD - the full-screen player, and since the mini bar now expands into it,
@@ -245,13 +254,26 @@ export default function WrldView(): JSX.Element {
   // janky. `dragging` still comes through state (only flips at drag
   // start/end, so it's cheap) to drive the transition below.
   const dragWrapRef = useRef<HTMLDivElement>(null)
-  const { dragging, handlers: dragHandlers } = useDragToDismiss(collapse, {
+  const { dragging, dismissing, dismiss, handlers: dragHandlers } = useDragToDismiss(collapse, {
     elRef: dragWrapRef,
+    slideOutMs: WRLD_SLIDE_OUT_MS,
     applyStyle: (el, dy) => {
       el.style.transform = dy ? `translateY(${dy}px)` : ''
       el.style.borderRadius = dy ? `${Math.min(dy, 32)}px` : '0px'
     },
   })
+
+  // Rises up from the mini bar on open - it used to just appear, full-screen,
+  // in one frame. Composited onto the inline transform so a drag started
+  // mid-rise still tracks the finger.
+  useLayoutEffect(() => {
+    const el = dragWrapRef.current
+    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.animate(
+      [{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }],
+      { duration: WRLD_SLIDE_IN_MS, easing: 'cubic-bezier(0.33,0,0.15,1)', composite: 'add' },
+    )
+  }, [])
 
   const voteActive = !!radioFmVote?.active && !voteDismissed
 
@@ -284,7 +306,11 @@ export default function WrldView(): JSX.Element {
       ref={dragWrapRef}
       className="relative flex-1 h-full w-full overflow-hidden flex flex-col isolate"
       style={{
-        transition: dragging ? 'none' : 'transform 0.25s ease-out, border-radius 0.25s ease-out',
+        // Released past the threshold (or the chevron tapped): carry on down
+        // off-screen on a gentle curve before collapse() unmounts this view.
+        transition: dragging ? 'none'
+          : dismissing ? `transform ${WRLD_SLIDE_OUT_MS}ms cubic-bezier(0.33,0,0.15,1), border-radius 0.2s ease-out`
+          : 'transform 0.25s ease-out, border-radius 0.25s ease-out',
       }}
     >
       <ArtBackdrop
@@ -315,7 +341,7 @@ export default function WrldView(): JSX.Element {
               other two hold. */}
           <div className="flex-1 flex justify-start">
             <button
-              onClick={collapse}
+              onClick={dismiss}
               aria-label="Collapse player"
               className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
               style={{ color: txtPri }}
@@ -1045,11 +1071,16 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
     return () => syncThemeColorMeta()
   }, [open])
 
-  const { style: dragStyle, handlers: dragHandlers } = useDragToDismiss(requestClose, {
+  const { style: dragStyle, reset: resetDrag, handlers: dragHandlers } = useDragToDismiss(requestClose, {
     threshold: 90,
     rubberBand: true,
     transition: 'transform 220ms cubic-bezier(0.16,1,0.3,1)',
+    holdOnDismiss: true,
   })
+  // A swipe-close leaves the offset where the finger let go (see
+  // holdOnDismiss) and this sheet stays mounted, so clear it for next time.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) resetDrag() }, [open])
 
   const showing = open || closing
 
@@ -1519,6 +1550,14 @@ function LyricsScreen({
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
 
+  // Opens with .animate-sheet-in but closes by unmounting, so it used to
+  // vanish in one frame - slide a copy back down instead.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useExitGhost(rootRef, (ghost) => ghost.animate(
+    [{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }],
+    { duration: LYRICS_SLIDE_OUT_MS, easing: 'cubic-bezier(0.4,0,0.6,1)', fill: 'forwards' },
+  ))
+
   return createPortal(
     // isolate: ArtBackdrop's noise-texture layer uses mix-blend-overlay,
     // which blends with whatever's painted behind it in the same stacking
@@ -1527,7 +1566,7 @@ function LyricsScreen({
     // in place of it) and visibly ghosts that page's content through. Seen
     // as faint text from the Tracker list bleeding through the lyrics
     // screen's backdrop, reading as "the background is transparent".
-    <div className="fixed inset-0 z-[70] flex flex-col animate-sheet-in isolate">
+    <div ref={rootRef} className="fixed inset-0 z-[70] flex flex-col animate-sheet-in isolate">
       {/* Repaints the page's own backdrop instead of an opaque theme colour -
           the text colours below were picked against the artwork, not against
           --surface. */}
